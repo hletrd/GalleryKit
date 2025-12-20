@@ -1,6 +1,6 @@
 # ATIK.KR Photo Gallery
 
-A simple, high-performance photo gallery application built with Next.js, designed for personal use to showcase photography with rich metadata.
+A simple, high-performance photo gallery application built with Next.js, designed for personal use.
 
 ### Demo
 [https://gallery.atik.kr](https://gallery.atik.kr)
