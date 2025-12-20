@@ -1,9 +1,30 @@
-# ATIK Photo Gallery
+# ATIK.KR Photo Gallery
 
-A simple photo gallery.
+A simple, high-performance photo gallery application built with Next.js, designed for personal use to showcase photography with rich metadata.
 
 ### Demo
 [https://gallery.atik.kr](https://gallery.atik.kr)
+
+## Features
+
+- **Masonry Grid Layout**
+  * Displays high-resolution photos in a responsive masonry grid.
+- **Image Optimization**
+  * Automatically converts uploads to AVIF, WebP, and JPEG formats using `sharp`.
+- **Topics & Albums**
+  * Organize photos into specific topics.
+- **EXIF Data**
+  * Extracts and displays metadata including Camera, Lens, ISO, Aperture, and Location.
+- **Metadata**
+  * Tagging, titles, and descriptions for searchability.
+- **Admin Dashboard**
+  * Manage photos, users, and tags.
+  * Supports multi-user access with Argon2 authentication.
+  * Drag-and-drop upload with batch editing.
+- **Internationalization**
+  * Localization support (English and Korean included).
+- **Docker Support**
+  * Includes Dockerfile and compose setup for easy deployment.
 
 ## Configuration
 
@@ -33,8 +54,9 @@ The site configuration is located in `apps/web/src/site-config.json`. You can cu
 
 ### Prerequisites
 
-- Node.js (v24 or later)
-- npm
+- **Node.js** (v24 or later)
+- **npm**
+- **MySQL Server** (v8.0 or later)
 
 ### Installation
 
@@ -52,6 +74,16 @@ Ensure you have the necessary environment variables set up in `apps/web/.env.loc
 cp apps/web/.env.local.example apps/web/.env.local
 ```
 
+Update `apps/web/.env.local` with your MySQL connection details:
+
+```env
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=your_user
+DB_PASSWORD=your_password
+DB_NAME=gallery
+```
+
 ### Running the Application
 
 To start the development server for the web application:
@@ -60,7 +92,7 @@ To start the development server for the web application:
 npm run dev
 ```
 
-This will start the Next.js app on [http://localhost:3000](http://localhost:3000) (or port 5000 if configured in VS Code).
+This will start the Next.js app on [http://localhost:3000](http://localhost:3000).
 
 ### Building
 
