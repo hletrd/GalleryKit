@@ -55,7 +55,6 @@ Key directories and configuration files:
     - **`src/site-config.json`**: Main site configuration (title, SEO, links).
     - **`.env.local`**: Environment variables (Database credentials, secrets).
     - **`docker-compose.yml`**: Docker Compose configuration for deployment.
-- **`README.md`**: Project documentation.
 
 ## Getting Started
 
