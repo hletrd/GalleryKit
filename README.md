@@ -46,9 +46,16 @@ The site configuration is located in `apps/web/src/site-config.json`. You can cu
 }
 ```
 
-## Structure
+## Directory Structure
 
-- **`apps/web`**: The main web application built with [Next.js](https://nextjs.org).
+Key directories and configuration files:
+
+- **`apps/web`**: Main application source code.
+    - **`public/uploads`**: Stores uploaded images (AVIF, WebP, JPEG) and originals. **Ensure this directory is persistent.**
+    - **`src/site-config.json`**: Main site configuration (title, SEO, links).
+    - **`.env.local`**: Environment variables (Database credentials, secrets).
+    - **`docker-compose.yml`**: Docker Compose configuration for deployment.
+- **`README.md`**: Project documentation.
 
 ## Getting Started
 
@@ -60,7 +67,14 @@ The site configuration is located in `apps/web/src/site-config.json`. You can cu
 
 ### Installation
 
-Install dependencies from the root directory:
+1. Clone the repository:
+
+```bash
+git clone https://github.com/hletrd/gallery.git
+cd gallery
+```
+
+2. Install dependencies:
 
 ```bash
 npm install
