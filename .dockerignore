@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.vscode
+**/.env*
+**/*.db
+apps/web/public/uploads
+apps/web/public/uploads/**
+build
+dist
+*.log
+

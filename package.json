@@ -1,0 +1,12 @@
+{
+    "name": "atik-photo-gallery",
+    "private": true,
+    "workspaces": [
+        "apps/*"
+    ],
+    "scripts": {
+        "dev": "npm run dev --workspace=apps/web",
+        "build": "npm run build --workspaces",
+        "start": "npm run start --workspace=apps/web"
+    }
+}

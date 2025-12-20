@@ -1,0 +1,13 @@
+node_modules
+.next
+.DS_Store
+dist
+.env
+.env.local
+*.log
+coverage
+apps/web/sqlite.db
+apps/web/data/
+*.db-wal
+*.db-shm
+*.db-journal

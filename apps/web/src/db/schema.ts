@@ -1,0 +1,93 @@
+import { mysqlTable, varchar, int, float, uniqueIndex, timestamp, boolean, text } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+
+export const topics = mysqlTable("topics", {
+    slug: varchar("slug", { length: 255 }).primaryKey(),
+    label: varchar("label", { length: 255 }).notNull(),
+    order: int("order").default(0),
+    image_filename: varchar("image_filename", { length: 255 }),
+});
+
+export const images = mysqlTable("images", {
+    id: int("id").primaryKey().autoincrement(),
+    filename_original: varchar("filename_original", { length: 255 }).notNull(),
+    filename_avif: varchar("filename_avif", { length: 255 }).notNull(),
+    filename_webp: varchar("filename_webp", { length: 255 }).notNull(),
+    filename_jpeg: varchar("filename_jpeg", { length: 255 }).notNull(),
+    width: int("width").notNull(),
+    height: int("height").notNull(),
+    original_width: int("original_width"),
+    original_height: int("original_height"),
+    title: varchar("title", { length: 255 }),
+    description: text("description"),
+    user_filename: varchar("user_filename", { length: 255 }),
+    share_key: varchar("share_key", { length: 255 }).unique(),
+    topic: varchar("topic", { length: 255 }).references(() => topics.slug).notNull(),
+
+    // EXIF Data
+    capture_date: varchar("capture_date", { length: 255 }),
+    camera_model: varchar("camera_model", { length: 255 }),
+    lens_model: varchar("lens_model", { length: 255 }),
+    iso: int("iso"),
+    f_number: float("f_number"),
+    exposure_time: varchar("exposure_time", { length: 255 }),
+    focal_length: float("focal_length"),
+    latitude: float("latitude"),
+    longitude: float("longitude"),
+    color_space: varchar("color_space", { length: 255 }),
+
+    created_at: timestamp("created_at")
+        .default(sql`CURRENT_TIMESTAMP`)
+        .notNull(),
+    updated_at: timestamp("updated_at")
+        .default(sql`CURRENT_TIMESTAMP`)
+        .onUpdateNow()
+        .notNull(),
+    processed: boolean("processed").default(true),
+});
+
+export const tags = mysqlTable("tags", {
+    id: int("id").primaryKey().autoincrement(),
+    name: varchar("name", { length: 255 }).notNull().unique(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+});
+
+export const imageTags = mysqlTable("image_tags", {
+    imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
+    tagId: int("tag_id").references(() => tags.id, { onDelete: 'cascade' }).notNull(),
+}, (table) => ({
+    imageIdTagIdUnique: uniqueIndex('image_tags_image_id_tag_id_unique').on(table.imageId, table.tagId),
+}));
+
+export const adminSettings = mysqlTable("admin_settings", {
+    key: varchar("key", { length: 255 }).primaryKey(),
+    value: text("value").notNull(),
+});
+
+export const sharedGroups = mysqlTable("shared_groups", {
+    id: int("id").primaryKey().autoincrement(),
+    key: varchar("key", { length: 255 }).notNull().unique(),
+    created_at: timestamp("created_at")
+        .default(sql`CURRENT_TIMESTAMP`)
+        .notNull(),
+});
+
+export const sharedGroupImages = mysqlTable("shared_group_images", {
+    groupId: int("group_id").references(() => sharedGroups.id, { onDelete: 'cascade' }).notNull(),
+    imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
+}, (table) => ({
+    groupIdImageIdUnique: uniqueIndex('shared_group_images_group_id_image_id_unique').on(table.groupId, table.imageId),
+}));
+
+export const adminUsers = mysqlTable("admin_users", {
+    id: int("id").primaryKey().autoincrement(),
+    username: varchar("username", { length: 255 }).notNull().unique(),
+    password_hash: varchar("password_hash", { length: 255 }).notNull(),
+    created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const sessions = mysqlTable("sessions", {
+    id: varchar("id", { length: 255 }).primaryKey(),
+    userId: int("user_id").references(() => adminUsers.id, { onDelete: 'cascade' }).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+});

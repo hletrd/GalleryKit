@@ -1,0 +1,251 @@
+import { db, images, topics, tags, imageTags, sharedGroups, sharedGroupImages } from '@/db';
+import { eq, desc, asc, and, gt, lt, or, inArray } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
+import { isBase56 } from './base56';
+
+const selectFields = {
+    id: images.id,
+    // filename_original is intentionally omitted for privacy
+    filename_avif: images.filename_avif,
+    filename_webp: images.filename_webp,
+    filename_jpeg: images.filename_jpeg,
+    width: images.width,
+    height: images.height,
+    original_width: images.original_width,
+    original_height: images.original_height,
+    title: images.title,
+    description: images.description,
+    user_filename: images.user_filename,
+    topic: images.topic,
+    capture_date: images.capture_date,
+    created_at: images.created_at,
+    // EXIF
+    camera_model: images.camera_model,
+    lens_model: images.lens_model,
+    iso: images.iso,
+    f_number: images.f_number,
+    exposure_time: images.exposure_time,
+    focal_length: images.focal_length,
+    latitude: images.latitude,
+    longitude: images.longitude,
+    color_space: images.color_space,
+};
+
+export async function getTopics() {
+    return db.select().from(topics).orderBy(asc(topics.order));
+}
+
+export async function getTags(topic?: string) {
+    const conditions = [eq(images.processed, true)];
+    if (topic) {
+        conditions.push(eq(images.topic, topic));
+    }
+
+    return db.select({
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        count: sql<number>`count(${imageTags.imageId})`
+    })
+    .from(tags)
+    .leftJoin(imageTags, eq(tags.id, imageTags.tagId))
+    .leftJoin(images, eq(imageTags.imageId, images.id))
+    .where(and(...conditions))
+    .groupBy(tags.id)
+    .orderBy(desc(sql`count(${imageTags.imageId})`), asc(tags.name));
+}
+
+export async function getImages(topic?: string, tagSlugs?: string[], includeUnprocessed: boolean = false) {
+    const conditions = [];
+
+    if (topic !== undefined) {
+        if (!/^[a-z0-9_-]+$/i.test(topic) || topic.length > 100) return [];
+        conditions.push(eq(images.topic, topic));
+    }
+
+    // Only show processed images (processed is true).
+    if (!includeUnprocessed) {
+        conditions.push(eq(images.processed, true));
+    }
+
+    // Validate and filter tag slugs
+    const validTagSlugs = (tagSlugs || [])
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
+
+    const hasTagFilter = validTagSlugs.length > 0;
+
+    if (hasTagFilter) {
+        // For multiple tags, we need to find images that have ALL the specified tags
+        // Using a subquery approach: get image IDs that have all required tags
+        const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
+
+        // Create a subquery to find images with all the required tags
+        const imageIdsWithAllTags = db
+            .select({ imageId: imageTags.imageId })
+            .from(imageTags)
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(or(...tagConditions))
+            .groupBy(imageTags.imageId)
+            .having(sql`COUNT(DISTINCT ${tags.slug}) = ${validTagSlugs.length}`);
+
+        conditions.push(inArray(images.id, imageIdsWithAllTags));
+    }
+
+    if (conditions.length > 0) {
+        return db.select({
+            ...selectFields,
+            tag_names: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name})`
+        })
+            .from(images)
+            .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+            .leftJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(and(...conditions))
+            .groupBy(images.id)
+            .orderBy(desc(images.capture_date), desc(images.created_at));
+    }
+
+    return db.select({
+        ...selectFields,
+        tag_names: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name})`
+    })
+        .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .groupBy(images.id)
+        .orderBy(desc(images.capture_date), desc(images.created_at));
+}
+
+export async function getImage(id: number) {
+    // Validate ID is a positive integer
+    if (!Number.isInteger(id) || id <= 0) {
+        return null;
+    }
+
+    // Only return processed images (processed is true OR null/undefined for legacy)
+    const [image] = await db.select({
+        ...selectFields,
+        topic_label: topics.label
+    })
+        .from(images)
+        .leftJoin(topics, eq(images.topic, topics.slug))
+        .where(
+            and(
+                eq(images.id, id),
+                eq(images.processed, true)
+            )
+        );
+
+    // Return null if image not found (instead of spreading undefined)
+    if (!image) {
+        return null;
+    }
+
+    // Fetch tags
+    const imageTagsResult = await db.select({
+        name: tags.name,
+        slug: tags.slug
+    })
+        .from(imageTags)
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(eq(imageTags.imageId, id));
+
+    // Simplified queries for adjacent images
+    // Prev: Newer image (created_at > current) -> Order by created_at ASC limit 1
+    const [prevImage] = await db.select({ id: images.id })
+        .from(images)
+        .where(
+            and(
+                gt(images.created_at, image.created_at),
+                eq(images.processed, true)
+            )
+        )
+        .orderBy(asc(images.created_at))
+        .limit(1);
+
+    // Next: Older image (created_at < current) -> Order by created_at DESC limit 1
+    const [nextImage] = await db.select({ id: images.id })
+        .from(images)
+        .where(
+            and(
+                lt(images.created_at, image.created_at),
+                eq(images.processed, true)
+            )
+        )
+        .orderBy(desc(images.created_at))
+        .limit(1);
+
+    return {
+        ...image,
+        tags: imageTagsResult,
+        prevId: prevImage?.id || null,
+        nextId: nextImage?.id || null
+    };
+}
+
+export async function getImageByShareKey(key: string) {
+    // Validate key format (Base56; supports legacy 5-char and newer longer keys)
+    const trimmedKey = (key || '').trim();
+    if (!isBase56(trimmedKey, [5, 10])) {
+        return null;
+    }
+
+    const result = await db.select(selectFields)
+        .from(images)
+        .where(
+            and(
+                eq(images.share_key, trimmedKey),
+                eq(images.processed, true)
+            )
+        )
+        .limit(1);
+    const image = result[0];
+    if (!image) return null;
+
+    const imageTagsResult = await db.select({
+        slug: tags.slug,
+        name: tags.name
+    })
+    .from(imageTags)
+    .innerJoin(tags, eq(imageTags.tagId, tags.id))
+    .where(eq(imageTags.imageId, image.id));
+
+    return {
+        ...image,
+        tags: imageTagsResult,
+        prevId: null,
+        nextId: null
+    };
+}
+
+export async function getSharedGroup(key: string) {
+    // Validate key format (Base56; supports legacy 6-char and newer longer keys)
+    const trimmedKey = (key || '').trim();
+    if (!isBase56(trimmedKey, [6, 10])) {
+        return null;
+    }
+
+    const [group] = await db.select().from(sharedGroups).where(eq(sharedGroups.key, trimmedKey)).limit(1);
+    if (!group) return null;
+
+    const groupImages = await db.select(selectFields)
+    .from(sharedGroupImages)
+    .innerJoin(images, eq(sharedGroupImages.imageId, images.id))
+    .where(
+        and(
+            eq(sharedGroupImages.groupId, group.id),
+            eq(images.processed, true)
+        )
+    );
+
+    return {
+        ...group,
+        images: groupImages
+    };
+}
+
+export async function getTopicBySlug(slug: string) {
+    if (!/^[a-z0-9_-]+$/i.test(slug)) return null;
+    const [topic] = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
+    return topic || null;
+}

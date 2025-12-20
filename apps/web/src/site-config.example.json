@@ -1,0 +1,13 @@
+{
+    "title": "Your Title",
+    "description": "Your Description",
+    "url": "https://example.com",
+    "parent_url": "https://example.com",
+    "locale": "en_US",
+    "author": "Your Name",
+    "nav_title": "Gallery",
+    "home_link": "/",
+    "footer_text": "Footer text here",
+    "google_analytics_id": "G-XXXXXXXXXX",
+    "external_links": []
+}
