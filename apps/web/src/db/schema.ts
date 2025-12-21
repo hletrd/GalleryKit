@@ -8,6 +8,11 @@ export const topics = mysqlTable("topics", {
     image_filename: varchar("image_filename", { length: 255 }),
 });
 
+export const topicAliases = mysqlTable("topic_aliases", {
+    alias: varchar("alias", { length: 255 }).primaryKey(),
+    topicSlug: varchar("topic_slug", { length: 255 }).references(() => topics.slug, { onDelete: 'cascade' }).notNull(),
+});
+
 export const images = mysqlTable("images", {
     id: int("id").primaryKey().autoincrement(),
     filename_original: varchar("filename_original", { length: 255 }).notNull(),

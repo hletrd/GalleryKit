@@ -10,5 +10,6 @@ const poolConnection = mysql.createPool({
     database: process.env.DB_NAME,
 });
 
+export const connection = poolConnection;
 export const db = drizzle(poolConnection, { mode: "default", schema });
-export * from "./schema";
+export { images, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions } from './schema';

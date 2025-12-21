@@ -1,4 +1,9 @@
+
 import { ImageResponse } from 'next/og'
+import { Camera } from 'lucide-react'
+
+// Route segment config
+export const runtime = 'edge'
 
 // Image metadata
 export const size = {
@@ -22,25 +27,26 @@ export default function Icon() {
           alignItems: 'center',
           justifyContent: 'center',
           color: 'white',
-          borderRadius: '20%',
+          borderRadius: 8, // Rounded square
         }}
       >
         <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ width: '20px', height: '20px' }}
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ transform: 'scale(0.9) translateY(1px)' }}
         >
-          <rect x="2" y="6" width="20" height="15" rx="3" ry="3" />
-          <circle cx="12" cy="13" r="4" />
-          <path d="M7 6V4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" />
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+          <circle cx="12" cy="13" r="3" />
         </svg>
       </div>
     ),
+    // ImageResponse options
     {
       ...size,
     }

@@ -3,7 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { TagFilter } from '@/components/tag-filter';
 import { TopicEmptyState } from '@/components/topic-empty-state';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 
@@ -66,6 +66,11 @@ export default async function TopicPage({
   const topicData = await getTopicBySlug(topic);
   if (!topicData) {
     notFound();
+  }
+
+  // If the requested topic slug doesn't match the canonical slug, redirect standardly
+  if (topicData.slug !== topic) {
+      redirect(`/${topicData.slug}`);
   }
 
   const images = await getImages(topic, tagSlugs.length > 0 ? tagSlugs : undefined);

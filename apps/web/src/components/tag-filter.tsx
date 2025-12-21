@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { Fragment } from 'react';
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
@@ -51,18 +52,20 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                 {t('home.allTags')}
             </Badge>
             {tags.map(tag => (
-                <Badge
-                    key={tag.id}
-                    variant={currentTags.includes(tag.slug) ? "default" : "outline"}
-                    className={cn(
-                        "cursor-pointer hover:bg-primary/90 flex gap-1",
-                        currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
-                    )}
-                    onClick={() => handleTagClick(tag.slug)}
-                >
-                    {tag.name}
-                    <span className="opacity-60 text-[10px]">({tag.count})</span>
-                </Badge>
+                <Fragment key={tag.id}>
+                    <Badge
+                        variant={currentTags.includes(tag.slug) ? "default" : "outline"}
+                        className={cn(
+                            "cursor-pointer hover:bg-primary/90 flex gap-1",
+                            currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
+                        )}
+                        onClick={() => handleTagClick(tag.slug)}
+                    >
+                        {tag.name}
+                        <span className="opacity-60 text-[10px]">({tag.count})</span>
+                    </Badge>
+                    {' '}
+                </Fragment>
             ))}
         </div>
     );

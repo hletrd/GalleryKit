@@ -1,4 +1,4 @@
-import { db, images, topics, tags, imageTags, sharedGroups, sharedGroupImages } from '@/db';
+import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
@@ -246,6 +246,17 @@ export async function getSharedGroup(key: string) {
 
 export async function getTopicBySlug(slug: string) {
     if (!/^[a-z0-9_-]+$/i.test(slug)) return null;
+
+    // Check direct topic match
     const [topic] = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
-    return topic || null;
+    if (topic) return topic;
+
+    // Check aliases
+    const [alias] = await db.select().from(topicAliases).where(eq(topicAliases.alias, slug)).limit(1);
+    if (alias) {
+        const [resolvedTopic] = await db.select().from(topics).where(eq(topics.slug, alias.topicSlug)).limit(1);
+        return resolvedTopic || null;
+    }
+
+    return null;
 }
