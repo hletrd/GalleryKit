@@ -31,6 +31,9 @@ COPY . .
 
 WORKDIR /app/apps/web
 # Ensure no local env files interfere with the build
+# Copy example config if actual config doesn't exist
+RUN cp apps/web/src/site-config.example.json apps/web/src/site-config.json || true
+
 # Build the app
 RUN npm run build
 
