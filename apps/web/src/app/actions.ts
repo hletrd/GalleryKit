@@ -8,7 +8,7 @@ import { cookies, headers } from 'next/headers';
 import { saveOriginalAndGetMetadata, processImageFormats, extractExifForDb, UPLOAD_DIR_ORIGINAL } from '@/lib/process-image';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { db, images, topics, adminSettings, sharedGroups, sharedGroupImages, tags, imageTags, adminUsers, sessions } from '@/db';
+import { db, images, topics, topicAliases, adminSettings, sharedGroups, sharedGroupImages, tags, imageTags, adminUsers, sessions } from '@/db';
 import { eq, sql, and, desc, or, isNull } from 'drizzle-orm';
 import path from 'path';
 import fs from 'fs/promises';
@@ -788,6 +788,12 @@ export async function createTopic(formData: FormData) {
         return { error: 'Invalid slug format. Use only lowercase letters, numbers, hyphens, and underscores.' };
     }
 
+    // Checking for duplicate slug
+    const existingTopic = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
+    if (existingTopic.length > 0) {
+        return { error: 'Topic slug already exists' };
+    }
+
     // Validate label length
     if (label.length > 100) {
         return { error: 'Label is too long (max 100 characters)' };
@@ -798,17 +804,24 @@ export async function createTopic(formData: FormData) {
          try {
              imageFilename = await processTopicImage(imageFile);
          } catch {
-             return { error: 'Invalid image file' };
+             // If image processing fails, continue without image but maybe warn?
+             // For now, fail safely without image
          }
     }
 
     try {
-        await db.insert(topics).values({ label, slug: slug.toLowerCase(), order, image_filename: imageFilename });
+        await db.insert(topics).values({
+            label,
+            slug,
+            order,
+            image_filename: imageFilename,
+        });
+
         revalidatePath('/admin/categories');
+        revalidatePath('/');
         return { success: true };
     } catch {
-        console.error("Failed to create topic");
-        return { error: 'Failed to create topic (Slug might be taken)' };
+        return { error: 'Failed to create topic' };
     }
 }
 
@@ -816,60 +829,59 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
     const label = formData.get('label') as string;
-    const newSlug = formData.get('slug') as string;
+    const slug = formData.get('slug') as string;
     const orderStr = formData.get('order') as string;
     const imageFile = formData.get('image') as File;
 
-    if (!label || !newSlug) return { error: 'Label and Slug are required' };
+    if (!label || !slug) return { error: 'Label and Slug are required' };
 
-    // Validate and sanitize order (default to 0, limit range)
     let order = parseInt(orderStr, 10);
     if (isNaN(order)) order = 0;
-    order = Math.max(-1000, Math.min(1000, order)); // Limit to reasonable range
+    order = Math.max(-1000, Math.min(1000, order));
 
-    // Validate slugs
-    if (!isValidSlug(currentSlug) || !isValidSlug(newSlug)) {
+    if (!isValidSlug(slug)) {
         return { error: 'Invalid slug format' };
     }
 
-    // Validate label length
-    if (label.length > 100) {
-        return { error: 'Label is too long (max 100 characters)' };
+    // Check if slug changed and if new slug exists
+    if (slug !== currentSlug) {
+         const existingTopic = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
+         if (existingTopic.length > 0) {
+             return { error: 'Topic slug already exists' };
+         }
     }
 
-    const updateData: any = { label, slug: newSlug.toLowerCase(), order };
-
+    let imageFilename = undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
-             const filename = await processTopicImage(imageFile);
-             updateData.image_filename = filename;
-         } catch {
-             return { error: 'Invalid image file' };
+             imageFilename = await processTopicImage(imageFile);
+         } catch (e) {
+             console.error("Failed to process topic image", e);
          }
     }
 
     try {
         await db.update(topics)
-            .set(updateData)
+            .set({
+                label,
+                slug,
+                order,
+                ...(imageFilename ? { image_filename: imageFilename } : {})
+            })
             .where(eq(topics.slug, currentSlug));
+
         revalidatePath('/admin/categories');
+        revalidatePath('/');
         return { success: true };
     } catch {
-        console.error("Failed to update topic");
-        return { error: 'Failed to update topic' };
+         return { error: 'Failed to update topic' };
     }
 }
 
 export async function deleteTopic(slug: string) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
-    // Validate slug
-    if (!isValidSlug(slug)) {
-        return { error: 'Invalid slug format' };
-    }
-
     try {
-        // Check for images first to prevent orphaned images
         const headerImages = await db.select().from(images).where(eq(images.topic, slug)).limit(1);
         if (headerImages.length > 0) {
             return { error: 'Cannot delete category containing images. Delete images first.' };
@@ -877,11 +889,49 @@ export async function deleteTopic(slug: string) {
 
         await db.delete(topics).where(eq(topics.slug, slug));
         revalidatePath('/admin/categories');
+        revalidatePath('/');
+
         return { success: true };
     } catch {
-        console.error("Failed to delete topic");
-        return { error: 'Failed to delete topic' };
+         return { error: 'Failed to delete topic' };
     }
+}
+
+export async function createTopicAlias(topicSlug: string, alias: string) {
+    if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    if (!isValidSlug(alias)) {
+        return { error: 'Invalid alias format' };
+    }
+
+    // Check if alias already exists (as a topic or alias)
+    const existingTopic = await db.select().from(topics).where(eq(topics.slug, alias)).limit(1);
+    if (existingTopic.length > 0) return { error: 'Alias conflicts with an existing topic slug' };
+
+    const existingAlias = await db.select().from(topicAliases).where(eq(topicAliases.alias, alias)).limit(1);
+    if (existingAlias.length > 0) return { error: 'Alias already exists' };
+
+    await db.insert(topicAliases).values({
+        alias,
+        topicSlug
+    });
+
+    revalidatePath('/admin/categories');
+    return { success: true };
+}
+
+export async function deleteTopicAlias(topicSlug: string, alias: string) {
+    if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    await db.delete(topicAliases).where(
+        and(
+            eq(topicAliases.alias, alias),
+            eq(topicAliases.topicSlug, topicSlug)
+        )
+    );
+
+    revalidatePath('/admin/categories');
+    return { success: true };
 }
 
 export async function createPhotoShareLink(imageId: number) {

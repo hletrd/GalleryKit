@@ -18,9 +18,9 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
-import { createTopic, updateTopic, deleteTopic } from '@/app/actions';
+import { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias } from '@/app/actions';
 import { toast } from 'sonner';
-import { Pencil, Trash2, Plus, ChevronLeft } from 'lucide-react';
+import { Pencil, Trash2, Plus, ChevronLeft, X } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
 import Link from 'next/link';
 
@@ -29,12 +29,14 @@ type Topic = {
     label: string;
     order: number | null;
     image_filename: string | null;
+    aliases: string[];
 };
 
 export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const { t } = useTranslation();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
+    const [newAlias, setNewAlias] = useState('');
 
     async function handleCreate(formData: FormData) {
         const res = await createTopic(formData);
@@ -64,6 +66,32 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             toast.error(res.error);
         } else {
             toast.success(t('categories.deleted'));
+        }
+    }
+
+    async function handleAddAlias(topicSlug: string) {
+        if (!newAlias.trim()) return;
+        const res = await createTopicAlias(topicSlug, newAlias.trim());
+        if (res?.error) {
+            toast.error(res.error);
+        } else {
+            toast.success('Alias added');
+            setNewAlias('');
+            // Optimistically update the editing topic state or rely on revalidation?
+            // Revalidation should cause a refresh, but local state 'editingTopic' won't update automatically if it's detached.
+            // But since 'initialTopics' updates from parent, we might see it if we close/reopen or if we sync 'editingTopic'
+            // For now, let's manually update client state to be snappy
+             setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, newAlias.trim()] }) : null);
+        }
+    }
+
+    async function handleDeleteAlias(topicSlug: string, alias: string) {
+        const res = await deleteTopicAlias(topicSlug, alias);
+        if (res?.error) {
+            toast.error(res.error);
+        } else {
+            toast.success('Alias removed');
+             setEditingTopic(prev => prev ? ({ ...prev, aliases: prev.aliases.filter(a => a !== alias) }) : null);
         }
     }
 
@@ -107,6 +135,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                         <TableHead>{t('categories.order')}</TableHead>
                         <TableHead>{t('categories.label')}</TableHead>
                         <TableHead>{t('categories.slug')}</TableHead>
+                        <TableHead>Aliases</TableHead>
                         <TableHead className="text-right">{t('imageManager.actions')}</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -116,6 +145,15 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                             <TableCell>{topic.order}</TableCell>
                             <TableCell>{topic.label}</TableCell>
                             <TableCell>{topic.slug}</TableCell>
+                            <TableCell>
+                                <div className="flex flex-wrap gap-1">
+                                    {topic.aliases?.map(alias => (
+                                        <span key={alias} className="px-2 py-0.5 bg-muted rounded-full text-xs">
+                                            {alias}
+                                        </span>
+                                    ))}
+                                </div>
+                            </TableCell>
                             <TableCell className="text-right space-x-2">
                                 <Button variant="ghost" size="icon" onClick={() => setEditingTopic(topic)}>
                                     <Pencil className="h-4 w-4" />
@@ -130,24 +168,59 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             </Table>
 
             <Dialog open={!!editingTopic} onOpenChange={(open) => !open && setEditingTopic(null)}>
-                <DialogContent>
+                <DialogContent className="max-w-xl">
                     <DialogHeader>
                         <DialogTitle>{t('categories.edit')}</DialogTitle>
                     </DialogHeader>
                     {editingTopic && (
-                        <form action={handleUpdate} className="space-y-4">
-                            <Input name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required />
-                            <Input name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required />
-                            <Input type="number" name="order" defaultValue={editingTopic.order ?? 0} placeholder={t('categories.order')} />
-                            <div className="grid w-full items-center gap-1.5">
-                                <label htmlFor="edit-image" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{t('categories.image')}</label>
-                                <Input id="edit-image" type="file" name="image" accept="image/*" />
-                                {editingTopic.image_filename && (
-                                    <p className="text-xs text-muted-foreground">{t('categories.currentImage', { name: editingTopic.image_filename })}</p>
-                                )}
+                        <div className="space-y-6">
+                            <form action={handleUpdate} className="space-y-4">
+                                <Input name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required />
+                                <Input name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required />
+                                <Input type="number" name="order" defaultValue={editingTopic.order ?? 0} placeholder={t('categories.order')} />
+                                <div className="grid w-full items-center gap-1.5">
+                                    <label htmlFor="edit-image" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{t('categories.image')}</label>
+                                    <Input id="edit-image" type="file" name="image" accept="image/*" />
+                                    {editingTopic.image_filename && (
+                                        <p className="text-xs text-muted-foreground">{t('categories.currentImage', { name: editingTopic.image_filename })}</p>
+                                    )}
+                                </div>
+                                <Button type="submit">{t('categories.update')}</Button>
+                            </form>
+
+                            <div className="border-t pt-4">
+                                <h3 className="text-sm font-medium mb-3">Aliases</h3>
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    {editingTopic.aliases.map(alias => (
+                                        <div key={alias} className="flex items-center gap-1 px-2 py-1 bg-secondary rounded-md text-sm">
+                                            <span>{alias}</span>
+                                            <button
+                                              onClick={() => handleDeleteAlias(editingTopic.slug, alias)}
+                                              className="text-muted-foreground hover:text-destructive"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {editingTopic.aliases.length === 0 && <span className="text-sm text-muted-foreground italic">No aliases</span>}
+                                </div>
+                                <div className="flex gap-2">
+                                    <Input
+                                        placeholder="Add new alias"
+                                        value={newAlias}
+                                        onChange={(e) => setNewAlias(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                handleAddAlias(editingTopic.slug);
+                                            }
+                                        }}
+                                        className="max-w-[200px]"
+                                    />
+                                    <Button type="button" variant="secondary" onClick={() => handleAddAlias(editingTopic.slug)}>Add</Button>
+                                </div>
                             </div>
-                            <Button type="submit">{t('categories.update')}</Button>
-                        </form>
+                        </div>
                     )}
                 </DialogContent>
             </Dialog>

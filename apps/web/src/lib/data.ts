@@ -35,6 +35,18 @@ export async function getTopics() {
     return db.select().from(topics).orderBy(asc(topics.order));
 }
 
+export async function getTopicsWithAliases() {
+    const allTopics = await db.select().from(topics).orderBy(asc(topics.order));
+    const allAliases = await db.select().from(topicAliases);
+
+    return allTopics.map(topic => ({
+        ...topic,
+        aliases: allAliases
+            .filter(a => a.topicSlug === topic.slug)
+            .map(a => a.alias)
+    }));
+}
+
 export async function getTags(topic?: string) {
     const conditions = [eq(images.processed, true)];
     if (topic) {
