@@ -457,6 +457,13 @@ export async function login(prevState: any, formData: FormData) {
 
 export async function logout() {
     const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+
+    // Delete session from database if it exists
+    if (token) {
+        await db.delete(sessions).where(eq(sessions.id, token)).catch(() => {});
+    }
+
     cookieStore.delete({ name: COOKIE_NAME, path: '/' });
     redirect('/admin');
 }
@@ -828,6 +835,11 @@ export async function createTopic(formData: FormData) {
 export async function updateTopic(currentSlug: string, formData: FormData) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
+    // Validate currentSlug
+    if (!currentSlug || !isValidSlug(currentSlug)) {
+        return { error: 'Invalid current slug' };
+    }
+
     const label = formData.get('label') as string;
     const slug = formData.get('slug') as string;
     const orderStr = formData.get('order') as string;
@@ -881,6 +893,10 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
 export async function deleteTopic(slug: string) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
+    if (!slug || !isValidSlug(slug)) {
+        return { error: 'Invalid slug' };
+    }
+
     try {
         const headerImages = await db.select().from(images).where(eq(images.topic, slug)).limit(1);
         if (headerImages.length > 0) {
@@ -899,6 +915,10 @@ export async function deleteTopic(slug: string) {
 
 export async function createTopicAlias(topicSlug: string, alias: string) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    if (!topicSlug || !isValidSlug(topicSlug)) {
+        return { error: 'Invalid topic slug' };
+    }
 
     if (!isValidSlug(alias)) {
         return { error: 'Invalid alias format' };
@@ -922,6 +942,14 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
 
 export async function deleteTopicAlias(topicSlug: string, alias: string) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    if (!topicSlug || !isValidSlug(topicSlug)) {
+        return { error: 'Invalid topic slug' };
+    }
+
+    if (!alias || !isValidSlug(alias)) {
+        return { error: 'Invalid alias' };
+    }
 
     await db.delete(topicAliases).where(
         and(
