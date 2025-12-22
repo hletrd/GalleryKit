@@ -146,5 +146,21 @@
     "topics": {
       "default": "Gallery"
     }
+  },
+  "serverActions": {
+    "unauthorized": "Unauthorized",
+    "invalidCurrentSlug": "Invalid current slug",
+    "labelSlugRequired": "Label and Slug are required",
+    "invalidSlugFormat": "Invalid slug format",
+    "failedToDeleteImages": "Failed to delete images",
+    "failedToUpdateTopic": "Failed to update topic",
+    "invalidSlug": "Invalid slug",
+    "cannotDeleteCategoryWithImages": "Cannot delete category containing images. Delete images first.",
+    "failedToDeleteTopic": "Failed to delete topic",
+    "invalidTopicSlug": "Invalid topic slug",
+    "invalidAliasFormat": "Invalid alias format",
+    "aliasConflictsWithTopic": "Alias conflicts with an existing topic slug",
+    "aliasAlreadyExists": "Alias already exists",
+    "invalidAlias": "Invalid alias"
   }
 }

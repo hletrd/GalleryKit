@@ -15,6 +15,7 @@ import fs from 'fs/promises';
 import { generateBase56 } from '@/lib/base56';
 import { processTopicImage } from '@/lib/process-topic-image';
 import PQueue from 'p-queue';
+import { getTranslations } from 'next-intl/server';
 
 const processingQueueKey = Symbol.for('gallery.imageProcessingQueue');
 
@@ -479,6 +480,16 @@ function isValidSlug(slug: string): boolean {
     return /^[a-z0-9_-]+$/i.test(slug) && slug.length > 0 && slug.length <= 100;
 }
 
+// Allow CJK characters, emojis, and most symbols for aliases, but disallow:
+// - Slashes (path separators)
+// - Backslashes (path separators/escapes)
+// - Question marks (query parameters)
+// - Hash/Pound (fragments)
+// - Whitespace (better UX for URLs, though encoded spaces theoretically work)
+function isValidTopicAlias(alias: string): boolean {
+    return /^[^/\\\s?#]+$/.test(alias);
+}
+
 // Validate filename (no path traversal, only safe characters)
 function isValidFilename(filename: string): boolean {
     // Check for path traversal attempts
@@ -839,11 +850,12 @@ export async function createTopic(formData: FormData) {
 }
 
 export async function updateTopic(currentSlug: string, formData: FormData) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Validate currentSlug
     if (!currentSlug || !isValidSlug(currentSlug)) {
-        return { error: 'Invalid current slug' };
+        return { error: t('invalidCurrentSlug') };
     }
 
     const label = formData.get('label') as string;
@@ -851,14 +863,14 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const orderStr = formData.get('order') as string;
     const imageFile = formData.get('image') as File;
 
-    if (!label || !slug) return { error: 'Label and Slug are required' };
+    if (!label || !slug) return { error: t('labelSlugRequired') };
 
     let order = parseInt(orderStr, 10);
     if (isNaN(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order));
 
     if (!isValidSlug(slug)) {
-        return { error: 'Invalid slug format' };
+        return { error: t('invalidSlugFormat') };
     }
 
     // Check if slug changed and if new slug exists
@@ -897,16 +909,17 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
 }
 
 export async function deleteTopic(slug: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!slug || !isValidSlug(slug)) {
-        return { error: 'Invalid slug' };
+        return { error: t('invalidSlug') };
     }
 
     try {
         const headerImages = await db.select().from(images).where(eq(images.topic, slug)).limit(1);
         if (headerImages.length > 0) {
-            return { error: 'Cannot delete category containing images. Delete images first.' };
+            return { error: t('cannotDeleteCategoryWithImages') };
         }
 
         await db.delete(topics).where(eq(topics.slug, slug));
@@ -915,27 +928,28 @@ export async function deleteTopic(slug: string) {
 
         return { success: true };
     } catch {
-         return { error: 'Failed to delete topic' };
+         return { error: t('failedToDeleteTopic') };
     }
 }
 
 export async function createTopicAlias(topicSlug: string, alias: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!topicSlug || !isValidSlug(topicSlug)) {
-        return { error: 'Invalid topic slug' };
+        return { error: t('invalidTopicSlug') };
     }
 
-    if (!isValidSlug(alias)) {
-        return { error: 'Invalid alias format' };
+    if (!isValidTopicAlias(alias)) {
+        return { error: t('invalidAliasFormat') };
     }
 
     // Check if alias already exists (as a topic or alias)
     const existingTopic = await db.select().from(topics).where(eq(topics.slug, alias)).limit(1);
-    if (existingTopic.length > 0) return { error: 'Alias conflicts with an existing topic slug' };
+    if (existingTopic.length > 0) return { error: t('aliasConflictsWithTopic') };
 
     const existingAlias = await db.select().from(topicAliases).where(eq(topicAliases.alias, alias)).limit(1);
-    if (existingAlias.length > 0) return { error: 'Alias already exists' };
+    if (existingAlias.length > 0) return { error: t('aliasAlreadyExists') };
 
     await db.insert(topicAliases).values({
         alias,
@@ -947,14 +961,16 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
 }
 
 export async function deleteTopicAlias(topicSlug: string, alias: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!topicSlug || !isValidSlug(topicSlug)) {
-        return { error: 'Invalid topic slug' };
+        return { error: t('invalidTopicSlug') };
     }
 
-    if (!alias || !isValidSlug(alias)) {
-        return { error: 'Invalid alias' };
+    // Use permissive check for delete too, ensuring we can delete legacy/weird aliases if they exist
+    if (!alias || !isValidTopicAlias(alias)) {
+        return { error: t('invalidAlias') };
     }
 
     await db.delete(topicAliases).where(
