@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
-import path from 'path';
+
 
 dotenv.config({ path: '.env.local' });
 

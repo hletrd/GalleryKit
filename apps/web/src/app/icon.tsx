@@ -1,6 +1,5 @@
 
 import { ImageResponse } from 'next/og'
-import { Camera } from 'lucide-react'
 
 // Route segment config
 export const runtime = 'edge'

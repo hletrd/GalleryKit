@@ -1,7 +1,7 @@
 
 import path from 'path';
 import dotenv from 'dotenv';
-import { sql } from 'drizzle-orm';
+
 
 // Load environment variables from .env.local
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });

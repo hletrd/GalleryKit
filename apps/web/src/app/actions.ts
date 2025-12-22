@@ -266,20 +266,7 @@ async function getSessionSecret(): Promise<string> {
     return sessionSecretPromise;
 }
 
-async function rotateSessionSecret(): Promise<string> {
-    const newSecret = generateSecureSessionSecret();
 
-    await db.insert(adminSettings)
-        .values({ key: 'session_secret', value: newSecret })
-        .onDuplicateKeyUpdate({
-            set: { value: newSecret }
-        });
-
-    cachedSessionSecret = newSecret;
-    sessionSecretPromise = null;
-
-    return newSecret;
-}
 
 // Generate a secure session token
 async function generateSessionToken(secretOverride?: string): Promise<string> {

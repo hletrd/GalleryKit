@@ -14,7 +14,7 @@ async function run() {
     try {
         console.log('Running drizzle-kit push...');
         execSync('npx drizzle-kit push', { stdio: 'inherit' });
-    } catch (e) {
+    } catch {
         console.warn('⚠️  drizzle-kit push encountered an error (likely safe if verifying existing schema). Continuing to verification...');
     }
 

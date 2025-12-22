@@ -6,7 +6,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
 // Remove static import
 // import { db, adminUsers } from '../src/db';
-import { eq } from 'drizzle-orm';
+
 import * as argon2 from 'argon2';
 
 async function main() {
