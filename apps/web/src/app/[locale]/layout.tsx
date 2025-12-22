@@ -4,9 +4,11 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Nav } from "@/components/nav";
 import { Toaster } from "@/components/ui/sonner";
-import { I18nProvider } from "@/components/i18n-provider";
+import { NextIntlClientProvider } from 'next-intl';
+import { getMessages } from 'next-intl/server';
 import { Footer } from "@/components/footer";
 import siteConfig from "@/site-config.json";
+import { notFound } from 'next/navigation';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -36,18 +38,31 @@ export const metadata: Metadata = {
   }
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
-}: Readonly<{
+  params
+}: {
   children: React.ReactNode;
-}>) {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+
+  // Ensure that the incoming `locale` is valid
+  if (!['en', 'ko'].includes(locale)) {
+    notFound();
+  }
+
+  // Providing all messages to the client
+  // side is the easiest way to get started
+  const messages = await getMessages();
+
   return (
-    <html suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <body
         suppressHydrationWarning
         className={`${inter.className} antialiased min-h-screen bg-background font-sans flex flex-col`}
       >
-        <I18nProvider>
+        <NextIntlClientProvider messages={messages}>
           <ThemeProvider
             attribute="class"
             defaultTheme="dark"
@@ -61,8 +76,7 @@ export default function RootLayout({
             <Footer />
             <Toaster />
           </ThemeProvider>
-
-        </I18nProvider>
+        </NextIntlClientProvider>
         {siteConfig.google_analytics_id && (
           <>
             <Script src={`https://www.googletagmanager.com/gtag/js?id=${siteConfig.google_analytics_id}`} strategy="afterInteractive" />
