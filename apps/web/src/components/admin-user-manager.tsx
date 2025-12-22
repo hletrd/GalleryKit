@@ -1,5 +1,7 @@
 'use client';
 
+import { useTranslation } from "@/components/i18n-provider";
+
 import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +25,7 @@ interface AdminUserManagerProps {
 export function AdminUserManager({ users }: AdminUserManagerProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [open, setOpen] = useState(false);
+    const { t } = useTranslation();
 
     async function handleCreate(formData: FormData) {
         setIsCreating(true);
@@ -32,19 +35,19 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
         if (result.error) {
             toast.error(result.error);
         } else {
-            toast.success('User created successfully');
+            toast.success(t('users.createSuccess'));
             setOpen(false);
         }
     }
 
     async function handleDelete(id: number, username: string) {
-        if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+        if (!confirm(t('users.deleteConfirm', { username }))) return;
 
         const result = await deleteAdminUser(id);
         if (result.error) {
             toast.error(result.error);
         } else {
-            toast.success('User deleted successfully');
+            toast.success(t('users.deleteSuccess'));
         }
     }
 
@@ -52,34 +55,34 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
         <Card>
             <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                    <CardTitle>Admin Users</CardTitle>
+                    <CardTitle>{t('users.adminUsers')}</CardTitle>
                 </div>
                 <Dialog open={open} onOpenChange={setOpen}>
                     <DialogTrigger asChild>
                         <Button size="sm">
                             <UserPlus className="mr-2 h-4 w-4" />
-                            Add User
+                            {t('users.add')}
                         </Button>
                     </DialogTrigger>
                     <DialogContent>
                         <DialogHeader>
-                            <DialogTitle>Add New Admin User</DialogTitle>
+                            <DialogTitle>{t('users.createTitle')}</DialogTitle>
                             <DialogDescription>
-                                Create a new user with access to the admin dashboard.
+                                {t('users.createDesc')}
                             </DialogDescription>
                         </DialogHeader>
                         <form action={handleCreate} className="space-y-4">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Username</label>
-                                <Input name="username" placeholder="Username" required minLength={3} />
+                                <label className="text-sm font-medium">{t('users.username')}</label>
+                                <Input name="username" placeholder={t('users.username')} required minLength={3} />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Password</label>
-                                <Input name="password" type="password" placeholder="Password (min 8 chars)" required minLength={8} />
+                                <label className="text-sm font-medium">{t('users.password')}</label>
+                                <Input name="password" type="password" placeholder={t('users.passwordPlaceholder')} required minLength={8} />
                             </div>
                             <DialogFooter>
                                 <Button type="submit" disabled={isCreating}>
-                                    {isCreating ? 'Creating...' : 'Create User'}
+                                    {isCreating ? t('users.creating') : t('users.createButton')}
                                 </Button>
                             </DialogFooter>
                         </form>
@@ -91,9 +94,9 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Username</TableHead>
-                                <TableHead>Created At</TableHead>
-                                <TableHead className="w-[100px]">Actions</TableHead>
+                                <TableHead>{t('users.username')}</TableHead>
+                                <TableHead>{t('users.createdAt')}</TableHead>
+                                <TableHead className="w-[100px]">{t('users.actions')}</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -112,7 +115,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                             onClick={() => handleDelete(user.id, user.username)}
                                             className="text-destructive hover:text-destructive/90"
                                             disabled={user.username === 'admin'}
-                                            title={user.username === 'admin' ? "Cannot delete default admin" : "Delete user"}
+                                            title={user.username === 'admin' ? t('users.cannotDeleteAdmin') : t('users.deleteTooltip')}
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </Button>
@@ -122,7 +125,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                             {users.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={3} className="text-center text-muted-foreground">
-                                        No users found.
+                                        {t('users.noUsers')}
                                     </TableCell>
                                 </TableRow>
                             )}

@@ -14,8 +14,7 @@ export function AdminNav() {
         { href: '/admin/categories', label: t('nav.categories') },
         { href: '/admin/tags', label: t('nav.tags') },
         { href: '/admin/password', label: t('nav.password') },
-        // { href: '/admin/users', label: t('nav.users', 'Users') }, // Wait, verify translation key or use fallback
-        { href: '/admin/users', label: 'Users' }, // Using hardcoded label for now or I need to add translation key
+        { href: '/admin/users', label: t('nav.users') },
     ];
 
     return (
