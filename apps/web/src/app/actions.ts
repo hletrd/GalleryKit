@@ -98,7 +98,6 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
 const bootstrapImageProcessingQueue = async () => {
     const state = getProcessingQueueState();
     if (state.bootstrapped) return;
-    state.bootstrapped = true;
 
     try {
         const pending = await db.select().from(images).where(eq(images.processed, false));
@@ -111,7 +110,9 @@ const bootstrapImageProcessingQueue = async () => {
                 filenameJpeg: image.filename_jpeg,
                 width: image.width,
             });
+
         }
+        state.bootstrapped = true;
     } catch (err: any) {
         // Suppress connection refused errors during build/startup to avoid noise
         if (err?.code !== 'ECONNREFUSED') {
