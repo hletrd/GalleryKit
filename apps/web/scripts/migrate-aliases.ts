@@ -1,9 +1,15 @@
 
-import { db } from '../src/db';
-import { connection } from '../src/db';
+import path from 'path';
+import dotenv from 'dotenv';
 import { sql } from 'drizzle-orm';
 
+// Load environment variables from .env.local
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+
 async function main() {
+    // Dynamic import to ensure env vars are loaded before DB connection is initialized
+    const { connection } = await import('../src/db');
+
     console.log('Migrating topic aliases...');
 
     try {
@@ -12,7 +18,7 @@ async function main() {
                 alias varchar(255) PRIMARY KEY,
                 topic_slug varchar(255) NOT NULL,
                 FOREIGN KEY (topic_slug) REFERENCES topics(slug) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            );
         `);
         console.log('Created topic_aliases table.');
     } catch (e) {

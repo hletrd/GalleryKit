@@ -112,8 +112,13 @@ const bootstrapImageProcessingQueue = async () => {
                 width: image.width,
             });
         }
-    } catch (err) {
-        console.error('Failed to bootstrap image processing queue', err);
+    } catch (err: any) {
+        // Suppress connection refused errors during build/startup to avoid noise
+        if (err?.code !== 'ECONNREFUSED') {
+            console.error('Failed to bootstrap image processing queue', err);
+        } else {
+             console.warn('Could not connect to database to bootstrap queue (ECONNREFUSED). Skipping.');
+        }
     }
 };
 
