@@ -92,6 +92,15 @@ async function run() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         `);
 
+        // topic_aliases
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS topic_aliases (
+                alias varchar(255) PRIMARY KEY,
+                topic_slug varchar(255) NOT NULL,
+                FOREIGN KEY (topic_slug) REFERENCES topics(slug) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
         // Check for missing user_filename column in existing images table
         try {
             const [columns] = await connection.query(`SHOW COLUMNS FROM images LIKE 'user_filename'`);
