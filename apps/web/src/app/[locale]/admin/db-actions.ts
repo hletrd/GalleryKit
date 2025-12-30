@@ -32,17 +32,6 @@ export async function exportImagesCsv() {
         })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
-        .leftJoin(imageTags, eq(images.id, imageTags.imageId)) // duplicate join was not issue but let's fix it later if needed, wait, line 35-36 in original file was:
-        // .leftJoin(imageTags, eq(images.id, imageTags.imageId))
-        // .leftJoin(tags, eq(imageTags.tagId, tags.id))
-        // I should be careful not to break the joins in the ReplacementContent context, actually I will just replace the select part and the map part separately or together carefully.
-
-        // Retrying with a better strategy to avoid messing up context lines too much.
-        // The original read shows lines 26-32 for select, and lines 44-45 for mapping.
-
-        })
-        .from(images)
-        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
         .groupBy(images.id);
 
@@ -139,6 +128,10 @@ export async function restoreDatabase(formData: FormData) {
     await fs.writeFile(tempPath, buffer);
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
+
+    if (!DB_HOST || !DB_USER || !DB_NAME) {
+        return { success: false, error: "Missing database configuration" };
+    }
 
     return new Promise<{ success: boolean, error?: string }>((resolve) => {
         const restore = spawn('mysql', [
