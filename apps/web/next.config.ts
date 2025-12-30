@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '250mb',
     },
     // Allow large requests to pass through middleware
-    middlewareClientMaxBodySize: '250mb',
+    proxyClientMaxBodySize: '250mb',
   },
   images: {
     formats: ['image/avif', 'image/webp'],
