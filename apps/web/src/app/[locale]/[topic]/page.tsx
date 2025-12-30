@@ -60,8 +60,7 @@ export default async function TopicPage({
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
 
-  // Parse comma-separated tags
-  const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
+
 
   const topicData = await getTopicBySlug(topic);
   if (!topicData) {
@@ -73,8 +72,14 @@ export default async function TopicPage({
       redirect(`/${topicData.slug}`);
   }
 
+  const allTags = await getTags(topic);
+
+  // Parse and validate tag slugs
+  const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
+  const tagSlugs = rawTagSlugs.filter(slug => allTags.some(t => t.slug === slug));
+
   const images = await getImages(topic, tagSlugs.length > 0 ? tagSlugs : undefined);
-  const tags = (await getTags(topic)).filter(t => t.count > 1);
+  const tags = allTags.filter(t => t.count > 1);
 
   return (
     <div className="space-y-8">
@@ -85,7 +90,7 @@ export default async function TopicPage({
             {tagSlugs.length > 0 && (
               <span className="text-muted-foreground font-normal">
                 {tagSlugs.map(slug => {
-                  const match = tags.find(t => t.slug === slug.trim().toLowerCase());
+                  const match = allTags.find(t => t.slug === slug.trim().toLowerCase());
                   return `#${match?.name ?? slug}`;
                 }).join(' ')}
               </span>

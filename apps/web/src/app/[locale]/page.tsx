@@ -48,12 +48,14 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
 
-  // Parse comma-separated tags
-  const tagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
-
   // Root always gets latest uploads (no topic)
-  const images = await getImages(undefined, tagSlugs.length > 0 ? tagSlugs : undefined);
-  const tags = await getTags();
+  const allTags = await getTags();
 
-  return <HomeClient images={images} tags={tags} currentTags={tagSlugs} />;
+  // Parse and validate tag slugs
+  const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
+  const tagSlugs = rawTagSlugs.filter(slug => allTags.some(t => t.slug === slug));
+
+  const images = await getImages(undefined, tagSlugs.length > 0 ? tagSlugs : undefined);
+
+  return <HomeClient images={images} tags={allTags} currentTags={tagSlugs} />;
 }
