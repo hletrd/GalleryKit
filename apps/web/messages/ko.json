@@ -144,12 +144,21 @@
     "clearFilter": "필터 초기화",
     "allTags": "전체"
   },
+  "login": {
+    "title": "관리자 로그인",
+    "description": "관리자 계정으로 로그인하세요.",
+    "username": "아이디",
+    "password": "비밀번호",
+    "submit": "로그인",
+    "submitting": "로그인 중..."
+  },
   "viewer": {
     "backTo": "돌아가기",
     "share": "공유",
     "info": "정보",
     "infoPinned": "정보 고정됨",
     "exifData": "EXIF",
+    "colorSpace": "색 공간",
     "camera": "카메라",
     "lens": "렌즈",
     "focalLength": "초점 거리",

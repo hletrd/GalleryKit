@@ -144,12 +144,21 @@
     "clearFilter": "Clear filter",
     "allTags": "All"
   },
+  "login": {
+    "title": "Admin Login",
+    "description": "Sign in to manage gallery.",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Login",
+    "submitting": "Logging in..."
+  },
   "viewer": {
     "backTo": "Back to {topic}",
     "share": "Share",
     "info": "Info",
     "infoPinned": "Info Pinned",
     "exifData": "EXIF",
+    "colorSpace": "Color Space",
     "camera": "Camera",
     "lens": "Lens",
     "focalLength": "Focal Length",
