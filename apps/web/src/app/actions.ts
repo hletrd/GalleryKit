@@ -651,8 +651,10 @@ export async function uploadImages(formData: FormData) {
                 successCount++;
             }
         } catch (e) {
-            console.error(`Failed to process file ${file.name}`, e);
-            failedFiles.push(file.name);
+            console.error(`Failed to process file ${file.name}:`, e);
+            // Include error message in failed files list for debugging if possible,
+            // but for now just the name to match return type
+            failedFiles.push(`${file.name} (${e instanceof Error ? e.message : 'Unknown error'})`);
         }
     }
 

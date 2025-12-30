@@ -5,7 +5,7 @@ const withNextIntl = createNextIntlPlugin();
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  serverExternalPackages: ['drizzle-orm', 'better-sqlite3'],
+  serverExternalPackages: ['drizzle-orm', 'better-sqlite3', 'sharp'],
   experimental: {
     serverActions: {
       // Keep this close to the app-level MAX_FILE_SIZE to reduce DoS blast radius.

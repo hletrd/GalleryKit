@@ -18,7 +18,7 @@ sharp.concurrency(sharpConcurrency);
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
-    : 64 * 1024 * 1024;
+    : 256 * 1024 * 1024;
 // sharp.limitInputPixels(maxInputPixels) - Removed in sharp 0.33+, passed in constructor instead
 
 const UPLOAD_ROOT = (() => {
@@ -150,7 +150,8 @@ export async function saveOriginalAndGetMetadata(
     // Validate the file is a valid image by attempting to get metadata with Sharp
     try {
         await sharp(buffer, { limitInputPixels: maxInputPixels }).metadata();
-    } catch {
+    } catch (e) {
+        console.error('Sharp metadata validation failed:', e);
         throw new Error('Invalid image file. Could not process the file as an image.');
     }
 
