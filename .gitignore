@@ -11,3 +11,4 @@ apps/web/data/
 *.db-wal
 *.db-shm
 *.db-journal
+test
