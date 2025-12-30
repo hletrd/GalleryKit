@@ -1,3 +1,4 @@
+
 {
   "nav": {
     "dashboard": "Dashboard",
@@ -5,8 +6,35 @@
     "tags": "Tags",
     "password": "Password",
     "users": "Users",
+    "db": "DB Management",
     "logout": "Logout",
     "admin": "Admin"
+  },
+  "db": {
+    "title": "Database Management",
+    "backupTitle": "Backup Database",
+    "backupDesc": "Create a SQL dump of the entire database. Download will start automatically.",
+    "backupButton": "Download Backup (.sql)",
+    "backupButtonProcessing": "Processing...",
+    "restoreTitle": "Restore Database",
+    "restoreDesc": "Restore database from a SQL dump file.",
+    "restoreWarning": "WARNING: This will overwrite data!",
+    "restoreSelectFile": "Select .sql file",
+    "dangerZone": "Danger Zone",
+    "dangerZoneDesc": "This action cannot be undone.",
+    "restoreButton": "Restore Database",
+    "restoreButtonProcessing": "Restoring...",
+    "exportTitle": "Export Data",
+    "exportDesc": "Export all images and their tags to CSV format.",
+    "exportButton": "Export Images CSV",
+    "exportButtonProcessing": "Exporting...",
+    "successBackup": "Database backup created and download started",
+    "successRestore": "Database restored successfully",
+    "successExport": "CSV export completed",
+    "errorBackup": "Backup failed",
+    "errorRestore": "Restore failed",
+    "errorExport": "Export failed",
+    "confirmRestore": "WARNING: This will overwrite the entire database! Are you sure?"
   },
   "users": {
     "title": "User Management",
@@ -194,4 +222,3 @@
     "aliasAlreadyExists": "Alias already exists",
     "invalidAlias": "Invalid alias"
   }
-}

@@ -15,6 +15,7 @@ export function AdminNav() {
         { href: '/admin/tags', label: t('nav.tags') },
         { href: '/admin/password', label: t('nav.password') },
         { href: '/admin/users', label: t('nav.users') },
+        { href: '/admin/db', label: t('nav.db') },
     ];
 
     return (

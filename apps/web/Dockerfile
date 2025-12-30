@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     g++ \
     gosu \
+    mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
 FROM base AS deps

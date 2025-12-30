@@ -1,12 +1,40 @@
+
 {
   "nav": {
     "dashboard": "대시보드",
     "categories": "카테고리",
     "tags": "태그",
     "password": "비밀번호",
-    "users": "사용자",
+    "users": "사용자 관리",
+    "db": "DB 관리",
     "logout": "로그아웃",
     "admin": "관리자"
+  },
+  "db": {
+    "title": "데이터베이스 관리",
+    "backupTitle": "데이터베이스 백업",
+    "backupDesc": "전체 데이터베이스의 SQL 덤프를 생성합니다. 다운로드가 자동으로 시작됩니다.",
+    "backupButton": "백업 다운로드 (.sql)",
+    "backupButtonProcessing": "처리 중...",
+    "restoreTitle": "데이터베이스 복원",
+    "restoreDesc": "SQL 덤프 파일에서 데이터베이스를 복원합니다.",
+    "restoreWarning": "경고: 기존 데이터를 삭제합니다.",
+    "restoreSelectFile": ".sql 파일 선택",
+    "dangerZone": "위험",
+    "dangerZoneDesc": "이 작업은 되돌릴 수 없습니다.",
+    "restoreButton": "데이터베이스 복원",
+    "restoreButtonProcessing": "복원 중...",
+    "exportTitle": "데이터 내보내기",
+    "exportDesc": "모든 이미지와 태그를 CSV 형식으로 내보냅니다.",
+    "exportButton": "이미지 CSV 내보내기",
+    "exportButtonProcessing": "내보내는 중...",
+    "successBackup": "데이터베이스를 백업했습니다.",
+    "successRestore": "데이터베이스를 복원했습니다.",
+    "successExport": "CSV 파일을 내보냅니다.",
+    "errorBackup": "백업 실패",
+    "errorRestore": "복원 실패",
+    "errorExport": "내보내기 실패",
+    "confirmRestore": "경고: 전체 데이터베이스를 덮어씁니다."
   },
   "users": {
     "title": "사용자 관리",
@@ -114,11 +142,11 @@
     "untitled": "제목 없음",
     "noImages": "이미지가 없습니다.",
     "deleteImageConfirmTitle": "정말 삭제하시겠습니까?",
-    "deleteImageConfirmDesc": "이미지와 파일이 영구적으로 삭제됩니다.",
+    "deleteImageConfirmDesc": "이미지와 파일을 영구적으로 삭제합니다.",
     "imageDeleted": "이미지 삭제됨",
     "deleteFailed": "이미지 삭제 실패",
     "bulkDeleteSuccess": "{count}장 삭제됨",
-    "linkCopied": "그룹 링크가 복사되었습니다",
+    "linkCopied": "그룹 링크를 복사했습니다.",
     "tags": "태그",
     "addTag": "태그 추가",
     "cancelAdd": "취소",
@@ -136,7 +164,7 @@
     "descField": "설명",
     "save": "저장",
     "saving": "저장 중...",
-    "updateSuccess": "이미지 정보가 수정되었습니다"
+    "updateSuccess": "이미지 정보를 수정했습니다."
   },
   "home": {
     "latestUploads": "최근 사진",
@@ -190,8 +218,7 @@
     "failedToDeleteTopic": "카테고리를 삭제하지 못했습니다.",
     "invalidTopicSlug": "유효하지 않은 카테고리 슬러그입니다.",
     "invalidAliasFormat": "유효하지 않은 별칭 형식입니다.",
-    "aliasConflictsWithTopic": "슬러그가 중복됩니다.",
+    "aliasConflictsWithTopic": "중복된 슬러그입니다.",
     "aliasAlreadyExists": "이미 존재하는 별칭입니다.",
     "invalidAlias": "유효하지 않은 별칭입니다."
   }
-}
