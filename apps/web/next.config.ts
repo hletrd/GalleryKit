@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
       // Keep this close to the app-level MAX_FILE_SIZE to reduce DoS blast radius.
       bodySizeLimit: '250mb',
     },
+    // Allow large requests to pass through middleware
+    middlewareClientMaxBodySize: '250mb',
   },
   images: {
     formats: ['image/avif', 'image/webp'],
