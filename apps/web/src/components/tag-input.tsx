@@ -152,7 +152,7 @@ export function TagInput({
 
             {isOpen && (inputValue || filteredTags.length > 0) && (
                 <div className="absolute top-full left-0 w-full mt-1 z-50 rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-in fade-in-0 zoom-in-95">
-                    <div className="max-h-[200px] overflow-auto p-1">
+                    <div className="max-h-[300px] overflow-auto p-1">
                         {filteredTags.length === 0 && !showCreateOption && (
                             <div className="py-2 px-2 text-sm text-muted-foreground text-center">
                                 No matching tags
