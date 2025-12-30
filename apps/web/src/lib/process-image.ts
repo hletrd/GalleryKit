@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto';
 
 const cpuCount = os.cpus()?.length ?? 1;
 const maxConcurrency = Math.max(1, cpuCount - 2);
-const envConcurrency = Number.parseInt(process.env.IMAGE_SHARP_CONCURRENCY ?? '', 10);
+const envConcurrency = 10;
 const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
     ? Math.min(envConcurrency, maxConcurrency)
     : maxConcurrency;

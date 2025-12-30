@@ -17,5 +17,15 @@ if [ -d "/app/apps/web/.next" ]; then
     chown -R node:node /app/apps/web/.next
 fi
 
+# Set UV_THREADPOOL_SIZE to CPU count if not set
+if [ -z "$UV_THREADPOOL_SIZE" ]; then
+    if command -v nproc > /dev/null; then
+        export UV_THREADPOOL_SIZE=$(nproc)
+    else
+        export UV_THREADPOOL_SIZE=4
+    fi
+    echo "Auto-configured UV_THREADPOOL_SIZE=$UV_THREADPOOL_SIZE"
+fi
+
 # Drop privileges and execute command
 exec gosu node "$@"
