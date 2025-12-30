@@ -24,7 +24,6 @@ export async function exportImagesCsv() {
             id: images.id,
             filename: images.filename_original,
             title: images.title,
-            caption: images.caption,
             width: images.width,
             height: images.height,
             captureDate: images.capture_date,
@@ -33,16 +32,26 @@ export async function exportImagesCsv() {
         })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId)) // duplicate join was not issue but let's fix it later if needed, wait, line 35-36 in original file was:
+        // .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        // .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        // I should be careful not to break the joins in the ReplacementContent context, actually I will just replace the select part and the map part separately or together carefully.
+
+        // Retrying with a better strategy to avoid messing up context lines too much.
+        // The original read shows lines 26-32 for select, and lines 44-45 for mapping.
+
+        })
+        .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
         .groupBy(images.id);
 
     // Convert to CSV
-    const headers = ["ID", "Filename", "Title", "Caption", "Width", "Height", "Capture Date", "Topic", "Tags"];
+    const headers = ["ID", "Filename", "Title", "Width", "Height", "Capture Date", "Topic", "Tags"];
     const rows = results.map(row => [
         row.id,
         row.filename,
         row.title || "",
-        row.caption || "",
         row.width,
         row.height,
         row.captureDate ? new Date(row.captureDate).toISOString() : "",
