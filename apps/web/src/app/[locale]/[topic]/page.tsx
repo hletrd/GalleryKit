@@ -18,11 +18,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
 
   if (!topicData) return {};
 
-  const images = await getImages(topic);
-  const latestImage = images[0];
-  const isLatestTitleFilename = latestImage?.title
-    ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
-    : false;
+
 
   const title = tagSlugs.length > 0
     ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${topicData.label}`
@@ -38,14 +34,14 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     openGraph: {
       title: `${title} | ${siteConfig.title}`,
       description: description,
-      images: latestImage ? [
+      images: [
         {
-          url: `/uploads/jpeg/${latestImage.filename_jpeg}`,
-          width: latestImage.width,
-          height: latestImage.height,
-          alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : topicData.label,
+          url: `/api/og?topic=${topicData.slug}&tags=${tagSlugs.join(',')}`,
+          width: 1200,
+          height: 630,
+          alt: title,
         }
-      ] : [],
+      ],
     },
   };
 }
