@@ -154,6 +154,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                         >
                             <div className="w-full h-full flex items-center justify-center">
                                 {(() => {
+                                    const getAltText = (img: any) => {
+                                        if (img.description && img.description.trim()) return img.description;
+                                        if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
+                                        if (img.tags && img.tags.length > 0) return img.tags.map((t: any) => t.name).join(', ');
+                                        return 'Photo';
+                                    };
                                     // Extract base UUID from filename (e.g. "uuid.webp" -> "uuid")
                                     const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
                                     const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
@@ -163,7 +169,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                         return (
                                             <Image
                                                 src={`/uploads/jpeg/${image.filename_jpeg}`}
-                                                alt={((image.tags && image.tags.length > 0) ? image.tags.map((t: any) => `#${t.name}`).join(' ') : (image.title && !image.title.match(/\.[a-z0-9]{3,4}$/i) ? image.title : 'Photo'))}
+                                                alt={getAltText(image)}
                                                 width={image.width}
                                                 height={image.height}
                                                 className="w-full h-full object-contain max-h-[80vh] z-0 relative"
@@ -186,7 +192,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                             />
                                             <img
                                                 src={`/uploads/jpeg/${image.filename_jpeg}`}
-                                                alt={((image.tags && image.tags.length > 0) ? image.tags.map((t: any) => `#${t.name}`).join(' ') : (image.title && !image.title.match(/\.[a-z0-9]{3,4}$/i) ? image.title : 'Photo'))}
+                                                alt={getAltText(image)}
                                                 width={image.width}
                                                 height={image.height}
                                                 className="w-full h-full object-contain max-h-[80vh] z-0 relative"

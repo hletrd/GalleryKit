@@ -40,7 +40,13 @@ export function HomeClient({ images, tags, currentTags }: HomeClientProps) {
 
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
                 {images.map((image) => {
-                    const altText = image.title || image.user_filename || 'Gallery Image';
+                    const altText = (image.description && image.description.trim())
+                        ? image.description
+                        : (image.title && image.title.trim() && !image.title.match(/\.[a-z0-9]{3,4}$/i))
+                            ? image.title
+                            : image.tag_names
+                                ? image.tag_names.split(',').map((t: string) => t.trim()).join(', ')
+                                : 'Photo';
                     const displayTitle = (() => {
                         if (image.title && image.title.trim().length > 0) {
                              return image.title;
