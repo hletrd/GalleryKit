@@ -570,6 +570,7 @@ export async function uploadImages(formData: FormData) {
                         original_width: data.originalWidth,
                         original_height: data.originalHeight,
                         user_filename: originalFilename, // Ensure user_filename is set on update (migration-like)
+                        blur_data_url: data.blurDataUrl,
                         processed: false,
                         updated_at: sql`CURRENT_TIMESTAMP`,
                         ...exifDb
@@ -606,6 +607,7 @@ export async function uploadImages(formData: FormData) {
                 title: null, // Title is null by default, showing tags or user_filename
                 description: '',
                 user_filename: originalFilename,
+                blur_data_url: data.blurDataUrl,
                 processed: false,
                 ...exifDb
             };

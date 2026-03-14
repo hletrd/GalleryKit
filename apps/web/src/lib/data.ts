@@ -29,6 +29,7 @@ const selectFields = {
     latitude: images.latitude,
     longitude: images.longitude,
     color_space: images.color_space,
+    blur_data_url: images.blur_data_url,
 };
 
 export async function getTopics() {

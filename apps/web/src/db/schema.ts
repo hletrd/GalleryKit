@@ -40,6 +40,7 @@ export const images = mysqlTable("images", {
     latitude: float("latitude"),
     longitude: float("longitude"),
     color_space: varchar("color_space", { length: 255 }),
+    blur_data_url: text('blur_data_url'),
 
     created_at: timestamp("created_at")
         .default(sql`CURRENT_TIMESTAMP`)

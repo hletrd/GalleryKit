@@ -58,7 +58,15 @@ export function HomeClient({ images, tags, currentTags }: HomeClientProps) {
                     })();
 
                     return (
-                        <div key={image.id} className="break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]">
+                        <div
+                            key={image.id}
+                            className="break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]"
+                            style={image.blur_data_url ? {
+                                backgroundImage: `url(${image.blur_data_url})`,
+                                backgroundSize: 'cover',
+                                backgroundPosition: 'center',
+                            } : undefined}
+                        >
                             <Link href={`/p/${image.id}`}>
                                 <div className="relative w-full">
                                     <picture>

@@ -127,6 +127,7 @@ export interface ImageProcessingResult {
     metadata: sharp.Metadata;
     exifData: any;
     color_space?: string | null;
+    blurDataUrl?: string | null;
 }
 
 export async function saveOriginalAndGetMetadata(
@@ -187,6 +188,19 @@ export async function saveOriginalAndGetMetadata(
     // Ensure height is always a positive number so Next/Image does not throw
     const height = (metadata.height && metadata.height > 0) ? metadata.height : width;
 
+    // Generate tiny blur placeholder
+    let blurDataUrl: string | null = null;
+    try {
+        const blurBuffer = await sharp(buffer, { limitInputPixels: maxInputPixels })
+            .resize(16, undefined, { fit: 'inside' })
+            .blur(2)
+            .jpeg({ quality: 40 })
+            .toBuffer();
+        blurDataUrl = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
+    } catch {
+        // Non-critical, skip blur placeholder
+    }
+
     return {
         id,
         filenameOriginal,
@@ -200,6 +214,7 @@ export async function saveOriginalAndGetMetadata(
         originalHeight: (metadata.height && metadata.height > 0) ? metadata.height : height,
         metadata,
         exifData,
+        blurDataUrl,
     };
 }
 
