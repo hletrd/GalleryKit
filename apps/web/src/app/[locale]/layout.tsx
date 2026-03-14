@@ -62,6 +62,9 @@ export default async function RootLayout({
         suppressHydrationWarning
         className={`${inter.className} antialiased min-h-screen bg-background font-sans flex flex-col`}
       >
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md">
+          Skip to content
+        </a>
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider
             attribute="class"
@@ -70,7 +73,7 @@ export default async function RootLayout({
             disableTransitionOnChange
           >
             <Nav />
-            <main className="container mx-auto px-4 py-8 flex-1">
+            <main id="main-content" className="container mx-auto px-4 py-8 flex-1">
               {children}
             </main>
             <Footer />

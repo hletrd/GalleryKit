@@ -58,6 +58,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => router.push(`/p/${prevId}`)}
+                    aria-label="Previous photo"
                     >
                         <ChevronLeft className="h-6 w-6" />
                     </Button>
@@ -71,11 +72,15 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => router.push(`/p/${nextId}`)}
+                    aria-label="Next photo"
                     >
                         <ChevronRight className="h-6 w-6" />
                     </Button>
                 </div>
             )}
+            <div className="sr-only" aria-live="polite" aria-atomic="true">
+                {prevId !== null || nextId !== null ? 'Photo navigation available' : ''}
+            </div>
         </>
     );
 }
