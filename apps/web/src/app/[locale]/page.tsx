@@ -63,5 +63,5 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   ]);
   const hasMore = totalCount > PAGE_SIZE;
 
-  return <HomeClient images={images} tags={allTags} currentTags={tagSlugs} hasMore={hasMore} />;
+  return <HomeClient images={images} tags={allTags} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />;
 }

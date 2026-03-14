@@ -80,5 +80,5 @@ export default async function TopicPage({
   const hasMore = totalCount > PAGE_SIZE;
   const tags = allTags.filter(t => t.count > 1);
 
-  return <HomeClient images={images} tags={tags} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} />;
+  return <HomeClient images={images} tags={tags} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} totalCount={totalCount} />;
 }

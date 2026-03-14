@@ -10,11 +10,10 @@ interface LoadMoreProps {
     initialOffset: number;
     hasMore: boolean;
     limit?: number;
-    children: (images: any[]) => React.ReactNode;
+    onLoadMore: (images: any[]) => void;
 }
 
-export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, children }: LoadMoreProps) {
-    const [additionalImages, setAdditionalImages] = useState<any[]>([]);
+export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
     const [loading, setLoading] = useState(false);
     const [hasMore, setHasMore] = useState(initialHasMore);
     const [offset, setOffset] = useState(initialOffset);
@@ -29,7 +28,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
                 setHasMore(false);
             }
             if (newImages.length > 0) {
-                setAdditionalImages(prev => [...prev, ...newImages]);
+                onLoadMore(newImages);
                 setOffset(prev => prev + newImages.length);
             }
         } catch (error) {
@@ -37,7 +36,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         } finally {
             setLoading(false);
         }
-    }, [loading, hasMore, offset, limit, topicSlug, tagSlugs]);
+    }, [loading, hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore]);
 
     useEffect(() => {
         const sentinel = sentinelRef.current;
@@ -58,7 +57,6 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
 
     return (
         <>
-            {children(additionalImages)}
             {hasMore && (
                 <div ref={sentinelRef} className="flex justify-center py-8">
                     {loading && <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />}
