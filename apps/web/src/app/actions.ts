@@ -16,6 +16,7 @@ import { generateBase56 } from '@/lib/base56';
 import { processTopicImage } from '@/lib/process-topic-image';
 import PQueue from 'p-queue';
 import { getTranslations } from 'next-intl/server';
+import { getImages } from '@/lib/data';
 
 const processingQueueKey = Symbol.for('gallery.imageProcessingQueue');
 
@@ -1414,4 +1415,9 @@ export async function deleteAdminUser(id: number) {
         console.error('Delete user failed', e);
         return { error: 'Failed to delete user' };
     }
+}
+
+export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
+    const images = await getImages(topicSlug, tagSlugs, limit, offset);
+    return images;
 }

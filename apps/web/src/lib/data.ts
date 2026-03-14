@@ -68,7 +68,40 @@ export async function getTags(topic?: string) {
     .orderBy(desc(sql`count(${imageTags.imageId})`), asc(tags.name));
 }
 
-export async function getImages(topic?: string, tagSlugs?: string[], includeUnprocessed: boolean = false) {
+export async function getImageCount(topic?: string, tagSlugs?: string[]): Promise<number> {
+    const conditions = [];
+
+    if (topic !== undefined) {
+        if (!/^[a-z0-9_-]+$/i.test(topic) || topic.length > 100) return 0;
+        conditions.push(eq(images.topic, topic));
+    }
+
+    conditions.push(eq(images.processed, true));
+
+    const validTagSlugs = (tagSlugs || [])
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
+
+    if (validTagSlugs.length > 0) {
+        const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
+        const imageIdsWithAllTags = db
+            .select({ imageId: imageTags.imageId })
+            .from(imageTags)
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(or(...tagConditions))
+            .groupBy(imageTags.imageId)
+            .having(sql`COUNT(DISTINCT ${tags.slug}) = ${validTagSlugs.length}`);
+        conditions.push(inArray(images.id, imageIdsWithAllTags));
+    }
+
+    const result = await db.select({ count: sql<number>`count(*)` })
+        .from(images)
+        .where(and(...conditions));
+
+    return Number(result[0]?.count ?? 0);
+}
+
+export async function getImages(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
     const conditions = [];
 
     if (topic !== undefined) {
@@ -106,7 +139,7 @@ export async function getImages(topic?: string, tagSlugs?: string[], includeUnpr
     }
 
     if (conditions.length > 0) {
-        return db.select({
+        const query = db.select({
             ...selectFields,
             tag_names: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name})`
         })
@@ -116,9 +149,14 @@ export async function getImages(topic?: string, tagSlugs?: string[], includeUnpr
             .where(and(...conditions))
             .groupBy(images.id)
             .orderBy(desc(images.capture_date), desc(images.created_at));
+
+        if (limit > 0) {
+            return query.limit(limit).offset(offset);
+        }
+        return query;
     }
 
-    return db.select({
+    const query = db.select({
         ...selectFields,
         tag_names: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name})`
     })
@@ -127,6 +165,11 @@ export async function getImages(topic?: string, tagSlugs?: string[], includeUnpr
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
         .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at));
+
+    if (limit > 0) {
+        return query.limit(limit).offset(offset);
+    }
+    return query;
 }
 
 export async function getImage(id: number) {
