@@ -12,3 +12,4 @@ apps/web/data/
 *.db-shm
 *.db-journal
 test
+.omc
