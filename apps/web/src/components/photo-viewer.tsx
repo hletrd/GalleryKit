@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { PhotoNavigation } from '@/components/photo-navigation';
 import { cn } from "@/lib/utils";
 import { createPhotoShareLink } from '@/app/actions';
+import { ImageZoom } from '@/components/image-zoom';
 
 import { useRouter } from 'next/navigation';
 
@@ -154,55 +155,57 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                             className="w-full h-full flex items-center justify-center relative"
                         >
                             <div className="w-full h-full flex items-center justify-center">
-                                {(() => {
-                                    const getAltText = (img: any) => {
-                                        if (img.description && img.description.trim()) return img.description;
-                                        if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
-                                        if (img.tags && img.tags.length > 0) return img.tags.map((t: any) => t.name).join(', ');
-                                        return 'Photo';
-                                    };
-                                    // Extract base UUID from filename (e.g. "uuid.webp" -> "uuid")
-                                    const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
-                                    const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
+                                <ImageZoom className="w-full h-full flex items-center justify-center">
+                                    {(() => {
+                                        const getAltText = (img: any) => {
+                                            if (img.description && img.description.trim()) return img.description;
+                                            if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
+                                            if (img.tags && img.tags.length > 0) return img.tags.map((t: any) => t.name).join(', ');
+                                            return 'Photo';
+                                        };
+                                        // Extract base UUID from filename (e.g. "uuid.webp" -> "uuid")
+                                        const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
+                                        const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
 
-                                    // If we don't have the filenames for some reason, fallback to basic Image
-                                    if (!baseWebp || !baseAvif) {
+                                        // If we don't have the filenames for some reason, fallback to basic Image
+                                        if (!baseWebp || !baseAvif) {
+                                            return (
+                                                <Image
+                                                    src={`/uploads/jpeg/${image.filename_jpeg}`}
+                                                    alt={getAltText(image)}
+                                                    width={image.width}
+                                                    height={image.height}
+                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative"
+                                                    priority
+                                                />
+                                            );
+                                        }
+
                                         return (
-                                            <Image
-                                                src={`/uploads/jpeg/${image.filename_jpeg}`}
-                                                alt={getAltText(image)}
-                                                width={image.width}
-                                                height={image.height}
-                                                className="w-full h-full object-contain max-h-[80vh] z-0 relative"
-                                                priority
-                                            />
+                                            <picture className="w-full h-full flex items-center justify-center">
+                                                <source
+                                                    type="image/avif"
+                                                    srcSet={`/uploads/avif/${baseAvif}_640.avif 640w, /uploads/avif/${baseAvif}_1536.avif 1536w, /uploads/avif/${baseAvif}_2048.avif 2048w, /uploads/avif/${baseAvif}_4096.avif 4096w`}
+                                                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
+                                                />
+                                                <source
+                                                    type="image/webp"
+                                                    srcSet={`/uploads/webp/${baseWebp}_640.webp 640w, /uploads/webp/${baseWebp}_1536.webp 1536w, /uploads/webp/${baseWebp}_2048.webp 2048w, /uploads/webp/${baseWebp}_4096.webp 4096w`}
+                                                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
+                                                />
+                                                <img
+                                                    src={`/uploads/jpeg/${image.filename_jpeg}`}
+                                                    alt={getAltText(image)}
+                                                    width={image.width}
+                                                    height={image.height}
+                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative"
+                                                    decoding="sync"
+                                                    loading="eager"
+                                                />
+                                            </picture>
                                         );
-                                    }
-
-                                    return (
-                                        <picture className="w-full h-full flex items-center justify-center">
-                                            <source
-                                                type="image/avif"
-                                                srcSet={`/uploads/avif/${baseAvif}_640.avif 640w, /uploads/avif/${baseAvif}_1536.avif 1536w, /uploads/avif/${baseAvif}_2048.avif 2048w, /uploads/avif/${baseAvif}_4096.avif 4096w`}
-                                                sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
-                                            />
-                                            <source
-                                                type="image/webp"
-                                                srcSet={`/uploads/webp/${baseWebp}_640.webp 640w, /uploads/webp/${baseWebp}_1536.webp 1536w, /uploads/webp/${baseWebp}_2048.webp 2048w, /uploads/webp/${baseWebp}_4096.webp 4096w`}
-                                                sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
-                                            />
-                                            <img
-                                                src={`/uploads/jpeg/${image.filename_jpeg}`}
-                                                alt={getAltText(image)}
-                                                width={image.width}
-                                                height={image.height}
-                                                className="w-full h-full object-contain max-h-[80vh] z-0 relative"
-                                                decoding="sync"
-                                                loading="eager"
-                                            />
-                                        </picture>
-                                    );
-                                })()}
+                                    })()}
+                                </ImageZoom>
                             </div>
                         </motion.div>
                     </AnimatePresence>
