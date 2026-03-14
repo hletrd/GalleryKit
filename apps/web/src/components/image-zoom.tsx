@@ -55,12 +55,16 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             });
         }
         lastTapRef.current = now;
+        if (isZoomed) {
+            e.stopPropagation();
+        }
         isDraggingRef.current = false;
-    }, []);
+    }, [isZoomed]);
 
     // Touch drag when zoomed
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
         if (!isZoomed || e.touches.length !== 1) return;
+        e.stopPropagation();
         isDraggingRef.current = true;
         dragStartRef.current = {
             x: e.touches[0].clientX - positionRef.current.x,
@@ -71,6 +75,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
     const handleTouchMove = useCallback((e: React.TouchEvent) => {
         if (!isZoomed || !isDraggingRef.current || e.touches.length !== 1) return;
         e.preventDefault();
+        e.stopPropagation();
         const x = e.touches[0].clientX - dragStartRef.current.x;
         const y = e.touches[0].clientY - dragStartRef.current.y;
         // Clamp position
