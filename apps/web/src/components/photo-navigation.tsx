@@ -13,19 +13,6 @@ interface PhotoNavigationProps {
 export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
     const router = useRouter();
 
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'ArrowLeft' && prevId) {
-                router.push(`/p/${prevId}`);
-            } else if (e.key === 'ArrowRight' && nextId) {
-                router.push(`/p/${nextId}`);
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [prevId, nextId, router]);
-
     // Basic Touch Swipe support
     useEffect(() => {
         let touchStartX = 0;
