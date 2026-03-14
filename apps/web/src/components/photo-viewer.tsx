@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,7 @@ function hasExifData(val: any): boolean {
 export default function PhotoViewer({ images, initialImageId, prevId, nextId }: PhotoViewerProps) {
     const { t } = useTranslation();
     const router = useRouter();
+    const prefersReducedMotion = useReducedMotion();
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
     const [timerShowInfo, setTimerShowInfo] = useState(true);
     const [isPinned, setIsPinned] = useState(false);
@@ -143,13 +144,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
                     />
 
-                    <AnimatePresence mode="wait">
+                    <AnimatePresence mode="wait" initial={false}>
                         <motion.div
                             key={image.id}
-                            initial={{ opacity: 0, x: 20 }}
+                            initial={prefersReducedMotion ? false : { opacity: 0, x: 20 }}
                             animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: -20 }}
-                            transition={{ duration: 0.2 }}
+                            exit={prefersReducedMotion ? undefined : { opacity: 0, x: -20 }}
+                            transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
                             className="w-full h-full flex items-center justify-center relative"
                         >
                             <div className="w-full h-full flex items-center justify-center">
