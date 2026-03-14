@@ -235,12 +235,12 @@ export async function processImageFormats(
             if (lastRendered && lastRendered.resizeWidth === resizeWidth) {
                 await fs.copyFile(lastRendered.filePath, outputPath);
             } else {
-                const sharpInstance = image.clone().resize({ width: resizeWidth });
+                const sharpInstance = image.clone().resize({ width: resizeWidth }).keepIccProfile();
 
                 if (format === 'webp') {
                     await sharpInstance.webp({ quality: 90 }).toFile(outputPath);
                 } else if (format === 'avif') {
-                    await sharpInstance.avif({ quality: 80 }).toFile(outputPath);
+                    await sharpInstance.avif({ quality: 85 }).toFile(outputPath);
                 } else {
                     await sharpInstance.jpeg({ quality: 90 }).toFile(outputPath);
                 }
