@@ -195,6 +195,8 @@
     "shutterSpeed": "Shutter Speed",
     "iso": "ISO",
     "location": "Location",
+    "dimensions": "Dimensions",
+    "format": "Format",
     "originalDimensions": "Original Dimensions",
     "previewDimensions": "Preview Dimensions",
     "capturedAt": "Captured At",

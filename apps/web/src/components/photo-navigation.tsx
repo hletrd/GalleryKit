@@ -79,7 +79,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                 </div>
             )}
             <div className="sr-only" aria-live="polite" aria-atomic="true">
-                {prevId !== null || nextId !== null ? 'Photo navigation available' : ''}
+                {prevId !== null || nextId !== null ? `Photo navigation: ${prevId ? 'previous' : ''} ${nextId ? 'next' : ''} available` : ''}
             </div>
         </>
     );

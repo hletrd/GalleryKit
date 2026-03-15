@@ -195,6 +195,8 @@
     "shutterSpeed": "셔터 속도",
     "iso": "ISO",
     "location": "위치",
+    "dimensions": "크기",
+    "format": "포맷",
     "originalDimensions": "원본 해상도",
     "previewDimensions": "미리보기 해상도",
     "capturedAt": "촬영 일시",

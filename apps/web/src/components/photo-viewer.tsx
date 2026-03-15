@@ -209,6 +209,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                             </div>
                         </motion.div>
                     </AnimatePresence>
+                    {(prevId != null || nextId != null) && (
+                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10">
+                            Photo {image.id}
+                        </div>
+                    )}
                 </div>
 
                 {/* Info Sidebar */}
@@ -301,6 +306,30 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
                                             <p className="font-medium">{image.color_space}</p>
+                                        </div>
+                                    )}
+                                    {(image.width > 0 && image.height > 0) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.dimensions')}</p>
+                                            <p className="font-medium">
+                                                {image.width} × {image.height}
+                                                <span className="text-muted-foreground text-xs ml-1">
+                                                    ({(image.width * image.height / 1000000).toFixed(1)} MP)
+                                                </span>
+                                            </p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.original_format) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.format')}</p>
+                                            <p className="font-medium">
+                                                {image.original_format}
+                                                {image.original_file_size && (
+                                                    <span className="text-muted-foreground text-xs ml-1">
+                                                        ({(image.original_file_size / (1024 * 1024)).toFixed(1)} MB)
+                                                    </span>
+                                                )}
+                                            </p>
                                         </div>
                                     )}
                                     {(image.latitude != null && image.longitude != null) && (
