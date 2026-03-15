@@ -1,11 +1,100 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { TagFilter } from '@/components/tag-filter';
 import { useTranslation } from "@/components/i18n-provider";
 import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
+import { cn } from '@/lib/utils';
+
+function reorderForColumns(items: any[], columnCount: number): any[] {
+    if (columnCount <= 1 || items.length === 0) return items;
+
+    // Initialize columns with heights
+    const columns: { items: any[]; height: number }[] =
+        Array.from({ length: columnCount }, () => ({ items: [], height: 0 }));
+
+    // Distribute items to shortest column (greedy algorithm)
+    for (const item of items) {
+        // Use aspect ratio to estimate relative height (normalized to width=1)
+        const aspectRatio = (item.width && item.height && item.width > 0)
+            ? item.height / item.width
+            : 1;
+
+        // Find the shortest column
+        let shortest = 0;
+        for (let i = 1; i < columns.length; i++) {
+            if (columns[i].height < columns[shortest].height) {
+                shortest = i;
+            }
+        }
+
+        columns[shortest].items.push(item);
+        columns[shortest].height += aspectRatio;
+    }
+
+    // Interleave: CSS columns fills top-to-bottom, so to get left-to-right
+    // visual order, we need to arrange items so that CSS columns produces
+    // the correct visual order.
+    // CSS columns with N columns takes items [0..k-1] in col 1, [k..2k-1] in col 2, etc.
+    // We want col[0][0], col[1][0], col[2][0], col[0][1], col[1][1], ...
+    // So we need to output in column-first order that CSS will then re-distribute.
+
+    // The trick: determine how many items go in each CSS column
+    const totalItems = items.length;
+    const basePerCol = Math.floor(totalItems / columnCount);
+    const extras = totalItems % columnCount;
+
+    // CSS columns distributes: first (extras) columns get (basePerCol+1) items,
+    // remaining columns get basePerCol items
+    const cssColSizes: number[] = [];
+    for (let i = 0; i < columnCount; i++) {
+        cssColSizes.push(i < extras ? basePerCol + 1 : basePerCol);
+    }
+
+    // Build result array in the order CSS columns expects
+    const result: any[] = [];
+    for (let col = 0; col < columnCount; col++) {
+        const count = cssColSizes[col];
+        for (let row = 0; row < count; row++) {
+            if (row < columns[col].items.length) {
+                result.push(columns[col].items[row]);
+            }
+        }
+    }
+
+    // If any items were missed due to uneven distribution, append them
+    if (result.length < items.length) {
+        const resultIds = new Set(result.map(r => r.id));
+        for (const item of items) {
+            if (!resultIds.has(item.id)) {
+                result.push(item);
+            }
+        }
+    }
+
+    return result;
+}
+
+function useColumnCount() {
+    const [count, setCount] = useState(4);
+
+    useEffect(() => {
+        const update = () => {
+            const w = window.innerWidth;
+            if (w < 640) setCount(1);
+            else if (w < 768) setCount(2);
+            else if (w < 1280) setCount(3);
+            else setCount(4);
+        };
+        update();
+        window.addEventListener('resize', update);
+        return () => window.removeEventListener('resize', update);
+    }, []);
+
+    return count;
+}
 
 interface HomeClientProps {
     images: any[];
@@ -22,6 +111,8 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
     const handleLoadMore = useCallback((newImages: any[]) => {
         setAllImages(prev => [...prev, ...newImages]);
     }, []);
+    const columnCount = useColumnCount();
+    const orderedImages = reorderForColumns(allImages, columnCount);
     const displayTags = (currentTags || []).map((tag) => {
         const match = tags.find((t: any) => t.slug === tag.trim().toLowerCase());
         return match?.name ?? tag;
@@ -47,7 +138,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
             </div>
 
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
-                {allImages.map((image) => {
+                {orderedImages.map((image) => {
                     const altText = (image.description && image.description.trim())
                         ? image.description
                         : (image.title && image.title.trim() && !image.title.match(/\.[a-z0-9]{3,4}$/i))
@@ -68,12 +159,18 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                     return (
                         <div
                             key={image.id}
-                            className="break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]"
+                            className={cn(
+                                "break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]",
+                                image.blur_data_url && "skeleton-shimmer"
+                            )}
                             style={image.blur_data_url ? {
                                 backgroundImage: `url(${image.blur_data_url})`,
                                 backgroundSize: 'cover',
                                 backgroundPosition: 'center',
-                            } : undefined}
+                            } : {
+                                aspectRatio: `${image.width} / ${image.height}`,
+                                backgroundColor: 'hsl(var(--muted))',
+                            }}
                         >
                             <Link href={`/p/${image.id}`}>
                                 <div className="relative w-full">
@@ -145,13 +242,19 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                 />
             )}
 
-            {images.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-64 border border-dashed rounded-xl text-muted-foreground gap-2">
-                    <p>{t('home.noImages')}</p>
+            {allImages.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-64 border border-dashed rounded-xl text-muted-foreground gap-3 p-6">
+                    <svg className="h-12 w-12 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                    </svg>
+                    <p className="font-medium">{t('home.noImages')}</p>
                     {currentTags && currentTags.length > 0 && (
-                        <Link href="/" className="underline hover:text-primary">
-                            {t('home.clearFilter')}
-                        </Link>
+                        <div className="flex flex-col items-center gap-2">
+                            <p className="text-sm">{t('home.noResultsHint') || 'Try removing some filters'}</p>
+                            <Link href={topicSlug ? `/${topicSlug}` : '/'} className="text-sm underline hover:text-primary">
+                                {t('home.clearFilter')}
+                            </Link>
+                        </div>
                     )}
                 </div>
             )}
