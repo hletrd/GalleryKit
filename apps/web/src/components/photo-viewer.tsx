@@ -14,6 +14,9 @@ import { PhotoNavigation } from '@/components/photo-navigation';
 import { cn } from "@/lib/utils";
 import { createPhotoShareLink } from '@/app/actions';
 import { ImageZoom } from '@/components/image-zoom';
+import { Lightbox, LightboxTrigger } from '@/components/lightbox';
+import InfoBottomSheet from '@/components/info-bottom-sheet';
+import { Histogram } from '@/components/histogram';
 
 import { useRouter } from 'next/navigation';
 
@@ -39,6 +42,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
     const [timerShowInfo, setTimerShowInfo] = useState(true);
     const [isPinned, setIsPinned] = useState(false);
+    const [showLightbox, setShowLightbox] = useState(false);
+    const [showBottomSheet, setShowBottomSheet] = useState(false);
 
     // Find current image index and object
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
@@ -73,6 +78,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                 navigate(-1);
             } else if (e.key === "ArrowRight") {
                 navigate(1);
+            } else if (e.key === 'f' || e.key === 'F') {
+                setShowLightbox(prev => !prev);
             }
         };
         window.addEventListener("keydown", handleKeyDown);
@@ -82,8 +89,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
     return (
-        <div className="flex flex-col h-full min-h-[calc(100vh-8rem)]">
-            <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
+            <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
                 <Link href={`/${image.topic}`}>
                     <Button variant="ghost" className="pl-0 gap-2">
                         <ArrowLeft className="h-4 w-4" />
@@ -92,6 +99,18 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                 </Link>
 
                 <div className="flex gap-2">
+                    <LightboxTrigger onClick={() => setShowLightbox(true)} />
+
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowBottomSheet(true)}
+                        className="gap-2 lg:hidden"
+                    >
+                        <Info className="h-4 w-4" />
+                        {t('viewer.info')}
+                    </Button>
+
                     <Button
                         variant="outline"
                         size="sm"
@@ -135,7 +154,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
             </div>
 
             <div className={cn(
-                "grid gap-8 flex-1 transition-all duration-500 ease-in-out",
+                "grid gap-8 flex-1 transition-all duration-500 ease-in-out photo-viewer-grid",
                 showInfo ? "grid-cols-1 lg:grid-cols-[1fr_350px]" : "grid-cols-1"
             )}>
                 {/* Main Image Area */}
@@ -175,7 +194,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                                     alt={getAltText(image)}
                                                     width={image.width}
                                                     height={image.height}
-                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative"
+                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
                                                     priority
                                                 />
                                             );
@@ -198,7 +217,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                                     alt={getAltText(image)}
                                                     width={image.width}
                                                     height={image.height}
-                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative"
+                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
                                                     decoding="sync"
                                                     loading="eager"
                                                 />
@@ -347,6 +366,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                         </div>
                                     )}
                                 </div>
+                                {image.filename_jpeg && (
+                                    <div className="mt-4 border-t pt-4">
+                                        <Histogram
+                                            imageUrl={`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                )}
                                 <div className="grid grid-cols-2 gap-4 text-sm mt-4">
 
                                     <div className="col-span-2">
@@ -381,6 +408,22 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                     )}
                 </div>
             </div>
+
+            {showLightbox && (
+                <Lightbox
+                    image={image}
+                    prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
+                    nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
+                    onClose={() => setShowLightbox(false)}
+                    onNavigate={navigate}
+                />
+            )}
+
+            <InfoBottomSheet
+                image={image}
+                isOpen={showBottomSheet}
+                onClose={() => setShowBottomSheet(false)}
+            />
         </div>
     );
 }

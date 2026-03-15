@@ -171,7 +171,8 @@
     "metaTitle": "{count} photos.",
     "noImages": "No images found.",
     "clearFilter": "Clear filter",
-    "allTags": "All"
+    "allTags": "All",
+    "noResultsHint": "Try removing some filters"
   },
   "login": {
     "title": "Admin Login",
@@ -204,6 +205,9 @@
     "linkCopied": "Link copied to clipboard",
     "errorSharing": "Error creating share link",
     "noDescription": "No description provided.",
+    "histogram": "Histogram",
+    "fullscreen": "Fullscreen",
+    "bottomSheet": "Photo Info",
     "topics": {
       "default": "Gallery"
     }

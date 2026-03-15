@@ -171,7 +171,8 @@
     "metaTitle": "사진 {count}장",
     "noImages": "사진이 없습니다",
     "clearFilter": "필터 초기화",
-    "allTags": "전체"
+    "allTags": "전체",
+    "noResultsHint": "일부 필터를 제거해 보세요"
   },
   "login": {
     "title": "관리자 로그인",
@@ -204,6 +205,9 @@
     "linkCopied": "링크가 복사되었습니다",
     "errorSharing": "공유 링크 생성 오류",
     "noDescription": "설명이 없습니다.",
+    "histogram": "히스토그램",
+    "fullscreen": "전체 화면",
+    "bottomSheet": "사진 정보",
     "topics": {
       "default": "갤러리"
     }
