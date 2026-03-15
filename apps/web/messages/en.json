@@ -208,6 +208,12 @@
     "histogram": "Histogram",
     "fullscreen": "Fullscreen",
     "bottomSheet": "Photo Info",
+    "whiteBalance": "White Balance",
+    "meteringMode": "Metering Mode",
+    "exposureComp": "Exposure Comp.",
+    "exposureProgram": "Exposure Program",
+    "flash": "Flash",
+    "bitDepth": "Bit Depth",
     "topics": {
       "default": "Gallery"
     }

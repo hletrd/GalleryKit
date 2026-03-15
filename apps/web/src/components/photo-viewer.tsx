@@ -324,7 +324,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                     {hasExifData(image.color_space) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                            <p className="font-medium">{image.color_space}</p>
+                                            <p className="font-medium">
+                                                {image.color_space}
+                                                {image.color_space && image.color_space.toLowerCase().includes('p3') && (
+                                                    <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded gamut-p3-badge">
+                                                        P3
+                                                    </span>
+                                                )}
+                                            </p>
                                         </div>
                                     )}
                                     {(image.width > 0 && image.height > 0) && (
@@ -349,6 +356,42 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                                     </span>
                                                 )}
                                             </p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.white_balance) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.whiteBalance')}</p>
+                                            <p className="font-medium">{image.white_balance}</p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.metering_mode) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.meteringMode')}</p>
+                                            <p className="font-medium">{image.metering_mode}</p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.exposure_compensation) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.exposureComp')}</p>
+                                            <p className="font-medium">{image.exposure_compensation} EV</p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.exposure_program) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.exposureProgram')}</p>
+                                            <p className="font-medium">{image.exposure_program}</p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.flash) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.flash')}</p>
+                                            <p className="font-medium">{image.flash}</p>
+                                        </div>
+                                    )}
+                                    {hasExifData(image.bit_depth) && (
+                                        <div>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.bitDepth')}</p>
+                                            <p className="font-medium">{image.bit_depth}-bit</p>
                                         </div>
                                     )}
                                     {(image.latitude != null && image.longitude != null) && (

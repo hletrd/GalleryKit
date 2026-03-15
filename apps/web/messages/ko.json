@@ -208,6 +208,12 @@
     "histogram": "히스토그램",
     "fullscreen": "전체 화면",
     "bottomSheet": "사진 정보",
+    "whiteBalance": "화이트 밸런스",
+    "meteringMode": "측광 모드",
+    "exposureComp": "노출 보정",
+    "exposureProgram": "노출 프로그램",
+    "flash": "플래시",
+    "bitDepth": "비트 심도",
     "topics": {
       "default": "갤러리"
     }
