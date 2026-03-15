@@ -1,0 +1,158 @@
+'use client';
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { searchImagesAction } from '@/app/actions';
+import Link from 'next/link';
+import { useTranslation } from '@/components/i18n-provider';
+
+export function Search() {
+    const { t } = useTranslation();
+    const [isOpen, setIsOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const debounceRef = useRef<NodeJS.Timeout>(undefined);
+
+    const performSearch = useCallback(async (searchQuery: string) => {
+        if (!searchQuery.trim()) {
+            setResults([]);
+            return;
+        }
+        setLoading(true);
+        try {
+            const data = await searchImagesAction(searchQuery);
+            setResults(data);
+        } catch {
+            setResults([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+            performSearch(query);
+        }, 300);
+        return () => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+        };
+    }, [query, performSearch]);
+
+    // Keyboard shortcut: Cmd/Ctrl + K to toggle search
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                setIsOpen(prev => !prev);
+            }
+            if (e.key === 'Escape' && isOpen) {
+                setIsOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (isOpen && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [isOpen]);
+
+    if (!isOpen) {
+        return (
+            <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsOpen(true)}
+                aria-label="Search photos"
+                className="h-9 w-9"
+            >
+                <SearchIcon className="h-4 w-4" />
+            </Button>
+        );
+    }
+
+    return (
+        <>
+            {/* Backdrop */}
+            <div
+                className="fixed inset-0 bg-black/50 z-40"
+                onClick={() => setIsOpen(false)}
+            />
+            {/* Search Panel */}
+            <div className="fixed top-0 left-0 right-0 z-50 p-4 sm:p-6 sm:pt-[10vh]">
+                <div className="mx-auto max-w-xl bg-card border rounded-xl shadow-2xl overflow-hidden">
+                    <div className="flex items-center gap-2 p-4 border-b">
+                        <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <Input
+                            ref={inputRef}
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder={t('search.placeholder') || 'Search photos, tags, cameras...'}
+                            className="border-0 focus-visible:ring-0 shadow-none h-8 p-0"
+                        />
+                        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setIsOpen(false)}
+                            className="h-8 w-8 shrink-0"
+                        >
+                            <X className="h-4 w-4" />
+                        </Button>
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto">
+                        {results.length > 0 ? (
+                            <div className="p-2">
+                                {results.map((image) => (
+                                    <Link
+                                        key={image.id}
+                                        href={`/p/${image.id}`}
+                                        onClick={() => setIsOpen(false)}
+                                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                                    >
+                                        <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
+                                            <img
+                                                src={`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`}
+                                                alt=""
+                                                className="w-full h-full object-cover"
+                                                loading="lazy"
+                                            />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium text-sm truncate">
+                                                {image.title || image.description || `Photo ${image.id}`}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground truncate">
+                                                {[image.topic, image.camera_model].filter(Boolean).join(' \u00b7 ')}
+                                            </p>
+                                        </div>
+                                    </Link>
+                                ))}
+                            </div>
+                        ) : query.trim() ? (
+                            <div className="p-8 text-center text-muted-foreground text-sm">
+                                {loading ? '' : (t('search.noResults') || 'No photos found')}
+                            </div>
+                        ) : (
+                            <div className="p-8 text-center text-muted-foreground text-sm">
+                                {t('search.hint') || 'Search by title, tag, camera, or description'}
+                            </div>
+                        )}
+                    </div>
+                    <div className="p-2 border-t text-center">
+                        <p className="text-xs text-muted-foreground">
+                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{'\u2318'}K</kbd> to toggle search
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+}

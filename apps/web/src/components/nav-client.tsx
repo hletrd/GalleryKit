@@ -7,6 +7,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import siteConfig from "@/site-config.json";
+import { Search } from "@/components/search";
 
 interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
@@ -62,6 +63,10 @@ export function NavClient({ topics }: NavClientProps) {
                             </Link>
                         );
                     })}
+                </div>
+
+                <div className={cn("shrink-0", isExpanded && "pt-1")}>
+                    <Search />
                 </div>
 
                 {/* Mobile Expand Toggle */}
