@@ -95,6 +95,15 @@
   pointer-events: none;
 }
 
+/* Color gamut detection */
+:root { --display-gamut: srgb; }
+@media (color-gamut: p3) { :root { --display-gamut: p3; } }
+@media (dynamic-range: high) { :root { --display-hdr: true; } }
+
+/* Only show P3 badge on P3-capable displays */
+.gamut-p3-badge { display: none; }
+@media (color-gamut: p3) { .gamut-p3-badge { display: inline-block; } }
+
 /* Orientation-aware layout: landscape mobile */
 @media (orientation: landscape) and (max-width: 767px) {
   .photo-viewer-image {
