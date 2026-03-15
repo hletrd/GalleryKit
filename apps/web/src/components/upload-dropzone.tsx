@@ -17,7 +17,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const router = useRouter();
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [currentFileIndex, setCurrentFileIndex] = useState(0);
+    const [completedCount, setCompletedCount] = useState(0);
     const [topic, setTopic] = useState<string>(topics[0]?.slug || '');
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [files, setFiles] = useState<File[]>([]);
@@ -52,16 +52,18 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         if (!files.length) return;
         setUploading(true);
         setProgress(0);
-        setCurrentFileIndex(0);
+        setCompletedCount(0);
+
+        const UPLOAD_CONCURRENCY = 3;
 
         let successCount = 0;
         const failedFiles: File[] = [];
         const duplicateFiles: string[] = [];
+        const totalFiles = files.length;
+        let completedSoFar = 0;
 
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
+        const uploadFile = async (file: File) => {
             const fileId = getFileId(file);
-            setCurrentFileIndex(i + 1);
 
             const formData = new FormData();
             formData.append('files', file);
@@ -92,10 +94,25 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                 failedFiles.push(file);
             }
 
-            setProgress(Math.round(((i + 1) / files.length) * 100));
+            completedSoFar++;
+            setCompletedCount(completedSoFar);
+            setProgress(Math.round((completedSoFar / totalFiles) * 100));
+        };
+
+        // Process files in parallel with concurrency limit
+        const queue = [...files];
+        const inFlight = new Set<Promise<void>>();
+
+        for (const file of queue) {
+            const promise: Promise<void> = uploadFile(file).finally(() => inFlight.delete(promise));
+            inFlight.add(promise);
+
+            if (inFlight.size >= UPLOAD_CONCURRENCY) {
+                await Promise.race(inFlight);
+            }
         }
 
-        setUploading(false);
+        await Promise.all(inFlight);
 
         setUploading(false);
 
@@ -189,7 +206,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                 {uploading && (
                     <div className="space-y-2">
                         <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>{t('upload.uploadingProgress', { current: currentFileIndex, total: files.length })}</span>
+                            <span>{t('upload.uploadingProgress', { current: completedCount, total: files.length })}</span>
                             <span>{Math.round(progress)}%</span>
                         </div>
                         <Progress value={progress} />
