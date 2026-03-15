@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import PhotoViewer from '@/components/photo-viewer';
 import Image from 'next/image';
 import Link from 'next/link';
+import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
@@ -48,20 +49,32 @@ export default async function SharedGroupPage({ params, searchParams }: { params
 
     if (selectedImage) {
         return (
-            <PhotoViewer
-                images={[selectedImage]}
-                initialImageId={selectedImage.id}
-                tags={[]}
-                prevId={prevId}
-                nextId={nextId}
-            />
+            <>
+                <div className="flex items-center justify-between mb-4 px-4 pt-4">
+                    <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                        ← {siteConfig.nav_title || siteConfig.title || 'Gallery'}
+                    </Link>
+                </div>
+                <PhotoViewer
+                    images={[selectedImage]}
+                    initialImageId={selectedImage.id}
+                    tags={[]}
+                    prevId={prevId}
+                    nextId={nextId}
+                />
+            </>
         );
     }
 
     // Render Grid
     return (
         <div className="container mx-auto px-4 py-8">
-            <h1 className="text-2xl font-bold mb-6">Shared Photos</h1>
+            <div className="flex items-center justify-between mb-6">
+                <h1 className="text-2xl font-bold">Shared Photos</h1>
+                <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                    ← {siteConfig.nav_title || siteConfig.title || 'Gallery'}
+                </Link>
+            </div>
             <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
                 {group.images.map((image) => {
                     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);

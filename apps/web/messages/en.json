@@ -206,6 +206,16 @@
       "default": "Gallery"
     }
   },
+  "shared": {
+    "viewGallery": "View Gallery",
+    "sharedPhoto": "Shared Photo",
+    "sharedCollection": "Shared Collection"
+  },
+  "search": {
+    "placeholder": "Search photos, tags, cameras...",
+    "noResults": "No photos found",
+    "hint": "Search by title, tag, camera, or description"
+  },
   "serverActions": {
     "unauthorized": "Unauthorized",
     "invalidCurrentSlug": "Invalid current slug",

@@ -1,6 +1,8 @@
 import { getImageByShareKey } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import PhotoViewer from '@/components/photo-viewer';
+import Link from 'next/link';
+import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
@@ -26,12 +28,19 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     }
 
     return (
-        <PhotoViewer
-            images={[image]}
-            initialImageId={image.id}
-            tags={[]}
-            prevId={null}
-            nextId={null}
-        />
+        <>
+            <div className="flex items-center justify-between mb-4 px-4 pt-4">
+                <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                    ← {siteConfig.nav_title || siteConfig.title || 'Gallery'}
+                </Link>
+            </div>
+            <PhotoViewer
+                images={[image]}
+                initialImageId={image.id}
+                tags={[]}
+                prevId={null}
+                nextId={null}
+            />
+        </>
     );
 }
