@@ -574,7 +574,11 @@ export async function uploadImages(formData: FormData) {
                         blur_data_url: data.blurDataUrl,
                         processed: false,
                         updated_at: sql`CURRENT_TIMESTAMP`,
-                        ...exifDb
+                        ...exifDb,
+                        color_space: data.iccProfileName || exifDb.color_space,
+                        bit_depth: data.bitDepth,
+                        original_format: data.filenameOriginal.split('.').pop()?.toUpperCase() || null,
+                        original_file_size: file.size,
                     })
                     .where(eq(images.id, existingImage.id));
 
@@ -610,7 +614,11 @@ export async function uploadImages(formData: FormData) {
                 user_filename: originalFilename,
                 blur_data_url: data.blurDataUrl,
                 processed: false,
-                ...exifDb
+                ...exifDb,
+                color_space: data.iccProfileName || exifDb.color_space,
+                bit_depth: data.bitDepth,
+                original_format: data.filenameOriginal.split('.').pop()?.toUpperCase() || null,
+                original_file_size: file.size,
             };
 
             const [result] = await db.insert(images).values(insertValues);
@@ -1420,4 +1428,9 @@ export async function deleteAdminUser(id: number) {
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
     const images = await getImages(topicSlug, tagSlugs, limit, offset);
     return images;
+}
+
+export async function searchImagesAction(query: string) {
+    const { searchImages } = await import('@/lib/data');
+    return searchImages(query, 20);
 }

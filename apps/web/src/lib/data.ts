@@ -1,5 +1,5 @@
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages } from '@/db';
-import { eq, desc, asc, and, gt, lt, or, inArray } from 'drizzle-orm';
+import { eq, desc, asc, and, gt, lt, or, inArray, like } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
 
@@ -29,6 +29,14 @@ const selectFields = {
     latitude: images.latitude,
     longitude: images.longitude,
     color_space: images.color_space,
+    white_balance: images.white_balance,
+    metering_mode: images.metering_mode,
+    exposure_compensation: images.exposure_compensation,
+    exposure_program: images.exposure_program,
+    flash: images.flash,
+    bit_depth: images.bit_depth,
+    original_format: images.original_format,
+    original_file_size: images.original_file_size,
     blur_data_url: images.blur_data_url,
 };
 
@@ -315,4 +323,80 @@ export async function getTopicBySlug(slug: string) {
     }
 
     return null;
+}
+
+export async function searchImages(query: string, limit: number = 20): Promise<any[]> {
+    if (!query || query.trim().length === 0) return [];
+
+    const searchTerm = `%${query.trim()}%`;
+
+    const results = await db
+        .select({
+            id: images.id,
+            title: images.title,
+            description: images.description,
+            filename_jpeg: images.filename_jpeg,
+            filename_webp: images.filename_webp,
+            filename_avif: images.filename_avif,
+            width: images.width,
+            height: images.height,
+            topic: images.topic,
+            camera_model: images.camera_model,
+            capture_date: images.capture_date,
+            blur_data_url: images.blur_data_url,
+        })
+        .from(images)
+        .where(
+            and(
+                eq(images.processed, true),
+                or(
+                    like(images.title, searchTerm),
+                    like(images.description, searchTerm),
+                    like(images.camera_model, searchTerm),
+                    like(images.topic, searchTerm),
+                )
+            )
+        )
+        .orderBy(desc(images.created_at))
+        .limit(limit);
+
+    // Also search by tag name
+    const tagResults = await db
+        .select({
+            id: images.id,
+            title: images.title,
+            description: images.description,
+            filename_jpeg: images.filename_jpeg,
+            filename_webp: images.filename_webp,
+            filename_avif: images.filename_avif,
+            width: images.width,
+            height: images.height,
+            topic: images.topic,
+            camera_model: images.camera_model,
+            capture_date: images.capture_date,
+            blur_data_url: images.blur_data_url,
+        })
+        .from(images)
+        .innerJoin(imageTags, eq(images.id, imageTags.imageId))
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(
+            and(
+                eq(images.processed, true),
+                like(tags.name, searchTerm),
+            )
+        )
+        .orderBy(desc(images.created_at))
+        .limit(limit);
+
+    // Deduplicate by id
+    const seen = new Set<number>();
+    const combined: any[] = [];
+    for (const r of [...results, ...tagResults]) {
+        if (!seen.has(r.id)) {
+            seen.add(r.id);
+            combined.push(r);
+        }
+    }
+
+    return combined.slice(0, limit);
 }

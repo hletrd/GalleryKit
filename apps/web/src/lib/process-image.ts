@@ -128,6 +128,8 @@ export interface ImageProcessingResult {
     exifData: any;
     color_space?: string | null;
     blurDataUrl?: string | null;
+    iccProfileName?: string | null;
+    bitDepth?: number | null;
 }
 
 export async function saveOriginalAndGetMetadata(
@@ -201,6 +203,46 @@ export async function saveOriginalAndGetMetadata(
         // Non-critical, skip blur placeholder
     }
 
+    // Parse ICC profile name if available
+    let iccProfileName: string | null = null;
+    if (metadata.icc && metadata.icc.length > 128) {
+        try {
+            // ICC profile structure: 128-byte header, then tag table
+            // Tag count at offset 128 (4 bytes, big-endian)
+            const tagCount = metadata.icc.readUInt32BE(128);
+            for (let i = 0; i < tagCount && i < 50; i++) {
+                const tagOffset = 132 + i * 12;
+                const tagSig = metadata.icc.subarray(tagOffset, tagOffset + 4).toString('ascii');
+                if (tagSig === 'desc') {
+                    const dataOffset = metadata.icc.readUInt32BE(tagOffset + 4);
+                    const dataSize = metadata.icc.readUInt32BE(tagOffset + 8);
+                    // 'desc' type: 4 bytes type sig, 4 bytes reserved, 4 bytes count, then ASCII string
+                    const descType = metadata.icc.subarray(dataOffset, dataOffset + 4).toString('ascii');
+                    if (descType === 'desc') {
+                        const strLen = metadata.icc.readUInt32BE(dataOffset + 8);
+                        const str = metadata.icc.subarray(dataOffset + 12, dataOffset + 12 + strLen - 1).toString('ascii');
+                        iccProfileName = str.trim();
+                    } else if (descType === 'mluc') {
+                        // Multi-localized Unicode: 4 bytes type, 4 bytes reserved, 4 bytes number of records
+                        const numRecords = metadata.icc.readUInt32BE(dataOffset + 8);
+                        if (numRecords > 0) {
+                            const recOffset = metadata.icc.readUInt32BE(dataOffset + 16 + 4);
+                            const recLen = metadata.icc.readUInt32BE(dataOffset + 16);
+                            const str = metadata.icc.subarray(dataOffset + recOffset, dataOffset + recOffset + recLen).toString('utf16le');
+                            iccProfileName = str.replace(/\0/g, '').trim();
+                        }
+                    }
+                    break;
+                }
+            }
+        } catch {
+            // ICC parsing is best-effort
+        }
+    }
+
+    // Extract bit depth from Sharp metadata
+    const bitDepth = metadata.depth ? (typeof metadata.depth === 'string' ? parseInt(metadata.depth, 10) : metadata.depth) : null;
+
     return {
         id,
         filenameOriginal,
@@ -215,6 +257,8 @@ export async function saveOriginalAndGetMetadata(
         metadata,
         exifData,
         blurDataUrl,
+        iccProfileName,
+        bitDepth,
     };
 }
 
@@ -383,5 +427,61 @@ export function extractExifForDb(exifData: any) {
 
             return null;
         })(),
+
+        // White Balance
+        white_balance: (() => {
+            const wb = exifParams.WhiteBalance;
+            if (wb === 0) return 'Auto';
+            if (wb === 1) return 'Manual';
+            return null;
+        })(),
+
+        // Metering Mode
+        metering_mode: (() => {
+            const mm = exifParams.MeteringMode;
+            const modes: Record<number, string> = {
+                0: 'Unknown', 1: 'Average', 2: 'Center-weighted', 3: 'Spot',
+                4: 'Multi-spot', 5: 'Multi-segment', 6: 'Partial'
+            };
+            return modes[mm] ?? null;
+        })(),
+
+        // Exposure Compensation
+        exposure_compensation: (() => {
+            const ec = exifParams.ExposureBiasValue ?? exifParams.ExposureCompensation;
+            if (ec === undefined || ec === null) return null;
+            const val = Number(ec);
+            if (!Number.isFinite(val)) return null;
+            if (val === 0) return '0 EV';
+            return `${val > 0 ? '+' : ''}${val.toFixed(1)} EV`;
+        })(),
+
+        // Exposure Program
+        exposure_program: (() => {
+            const ep = exifParams.ExposureProgram;
+            const programs: Record<number, string> = {
+                0: 'Not Defined', 1: 'Manual', 2: 'Program AE', 3: 'Aperture Priority',
+                4: 'Shutter Priority', 5: 'Creative', 6: 'Action', 7: 'Portrait', 8: 'Landscape'
+            };
+            return programs[ep] ?? null;
+        })(),
+
+        // Flash
+        flash: (() => {
+            const f = exifParams.Flash;
+            if (f === undefined || f === null) return null;
+            const val = typeof f === 'number' ? f : Number(f);
+            if (!Number.isFinite(val)) return null;
+            // Bit 0: fired, Bits 1-2: return, Bits 3-4: mode
+            const fired = (val & 0x01) !== 0;
+            const mode = (val >> 3) & 0x03;
+            if (mode === 2) return fired ? 'Auto, Fired' : 'Auto, Not Fired';
+            if (mode === 1) return 'Forced On';
+            if (mode === 3) return 'Forced Off';
+            return fired ? 'Fired' : 'Not Fired';
+        })(),
+
+        // Bit Depth — set from Sharp metadata in saveOriginalAndGetMetadata
+        bit_depth: null as number | null,
     };
 }

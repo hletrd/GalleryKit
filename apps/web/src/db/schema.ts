@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, float, uniqueIndex, timestamp, boolean, text } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, float, uniqueIndex, timestamp, boolean, text, bigint } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 export const topics = mysqlTable("topics", {
@@ -40,6 +40,14 @@ export const images = mysqlTable("images", {
     latitude: float("latitude"),
     longitude: float("longitude"),
     color_space: varchar("color_space", { length: 255 }),
+    white_balance: varchar('white_balance', { length: 50 }),
+    metering_mode: varchar('metering_mode', { length: 50 }),
+    exposure_compensation: varchar('exposure_compensation', { length: 20 }),
+    exposure_program: varchar('exposure_program', { length: 50 }),
+    flash: varchar('flash', { length: 50 }),
+    bit_depth: int('bit_depth'),
+    original_format: varchar('original_format', { length: 10 }),
+    original_file_size: bigint('original_file_size', { mode: 'number' }),
     blur_data_url: text('blur_data_url'),
 
     created_at: timestamp("created_at")
