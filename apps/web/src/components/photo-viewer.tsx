@@ -230,7 +230,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                     </AnimatePresence>
                     {(prevId != null || nextId != null) && (
                         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10">
-                            Photo {image.id}
+                            {currentIndex + 1} / {images.length}
                         </div>
                     )}
                 </div>
