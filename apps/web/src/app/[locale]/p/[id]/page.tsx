@@ -45,7 +45,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             description: image.description || `View photo by ${siteConfig.author}`,
             images: [
                 {
-                    url: `/uploads/jpeg/${image.filename_jpeg}`,
+                    url: `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
                     width: image.width,
                     height: image.height,
                     alt: displayTitle,
@@ -59,7 +59,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             card: 'summary_large_image',
             title: displayTitle,
             description: image.description || `View photo by ${siteConfig.author}`,
-            images: [`/uploads/jpeg/${image.filename_jpeg}`],
+            images: [`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
         }
     };
 }
@@ -94,6 +94,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         '@context': 'https://schema.org',
         '@type': 'ImageObject',
         contentUrl: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${image.filename_jpeg}`,
+        thumbnailUrl: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+        encodingFormat: 'image/jpeg',
         license: 'https://creativecommons.org/licenses/by-nc/4.0/',
         acquireLicensePage: siteConfig.parent_url,
         creditText: siteConfig.author,
@@ -103,38 +105,61 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         },
         copyrightNotice: siteConfig.author,
         datePublished: image.created_at,
-        width: image.width,
-        height: image.height,
+        uploadDate: image.created_at,
+        width: {
+            '@type': 'QuantitativeValue',
+            value: image.width,
+            unitCode: 'E37',
+        },
+        height: {
+            '@type': 'QuantitativeValue',
+            value: image.height,
+            unitCode: 'E37',
+        },
         name: displayTitle,
         description: image.description,
         keywords: keywords.join(', '),
+        ...(image.latitude != null && image.longitude != null ? {
+            locationCreated: {
+                '@type': 'Place',
+                geo: {
+                    '@type': 'GeoCoordinates',
+                    latitude: image.latitude,
+                    longitude: image.longitude,
+                },
+            },
+        } : {}),
         exifData: [
-            image.camera_model && {
-                '@type': 'PropertyValue',
-                name: 'Camera',
-                value: image.camera_model
+            image.camera_model && { '@type': 'PropertyValue', name: 'Camera', value: image.camera_model },
+            image.lens_model && { '@type': 'PropertyValue', name: 'Lens', value: image.lens_model },
+            image.iso && { '@type': 'PropertyValue', name: 'ISO', value: image.iso },
+            image.f_number && { '@type': 'PropertyValue', name: 'Aperture', value: `f/${image.f_number}` },
+            image.exposure_time && { '@type': 'PropertyValue', name: 'Exposure Time', value: `${image.exposure_time}s` },
+        ].filter(Boolean),
+    };
+
+    const breadcrumbLd = {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+            {
+                '@type': 'ListItem',
+                position: 1,
+                name: siteConfig.title || 'Gallery',
+                item: process.env.BASE_URL || siteConfig.url,
             },
-            image.lens_model && {
-                '@type': 'PropertyValue',
-                name: 'Lens',
-                value: image.lens_model
+            image.topic && {
+                '@type': 'ListItem',
+                position: 2,
+                name: image.topic,
+                item: `${process.env.BASE_URL || siteConfig.url}/${image.topic}`,
             },
-            image.iso && {
-                '@type': 'PropertyValue',
-                name: 'ISO',
-                value: image.iso
+            {
+                '@type': 'ListItem',
+                position: image.topic ? 3 : 2,
+                name: displayTitle,
             },
-            image.f_number && {
-                '@type': 'PropertyValue',
-                name: 'Aperture',
-                value: `f/${image.f_number}`
-            },
-            image.exposure_time && {
-               '@type': 'PropertyValue',
-               name: 'Exposure Time',
-               value: `${image.exposure_time}s`
-            }
-        ].filter(Boolean)
+        ].filter(Boolean),
     };
 
     return (
@@ -143,6 +168,12 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{
                     __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c')
+                }}
+            />
+            <script
+                type="application/ld+json"
+                dangerouslySetInnerHTML={{
+                    __html: JSON.stringify(breadcrumbLd).replace(/</g, '\\u003c')
                 }}
             />
             <PhotoViewer
