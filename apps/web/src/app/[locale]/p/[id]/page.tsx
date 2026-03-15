@@ -1,5 +1,6 @@
 import { getImage } from '@/lib/data';
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import PhotoViewer from '@/components/photo-viewer';
 import siteConfig from "@/site-config.json";
 
@@ -183,6 +184,17 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 prevId={image.prevId}
                 nextId={image.nextId}
             />
+            {/* Prefetch adjacent photos for instant navigation */}
+            {image.prevId && (
+                <Link href={`/p/${image.prevId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                    prev
+                </Link>
+            )}
+            {image.nextId && (
+                <Link href={`/p/${image.nextId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                    next
+                </Link>
+            )}
         </>
     );
 }
