@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray, like } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
@@ -26,8 +27,6 @@ const selectFields = {
     f_number: images.f_number,
     exposure_time: images.exposure_time,
     focal_length: images.focal_length,
-    latitude: images.latitude,
-    longitude: images.longitude,
     color_space: images.color_space,
     white_balance: images.white_balance,
     metering_mode: images.metering_mode,
@@ -40,13 +39,21 @@ const selectFields = {
     blur_data_url: images.blur_data_url,
 };
 
+const adminSelectFields = {
+    ...selectFields,
+    latitude: images.latitude,
+    longitude: images.longitude,
+};
+
 export async function getTopics() {
     return db.select().from(topics).orderBy(asc(topics.order));
 }
 
 export async function getTopicsWithAliases() {
-    const allTopics = await db.select().from(topics).orderBy(asc(topics.order));
-    const allAliases = await db.select().from(topicAliases);
+    const [allTopics, allAliases] = await Promise.all([
+        db.select().from(topics).orderBy(asc(topics.order)),
+        db.select().from(topicAliases),
+    ]);
 
     return allTopics.map(topic => ({
         ...topic,
@@ -205,39 +212,56 @@ export async function getImage(id: number) {
         return null;
     }
 
-    // Fetch tags
-    const imageTagsResult = await db.select({
-        name: tags.name,
-        slug: tags.slug
-    })
-        .from(imageTags)
-        .innerJoin(tags, eq(imageTags.tagId, tags.id))
-        .where(eq(imageTags.imageId, id));
+    // Fetch tags, prev, and next image in parallel (all independent of each other)
+    const [imageTagsResult, prevResult, nextResult] = await Promise.all([
+        // Fetch tags
+        db.select({
+            name: tags.name,
+            slug: tags.slug
+        })
+            .from(imageTags)
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(eq(imageTags.imageId, id)),
 
-    // Simplified queries for adjacent images
-    // Prev: Newer image (created_at > current) -> Order by created_at ASC limit 1
-    const [prevImage] = await db.select({ id: images.id })
-        .from(images)
-        .where(
-            and(
-                gt(images.created_at, image.created_at),
-                eq(images.processed, true)
+        // Prev: Newer image (created_at > current) with tiebreaker on id -> Order by created_at ASC, id ASC, limit 1
+        db.select({ id: images.id })
+            .from(images)
+            .where(
+                and(
+                    or(
+                        gt(images.created_at, image.created_at),
+                        and(
+                            eq(images.created_at, image.created_at),
+                            gt(images.id, image.id)
+                        )
+                    ),
+                    eq(images.processed, true)
+                )
             )
-        )
-        .orderBy(asc(images.created_at))
-        .limit(1);
+            .orderBy(asc(images.created_at), asc(images.id))
+            .limit(1),
 
-    // Next: Older image (created_at < current) -> Order by created_at DESC limit 1
-    const [nextImage] = await db.select({ id: images.id })
-        .from(images)
-        .where(
-            and(
-                lt(images.created_at, image.created_at),
-                eq(images.processed, true)
+        // Next: Older image (created_at < current) with tiebreaker on id -> Order by created_at DESC, id DESC, limit 1
+        db.select({ id: images.id })
+            .from(images)
+            .where(
+                and(
+                    or(
+                        lt(images.created_at, image.created_at),
+                        and(
+                            eq(images.created_at, image.created_at),
+                            lt(images.id, image.id)
+                        )
+                    ),
+                    eq(images.processed, true)
+                )
             )
-        )
-        .orderBy(desc(images.created_at))
-        .limit(1);
+            .orderBy(desc(images.created_at), desc(images.id))
+            .limit(1),
+    ]);
+
+    const [prevImage] = prevResult;
+    const [nextImage] = nextResult;
 
     return {
         ...image,
@@ -330,63 +354,65 @@ export async function searchImages(query: string, limit: number = 20): Promise<a
 
     const searchTerm = `%${query.trim()}%`;
 
-    const results = await db
-        .select({
-            id: images.id,
-            title: images.title,
-            description: images.description,
-            filename_jpeg: images.filename_jpeg,
-            filename_webp: images.filename_webp,
-            filename_avif: images.filename_avif,
-            width: images.width,
-            height: images.height,
-            topic: images.topic,
-            camera_model: images.camera_model,
-            capture_date: images.capture_date,
-            blur_data_url: images.blur_data_url,
-        })
-        .from(images)
-        .where(
-            and(
-                eq(images.processed, true),
-                or(
-                    like(images.title, searchTerm),
-                    like(images.description, searchTerm),
-                    like(images.camera_model, searchTerm),
-                    like(images.topic, searchTerm),
+    const [results, tagResults] = await Promise.all([
+        db
+            .select({
+                id: images.id,
+                title: images.title,
+                description: images.description,
+                filename_jpeg: images.filename_jpeg,
+                filename_webp: images.filename_webp,
+                filename_avif: images.filename_avif,
+                width: images.width,
+                height: images.height,
+                topic: images.topic,
+                camera_model: images.camera_model,
+                capture_date: images.capture_date,
+                blur_data_url: images.blur_data_url,
+            })
+            .from(images)
+            .where(
+                and(
+                    eq(images.processed, true),
+                    or(
+                        like(images.title, searchTerm),
+                        like(images.description, searchTerm),
+                        like(images.camera_model, searchTerm),
+                        like(images.topic, searchTerm),
+                    )
                 )
             )
-        )
-        .orderBy(desc(images.created_at))
-        .limit(limit);
+            .orderBy(desc(images.created_at))
+            .limit(limit),
 
-    // Also search by tag name
-    const tagResults = await db
-        .select({
-            id: images.id,
-            title: images.title,
-            description: images.description,
-            filename_jpeg: images.filename_jpeg,
-            filename_webp: images.filename_webp,
-            filename_avif: images.filename_avif,
-            width: images.width,
-            height: images.height,
-            topic: images.topic,
-            camera_model: images.camera_model,
-            capture_date: images.capture_date,
-            blur_data_url: images.blur_data_url,
-        })
-        .from(images)
-        .innerJoin(imageTags, eq(images.id, imageTags.imageId))
-        .innerJoin(tags, eq(imageTags.tagId, tags.id))
-        .where(
-            and(
-                eq(images.processed, true),
-                like(tags.name, searchTerm),
+        // Also search by tag name
+        db
+            .select({
+                id: images.id,
+                title: images.title,
+                description: images.description,
+                filename_jpeg: images.filename_jpeg,
+                filename_webp: images.filename_webp,
+                filename_avif: images.filename_avif,
+                width: images.width,
+                height: images.height,
+                topic: images.topic,
+                camera_model: images.camera_model,
+                capture_date: images.capture_date,
+                blur_data_url: images.blur_data_url,
+            })
+            .from(images)
+            .innerJoin(imageTags, eq(images.id, imageTags.imageId))
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(
+                and(
+                    eq(images.processed, true),
+                    like(tags.name, searchTerm),
+                )
             )
-        )
-        .orderBy(desc(images.created_at))
-        .limit(limit);
+            .orderBy(desc(images.created_at))
+            .limit(limit),
+    ]);
 
     // Deduplicate by id
     const seen = new Set<number>();
@@ -400,3 +426,9 @@ export async function searchImages(query: string, limit: number = 20): Promise<a
 
     return combined.slice(0, limit);
 }
+
+export { adminSelectFields };
+
+export const getImageCached = cache(getImage);
+export const getTopicBySlugCached = cache(getTopicBySlug);
+export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
