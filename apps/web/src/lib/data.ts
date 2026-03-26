@@ -352,7 +352,8 @@ export async function getTopicBySlug(slug: string) {
 export async function searchImages(query: string, limit: number = 20): Promise<any[]> {
     if (!query || query.trim().length === 0) return [];
 
-    const searchTerm = `%${query.trim()}%`;
+    const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
+    const searchTerm = `%${escaped}%`;
 
     const [results, tagResults] = await Promise.all([
         db

@@ -40,7 +40,7 @@ export default function middleware(request: NextRequest) {
 
   // Guard: if this is a protected admin sub-route and there's no session cookie, redirect to login
   if (isProtectedAdminRoute(pathname)) {
-    const sessionCookie = request.cookies.get('session_token');
+    const sessionCookie = request.cookies.get('admin_session');
     if (!sessionCookie) {
       // Determine login page URL based on locale prefix in path
       let loginUrl: string;

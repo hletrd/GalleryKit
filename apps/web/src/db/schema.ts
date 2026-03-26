@@ -59,9 +59,9 @@ export const images = mysqlTable("images", {
         .notNull(),
     processed: boolean("processed").default(true),
 }, (table) => ({
-    idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date),
+    idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at),
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
-    idxImagesTopic: index('idx_images_topic').on(table.topic),
+    idxImagesTopic: index('idx_images_topic').on(table.topic, table.processed, table.capture_date, table.created_at),
     idxImagesUserFilename: index('idx_images_user_filename').on(table.user_filename),
 }));
 

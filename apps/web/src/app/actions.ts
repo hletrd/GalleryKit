@@ -792,14 +792,12 @@ export async function deleteImages(ids: number[]) {
     const foundIds = imageRecords.map(img => img.id);
     const notFoundCount = ids.filter(id => !foundIds.includes(id)).length;
 
-    // Delete all imageTags in one query
+    // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
     if (foundIds.length > 0) {
-        await db.delete(imageTags).where(inArray(imageTags.imageId, foundIds));
-    }
-
-    // Delete all DB records in one query
-    if (foundIds.length > 0) {
-        await db.delete(images).where(inArray(images.id, foundIds));
+        await db.transaction(async (tx) => {
+            await tx.delete(imageTags).where(inArray(imageTags.imageId, foundIds));
+            await tx.delete(images).where(inArray(images.id, foundIds));
+        });
     }
 
     // Clean up files for all images concurrently
@@ -943,18 +941,28 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     try {
-        await db.update(topics)
-            .set({
-                label,
-                slug,
-                order,
-                ...(imageFilename ? { image_filename: imageFilename } : {})
-            })
-            .where(eq(topics.slug, currentSlug));
-
-        // Cascade slug change to images referencing the old slug
         if (slug !== currentSlug) {
-            await db.update(images).set({ topic: slug }).where(eq(images.topic, currentSlug));
+            // Cascade slug change in a transaction: update references first (while old FK target exists), then rename the PK
+            await db.transaction(async (tx) => {
+                await tx.update(images).set({ topic: slug }).where(eq(images.topic, currentSlug));
+                await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, currentSlug));
+                await tx.update(topics)
+                    .set({
+                        label,
+                        slug,
+                        order,
+                        ...(imageFilename ? { image_filename: imageFilename } : {})
+                    })
+                    .where(eq(topics.slug, currentSlug));
+            });
+        } else {
+            await db.update(topics)
+                .set({
+                    label,
+                    order,
+                    ...(imageFilename ? { image_filename: imageFilename } : {})
+                })
+                .where(eq(topics.slug, currentSlug));
         }
 
         revalidatePath('/admin/categories');
