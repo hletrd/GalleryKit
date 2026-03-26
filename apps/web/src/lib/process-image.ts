@@ -54,17 +54,18 @@ const ALLOWED_EXTENSIONS = new Set([
 // Maximum file size (200MB for RAW files)
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
-// Ensure directories exist — only runs once
-let dirsEnsured = false;
-const ensureDirs = async () => {
-    if (dirsEnsured) return;
-    await Promise.all([
-        fs.mkdir(UPLOAD_DIR_ORIGINAL, { recursive: true }),
-        fs.mkdir(UPLOAD_DIR_WEBP, { recursive: true }),
-        fs.mkdir(UPLOAD_DIR_AVIF, { recursive: true }),
-        fs.mkdir(UPLOAD_DIR_JPEG, { recursive: true }),
-    ]);
-    dirsEnsured = true;
+// Ensure directories exist — only runs once (promise-based singleton to avoid races)
+let dirsPromise: Promise<void> | null = null;
+const ensureDirs = () => {
+    if (!dirsPromise) {
+        dirsPromise = Promise.all([
+            fs.mkdir(UPLOAD_DIR_ORIGINAL, { recursive: true }),
+            fs.mkdir(UPLOAD_DIR_WEBP, { recursive: true }),
+            fs.mkdir(UPLOAD_DIR_AVIF, { recursive: true }),
+            fs.mkdir(UPLOAD_DIR_JPEG, { recursive: true }),
+        ]).then(() => {});
+    }
+    return dirsPromise;
 };
 
 // Sanitize and validate file extension
@@ -211,30 +212,40 @@ export async function saveOriginalAndGetMetadata(
 
     // Parse ICC profile name if available
     let iccProfileName: string | null = null;
-    if (metadata.icc && metadata.icc.length > 128) {
+    if (metadata.icc && metadata.icc.length > 132) {
         try {
+            const icc = metadata.icc;
+            const iccLen = icc.length;
             // ICC profile structure: 128-byte header, then tag table
             // Tag count at offset 128 (4 bytes, big-endian)
-            const tagCount = metadata.icc.readUInt32BE(128);
-            for (let i = 0; i < tagCount && i < 50; i++) {
+            const tagCount = Math.min(icc.readUInt32BE(128), 100);
+            for (let i = 0; i < tagCount; i++) {
                 const tagOffset = 132 + i * 12;
-                const tagSig = metadata.icc.subarray(tagOffset, tagOffset + 4).toString('ascii');
+                if (tagOffset + 12 > iccLen) break;
+                const tagSig = icc.subarray(tagOffset, tagOffset + 4).toString('ascii');
                 if (tagSig === 'desc') {
-                    const dataOffset = metadata.icc.readUInt32BE(tagOffset + 4);
-                    const dataSize = metadata.icc.readUInt32BE(tagOffset + 8);
+                    const dataOffset = icc.readUInt32BE(tagOffset + 4);
+                    if (dataOffset + 12 > iccLen) break;
                     // 'desc' type: 4 bytes type sig, 4 bytes reserved, 4 bytes count, then ASCII string
-                    const descType = metadata.icc.subarray(dataOffset, dataOffset + 4).toString('ascii');
+                    const descType = icc.subarray(dataOffset, dataOffset + 4).toString('ascii');
                     if (descType === 'desc') {
-                        const strLen = metadata.icc.readUInt32BE(dataOffset + 8);
-                        const str = metadata.icc.subarray(dataOffset + 12, dataOffset + 12 + strLen - 1).toString('ascii');
+                        const strLen = Math.min(icc.readUInt32BE(dataOffset + 8), 1024);
+                        const strStart = dataOffset + 12;
+                        const strEnd = strStart + strLen - 1;
+                        if (strEnd > iccLen || strStart >= strEnd) break;
+                        const str = icc.subarray(strStart, strEnd).toString('ascii');
                         iccProfileName = str.trim();
                     } else if (descType === 'mluc') {
                         // Multi-localized Unicode: 4 bytes type, 4 bytes reserved, 4 bytes number of records
-                        const numRecords = metadata.icc.readUInt32BE(dataOffset + 8);
+                        const numRecords = icc.readUInt32BE(dataOffset + 8);
                         if (numRecords > 0) {
-                            const recOffset = metadata.icc.readUInt32BE(dataOffset + 16 + 4);
-                            const recLen = metadata.icc.readUInt32BE(dataOffset + 16);
-                            const str = metadata.icc.subarray(dataOffset + recOffset, dataOffset + recOffset + recLen).toString('utf16le');
+                            if (dataOffset + 24 > iccLen) break;
+                            const recOffset = icc.readUInt32BE(dataOffset + 16 + 4);
+                            const recLen = Math.min(icc.readUInt32BE(dataOffset + 16), 1024);
+                            const strStart = dataOffset + recOffset;
+                            const strEnd = strStart + recLen;
+                            if (strEnd > iccLen || strStart >= strEnd) break;
+                            const str = icc.subarray(strStart, strEnd).toString('utf16le');
                             iccProfileName = str.replace(/\0/g, '').trim();
                         }
                     }
