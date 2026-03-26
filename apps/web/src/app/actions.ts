@@ -5,7 +5,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
 
 import { cookies, headers } from 'next/headers';
-import { saveOriginalAndGetMetadata, processImageFormats, extractExifForDb, UPLOAD_DIR_ORIGINAL } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, processImageFormats, extractExifForDb, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { isRedirectError } from 'next/dist/client/components/redirect-error';
@@ -65,6 +65,14 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
     state.queue.add(async () => {
         console.log(`[Queue] Processing job ${job.id} started`);
         try {
+            // US-009: Claim check — verify the row still exists and is unprocessed
+            const [check] = await db.select({ id: images.id }).from(images)
+                .where(and(eq(images.id, job.id), eq(images.processed, false)));
+            if (!check) {
+                console.log(`[Queue] Image ${job.id} no longer pending, skipping`);
+                return;
+            }
+
             const originalPath = path.join(UPLOAD_DIR_ORIGINAL, job.filenameOriginal);
 
             // Check if file exists before processing to avoid errors
@@ -84,9 +92,30 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 job.width,
             );
 
-            await db.update(images)
+            // US-001: Conditional update — only mark processed if still unprocessed (not deleted)
+            const [updateResult] = await db.update(images)
                 .set({ processed: true })
-                .where(eq(images.id, job.id));
+                .where(and(eq(images.id, job.id), eq(images.processed, false)));
+
+            if (updateResult.affectedRows === 0) {
+                // Image was deleted during processing — clean up generated format files
+                console.log(`[Queue] Image ${job.id} was deleted during processing, cleaning up`);
+                const imageFileId = path.basename(job.filenameWebp, path.extname(job.filenameWebp));
+                const safePrefix = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(imageFileId)
+                    ? imageFileId : null;
+                if (safePrefix) {
+                    for (const dir of [UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG]) {
+                        try {
+                            const dirFiles = await fs.readdir(dir);
+                            const toDelete = dirFiles.filter(f => f.startsWith(safePrefix));
+                            await Promise.all(toDelete.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
+                        } catch {
+                            // dir might not exist
+                        }
+                    }
+                }
+                return;
+            }
 
             console.log(`[Queue] Job ${job.id} complete`);
             revalidatePath('/');
@@ -117,6 +146,10 @@ const bootstrapImageProcessingQueue = async () => {
 
         }
         state.bootstrapped = true;
+
+        // US-004: Purge expired sessions on startup and periodically
+        purgeExpiredSessions();
+        setInterval(purgeExpiredSessions, 60 * 60 * 1000); // every hour
     } catch (err: any) {
         // Suppress connection refused errors during build/startup to avoid noise
         if (err?.code !== 'ECONNREFUSED' && err?.cause?.code !== 'ECONNREFUSED') {
@@ -126,6 +159,14 @@ const bootstrapImageProcessingQueue = async () => {
         }
     }
 };
+
+async function purgeExpiredSessions() {
+    try {
+        await db.delete(sessions).where(sql`${sessions.expiresAt} < NOW()`);
+    } catch (err) {
+        console.error('Failed to purge expired sessions', err);
+    }
+}
 
 void bootstrapImageProcessingQueue();
 
@@ -631,6 +672,14 @@ export async function uploadImages(formData: FormData) {
                             const slugs = tagEntries.map(t => t.slug);
                             // Single batch fetch for all tag records
                             const tagRecords = await db.select().from(tags).where(inArray(tags.slug, slugs));
+                            // US-002: Warn on tag slug collisions
+                            const intendedBySlug = new Map(tagEntries.map(t => [t.slug, t.name]));
+                            for (const rec of tagRecords) {
+                                const intended = intendedBySlug.get(rec.slug);
+                                if (intended && rec.name !== intended) {
+                                    console.warn(`Tag slug collision: "${intended}" collides with existing "${rec.name}" on slug "${rec.slug}"`);
+                                }
+                            }
                             if (tagRecords.length > 0) {
                                 // Single batch insert for all imageTags
                                 await db.insert(imageTags).ignore().values(
@@ -709,8 +758,15 @@ export async function deleteImage(id: number) {
         ? imageId
         : null;
 
-    // Delete db record first (so if it fails, files remain intact)
-    await db.delete(images).where(eq(images.id, id));
+    // US-001: Remove from processing queue so the queue detects deletion
+    const queueState = getProcessingQueueState();
+    queueState.enqueued.delete(id);
+
+    // US-008: Delete DB records in a transaction for consistency
+    await db.transaction(async (tx) => {
+        await tx.delete(imageTags).where(eq(imageTags.imageId, id));
+        await tx.delete(images).where(eq(images.id, id));
+    });
 
     // Delete files (best effort - log errors but don't fail)
     try {
@@ -862,12 +918,6 @@ export async function createTopic(formData: FormData) {
         return { error: 'Invalid slug format. Use only lowercase letters, numbers, hyphens, and underscores.' };
     }
 
-    // Checking for duplicate slug
-    const existingTopic = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
-    if (existingTopic.length > 0) {
-        return { error: 'Topic slug already exists' };
-    }
-
     // Validate label length
     if (label.length > 100) {
         return { error: 'Label is too long (max 100 characters)' };
@@ -883,6 +933,7 @@ export async function createTopic(formData: FormData) {
          }
     }
 
+    // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
     try {
         await db.insert(topics).values({
             label,
@@ -894,7 +945,10 @@ export async function createTopic(formData: FormData) {
         revalidatePath('/admin/categories');
         revalidatePath('/');
         return { success: true };
-    } catch {
+    } catch (e: any) {
+        if (e?.code === 'ER_DUP_ENTRY' || e?.cause?.code === 'ER_DUP_ENTRY') {
+            return { error: 'Topic slug already exists' };
+        }
         return { error: 'Failed to create topic' };
     }
 }
@@ -1009,20 +1063,21 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidAliasFormat') };
     }
 
-    // Check if alias already exists (as a topic or alias)
-    const existingTopic = await db.select().from(topics).where(eq(topics.slug, alias)).limit(1);
-    if (existingTopic.length > 0) return { error: t('aliasConflictsWithTopic') };
+    // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
+    try {
+        await db.insert(topicAliases).values({
+            alias,
+            topicSlug
+        });
 
-    const existingAlias = await db.select().from(topicAliases).where(eq(topicAliases.alias, alias)).limit(1);
-    if (existingAlias.length > 0) return { error: t('aliasAlreadyExists') };
-
-    await db.insert(topicAliases).values({
-        alias,
-        topicSlug
-    });
-
-    revalidatePath('/admin/categories');
-    return { success: true };
+        revalidatePath('/admin/categories');
+        return { success: true };
+    } catch (e: any) {
+        if (e?.code === 'ER_DUP_ENTRY' || e?.cause?.code === 'ER_DUP_ENTRY') {
+            return { error: t('aliasAlreadyExists') };
+        }
+        return { error: t('invalidAliasFormat') };
+    }
 }
 
 export async function deleteTopicAlias(topicSlug: string, alias: string) {
@@ -1300,8 +1355,13 @@ export async function addTagToImage(imageId: number, tagName: string) {
         await db.insert(tags).ignore().values({ name: cleanName, slug });
 
         // Get tag id (optimized select)
-        const [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+        const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
         if (!tagRecord) return { error: 'Failed to retrieve tag' };
+
+        // US-002: Warn on tag slug collision
+        if (tagRecord.name !== cleanName) {
+            console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
+        }
 
         // Link tag to image
         await db.insert(imageTags).ignore().values({
@@ -1368,8 +1428,13 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
     try {
         // Upsert tag
         await db.insert(tags).ignore().values({ name: cleanName, slug });
-        const [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+        const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
         if (!tagRecord) return { error: 'Failed to retrieve tag' };
+
+        // US-002: Warn on tag slug collision
+        if (tagRecord.name !== cleanName) {
+            console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
+        }
 
         // Batch insert
         const values = imageIds.map(imageId => ({
