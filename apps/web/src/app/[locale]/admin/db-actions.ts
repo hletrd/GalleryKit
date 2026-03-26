@@ -6,8 +6,20 @@ import { eq, sql } from "drizzle-orm";
 import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
 import { isAdmin } from "@/app/actions";
 import { revalidatePath } from "next/cache";
+
+// --- CSV helpers ---
+
+function escapeCsvField(value: string): string {
+    // Prefix formula injection characters with a single quote
+    if (value.match(/^[=+\-@\t\r]/)) {
+        value = "'" + value;
+    }
+    // Wrap in double quotes and escape embedded double quotes by doubling them
+    return '"' + value.replace(/"/g, '""') + '"';
+}
 
 // --- CSV Export ---
 
@@ -38,14 +50,14 @@ export async function exportImagesCsv() {
     // Convert to CSV
     const headers = ["ID", "Filename", "Title", "Width", "Height", "Capture Date", "Topic", "Tags"];
     const rows = results.map(row => [
-        row.id,
-        row.filename,
-        row.title || "",
-        row.width,
-        row.height,
-        row.captureDate ? new Date(row.captureDate).toISOString() : "",
-        row.topic,
-        `"${(row.tags || "").replace(/"/g, '""')}"` // Quote and escape tags
+        escapeCsvField(String(row.id)),
+        escapeCsvField(row.filename || ""),
+        escapeCsvField(row.title || ""),
+        escapeCsvField(String(row.width)),
+        escapeCsvField(String(row.height)),
+        escapeCsvField(row.captureDate ? new Date(row.captureDate).toISOString() : ""),
+        escapeCsvField(row.topic || ""),
+        escapeCsvField(row.tags || ""),
     ]);
 
     const csvContent = [
@@ -71,21 +83,24 @@ export async function dumpDatabase() {
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `backup-${DB_NAME}-${timestamp}.sql`;
-    const outputPath = path.join(process.cwd(), 'public', 'uploads', filename); // Save to temp/uploads for download
 
-    // Ensure uploads dir exists (should exist in prod)
-    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    // Save to a non-public backups directory (mounted as volume in Docker)
+    const backupsDir = path.join(process.cwd(), 'data', 'backups');
+    const outputPath = path.join(backupsDir, filename);
 
-    return new Promise<{ success: boolean, url?: string, error?: string }>((resolve, reject) => {
+    await fs.mkdir(backupsDir, { recursive: true });
+
+    return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
         const dump = spawn('mysqldump', [
             `-h${DB_HOST}`,
             `-P${DB_PORT || '3306'}`,
             `-u${DB_USER}`,
-            `-p${DB_PASSWORD}`,
             '--single-transaction', // Good for InnoDB
             '--quick',
             DB_NAME
-        ]);
+        ], {
+            env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
+        });
 
         const writeStream = require('fs').createWriteStream(outputPath);
 
@@ -97,20 +112,22 @@ export async function dumpDatabase() {
 
         dump.on('close', (code: number) => {
             if (code === 0) {
-                // Return relative URL for download
-                resolve({ success: true, url: `/uploads/${filename}` });
+                // Return filename; url points to authenticated admin download route
+                resolve({ success: true, filename, url: `/api/admin/db/download?file=${encodeURIComponent(filename)}` });
             } else {
                 resolve({ success: false, error: `mysqldump exited with code ${code}` });
             }
         });
 
         dump.on('error', (err: any) => {
-             resolve({ success: false, error: err.message });
+            resolve({ success: false, error: err.message });
         });
     });
 }
 
 // --- DB Restore ---
+
+const MAX_RESTORE_SIZE = 500 * 1024 * 1024; // 500 MB
 
 export async function restoreDatabase(formData: FormData) {
     if (!(await isAdmin())) {
@@ -122,14 +139,28 @@ export async function restoreDatabase(formData: FormData) {
         return { success: false, error: "No file provided" };
     }
 
-    // Save uploaded file temporarily
+    // File size validation
+    if (file.size > MAX_RESTORE_SIZE) {
+        return { success: false, error: "File too large (max 500MB)" };
+    }
+
+    // Save uploaded file temporarily to os.tmpdir()
     const buffer = Buffer.from(await file.arrayBuffer());
-    const tempPath = path.join(process.cwd(), 'backup-restore-temp.sql');
+
+    // Validate file content: must start with mysqldump headers (-- comment or SQL keywords)
+    const headerBytes = buffer.slice(0, 256).toString('utf8');
+    const validHeader = /^(--)|(CREATE\s)|(INSERT\s)|(DROP\s)|(SET\s)|(\/\*!)/.test(headerBytes.trimStart());
+    if (!validHeader) {
+        return { success: false, error: "Invalid SQL dump file" };
+    }
+
+    const tempPath = path.join(os.tmpdir(), `restore-${Date.now()}.sql`);
     await fs.writeFile(tempPath, buffer);
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
     if (!DB_HOST || !DB_USER || !DB_NAME) {
+        await fs.unlink(tempPath).catch(() => {});
         return { success: false, error: "Missing database configuration" };
     }
 
@@ -138,15 +169,17 @@ export async function restoreDatabase(formData: FormData) {
             `-h${DB_HOST}`,
             `-P${DB_PORT || '3306'}`,
             `-u${DB_USER}`,
-            `-p${DB_PASSWORD}`,
+            '--one-database',
             DB_NAME
-        ]);
+        ], {
+            env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
+        });
 
         const readStream = require('fs').createReadStream(tempPath);
         readStream.pipe(restore.stdin);
 
         restore.stderr.on('data', (data: any) => {
-             console.error(`mysql restore stderr: ${data}`);
+            console.error(`mysql restore stderr: ${data}`);
         });
 
         restore.on('close', async (code: number) => {
@@ -161,7 +194,7 @@ export async function restoreDatabase(formData: FormData) {
             }
         });
 
-         restore.on('error', async (err: any) => {
+        restore.on('error', async (err: any) => {
             await fs.unlink(tempPath).catch(() => {});
             resolve({ success: false, error: err.message });
         });

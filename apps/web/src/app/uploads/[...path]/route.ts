@@ -1,84 +1,85 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import fs from 'fs/promises';
-import { createReadStream, existsSync } from 'fs';
-import { Readable } from 'stream';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { UPLOAD_DIR_ORIGINAL } from '@/lib/process-image';
 
-// Reuse logic or define simple constant based on Docker structure
-// In Docker/Standalone: process.cwd() is usually /app
-// We map volumes to /app/apps/web/public/uploads
-const UPLOAD_ROOT = path.join(process.cwd(), 'apps/web/public/uploads');
-
-// Fallback for local dev where CWD might be apps/web
-const LOCAL_UPLOAD_ROOT = path.join(process.cwd(), 'public/uploads');
-
-function getContentType(filename: string): string {
-    const ext = path.extname(filename).toLowerCase();
-    switch (ext) {
-        case '.jpg':
-        case '.jpeg':
-            return 'image/jpeg';
-        case '.png':
-            return 'image/png';
-        case '.webp':
-            return 'image/webp';
-        case '.avif':
-            return 'image/avif';
-        case '.gif':
-            return 'image/gif';
-        case '.svg':
-            return 'image/svg+xml';
-        default:
-            return 'application/octet-stream';
-    }
-}
+// Derive UPLOAD_ROOT from the exported original uploads directory
+const UPLOAD_ROOT = path.dirname(UPLOAD_DIR_ORIGINAL);
+const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
+const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
+const MAX_SEGMENT_LENGTH = 255;
 
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ path: string[] }> }
 ) {
     const { path: pathSegments } = await params;
-    const filePathRelative = pathSegments.join('/');
 
-    // Prevent path traversal
-    if (filePathRelative.includes('..')) {
-        return new NextResponse('Invalid path', { status: 400 });
+    if (!Array.isArray(pathSegments) || pathSegments.length < 2) {
+        return new NextResponse('Not found', { status: 404 });
     }
 
-    // Try finding the file in typical locations
-    let fullPath = path.join(UPLOAD_ROOT, filePathRelative);
-
-    if (!existsSync(fullPath)) {
-        // Try local dev path
-        fullPath = path.join(LOCAL_UPLOAD_ROOT, filePathRelative);
+    const [topLevelDir] = pathSegments;
+    if (!ALLOWED_UPLOAD_DIRS.has(topLevelDir)) {
+        return new NextResponse('Not found', { status: 404 });
     }
 
-    if (!existsSync(fullPath)) {
-        return new NextResponse('File not found', { status: 404 });
+    for (const segment of pathSegments) {
+        if (!segment || segment.length > MAX_SEGMENT_LENGTH || segment === '.' || segment === '..') {
+            return new NextResponse('Invalid path', { status: 400 });
+        }
+        if (!SAFE_SEGMENT.test(segment)) {
+            return new NextResponse('Invalid path', { status: 400 });
+        }
+    }
+
+    // Construct absolute path
+    const relativePath = path.join(...pathSegments);
+    const absolutePath = path.join(UPLOAD_ROOT, relativePath);
+
+    // Containment check: ensure the resolved path is inside UPLOAD_ROOT
+    const resolvedRoot = path.resolve(UPLOAD_ROOT) + path.sep;
+    const resolvedPath = path.resolve(absolutePath);
+
+    if (!resolvedPath.startsWith(resolvedRoot)) {
+        return new NextResponse('Access denied', { status: 403 });
     }
 
     try {
-        const stats = await fs.stat(fullPath);
+        const stats = await stat(absolutePath);
+
         if (!stats.isFile()) {
             return new NextResponse('Not a file', { status: 404 });
         }
 
+        // Determine content type (no SVG)
+        const ext = path.extname(absolutePath).toLowerCase();
+        let contentType = 'application/octet-stream';
+        if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+        else if (ext === '.png') contentType = 'image/png';
+        else if (ext === '.webp') contentType = 'image/webp';
+        else if (ext === '.avif') contentType = 'image/avif';
+        else if (ext === '.gif') contentType = 'image/gif';
+
         // Create stream
-        const stream = createReadStream(fullPath);
+        const fileStream = createReadStream(absolutePath);
 
-        // Convert node stream to web stream for Next.js response
-        // @ts-ignore
-        const webStream = Readable.toWeb(stream);
-
-        return new NextResponse(webStream as any, {
+        // @ts-expect-error - Readable is compatible with BodyInit in recent Next.js versions for streaming
+        return new NextResponse(fileStream, {
             headers: {
-                'Content-Type': getContentType(fullPath),
+                'Content-Type': contentType,
                 'Content-Length': stats.size.toString(),
                 'Cache-Control': 'public, max-age=31536000, immutable',
+                'X-Content-Type-Options': 'nosniff',
             },
         });
-    } catch (e) {
-        console.error('Error serving file:', e);
+
+    } catch (err: any) {
+        if (err.code === 'ENOENT') {
+            return new NextResponse('File not found', { status: 404 });
+        }
+        console.error('Error serving static file:', err);
         return new NextResponse('Internal Server Error', { status: 500 });
     }
 }
