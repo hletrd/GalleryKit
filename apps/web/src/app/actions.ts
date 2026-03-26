@@ -35,6 +35,7 @@ type ProcessingQueueState = {
     queue: PQueue;
     enqueued: Set<number>;
     bootstrapped: boolean;
+    gcInterval?: ReturnType<typeof setInterval>;
 };
 
 const getProcessingQueueState = (): ProcessingQueueState => {
@@ -149,7 +150,8 @@ const bootstrapImageProcessingQueue = async () => {
 
         // US-004: Purge expired sessions on startup and periodically
         purgeExpiredSessions();
-        setInterval(purgeExpiredSessions, 60 * 60 * 1000); // every hour
+        if (state.gcInterval) clearInterval(state.gcInterval);
+        state.gcInterval = setInterval(purgeExpiredSessions, 60 * 60 * 1000); // every hour
     } catch (err: any) {
         // Suppress connection refused errors during build/startup to avoid noise
         if (err?.code !== 'ECONNREFUSED' && err?.cause?.code !== 'ECONNREFUSED') {
@@ -1541,9 +1543,11 @@ export async function deleteAdminUser(id: number) {
         return { error: 'Cannot delete your own account' };
     }
 
-    // Check if it's the last admin? (Optional but good safety)
-    // const admins = await db.select({ count: sql<number>`count(*)` }).from(adminUsers);
-    // if (admins[0].count <= 1) return { error: 'Cannot delete the last admin' };
+    // Prevent deleting the last admin
+    const [adminCount] = await db.select({ count: sql<number>`count(*)` }).from(adminUsers);
+    if (Number(adminCount.count) <= 1) {
+        return { error: 'Cannot delete the last admin user' };
+    }
 
     try {
         await db.delete(adminUsers).where(eq(adminUsers.id, id));

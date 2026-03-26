@@ -223,14 +223,25 @@ export async function getImage(id: number) {
             .innerJoin(tags, eq(imageTags.tagId, tags.id))
             .where(eq(imageTags.imageId, id)),
 
-        // Prev: Newer image (created_at > current) with tiebreaker on id -> Order by created_at ASC, id ASC, limit 1
+        // Prev: Newer image by (capture_date, created_at, id) — matches gallery grid sort order
         db.select({ id: images.id })
             .from(images)
             .where(
                 and(
                     or(
-                        gt(images.created_at, image.created_at),
+                        image.capture_date
+                            ? gt(images.capture_date, image.capture_date)
+                            : sql`${images.capture_date} IS NOT NULL`,
                         and(
+                            image.capture_date
+                                ? eq(images.capture_date, image.capture_date)
+                                : sql`${images.capture_date} IS NULL`,
+                            gt(images.created_at, image.created_at)
+                        ),
+                        and(
+                            image.capture_date
+                                ? eq(images.capture_date, image.capture_date)
+                                : sql`${images.capture_date} IS NULL`,
                             eq(images.created_at, image.created_at),
                             gt(images.id, image.id)
                         )
@@ -238,17 +249,28 @@ export async function getImage(id: number) {
                     eq(images.processed, true)
                 )
             )
-            .orderBy(asc(images.created_at), asc(images.id))
+            .orderBy(asc(images.capture_date), asc(images.created_at), asc(images.id))
             .limit(1),
 
-        // Next: Older image (created_at < current) with tiebreaker on id -> Order by created_at DESC, id DESC, limit 1
+        // Next: Older image by (capture_date, created_at, id) — matches gallery grid sort order
         db.select({ id: images.id })
             .from(images)
             .where(
                 and(
                     or(
-                        lt(images.created_at, image.created_at),
+                        image.capture_date
+                            ? lt(images.capture_date, image.capture_date)
+                            : sql`FALSE`,
                         and(
+                            image.capture_date
+                                ? eq(images.capture_date, image.capture_date)
+                                : sql`${images.capture_date} IS NULL`,
+                            lt(images.created_at, image.created_at)
+                        ),
+                        and(
+                            image.capture_date
+                                ? eq(images.capture_date, image.capture_date)
+                                : sql`${images.capture_date} IS NULL`,
                             eq(images.created_at, image.created_at),
                             lt(images.id, image.id)
                         )
@@ -256,7 +278,7 @@ export async function getImage(id: number) {
                     eq(images.processed, true)
                 )
             )
-            .orderBy(desc(images.created_at), desc(images.id))
+            .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
             .limit(1),
     ]);
 

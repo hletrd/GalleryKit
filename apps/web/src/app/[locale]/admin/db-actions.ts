@@ -5,6 +5,7 @@ import { images, imageTags, tags } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { spawn } from "child_process";
 import fs from "fs/promises";
+import { createWriteStream, createReadStream } from "fs";
 import path from "path";
 import os from "os";
 import { isAdmin } from "@/app/actions";
@@ -102,7 +103,7 @@ export async function dumpDatabase() {
             env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
         });
 
-        const writeStream = require('fs').createWriteStream(outputPath);
+        const writeStream = createWriteStream(outputPath);
 
         dump.stdout.pipe(writeStream);
 
@@ -175,7 +176,7 @@ export async function restoreDatabase(formData: FormData) {
             env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
         });
 
-        const readStream = require('fs').createReadStream(tempPath);
+        const readStream = createReadStream(tempPath);
         readStream.pipe(restore.stdin);
 
         restore.stderr.on('data', (data: any) => {

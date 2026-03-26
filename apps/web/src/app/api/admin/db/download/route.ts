@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdmin } from '@/app/actions';
 import path from 'path';
-import { createReadStream, statSync } from 'fs';
+import { createReadStream } from 'fs';
+import { lstat } from 'fs/promises';
 import { Readable } from 'stream';
 
 const SAFE_FILENAME = /^backup-[a-zA-Z0-9_-]+-\d{4}-\d{2}-\d{2}T[\d-]+Z\.sql$/;
@@ -26,7 +27,11 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-        const stat = statSync(filePath);
+        const stats = await lstat(filePath);
+        if (stats.isSymbolicLink() || !stats.isFile()) {
+            return new NextResponse('Access denied', { status: 403 });
+        }
+
         const stream = createReadStream(filePath);
         const webStream = Readable.toWeb(stream as any) as ReadableStream;
 
@@ -34,7 +39,7 @@ export async function GET(request: NextRequest) {
             headers: {
                 'Content-Type': 'application/sql',
                 'Content-Disposition': `attachment; filename="${file}"`,
-                'Content-Length': stat.size.toString(),
+                'Content-Length': stats.size.toString(),
                 'X-Content-Type-Options': 'nosniff',
             },
         });
