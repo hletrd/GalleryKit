@@ -54,12 +54,17 @@ const ALLOWED_EXTENSIONS = new Set([
 // Maximum file size (200MB for RAW files)
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
-// Ensure directories exist
+// Ensure directories exist — only runs once
+let dirsEnsured = false;
 const ensureDirs = async () => {
-    await fs.mkdir(UPLOAD_DIR_ORIGINAL, { recursive: true });
-    await fs.mkdir(UPLOAD_DIR_WEBP, { recursive: true });
-    await fs.mkdir(UPLOAD_DIR_AVIF, { recursive: true });
-    await fs.mkdir(UPLOAD_DIR_JPEG, { recursive: true });
+    if (dirsEnsured) return;
+    await Promise.all([
+        fs.mkdir(UPLOAD_DIR_ORIGINAL, { recursive: true }),
+        fs.mkdir(UPLOAD_DIR_WEBP, { recursive: true }),
+        fs.mkdir(UPLOAD_DIR_AVIF, { recursive: true }),
+        fs.mkdir(UPLOAD_DIR_JPEG, { recursive: true }),
+    ]);
+    dirsEnsured = true;
 };
 
 // Sanitize and validate file extension
@@ -150,9 +155,13 @@ export async function saveOriginalAndGetMetadata(
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Validate the file is a valid image by attempting to get metadata with Sharp
+    // Use a single Sharp instance for validation, metadata, and blur generation
+    const image = sharp(buffer, { limitInputPixels: maxInputPixels });
+
+    // Validate the file is a valid image and get metadata in one shot
+    let metadata: sharp.Metadata;
     try {
-        await sharp(buffer, { limitInputPixels: maxInputPixels }).metadata();
+        metadata = await image.metadata();
     } catch (e) {
         console.error('Sharp metadata validation failed:', e);
         throw new Error('Invalid image file. Could not process the file as an image.');
@@ -172,9 +181,6 @@ export async function saveOriginalAndGetMetadata(
     // Save original
     await fs.writeFile(path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal), buffer);
 
-    const image = sharp(buffer, { limitInputPixels: maxInputPixels });
-    const metadata = await image.metadata();
-
     // Parse EXIF
     let exifData: any = {};
     if (metadata.exif) {
@@ -190,10 +196,10 @@ export async function saveOriginalAndGetMetadata(
     // Ensure height is always a positive number so Next/Image does not throw
     const height = (metadata.height && metadata.height > 0) ? metadata.height : width;
 
-    // Generate tiny blur placeholder
+    // Generate tiny blur placeholder using a clone of the single Sharp instance
     let blurDataUrl: string | null = null;
     try {
-        const blurBuffer = await sharp(buffer, { limitInputPixels: maxInputPixels })
+        const blurBuffer = await image.clone()
             .resize(16, undefined, { fit: 'inside' })
             .blur(2)
             .jpeg({ quality: 40 })
@@ -314,30 +320,17 @@ export async function processImageFormats(
         }
     };
 
-    const errors: unknown[] = [];
-    for (const [format, dir, filename] of [
-        ['webp', UPLOAD_DIR_WEBP, filenameWebp],
-        ['avif', UPLOAD_DIR_AVIF, filenameAvif],
-        ['jpeg', UPLOAD_DIR_JPEG, filenameJpeg],
-    ] as const) {
-        try {
-            await generateForFormat(format, dir, filename);
-        } catch (err) {
-            errors.push(err);
-        }
-    }
-
-    if (errors.length > 0) {
-        throw errors[0];
-    }
+    // Generate all three formats in parallel
+    await Promise.all([
+        generateForFormat('webp', UPLOAD_DIR_WEBP, filenameWebp),
+        generateForFormat('avif', UPLOAD_DIR_AVIF, filenameAvif),
+        generateForFormat('jpeg', UPLOAD_DIR_JPEG, filenameJpeg),
+    ]);
 
     // Verify files exist and are not empty
     try {
         const stats = await fs.stat(path.join(UPLOAD_DIR_WEBP, filenameWebp));
         if (stats.size === 0) throw new Error('Generated WebP file is empty');
-
-        // Brief delay to ensure FS flush
-        await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (e) {
         throw new Error(`File verification failed: ${e}`);
     }
