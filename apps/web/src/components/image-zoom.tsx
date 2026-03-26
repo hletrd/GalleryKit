@@ -10,8 +10,8 @@ interface ImageZoomProps {
 
 export function ImageZoom({ children, className }: ImageZoomProps) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const innerRef = useRef<HTMLDivElement>(null);
     const [isZoomed, setIsZoomed] = useState(false);
-    const [position, setPosition] = useState({ x: 0, y: 0 });
     const lastTapRef = useRef(0);
     const isDraggingRef = useRef(false);
     const dragStartRef = useRef({ x: 0, y: 0 });
@@ -19,27 +19,34 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
 
     const zoomLevel = 2.5;
 
+    // Apply transform directly to the DOM node to avoid re-renders on every mousemove
+    const applyTransform = useCallback((zoomed: boolean, x: number, y: number) => {
+        if (!innerRef.current) return;
+        innerRef.current.style.transform = zoomed
+            ? `scale(${zoomLevel}) translate(${x / zoomLevel}%, ${y / zoomLevel}%)`
+            : 'scale(1) translate(0%, 0%)';
+    }, []);
+
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
         if (!isZoomed || !containerRef.current) return;
         const rect = containerRef.current.getBoundingClientRect();
-        // Map mouse position to translate range
         const x = ((e.clientX - rect.left) / rect.width - 0.5) * -100;
         const y = ((e.clientY - rect.top) / rect.height - 0.5) * -100;
-        setPosition({ x, y });
         positionRef.current = { x, y };
-    }, [isZoomed]);
+        applyTransform(true, x, y);
+    }, [isZoomed, applyTransform]);
 
     const handleClick = useCallback((e: React.MouseEvent) => {
-        // Prevent zoom toggle if user was dragging
         e.preventDefault();
         setIsZoomed(prev => {
-            if (prev) {
-                setPosition({ x: 0, y: 0 });
+            const next = !prev;
+            if (!next) {
                 positionRef.current = { x: 0, y: 0 };
+                applyTransform(false, 0, 0);
             }
-            return !prev;
+            return next;
         });
-    }, []);
+    }, [applyTransform]);
 
     // Double-tap for mobile
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -47,11 +54,12 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         if (now - lastTapRef.current < 300) {
             e.preventDefault();
             setIsZoomed(prev => {
-                if (prev) {
-                    setPosition({ x: 0, y: 0 });
+                const next = !prev;
+                if (!next) {
                     positionRef.current = { x: 0, y: 0 };
+                    applyTransform(false, 0, 0);
                 }
-                return !prev;
+                return next;
             });
         }
         lastTapRef.current = now;
@@ -59,7 +67,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             e.stopPropagation();
         }
         isDraggingRef.current = false;
-    }, [isZoomed]);
+    }, [isZoomed, applyTransform]);
 
     // Touch drag when zoomed
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -76,27 +84,32 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         if (!isZoomed || !isDraggingRef.current || e.touches.length !== 1) return;
         e.preventDefault();
         e.stopPropagation();
-        const x = e.touches[0].clientX - dragStartRef.current.x;
-        const y = e.touches[0].clientY - dragStartRef.current.y;
-        // Clamp position
-        const clampedX = Math.max(-100, Math.min(100, x));
-        const clampedY = Math.max(-100, Math.min(100, y));
-        setPosition({ x: clampedX, y: clampedY });
-        positionRef.current = { x: clampedX, y: clampedY };
-    }, [isZoomed]);
+        const x = Math.max(-100, Math.min(100, e.touches[0].clientX - dragStartRef.current.x));
+        const y = Math.max(-100, Math.min(100, e.touches[0].clientY - dragStartRef.current.y));
+        positionRef.current = { x, y };
+        applyTransform(true, x, y);
+    }, [isZoomed, applyTransform]);
 
     // Reset zoom on escape
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape' && isZoomed) {
                 setIsZoomed(false);
-                setPosition({ x: 0, y: 0 });
                 positionRef.current = { x: 0, y: 0 };
+                applyTransform(false, 0, 0);
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isZoomed]);
+    }, [isZoomed, applyTransform]);
+
+    // Sync transform when zoom state changes via state setter
+    useEffect(() => {
+        if (!isZoomed) {
+            positionRef.current = { x: 0, y: 0 };
+            applyTransform(false, 0, 0);
+        }
+    }, [isZoomed, applyTransform]);
 
     return (
         <div
@@ -116,11 +129,10 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             aria-label={isZoomed ? 'Click to zoom out' : 'Click to zoom in'}
         >
             <div
+                ref={innerRef}
                 className="w-full h-full transition-transform duration-300 ease-out"
                 style={{
-                    transform: isZoomed
-                        ? `scale(${zoomLevel}) translate(${position.x / zoomLevel}%, ${position.y / zoomLevel}%)`
-                        : 'scale(1) translate(0%, 0%)',
+                    transform: 'scale(1) translate(0%, 0%)',
                 }}
             >
                 {children}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { TagFilter } from '@/components/tag-filter';
 import { useTranslation } from "@/components/i18n-provider";
@@ -81,6 +81,7 @@ function useColumnCount() {
     const [count, setCount] = useState(4);
 
     useEffect(() => {
+        let rafId: number | null = null;
         const update = () => {
             const w = window.innerWidth;
             if (w < 640) setCount(1);
@@ -88,9 +89,19 @@ function useColumnCount() {
             else if (w < 1280) setCount(3);
             else setCount(4);
         };
+        const handleResize = () => {
+            if (rafId !== null) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                update();
+                rafId = null;
+            });
+        };
         update();
-        window.addEventListener('resize', update);
-        return () => window.removeEventListener('resize', update);
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (rafId !== null) cancelAnimationFrame(rafId);
+        };
     }, []);
 
     return count;
@@ -111,8 +122,12 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
     const handleLoadMore = useCallback((newImages: any[]) => {
         setAllImages(prev => [...prev, ...newImages]);
     }, []);
+
+    // Reset allImages when the images prop changes (e.g. topic/filter change)
+    useEffect(() => { setAllImages(images); }, [images]);
+
     const columnCount = useColumnCount();
-    const orderedImages = reorderForColumns(allImages, columnCount);
+    const orderedImages = useMemo(() => reorderForColumns(allImages, columnCount), [allImages, columnCount]);
     const displayTags = (currentTags || []).map((tag) => {
         const match = tags.find((t: any) => t.slug === tag.trim().toLowerCase());
         return match?.name ?? tag;

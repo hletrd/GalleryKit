@@ -373,7 +373,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                     {hasExifData(image.exposure_compensation) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.exposureComp')}</p>
-                                            <p className="font-medium">{image.exposure_compensation} EV</p>
+                                            <p className="font-medium">{image.exposure_compensation}</p>
                                         </div>
                                     )}
                                     {hasExifData(image.exposure_program) && (

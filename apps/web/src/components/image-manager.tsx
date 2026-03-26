@@ -398,7 +398,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                         ))}
                         {images.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={7} className="h-24 text-center">
+                                <TableCell colSpan={8} className="h-24 text-center">
                                     {t('imageManager.noImages')}
                                 </TableCell>
                             </TableRow>

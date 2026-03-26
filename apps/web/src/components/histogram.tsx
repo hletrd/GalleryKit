@@ -29,8 +29,10 @@ const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
 
 function computeHistogram(imageEl: HTMLImageElement): HistogramData {
     const canvas = document.createElement('canvas');
-    canvas.width = imageEl.naturalWidth;
-    canvas.height = imageEl.naturalHeight;
+    const maxDim = 256;
+    const scale = Math.min(maxDim / imageEl.naturalWidth, maxDim / imageEl.naturalHeight, 1);
+    canvas.width = Math.round(imageEl.naturalWidth * scale);
+    canvas.height = Math.round(imageEl.naturalHeight * scale);
     const ctx = canvas.getContext('2d');
     if (!ctx) {
         return {

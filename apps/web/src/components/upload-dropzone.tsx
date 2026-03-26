@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useRouter } from 'next/navigation';
 import { uploadImages } from '@/app/actions';
@@ -38,6 +38,24 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
 
     // Helper to generate a unique ID for a file instance
     const getFileId = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
+
+    // Memoize object URLs keyed by file identity; clean up when files change
+    const previewUrls = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const file of files) {
+            map.set(getFileId(file), URL.createObjectURL(file));
+        }
+        return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files]);
+
+    useEffect(() => {
+        return () => {
+            for (const url of previewUrls.values()) {
+                URL.revokeObjectURL(url);
+            }
+        };
+    }, [previewUrls]);
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         setFiles(prev => [...prev, ...acceptedFiles]);
@@ -225,7 +243,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                             {files.map((file, i) => {
                                 const fileId = getFileId(file);
                                 const localTags = perFileTags[fileId] || [];
-                                const previewUrl = URL.createObjectURL(file);
+                                const previewUrl = previewUrls.get(fileId) || '';
 
                                 return (
                                 <Card key={i} className="relative group border bg-muted/30">
@@ -244,7 +262,6 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                                             src={previewUrl}
                                             alt={file.name}
                                             className="h-full w-full object-contain"
-                                            onLoad={() => URL.revokeObjectURL(previewUrl)}
                                         />
                                     </div>
 
