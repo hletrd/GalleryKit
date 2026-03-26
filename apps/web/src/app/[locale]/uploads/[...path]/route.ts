@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { createReadStream } from 'fs';
-import { stat } from 'fs/promises';
+import { lstat } from 'fs/promises';
 import { UPLOAD_DIR_ORIGINAL } from '@/lib/process-image';
 
 // We need to resolve the uploads root correctly.
@@ -54,10 +54,10 @@ export async function GET(
   }
 
   try {
-    const stats = await stat(absolutePath);
+    const stats = await lstat(absolutePath);
 
-    if (!stats.isFile()) {
-       return new NextResponse('Not a file', { status: 404 });
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+       return new NextResponse('Access denied', { status: 403 });
     }
 
     // Determine content type
