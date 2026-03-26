@@ -8,8 +8,9 @@ import { cookies, headers } from 'next/headers';
 import { saveOriginalAndGetMetadata, processImageFormats, extractExifForDb, UPLOAD_DIR_ORIGINAL } from '@/lib/process-image';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { isRedirectError } from 'next/dist/client/components/redirect-error';
 import { db, images, topics, topicAliases, adminSettings, sharedGroups, sharedGroupImages, tags, imageTags, adminUsers, sessions } from '@/db';
-import { eq, sql, and, desc, or, isNull } from 'drizzle-orm';
+import { eq, sql, and, desc, or, isNull, inArray } from 'drizzle-orm';
 import path from 'path';
 import fs from 'fs/promises';
 import { generateBase56 } from '@/lib/base56';
@@ -17,6 +18,7 @@ import { processTopicImage } from '@/lib/process-topic-image';
 import PQueue from 'p-queue';
 import { getTranslations } from 'next-intl/server';
 import { getImages } from '@/lib/data';
+import { cache } from 'react';
 
 const processingQueueKey = Symbol.for('gallery.imageProcessingQueue');
 
@@ -279,15 +281,15 @@ async function generateSessionToken(secretOverride?: string): Promise<string> {
     return `${data}:${signature}`;
 }
 
-// Verify session token
-async function verifySessionToken(token: string): Promise<boolean> {
+// Verify session token and return the session record on success, null on failure
+async function verifySessionToken(token: string): Promise<{ id: string; userId: number; expiresAt: Date } | null> {
     if (!token) {
-        return false;
+        return null;
     }
 
     const parts = token.split(':');
     if (parts.length !== 3) {
-        return false;
+        return null;
     }
 
     const [timestamp, random, signature] = parts;
@@ -301,18 +303,18 @@ async function verifySessionToken(token: string): Promise<boolean> {
     const expectedSignatureBuffer = Buffer.from(expectedSignature);
 
     if (signatureBuffer.length !== expectedSignatureBuffer.length) {
-        return false;
+        return null;
     }
 
     if (!timingSafeEqual(signatureBuffer, expectedSignatureBuffer)) {
-        return false;
+        return null;
     }
 
     // Check token age (24 hours max)
     const tokenAge = Date.now() - parseInt(timestamp, 10);
     const maxAge = 24 * 60 * 60 * 1000; // 24 hours
     if (tokenAge > maxAge || tokenAge < 0) {
-        return false;
+        return null;
     }
 
     const session = await db.query.sessions.findFirst({
@@ -320,16 +322,16 @@ async function verifySessionToken(token: string): Promise<boolean> {
     });
 
     if (!session) {
-        return false;
+        return null;
     }
 
     if (session.expiresAt < new Date()) {
         // Cleanup expired session
         await db.delete(sessions).where(eq(sessions.id, token));
-        return false;
+        return null;
     }
 
-    return true;
+    return session;
 }
 
 export async function getSession() {
@@ -338,28 +340,17 @@ export async function getSession() {
 
     if (!token) return null;
 
-    if (!(await verifySessionToken(token))) return null;
-
-    // Fetch full session with user data
-    // Drizzle query using `findFirst` on sessions table
-    // Since verifySessionToken already checked existence, we can just fetch
-    const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, token),
-        // We can't use 'with' relations if not defined in schema, so we manually fetch user
-    });
-
-    if (!session) return null;
-
+    const session = await verifySessionToken(token);
     return session;
 }
 
-export async function getCurrentUser() {
+export const getCurrentUser = cache(async function getCurrentUser() {
     const session = await getSession();
     if (!session) return null;
 
     const [user] = await db.select().from(adminUsers).where(eq(adminUsers.id, session.userId));
     return user || null;
-}
+});
 
 export async function isAdmin() {
     return !!(await getCurrentUser());
@@ -441,9 +432,7 @@ export async function login(prevState: any, formData: FormData) {
             redirect('/admin/dashboard');
         }
     } catch (e) {
-        if (e instanceof Error && e.message === 'NEXT_REDIRECT') {
-            throw e;
-        }
+        if (isRedirectError(e)) throw e;
         console.error("Login verification failed", e);
     }
 
@@ -627,21 +616,29 @@ export async function uploadImages(formData: FormData) {
             if (insertedImage) {
                 processedIds.push(insertedImage.id);
 
-                // Phase 3: Process Tags
+                // Phase 3: Process Tags (batched)
                 if (tagNames.length > 0) {
                     try {
-                        const uniqueTagNames = Array.from(new Set(tagNames));
-                        for (const tagName of uniqueTagNames) {
-                            const cleanName = tagName.trim();
-                            if (!cleanName) continue;
-                            const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-                            await db.insert(tags as any).ignore().values({ name: cleanName, slug });
-                            const [tagRecord] = await db.select().from(tags).where(eq(tags.slug, slug));
-                            if (tagRecord) {
-                                await db.insert(imageTags).ignore().values({
-                                    imageId: insertedImage.id,
-                                    tagId: tagRecord.id
-                                });
+                        const uniqueTagNames = Array.from(new Set(tagNames))
+                            .map(t => t.trim()).filter(Boolean);
+                        if (uniqueTagNames.length > 0) {
+                            const tagEntries = uniqueTagNames.map(cleanName => ({
+                                name: cleanName,
+                                slug: cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+                            }));
+                            // Single batch insert for all tags
+                            await db.insert(tags as any).ignore().values(tagEntries);
+                            const slugs = tagEntries.map(t => t.slug);
+                            // Single batch fetch for all tag records
+                            const tagRecords = await db.select().from(tags).where(inArray(tags.slug, slugs));
+                            if (tagRecords.length > 0) {
+                                // Single batch insert for all imageTags
+                                await db.insert(imageTags).ignore().values(
+                                    tagRecords.map(tagRecord => ({
+                                        imageId: insertedImage.id,
+                                        tagId: tagRecord.id,
+                                    }))
+                                );
                             }
                         }
                     } catch (err) {
@@ -777,17 +774,72 @@ export async function deleteImages(ids: number[]) {
         }
     }
 
-    let successCount = 0;
-    let errorCount = 0;
+    // Fetch all images in one query
+    const imageRecords = await db.select().from(images).where(inArray(images.id, ids));
 
-    for (const id of ids) {
-        const result = await deleteImage(id);
-        if (result.success) {
-            successCount++;
-        } else {
-            errorCount++;
+    // Validate all filenames before deleting anything
+    for (const image of imageRecords) {
+        if (
+            !isValidFilename(image.filename_original)
+            || !isValidFilename(image.filename_webp)
+            || !isValidFilename(image.filename_avif)
+            || !isValidFilename(image.filename_jpeg)
+        ) {
+            return { error: 'Invalid filename in database record' };
         }
     }
+
+    const foundIds = imageRecords.map(img => img.id);
+    const notFoundCount = ids.filter(id => !foundIds.includes(id)).length;
+
+    // Delete all imageTags in one query
+    if (foundIds.length > 0) {
+        await db.delete(imageTags).where(inArray(imageTags.imageId, foundIds));
+    }
+
+    // Delete all DB records in one query
+    if (foundIds.length > 0) {
+        await db.delete(images).where(inArray(images.id, foundIds));
+    }
+
+    // Clean up files for all images concurrently
+    await Promise.all(imageRecords.map(async (image) => {
+        try {
+            const imageFileId = path.basename(image.filename_webp, path.extname(image.filename_webp));
+            const safePrefix = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(imageFileId)
+                ? imageFileId
+                : null;
+
+            const dirEntries = [
+                { dirRelPath: 'public/uploads/original', file: image.filename_original },
+                { dirRelPath: 'public/uploads/webp', file: image.filename_webp, prefix: safePrefix },
+                { dirRelPath: 'public/uploads/avif', file: image.filename_avif, prefix: safePrefix },
+                { dirRelPath: 'public/uploads/jpeg', file: image.filename_jpeg, prefix: safePrefix },
+            ];
+
+            for (const dirInfo of dirEntries) {
+                const absDir = path.join(process.cwd(), dirInfo.dirRelPath);
+                if (dirInfo.file) {
+                    await fs.unlink(path.join(absDir, dirInfo.file)).catch(() => {});
+                }
+                const prefix = dirInfo.prefix;
+                if (prefix) {
+                    try {
+                        const dirFiles = await fs.readdir(absDir);
+                        const toDelete = dirFiles.filter(f => f.startsWith(prefix));
+                        await Promise.all(toDelete.map(f => fs.unlink(path.join(absDir, f)).catch(() => {})));
+                    } catch {
+                        // dir might not exist
+                    }
+                }
+            }
+        } catch {
+            console.error(`Error deleting files for image ${image.id}`);
+        }
+    }));
+
+    const successCount = foundIds.length;
+    const errorCount = notFoundCount;
 
     return { success: true, count: successCount, errors: errorCount };
 }
@@ -899,6 +951,11 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                 ...(imageFilename ? { image_filename: imageFilename } : {})
             })
             .where(eq(topics.slug, currentSlug));
+
+        // Cascade slug change to images referencing the old slug
+        if (slug !== currentSlug) {
+            await db.update(images).set({ topic: slug }).where(eq(images.topic, currentSlug));
+        }
 
         revalidatePath('/admin/categories');
         revalidatePath('/');
@@ -1426,11 +1483,15 @@ export async function deleteAdminUser(id: number) {
 }
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
-    const images = await getImages(topicSlug, tagSlugs, limit, offset);
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const images = await getImages(topicSlug, tagSlugs, safeLimit, safeOffset);
     return images;
 }
 
 export async function searchImagesAction(query: string) {
+    if (!query || query.trim().length < 2) return [];
+    const safeQuery = query.trim().slice(0, 200);
     const { searchImages } = await import('@/lib/data');
-    return searchImages(query, 20);
+    return searchImages(safeQuery, 20);
 }
