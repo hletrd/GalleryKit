@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, float, uniqueIndex, timestamp, boolean, text, bigint } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, float, uniqueIndex, index, timestamp, boolean, text, bigint } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 export const topics = mysqlTable("topics", {
@@ -58,7 +58,12 @@ export const images = mysqlTable("images", {
         .onUpdateNow()
         .notNull(),
     processed: boolean("processed").default(true),
-});
+}, (table) => ({
+    idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date),
+    idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
+    idxImagesTopic: index('idx_images_topic').on(table.topic),
+    idxImagesUserFilename: index('idx_images_user_filename').on(table.user_filename),
+}));
 
 export const tags = mysqlTable("tags", {
     id: int("id").primaryKey().autoincrement(),
@@ -71,6 +76,7 @@ export const imageTags = mysqlTable("image_tags", {
     tagId: int("tag_id").references(() => tags.id, { onDelete: 'cascade' }).notNull(),
 }, (table) => ({
     imageIdTagIdUnique: uniqueIndex('image_tags_image_id_tag_id_unique').on(table.imageId, table.tagId),
+    idxImageTagsTagId: index('idx_image_tags_tag_id').on(table.tagId),
 }));
 
 export const adminSettings = mysqlTable("admin_settings", {
