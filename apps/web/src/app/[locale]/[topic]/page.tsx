@@ -1,4 +1,4 @@
-import { getImages, getTags, getTopicBySlug, getImageCount } from '@/lib/data';
+import { getImages, getTags, getTopicBySlugCached, getImageCount } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
@@ -11,7 +11,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const { tags: tagsParam } = await searchParams;
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
 
-  const topicData = await getTopicBySlug(topic);
+  const topicData = await getTopicBySlugCached(topic);
 
   if (!topicData) return {};
 
@@ -55,7 +55,7 @@ export default async function TopicPage({
 
 
 
-  const topicData = await getTopicBySlug(topic);
+  const topicData = await getTopicBySlugCached(topic);
   if (!topicData) {
     notFound();
   }

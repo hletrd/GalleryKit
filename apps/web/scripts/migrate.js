@@ -127,7 +127,13 @@ console.log(`[Migration] Starting migration...`);
 
         if (rows.length === 0) {
             console.log('[Migration] Seeding default admin user...');
-            const password = process.env.ADMIN_PASSWORD || 'admin123';
+            const crypto = require('crypto');
+            let password = process.env.ADMIN_PASSWORD;
+            if (!password || password.length < 8) {
+                password = crypto.randomBytes(16).toString('base64url');
+                console.log(`[Migration] Generated random admin password: ${password}`);
+                console.log(`[Migration] SAVE THIS PASSWORD. It will not be shown again.`);
+            }
             const hash = await argon2.hash(password);
 
             await connection.query('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)', ['admin', hash]);

@@ -1,4 +1,4 @@
-import { getImage } from '@/lib/data';
+import { getImageCached } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import PhotoViewer from '@/components/photo-viewer';
@@ -11,7 +11,7 @@ export const revalidate = 604800;
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const imageId = parseInt(id, 10);
-    const image = await getImage(imageId);
+    const image = await getImageCached(imageId);
 
     if (!image) {
         return {
@@ -74,7 +74,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         return notFound();
     }
 
-    const image: any = await getImage(imageId);
+    const image: any = await getImageCached(imageId);
 
     if (!image) return notFound();
 

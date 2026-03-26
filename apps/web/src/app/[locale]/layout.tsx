@@ -14,7 +14,6 @@ const inter = Inter({ subsets: ["latin"] });
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
-export const dynamic = 'force-dynamic';
 import Script from 'next/script';
 
 export const metadata: Metadata = {
