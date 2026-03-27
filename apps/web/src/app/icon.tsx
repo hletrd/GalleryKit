@@ -15,37 +15,32 @@ export const contentType = 'image/png'
 export default function Icon() {
   return new ImageResponse(
     (
-      // ImageResponse JSX element
       <div
         style={{
-          fontSize: 24,
-          background: 'black',
+          background: '#09090b',
           width: '100%',
           height: '100%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'white',
-          borderRadius: 8, // Rounded square
+          borderRadius: 8,
         }}
       >
         <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          viewBox="0 0 120 120"
           fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ transform: 'scale(0.9) translateY(1px)' }}
         >
-          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-          <circle cx="12" cy="13" r="3" />
+          {/* Image frame */}
+          <rect x="16" y="26" width="88" height="68" rx="8" stroke="#a1a1aa" strokeWidth="6" fill="none" />
+          {/* Sun circle */}
+          <circle cx="42" cy="48" r="9" stroke="#e4e4e7" strokeWidth="5" fill="none" />
+          {/* Mountain landscape */}
+          <path d="M16 78 L46 54 L68 72 L82 60 L104 82" stroke="#e4e4e7" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </svg>
       </div>
     ),
-    // ImageResponse options
     {
       ...size,
     }
