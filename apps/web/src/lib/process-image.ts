@@ -332,7 +332,8 @@ export async function saveOriginalAndGetMetadata(
     }
 
     // Extract bit depth from Sharp metadata
-    const bitDepth = metadata.depth ? (typeof metadata.depth === 'string' ? parseInt(metadata.depth, 10) : metadata.depth) : null;
+    const rawBitDepth = metadata.depth ? (typeof metadata.depth === 'string' ? parseInt(metadata.depth, 10) : metadata.depth) : null;
+    const bitDepth = (rawBitDepth !== null && Number.isFinite(rawBitDepth)) ? rawBitDepth : null;
 
     return {
         id,

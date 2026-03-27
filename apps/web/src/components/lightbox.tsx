@@ -67,7 +67,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            e.stopPropagation();
+            // Only stop propagation for keys we handle
+            if (['f', 'F', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) {
+                e.stopPropagation();
+            }
             if (e.key === 'f' || e.key === 'F') {
                 toggleFullscreen();
             } else if (e.key === 'ArrowLeft' && prevId !== null) {

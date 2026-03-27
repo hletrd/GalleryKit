@@ -779,6 +779,10 @@ export async function uploadImages(formData: FormData) {
         return { error: 'All uploads failed' };
     }
 
+    // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
+    revalidatePath('/');
+    revalidatePath('/admin/dashboard');
+
     return {
         success: true,
         count: successCount,

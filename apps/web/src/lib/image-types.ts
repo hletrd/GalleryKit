@@ -50,7 +50,7 @@ export interface TagInfo {
 export function hasExifData(val: string | number | null | undefined): boolean {
     if (val === undefined || val === null) return false;
     if (typeof val === 'string') return val.trim().length > 0;
-    if (typeof val === 'number') return val > 0;
+    if (typeof val === 'number') return Number.isFinite(val);
     return false;
 }
 
