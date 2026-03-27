@@ -15,7 +15,7 @@
   <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/Sharp-Image_Processing-99CC00?logo=sharp&logoColor=white" alt="Sharp"></a>
   <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/MySQL-8.0+-4479A1?logo=mysql&logoColor=white" alt="MySQL 8.0+"></a>
   <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker"></a>
-  <a href="https://github.com/hletrd/gallerykit/blob/master/LICENSE"><img src="https://img.shields.io/github/license/hletrd/gallerykit" alt="License"></a>
+  <a href="https://github.com/hletrd/gallerykit/blob/master/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue" alt="Apache 2.0"></a>
 </p>
 
 <p align="center">
@@ -148,4 +148,4 @@ The application listens on port 3000.
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+Licensed under the [Apache License 2.0](LICENSE).
