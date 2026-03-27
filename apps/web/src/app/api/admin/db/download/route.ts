@@ -41,6 +41,8 @@ export async function GET(request: NextRequest) {
                 'Content-Disposition': `attachment; filename="${file}"`,
                 'Content-Length': stats.size.toString(),
                 'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Pragma': 'no-cache',
             },
         });
     } catch {

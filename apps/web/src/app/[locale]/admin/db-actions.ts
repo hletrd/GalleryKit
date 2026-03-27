@@ -219,6 +219,9 @@ export async function restoreDatabase(formData: FormData) {
         /\bINSTALL\s+PLUGIN\b/i,
         /\bSET\s+GLOBAL\b/i,
         /\bCREATE\s+SERVER\b/i,
+        // Schema modifications that --one-database does not fully block
+        /\bRENAME\s+TABLE\b/i,
+        /\bCREATE\s+(OR\s+REPLACE\s+)?VIEW\b/i,
     ];
     const CHUNK_SIZE = 1024 * 1024;
     const OVERLAP = 256; // overlap to catch patterns split across chunks
