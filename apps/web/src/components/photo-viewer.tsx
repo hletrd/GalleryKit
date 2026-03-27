@@ -63,9 +63,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
         }
     }, [currentIndex, images, prevId, nextId, router]);
 
-    // Handle keyboard navigation
+    // Handle keyboard navigation (skip when lightbox is active — it handles its own keys)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (showLightbox) return;
             if (e.key === "ArrowLeft") {
                 navigate(-1);
             } else if (e.key === "ArrowRight") {
@@ -76,7 +77,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [navigate]);
+    }, [navigate, showLightbox]);
 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
@@ -237,7 +238,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <Badge variant="outline">{image.topic}</Badge>
-                                    <span className="text-xs text-muted-foreground" suppressHydrationWarning>{new Date(image.capture_date || '').toLocaleDateString()}</span>
+                                    {image.capture_date && <span className="text-xs text-muted-foreground" suppressHydrationWarning>{new Date(image.capture_date).toLocaleDateString()}</span>}
                                 </div>
 
                                 {image.tags && image.tags.length > 0 && (

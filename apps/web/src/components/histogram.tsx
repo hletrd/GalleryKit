@@ -147,10 +147,12 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
         if (!imageUrl) return;
         setLoading(true);
         setHistogramData(null);
+        let aborted = false;
 
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
+            if (aborted) return;
             try {
                 const data = computeHistogram(img);
                 setHistogramData(data);
@@ -161,9 +163,16 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
             }
         };
         img.onerror = () => {
+            if (aborted) return;
             setLoading(false);
         };
         img.src = imageUrl;
+        return () => {
+            aborted = true;
+            img.onload = null;
+            img.onerror = null;
+            img.src = '';
+        };
     }, [imageUrl]);
 
     useEffect(() => {

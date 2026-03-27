@@ -886,8 +886,9 @@ export async function deleteImages(ids: number[]) {
         }
     }
 
-    const foundIds = imageRecords.map(img => img.id);
-    const notFoundCount = ids.filter(id => !foundIds.includes(id)).length;
+    const foundIdSet = new Set(imageRecords.map(img => img.id));
+    const foundIds = [...foundIdSet];
+    const notFoundCount = ids.filter(id => !foundIdSet.has(id)).length;
 
     // Remove from processing queue so queue detects deletion (matches deleteImage behavior)
     const queueState = getProcessingQueueState();

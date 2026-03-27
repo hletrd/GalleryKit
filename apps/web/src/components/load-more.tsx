@@ -20,9 +20,11 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
     const [hasMore, setHasMore] = useState(initialHasMore);
     const [offset, setOffset] = useState(initialOffset);
     const sentinelRef = useRef<HTMLDivElement>(null);
+    const loadingRef = useRef(false);
 
     const loadMore = useCallback(async () => {
-        if (loading || !hasMore) return;
+        if (loadingRef.current || !hasMore) return;
+        loadingRef.current = true;
         setLoading(true);
         try {
             const newImages = await loadMoreImages(topicSlug, tagSlugs, offset, limit);
@@ -36,9 +38,10 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         } catch (error) {
             console.error('Failed to load more images:', error);
         } finally {
+            loadingRef.current = false;
             setLoading(false);
         }
-    }, [loading, hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore]);
+    }, [hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore]);
 
     // Use a ref for the loadMore callback to avoid re-creating the observer
     // on every state change (loading/offset updates cause callback churn).

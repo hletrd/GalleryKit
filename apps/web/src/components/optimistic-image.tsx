@@ -1,7 +1,7 @@
 'use client';
 
 import Image, { ImageProps } from 'next/image';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 
@@ -19,12 +19,16 @@ function OptimisticImageInner({ src, alt, className, ...props }: OptimisticImage
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
+    const retryTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+    // Clear retry timer on unmount
+    useEffect(() => () => { clearTimeout(retryTimerRef.current); }, []);
 
     const handleError = () => {
         if (retryCount < 5) {
             // Exponential backoff: 500ms, 1000ms, 2000ms...
             const delay = 500 * Math.pow(2, retryCount);
-            setTimeout(() => {
+            retryTimerRef.current = setTimeout(() => {
                 setRetryCount(c => c + 1);
                 // Add query param to bust browser cache
                 const separator = typeof src === 'string' && src.includes('?') ? '&' : '?';
