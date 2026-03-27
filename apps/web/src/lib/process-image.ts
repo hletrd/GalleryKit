@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto';
 
 const cpuCount = os.cpus()?.length ?? 1;
 const maxConcurrency = Math.max(1, cpuCount - 2);
-const envConcurrency = 10;
+const envConcurrency = Number.parseInt(process.env.SHARP_CONCURRENCY ?? '', 10);
 const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
     ? Math.min(envConcurrency, maxConcurrency)
     : maxConcurrency;
@@ -19,7 +19,7 @@ const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? 
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
     : 256 * 1024 * 1024;
-// sharp.limitInputPixels(maxInputPixels) - Removed in sharp 0.33+, passed in constructor instead
+// limitInputPixels is passed per-constructor call (Sharp 0.33+ API)
 
 const UPLOAD_ROOT = (() => {
     // In Docker (prod), we might be in /app, so we need apps/web/public
@@ -55,6 +55,7 @@ const ALLOWED_EXTENSIONS = new Set([
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
 // Ensure directories exist — only runs once (promise-based singleton to avoid races)
+// Clears on failure so a transient error doesn't permanently break uploads.
 let dirsPromise: Promise<void> | null = null;
 const ensureDirs = () => {
     if (!dirsPromise) {
@@ -63,17 +64,21 @@ const ensureDirs = () => {
             fs.mkdir(UPLOAD_DIR_WEBP, { recursive: true }),
             fs.mkdir(UPLOAD_DIR_AVIF, { recursive: true }),
             fs.mkdir(UPLOAD_DIR_JPEG, { recursive: true }),
-        ]).then(() => {});
+        ]).then(() => {}).catch((e) => {
+            dirsPromise = null;
+            throw e;
+        });
     }
     return dirsPromise;
 };
 
-// Sanitize and validate file extension
+// Sanitize and validate file extension.
+// NOTE: ALLOWED_EXTENSIONS entries must only contain [a-z0-9.] characters
+// since the sanitizer strips everything else.
 function getSafeExtension(filename: string): string {
-    // Get extension and convert to lowercase
     let ext = path.extname(filename).toLowerCase();
 
-    // Remove any path traversal attempts
+    // Strip any non-alphanumeric characters except dot
     ext = ext.replace(/[^a-z0-9.]/g, '');
 
     // Validate against allowed extensions
@@ -84,7 +89,50 @@ function getSafeExtension(filename: string): string {
     return ext;
 }
 
-function parseExifDateTime(value: unknown): string {
+/** Minimal interface for exif-reader output — covers the fields we actually access. */
+interface ExifParamsRaw {
+    FNumber?: number;
+    ISO?: number;
+    ISOSpeedRatings?: number;
+    ExposureTime?: string | number;
+    DateTimeOriginal?: unknown;
+    LensModel?: string;
+    FocalLength?: number;
+    ColorSpace?: number;
+    WhiteBalance?: string | number;
+    MeteringMode?: string | number;
+    ExposureBiasValue?: number;
+    ExposureCompensation?: number;
+    ExposureProgram?: string | number;
+    Flash?: string | number;
+    [key: string]: unknown;
+}
+
+interface ExifImageRaw {
+    Model?: string;
+    Make?: string;
+    [key: string]: unknown;
+}
+
+interface ExifGpsRaw {
+    GPSLatitude?: number[];
+    GPSLatitudeRef?: string;
+    GPSLongitude?: number[];
+    GPSLongitudeRef?: string;
+    [key: string]: unknown;
+}
+
+export interface ExifDataRaw {
+    exif?: ExifParamsRaw;
+    Photo?: ExifParamsRaw;
+    image?: ExifImageRaw;
+    Image?: ExifImageRaw;
+    gps?: ExifGpsRaw;
+    GPSInfo?: ExifGpsRaw;
+    [key: string]: unknown;
+}
+
+function parseExifDateTime(value: unknown): string | null {
     if (typeof value === 'string') {
         // Common EXIF format: "YYYY:MM:DD HH:MM:SS" (no timezone)
         const match = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(value);
@@ -97,21 +145,48 @@ function parseExifDateTime(value: unknown): string {
         }
     }
 
-    const date = new Date(value as any);
-    if (!Number.isNaN(date.getTime())) {
-        return date.toISOString();
+    // Handle Date objects and numeric timestamps explicitly
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString();
+    }
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+            return date.toISOString();
+        }
     }
 
-    return new Date().toISOString();
+    // Return null instead of current date so images with unparsable EXIF dates
+    // don't appear as "taken right now" in a chronologically-sorted gallery.
+    return null;
+}
+
+// Known output sizes — used by both processImageFormats and deleteImageVariants.
+const OUTPUT_SIZES = [640, 1536, 2048, 4096];
+
+/**
+ * Delete all sized variants for a given base filename deterministically.
+ * Avoids expensive readdir on directories with thousands of files.
+ */
+export async function deleteImageVariants(dir: string, baseFilename: string) {
+    const ext = path.extname(baseFilename);
+    const name = path.basename(baseFilename, ext);
+    const filesToDelete = [
+        baseFilename,
+        ...OUTPUT_SIZES.map(size => `${name}_${size}${ext}`),
+    ];
+    await Promise.all(
+        filesToDelete.map(f => fs.unlink(path.join(dir, f)).catch(() => {})),
+    );
 }
 
 async function deleteByPrefix(dir: string, prefix: string) {
+    // Deterministic deletion — try all allowed original extensions.
+    // This is only called for the original/ directory when replacing an image.
     try {
-        const files = await fs.readdir(dir);
+        const allExts = Array.from(ALLOWED_EXTENSIONS);
         await Promise.all(
-            files
-                .filter((f) => f.startsWith(prefix))
-                .map((f) => fs.unlink(path.join(dir, f)).catch(() => {})),
+            allExts.map(ext => fs.unlink(path.join(dir, `${prefix}${ext}`)).catch(() => {})),
         );
     } catch {
         // Best-effort cleanup.
@@ -130,8 +205,7 @@ export interface ImageProcessingResult {
     height: number;
     originalWidth: number;
     originalHeight: number;
-    metadata: sharp.Metadata;
-    exifData: any;
+    exifData: ExifDataRaw;
     color_space?: string | null;
     blurDataUrl?: string | null;
     iccProfileName?: string | null;
@@ -183,7 +257,7 @@ export async function saveOriginalAndGetMetadata(
     await fs.writeFile(path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal), buffer);
 
     // Parse EXIF
-    let exifData: any = {};
+    let exifData: ExifDataRaw = {};
     if (metadata.exif) {
         try {
             exifData = exifReader(metadata.exif);
@@ -271,7 +345,6 @@ export async function saveOriginalAndGetMetadata(
         height,
         originalWidth: (metadata.width && metadata.width > 0) ? metadata.width : width,
         originalHeight: (metadata.height && metadata.height > 0) ? metadata.height : height,
-        metadata,
         exifData,
         blurDataUrl,
         iccProfileName,
@@ -280,16 +353,17 @@ export async function saveOriginalAndGetMetadata(
 }
 
 export async function processImageFormats(
-    buffer: Buffer,
+    inputPath: string,
     filenameWebp: string,
     filenameAvif: string,
     filenameJpeg: string,
     baseWidth: number // The width from metadata
 ) {
-    const image = sharp(buffer, { limitInputPixels: maxInputPixels });
+    // Use file path instead of buffer to let Sharp use native mmap/streaming,
+    // avoiding a full copy of the image (up to 200MB) on the Node.js heap.
+    const image = sharp(inputPath, { limitInputPixels: maxInputPixels });
 
-    // Sizes to generate
-    const sizes = [640, 1536, 2048, 4096];
+    const sizes = OUTPUT_SIZES;
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -324,9 +398,16 @@ export async function processImageFormats(
                 lastRendered = { resizeWidth, filePath: outputPath };
             }
 
-            // If this size is 2048, also save as the "base" filename to satisfy existing schema
+            // If this size is 2048, also save as the "base" filename to satisfy existing schema.
+            // Prefer hard link (zero-copy); fall back to copyFile if the FS doesn't support links.
             if (size === 2048) {
-                await fs.copyFile(outputPath, path.join(dir, baseFilename));
+                const basePath = path.join(dir, baseFilename);
+                await fs.unlink(basePath).catch(() => {});
+                try {
+                    await fs.link(outputPath, basePath);
+                } catch {
+                    await fs.copyFile(outputPath, basePath);
+                }
             }
         }
     };
@@ -348,7 +429,7 @@ export async function processImageFormats(
 }
 
 // Helper to clean strings
-function cleanString(val: any): string | null {
+function cleanString(val: unknown): string | null {
     if (val === undefined || val === null) return null;
     const s = String(val).trim();
     if (s.length === 0 || s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') return null;
@@ -356,15 +437,15 @@ function cleanString(val: any): string | null {
 }
 
 // Helper to clean numbers
-function cleanNumber(val: any): number | null {
+function cleanNumber(val: unknown): number | null {
     if (val === undefined || val === null) return null;
-    if (Array.isArray(val)) val = val[0]; // Handle arrays like [100]
-    const n = Number(val);
+    const v = Array.isArray(val) ? val[0] : val; // Handle arrays like [100]
+    const n = Number(v);
     return !Number.isFinite(n) ? null : n;
 }
 
 // Helper to extract EXIF data for DB insertion
-export function extractExifForDb(exifData: any) {
+export function extractExifForDb(exifData: ExifDataRaw) {
     // exif-reader returns top-level objects: image, thumbnail, exif, gps, interloper
     // Standard tags are usually in 'exif' (e.g. FNumber, ISO, ExposureTime)
     // Model is often in 'image'
@@ -403,7 +484,7 @@ export function extractExifForDb(exifData: any) {
     }
 
     return {
-        capture_date: parseExifDateTime(dateTimeOriginal),
+        capture_date: parseExifDateTime(dateTimeOriginal) ?? undefined,
         camera_model: cleanString(imageParams.Model) || undefined, // undefined to allow DB default if any, or null
         lens_model: cleanString(exifParams.LensModel),
         iso: cleanNumber(iso),
@@ -426,7 +507,7 @@ export function extractExifForDb(exifData: any) {
                // If we want to be more specific, we'd need to parse the ICC profile buffer from sharp metadata,
                // but exif-reader doesn't give us that easily here.
                // However, Apple devices often set "Uncalibrated" for Display P3.
-               return 'Display P3'; // Heuristic for now, or just 'Uncalibrated' / 'Wide Gamut'
+               return 'Uncalibrated'; // 65535 = Uncalibrated; actual profile determined by ICC parsing below
             }
 
             return null;
@@ -447,7 +528,7 @@ export function extractExifForDb(exifData: any) {
                 0: 'Unknown', 1: 'Average', 2: 'Center-weighted', 3: 'Spot',
                 4: 'Multi-spot', 5: 'Multi-segment', 6: 'Partial'
             };
-            return modes[mm] ?? null;
+            return (typeof mm === 'number' ? modes[mm] : null) ?? null;
         })(),
 
         // Exposure Compensation
@@ -467,7 +548,7 @@ export function extractExifForDb(exifData: any) {
                 0: 'Not Defined', 1: 'Manual', 2: 'Program AE', 3: 'Aperture Priority',
                 4: 'Shutter Priority', 5: 'Creative', 6: 'Action', 7: 'Portrait', 8: 'Landscape'
             };
-            return programs[ep] ?? null;
+            return (typeof ep === 'number' ? programs[ep] : null) ?? null;
         })(),
 
         // Flash

@@ -4,24 +4,17 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Info, MapPin, Calendar, Clock } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
+import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
 
 interface InfoBottomSheetProps {
-    image: any;
+    image: ImageDetail;
     isOpen: boolean;
     onClose: () => void;
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
-function hasExifData(val: any): boolean {
-    if (val === undefined || val === null) return false;
-    if (typeof val === 'string') return val.trim().length > 0;
-    if (typeof val === 'number') return val > 0;
-    return false;
-}
-
 const PEEK_HEIGHT = 140;   // px visible in peek state
-const EXPANDED_HEIGHT = 80; // vh in expanded state (as percentage string handled via class)
 
 export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSheetProps) {
     const { t } = useTranslation();
@@ -30,7 +23,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
     const touchStartY = useRef<number | null>(null);
     const touchStartTime = useRef<number | null>(null);
 
-    // Reset to peek when opened
+    // Sync sheet state with isOpen prop — intentional immediate setState on prop change
     useEffect(() => {
         if (isOpen) {
             setSheetState('peek');
@@ -45,8 +38,6 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                 return `calc(100% - ${PEEK_HEIGHT}px)`;
             case 'expanded':
                 return '5vh';
-            default:
-                return `calc(100% - ${PEEK_HEIGHT}px)`;
         }
     }, []);
 
@@ -100,7 +91,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
     const displayTitle = image.title && image.title.trim() !== ''
         ? image.title
         : (image.tags && image.tags.length > 0
-            ? image.tags.map((tag: any) => `#${tag.name}`).join(' ')
+            ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
             : (image.user_filename || t('imageManager.untitled')));
 
     const formattedShutterSpeed = (() => {
@@ -170,7 +161,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                         {/* Tags */}
                         {image.tags && image.tags.length > 0 && (
                             <div className="flex flex-wrap gap-2 mb-4">
-                                {image.tags.map((tag: any) => (
+                                {image.tags.map((tag: TagInfo) => (
                                     <Badge key={tag.slug} variant="secondary" className="text-xs">
                                         #{tag.name}
                                     </Badge>
@@ -196,13 +187,13 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                             {hasExifData(image.camera_model) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.camera')}</p>
-                                    <p className="font-medium truncate" title={image.camera_model}>{image.camera_model}</p>
+                                    <p className="font-medium truncate" title={nu(image.camera_model)}>{image.camera_model}</p>
                                 </div>
                             )}
                             {hasExifData(image.lens_model) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.lens')}</p>
-                                    <p className="font-medium truncate" title={image.lens_model}>{image.lens_model}</p>
+                                    <p className="font-medium truncate" title={nu(image.lens_model)}>{image.lens_model}</p>
                                 </div>
                             )}
                             {hasExifData(image.focal_length) && (

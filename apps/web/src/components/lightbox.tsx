@@ -4,9 +4,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { ImageDetail } from '@/lib/image-types';
 
 interface LightboxProps {
-    image: any;
+    image: ImageDetail;
     prevId: number | null;
     nextId: number | null;
     onClose: () => void;
@@ -56,6 +57,14 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         };
     }, []);
 
+    const toggleFullscreen = useCallback(() => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+            document.exitFullscreen().catch(() => {});
+        }
+    }, []);
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             e.stopPropagation();
@@ -75,15 +84,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
         };
-    }, [prevId, nextId, onNavigate, onClose]);
-
-    const toggleFullscreen = useCallback(() => {
-        if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(() => {});
-        } else {
-            document.exitFullscreen().catch(() => {});
-        }
-    }, []);
+    }, [prevId, nextId, onNavigate, onClose, toggleFullscreen]);
 
     const handleBackdropClick = useCallback(() => {
         showControls();
@@ -139,6 +140,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                 <img
                     src={jpegSrc}
                     alt={image.title ?? image.filename_jpeg ?? ''}
+                    width={image.width}
+                    height={image.height}
                     className="w-full h-full object-contain"
                     draggable={false}
                 />

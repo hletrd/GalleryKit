@@ -4,13 +4,15 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadMoreImages } from '@/app/actions';
 import { Loader2 } from 'lucide-react';
 
+type LoadMoreResult = Awaited<ReturnType<typeof loadMoreImages>>;
+
 interface LoadMoreProps {
     topicSlug?: string;
     tagSlugs?: string[];
     initialOffset: number;
     hasMore: boolean;
     limit?: number;
-    onLoadMore: (images: any[]) => void;
+    onLoadMore: (images: LoadMoreResult) => void;
 }
 
 export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
@@ -38,14 +40,19 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         }
     }, [loading, hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore]);
 
+    // Use a ref for the loadMore callback to avoid re-creating the observer
+    // on every state change (loading/offset updates cause callback churn).
+    const loadMoreRef = useRef(loadMore);
+    loadMoreRef.current = loadMore;
+
     useEffect(() => {
         const sentinel = sentinelRef.current;
         if (!sentinel) return;
 
         const observer = new IntersectionObserver(
             (entries) => {
-                if (entries[0].isIntersecting && hasMore && !loading) {
-                    loadMore();
+                if (entries[0].isIntersecting) {
+                    loadMoreRef.current();
                 }
             },
             { rootMargin: '200px' }
@@ -53,7 +60,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
 
         observer.observe(sentinel);
         return () => observer.disconnect();
-    }, [hasMore, loading, loadMore]);
+    }, [hasMore]);
 
     return (
         <>

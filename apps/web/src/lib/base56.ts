@@ -1,19 +1,27 @@
 import { randomBytes } from 'crypto';
 
 export const BASE56_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+const BASE56_REGEX = new RegExp(`^[${BASE56_CHARS}]+$`);
 
 export function generateBase56(length: number): string {
-    // Use cryptographically secure random bytes
-    const bytes = randomBytes(length);
+    // Pre-generate a larger buffer to minimize syscalls during rejection sampling.
+    // Since ~12.5% of bytes are rejected (256-224)/256, 2x is ample headroom.
+    let pool = randomBytes(length * 2);
+    let poolIdx = 0;
     let result = '';
     const charactersLength = BASE56_CHARS.length;
     for (let i = 0; i < length; i++) {
-        // Use modulo with rejection sampling bias mitigation
-        // Since 256 % 56 = 32, we reject values >= 224 to avoid bias
-        let randomValue = bytes[i];
-        while (randomValue >= 224) {
-            randomValue = randomBytes(1)[0];
-        }
+        // Rejection sampling: reject values >= 224 to avoid modulo bias (256 % 56 = 32)
+        let randomValue: number;
+        let attempts = 0;
+        do {
+            if (poolIdx >= pool.length) {
+                pool = randomBytes(length * 2);
+                poolIdx = 0;
+            }
+            randomValue = pool[poolIdx++];
+            if (++attempts > 1000) throw new Error('RNG failure: too many rejections');
+        } while (randomValue >= 224);
         result += BASE56_CHARS.charAt(randomValue % charactersLength);
     }
     return result;
@@ -29,6 +37,5 @@ export function isBase56(str: string, expectedLength?: number | number[]): boole
             return false;
         }
     }
-    const regex = new RegExp(`^[${BASE56_CHARS}]+$`);
-    return regex.test(str);
+    return BASE56_REGEX.test(str);
 }

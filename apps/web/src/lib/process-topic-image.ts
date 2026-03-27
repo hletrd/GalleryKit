@@ -8,8 +8,6 @@ const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? 
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
     : 64 * 1024 * 1024;
-// sharp.limitInputPixels(maxInputPixels);
-
 const RESOURCES_ROOT = (() => {
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/resources');
     const simplePath = path.join(process.cwd(), 'public/resources');
@@ -27,9 +25,16 @@ const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
 // Maximum file size (200MB for topic images)
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
-// Ensure directory exists
-const ensureDir = async () => {
-    await fs.mkdir(RESOURCES_DIR, { recursive: true });
+// Ensure directory exists — singleton promise to avoid concurrent mkdir races (matches process-image.ts pattern)
+let dirPromise: Promise<void> | null = null;
+const ensureDir = () => {
+    if (!dirPromise) {
+        dirPromise = fs.mkdir(RESOURCES_DIR, { recursive: true }).then(() => {}).catch((e) => {
+            dirPromise = null;
+            throw e;
+        });
+    }
+    return dirPromise;
 };
 
 // Validate file extension
@@ -56,24 +61,20 @@ export async function processTopicImage(file: File): Promise<string> {
 
     await ensureDir();
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const id = randomUUID();
+    const filename = `${id}.webp`;
+    const outputPath = path.join(RESOURCES_DIR, filename);
 
-    // Validate image by attempting to read metadata
+    // Topic images only produce a 512x512 thumbnail so the buffer is small in practice.
     try {
-        await sharp(buffer, { limitInputPixels: maxInputPixels }).metadata();
+        const buffer = Buffer.from(await file.arrayBuffer());
+        await sharp(buffer, { limitInputPixels: maxInputPixels })
+            .resize({ width: 512, height: 512, fit: 'cover' })
+            .webp({ quality: 90 })
+            .toFile(outputPath);
     } catch {
         throw new Error('Invalid image file');
     }
-
-    const id = randomUUID();
-    const filename = `${id}.webp`; // Convert everything to WebP for consistency
-    const outputPath = path.join(RESOURCES_DIR, filename);
-
-    // Resize to 512x512 max (cover), strip metadata, convert to WebP
-    await sharp(buffer, { limitInputPixels: maxInputPixels })
-        .resize({ width: 512, height: 512, fit: 'cover' })
-        .webp({ quality: 90 })
-        .toFile(outputPath);
 
     return filename;
 }

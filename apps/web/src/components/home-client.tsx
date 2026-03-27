@@ -8,11 +8,11 @@ import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
 import { cn } from '@/lib/utils';
 
-function reorderForColumns(items: any[], columnCount: number): any[] {
+function reorderForColumns<T extends { id: number; width?: number; height?: number }>(items: T[], columnCount: number): T[] {
     if (columnCount <= 1 || items.length === 0) return items;
 
     // Initialize columns with heights
-    const columns: { items: any[]; height: number }[] =
+    const columns: { items: T[]; height: number }[] =
         Array.from({ length: columnCount }, () => ({ items: [], height: 0 }));
 
     // Distribute items to shortest column (greedy algorithm)
@@ -54,7 +54,7 @@ function reorderForColumns(items: any[], columnCount: number): any[] {
     }
 
     // Build result array in the order CSS columns expects
-    const result: any[] = [];
+    const result: T[] = [];
     for (let col = 0; col < columnCount; col++) {
         const count = cssColSizes[col];
         for (let row = 0; row < count; row++) {
@@ -107,9 +107,31 @@ function useColumnCount() {
     return count;
 }
 
+interface GalleryImage {
+    id: number;
+    filename_avif: string;
+    filename_webp: string;
+    filename_jpeg: string;
+    width: number;
+    height: number;
+    title: string | null;
+    description: string | null;
+    blur_data_url: string | null;
+    tag_names?: string | null;
+    topic?: string;
+    user_filename?: string | null;
+}
+
+interface GalleryTag {
+    id: number;
+    name: string;
+    slug: string;
+    count: number;
+}
+
 interface HomeClientProps {
-    images: any[];
-    tags: any[];
+    images: GalleryImage[];
+    tags: GalleryTag[];
     currentTags?: string[];
     topicSlug?: string;
     hasMore?: boolean;
@@ -119,7 +141,7 @@ interface HomeClientProps {
 export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = false, totalCount }: HomeClientProps) {
     const { t } = useTranslation();
     const [allImages, setAllImages] = useState(images);
-    const handleLoadMore = useCallback((newImages: any[]) => {
+    const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
         setAllImages(prev => [...prev, ...newImages]);
     }, []);
 
@@ -129,7 +151,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
     const columnCount = useColumnCount();
     const orderedImages = useMemo(() => reorderForColumns(allImages, columnCount), [allImages, columnCount]);
     const displayTags = (currentTags || []).map((tag) => {
-        const match = tags.find((t: any) => t.slug === tag.trim().toLowerCase());
+        const match = tags.find((t) => t.slug === tag.trim().toLowerCase());
         return match?.name ?? tag;
     });
 

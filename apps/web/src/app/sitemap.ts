@@ -1,4 +1,4 @@
-import { getImages, getTopics } from '@/lib/data';
+import { getImageIdsForSitemap, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
 export const dynamic = 'force-dynamic';
@@ -8,8 +8,10 @@ import siteConfig from "@/site-config.json";
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const images = await getImages();
-  const topics = await getTopics();
+  const [images, topics] = await Promise.all([
+    getImageIdsForSitemap(),
+    getTopics(),
+  ]);
 
   const entries: MetadataRoute.Sitemap = images.map((image) => ({
     url: `${BASE_URL}/p/${image.id}`,

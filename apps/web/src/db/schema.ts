@@ -110,4 +110,6 @@ export const sessions = mysqlTable("sessions", {
     id: varchar("id", { length: 255 }).primaryKey(),
     userId: int("user_id").references(() => adminUsers.id, { onDelete: 'cascade' }).notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-});
+}, (table) => ({
+    idxSessionsExpiresAt: index('idx_sessions_expires_at').on(table.expiresAt),
+}));

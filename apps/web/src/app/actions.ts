@@ -1,11 +1,16 @@
 'use server';
 
 import * as argon2 from 'argon2';
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { isIP } from 'net';
 
+/** Hash a session token for storage — so DB compromise doesn't yield usable cookies. */
+function hashSessionToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+}
+
 import { cookies, headers } from 'next/headers';
-import { saveOriginalAndGetMetadata, processImageFormats, extractExifForDb, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, processImageFormats, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { isRedirectError } from 'next/dist/client/components/redirect-error';
@@ -17,10 +22,10 @@ import { generateBase56 } from '@/lib/base56';
 import { processTopicImage } from '@/lib/process-topic-image';
 import PQueue from 'p-queue';
 import { getTranslations } from 'next-intl/server';
-import { getImages } from '@/lib/data';
+import { getImages, searchImages } from '@/lib/data';
 import { cache } from 'react';
 
-const processingQueueKey = Symbol.for('gallery.imageProcessingQueue');
+const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 
 type ImageProcessingJob = {
     id: number;
@@ -58,19 +63,19 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
     const state = getProcessingQueueState();
     if (state.enqueued.has(job.id)) return;
 
-    console.log(`[Queue] Enqueuing job ${job.id}`);
+    console.debug(`[Queue] Enqueuing job ${job.id}`);
     state.enqueued.add(job.id);
     state.queue.start();
 
     // Explicitly add to queue
     state.queue.add(async () => {
-        console.log(`[Queue] Processing job ${job.id} started`);
+        console.debug(`[Queue] Processing job ${job.id} started`);
         try {
             // US-009: Claim check — verify the row still exists and is unprocessed
             const [check] = await db.select({ id: images.id }).from(images)
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
             if (!check) {
-                console.log(`[Queue] Image ${job.id} no longer pending, skipping`);
+                console.debug(`[Queue] Image ${job.id} no longer pending, skipping`);
                 return;
             }
 
@@ -84,9 +89,10 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 return;
             }
 
-            const buffer = await fs.readFile(originalPath);
+            // Pass file path (not buffer) so Sharp uses native mmap — avoids
+            // pinning the entire image (up to 200MB) on the Node.js heap.
             await processImageFormats(
-                buffer,
+                originalPath,
                 job.filenameWebp,
                 job.filenameAvif,
                 job.filenameJpeg,
@@ -100,25 +106,16 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
             if (updateResult.affectedRows === 0) {
                 // Image was deleted during processing — clean up generated format files
-                console.log(`[Queue] Image ${job.id} was deleted during processing, cleaning up`);
-                const imageFileId = path.basename(job.filenameWebp, path.extname(job.filenameWebp));
-                const safePrefix = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(imageFileId)
-                    ? imageFileId : null;
-                if (safePrefix) {
-                    for (const dir of [UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG]) {
-                        try {
-                            const dirFiles = await fs.readdir(dir);
-                            const toDelete = dirFiles.filter(f => f.startsWith(safePrefix));
-                            await Promise.all(toDelete.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
-                        } catch {
-                            // dir might not exist
-                        }
-                    }
-                }
+                console.debug(`[Queue] Image ${job.id} was deleted during processing, cleaning up`);
+                await Promise.all([
+                    deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp),
+                    deleteImageVariants(UPLOAD_DIR_AVIF, job.filenameAvif),
+                    deleteImageVariants(UPLOAD_DIR_JPEG, job.filenameJpeg),
+                ]);
                 return;
             }
 
-            console.log(`[Queue] Job ${job.id} complete`);
+            console.debug(`[Queue] Job ${job.id} complete`);
             revalidatePath('/');
             revalidatePath('/admin/dashboard');
         } catch (err) {
@@ -134,7 +131,16 @@ const bootstrapImageProcessingQueue = async () => {
     if (state.bootstrapped) return;
 
     try {
-        const pending = await db.select().from(images).where(eq(images.processed, false));
+        // Select only the columns needed for enqueue — avoids fetching blob-like fields
+        // (blur_data_url, description) for potentially hundreds of unprocessed images.
+        const pending = await db.select({
+            id: images.id,
+            filename_original: images.filename_original,
+            filename_webp: images.filename_webp,
+            filename_avif: images.filename_avif,
+            filename_jpeg: images.filename_jpeg,
+            width: images.width,
+        }).from(images).where(eq(images.processed, false));
         for (const image of pending) {
             enqueueImageProcessing({
                 id: image.id,
@@ -152,9 +158,9 @@ const bootstrapImageProcessingQueue = async () => {
         purgeExpiredSessions();
         if (state.gcInterval) clearInterval(state.gcInterval);
         state.gcInterval = setInterval(purgeExpiredSessions, 60 * 60 * 1000); // every hour
-    } catch (err: any) {
+    } catch (err: unknown) {
         // Suppress connection refused errors during build/startup to avoid noise
-        if (err?.code !== 'ECONNREFUSED' && err?.cause?.code !== 'ECONNREFUSED') {
+        if (!(err instanceof Error && (('code' in err && (err as { code: string }).code === 'ECONNREFUSED') || (err.cause && typeof err.cause === 'object' && 'code' in err.cause && (err.cause as { code: string }).code === 'ECONNREFUSED')))) {
             console.error('Failed to bootstrap image processing queue', err);
         } else {
              console.warn('Could not connect to database to bootstrap queue (ECONNREFUSED). Skipping.');
@@ -181,6 +187,11 @@ const GROUP_SHARE_KEY_LENGTH = 10;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_RATE_LIMIT_MAX_KEYS = 5000;
+
+/** Type guard for MySQL/Drizzle errors with `.code` property. */
+function isMySQLError(e: unknown): e is Error & { code: string; cause?: { code?: string } } {
+    return e instanceof Error && 'code' in e && typeof (e as { code: unknown }).code === 'string';
+}
 
 type RateLimitEntry = { count: number; lastAttempt: number };
 
@@ -228,21 +239,25 @@ function getClientIp(headerStore: HeaderLike): string {
 }
 
 function pruneLoginRateLimit(now: number) {
+    // Prune expired entries (O(n) single pass)
     for (const [key, entry] of loginRateLimit) {
         if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
             loginRateLimit.delete(key);
         }
     }
 
-    if (loginRateLimit.size <= LOGIN_RATE_LIMIT_MAX_KEYS) return;
-
-    // Evict the oldest entries rather than clearing everything so attackers cannot reset the limiter
-    const entries = Array.from(loginRateLimit.entries())
-        .sort((a, b) => a[1].lastAttempt - b[1].lastAttempt);
-
-    for (const [key] of entries) {
-        if (loginRateLimit.size <= LOGIN_RATE_LIMIT_MAX_KEYS) break;
-        loginRateLimit.delete(key);
+    // Hard cap: if still over limit after expiry pruning, evict oldest entries.
+    // Use a single pass to find the oldest entries instead of sorting the entire Map.
+    if (loginRateLimit.size > LOGIN_RATE_LIMIT_MAX_KEYS) {
+        const excess = loginRateLimit.size - LOGIN_RATE_LIMIT_MAX_KEYS;
+        // Map iteration order is insertion order; oldest entries are first.
+        // Re-inserted entries (updated IPs) move to the end, so this is a reasonable LRU heuristic.
+        let evicted = 0;
+        for (const key of loginRateLimit.keys()) {
+            if (evicted >= excess) break;
+            loginRateLimit.delete(key);
+            evicted++;
+        }
     }
 }
 
@@ -354,14 +369,17 @@ async function verifySessionToken(token: string): Promise<{ id: string; userId: 
     }
 
     // Check token age (24 hours max)
-    const tokenAge = Date.now() - parseInt(timestamp, 10);
+    const tokenTimestamp = parseInt(timestamp, 10);
+    if (!Number.isFinite(tokenTimestamp)) return null;
+    const tokenAge = Date.now() - tokenTimestamp;
     const maxAge = 24 * 60 * 60 * 1000; // 24 hours
     if (tokenAge > maxAge || tokenAge < 0) {
         return null;
     }
 
+    const tokenHash = hashSessionToken(token);
     const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, token)
+        where: eq(sessions.id, tokenHash)
     });
 
     if (!session) {
@@ -370,7 +388,7 @@ async function verifySessionToken(token: string): Promise<{ id: string; userId: 
 
     if (session.expiresAt < new Date()) {
         // Cleanup expired session
-        await db.delete(sessions).where(eq(sessions.id, token));
+        await db.delete(sessions).where(eq(sessions.id, tokenHash));
         return null;
     }
 
@@ -391,17 +409,39 @@ export const getCurrentUser = cache(async function getCurrentUser() {
     const session = await getSession();
     if (!session) return null;
 
-    const [user] = await db.select().from(adminUsers).where(eq(adminUsers.id, session.userId));
+    const [user] = await db.select({
+        id: adminUsers.id,
+        username: adminUsers.username,
+        created_at: adminUsers.created_at,
+    }).from(adminUsers).where(eq(adminUsers.id, session.userId));
     return user || null;
 });
+
+/** Fetch only id + password_hash — only for internal auth verification (never cache or export to client). */
+async function getAdminUserWithHash(userId: number) {
+    const [user] = await db.select({
+        id: adminUsers.id,
+        password_hash: adminUsers.password_hash,
+    }).from(adminUsers).where(eq(adminUsers.id, userId));
+    return user || null;
+}
 
 export async function isAdmin() {
     return !!(await getCurrentUser());
 }
 
-export async function login(prevState: any, formData: FormData) {
-    const username = formData.get('username') as string;
-    const password = formData.get('password') as string;
+export async function login(prevState: { error?: string } | null, formData: FormData) {
+    const username = formData.get('username')?.toString() ?? '';
+    const password = formData.get('password')?.toString() ?? '';
+
+    // Validate inputs before touching rate-limit state so that missing-field
+    // requests don't consume rate-limit attempts.
+    if (!username) {
+        return { error: 'Username is required' };
+    }
+    if (!password) {
+        return { error: 'Password is required' };
+    }
 
     // Rate Limiting
     const requestHeaders = await headers();
@@ -421,21 +461,17 @@ export async function login(prevState: any, formData: FormData) {
         return { error: 'Too many login attempts. Please try again later.' };
     }
 
-    // Increment count
+    // Increment count and re-insert to maintain Map insertion order (LRU eviction)
     limitData.count++;
     limitData.lastAttempt = now;
+    loginRateLimit.delete(ip);
     loginRateLimit.set(ip, limitData);
 
-    if (!username || typeof username !== 'string') {
-        return { error: 'Username is required' };
-    }
-
-    if (!password || typeof password !== 'string') {
-        return { error: 'Password is required' };
-    }
-
     try {
-        const [user] = await db.select()
+        const [user] = await db.select({
+            id: adminUsers.id,
+            password_hash: adminUsers.password_hash,
+        })
             .from(adminUsers)
             .where(eq(adminUsers.username, username))
             .limit(1);
@@ -446,16 +482,20 @@ export async function login(prevState: any, formData: FormData) {
 
         const match = await argon2.verify(user.password_hash, password);
 
-        if (match) {
-            // Successful auth: drop any accumulated failures for this IP.
-            loginRateLimit.delete(ip);
+        if (!match) {
+            return { error: 'Invalid credentials' };
+        }
 
+        // Successful auth: drop any accumulated failures for this IP.
+        loginRateLimit.delete(ip);
+
+        try {
             const cookieStore = await cookies();
             const sessionToken = await generateSessionToken();
             const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
             await db.insert(sessions).values({
-                id: sessionToken,
+                id: hashSessionToken(sessionToken),
                 userId: user.id,
                 expiresAt: expiresAt
             });
@@ -473,10 +513,14 @@ export async function login(prevState: any, formData: FormData) {
             });
 
             redirect('/admin/dashboard');
+        } catch (e) {
+            if (isRedirectError(e)) throw e;
+            console.error("Session creation failed after successful auth", e);
+            return { error: 'Login succeeded but session creation failed. Please try again.' };
         }
     } catch (e) {
         if (isRedirectError(e)) throw e;
-        console.error("Login verification failed", e);
+        console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
     }
 
     return { error: 'Invalid credentials' };
@@ -488,7 +532,7 @@ export async function logout() {
 
     // Delete session from database if it exists
     if (token) {
-        await db.delete(sessions).where(eq(sessions.id, token)).catch(() => {});
+        await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
     }
 
     cookieStore.delete({ name: COOKIE_NAME, path: '/' });
@@ -525,19 +569,28 @@ export async function uploadImages(formData: FormData) {
         return { error: 'Unauthorized' };
     }
 
-    const files = formData.getAll('files') as File[];
+    const files = formData.getAll('files').filter((f): f is File => f instanceof File);
     // Topic is now a string slug
-    const topic = formData.get('topic') as string;
-    const tagsString = formData.get('tags') as string;
+    const topic = formData.get('topic')?.toString() ?? '';
+    const tagsString = formData.get('tags')?.toString() ?? '';
 
     if (tagsString && tagsString.length > 1000) {
         return { error: 'Tags string is too long (max 1000 chars)' };
     }
 
-    const tagNames = tagsString ? tagsString.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const tagNames = tagsString
+        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && t.length <= 100)
+        : [];
 
     if (!files.length) return { error: 'No files provided' };
     if (files.length > 10) return { error: 'Too many files at once (max 10)' };
+
+    // Validate total upload size to prevent excessive memory pressure
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > 250 * 1024 * 1024) {
+        return { error: 'Total upload size exceeds 250MB limit' };
+    }
+
     if (!topic) return { error: 'Topic required' };
 
     // Validate topic slug format
@@ -557,7 +610,13 @@ export async function uploadImages(formData: FormData) {
             const originalFilename = path.basename(file.name).trim();
 
             const existingImage = originalFilename.length > 0
-                ? (await db.select()
+                ? (await db.select({
+                        id: images.id,
+                        filename_original: images.filename_original,
+                        filename_webp: images.filename_webp,
+                        filename_avif: images.filename_avif,
+                        filename_jpeg: images.filename_jpeg,
+                    })
                     .from(images)
                     .where(or(
                         eq(images.user_filename, originalFilename),
@@ -670,7 +729,7 @@ export async function uploadImages(formData: FormData) {
                                 slug: cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
                             }));
                             // Single batch insert for all tags
-                            await db.insert(tags as any).ignore().values(tagEntries);
+                            await db.insert(tags).ignore().values(tagEntries);
                             const slugs = tagEntries.map(t => t.slug);
                             // Single batch fetch for all tag records
                             const tagRecords = await db.select().from(tags).where(inArray(tags.slug, slugs));
@@ -710,10 +769,9 @@ export async function uploadImages(formData: FormData) {
                 successCount++;
             }
         } catch (e) {
+            // Log full error server-side; only return filename to client (no internal details)
             console.error(`Failed to process file ${file.name}:`, e);
-            // Include error message in failed files list for debugging if possible,
-            // but for now just the name to match return type
-            failedFiles.push(`${file.name} (${e instanceof Error ? e.message : 'Unknown error'})`);
+            failedFiles.push(file.name);
         }
     }
 
@@ -739,8 +797,14 @@ export async function deleteImage(id: number) {
         return { error: 'Invalid image ID' };
     }
 
-    // Get image to find filenames
-    const [image] = await db.select().from(images).where(eq(images.id, id));
+    // Get image to find filenames — select only needed columns
+    const [image] = await db.select({
+        id: images.id,
+        filename_original: images.filename_original,
+        filename_webp: images.filename_webp,
+        filename_avif: images.filename_avif,
+        filename_jpeg: images.filename_jpeg,
+    }).from(images).where(eq(images.id, id));
     if (!image) return { error: 'Image not found' };
 
     // Validate filenames before attempting to delete (security check)
@@ -753,13 +817,6 @@ export async function deleteImage(id: number) {
          return { error: 'Invalid filename in database record' };
     }
 
-    // Extract ID (basename without extension) from webp filename
-    // specific format: uuid.webp
-    const imageId = path.basename(image.filename_webp, path.extname(image.filename_webp));
-    const safePrefix = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(imageId)
-        ? imageId
-        : null;
-
     // US-001: Remove from processing queue so the queue detects deletion
     const queueState = getProcessingQueueState();
     queueState.enqueued.delete(id);
@@ -770,44 +827,20 @@ export async function deleteImage(id: number) {
         await tx.delete(images).where(eq(images.id, id));
     });
 
-    // Delete files (best effort - log errors but don't fail)
+    // Delete files deterministically (no readdir) — best effort, all in parallel
     try {
-        const dirs = [
-            { path: 'public/uploads/original', file: image.filename_original }, // Original is exact
-            { path: 'public/uploads/webp', file: image.filename_webp, prefix: safePrefix },
-            { path: 'public/uploads/avif', file: image.filename_avif, prefix: safePrefix },
-            { path: 'public/uploads/jpeg', file: image.filename_jpeg, prefix: safePrefix },
-        ];
-
-        for (const dirInfo of dirs) {
-             const dirPath = path.join(process.cwd(), dirInfo.path);
-
-             if (dirInfo.file) {
-                 // Exact file deletion (original)
-                 await fs.unlink(path.join(dirPath, dirInfo.file)).catch(() => {});
-             }
-
-             const prefix = dirInfo.prefix;
-             if (prefix) {
-                 // Prefix based deletion (converted variants)
-                 try {
-                     const files = await fs.readdir(dirPath);
-                     // Delete file if it starts with the ID (e.g. "uuid.webp" or "uuid_2048.webp")
-                     const toDelete = files.filter(f => f.startsWith(prefix));
-
-                     for (const f of toDelete) {
-                         await fs.unlink(path.join(dirPath, f)).catch(() => {});
-                     }
-                 } catch {
-                     // dir might not exist or error reading
-                 }
-             }
-        }
-
+        await Promise.all([
+            fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, image.filename_original)).catch(() => {}),
+            deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp),
+            deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif),
+            deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg),
+        ]);
     } catch {
         console.error("Error deleting files");
     }
 
+    revalidatePath('/');
+    revalidatePath('/admin/dashboard');
     return { success: true };
 }
 
@@ -832,8 +865,14 @@ export async function deleteImages(ids: number[]) {
         }
     }
 
-    // Fetch all images in one query
-    const imageRecords = await db.select().from(images).where(inArray(images.id, ids));
+    // Fetch all images in one query — select only needed columns
+    const imageRecords = await db.select({
+        id: images.id,
+        filename_original: images.filename_original,
+        filename_webp: images.filename_webp,
+        filename_avif: images.filename_avif,
+        filename_jpeg: images.filename_jpeg,
+    }).from(images).where(inArray(images.id, ids));
 
     // Validate all filenames before deleting anything
     for (const image of imageRecords) {
@@ -850,6 +889,12 @@ export async function deleteImages(ids: number[]) {
     const foundIds = imageRecords.map(img => img.id);
     const notFoundCount = ids.filter(id => !foundIds.includes(id)).length;
 
+    // Remove from processing queue so queue detects deletion (matches deleteImage behavior)
+    const queueState = getProcessingQueueState();
+    for (const id of foundIds) {
+        queueState.enqueued.delete(id);
+    }
+
     // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
     if (foundIds.length > 0) {
         await db.transaction(async (tx) => {
@@ -858,37 +903,15 @@ export async function deleteImages(ids: number[]) {
         });
     }
 
-    // Clean up files for all images concurrently
+    // Clean up files deterministically (no readdir) for all images concurrently
     await Promise.all(imageRecords.map(async (image) => {
         try {
-            const imageFileId = path.basename(image.filename_webp, path.extname(image.filename_webp));
-            const safePrefix = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(imageFileId)
-                ? imageFileId
-                : null;
-
-            const dirEntries = [
-                { dirRelPath: 'public/uploads/original', file: image.filename_original },
-                { dirRelPath: 'public/uploads/webp', file: image.filename_webp, prefix: safePrefix },
-                { dirRelPath: 'public/uploads/avif', file: image.filename_avif, prefix: safePrefix },
-                { dirRelPath: 'public/uploads/jpeg', file: image.filename_jpeg, prefix: safePrefix },
-            ];
-
-            for (const dirInfo of dirEntries) {
-                const absDir = path.join(process.cwd(), dirInfo.dirRelPath);
-                if (dirInfo.file) {
-                    await fs.unlink(path.join(absDir, dirInfo.file)).catch(() => {});
-                }
-                const prefix = dirInfo.prefix;
-                if (prefix) {
-                    try {
-                        const dirFiles = await fs.readdir(absDir);
-                        const toDelete = dirFiles.filter(f => f.startsWith(prefix));
-                        await Promise.all(toDelete.map(f => fs.unlink(path.join(absDir, f)).catch(() => {})));
-                    } catch {
-                        // dir might not exist
-                    }
-                }
-            }
+            await Promise.all([
+                fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, image.filename_original)).catch(() => {}),
+                deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp),
+                deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif),
+                deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg),
+            ]);
         } catch {
             console.error(`Error deleting files for image ${image.id}`);
         }
@@ -897,22 +920,24 @@ export async function deleteImages(ids: number[]) {
     const successCount = foundIds.length;
     const errorCount = notFoundCount;
 
+    revalidatePath('/');
+    revalidatePath('/admin/dashboard');
     return { success: true, count: successCount, errors: errorCount };
 }
 
 export async function createTopic(formData: FormData) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
-    const label = formData.get('label') as string;
-    const slug = formData.get('slug') as string;
-    const orderStr = formData.get('order') as string;
-    const imageFile = formData.get('image') as File;
+    const label = formData.get('label')?.toString() ?? '';
+    const slug = formData.get('slug')?.toString() ?? '';
+    const orderStr = formData.get('order')?.toString() ?? '';
+    const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
     if (!label || !slug) return { error: 'Label and Slug are required' };
 
     // Validate and sanitize order (default to 0, limit range)
     let order = parseInt(orderStr, 10);
-    if (isNaN(order)) order = 0;
+    if (Number.isNaN(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order)); // Limit to reasonable range
 
     // Validate slug format
@@ -929,8 +954,8 @@ export async function createTopic(formData: FormData) {
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
              imageFilename = await processTopicImage(imageFile);
-         } catch {
-             // If image processing fails, continue without image but maybe warn?
+         } catch (e) {
+             console.warn('Topic image processing failed, continuing without image:', e);
              // For now, fail safely without image
          }
     }
@@ -947,10 +972,11 @@ export async function createTopic(formData: FormData) {
         revalidatePath('/admin/categories');
         revalidatePath('/');
         return { success: true };
-    } catch (e: any) {
-        if (e?.code === 'ER_DUP_ENTRY' || e?.cause?.code === 'ER_DUP_ENTRY') {
+    } catch (e: unknown) {
+        if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
             return { error: 'Topic slug already exists' };
         }
+        console.error('Failed to create topic', e);
         return { error: 'Failed to create topic' };
     }
 }
@@ -964,27 +990,19 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         return { error: t('invalidCurrentSlug') };
     }
 
-    const label = formData.get('label') as string;
-    const slug = formData.get('slug') as string;
-    const orderStr = formData.get('order') as string;
-    const imageFile = formData.get('image') as File;
+    const label = formData.get('label')?.toString() ?? '';
+    const slug = formData.get('slug')?.toString() ?? '';
+    const orderStr = formData.get('order')?.toString() ?? '';
+    const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
     if (!label || !slug) return { error: t('labelSlugRequired') };
 
     let order = parseInt(orderStr, 10);
-    if (isNaN(order)) order = 0;
+    if (Number.isNaN(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order));
 
     if (!isValidSlug(slug)) {
         return { error: t('invalidSlugFormat') };
-    }
-
-    // Check if slug changed and if new slug exists
-    if (slug !== currentSlug) {
-         const existingTopic = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
-         if (existingTopic.length > 0) {
-             return { error: 'Topic slug already exists' };
-         }
     }
 
     let imageFilename = undefined;
@@ -1024,7 +1042,11 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         revalidatePath('/admin/categories');
         revalidatePath('/');
         return { success: true };
-    } catch {
+    } catch (e: unknown) {
+         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
+             return { error: 'Topic slug already exists' };
+         }
+         console.error('Failed to update topic', e);
          return { error: 'Failed to update topic' };
     }
 }
@@ -1038,17 +1060,24 @@ export async function deleteTopic(slug: string) {
     }
 
     try {
-        const headerImages = await db.select().from(images).where(eq(images.topic, slug)).limit(1);
-        if (headerImages.length > 0) {
-            return { error: t('cannotDeleteCategoryWithImages') };
-        }
-
-        await db.delete(topics).where(eq(topics.slug, slug));
+        // Wrap check + delete in a transaction to prevent TOCTOU race
+        // (image could be added between the check and delete otherwise)
+        await db.transaction(async (tx) => {
+            const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, slug)).limit(1);
+            if (headerImages.length > 0) {
+                throw new Error('HAS_IMAGES');
+            }
+            await tx.delete(topics).where(eq(topics.slug, slug));
+        });
         revalidatePath('/admin/categories');
         revalidatePath('/');
 
         return { success: true };
-    } catch {
+    } catch (e) {
+         if (e instanceof Error && e.message === 'HAS_IMAGES') {
+             return { error: t('cannotDeleteCategoryWithImages') };
+         }
+         console.error('Failed to delete topic', e);
          return { error: t('failedToDeleteTopic') };
     }
 }
@@ -1074,8 +1103,8 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
 
         revalidatePath('/admin/categories');
         return { success: true };
-    } catch (e: any) {
-        if (e?.code === 'ER_DUP_ENTRY' || e?.cause?.code === 'ER_DUP_ENTRY') {
+    } catch (e: unknown) {
+        if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
             return { error: t('aliasAlreadyExists') };
         }
         return { error: t('invalidAliasFormat') };
@@ -1114,7 +1143,8 @@ export async function createPhotoShareLink(imageId: number) {
         return { error: 'Invalid image ID' };
     }
 
-    const [image] = await db.select().from(images).where(eq(images.id, imageId));
+    const [image] = await db.select({ id: images.id, share_key: images.share_key })
+        .from(images).where(eq(images.id, imageId));
     if (!image) return { error: 'Image not found' };
 
     if (image.share_key) {
@@ -1184,17 +1214,13 @@ export async function createGroupShareLink(imageIds: number[]) {
                 const [result] = await tx.insert(sharedGroups)
                     .values({ key: groupKey });
 
-                const group = { id: result.insertId, key: groupKey };
-
-                if (!group) {
-                    throw new Error('Failed to create group');
-                }
+                const groupId = result.insertId;
 
                 await tx.insert(sharedGroupImages)
                     .ignore()
                     .values(
                         uniqueImageIds.map((imgId) => ({
-                            groupId: group.id,
+                            groupId: groupId,
                             imageId: imgId,
                         }))
                     );
@@ -1284,15 +1310,15 @@ export async function deleteTag(id: number) {
     }
 }
 
-export async function updatePassword(prevState: any, formData: FormData) {
+export async function updatePassword(prevState: { error?: string; success?: boolean; message?: string } | null, formData: FormData) {
     const currentUser = await getCurrentUser();
     if (!currentUser) {
         return { error: 'Unauthorized' };
     }
 
-    const currentPassword = formData.get('currentPassword') as string;
-    const newPassword = formData.get('newPassword') as string;
-    const confirmPassword = formData.get('confirmPassword') as string;
+    const currentPassword = formData.get('currentPassword')?.toString() ?? '';
+    const newPassword = formData.get('newPassword')?.toString() ?? '';
+    const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
 
     if (!currentPassword || !newPassword || !confirmPassword) {
         return { error: 'All fields are required' };
@@ -1306,9 +1332,19 @@ export async function updatePassword(prevState: any, formData: FormData) {
         return { error: 'New password must be at least 8 characters long' };
     }
 
+    if (newPassword.length > 1024) {
+        return { error: 'Password is too long (max 1024 characters)' };
+    }
+
     try {
+        // Fetch user with hash for password verification (getCurrentUser no longer returns hash)
+        const userWithHash = await getAdminUserWithHash(currentUser.id);
+        if (!userWithHash) {
+            return { error: 'Unauthorized' };
+        }
+
         // Verify current password
-        const match = await argon2.verify(currentUser.password_hash, currentPassword);
+        const match = await argon2.verify(userWithHash.password_hash, currentPassword);
 
         if (!match) {
             return { error: 'Incorrect current password' };
@@ -1336,7 +1372,7 @@ export async function updatePassword(prevState: any, formData: FormData) {
         return { success: true, message: 'Password updated successfully.' };
 
     } catch (e) {
-        console.error("Failed to update password", e);
+        console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
         return { error: 'Failed to update password' };
     }
 }
@@ -1504,13 +1540,14 @@ export async function getAdminUsers() {
 export async function createAdminUser(formData: FormData) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
-    const username = formData.get('username') as string;
-    const password = formData.get('password') as string;
+    const username = formData.get('username')?.toString() ?? '';
+    const password = formData.get('password')?.toString() ?? '';
 
     if (!username || username.length < 3) return { error: 'Username must be at least 3 chars' };
     if (username.length > 64) return { error: 'Username is too long (max 64 chars)' };
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: 'Username can only contain letters, numbers, underscores, and hyphens' };
     if (!password || password.length < 8) return { error: 'Password must be at least 8 chars' };
+    if (password.length > 1024) return { error: 'Password is too long (max 1024 chars)' };
 
     try {
         const hash = await argon2.hash(password);
@@ -1521,8 +1558,8 @@ export async function createAdminUser(formData: FormData) {
 
         revalidatePath('/admin/dashboard');
         return { success: true };
-    } catch (e: any) {
-        if (e.code === 'ER_DUP_ENTRY' || e.message?.includes('users.username')) {
+    } catch (e: unknown) {
+        if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('users.username'))) {
             return { error: 'Username already exists' };
         }
         console.error('Create user failed', e);
@@ -1543,32 +1580,42 @@ export async function deleteAdminUser(id: number) {
         return { error: 'Cannot delete your own account' };
     }
 
-    // Prevent deleting the last admin
-    const [adminCount] = await db.select({ count: sql<number>`count(*)` }).from(adminUsers);
-    if (Number(adminCount.count) <= 1) {
-        return { error: 'Cannot delete the last admin user' };
-    }
-
+    // Atomically check last-admin and delete inside a transaction to prevent TOCTOU race
     try {
-        await db.delete(adminUsers).where(eq(adminUsers.id, id));
+        await db.transaction(async (tx) => {
+            const [adminCount] = await tx.select({ count: sql<number>`count(*)` }).from(adminUsers);
+            if (Number(adminCount.count) <= 1) {
+                throw new Error('LAST_ADMIN');
+            }
+            await tx.delete(adminUsers).where(eq(adminUsers.id, id));
+        });
         revalidatePath('/admin/dashboard');
         return { success: true };
-    } catch (e) {
+    } catch (e: unknown) {
+        if (e instanceof Error && e.message === 'LAST_ADMIN') {
+            return { error: 'Cannot delete the last admin user' };
+        }
         console.error('Delete user failed', e);
         return { error: 'Failed to delete user' };
     }
 }
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
+    // Validate slug format before passing to data layer (defense in depth)
+    if (topicSlug && (!isValidSlug(topicSlug))) return [];
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
     const safeOffset = Math.max(Number(offset) || 0, 0);
-    const images = await getImages(topicSlug, tagSlugs, safeLimit, safeOffset);
+    // Cap maximum offset to prevent deep pagination DoS
+    if (safeOffset > 10000) return [];
+    // Cap tag array to prevent complex query DoS
+    const safeTags = (tagSlugs || []).slice(0, 20);
+    const images = await getImages(topicSlug, safeTags, safeLimit, safeOffset);
     return images;
 }
 
 export async function searchImagesAction(query: string) {
-    if (!query || query.trim().length < 2) return [];
+    if (!query || typeof query !== 'string' || query.length > 1000) return [];
+    if (query.trim().length < 2) return [];
     const safeQuery = query.trim().slice(0, 200);
-    const { searchImages } = await import('@/lib/data');
     return searchImages(safeQuery, 20);
 }

@@ -55,11 +55,20 @@ export async function getTopicsWithAliases() {
         db.select().from(topicAliases),
     ]);
 
+    // Use Map for O(1) alias lookup instead of O(N*M) nested filter
+    const aliasMap = new Map<string, string[]>();
+    for (const a of allAliases) {
+        const existing = aliasMap.get(a.topicSlug);
+        if (existing) {
+            existing.push(a.alias);
+        } else {
+            aliasMap.set(a.topicSlug, [a.alias]);
+        }
+    }
+
     return allTopics.map(topic => ({
         ...topic,
-        aliases: allAliases
-            .filter(a => a.topicSlug === topic.slug)
-            .map(a => a.alias)
+        aliases: aliasMap.get(topic.slug) ?? []
     }));
 }
 
@@ -153,27 +162,9 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         conditions.push(inArray(images.id, imageIdsWithAllTags));
     }
 
-    if (conditions.length > 0) {
-        const query = db.select({
-            ...selectFields,
-            tag_names: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name})`
-        })
-            .from(images)
-            .leftJoin(imageTags, eq(images.id, imageTags.imageId))
-            .leftJoin(tags, eq(imageTags.tagId, tags.id))
-            .where(and(...conditions))
-            .groupBy(images.id)
-            .orderBy(desc(images.capture_date), desc(images.created_at));
-
-        if (limit > 0) {
-            return query.limit(limit).offset(offset);
-        }
-        return query;
-    }
-
-    const query = db.select({
+    const baseQuery = db.select({
         ...selectFields,
-        tag_names: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name})`
+        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -181,10 +172,13 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at));
 
-    if (limit > 0) {
-        return query.limit(limit).offset(offset);
-    }
-    return query;
+    const query = conditions.length > 0
+        ? baseQuery.where(and(...conditions))
+        : baseQuery;
+
+    // Enforce a hard max to prevent unbounded result sets that can OOM the server.
+    const effectiveLimit = limit > 0 ? Math.min(limit, 500) : 500;
+    return query.limit(effectiveLimit).offset(offset);
 }
 
 export async function getImage(id: number) {
@@ -252,7 +246,9 @@ export async function getImage(id: number) {
             .orderBy(asc(images.capture_date), asc(images.created_at), asc(images.id))
             .limit(1),
 
-        // Next: Older image by (capture_date, created_at, id) — matches gallery grid sort order
+        // Next: Older image by (capture_date, created_at, id) — matches gallery grid sort order.
+        // When capture_date is NULL, FALSE is intentional: in MySQL DESC sort, NULLs sort last,
+        // so there are no "older" images by capture_date — only created_at/id tiebreakers apply.
         db.select({ id: images.id })
             .from(images)
             .where(
@@ -288,8 +284,8 @@ export async function getImage(id: number) {
     return {
         ...image,
         tags: imageTagsResult,
-        prevId: prevImage?.id || null,
-        nextId: nextImage?.id || null
+        prevId: prevImage?.id ?? null,
+        nextId: nextImage?.id ?? null
     };
 }
 
@@ -312,13 +308,14 @@ export async function getImageByShareKey(key: string) {
     const image = result[0];
     if (!image) return null;
 
+    // Fetch tags for this image
     const imageTagsResult = await db.select({
-        slug: tags.slug,
-        name: tags.name
-    })
-    .from(imageTags)
-    .innerJoin(tags, eq(imageTags.tagId, tags.id))
-    .where(eq(imageTags.imageId, image.id));
+            slug: tags.slug,
+            name: tags.name
+        })
+        .from(imageTags)
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(eq(imageTags.imageId, image.id));
 
     return {
         ...image,
@@ -346,7 +343,8 @@ export async function getSharedGroup(key: string) {
             eq(sharedGroupImages.groupId, group.id),
             eq(images.processed, true)
         )
-    );
+    )
+    .limit(100);
 
     return {
         ...group,
@@ -357,21 +355,40 @@ export async function getSharedGroup(key: string) {
 export async function getTopicBySlug(slug: string) {
     if (!/^[a-z0-9_-]+$/i.test(slug)) return null;
 
-    // Check direct topic match
-    const [topic] = await db.select().from(topics).where(eq(topics.slug, slug)).limit(1);
-    if (topic) return topic;
+    // Single query: direct match OR alias resolution via LEFT JOIN
+    const [result] = await db
+        .select({
+            slug: topics.slug,
+            label: topics.label,
+            order: topics.order,
+            image_filename: topics.image_filename,
+        })
+        .from(topics)
+        .leftJoin(topicAliases, eq(topics.slug, topicAliases.topicSlug))
+        .where(or(eq(topics.slug, slug), eq(topicAliases.alias, slug)))
+        .limit(1);
 
-    // Check aliases
-    const [alias] = await db.select().from(topicAliases).where(eq(topicAliases.alias, slug)).limit(1);
-    if (alias) {
-        const [resolvedTopic] = await db.select().from(topics).where(eq(topics.slug, alias.topicSlug)).limit(1);
-        return resolvedTopic || null;
-    }
-
-    return null;
+    return result || null;
 }
 
-export async function searchImages(query: string, limit: number = 20): Promise<any[]> {
+interface SearchResult {
+    id: number;
+    title: string | null;
+    description: string | null;
+    filename_jpeg: string;
+    filename_webp: string;
+    filename_avif: string;
+    width: number;
+    height: number;
+    topic: string;
+    camera_model: string | null;
+    capture_date: string | null;
+    blur_data_url: string | null;
+}
+
+export type { SearchResult };
+
+export async function searchImages(query: string, limit: number = 20): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
 
     const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
@@ -439,7 +456,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<a
 
     // Deduplicate by id
     const seen = new Set<number>();
-    const combined: any[] = [];
+    const combined: SearchResult[] = [];
     for (const r of [...results, ...tagResults]) {
         if (!seen.has(r.id)) {
             seen.add(r.id);
@@ -448,6 +465,17 @@ export async function searchImages(query: string, limit: number = 20): Promise<a
     }
 
     return combined.slice(0, limit);
+}
+
+/** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns, no limit */
+export async function getImageIdsForSitemap() {
+    return db.select({
+        id: images.id,
+        created_at: images.created_at,
+    })
+    .from(images)
+    .where(eq(images.processed, true))
+    .orderBy(desc(images.created_at));
 }
 
 export { adminSelectFields };

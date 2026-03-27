@@ -246,7 +246,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                                 const previewUrl = previewUrls.get(fileId) || '';
 
                                 return (
-                                <Card key={i} className="relative group border bg-muted/30">
+                                <Card key={fileId} className="relative group border bg-muted/30">
                                     <Button
                                         variant="ghost"
                                         size="icon"

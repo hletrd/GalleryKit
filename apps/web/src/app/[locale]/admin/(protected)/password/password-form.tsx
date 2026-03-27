@@ -34,7 +34,7 @@ import { useTranslation } from "@/components/i18n-provider";
 // ... (keep ActionState type and initialState)
 
 export function PasswordForm() {
-    const [state, formAction, isPending] = useActionState(updatePassword as any, startState);
+    const [state, formAction, isPending] = useActionState(updatePassword, startState);
     const { t } = useTranslation();
 
     return (

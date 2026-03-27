@@ -5,9 +5,9 @@ import { ImageManager } from "@/components/image-manager";
 import { useTranslation } from "@/components/i18n-provider";
 
 interface DashboardClientProps {
-    images: any;
-    topics: any;
-    tags: any;
+    images: { id: number; filename_avif: string; title: string | null; topic: string | null; created_at: string | Date | null; tag_names?: string | null; user_filename?: string | null; description?: string | null }[];
+    topics: { slug: string; label: string }[];
+    tags: { id: number; name: string; slug: string }[];
 }
 
 export function DashboardClient({ images, topics, tags }: DashboardClientProps) {
@@ -32,9 +32,6 @@ export function DashboardClient({ images, topics, tags }: DashboardClientProps) 
                 </div>
             </div>
 
-            {/* <div className="border-t pt-8">
-                 <AdminUserManager users={adminUsers} />
-            </div> */}
         </div>
     );
 }

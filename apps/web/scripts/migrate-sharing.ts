@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Database } from 'bun:sqlite';
 
 const db = new Database('sqlite.db');

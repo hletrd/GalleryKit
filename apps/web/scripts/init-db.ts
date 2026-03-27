@@ -104,7 +104,7 @@ async function run() {
         // Check for missing user_filename column in existing images table
         try {
             const [columns] = await connection.query(`SHOW COLUMNS FROM images LIKE 'user_filename'`);
-            // @ts-ignore
+            // @ts-expect-error -- mysql2 query returns unknown tuple
             if (Array.isArray(columns) && columns.length === 0) {
                  console.log('[Migration] Adding missing column user_filename to images...');
                  await connection.query(`ALTER TABLE images ADD COLUMN \`user_filename\` varchar(255) DEFAULT NULL;`);

@@ -17,22 +17,16 @@ import { ImageZoom } from '@/components/image-zoom';
 import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
+import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
 
 import { useRouter } from 'next/navigation';
 
 interface PhotoViewerProps {
-    images: any[];
+    images: ImageDetail[];
     initialImageId: number;
-    tags: any[];
+    tags: TagInfo[];
     prevId?: number | null;
     nextId?: number | null;
-}
-
-function hasExifData(val: any): boolean {
-    if (val === undefined || val === null) return false;
-    if (typeof val === 'string') return val.trim().length > 0;
-    if (typeof val === 'number') return val > 0;
-    return false;
 }
 
 export default function PhotoViewer({ images, initialImageId, prevId, nextId }: PhotoViewerProps) {
@@ -51,11 +45,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
 
     // Derived state: visible if pinned OR if timer hasn't expired yet
     const showInfo = isPinned || timerShowInfo;
-    const downloadFilename = image?.filename_original || image?.filename_jpeg;
+    const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
-    const downloadHref = image?.filename_original
-        ? `/uploads/original/${image.filename_original}`
-        : (image?.filename_jpeg ? `/uploads/jpeg/${image.filename_jpeg}` : null);
+    const downloadHref = image?.filename_jpeg ? `/uploads/jpeg/${image.filename_jpeg}` : null;
 
     const navigate = useCallback((direction: number) => {
         const newIndex = currentIndex + direction;
@@ -176,10 +168,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                             <div className="w-full h-full flex items-center justify-center">
                                 <ImageZoom className="w-full h-full flex items-center justify-center">
                                     {(() => {
-                                        const getAltText = (img: any) => {
+                                        const getAltText = (img: ImageDetail) => {
                                             if (img.description && img.description.trim()) return img.description;
                                             if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
-                                            if (img.tags && img.tags.length > 0) return img.tags.map((t: any) => t.name).join(', ');
+                                            if (img.tags && img.tags.length > 0) return img.tags.map((t: TagInfo) => t.name).join(', ');
                                             return 'Photo';
                                         };
                                         // Extract base UUID from filename (e.g. "uuid.webp" -> "uuid")
@@ -250,7 +242,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
 
                                 {image.tags && image.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-2 mt-4 mb-2">
-                                        {image.tags.map((tag: any) => (
+                                        {image.tags.map((tag: TagInfo) => (
                                             <Badge key={tag.slug} variant="secondary" className="text-xs">
                                                 #{tag.name}
                                             </Badge>
@@ -262,7 +254,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                     {image.title && image.title.trim() !== ''
                                         ? image.title
                                         : (image.tags && image.tags.length > 0
-                                            ? image.tags.map((t: any) => `#${t.name}`).join(' ')
+                                            ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
                                             : (image.user_filename || t('imageManager.untitled')))}
                                 </CardTitle>
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
@@ -273,13 +265,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                     {hasExifData(image.camera_model) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.camera')}</p>
-                                            <p className="font-medium truncate" title={image.camera_model}>{image.camera_model}</p>
+                                            <p className="font-medium truncate" title={nu(image.camera_model)}>{image.camera_model}</p>
                                         </div>
                                     )}
                                     {hasExifData(image.lens_model) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.lens')}</p>
-                                            <p className="font-medium truncate" title={image.lens_model}>{image.lens_model}</p>
+                                            <p className="font-medium truncate" title={nu(image.lens_model)}>{image.lens_model}</p>
                                         </div>
                                     )}
                                     {hasExifData(image.focal_length) && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { deleteImage, deleteImages, createGroupShareLink } from '@/app/actions';
+import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, updateImageMetadata, addTagToImage, removeTagFromImage } from '@/app/actions';
 import { TagInput } from "@/components/tag-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,8 +45,8 @@ interface ImageType {
     filename_avif: string;
     title: string | null;
     topic: string | null;
-    created_at: string;
-    tag_names?: string; // It comes from SQL query as string
+    created_at: string | Date | null;
+    tag_names?: string | null; // GROUP_CONCAT returns null when no tags
     user_filename?: string | null;
     description?: string | null;
 }
@@ -159,7 +159,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
 
     const handleBatchAddTag = async () => {
          if (!tagInput.trim()) return;
-         const res = await import('@/app/actions').then(mod => mod.batchAddTags(Array.from(selectedIds), tagInput));
+         const res = await batchAddTags(Array.from(selectedIds), tagInput);
          if (res?.success) {
              toast.success(t('imageManager.batchAddSuccess'));
              setIsAddingTag(false);
@@ -180,7 +180,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
         if (!editingImage) return;
         setIsSavingEdit(true);
         try {
-            const res = await import('@/app/actions').then(mod => mod.updateImageMetadata(editingImage.id, editTitle, editDescription));
+            const res = await updateImageMetadata(editingImage.id, editTitle, editDescription);
             if (res.success) {
                 toast.success(t('imageManager.updateSuccess') || "Image updated");
                 setImages(prev => prev.map(img => img.id === editingImage.id ? { ...img, title: editTitle, description: editDescription } : img));
@@ -324,48 +324,47 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                             selectedTags={image.tag_names ? image.tag_names.split(',').filter(Boolean) : []}
                                             onTagsChange={async (newTags) => {
                                                 const oldTags = image.tag_names ? image.tag_names.split(',').filter(Boolean) : [];
-                                                // Determine added or removed
                                                 const added = newTags.filter(t => !oldTags.includes(t));
                                                 const removed = oldTags.filter(t => !newTags.includes(t));
+                                                let allSucceeded = true;
 
-                                                if (added.length > 0) {
-                                                    // Handle add (one by one usually)
-                                                    for (const tag of added) {
-                                                        const res = await import('@/app/actions').then(mod => mod.addTagToImage(image.id, tag));
-                                                        if (res?.success) {
-                                                            toast.success(t('imageManager.tagAdded'));
-                                                        } else {
-                                                            toast.error(res?.error || t('imageManager.batchAddFailed'));
-                                                        }
+                                                for (const tag of added) {
+                                                    const res = await addTagToImage(image.id, tag);
+                                                    if (res?.success) {
+                                                        toast.success(t('imageManager.tagAdded'));
+                                                    } else {
+                                                        toast.error(res?.error || t('imageManager.batchAddFailed'));
+                                                        allSucceeded = false;
                                                     }
                                                 }
 
-                                                if (removed.length > 0) {
-                                                    for (const tag of removed) {
-                                                        const res = await import('@/app/actions').then(mod => mod.removeTagFromImage(image.id, tag));
-                                                        if (res?.success) {
-                                                            toast.success(t('imageManager.tagRemoved'));
-                                                        } else {
-                                                            toast.error(res?.error || t('imageManager.deleteFailed'));
-                                                        }
+                                                for (const tag of removed) {
+                                                    const res = await removeTagFromImage(image.id, tag);
+                                                    if (res?.success) {
+                                                        toast.success(t('imageManager.tagRemoved'));
+                                                    } else {
+                                                        toast.error(res?.error || t('imageManager.deleteFailed'));
+                                                        allSucceeded = false;
                                                     }
                                                 }
 
-                                                // Update local state optimistically or just wait for revalidatePath from server action?
-                                                // Ideally we update local state to avoid flicker.
-                                                setImages(prev => prev.map(img => {
-                                                    if (img.id === image.id) {
-                                                        return { ...img, tag_names: newTags.join(',') };
-                                                    }
-                                                    return img;
-                                                }));
+                                                // Only update local state if all operations succeeded;
+                                                // otherwise let revalidation bring the correct state.
+                                                if (allSucceeded) {
+                                                    setImages(prev => prev.map(img => {
+                                                        if (img.id === image.id) {
+                                                            return { ...img, tag_names: newTags.join(',') };
+                                                        }
+                                                        return img;
+                                                    }));
+                                                }
                                             }}
                                             placeholder={t('imageManager.addTag')}
                                             className="w-full"
                                         />
                                     </div>
                                 </TableCell>
-                                <TableCell suppressHydrationWarning>{new Date(image.created_at).toLocaleDateString()}</TableCell>
+                                <TableCell suppressHydrationWarning>{image.created_at ? new Date(image.created_at).toLocaleDateString() : '-'}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
                                         <Button variant="ghost" size="icon" onClick={() => startEdit(image)}>

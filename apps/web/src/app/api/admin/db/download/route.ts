@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
         }
 
         const stream = createReadStream(filePath);
-        const webStream = Readable.toWeb(stream as any) as ReadableStream;
+        const webStream = Readable.toWeb(stream) as ReadableStream;
 
         return new NextResponse(webStream, {
             headers: {

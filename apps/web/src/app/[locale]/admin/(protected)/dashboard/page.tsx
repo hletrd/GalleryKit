@@ -4,7 +4,7 @@ import { DashboardClient } from "./dashboard-client";
 export const dynamic = 'force-dynamic';
 
 export default async function AdminDashboard() {
-    const images = await getImages(undefined, undefined, 0, 0, true);
+    const images = await getImages(undefined, undefined, 200, 0, true);
     const topics = await getTopics();
     const tags = await getTags();
 
