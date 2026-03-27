@@ -1592,6 +1592,8 @@ export async function deleteAdminUser(id: number) {
             if (Number(adminCount.count) <= 1) {
                 throw new Error('LAST_ADMIN');
             }
+            // Explicitly delete sessions before user (defense in depth alongside FK cascade)
+            await tx.delete(sessions).where(eq(sessions.userId, id));
             await tx.delete(adminUsers).where(eq(adminUsers.id, id));
         });
         revalidatePath('/admin/dashboard');

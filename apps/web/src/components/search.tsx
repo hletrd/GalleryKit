@@ -47,6 +47,8 @@ export function Search() {
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                // Don't toggle search when user is typing in an input/textarea
+                if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
                 e.preventDefault();
                 setIsOpen(prev => !prev);
             }
