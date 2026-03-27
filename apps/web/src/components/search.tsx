@@ -78,15 +78,23 @@ export function Search() {
         );
     }
 
+    // Lock body scroll when search is open
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+
     return (
         <>
             {/* Backdrop */}
             <div
                 className="fixed inset-0 bg-black/50 z-40"
                 onClick={() => setIsOpen(false)}
+                aria-hidden="true"
             />
             {/* Search Panel */}
-            <div className="fixed top-0 left-0 right-0 z-50 p-4 sm:p-6 sm:pt-[10vh]">
+            <div role="dialog" aria-modal="true" aria-label="Search photos" className="fixed top-0 left-0 right-0 z-50 p-4 sm:p-6 sm:pt-[10vh]">
                 <div className="mx-auto max-w-xl bg-card border rounded-xl shadow-2xl overflow-hidden">
                     <div className="flex items-center gap-2 p-4 border-b">
                         <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />

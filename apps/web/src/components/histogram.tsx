@@ -216,6 +216,8 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                             width={200}
                             height={100}
                             className="w-full h-full"
+                            role="img"
+                            aria-label={`Color histogram, ${MODE_LABELS[mode]} mode`}
                         />
                     </div>
                     <button

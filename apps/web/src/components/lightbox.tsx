@@ -16,7 +16,7 @@ interface LightboxProps {
 
 export function LightboxTrigger({ onClick }: { onClick: () => void }) {
     return (
-        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8">
+        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8" aria-label="Open fullscreen view">
             <Maximize className="h-4 w-4" />
         </Button>
     );
@@ -118,8 +118,18 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         ? {}
         : { transition: 'opacity 0.2s ease-in-out' };
 
+    // Lock body scroll when lightbox is open
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, []);
+
     return (
         <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Photo lightbox"
             className="fixed inset-0 z-50 flex items-center justify-center bg-black"
             onClick={handleBackdropClick}
             onMouseMove={handleMouseMove}
