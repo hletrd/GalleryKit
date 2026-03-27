@@ -424,7 +424,8 @@ export async function processImageFormats(
         const stats = await fs.stat(path.join(UPLOAD_DIR_WEBP, filenameWebp));
         if (stats.size === 0) throw new Error('Generated WebP file is empty');
     } catch (e) {
-        throw new Error(`File verification failed: ${e}`);
+        console.error('File verification failed:', e);
+        throw new Error('Image processing failed: generated file could not be verified');
     }
 }
 

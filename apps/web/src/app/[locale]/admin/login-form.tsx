@@ -33,8 +33,8 @@ export function LoginForm() {
                 </CardHeader>
                 <CardContent>
                     <form action={formAction} className="space-y-4">
-                        <Input type="text" name="username" placeholder={t('username')} required autoFocus />
-                        <Input type="password" name="password" placeholder={t('password')} required />
+                        <Input type="text" name="username" placeholder={t('username')} required autoFocus autoComplete="username" />
+                        <Input type="password" name="password" placeholder={t('password')} required autoComplete="current-password" />
                         <Button type="submit" className="w-full" disabled={isPending}>
                             {isPending ? t('submitting') : t('submit')}
                         </Button>

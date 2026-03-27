@@ -1352,7 +1352,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         }
 
         // Hash new password
-        const newHash = await argon2.hash(newPassword);
+        const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
 
         // Update password
         await db.update(adminUsers)
@@ -1551,7 +1551,7 @@ export async function createAdminUser(formData: FormData) {
     if (password.length > 1024) return { error: 'Password is too long (max 1024 chars)' };
 
     try {
-        const hash = await argon2.hash(password);
+        const hash = await argon2.hash(password, { type: argon2.argon2id });
         await db.insert(adminUsers).values({
             username,
             password_hash: hash

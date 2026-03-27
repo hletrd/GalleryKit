@@ -132,10 +132,14 @@ console.log(`[Migration] Starting migration...`);
             let password = process.env.ADMIN_PASSWORD;
             if (!password || password.length < 8) {
                 password = crypto.randomBytes(16).toString('base64url');
-                console.log(`[Migration] Generated random admin password: ${password}`);
-                console.log(`[Migration] SAVE THIS PASSWORD. It will not be shown again.`);
+                // Write password to a restricted temp file instead of stdout/Docker logs
+                const tempPwdPath = '/tmp/admin-password.txt';
+                require('fs').writeFileSync(tempPwdPath, password, { mode: 0o600 });
+                console.log(`[Migration] Generated random admin password. Saved to ${tempPwdPath}`);
+                console.log(`[Migration] Retrieve: docker exec <container> cat ${tempPwdPath}`);
+                console.log(`[Migration] Delete after saving: docker exec <container> rm ${tempPwdPath}`);
             }
-            const hash = await argon2.hash(password);
+            const hash = await argon2.hash(password, { type: argon2.argon2id });
 
             await connection.query('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)', ['admin', hash]);
             console.log('[Migration] Admin user created.');
