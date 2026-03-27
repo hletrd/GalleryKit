@@ -176,7 +176,7 @@
   },
   "login": {
     "title": "Admin Login",
-    "description": "Sign in to manage gallery.",
+    "description": "Sign in to manage GalleryKit.",
     "username": "Username",
     "password": "Password",
     "submit": "Login",
@@ -215,11 +215,11 @@
     "flash": "Flash",
     "bitDepth": "Bit Depth",
     "topics": {
-      "default": "Gallery"
+      "default": "GalleryKit"
     }
   },
   "shared": {
-    "viewGallery": "View Gallery",
+    "viewGallery": "View GalleryKit",
     "sharedPhoto": "Shared Photo",
     "sharedCollection": "Shared Collection"
   },

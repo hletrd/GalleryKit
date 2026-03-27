@@ -12,11 +12,11 @@ export async function GET(req: NextRequest) {
     // Default validitiy 60 seocnds
     const cacheControl = 'public, max-age=60, stale-while-revalidate=60';
 
-    if (!topic) {
-      return new Response('Missing topic param', { status: 400 });
+    if (!topic || topic.length > 200) {
+      return new Response('Missing or invalid topic param', { status: 400 });
     }
 
-    const tagList = tags ? tags.split(',').filter(Boolean) : [];
+    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.slice(0, 100)) : [];
 
     return new ImageResponse(
       (
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
                 letterSpacing: '0.1em',
               }}
             >
-              Gallery
+              GalleryKit
             </div>
 
             {/* Topic Title */}
@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
                 textAlign: 'center',
               }}
             >
-              {topic.charAt(0).toUpperCase() + topic.slice(1)}
+              {(() => { const t = topic.length > 50 ? topic.slice(0, 50) + '...' : topic; return t.charAt(0).toUpperCase() + t.slice(1); })()}
             </div>
 
             {/* Tags */}
@@ -124,10 +124,13 @@ export async function GET(req: NextRequest) {
     );
   } catch (e: unknown) {
     if (e instanceof Error) {
-        console.log(`${e.message}`);
+        console.error(`${e.message}`);
     }
     return new Response(`Failed to generate the image`, {
       status: 500,
+      headers: {
+        'Cache-Control': 'public, max-age=60',
+      },
     });
   }
 }

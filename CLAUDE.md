@@ -1,8 +1,8 @@
-# CLAUDE.md — AI Assistant Context for Gallery
+# CLAUDE.md — AI Assistant Context for GalleryKit
 
 ## Project Overview
 
-**ATIK.KR Photo Gallery** is a high-performance, self-hosted photo gallery application built with Next.js 16. It features a masonry grid layout, automatic image optimization, EXIF extraction, and multi-user admin authentication.
+**GalleryKit** is a high-performance, self-hosted photo gallery application built with Next.js 16. It features a masonry grid layout, automatic image optimization, EXIF extraction, and multi-user admin authentication.
 
 **Demo:** https://gallery.atik.kr
 
@@ -19,7 +19,7 @@
 ## Repository Structure
 
 ```
-gallery/
+gallerykit/
 ├── apps/web/                 # Main Next.js application
 │   ├── src/
 │   │   ├── app/              # App Router pages and API routes

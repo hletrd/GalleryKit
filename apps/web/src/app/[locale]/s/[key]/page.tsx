@@ -12,7 +12,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     return {
         title: image.title && !isTitleFilename ? image.title : 'Shared Photo',
-        description: image.description || 'View this photo on Gallery',
+        description: image.description || 'View this photo on GalleryKit',
         openGraph: {
             images: [`/uploads/webp/${image.filename_webp.replace('.webp', '_2048.webp')}`]
         }
@@ -31,7 +31,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
         <>
             <div className="flex items-center justify-between mb-4 px-4 pt-4">
                 <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
-                    ← {siteConfig.nav_title || siteConfig.title || 'Gallery'}
+                    ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                 </Link>
             </div>
             <PhotoViewer

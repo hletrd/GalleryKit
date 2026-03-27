@@ -4,8 +4,12 @@ services:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
-    container_name: gallery-web
+    container_name: gallerykit-web
     restart: always
+    # SECURITY: host networking exposes port 3000 on all interfaces, bypassing
+    # Docker isolation. Ensure the host firewall blocks external access to :3000
+    # so all traffic goes through nginx (which applies rate limiting + security headers).
+    # Alternative: use bridge networking with ports: ["127.0.0.1:3000:3000"]
     network_mode: "host"
     env_file:
       - .env.local

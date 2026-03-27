@@ -52,7 +52,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             <>
                 <div className="flex items-center justify-between mb-4 px-4 pt-4">
                     <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
-                        ← {siteConfig.nav_title || siteConfig.title || 'Gallery'}
+                        ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                     </Link>
                 </div>
                 <PhotoViewer
@@ -72,7 +72,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold">Shared Photos</h1>
                 <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
-                    ← {siteConfig.nav_title || siteConfig.title || 'Gallery'}
+                    ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                 </Link>
             </div>
             <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">

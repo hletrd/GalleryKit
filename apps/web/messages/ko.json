@@ -219,7 +219,7 @@
     }
   },
   "shared": {
-    "viewGallery": "갤러리 보기",
+    "viewGallery": "GalleryKit 보기",
     "sharedPhoto": "공유된 사진",
     "sharedCollection": "공유된 컬렉션"
   },

@@ -1,34 +1,46 @@
-# ATIK.KR Photo Gallery
+<p align="center">
+  <img src=".github/assets/logo.svg" alt="GalleryKit" width="120" height="120">
+</p>
 
-A simple, high-performance photo gallery application built with Next.js, designed for personal use.
+<h1 align="center">GalleryKit</h1>
 
-### Demo
-[https://gallery.atik.kr](https://gallery.atik.kr)
+<p align="center">
+  A high-performance, self-hosted photo gallery built with Next.js
+</p>
+
+<p align="center">
+  <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/Next.js-16-black?logo=next.js" alt="Next.js 16"></a>
+  <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19"></a>
+  <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white" alt="TypeScript 6"></a>
+  <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/Sharp-Image_Processing-99CC00?logo=sharp&logoColor=white" alt="Sharp"></a>
+  <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/MySQL-8.0+-4479A1?logo=mysql&logoColor=white" alt="MySQL 8.0+"></a>
+  <a href="https://github.com/hletrd/gallerykit"><img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker"></a>
+  <a href="https://github.com/hletrd/gallerykit/blob/master/LICENSE"><img src="https://img.shields.io/github/license/hletrd/gallerykit" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="https://gallery.atik.kr">Live Demo</a> &middot;
+  <a href="#getting-started">Getting Started</a> &middot;
+  <a href="#docker-deployment">Docker</a>
+</p>
+
+---
 
 ## Features
 
-- **Masonry Grid Layout**
-  * Displays high-resolution photos in a responsive masonry grid.
-- **Image Optimization**
-  * Automatically converts uploads to AVIF, WebP, and JPEG formats using `sharp`.
-- **Topics & Albums**
-  * Organize photos into specific topics.
-- **EXIF Data**
-  * Extracts and displays metadata including Camera, Lens, ISO, Aperture, and Location.
-- **Metadata**
-  * Tagging, titles, and descriptions for searchability.
-- **Admin Dashboard**
-  * Manage photos, users, and tags.
-  * Supports multi-user access with Argon2 authentication.
-  * Drag-and-drop upload with batch editing.
-- **Internationalization**
-  * Localization support (English and Korean included).
-- **Docker Support**
-  * Includes Dockerfile and compose setup for easy deployment.
+- **Masonry Grid Layout** -- responsive, column-balanced photo grid with infinite scroll
+- **Multi-Format Optimization** -- automatic AVIF, WebP, and JPEG conversion via Sharp pipeline
+- **Topics & Albums** -- organize photos into categories with slug aliases
+- **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS
+- **Tagging & Search** -- full metadata search across titles, descriptions, cameras, and tags
+- **Sharing** -- per-photo and group share links with Base56 short keys
+- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multi-user auth (Argon2)
+- **Internationalization** -- English and Korean (next-intl)
+- **Docker Ready** -- standalone output, single-command deployment
 
 ## Configuration
 
-The site configuration is located in `apps/web/src/site-config.json`. You can customize the following fields:
+Site configuration lives in `apps/web/src/site-config.json`:
 
 ```json
 {
@@ -48,46 +60,46 @@ The site configuration is located in `apps/web/src/site-config.json`. You can cu
 
 ## Directory Structure
 
-Key directories and configuration files:
-
-- **`apps/web`**: Main application source code.
-    - **`public/uploads`**: Stores uploaded images (AVIF, WebP, JPEG) and originals. **Ensure this directory is persistent.**
-    - **`src/site-config.json`**: Main site configuration (title, SEO, links).
-    - **`.env.local`**: Environment variables (Database credentials, secrets).
-    - **`docker-compose.yml`**: Docker Compose configuration for deployment.
+```
+gallerykit/
+├── apps/web/                 # Next.js application
+│   ├── src/
+│   │   ├── app/              # App Router (pages, API routes, server actions)
+│   │   ├── components/       # React components
+│   │   ├── db/               # Drizzle ORM schema & connection
+│   │   ├── lib/              # Utilities (image processing, data layer)
+│   │   └── i18n/             # Internationalization config
+│   ├── messages/             # Translation files (en.json, ko.json)
+│   ├── public/uploads/       # Uploaded images (persistent volume)
+│   ├── scripts/              # DB init, migration, seed scripts
+│   ├── Dockerfile            # Multi-stage production build
+│   └── docker-compose.yml    # Docker deployment config
+└── package.json              # Monorepo root (npm workspaces)
+```
 
 ## Getting Started
 
 ### Prerequisites
 
-- **Node.js** (v24 or later)
+- **Node.js** v24+
 - **npm**
-- **MySQL Server** (v8.0 or later)
+- **MySQL** v8.0+
 
 ### Installation
 
-1. Clone the repository:
-
 ```bash
-git clone https://github.com/hletrd/gallery.git
-cd gallery
-```
-
-2. Install dependencies:
-
-```bash
+git clone https://github.com/hletrd/gallerykit.git
+cd gallerykit
 npm install
 ```
 
 ### Environment Setup
 
-Ensure you have the necessary environment variables set up in `apps/web/.env.local`. You can copy the example file:
-
 ```bash
 cp apps/web/.env.local.example apps/web/.env.local
 ```
 
-Update `apps/web/.env.local` with your MySQL connection details:
+Edit `apps/web/.env.local` with your MySQL credentials:
 
 ```env
 DB_HOST=127.0.0.1
@@ -97,33 +109,43 @@ DB_PASSWORD=your_password
 DB_NAME=gallery
 ```
 
-### Running the Application
-
-To start the development server for the web application:
+### Development
 
 ```bash
 npm run dev
 ```
 
-This will start the Next.js app on [http://localhost:3000](http://localhost:3000).
+Opens at [http://localhost:3000](http://localhost:3000).
 
 ### Building
-
-To build the application:
 
 ```bash
 npm run build
 ```
 
-### Setup using Docker
+## Docker Deployment
 
-You can also run the application using Docker.
-
-1. Ensure you have `apps/web/.env.local` configured.
-2. Run the following command from the root directory:
+1. Configure `apps/web/.env.local`
+2. Run:
 
 ```bash
 docker compose -f apps/web/docker-compose.yml up -d --build
 ```
 
-The application will use the host network stack (listening on port 3000 by default).
+The application listens on port 3000.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router) |
+| UI | React 19, Tailwind CSS, Radix UI, shadcn/ui |
+| Database | MySQL 8.0+, Drizzle ORM |
+| Auth | Argon2, HMAC-SHA256 sessions |
+| Images | Sharp (parallel AVIF/WebP/JPEG pipeline) |
+| i18n | next-intl (en, ko) |
+| Deploy | Docker (standalone output) |
+
+## License
+
+See [LICENSE](LICENSE) for details.

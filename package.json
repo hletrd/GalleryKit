@@ -1,5 +1,5 @@
 {
-    "name": "atik-photo-gallery",
+    "name": "gallerykit",
     "private": true,
     "workspaces": [
         "apps/*"

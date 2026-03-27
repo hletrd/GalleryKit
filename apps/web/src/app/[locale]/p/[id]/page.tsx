@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import PhotoViewer from '@/components/photo-viewer';
 import siteConfig from "@/site-config.json";
+import { TagInfo } from '@/lib/image-types';
 
 
 // Cache for 1 week (604800s) as photo content rarely changes
@@ -27,8 +28,8 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     let keywords: string[] = [];
 
     if (hasTags) {
-        displayTitle = image.tags.map((t: any) => `#${t.name}`).join(' ');
-        keywords = image.tags.map((t: any) => t.name);
+        displayTitle = image.tags.map((t: TagInfo) => `#${t.name}`).join(' ');
+        keywords = image.tags.map((t: TagInfo) => t.name);
     } else if (image.title && !isTitleFilename) {
         displayTitle = image.title.split(/\s+/).map((word: string) => `#${word}`).join(' ');
     } else {
@@ -74,7 +75,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         return notFound();
     }
 
-    const image: any = await getImageCached(imageId);
+    const image = await getImageCached(imageId);
 
     if (!image) return notFound();
 
@@ -83,12 +84,12 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
 
     const displayTitle = hasTags
-        ? image.tags.map((t: any) => `#${t.name}`).join(' ')
+        ? image.tags.map((t: TagInfo) => `#${t.name}`).join(' ')
         : (image.title && !isTitleFilename
             ? image.title.split(/\s+/).map((word: string) => `#${word}`).join(' ')
             : 'Untitled');
 
-    const keywords = image.tags?.map((t: any) => t.name) || [];
+    const keywords = image.tags?.map((t: TagInfo) => t.name) || [];
     if (image.topic) keywords.push(image.topic);
 
     const jsonLd = {
@@ -120,16 +121,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         name: displayTitle,
         description: image.description,
         keywords: keywords.join(', '),
-        ...(image.latitude != null && image.longitude != null ? {
-            locationCreated: {
-                '@type': 'Place',
-                geo: {
-                    '@type': 'GeoCoordinates',
-                    latitude: image.latitude,
-                    longitude: image.longitude,
-                },
-            },
-        } : {}),
+        // GPS coordinates are intentionally excluded from public queries for privacy
         exifData: [
             image.camera_model && { '@type': 'PropertyValue', name: 'Camera', value: image.camera_model },
             image.lens_model && { '@type': 'PropertyValue', name: 'Lens', value: image.lens_model },
@@ -146,7 +138,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             {
                 '@type': 'ListItem',
                 position: 1,
-                name: siteConfig.title || 'Gallery',
+                name: siteConfig.title || 'GalleryKit',
                 item: process.env.BASE_URL || siteConfig.url,
             },
             image.topic && {

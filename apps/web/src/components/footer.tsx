@@ -31,7 +31,7 @@ export function Footer() {
                 </p>
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                     <Link
-                        href="https://github.com/hletrd/gallery"
+                        href="https://github.com/hletrd/gallerykit"
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-2 hover:underline"
