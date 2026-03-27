@@ -118,11 +118,20 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         ? {}
         : { transition: 'opacity 0.2s ease-in-out' };
 
-    // Lock body scroll when lightbox is open
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+    // Lock body scroll and manage focus when lightbox is open
     useEffect(() => {
         const prev = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
-        return () => { document.body.style.overflow = prev; };
+        // Move focus into lightbox on open
+        closeButtonRef.current?.focus();
+        // Store previously focused element to restore on close
+        const previouslyFocused = document.activeElement as HTMLElement | null;
+        return () => {
+            document.body.style.overflow = prev;
+            previouslyFocused?.focus();
+        };
     }, []);
 
     return (
@@ -170,6 +179,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
             >
                 {/* Close button — top right */}
                 <button
+                    ref={closeButtonRef}
                     className="pointer-events-auto absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();

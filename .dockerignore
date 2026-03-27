@@ -1,12 +1,16 @@
 node_modules
 .next
 .git
+.github
 .vscode
 **/.env*
 **/*.db
 apps/web/public/uploads
 apps/web/public/uploads/**
+apps/web/data
 build
 dist
+test/
 *.log
-
+*.md
+!apps/web/README.md

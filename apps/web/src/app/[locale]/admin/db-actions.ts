@@ -6,6 +6,8 @@ import { eq, sql } from "drizzle-orm";
 import { spawn } from "child_process";
 import fs from "fs/promises";
 import { createWriteStream, createReadStream } from "fs";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import path from "path";
 import os from "os";
 import { randomUUID } from "crypto";
@@ -164,17 +166,16 @@ export async function restoreDatabase(formData: FormData) {
         return { success: false, error: "File too large (max 500MB)" };
     }
 
-    // Write uploaded file to disk first to avoid holding up to 500MB in Node.js heap
-    // during the dangerous-pattern scan. The scan reads from disk in streaming chunks.
+    // Stream uploaded file to disk to avoid holding up to 500MB in Node.js heap.
     const tempPath = path.join(os.tmpdir(), `restore-${randomUUID()}.sql`);
     try {
-        const fileBuffer = Buffer.from(await file.arrayBuffer());
-        await fs.writeFile(tempPath, fileBuffer);
+        const webStream = file.stream();
+        const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
+        await pipeline(nodeStream, createWriteStream(tempPath));
     } catch {
         await fs.unlink(tempPath).catch(() => {});
         return { success: false, error: "Failed to save uploaded file" };
     }
-    // fileBuffer is now out of scope and eligible for GC
 
     // Validate file header: must start with mysqldump headers
     const headerBuf = Buffer.alloc(256);

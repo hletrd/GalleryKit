@@ -24,6 +24,11 @@ const poolConnection = mysql.createPool({
     ...sslConfig,
 });
 
+// Increase GROUP_CONCAT max length from default 1024 to prevent silent truncation of tag lists
+poolConnection.on('connection', (connection) => {
+    connection.query('SET group_concat_max_len = 65535');
+});
+
 export const connection = poolConnection;
 export const db = drizzle(poolConnection, { mode: "default", schema });
 export { images, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions } from './schema';

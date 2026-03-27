@@ -267,31 +267,27 @@ let cachedSessionSecret: string | null = null;
 // Mutex to prevent race condition in getSessionSecret
 let sessionSecretPromise: Promise<string> | null = null;
 
-function generateSecureSessionSecret(): string {
-    const envSecret = process.env.SESSION_SECRET?.trim();
-
-    // Enforce a minimum size to prevent weak secrets
-    if (envSecret && envSecret.length >= 32) {
-        return envSecret;
-    }
-
-    return randomBytes(32).toString('hex');
-}
-
 async function getSessionSecret(): Promise<string> {
     // Return cached value if available
     if (cachedSessionSecret) return cachedSessionSecret;
 
+    // Prefer SESSION_SECRET env var (recommended for production)
+    const envSecret = process.env.SESSION_SECRET?.trim();
+    if (envSecret && envSecret.length >= 32) {
+        cachedSessionSecret = envSecret;
+        return envSecret;
+    }
+
     // Use existing promise if another request is already fetching/generating
     if (sessionSecretPromise) return sessionSecretPromise;
 
-    // Create a new promise for this operation
+    // Fallback: fetch or generate from DB (for backwards compatibility)
     sessionSecretPromise = (async () => {
         try {
-            // Double-check cache after acquiring "lock"
             if (cachedSessionSecret) return cachedSessionSecret;
 
-            // Try fetching from DB
+            console.warn('[Security] SESSION_SECRET env var not set or too short (min 32 chars). Falling back to DB-stored secret. Set SESSION_SECRET for production use.');
+
             const setting = await db.query.adminSettings.findFirst({
                 where: eq(adminSettings.key, 'session_secret')
             });
@@ -301,11 +297,9 @@ async function getSessionSecret(): Promise<string> {
                 return setting.value;
             }
 
-            // Generate new secret
-            const newSecret = generateSecureSessionSecret();
+            // Generate new secret and store in DB
+            const newSecret = randomBytes(32).toString('hex');
 
-            // Save to DB using INSERT IGNORE to avoid overwriting
-            // existing secret if another process created one
             await db.insert(adminSettings).ignore().values({
                 key: 'session_secret',
                 value: newSecret
@@ -319,7 +313,6 @@ async function getSessionSecret(): Promise<string> {
             cachedSessionSecret = finalSetting?.value || newSecret;
             return cachedSessionSecret;
         } finally {
-            // Clear the promise so future calls can proceed
             sessionSecretPromise = null;
         }
     })();
@@ -1240,6 +1233,33 @@ export async function createGroupShareLink(imageIds: number[]) {
         }
     }
     return { error: 'Failed to create group' };
+}
+
+export async function revokePhotoShareLink(imageId: number) {
+    if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    if (!Number.isInteger(imageId) || imageId <= 0) {
+        return { error: 'Invalid image ID' };
+    }
+
+    await db.update(images)
+        .set({ share_key: null })
+        .where(eq(images.id, imageId));
+
+    return { success: true };
+}
+
+export async function deleteGroupShareLink(groupId: number) {
+    if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+        return { error: 'Invalid group ID' };
+    }
+
+    // sharedGroupImages cascade-deletes via FK
+    await db.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
+
+    return { success: true };
 }
 
 // Tag Management

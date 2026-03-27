@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, float, uniqueIndex, index, timestamp, boolean, text, bigint } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, boolean, text, bigint } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 export const topics = mysqlTable("topics", {
@@ -27,7 +27,7 @@ export const images = mysqlTable("images", {
     description: text("description"),
     user_filename: varchar("user_filename", { length: 255 }),
     share_key: varchar("share_key", { length: 255 }).unique(),
-    topic: varchar("topic", { length: 255 }).references(() => topics.slug).notNull(),
+    topic: varchar("topic", { length: 255 }).references(() => topics.slug, { onDelete: 'restrict' }).notNull(),
 
     // EXIF Data
     capture_date: varchar("capture_date", { length: 255 }),
@@ -37,8 +37,8 @@ export const images = mysqlTable("images", {
     f_number: float("f_number"),
     exposure_time: varchar("exposure_time", { length: 255 }),
     focal_length: float("focal_length"),
-    latitude: float("latitude"),
-    longitude: float("longitude"),
+    latitude: double("latitude"),
+    longitude: double("longitude"),
     color_space: varchar("color_space", { length: 255 }),
     white_balance: varchar('white_balance', { length: 50 }),
     metering_mode: varchar('metering_mode', { length: 50 }),
@@ -102,7 +102,7 @@ export const sharedGroupImages = mysqlTable("shared_group_images", {
 export const adminUsers = mysqlTable("admin_users", {
     id: int("id").primaryKey().autoincrement(),
     username: varchar("username", { length: 255 }).notNull().unique(),
-    password_hash: varchar("password_hash", { length: 255 }).notNull(),
+    password_hash: varchar("password_hash", { length: 512 }).notNull(),
     created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
