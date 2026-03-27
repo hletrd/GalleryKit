@@ -467,7 +467,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     return combined.slice(0, limit);
 }
 
-/** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns, no limit */
+/** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns */
 export async function getImageIdsForSitemap() {
     return db.select({
         id: images.id,
@@ -475,7 +475,8 @@ export async function getImageIdsForSitemap() {
     })
     .from(images)
     .where(eq(images.processed, true))
-    .orderBy(desc(images.created_at));
+    .orderBy(desc(images.created_at))
+    .limit(50000);
 }
 
 export { adminSelectFields };
