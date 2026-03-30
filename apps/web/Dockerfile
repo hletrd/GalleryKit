@@ -31,9 +31,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 WORKDIR /app/apps/web
-# Ensure no local env files interfere with the build
-# Copy example config if actual config doesn't exist
-RUN cp src/site-config.example.json src/site-config.json || true
+# Use real site-config.json if present in build context, otherwise fall back to example
+RUN if [ ! -f src/site-config.json ]; then cp src/site-config.example.json src/site-config.json; fi
 
 # Build the app
 RUN npm run build
