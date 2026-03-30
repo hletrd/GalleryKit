@@ -1,11 +1,13 @@
 import { getSharedGroup } from '@/lib/data';
 import { notFound } from 'next/navigation';
-import PhotoViewer from '@/components/photo-viewer';
+import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 import { getLocale } from 'next-intl/server';
+
+const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 

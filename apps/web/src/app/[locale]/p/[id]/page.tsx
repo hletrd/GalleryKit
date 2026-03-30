@@ -1,10 +1,12 @@
 import { getImageCached } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import PhotoViewer from '@/components/photo-viewer';
+import dynamic from 'next/dynamic';
 import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
 import { getLocale } from 'next-intl/server';
+
+const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
 
 // Cache for 1 week (604800s) as photo content rarely changes
