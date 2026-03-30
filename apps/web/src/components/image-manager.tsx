@@ -302,7 +302,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                     <div className="relative h-32 w-32 overflow-hidden rounded border bg-muted flex items-center justify-center">
                                         <OptimisticImage
                                             src={`/uploads/avif/${image.filename_avif}`}
-                                            alt=""
+                                            alt={image.title || `Photo`}
                                             fill
                                             sizes="128px"
                                             className="h-full w-full object-contain"
