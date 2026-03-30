@@ -13,9 +13,12 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
 
   const topicData = await getTopicBySlugCached(topic);
 
-  if (!topicData) return {};
+  const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
-
+  if (!topicData) return {
+    title: 'Category Not Found',
+    description: 'This category could not be found.',
+  };
 
   const title = tagSlugs.length > 0
     ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${topicData.label}`
@@ -28,17 +31,28 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   return {
     title: title,
     description: description,
+    alternates: {
+      canonical: `${BASE_URL}/${topicData.slug}`,
+    },
     openGraph: {
       title: `${title} | ${siteConfig.title}`,
       description: description,
+      url: `${BASE_URL}/${topicData.slug}`,
+      siteName: siteConfig.title,
       images: [
         {
-          url: `/api/og?topic=${topicData.slug}&tags=${tagSlugs.join(',')}`,
+          url: `${BASE_URL}/api/og?topic=${topicData.slug}&tags=${tagSlugs.join(',')}`,
           width: 1200,
           height: 630,
           alt: title,
         }
       ],
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${title} | ${siteConfig.title}`,
+      description: description,
     },
   };
 }
