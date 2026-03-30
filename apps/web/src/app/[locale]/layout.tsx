@@ -23,6 +23,14 @@ export const metadata: Metadata = {
     template: `%s | ${siteConfig.title}`
   },
   description: siteConfig.description,
+  alternates: {
+    canonical: BASE_URL,
+    languages: {
+      'en': `${BASE_URL}/en`,
+      'ko': `${BASE_URL}/ko`,
+      'x-default': BASE_URL,
+    },
+  },
   openGraph: {
     title: siteConfig.title,
     description: siteConfig.description,
@@ -31,10 +39,18 @@ export const metadata: Metadata = {
     locale: siteConfig.locale,
     type: "website",
   },
+  twitter: {
+    card: 'summary_large_image',
+  },
   robots: {
     index: true,
     follow: true,
-  }
+  },
+  colorScheme: 'light dark',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
+  ],
 };
 
 export default async function RootLayout({
