@@ -228,6 +228,10 @@
     "noResults": "사진을 찾을 수 없습니다",
     "hint": "제목, 태그, 카메라, 설명으로 검색"
   },
+  "notFound": {
+    "description": "페이지를 찾을 수 없습니다.",
+    "backHome": "갤러리로 돌아가기"
+  },
   "serverActions": {
     "unauthorized": "권한이 없습니다",
     "invalidCurrentSlug": "유효하지 않은 슬러그입니다.",

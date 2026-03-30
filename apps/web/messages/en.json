@@ -228,6 +228,10 @@
     "noResults": "No photos found",
     "hint": "Search by title, tag, camera, or description"
   },
+  "notFound": {
+    "description": "This page could not be found.",
+    "backHome": "Return to Gallery"
+  },
   "serverActions": {
     "unauthorized": "Unauthorized",
     "invalidCurrentSlug": "Invalid current slug",
