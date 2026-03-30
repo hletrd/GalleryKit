@@ -101,5 +101,31 @@ export default async function TopicPage({
   const hasMore = totalCount > PAGE_SIZE;
   const tags = allTags.filter(t => t.count > 1);
 
-  return <HomeClient images={images} tags={tags} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} totalCount={totalCount} />;
+  const baseUrl = process.env.BASE_URL || siteConfig.url;
+  const galleryLd = images.length > 0 ? {
+    '@context': 'https://schema.org',
+    '@type': 'ImageGallery',
+    name: `${topicData.label} | ${siteConfig.title}`,
+    url: `${baseUrl}/${topic}`,
+    image: images.slice(0, 10).map((img) => ({
+      '@type': 'ImageObject',
+      contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
+      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+      name: img.title || `Photo ${img.id}`,
+    })),
+  } : null;
+
+  return (
+    <>
+      {galleryLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(galleryLd).replace(/</g, '\\u003c')
+          }}
+        />
+      )}
+      <HomeClient images={images} tags={tags} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} totalCount={totalCount} />
+    </>
+  );
 }

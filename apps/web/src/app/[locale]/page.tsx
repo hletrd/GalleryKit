@@ -79,6 +79,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     description: siteConfig.description,
   };
 
+  const baseUrl = process.env.BASE_URL || siteConfig.url;
+  const galleryLd = images.length > 0 ? {
+    '@context': 'https://schema.org',
+    '@type': 'ImageGallery',
+    name: siteConfig.title,
+    url: baseUrl,
+    image: images.slice(0, 10).map((img) => ({
+      '@type': 'ImageObject',
+      contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
+      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+      name: img.title || `Photo ${img.id}`,
+    })),
+  } : null;
+
   return (
     <>
       <script
@@ -87,6 +101,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
           __html: JSON.stringify(websiteLd).replace(/</g, '\\u003c')
         }}
       />
+      {galleryLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(galleryLd).replace(/</g, '\\u003c')
+          }}
+        />
+      )}
       <HomeClient images={images} tags={allTags} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />
     </>
   );
