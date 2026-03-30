@@ -209,7 +209,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                                 backgroundColor: 'hsl(var(--muted))',
                             }}
                         >
-                            <Link href={`/p/${image.id}`}>
+                            <Link href={`/p/${image.id}`} aria-label={`View photo: ${displayTitle}`}>
                                 <div className="relative w-full">
                                     <picture>
                                         {(() => {

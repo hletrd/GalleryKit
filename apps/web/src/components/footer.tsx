@@ -39,7 +39,7 @@ export function Footer() {
                         <GithubIcon className="h-4 w-4" />
                         GitHub
                     </Link>
-                    <Link href="/admin" className="hover:underline">
+                    <Link href="/admin" rel="nofollow" className="hover:underline">
                         Admin
                     </Link>
                 </div>
