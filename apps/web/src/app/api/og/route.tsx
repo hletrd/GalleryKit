@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
     const topic = searchParams.get('topic');
     const tags = searchParams.get('tags');
 
-    // Default validitiy 60 seocnds
-    const cacheControl = 'public, max-age=60, stale-while-revalidate=60';
+    // Cache OG images for 1 hour, stale-while-revalidate for 1 day
+    const cacheControl = 'public, max-age=3600, stale-while-revalidate=86400';
 
     if (!topic || topic.length > 200) {
       return new Response('Missing or invalid topic param', { status: 400 });
