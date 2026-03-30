@@ -4,13 +4,17 @@ import Link from 'next/link';
 import PhotoViewer from '@/components/photo-viewer';
 import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
+import { getLocale } from 'next-intl/server';
 
 
 // Cache for 1 week (604800s) as photo content rarely changes
 export const revalidate = 604800;
 
+const BASE_URL = process.env.BASE_URL || siteConfig.url;
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
+    const locale = await getLocale();
     const imageId = parseInt(id, 10);
     const image = await getImageCached(imageId);
 
@@ -39,19 +43,20 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     if (image.topic) keywords.push(image.topic);
 
     const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`;
-    const absoluteImageUrl = `${process.env.BASE_URL || siteConfig.url}${imageUrl}`;
+    const absoluteImageUrl = `${BASE_URL}${imageUrl}`;
+    const pageUrl = `${BASE_URL}/${locale}/p/${id}`;
 
     return {
         title: displayTitle,
         description: image.description || `View photo by ${siteConfig.author} (${displayTitle})`,
         keywords: keywords,
         alternates: {
-            canonical: `${process.env.BASE_URL || siteConfig.url}/p/${id}`,
+            canonical: pageUrl,
         },
         openGraph: {
             title: displayTitle,
             description: image.description || `View photo by ${siteConfig.author}`,
-            url: `${process.env.BASE_URL || siteConfig.url}/p/${id}`,
+            url: pageUrl,
             images: [
                 {
                     url: absoluteImageUrl,
@@ -75,6 +80,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function PhotoPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
+    const locale = await getLocale();
 
     // Validate that id is a valid positive integer
     const imageId = parseInt(id, 10);
@@ -146,18 +152,19 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 '@type': 'ListItem',
                 position: 1,
                 name: siteConfig.title || 'GalleryKit',
-                item: process.env.BASE_URL || siteConfig.url,
+                item: `${BASE_URL}/${locale}`,
             },
             image.topic && {
                 '@type': 'ListItem',
                 position: 2,
                 name: image.topic,
-                item: `${process.env.BASE_URL || siteConfig.url}/${image.topic}`,
+                item: `${BASE_URL}/${locale}/${image.topic}`,
             },
             {
                 '@type': 'ListItem',
                 position: image.topic ? 3 : 2,
                 name: displayTitle,
+                item: `${BASE_URL}/${locale}/p/${id}`,
             },
         ].filter(Boolean),
     };

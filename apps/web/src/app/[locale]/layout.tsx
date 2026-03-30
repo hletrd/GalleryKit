@@ -24,7 +24,6 @@ export const metadata: Metadata = {
   },
   description: siteConfig.description,
   alternates: {
-    canonical: BASE_URL,
     languages: {
       'en': `${BASE_URL}/en`,
       'ko': `${BASE_URL}/ko`,

@@ -5,28 +5,48 @@ import Image from 'next/image';
 import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
+import { getLocale } from 'next-intl/server';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
+    const locale = await getLocale();
     const group = await getSharedGroup(key);
     if (!group) return {
         title: 'Shared Photos Not Found',
         description: 'This shared collection could not be found.',
     };
+    const pageUrl = `${BASE_URL}/${locale}/g/${key}`;
+    const coverImage = group.images[0];
     return {
         title: `Shared Photos`,
         description: `View ${group.images.length} shared photos`,
         alternates: {
-            canonical: `${BASE_URL}/g/${key}`,
+            canonical: pageUrl,
         },
         openGraph: {
             title: `Shared Photos`,
             description: `View ${group.images.length} shared photos from ${siteConfig.title}`,
-            url: `${BASE_URL}/g/${key}`,
+            url: pageUrl,
             siteName: siteConfig.title,
             type: 'website',
+            ...(coverImage ? {
+                images: [{
+                    url: `${BASE_URL}/uploads/webp/${coverImage.filename_webp.replace('.webp', '_2048.webp')}`,
+                    width: coverImage.width,
+                    height: coverImage.height,
+                    alt: 'Shared Photos',
+                }],
+            } : {}),
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title: 'Shared Photos',
+            description: `View ${group.images.length} shared photos from ${siteConfig.title}`,
+            ...(coverImage ? {
+                images: [`${BASE_URL}/uploads/webp/${coverImage.filename_webp.replace('.webp', '_2048.webp')}`],
+            } : {}),
         },
     };
 }

@@ -4,11 +4,13 @@ import PhotoViewer from '@/components/photo-viewer';
 import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
+import { getLocale } from 'next-intl/server';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
+    const locale = await getLocale();
     const image = await getImageByShareKey(key);
     if (!image) return {
         title: 'Photo Not Found',
@@ -16,16 +18,17 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const title = image.title && !isTitleFilename ? image.title : 'Shared Photo';
+    const pageUrl = `${BASE_URL}/${locale}/s/${key}`;
     return {
         title: title,
         description: image.description || `View this photo on ${siteConfig.title}`,
         alternates: {
-            canonical: `${BASE_URL}/s/${key}`,
+            canonical: pageUrl,
         },
         openGraph: {
             title: title,
             description: image.description || `View this photo on ${siteConfig.title}`,
-            url: `${BASE_URL}/s/${key}`,
+            url: pageUrl,
             siteName: siteConfig.title,
             images: [
                 {

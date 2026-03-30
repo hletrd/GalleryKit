@@ -3,6 +3,7 @@ import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
+import { getLocale } from 'next-intl/server';
 
 export const revalidate = 3600;
 
@@ -10,10 +11,10 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
+  const locale = await getLocale();
+  const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
   const topicData = await getTopicBySlugCached(topic);
-
-  const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
   if (!topicData) return {
     title: 'Category Not Found',
@@ -28,16 +29,18 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     ? `Browse ${tagSlugs.join(', ')} photos in ${topicData.label} category`
     : `Photos in ${topicData.label} category`;
 
+  const pageUrl = `${BASE_URL}/${locale}/${topicData.slug}`;
+
   return {
     title: title,
     description: description,
     alternates: {
-      canonical: `${BASE_URL}/${topicData.slug}`,
+      canonical: pageUrl,
     },
     openGraph: {
       title: `${title} | ${siteConfig.title}`,
       description: description,
-      url: `${BASE_URL}/${topicData.slug}`,
+      url: pageUrl,
       siteName: siteConfig.title,
       images: [
         {
