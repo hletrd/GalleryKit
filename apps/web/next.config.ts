@@ -5,6 +5,7 @@ const withNextIntl = createNextIntlPlugin();
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  poweredByHeader: false,
   serverExternalPackages: ['drizzle-orm', 'sharp'],
   async headers() {
     return [
