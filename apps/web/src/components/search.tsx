@@ -130,7 +130,7 @@ export function Search() {
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                                             <img
                                                 src={`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`}
-                                                alt=""
+                                                alt={image.title || `Photo`}
                                                 className="w-full h-full object-cover"
                                                 loading="lazy"
                                             />
