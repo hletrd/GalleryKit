@@ -38,16 +38,23 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
     if (image.topic) keywords.push(image.topic);
 
+    const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`;
+    const absoluteImageUrl = `${process.env.BASE_URL || siteConfig.url}${imageUrl}`;
+
     return {
         title: displayTitle,
         description: image.description || `View photo by ${siteConfig.author} (${displayTitle})`,
         keywords: keywords,
+        alternates: {
+            canonical: `${process.env.BASE_URL || siteConfig.url}/p/${id}`,
+        },
         openGraph: {
             title: displayTitle,
             description: image.description || `View photo by ${siteConfig.author}`,
+            url: `${process.env.BASE_URL || siteConfig.url}/p/${id}`,
             images: [
                 {
-                    url: `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+                    url: absoluteImageUrl,
                     width: image.width,
                     height: image.height,
                     alt: displayTitle,
@@ -61,7 +68,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             card: 'summary_large_image',
             title: displayTitle,
             description: image.description || `View photo by ${siteConfig.author}`,
-            images: [`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
+            images: [absoluteImageUrl],
         }
     };
 }
