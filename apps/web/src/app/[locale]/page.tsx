@@ -33,14 +33,22 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     openGraph: {
       title: title,
       description: description,
+      url: `${process.env.BASE_URL || siteConfig.url}`,
+      siteName: siteConfig.title,
       images: latestImage ? [
         {
-          url: `/uploads/jpeg/${latestImage.filename_jpeg}`,
+          url: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${latestImage.filename_jpeg}`,
           width: latestImage.width,
           height: latestImage.height,
           alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : 'Latest Photo',
         }
       ] : [],
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: title,
+      description: description,
     },
   };
 }
@@ -63,5 +71,23 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   ]);
   const hasMore = totalCount > PAGE_SIZE;
 
-  return <HomeClient images={images} tags={allTags} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />;
+  const websiteLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: siteConfig.title,
+    url: process.env.BASE_URL || siteConfig.url,
+    description: siteConfig.description,
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(websiteLd).replace(/</g, '\\u003c')
+        }}
+      />
+      <HomeClient images={images} tags={allTags} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />
+    </>
+  );
 }
