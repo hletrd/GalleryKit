@@ -6,13 +6,28 @@ import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 
+const BASE_URL = process.env.BASE_URL || siteConfig.url;
+
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const group = await getSharedGroup(key);
-    if (!group) return {};
+    if (!group) return {
+        title: 'Shared Photos Not Found',
+        description: 'This shared collection could not be found.',
+    };
     return {
         title: `Shared Photos`,
         description: `View ${group.images.length} shared photos`,
+        alternates: {
+            canonical: `${BASE_URL}/g/${key}`,
+        },
+        openGraph: {
+            title: `Shared Photos`,
+            description: `View ${group.images.length} shared photos from ${siteConfig.title}`,
+            url: `${BASE_URL}/g/${key}`,
+            siteName: siteConfig.title,
+            type: 'website',
+        },
     };
 }
 
