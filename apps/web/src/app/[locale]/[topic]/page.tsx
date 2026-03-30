@@ -5,6 +5,11 @@ import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 import { getLocale } from 'next-intl/server';
 
+// Pre-declare for use in both generateMetadata and default export
+async function getLocaleAsync() {
+  return getLocale();
+}
+
 export const revalidate = 3600;
 
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ topic: string }>, searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
@@ -69,17 +74,16 @@ export default async function TopicPage({
 }) {
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
-
-
+  const locale = await getLocaleAsync();
 
   const topicData = await getTopicBySlugCached(topic);
   if (!topicData) {
     notFound();
   }
 
-  // If the requested topic slug doesn't match the canonical slug, redirect standardly
+  // If the requested topic slug doesn't match the canonical slug, redirect with locale preserved
   if (topicData.slug !== topic) {
-      redirect(`/${topicData.slug}`);
+      redirect(`/${locale}/${topicData.slug}`);
   }
 
   const allTags = await getTags(topic);
