@@ -5,17 +5,44 @@ import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 
+const BASE_URL = process.env.BASE_URL || siteConfig.url;
+
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const image = await getImageByShareKey(key);
-    if (!image) return {};
+    if (!image) return {
+        title: 'Photo Not Found',
+        description: 'This shared photo could not be found.',
+    };
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
+    const title = image.title && !isTitleFilename ? image.title : 'Shared Photo';
     return {
-        title: image.title && !isTitleFilename ? image.title : 'Shared Photo',
-        description: image.description || 'View this photo on GalleryKit',
+        title: title,
+        description: image.description || `View this photo on ${siteConfig.title}`,
+        alternates: {
+            canonical: `${BASE_URL}/s/${key}`,
+        },
         openGraph: {
-            images: [`/uploads/webp/${image.filename_webp.replace('.webp', '_2048.webp')}`]
-        }
+            title: title,
+            description: image.description || `View this photo on ${siteConfig.title}`,
+            url: `${BASE_URL}/s/${key}`,
+            siteName: siteConfig.title,
+            images: [
+                {
+                    url: `${BASE_URL}/uploads/webp/${image.filename_webp.replace('.webp', '_2048.webp')}`,
+                    width: image.width,
+                    height: image.height,
+                    alt: title,
+                }
+            ],
+            type: 'website',
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title: title,
+            description: image.description || `View this photo on ${siteConfig.title}`,
+            images: [`${BASE_URL}/uploads/webp/${image.filename_webp.replace('.webp', '_2048.webp')}`],
+        },
     };
 }
 
