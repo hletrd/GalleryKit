@@ -175,7 +175,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
             </div>
 
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
-                {orderedImages.map((image) => {
+                {orderedImages.map((image, index) => {
                     const altText = (image.description && image.description.trim())
                         ? image.description
                         : (image.title && image.title.trim() && !image.title.match(/\.[a-z0-9]{3,4}$/i))
@@ -192,6 +192,8 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                         }
                         return image.user_filename || 'Untitled';
                     })();
+
+                    const isAboveFold = index < columnCount;
 
                     return (
                         <div
@@ -235,8 +237,9 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                                                             width={image.width}
                                                             height={image.height}
                                                             className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                            loading="lazy"
+                                                            loading={isAboveFold ? "eager" : "lazy"}
                                                             decoding="async"
+                                                            fetchPriority={isAboveFold ? "high" : "auto"}
                                                         />
                                                     </>
                                                 );
