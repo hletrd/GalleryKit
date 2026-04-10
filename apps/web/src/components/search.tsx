@@ -66,6 +66,16 @@ export function Search() {
         }
     }, [isOpen]);
 
+    // Lock body scroll when the search overlay is open. Must be declared
+    // before any early return so the hook order stays stable across renders
+    // (rules-of-hooks), then no-ops when the overlay is closed.
+    useEffect(() => {
+        if (!isOpen) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, [isOpen]);
+
     if (!isOpen) {
         return (
             <Button
@@ -79,13 +89,6 @@ export function Search() {
             </Button>
         );
     }
-
-    // Lock body scroll when search is open
-    useEffect(() => {
-        const prev = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        return () => { document.body.style.overflow = prev; };
-    }, []);
 
     return (
         <>
