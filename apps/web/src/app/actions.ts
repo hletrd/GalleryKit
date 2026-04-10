@@ -493,13 +493,19 @@ export async function login(prevState: { error?: string } | null, formData: Form
                 expiresAt: expiresAt
             });
 
-            // Determine if we're in production (HTTPS) or development (HTTP)
-            const isProduction = process.env.NODE_ENV === 'production';
+            // Require HTTPS for the session cookie whenever the underlying
+            // request came in over TLS (via the reverse proxy), and always
+            // require it in production regardless of NODE_ENV introspection.
+            // This prevents session cookies from being emitted without Secure
+            // if someone misconfigures NODE_ENV on a prod box.
+            const forwardedProto = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+            const requestIsHttps = forwardedProto === 'https';
+            const requireSecureCookie = requestIsHttps || process.env.NODE_ENV === 'production';
 
             // Set secure cookie with proper attributes
             cookieStore.set(COOKIE_NAME, sessionToken, {
                 httpOnly: true,
-                secure: isProduction, // Only require HTTPS in production
+                secure: requireSecureCookie,
                 sameSite: 'lax',
                 maxAge: 24 * 60 * 60, // 24 hours
                 path: '/',
