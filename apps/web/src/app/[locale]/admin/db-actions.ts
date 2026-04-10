@@ -148,7 +148,10 @@ export async function dumpDatabase() {
 
 // --- DB Restore ---
 
-const MAX_RESTORE_SIZE = 500 * 1024 * 1024; // 500 MB
+// Keep in sync with next.config.ts `serverActions.bodySizeLimit` — uploads above
+// that value are rejected by the Next.js framework before reaching this action,
+// so a larger value here would be misleading.
+const MAX_RESTORE_SIZE = 250 * 1024 * 1024; // 250 MB
 
 export async function restoreDatabase(formData: FormData) {
     if (!(await isAdmin())) {
