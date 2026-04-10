@@ -38,14 +38,19 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         }, 3000);
     }, []);
 
+    // On mount, controls are already visible (initial state), so just arm the
+    // auto-hide timer. Calling setControlsVisible here would trip the
+    // react-hooks/set-state-in-effect rule for no practical gain.
     useEffect(() => {
-        showControls();
+        hideTimer.current = setTimeout(() => {
+            setControlsVisible(false);
+        }, 3000);
         return () => {
             if (hideTimer.current) {
                 clearTimeout(hideTimer.current);
             }
         };
-    }, [showControls]);
+    }, []);
 
     useEffect(() => {
         const handleFullscreenChange = () => {

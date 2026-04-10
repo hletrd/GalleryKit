@@ -46,7 +46,6 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
             map.set(getFileId(file), URL.createObjectURL(file));
         }
         return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [files]);
 
     useEffect(() => {

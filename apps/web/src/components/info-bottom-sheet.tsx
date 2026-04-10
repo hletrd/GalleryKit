@@ -23,9 +23,13 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
     const touchStartY = useRef<number | null>(null);
     const touchStartTime = useRef<number | null>(null);
 
-    // Sync sheet state with isOpen prop — intentional immediate setState on prop change
+    // Reset the sheet back to 'peek' whenever it opens. This is intentionally
+    // a prop→state sync: the parent controls isOpen, and on each open we want
+    // the sheet to start from the peek state regardless of where the user
+    // left it last time. Acceptable per React's "sync external state" guidance.
     useEffect(() => {
         if (isOpen) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSheetState('peek');
         }
     }, [isOpen]);
