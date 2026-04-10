@@ -11,11 +11,6 @@ services:
     network_mode: host
     env_file:
       - .env.local
-    # Explicit environment takes precedence over env_file — pin the bind so a
-    # stray HOSTNAME in .env.local can't expose :3000 to the host network and
-    # let clients bypass nginx rate limiting.
-    environment:
-      HOSTNAME: "127.0.0.1"
 
     volumes:
       - ./data:/app/data

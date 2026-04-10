@@ -44,11 +44,7 @@ ENV NODE_ENV=production
 # Disable next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
-# Bind to localhost only — with `network_mode: host` the nginx reverse proxy on
-# the same host reaches us via 127.0.0.1, and external clients cannot bypass its
-# rate limiting / WAF by hitting :3000 directly. Override via compose env_file
-# only if a non-colocated proxy genuinely needs network access.
-ENV HOSTNAME="127.0.0.1"
+ENV HOSTNAME="0.0.0.0"
 
 # Copy necessary files from apps/web (public is mounted at runtime)
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
