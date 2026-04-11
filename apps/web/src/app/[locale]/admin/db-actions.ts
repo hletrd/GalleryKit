@@ -153,11 +153,30 @@ export async function dumpDatabase() {
 // so a larger value here would be misleading.
 const MAX_RESTORE_SIZE = 250 * 1024 * 1024; // 250 MB
 
+// Process-level mutex so a compromised or buggy admin session can't queue up
+// concurrent 250MB uploads that fill /tmp. Single-writer per Node process is
+// fine here because restoreDatabase is already the slowest admin operation
+// and there is no legitimate reason to run two at once.
+let restoreInProgress = false;
+
 export async function restoreDatabase(formData: FormData) {
     if (!(await isAdmin())) {
         throw new Error("Unauthorized");
     }
 
+    if (restoreInProgress) {
+        return { success: false, error: "Another restore is already in progress" };
+    }
+    restoreInProgress = true;
+
+    try {
+        return await runRestore(formData);
+    } finally {
+        restoreInProgress = false;
+    }
+}
+
+async function runRestore(formData: FormData) {
     const fileEntry = formData.get('file');
     if (!fileEntry || !(fileEntry instanceof File)) {
         return { success: false, error: "No file provided" };
@@ -166,10 +185,10 @@ export async function restoreDatabase(formData: FormData) {
 
     // File size validation
     if (file.size > MAX_RESTORE_SIZE) {
-        return { success: false, error: "File too large (max 500MB)" };
+        return { success: false, error: "File too large (max 250MB)" };
     }
 
-    // Stream uploaded file to disk to avoid holding up to 500MB in Node.js heap.
+    // Stream uploaded file to disk to avoid holding up to 250MB in Node.js heap.
     const tempPath = path.join(os.tmpdir(), `restore-${randomUUID()}.sql`);
     try {
         const webStream = file.stream();
