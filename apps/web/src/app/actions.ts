@@ -278,10 +278,22 @@ async function getSessionSecret(): Promise<string> {
         return envSecret;
     }
 
+    // In production, refuse to fall back to a DB-stored secret. If an attacker
+    // ever obtains the admin_settings row they would be able to forge valid
+    // session tokens for any admin, so we want the signing key to live only in
+    // the process env (and not in the same trust domain as user data).
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+            'SESSION_SECRET env var is required in production (min 32 chars). ' +
+            'Refusing to fall back to a DB-stored secret to avoid forgery on DB compromise. ' +
+            'Generate one with: openssl rand -hex 32'
+        );
+    }
+
     // Use existing promise if another request is already fetching/generating
     if (sessionSecretPromise) return sessionSecretPromise;
 
-    // Fallback: fetch or generate from DB (for backwards compatibility)
+    // Dev-only fallback: fetch or generate from DB (for zero-config bootstrap)
     sessionSecretPromise = (async () => {
         try {
             if (cachedSessionSecret) return cachedSessionSecret;
@@ -423,6 +435,20 @@ export async function isAdmin() {
     return !!(await getCurrentUser());
 }
 
+/**
+ * Precomputed Argon2id hash used to equalize login timing between "user does
+ * not exist" and "user exists, wrong password" branches. Lazily initialized
+ * once per process so the first call doesn't pay the hash cost and we don't
+ * block import. The parameters must match whatever we use in argon2.hash().
+ */
+let dummyHashPromise: Promise<string> | null = null;
+async function getDummyHash(): Promise<string> {
+    if (!dummyHashPromise) {
+        dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), { type: argon2.argon2id });
+    }
+    return dummyHashPromise;
+}
+
 export async function login(prevState: { error?: string } | null, formData: FormData) {
     const username = formData.get('username')?.toString() ?? '';
     const password = formData.get('password')?.toString() ?? '';
@@ -469,13 +495,15 @@ export async function login(prevState: { error?: string } | null, formData: Form
             .where(eq(adminUsers.username, username))
             .limit(1);
 
-        if (!user) {
-            return { error: 'Invalid credentials' };
-        }
+        // Always run Argon2 verification against either the real hash or a
+        // precomputed dummy hash so both branches take the same wall time.
+        // Without this, the "user does not exist" branch returns in ~1ms while
+        // the "user exists, wrong password" branch takes ~100ms, enabling
+        // user enumeration via timing side-channel.
+        const hashToCheck = user?.password_hash ?? await getDummyHash();
+        const verified = await argon2.verify(hashToCheck, password);
 
-        const match = await argon2.verify(user.password_hash, password);
-
-        if (!match) {
+        if (!user || !verified) {
             return { error: 'Invalid credentials' };
         }
 
@@ -1359,8 +1387,8 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         return { error: 'New passwords do not match' };
     }
 
-    if (newPassword.length < 8) {
-        return { error: 'New password must be at least 8 characters long' };
+    if (newPassword.length < 12) {
+        return { error: 'New password must be at least 12 characters long' };
     }
 
     if (newPassword.length > 1024) {
@@ -1577,7 +1605,7 @@ export async function createAdminUser(formData: FormData) {
     if (!username || username.length < 3) return { error: 'Username must be at least 3 chars' };
     if (username.length > 64) return { error: 'Username is too long (max 64 chars)' };
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: 'Username can only contain letters, numbers, underscores, and hyphens' };
-    if (!password || password.length < 8) return { error: 'Password must be at least 8 chars' };
+    if (!password || password.length < 12) return { error: 'Password must be at least 12 characters long' };
     if (password.length > 1024) return { error: 'Password is too long (max 1024 chars)' };
 
     try {
