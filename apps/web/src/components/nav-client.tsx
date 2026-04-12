@@ -1,10 +1,12 @@
 'use client';
 
 import Link from "next/link";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ChevronUp, ChevronDown, Sun, Moon } from "lucide-react";
 import { useState } from "react";
+import { useTheme } from "next-themes";
 
 import { usePathname } from "next/navigation";
+import { useLocale } from "next-intl";
 import { cn } from "@/lib/utils";
 import siteConfig from "@/site-config.json";
 import { Search } from "@/components/search";
@@ -15,7 +17,21 @@ interface NavClientProps {
 
 export function NavClient({ topics }: NavClientProps) {
     const pathname = usePathname();
+    const locale = useLocale();
+    const { theme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
+
+    const otherLocale = locale === 'en' ? 'ko' : 'en';
+    // Swap locale prefix in the current path
+    const localeSwitchHref = (() => {
+        // Path starts with /en/ or /ko/ — replace prefix
+        const localePrefix = `/${locale}`;
+        if (pathname.startsWith(localePrefix + '/') || pathname === localePrefix) {
+            return `/${otherLocale}${pathname.slice(localePrefix.length) || '/'}`;
+        }
+        // No locale prefix (default locale) — prepend other locale
+        return `/${otherLocale}${pathname}`;
+    })();
 
     return (
         <nav className="sticky top-0 z-50 w-full bg-background/50 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
@@ -52,11 +68,15 @@ export function NavClient({ topics }: NavClientProps) {
                                 )}
                             >
                                 {topic.image_filename ? (
-                                    <img
-                                        src={`/resources/${topic.image_filename}`}
-                                        alt={topic.label}
-                                        className="w-6 h-6 object-cover rounded-full"
-                                    />
+                                    <>
+                                        <img
+                                            src={`/resources/${topic.image_filename}`}
+                                            alt={topic.label}
+                                            title={topic.label}
+                                            className="w-6 h-6 object-cover rounded-full"
+                                        />
+                                        <span className="sr-only">{topic.label}</span>
+                                    </>
                                 ) : (
                                     topic.label
                                 )}
@@ -65,8 +85,22 @@ export function NavClient({ topics }: NavClientProps) {
                     })}
                 </div>
 
-                <div className={cn("shrink-0", isExpanded && "pt-1")}>
+                <div className={cn("flex items-center gap-1 shrink-0", isExpanded && "pt-1")}>
                     <Search />
+                    <button
+                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        className="p-2 hover:bg-accent rounded-full transition-colors"
+                        aria-label="Toggle theme"
+                    >
+                        <Sun className="h-4 w-4 hidden dark:block" />
+                        <Moon className="h-4 w-4 block dark:hidden" />
+                    </button>
+                    <Link
+                        href={localeSwitchHref}
+                        className="px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
+                    >
+                        {otherLocale.toUpperCase()}
+                    </Link>
                 </div>
 
                 {/* Mobile Expand Toggle */}
