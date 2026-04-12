@@ -1,4 +1,5 @@
 import { getImageCached } from '@/lib/data';
+import { isAdmin } from '@/app/actions';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -191,6 +192,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 tags={[]}
                 prevId={image.prevId}
                 nextId={image.nextId}
+                canShare={await isAdmin()}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (

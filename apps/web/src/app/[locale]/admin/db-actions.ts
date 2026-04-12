@@ -86,7 +86,7 @@ export async function dumpDatabase() {
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `backup-${DB_NAME}-${timestamp}.sql`;
+    const filename = `backup-${timestamp}.sql`;
 
     // Save to a non-public backups directory (mounted as volume in Docker)
     const backupsDir = path.join(process.cwd(), 'data', 'backups');

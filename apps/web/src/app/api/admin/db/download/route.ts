@@ -5,7 +5,7 @@ import { createReadStream } from 'fs';
 import { lstat } from 'fs/promises';
 import { Readable } from 'stream';
 
-const SAFE_FILENAME = /^backup-[a-zA-Z0-9_-]+-\d{4}-\d{2}-\d{2}T[\d-]+Z\.sql$/;
+const SAFE_FILENAME = /^backup-\d{4}-\d{2}-\d{2}T[\d-]+Z\.sql$/;
 
 export async function GET(request: NextRequest) {
     const admin = await isAdmin();

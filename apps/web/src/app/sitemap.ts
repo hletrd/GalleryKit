@@ -1,6 +1,8 @@
 import { getImageIdsForSitemap, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
+// force-dynamic required: sitemap queries the DB which isn't available at build time.
+// Caching is handled by the ISR-like behavior of Next.js route handlers in production.
 export const dynamic = 'force-dynamic';
 
 import siteConfig from "@/site-config.json";

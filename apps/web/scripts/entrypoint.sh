@@ -1,9 +1,13 @@
 #!/bin/sh
 set -e
 
-# Fix permissions on data directory (if mounted as root)
-chown -R node:node /app/data
-chown -R node:node /app/apps/web/public/uploads
+# Fix permissions on data directory only if not already owned by node
+if [ "$(stat -c '%U' /app/data 2>/dev/null || echo root)" != "node" ]; then
+    chown -R node:node /app/data
+fi
+if [ "$(stat -c '%U' /app/apps/web/public/uploads 2>/dev/null || echo root)" != "node" ]; then
+    chown -R node:node /app/apps/web/public/uploads
+fi
 
 # Ensure .next folder exists and has correct permissions
 # Create cache directory explicitly to avoid runtime EACCES

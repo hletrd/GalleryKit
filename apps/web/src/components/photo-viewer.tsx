@@ -27,9 +27,10 @@ interface PhotoViewerProps {
     tags: TagInfo[];
     prevId?: number | null;
     nextId?: number | null;
+    canShare?: boolean;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false }: PhotoViewerProps) {
     const { t } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -104,6 +105,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                         {t('viewer.info')}
                     </Button>
 
+                    {canShare && (
                     <Button
                         variant="outline"
                         size="sm"
@@ -126,6 +128,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                         <Share2 className="h-4 w-4" />
                         {t('viewer.share')}
                     </Button>
+                    )}
 
                     <Button
                         variant={isPinned ? "default" : "outline"}
