@@ -101,7 +101,7 @@ export default async function RootLayout({
           rel="stylesheet"
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
         />
-        {siteConfig.google_analytics_id && (
+        {siteConfig.google_analytics_id && /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id) && (
           <>
             <Script src={`https://www.googletagmanager.com/gtag/js?id=${siteConfig.google_analytics_id}`} strategy="lazyOnload" />
             <Script id="google-analytics" strategy="lazyOnload">
@@ -109,8 +109,7 @@ export default async function RootLayout({
                 window.dataLayer = window.dataLayer || [];
                 function gtag(){dataLayer.push(arguments);}
                 gtag('js', new Date());
-
-                gtag('config', '${siteConfig.google_analytics_id}');
+                gtag('config', ${JSON.stringify(siteConfig.google_analytics_id)});
               `}
             </Script>
           </>

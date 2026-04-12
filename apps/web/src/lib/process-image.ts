@@ -468,10 +468,9 @@ export function extractExifForDb(exifData: ExifDataRaw) {
     let longitude: number | null = null;
 
     if (gpsParams) {
-        const convertDMSToDD = (dms: number[], ref: string) => {
+        const convertDMSToDD = (dms: number[], ref: string, maxDegrees: number) => {
             if (!dms || dms.length < 3) return null;
-            // Validate DMS component ranges
-            if (dms[0] < 0 || dms[0] > 180 || dms[1] < 0 || dms[1] >= 60 || dms[2] < 0 || dms[2] >= 60) return null;
+            if (dms[0] < 0 || dms[0] > maxDegrees || dms[1] < 0 || dms[1] >= 60 || dms[2] < 0 || dms[2] >= 60) return null;
             let dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
             if (ref === 'S' || ref === 'W') {
                 dd = dd * -1;
@@ -480,10 +479,10 @@ export function extractExifForDb(exifData: ExifDataRaw) {
         };
 
         if (gpsParams.GPSLatitude && gpsParams.GPSLatitudeRef) {
-            latitude = convertDMSToDD(gpsParams.GPSLatitude, gpsParams.GPSLatitudeRef);
+            latitude = convertDMSToDD(gpsParams.GPSLatitude, gpsParams.GPSLatitudeRef, 90);
         }
         if (gpsParams.GPSLongitude && gpsParams.GPSLongitudeRef) {
-            longitude = convertDMSToDD(gpsParams.GPSLongitude, gpsParams.GPSLongitudeRef);
+            longitude = convertDMSToDD(gpsParams.GPSLongitude, gpsParams.GPSLongitudeRef, 180);
         }
     }
 
