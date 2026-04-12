@@ -4,10 +4,13 @@ import exifReader from 'exif-reader';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
+import { createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 
 const cpuCount = os.cpus()?.length ?? 1;
-const maxConcurrency = Math.max(1, cpuCount - 2);
+const maxConcurrency = Math.max(1, cpuCount - 1);
 const envConcurrency = Number.parseInt(process.env.SHARP_CONCURRENCY ?? '', 10);
 const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
     ? Math.min(envConcurrency, maxConcurrency)
@@ -228,20 +231,6 @@ export async function saveOriginalAndGetMetadata(
 
     await ensureDirs();
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    // Use a single Sharp instance for validation, metadata, and blur generation
-    const image = sharp(buffer, { limitInputPixels: maxInputPixels });
-
-    // Validate the file is a valid image and get metadata in one shot
-    let metadata: sharp.Metadata;
-    try {
-        metadata = await image.metadata();
-    } catch (e) {
-        console.error('Sharp metadata validation failed:', e);
-        throw new Error('Invalid image file. Could not process the file as an image.');
-    }
-
     const originalExt = getSafeExtension(file.name);
     const id = options?.id || randomUUID();
     const filenameOriginal = `${id}${originalExt}`;
@@ -253,8 +242,30 @@ export async function saveOriginalAndGetMetadata(
         await deleteByPrefix(UPLOAD_DIR_ORIGINAL, id);
     }
 
-    // Save original
-    await fs.writeFile(path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal), buffer);
+    // Stream upload to disk first to avoid materializing up to 200MB on the heap.
+    // Sharp will then use native mmap via the file path.
+    const originalPath = path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal);
+    try {
+        const webStream = file.stream();
+        const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
+        await pipeline(nodeStream, createWriteStream(originalPath));
+    } catch (e) {
+        await fs.unlink(originalPath).catch(() => {});
+        throw new Error('Failed to save uploaded file');
+    }
+
+    // Use file path for Sharp (mmap, no heap buffer copy)
+    const image = sharp(originalPath, { limitInputPixels: maxInputPixels });
+
+    // Validate the file is a valid image and get metadata in one shot
+    let metadata: sharp.Metadata;
+    try {
+        metadata = await image.metadata();
+    } catch (e) {
+        console.error('Sharp metadata validation failed:', e);
+        await fs.unlink(originalPath).catch(() => {});
+        throw new Error('Invalid image file. Could not process the file as an image.');
+    }
 
     // Parse EXIF
     let exifData: ExifDataRaw = {};
