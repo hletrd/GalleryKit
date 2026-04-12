@@ -18,7 +18,7 @@ interface NavClientProps {
 export function NavClient({ topics }: NavClientProps) {
     const pathname = usePathname();
     const locale = useLocale();
-    const { theme, setTheme } = useTheme();
+    const { resolvedTheme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
 
     const otherLocale = locale === 'en' ? 'ko' : 'en';
@@ -68,15 +68,12 @@ export function NavClient({ topics }: NavClientProps) {
                                 )}
                             >
                                 {topic.image_filename ? (
-                                    <>
-                                        <img
-                                            src={`/resources/${topic.image_filename}`}
-                                            alt={topic.label}
-                                            title={topic.label}
-                                            className="w-6 h-6 object-cover rounded-full"
-                                        />
-                                        <span className="sr-only">{topic.label}</span>
-                                    </>
+                                    <img
+                                        src={`/resources/${topic.image_filename}`}
+                                        alt={topic.label}
+                                        title={topic.label}
+                                        className="w-6 h-6 object-cover rounded-full"
+                                    />
                                 ) : (
                                     topic.label
                                 )}
@@ -88,7 +85,7 @@ export function NavClient({ topics }: NavClientProps) {
                 <div className={cn("flex items-center gap-1 shrink-0", isExpanded && "pt-1")}>
                     <Search />
                     <button
-                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
                         className="p-2 hover:bg-accent rounded-full transition-colors"
                         aria-label="Toggle theme"
                     >

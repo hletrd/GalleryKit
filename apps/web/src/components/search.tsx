@@ -20,7 +20,7 @@ export function Search() {
 
     // Detect platform for keyboard shortcut hint (SSR-safe: default to Mac, correct on client)
     useEffect(() => {
-        setIsMac(/Mac|iPhone|iPad/.test(navigator.platform));
+        setIsMac(/Mac|iPhone|iPad/.test((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform));
     }, []);
 
     const performSearch = useCallback(async (searchQuery: string) => {
