@@ -14,8 +14,14 @@ export function Search() {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_webp: string; filename_jpeg: string; blur_data_url: string | null; width: number; height: number; topic: string; camera_model: string | null }[]>([]);
     const [loading, setLoading] = useState(false);
+    const [isMac, setIsMac] = useState(true);
     const inputRef = useRef<HTMLInputElement>(null);
     const debounceRef = useRef<NodeJS.Timeout>(undefined);
+
+    // Detect platform for keyboard shortcut hint (SSR-safe: default to Mac, correct on client)
+    useEffect(() => {
+        setIsMac(/Mac|iPhone|iPad/.test(navigator.platform));
+    }, []);
 
     const performSearch = useCallback(async (searchQuery: string) => {
         if (!searchQuery.trim()) {
@@ -99,8 +105,8 @@ export function Search() {
                 aria-hidden="true"
             />
             {/* Search Panel */}
-            <div role="dialog" aria-modal="true" aria-label="Search photos" className="fixed top-0 left-0 right-0 z-50 p-4 sm:p-6 sm:pt-[10vh]">
-                <div className="mx-auto max-w-xl bg-card border rounded-xl shadow-2xl overflow-hidden">
+            <div role="dialog" aria-modal="true" aria-label="Search photos" className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]">
+                <div className="mx-auto h-full sm:h-auto sm:max-w-xl bg-card sm:border sm:rounded-xl shadow-2xl overflow-hidden flex flex-col">
                     <div className="flex items-center gap-2 p-4 border-b">
                         <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                         <Input
@@ -120,7 +126,7 @@ export function Search() {
                             <X className="h-4 w-4" />
                         </Button>
                     </div>
-                    <div className="max-h-[60vh] overflow-y-auto">
+                    <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
                         {results.length > 0 ? (
                             <div className="p-2">
                                 {results.map((image) => (
@@ -161,7 +167,7 @@ export function Search() {
                     </div>
                     <div className="p-2 border-t text-center">
                         <p className="text-xs text-muted-foreground">
-                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{'\u2318'}K</kbd> to toggle search
+                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> to toggle search
                         </p>
                     </div>
                 </div>
