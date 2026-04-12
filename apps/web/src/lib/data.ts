@@ -16,7 +16,7 @@ const selectFields = {
     original_height: images.original_height,
     title: images.title,
     description: images.description,
-    user_filename: images.user_filename,
+    // user_filename intentionally excluded from public queries — may contain PII
     topic: images.topic,
     capture_date: images.capture_date,
     created_at: images.created_at,
@@ -41,6 +41,7 @@ const selectFields = {
 
 const adminSelectFields = {
     ...selectFields,
+    user_filename: images.user_filename,
     latitude: images.latitude,
     longitude: images.longitude,
 };
