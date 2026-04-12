@@ -415,65 +415,36 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
     const searchTerm = `%${escaped}%`;
 
-    const [results, tagResults] = await Promise.all([
-        db
-            .select({
-                id: images.id,
-                title: images.title,
-                description: images.description,
-                filename_jpeg: images.filename_jpeg,
-                filename_webp: images.filename_webp,
-                filename_avif: images.filename_avif,
-                width: images.width,
-                height: images.height,
-                topic: images.topic,
-                camera_model: images.camera_model,
-                capture_date: images.capture_date,
-                blur_data_url: images.blur_data_url,
-            })
-            .from(images)
-            .where(
-                and(
-                    eq(images.processed, true),
-                    or(
-                        like(images.title, searchTerm),
-                        like(images.description, searchTerm),
-                        like(images.camera_model, searchTerm),
-                        like(images.topic, searchTerm),
-                    )
-                )
-            )
-            .orderBy(desc(images.created_at))
-            .limit(limit),
+    const searchFields = {
+        id: images.id, title: images.title, description: images.description,
+        filename_jpeg: images.filename_jpeg, filename_webp: images.filename_webp,
+        filename_avif: images.filename_avif, width: images.width, height: images.height,
+        topic: images.topic, camera_model: images.camera_model,
+        capture_date: images.capture_date, blur_data_url: images.blur_data_url,
+    };
 
-        // Also search by tag name
-        db
-            .select({
-                id: images.id,
-                title: images.title,
-                description: images.description,
-                filename_jpeg: images.filename_jpeg,
-                filename_webp: images.filename_webp,
-                filename_avif: images.filename_avif,
-                width: images.width,
-                height: images.height,
-                topic: images.topic,
-                camera_model: images.camera_model,
-                capture_date: images.capture_date,
-                blur_data_url: images.blur_data_url,
-            })
-            .from(images)
-            .innerJoin(imageTags, eq(images.id, imageTags.imageId))
-            .innerJoin(tags, eq(imageTags.tagId, tags.id))
-            .where(
-                and(
-                    eq(images.processed, true),
-                    like(tags.name, searchTerm),
-                )
+    // Run main query first; only query tags if we need more results (saves a connection)
+    const results = await db.select(searchFields).from(images)
+        .where(and(
+            eq(images.processed, true),
+            or(
+                like(images.title, searchTerm),
+                like(images.description, searchTerm),
+                like(images.camera_model, searchTerm),
+                like(images.topic, searchTerm),
             )
-            .orderBy(desc(images.created_at))
-            .limit(limit),
-    ]);
+        ))
+        .orderBy(desc(images.created_at))
+        .limit(limit);
+
+    // Only search tags if main results are insufficient
+    const tagResults = results.length >= limit ? [] : await db.select(searchFields)
+        .from(images)
+        .innerJoin(imageTags, eq(images.id, imageTags.imageId))
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(and(eq(images.processed, true), like(tags.name, searchTerm)))
+        .orderBy(desc(images.created_at))
+        .limit(limit);
 
     // Deduplicate by id
     const seen = new Set<number>();

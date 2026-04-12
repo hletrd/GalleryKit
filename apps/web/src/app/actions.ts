@@ -116,8 +116,10 @@ const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             console.debug(`[Queue] Job ${job.id} complete`);
-            revalidatePath('/');
-            revalidatePath('/admin/dashboard');
+            // revalidatePath removed from per-job callback to avoid ISR cache
+            // thrashing — uploading 10 images was triggering 11 homepage
+            // invalidations. The single revalidatePath after the upload loop
+            // (in uploadImages) is sufficient.
         } catch (err) {
             console.error(`Background processing failed for ${job.id}`, err);
         } finally {
