@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Nav } from "@/components/nav";
@@ -9,8 +8,6 @@ import { getMessages } from 'next-intl/server';
 import { Footer } from "@/components/footer";
 import siteConfig from "@/site-config.json";
 import { notFound } from 'next/navigation';
-
-const inter = Inter({ subsets: ["latin"] });
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
@@ -74,7 +71,7 @@ export default async function RootLayout({
     <html lang={locale} suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className={`${inter.className} antialiased min-h-screen bg-background font-sans flex flex-col`}
+        className="antialiased min-h-screen bg-background font-sans flex flex-col"
       >
         <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md">
           Skip to content
