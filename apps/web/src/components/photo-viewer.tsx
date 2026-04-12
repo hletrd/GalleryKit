@@ -34,7 +34,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
-    const [timerShowInfo, setTimerShowInfo] = useState(true);
+    const [timerShowInfo, setTimerShowInfo] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
     const [showLightbox, setShowLightbox] = useState(false);
     const [showBottomSheet, setShowBottomSheet] = useState(false);
@@ -228,10 +228,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                     )}
                 </div>
 
-                {/* Info Sidebar */}
+                {/* Info Sidebar — hidden on mobile; only shown on lg+ via desktop pin/toggle */}
                 <div className={cn(
-                    "space-y-6 transition-all duration-500 ease-in-out overflow-hidden transform",
-                     showInfo ? "opacity-100 translate-x-0" : "opacity-0 translate-x-10 w-0 hidden lg:block lg:w-0 lg:p-0"
+                    "space-y-6 transition-all duration-500 ease-in-out overflow-hidden transform hidden lg:block",
+                     showInfo ? "lg:opacity-100 lg:translate-x-0" : "lg:opacity-0 lg:translate-x-10 lg:w-0 lg:p-0"
                 )}>
                     {showInfo && (
                         <Card className="h-full border-none shadow-none bg-transparent lg:border lg:bg-card lg:shadow-sm">
@@ -255,7 +255,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId }: 
                                     {image.title && image.title.trim() !== ''
                                         ? image.title
                                         : (image.tags && image.tags.length > 0
-                                            ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
+                                            ? image.tags.map((tag: TagInfo) => `#${tag.name.replace(/_/g, ' ')}`).join(' ')
                                             : (image.user_filename || t('imageManager.untitled')))}
                                 </CardTitle>
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
