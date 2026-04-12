@@ -130,7 +130,7 @@ console.log(`[Migration] Starting migration...`);
             console.log('[Migration] Seeding default admin user...');
             const crypto = require('crypto');
             let password = process.env.ADMIN_PASSWORD;
-            if (!password || password.length < 8) {
+            if (!password || password.length < 12) {
                 password = crypto.randomBytes(16).toString('base64url');
                 // Write password to a restricted temp file instead of stdout/Docker logs
                 const tempPwdPath = '/tmp/admin-password.txt';

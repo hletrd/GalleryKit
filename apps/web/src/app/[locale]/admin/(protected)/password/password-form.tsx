@@ -69,8 +69,9 @@ export function PasswordForm() {
                     type="password"
                     required
                     placeholder={t('password.newPlaceholder')}
-                    minLength={8}
+                    minLength={12}
                 />
+                <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
             </div>
 
             <div className="space-y-2">
@@ -81,7 +82,7 @@ export function PasswordForm() {
                     type="password"
                     required
                     placeholder={t('password.confirmPlaceholder')}
-                    minLength={8}
+                    minLength={12}
                 />
             </div>
 

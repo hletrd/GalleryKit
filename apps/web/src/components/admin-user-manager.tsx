@@ -78,7 +78,8 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                             </div>
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">{t('users.password')}</label>
-                                <Input name="password" type="password" placeholder={t('users.passwordPlaceholder')} required minLength={8} />
+                                <Input name="password" type="password" placeholder={t('users.passwordPlaceholder')} required minLength={12} />
+                                <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
                             </div>
                             <DialogFooter>
                                 <Button type="submit" disabled={isCreating}>

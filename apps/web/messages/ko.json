@@ -101,8 +101,9 @@
     "new": "새 비밀번호",
     "confirm": "새 비밀번호 확인",
     "currentPlaceholder": "현재 비밀번호 입력",
-    "newPlaceholder": "새 비밀번호 입력 (최소 8자)",
+    "newPlaceholder": "새 비밀번호 입력",
     "confirmPlaceholder": "새 비밀번호 다시 입력",
+    "minLength": "최소 12자 이상",
     "submit": "비밀번호 변경"
   },
   "upload": {
