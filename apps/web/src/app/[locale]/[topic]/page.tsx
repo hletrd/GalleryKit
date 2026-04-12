@@ -22,8 +22,8 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const topicData = await getTopicBySlugCached(topic);
 
   if (!topicData) return {
-    title: 'Category Not Found',
-    description: 'This category could not be found.',
+    title: 'Not Found',
+    description: 'The page you are looking for does not exist.',
   };
 
   const title = tagSlugs.length > 0
