@@ -234,6 +234,13 @@
     "description": "페이지를 찾을 수 없습니다.",
     "backHome": "갤러리로 돌아가기"
   },
+  "sharedGroup": {
+    "title": "공유된 사진",
+    "photo": "사진",
+    "empty": "이 그룹에 사진이 없습니다.",
+    "notFound": "공유된 컬렉션을 찾을 수 없습니다.",
+    "viewCount": "공유된 사진 {count}장 보기"
+  },
   "serverActions": {
     "unauthorized": "권한이 없습니다",
     "invalidCurrentSlug": "유효하지 않은 슬러그입니다.",

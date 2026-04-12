@@ -234,6 +234,13 @@
     "description": "This page could not be found.",
     "backHome": "Return to Gallery"
   },
+  "sharedGroup": {
+    "title": "Shared Photos",
+    "photo": "Photo",
+    "empty": "No images in this group.",
+    "notFound": "This shared collection could not be found.",
+    "viewCount": "View {count} shared photos"
+  },
   "serverActions": {
     "unauthorized": "Unauthorized",
     "invalidCurrentSlug": "Invalid current slug",

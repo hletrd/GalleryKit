@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
-import { getLocale } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
@@ -62,6 +62,8 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         notFound();
     }
 
+    const t = await getTranslations('sharedGroup');
+
     // Validate photoId is a valid positive integer
     let photoId: number | null = null;
     if (photoIdParam) {
@@ -107,7 +109,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     return (
         <div className="container mx-auto px-4 py-8">
             <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold">Shared Photos</h1>
+                <h1 className="text-2xl font-bold">{t('title')}</h1>
                 <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                     ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                 </Link>
@@ -115,7 +117,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
                 {group.images.map((image) => {
                     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
-                    const altText = image.title && !isTitleFilename ? image.title : 'Photo';
+                    const altText = image.title && !isTitleFilename ? image.title : t('photo');
 
                     return (
                         <Link
@@ -137,7 +139,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             </div>
             {group.images.length === 0 && (
                 <div className="text-center py-20 text-muted-foreground">
-                    No images in this group.
+                    {t('empty')}
                 </div>
             )}
         </div>
