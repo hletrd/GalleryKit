@@ -173,6 +173,7 @@
     "noImages": "사진이 없습니다",
     "clearFilter": "필터 초기화",
     "allTags": "전체",
+    "tagFilter": "태그 필터",
     "noResultsHint": "일부 필터를 제거해 보세요"
   },
   "login": {

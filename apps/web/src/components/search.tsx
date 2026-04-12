@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import FocusTrap from 'focus-trap-react';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,6 +106,7 @@ export function Search() {
                 aria-hidden="true"
             />
             {/* Search Panel */}
+            <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
             <div role="dialog" aria-modal="true" aria-label="Search photos" className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]">
                 <div className="mx-auto h-full sm:h-auto sm:max-w-xl bg-card sm:border sm:rounded-xl shadow-2xl overflow-hidden flex flex-col">
                     <div className="flex items-center gap-2 p-4 border-b">
@@ -172,6 +174,7 @@ export function Search() {
                     </div>
                 </div>
             </div>
+            </FocusTrap>
         </>
     );
 }

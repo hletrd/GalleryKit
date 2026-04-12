@@ -173,6 +173,7 @@
     "noImages": "No images found.",
     "clearFilter": "Clear filter",
     "allTags": "All",
+    "tagFilter": "Filter by tag",
     "noResultsHint": "Try removing some filters"
   },
   "login": {

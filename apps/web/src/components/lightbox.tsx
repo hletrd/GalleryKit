@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import FocusTrap from 'focus-trap-react';
 import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -140,6 +141,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
     }, []);
 
     return (
+        <FocusTrap focusTrapOptions={{ allowOutsideClick: true }}>
         <div
             role="dialog"
             aria-modal="true"
@@ -248,5 +250,6 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                 )}
             </div>
         </div>
+        </FocusTrap>
     );
 }

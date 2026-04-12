@@ -42,12 +42,23 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
 
     if (tags.length === 0) return null;
 
+    const handleKeyDown = (slug: string | null) => (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleTagClick(slug);
+        }
+    };
+
     return (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
              <Badge
                 variant={currentTags.length === 0 ? "default" : "outline"}
                 className={cn("cursor-pointer hover:bg-primary/90", currentTags.length === 0 && "bg-primary text-primary-foreground")}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleTagClick(null)}
+                onKeyDown={handleKeyDown(null)}
+                aria-pressed={currentTags.length === 0}
             >
                 {t('home.allTags')}
             </Badge>
@@ -59,7 +70,11 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                             "cursor-pointer hover:bg-primary/90 flex gap-1",
                             currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
                         )}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => handleTagClick(tag.slug)}
+                        onKeyDown={handleKeyDown(tag.slug)}
+                        aria-pressed={currentTags.includes(tag.slug)}
                     >
                         {tag.name}
                         <span className="opacity-60 text-[10px]">({tag.count})</span>
