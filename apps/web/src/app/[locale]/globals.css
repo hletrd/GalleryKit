@@ -126,6 +126,12 @@
   }
 }
 
+/* Scrollbar hiding utility — used by nav horizontal scroll on mobile */
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

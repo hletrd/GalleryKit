@@ -86,7 +86,7 @@ export function NavClient({ topics }: NavClientProps) {
                     <Search />
                     <button
                         onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-                        className="p-2 hover:bg-accent rounded-full transition-colors"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
                         aria-label="Toggle theme"
                     >
                         <Sun className="h-4 w-4 hidden dark:block" />
@@ -94,7 +94,7 @@ export function NavClient({ topics }: NavClientProps) {
                     </button>
                     <Link
                         href={localeSwitchHref}
-                        className="px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
                     >
                         {otherLocale.toUpperCase()}
                     </Link>
@@ -108,6 +108,7 @@ export function NavClient({ topics }: NavClientProps) {
                         isExpanded && "mt-1.5"
                     )}
                     aria-label={isExpanded ? "Collapse menu" : "Expand menu"}
+                    aria-expanded={isExpanded}
                 >
                     {isExpanded ? (
                         <ChevronUp className="h-4 w-4" />
@@ -116,15 +117,6 @@ export function NavClient({ topics }: NavClientProps) {
                     )}
                 </button>
             </div>
-            <style jsx global>{`
-                .no-scrollbar::-webkit-scrollbar {
-                    display: none;
-                }
-                .no-scrollbar {
-                    -ms-overflow-style: none;
-                    scrollbar-width: none;
-                }
-            `}</style>
         </nav>
     );
 }

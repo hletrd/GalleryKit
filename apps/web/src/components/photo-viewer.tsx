@@ -141,7 +141,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 setIsPinned(true);
                             }
                         }}
-                        className="gap-2 transition-all"
+                        className="gap-2 transition-all hidden lg:flex"
                     >
                         {isPinned ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
                         {isPinned ? t('viewer.infoPinned') : t('viewer.info')}

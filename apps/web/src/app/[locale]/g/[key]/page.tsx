@@ -121,7 +121,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                         <Link
                             key={image.id}
                             href={`/g/${key}?photoId=${image.id}`}
-                            className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-gray-100"
+                            className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20"
                         >
                              <Image
                                 src={`/uploads/webp/${image.filename_webp.replace('.webp', '_1536.webp')}`}

@@ -185,7 +185,7 @@
     "submitting": "로그인 중..."
   },
   "viewer": {
-    "backTo": "돌아가기",
+    "backTo": "{topic}(으)로 돌아가기",
     "share": "공유",
     "info": "정보",
     "infoPinned": "정보 고정됨",
