@@ -1,4 +1,4 @@
-import { getImages, getTags, getImageCount } from '@/lib/data';
+import { getImagesLite, getTags, getImageCount } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
@@ -13,7 +13,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const { tags: tagsParam } = await searchParams;
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
 
-  const images = await getImages(undefined, undefined, 1, 0);
+  const images = await getImagesLite(undefined, undefined, 1, 0);
   const latestImage = images[0];
   const isLatestTitleFilename = latestImage?.title
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
@@ -66,7 +66,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;
   const [images, totalCount] = await Promise.all([
-    getImages(undefined, filterTags, PAGE_SIZE, 0),
+    getImagesLite(undefined, filterTags, PAGE_SIZE, 0),
     getImageCount(undefined, filterTags),
   ]);
   const hasMore = totalCount > PAGE_SIZE;

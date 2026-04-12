@@ -22,7 +22,7 @@ import { generateBase56 } from '@/lib/base56';
 import { processTopicImage } from '@/lib/process-topic-image';
 import PQueue from 'p-queue';
 import { getTranslations } from 'next-intl/server';
-import { getImages, searchImages } from '@/lib/data';
+import { getImagesLite, searchImages } from '@/lib/data';
 import { cache } from 'react';
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
@@ -1670,7 +1670,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     if (safeOffset > 10000) return [];
     // Cap tag array to prevent complex query DoS
     const safeTags = (tagSlugs || []).slice(0, 20);
-    const images = await getImages(topicSlug, safeTags, safeLimit, safeOffset);
+    const images = await getImagesLite(topicSlug, safeTags, safeLimit, safeOffset);
     return images;
 }
 

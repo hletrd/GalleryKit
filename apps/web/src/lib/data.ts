@@ -126,42 +126,63 @@ export async function getImageCount(topic?: string, tagSlugs?: string[]): Promis
     return Number(result[0]?.count ?? 0);
 }
 
-export async function getImages(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
-    const conditions = [];
-
-    if (topic !== undefined) {
-        if (!/^[a-z0-9_-]+$/i.test(topic) || topic.length > 100) return [];
-        conditions.push(eq(images.topic, topic));
-    }
-
-    // Only show processed images (processed is true).
-    if (!includeUnprocessed) {
-        conditions.push(eq(images.processed, true));
-    }
-
-    // Validate and filter tag slugs
+/** Build tag-filter conditions (shared between getImages and getImagesLite). */
+function buildTagFilterCondition(tagSlugs?: string[]) {
     const validTagSlugs = (tagSlugs || [])
         .map(s => s.trim())
         .filter(s => s.length > 0 && /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
+    if (validTagSlugs.length === 0) return null;
+    const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
+    return inArray(images.id, db
+        .select({ imageId: imageTags.imageId })
+        .from(imageTags)
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(or(...tagConditions))
+        .groupBy(imageTags.imageId)
+        .having(sql`COUNT(DISTINCT ${tags.slug}) = ${validTagSlugs.length}`));
+}
 
-    const hasTagFilter = validTagSlugs.length > 0;
-
-    if (hasTagFilter) {
-        // For multiple tags, we need to find images that have ALL the specified tags
-        // Using a subquery approach: get image IDs that have all required tags
-        const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
-
-        // Create a subquery to find images with all the required tags
-        const imageIdsWithAllTags = db
-            .select({ imageId: imageTags.imageId })
-            .from(imageTags)
-            .innerJoin(tags, eq(imageTags.tagId, tags.id))
-            .where(or(...tagConditions))
-            .groupBy(imageTags.imageId)
-            .having(sql`COUNT(DISTINCT ${tags.slug}) = ${validTagSlugs.length}`);
-
-        conditions.push(inArray(images.id, imageIdsWithAllTags));
+function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnprocessed = false) {
+    const conditions = [];
+    if (topic !== undefined) {
+        if (!/^[a-z0-9_-]+$/i.test(topic) || topic.length > 100) return null;
+        conditions.push(eq(images.topic, topic));
     }
+    if (!includeUnprocessed) {
+        conditions.push(eq(images.processed, true));
+    }
+    const tagFilter = buildTagFilterCondition(tagSlugs);
+    if (tagFilter) conditions.push(tagFilter);
+    return conditions;
+}
+
+/**
+ * Lightweight image listing — no tag LEFT JOIN or GROUP_CONCAT.
+ * Use for gallery grids and infinite scroll where tag names are not displayed.
+ */
+export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0) {
+    const conditions = buildImageConditions(topic, tagSlugs);
+    if (conditions === null) return [];
+
+    const baseQuery = db.select(selectFields)
+        .from(images)
+        .orderBy(desc(images.capture_date), desc(images.created_at));
+
+    const query = conditions.length > 0
+        ? baseQuery.where(and(...conditions))
+        : baseQuery;
+
+    const effectiveLimit = limit > 0 ? Math.min(limit, 500) : 500;
+    return query.limit(effectiveLimit).offset(offset);
+}
+
+/**
+ * Full image listing with tag names via GROUP_CONCAT.
+ * Use when tag_names need to be displayed (e.g., admin dashboard).
+ */
+export async function getImages(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
+    const conditions = buildImageConditions(topic, tagSlugs, includeUnprocessed);
+    if (conditions === null) return [];
 
     const baseQuery = db.select({
         ...selectFields,
@@ -177,7 +198,6 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    // Enforce a hard max to prevent unbounded result sets that can OOM the server.
     const effectiveLimit = limit > 0 ? Math.min(limit, 500) : 500;
     return query.limit(effectiveLimit).offset(offset);
 }
