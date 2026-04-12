@@ -742,9 +742,14 @@ export async function uploadImages(formData: FormData) {
             };
 
             const [result] = await db.insert(images).values(insertValues);
+            if (!result.insertId) {
+                console.error(`Insert failed for file: ${file.name}`);
+                failedFiles.push(file.name);
+                continue;
+            }
             const insertedImage = { id: result.insertId, ...insertValues };
 
-            if (insertedImage) {
+            {
                 processedIds.push(insertedImage.id);
 
                 // Phase 3: Process Tags (batched)

@@ -1,19 +1,12 @@
 import createMiddleware from 'next-intl/middleware';
 import { NextRequest, NextResponse } from 'next/server';
+import { LOCALES, DEFAULT_LOCALE } from '@/lib/constants';
 
 const intlMiddleware = createMiddleware({
-  // A list of all locales that are supported
-  locales: ['en', 'ko'],
-
-  // Used when no locale matches
-  defaultLocale: 'en',
-
-  // Don't prefix the default locale
+  locales: [...LOCALES],
+  defaultLocale: DEFAULT_LOCALE,
   localePrefix: 'as-needed'
 });
-
-// Locales supported (must match above)
-const LOCALES = ['en', 'ko'];
 
 // Matches /admin/... subpaths but NOT the login page itself (/admin exactly, or /admin with no trailing slash)
 // Protected: /[locale]/admin/anything or /admin/anything (default locale, no prefix)
@@ -48,7 +41,7 @@ export default function middleware(request: NextRequest) {
       // Determine login page URL based on locale prefix in path
       let loginUrl: string;
       const localeMatch = pathname.match(/^\/([a-z]{2})\//);
-      if (localeMatch && LOCALES.includes(localeMatch[1])) {
+      if (localeMatch && (LOCALES as readonly string[]).includes(localeMatch[1])) {
         loginUrl = `/${localeMatch[1]}/admin`;
       } else {
         loginUrl = '/admin';

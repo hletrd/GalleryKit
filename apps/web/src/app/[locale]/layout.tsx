@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Nav } from "@/components/nav";
@@ -8,6 +8,7 @@ import { getMessages } from 'next-intl/server';
 import { Footer } from "@/components/footer";
 import siteConfig from "@/site-config.json";
 import { notFound } from 'next/navigation';
+import { LOCALES } from '@/lib/constants';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
@@ -42,6 +43,9 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+};
+
+export const viewport: Viewport = {
   colorScheme: 'light dark',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#ffffff' },
@@ -59,7 +63,7 @@ export default async function RootLayout({
   const { locale } = await params;
 
   // Ensure that the incoming `locale` is valid
-  if (!['en', 'ko'].includes(locale)) {
+  if (!(LOCALES as readonly string[]).includes(locale)) {
     notFound();
   }
 

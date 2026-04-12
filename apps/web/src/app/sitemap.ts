@@ -6,9 +6,9 @@ import { MetadataRoute } from 'next';
 export const dynamic = 'force-dynamic';
 
 import siteConfig from "@/site-config.json";
+import { LOCALES } from '@/lib/constants';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
-const LOCALES = ['en', 'ko'];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [images, topics] = await Promise.all([
