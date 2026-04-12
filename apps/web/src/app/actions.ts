@@ -1674,9 +1674,36 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     return images;
 }
 
+const SEARCH_WINDOW_MS = 60 * 1000; // 1 minute
+const SEARCH_MAX_REQUESTS = 30;
+const SEARCH_RATE_LIMIT_MAX_KEYS = 2000;
+const searchRateLimit = new Map<string, { count: number; resetAt: number }>();
+
 export async function searchImagesAction(query: string) {
     if (!query || typeof query !== 'string' || query.length > 1000) return [];
     if (query.trim().length < 2) return [];
+
+    // Server-side rate limiting for search (LIKE queries are expensive)
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    const now = Date.now();
+    const entry = searchRateLimit.get(ip);
+    if (entry && entry.resetAt > now && entry.count >= SEARCH_MAX_REQUESTS) {
+        return [];
+    }
+    if (!entry || entry.resetAt <= now) {
+        searchRateLimit.set(ip, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    // Evict stale entries if map grows too large
+    if (searchRateLimit.size > SEARCH_RATE_LIMIT_MAX_KEYS) {
+        for (const [key, val] of searchRateLimit) {
+            if (val.resetAt <= now) searchRateLimit.delete(key);
+            if (searchRateLimit.size <= SEARCH_RATE_LIMIT_MAX_KEYS) break;
+        }
+    }
+
     const safeQuery = query.trim().slice(0, 200);
     return searchImages(safeQuery, 20);
 }
