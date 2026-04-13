@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, bigint } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, bigint, primaryKey } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 export const topics = mysqlTable("topics", {
@@ -128,4 +128,13 @@ export const sessions = mysqlTable("sessions", {
     expiresAt: timestamp("expires_at").notNull(),
 }, (table) => ({
     idxSessionsExpiresAt: index('idx_sessions_expires_at').on(table.expiresAt),
+}));
+
+export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
+    ip: varchar("ip", { length: 45 }).notNull(),
+    bucketType: varchar("bucket_type", { length: 20 }).notNull(),
+    bucketStart: int("bucket_start").notNull(),
+    count: int("count").default(1).notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.ip, table.bucketType, table.bucketStart] }),
 }));

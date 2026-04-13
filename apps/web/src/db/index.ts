@@ -31,4 +31,4 @@ poolConnection.on('connection', (connection) => {
 
 export const connection = poolConnection;
 export const db = drizzle(poolConnection, { mode: "default", schema });
-export { images, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions } from './schema';
+export { images, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions, rateLimitBuckets } from './schema';
