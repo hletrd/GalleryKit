@@ -133,7 +133,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         >
             <div
                 ref={innerRef}
-                className="w-full h-full transition-transform duration-300 ease-out"
+                className={cn("w-full h-full", isZoomed ? "" : "transition-transform duration-300 ease-out")}
                 style={{
                     transform: 'scale(1) translate(0%, 0%)',
                 }}
