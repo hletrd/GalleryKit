@@ -28,41 +28,46 @@ const MODE_LABELS: Record<HistogramMode, string> = {
 
 const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
 
-function computeHistogram(imageEl: HTMLImageElement): HistogramData {
+/**
+ * Extract pixel data from an image on the main thread (canvas required),
+ * then post the raw buffer to a Web Worker for the O(n) histogram computation.
+ */
+function computeHistogramAsync(
+    imageEl: HTMLImageElement,
+    worker: Worker,
+): Promise<HistogramData> {
     const canvas = document.createElement('canvas');
     const maxDim = 256;
     const scale = Math.min(maxDim / imageEl.naturalWidth, maxDim / imageEl.naturalHeight, 1);
-    canvas.width = Math.round(imageEl.naturalWidth * scale);
-    canvas.height = Math.round(imageEl.naturalHeight * scale);
+    const w = Math.round(imageEl.naturalWidth * scale);
+    const h = Math.round(imageEl.naturalHeight * scale);
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-        return {
+        return Promise.resolve({
             r: new Array(256).fill(0),
             g: new Array(256).fill(0),
             b: new Array(256).fill(0),
             l: new Array(256).fill(0),
+        });
+    }
+    ctx.drawImage(imageEl, 0, 0, w, h);
+    const imageData = ctx.getImageData(0, 0, w, h);
+
+    return new Promise((resolve) => {
+        const handler = (e: MessageEvent) => {
+            worker.removeEventListener('message', handler);
+            resolve(e.data as HistogramData);
         };
-    }
-    ctx.drawImage(imageEl, 0, 0);
-    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-    const r = new Array(256).fill(0);
-    const g = new Array(256).fill(0);
-    const b = new Array(256).fill(0);
-    const l = new Array(256).fill(0);
-
-    for (let i = 0; i < data.length; i += 4) {
-        const rv = data[i];
-        const gv = data[i + 1];
-        const bv = data[i + 2];
-        r[rv]++;
-        g[gv]++;
-        b[bv]++;
-        const lum = Math.round(0.2126 * rv + 0.7152 * gv + 0.0722 * bv);
-        l[lum]++;
-    }
-
-    return { r, g, b, l };
+        worker.addEventListener('message', handler);
+        // Transfer the underlying ArrayBuffer so it is zero-copy
+        const buffer = imageData.data.buffer;
+        worker.postMessage(
+            { imageData: buffer, width: w, height: h },
+            [buffer],
+        );
+    });
 }
 
 function drawHistogram(
@@ -144,6 +149,16 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
     const [loading, setLoading] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const workerRef = useRef<Worker | null>(null);
+
+    // Create worker once, terminate on unmount
+    useEffect(() => {
+        workerRef.current = new Worker('/histogram-worker.js');
+        return () => {
+            workerRef.current?.terminate();
+            workerRef.current = null;
+        };
+    }, []);
 
     useEffect(() => {
         if (!imageUrl) return;
@@ -155,14 +170,21 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
         img.crossOrigin = 'anonymous';
         img.onload = () => {
             if (aborted) return;
-            try {
-                const data = computeHistogram(img);
-                setHistogramData(data);
-            } catch {
-                // Canvas tainted or other error — silently fail
-            } finally {
+            const worker = workerRef.current;
+            if (!worker) {
                 setLoading(false);
+                return;
             }
+            computeHistogramAsync(img, worker)
+                .then((data) => {
+                    if (!aborted) setHistogramData(data);
+                })
+                .catch(() => {
+                    // Canvas tainted or worker error — silently fail
+                })
+                .finally(() => {
+                    if (!aborted) setLoading(false);
+                });
         };
         img.onerror = () => {
             if (aborted) return;
