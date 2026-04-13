@@ -39,8 +39,9 @@ const selectFields = {
     blur_data_url: images.blur_data_url,
 };
 
-const adminSelectFields = {
-    ...selectFields,
+// Admin-only fields — extend selectFields with PII columns.
+// Used inline where needed; not a separate object to avoid dead exports.
+const adminExtraFields = {
     user_filename: images.user_filename,
     latitude: images.latitude,
     longitude: images.longitude,
@@ -157,14 +158,19 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
 }
 
 /**
- * Lightweight image listing — no tag LEFT JOIN or GROUP_CONCAT.
- * Use for gallery grids and infinite scroll where tag names are not displayed.
+ * Lightweight image listing — uses a scalar subquery for tag_names instead
+ * of LEFT JOIN + GROUP BY. Avoids the expensive GROUP_CONCAT that requires
+ * grouping the entire result set, while still providing tag names for
+ * display titles and alt text in the gallery grid.
  */
 export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0) {
     const conditions = buildImageConditions(topic, tagSlugs);
     if (conditions === null) return [];
 
-    const baseQuery = db.select(selectFields)
+    const baseQuery = db.select({
+        ...selectFields,
+        tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
+    })
         .from(images)
         .orderBy(desc(images.capture_date), desc(images.created_at));
 
@@ -471,7 +477,7 @@ export async function getImageIdsForSitemap() {
     .limit(50000);
 }
 
-export { adminSelectFields };
+export { adminExtraFields };
 
 export const getImageCached = cache(getImage);
 export const getTopicBySlugCached = cache(getTopicBySlug);
