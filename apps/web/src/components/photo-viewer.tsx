@@ -176,7 +176,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             if (img.description && img.description.trim()) return img.description;
                                             if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
                                             if (img.tags && img.tags.length > 0) return img.tags.map((t: TagInfo) => t.name).join(', ');
-                                            return 'Photo';
+                                            return t('common.photo');
                                         };
                                         // Extract base UUID from filename (e.g. "uuid.webp" -> "uuid")
                                         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
@@ -419,7 +419,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         <p className="text-muted-foreground">{t('viewer.capturedAt')}</p>
                                         <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
                                             <Calendar className="w-3 h-3" />
-                                            {image.capture_date ? new Date(image.capture_date).toLocaleDateString() : 'Unknown'}
+                                            {image.capture_date ? new Date(image.capture_date).toLocaleDateString() : t('common.unknown')}
                                         </p>
                                         {image.capture_date && (
                                             <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>

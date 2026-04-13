@@ -182,7 +182,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                             ? image.title
                             : image.tag_names
                                 ? image.tag_names.split(',').map((t: string) => t.trim()).join(', ')
-                                : 'Photo';
+                                : t('common.photo');
                     const displayTitle = (() => {
                         if (image.title && image.title.trim().length > 0) {
                              return image.title;
@@ -190,7 +190,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                         if (image.tag_names) {
                             return image.tag_names.split(',').map((tag: string) => `#${tag.trim()}`).join(' ');
                         }
-                        return image.user_filename || 'Untitled';
+                        return image.user_filename || t('common.untitled');
                     })();
 
                     const isAboveFold = index < columnCount;
