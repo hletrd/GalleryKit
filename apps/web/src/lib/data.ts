@@ -163,8 +163,8 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
  * grouping the entire result set, while still providing tag names for
  * display titles and alt text in the gallery grid.
  */
-export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0) {
-    const conditions = buildImageConditions(topic, tagSlugs);
+export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
+    const conditions = buildImageConditions(topic, tagSlugs, includeUnprocessed);
     if (conditions === null) return [];
 
     const baseQuery = db.select({
