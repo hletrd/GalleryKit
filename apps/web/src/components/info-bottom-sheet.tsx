@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import FocusTrap from 'focus-trap-react';
 import { Info, MapPin, Calendar, Clock } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
@@ -90,6 +91,16 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
         }
     }, [sheetState, onClose]);
 
+    // Escape key to close
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose]);
+
     if (!isOpen || !image) return null;
 
     const displayTitle = image.title && image.title.trim() !== ''
@@ -122,8 +133,12 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
             )}
 
             {/* Sheet */}
+            <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
             <div
                 ref={sheetRef}
+                role="dialog"
+                aria-modal="true"
+                aria-label={t('viewer.bottomSheet')}
                 className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl shadow-2xl transition-transform duration-300 ease-out"
                 style={{
                     transform: `translateY(${getTranslateY(sheetState)})`,
@@ -275,7 +290,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                             <p className="text-muted-foreground text-xs mb-1">{t('viewer.capturedAt')}</p>
                             <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
                                 <Calendar className="w-3 h-3" />
-                                {image.capture_date ? new Date(image.capture_date).toLocaleDateString() : 'Unknown'}
+                                {image.capture_date ? new Date(image.capture_date).toLocaleDateString() : t('common.unknown')}
                             </p>
                             {image.capture_date && (
                                 <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>
@@ -287,6 +302,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                     </div>
                 )}
             </div>
+            </FocusTrap>
         </>
     );
 }
