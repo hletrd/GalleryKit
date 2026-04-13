@@ -19,7 +19,7 @@ export function AdminNav() {
     ];
 
     return (
-        <nav className="flex items-center space-x-6 text-sm font-medium">
+        <nav className="flex items-center flex-wrap gap-x-6 gap-y-2 text-sm font-medium">
             {links.map(({ href, label }) => {
                 const isActive = pathname === href;
                 return (
