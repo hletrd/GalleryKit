@@ -87,6 +87,8 @@ export const adminSettings = mysqlTable("admin_settings", {
 export const sharedGroups = mysqlTable("shared_groups", {
     id: int("id").primaryKey().autoincrement(),
     key: varchar("key", { length: 255 }).notNull().unique(),
+    view_count: int("view_count").default(0).notNull(),
+    expires_at: datetime("expires_at", { mode: 'string' }),
     created_at: timestamp("created_at")
         .default(sql`CURRENT_TIMESTAMP`)
         .notNull(),
