@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { useTranslation } from '@/components/i18n-provider';
 
 export function Search() {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_webp: string; filename_jpeg: string; blur_data_url: string | null; width: number; height: number; topic: string; camera_model: string | null }[]>([]);
@@ -134,7 +134,7 @@ export function Search() {
                                 {results.map((image) => (
                                     <Link
                                         key={image.id}
-                                        href={`/p/${image.id}`}
+                                        href={`/${locale}/p/${image.id}`}
                                         onClick={() => setIsOpen(false)}
                                         className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
                                     >
