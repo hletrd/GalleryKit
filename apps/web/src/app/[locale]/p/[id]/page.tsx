@@ -7,7 +7,9 @@ import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
 import { getLocale } from 'next-intl/server';
 
-const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
+const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
+    loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
+});
 
 
 // Cache for 1 week (604800s) as photo content rarely changes
