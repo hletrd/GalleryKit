@@ -5,10 +5,6 @@ import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 import { getLocale } from 'next-intl/server';
 
-// Pre-declare for use in both generateMetadata and default export
-async function getLocaleAsync() {
-  return getLocale();
-}
 
 export const revalidate = 3600;
 
@@ -74,7 +70,7 @@ export default async function TopicPage({
 }) {
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
-  const locale = await getLocaleAsync();
+  const locale = await getLocale();
 
   const topicData = await getTopicBySlugCached(topic);
   if (!topicData) {
