@@ -9,13 +9,13 @@ export default function GlobalError({
 }) {
     return (
         <html>
-            <body className="min-h-screen bg-background flex items-center justify-center">
-                <div className="text-center space-y-4 p-8">
-                    <h1 className="text-4xl font-bold text-muted-foreground/30">Error</h1>
-                    <p className="text-muted-foreground">Something went wrong.</p>
+            <body style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#09090b', color: '#fafafa', fontFamily: 'system-ui, sans-serif' }}>
+                <div style={{ textAlign: 'center', padding: '2rem' }}>
+                    <h1 style={{ fontSize: '3rem', fontWeight: 'bold', opacity: 0.3, marginBottom: '1rem' }}>Error</h1>
+                    <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>Something went wrong.</p>
                     <button
                         onClick={reset}
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                        style={{ padding: '0.5rem 1.5rem', backgroundColor: '#fafafa', color: '#09090b', border: 'none', borderRadius: '0.375rem', cursor: 'pointer', fontSize: '0.875rem' }}
                     >
                         Try again
                     </button>
