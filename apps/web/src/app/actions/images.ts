@@ -46,8 +46,8 @@ export async function uploadImages(formData: FormData) {
 
     // Validate total upload size
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > 10 * 1024 * 1024 * 1024) {
-        return { error: 'Total upload size exceeds 10GB limit' };
+    if (totalSize > 2 * 1024 * 1024 * 1024) {
+        return { error: 'Total upload size exceeds 2GB limit' };
     }
 
     if (!topic) return { error: 'Topic required' };
