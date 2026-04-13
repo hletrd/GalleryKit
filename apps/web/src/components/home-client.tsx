@@ -7,6 +7,7 @@ import { useTranslation } from "@/components/i18n-provider";
 import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
 import { cn } from '@/lib/utils';
+import { imageUrl } from '@/lib/image-url';
 
 function reorderForColumns<T extends { id: number; width?: number; height?: number }>(items: T[], columnCount: number): T[] {
     if (columnCount <= 1 || items.length === 0) return items;
@@ -129,16 +130,22 @@ interface GalleryTag {
     count: number;
 }
 
+interface GalleryTopic {
+    slug: string;
+    label: string;
+}
+
 interface HomeClientProps {
     images: GalleryImage[];
     tags: GalleryTag[];
+    topics?: GalleryTopic[];
     currentTags?: string[];
     topicSlug?: string;
     hasMore?: boolean;
     totalCount?: number;
 }
 
-export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = false, totalCount }: HomeClientProps) {
+export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMore = false, totalCount }: HomeClientProps) {
     const { t } = useTranslation();
     const [allImages, setAllImages] = useState(images);
     const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
@@ -148,8 +155,22 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
     // Reset allImages when the images prop changes (e.g. topic/filter change)
     useEffect(() => { setAllImages(images); }, [images]);
 
+    const [showBackToTop, setShowBackToTop] = useState(false);
+    useEffect(() => {
+        const handleScroll = () => {
+            setShowBackToTop(window.scrollY > 600);
+        };
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
     const columnCount = useColumnCount();
     const orderedImages = useMemo(() => reorderForColumns(allImages, columnCount), [allImages, columnCount]);
+    const topicsMap = useMemo(() => {
+        const map: Record<string, string> = {};
+        for (const t of topics || []) map[t.slug] = t.label;
+        return map;
+    }, [topics]);
     const displayTags = (currentTags || []).map((tag) => {
         const match = tags.find((t) => t.slug === tag.trim().toLowerCase());
         return match?.name ?? tag;
@@ -199,7 +220,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                         <div
                             key={image.id}
                             className={cn(
-                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]",
+                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2",
                                 image.blur_data_url && "skeleton-shimmer"
                             )}
                             style={image.blur_data_url ? {
@@ -223,16 +244,16 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                                                     <>
                                                         <source
                                                             type="image/avif"
-                                                            srcSet={`/uploads/avif/${baseAvif}_640.avif 640w, /uploads/avif/${baseAvif}_1536.avif 1536w`}
+                                                            srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_640.avif`)} 640w, ${imageUrl(`/uploads/avif/${baseAvif}_1536.avif`)} 1536w`}
                                                             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
                                                         <source
                                                             type="image/webp"
-                                                            srcSet={`/uploads/webp/${baseWebp}_640.webp 640w, /uploads/webp/${baseWebp}_1536.webp 1536w`}
+                                                            srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_640.webp`)} 640w, ${imageUrl(`/uploads/webp/${baseWebp}_1536.webp`)} 1536w`}
                                                             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
                                                         <img
-                                                            src={`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`}
+                                                            src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`)}
                                                             alt={altText}
                                                             width={image.width}
                                                             height={image.height}
@@ -247,7 +268,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
 
                                             return (
                                                 <OptimisticImage
-                                                    src={`/uploads/jpeg/${image.filename_jpeg}`}
+                                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                                     alt={altText}
                                                     width={image.width}
                                                     height={image.height}
@@ -263,7 +284,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                                         <h3 className="text-white font-medium truncate">
                                             {displayTitle}
                                         </h3>
-                                        <p className="text-white/80 text-xs truncate">{image.topic}</p>
+                                        <p className="text-white/80 text-xs truncate">{(image.topic && topicsMap[image.topic]) || image.topic}</p>
                                     </div>
                                 </div>
                             </Link>
@@ -301,16 +322,11 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
             {/* Back to top button — visible after scrolling down */}
             <button
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                className="fixed bottom-6 right-6 z-40 p-3 bg-primary text-primary-foreground rounded-full shadow-lg opacity-0 pointer-events-none transition-opacity [.scrolled_&]:opacity-100 [.scrolled_&]:pointer-events-auto hover:bg-primary/90"
+                className={cn(
+                    "fixed bottom-6 right-6 z-40 p-3 bg-primary text-primary-foreground rounded-full shadow-lg transition-opacity hover:bg-primary/90",
+                    showBackToTop ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+                )}
                 aria-label={t('home.backToTop')}
-                ref={(el) => {
-                    if (!el) return;
-                    const handleScroll = () => {
-                        document.documentElement.classList.toggle('scrolled', window.scrollY > 600);
-                    };
-                    window.addEventListener('scroll', handleScroll, { passive: true });
-                    return () => window.removeEventListener('scroll', handleScroll);
-                }}
             >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />

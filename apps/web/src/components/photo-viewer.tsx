@@ -19,6 +19,7 @@ import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
+import { imageUrl } from '@/lib/image-url';
 
 import { useRouter } from 'next/navigation';
 
@@ -49,7 +50,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const showInfo = isPinned || timerShowInfo;
     const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
-    const downloadHref = image?.filename_jpeg ? `/uploads/jpeg/${image.filename_jpeg}` : null;
+    const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
 
     const navigate = useCallback((direction: number) => {
         const newIndex = currentIndex + direction;
@@ -187,7 +188,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         if (!baseWebp || !baseAvif) {
                                             return (
                                                 <Image
-                                                    src={`/uploads/jpeg/${image.filename_jpeg}`}
+                                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                                     alt={getAltText(image)}
                                                     width={image.width}
                                                     height={image.height}
@@ -201,16 +202,16 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <picture className="w-full h-full flex items-center justify-center">
                                                 <source
                                                     type="image/avif"
-                                                    srcSet={`/uploads/avif/${baseAvif}_640.avif 640w, /uploads/avif/${baseAvif}_1536.avif 1536w, /uploads/avif/${baseAvif}_2048.avif 2048w, /uploads/avif/${baseAvif}_4096.avif 4096w`}
+                                                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
                                                     sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
                                                 />
                                                 <source
                                                     type="image/webp"
-                                                    srcSet={`/uploads/webp/${baseWebp}_640.webp 640w, /uploads/webp/${baseWebp}_1536.webp 1536w, /uploads/webp/${baseWebp}_2048.webp 2048w, /uploads/webp/${baseWebp}_4096.webp 4096w`}
+                                                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
                                                     sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
                                                 />
                                                 <img
-                                                    src={`/uploads/jpeg/${image.filename_jpeg}`}
+                                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                                     alt={getAltText(image)}
                                                     width={image.width}
                                                     height={image.height}
@@ -409,7 +410,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 {image.filename_jpeg && (
                                     <div className="mt-4 border-t pt-4">
                                         <Histogram
-                                            imageUrl={`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`}
+                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`)}
                                             className="w-full"
                                         />
                                     </div>

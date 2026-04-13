@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { searchImagesAction } from '@/app/actions';
 import Link from 'next/link';
 import { useTranslation } from '@/components/i18n-provider';
+import { imageUrl } from '@/lib/image-url';
 
 export function Search() {
     const { t, locale } = useTranslation();
@@ -155,7 +156,7 @@ export function Search() {
                                     >
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                                             <img
-                                                src={`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`}
+                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`)}
                                                 alt={image.title || `Photo`}
                                                 className="w-full h-full object-cover"
                                                 loading="lazy"
@@ -184,7 +185,7 @@ export function Search() {
                     </div>
                     <div className="p-2 border-t text-center">
                         <p className="text-xs text-muted-foreground">
-                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> to toggle search
+                            <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}
                         </p>
                     </div>
                 </div>

@@ -7,6 +7,7 @@ import { useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
+import { imageUrl } from '@/lib/image-url';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -111,17 +112,17 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
 
     const avifSrcSet = baseAvif
         ? [640, 1536, 2048, 4096]
-              .map((w) => `/uploads/avif/${baseAvif}_${w}.avif ${w}w`)
+              .map((w) => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`)
               .join(', ')
         : undefined;
 
     const webpSrcSet = baseWebp
         ? [640, 1536, 2048, 4096]
-              .map((w) => `/uploads/webp/${baseWebp}_${w}.webp ${w}w`)
+              .map((w) => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`)
               .join(', ')
         : undefined;
 
-    const jpegSrc = image.filename_jpeg ? `/uploads/jpeg/${image.filename_jpeg}` : undefined;
+    const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
 
     const transitionStyle = shouldReduceMotion
         ? {}

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
+import { imageUrl } from '@/lib/image-url';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
@@ -124,7 +125,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20"
                         >
                              <Image
-                                src={`/uploads/webp/${image.filename_webp.replace('.webp', '_1536.webp')}`}
+                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace('.webp', '_1536.webp')}`)}
                                 alt={altText}
                                 width={image.width}
                                 height={image.height}
