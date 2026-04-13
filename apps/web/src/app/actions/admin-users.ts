@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isMySQLError } from '@/lib/validation';
+import { logAuditEvent } from '@/lib/audit';
 
 // Admin User Management
 export async function getAdminUsers() {
@@ -34,10 +35,13 @@ export async function createAdminUser(formData: FormData) {
 
     try {
         const hash = await argon2.hash(password, { type: argon2.argon2id });
-        await db.insert(adminUsers).values({
+        const [result] = await db.insert(adminUsers).values({
             username,
             password_hash: hash
         });
+
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(result.insertId)).catch(console.debug);
 
         revalidatePath('/admin/dashboard');
         return { success: true };
@@ -74,6 +78,7 @@ export async function deleteAdminUser(id: number) {
             await tx.delete(sessions).where(eq(sessions.userId, id));
             await tx.delete(adminUsers).where(eq(adminUsers.id, id));
         });
+        logAuditEvent(currentUser.id, 'user_delete', 'user', String(id)).catch(console.debug);
         revalidatePath('/admin/dashboard');
         return { success: true };
     } catch (e: unknown) {
