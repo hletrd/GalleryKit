@@ -22,15 +22,18 @@ export function NavClient({ topics }: NavClientProps) {
     const [isExpanded, setIsExpanded] = useState(false);
 
     const otherLocale = locale === 'en' ? 'ko' : 'en';
-    // Swap locale prefix in the current path
+    // Swap locale prefix in the current path, preserving query params
     const localeSwitchHref = (() => {
-        // Path starts with /en/ or /ko/ — replace prefix
         const localePrefix = `/${locale}`;
+        let path: string;
         if (pathname.startsWith(localePrefix + '/') || pathname === localePrefix) {
-            return `/${otherLocale}${pathname.slice(localePrefix.length) || '/'}`;
+            path = `/${otherLocale}${pathname.slice(localePrefix.length) || '/'}`;
+        } else {
+            path = `/${otherLocale}${pathname}`;
         }
-        // No locale prefix (default locale) — prepend other locale
-        return `/${otherLocale}${pathname}`;
+        // Preserve search params (e.g., ?tags=landscape)
+        const search = typeof window !== 'undefined' ? window.location.search : '';
+        return search ? `${path}${search}` : path;
     })();
 
     return (
