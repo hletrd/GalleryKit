@@ -108,6 +108,20 @@ export const adminUsers = mysqlTable("admin_users", {
     created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const auditLog = mysqlTable("audit_log", {
+    id: int("id").primaryKey().autoincrement(),
+    userId: int("user_id").references(() => adminUsers.id),
+    action: varchar("action", { length: 64 }).notNull(),
+    targetType: varchar("target_type", { length: 64 }),
+    targetId: varchar("target_id", { length: 128 }),
+    ip: varchar("ip", { length: 45 }),
+    metadata: text("metadata"),
+    created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+    userIdx: index("audit_user_idx").on(table.userId, table.created_at),
+    actionIdx: index("audit_action_idx").on(table.action, table.created_at),
+}));
+
 export const sessions = mysqlTable("sessions", {
     id: varchar("id", { length: 255 }).primaryKey(),
     userId: int("user_id").references(() => adminUsers.id, { onDelete: 'cascade' }).notNull(),
