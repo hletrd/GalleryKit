@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, boolean, text, bigint } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, bigint } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 export const topics = mysqlTable("topics", {
@@ -30,7 +30,7 @@ export const images = mysqlTable("images", {
     topic: varchar("topic", { length: 255 }).references(() => topics.slug, { onDelete: 'restrict' }).notNull(),
 
     // EXIF Data
-    capture_date: varchar("capture_date", { length: 255 }),
+    capture_date: datetime("capture_date", { mode: 'string' }),
     camera_model: varchar("camera_model", { length: 255 }),
     lens_model: varchar("lens_model", { length: 255 }),
     iso: int("iso"),
