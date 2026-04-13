@@ -30,12 +30,15 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [shouldReduceMotion, setShouldReduceMotion] = useState(false);
+    const [shouldReduceMotion, setShouldReduceMotion] = useState(
+        () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
     const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
+    const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
     useEffect(() => {
         const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-        setShouldReduceMotion(mq.matches);
         const handler = (e: MediaQueryListEvent) => setShouldReduceMotion(e.matches);
         mq.addEventListener('change', handler);
         return () => mq.removeEventListener('change', handler);
@@ -154,19 +157,17 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         ? {}
         : { transition: 'opacity 0.2s ease-in-out' };
 
-    const closeButtonRef = useRef<HTMLButtonElement>(null);
-
     // Lock body scroll and manage focus when lightbox is open
     useEffect(() => {
         const prev = document.body.style.overflow;
+        previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
         document.body.style.overflow = 'hidden';
-        // Move focus into lightbox on open
         closeButtonRef.current?.focus();
-        // Store previously focused element to restore on close
-        const previouslyFocused = document.activeElement as HTMLElement | null;
         return () => {
             document.body.style.overflow = prev;
-            previouslyFocused?.focus();
+            previouslyFocusedRef.current?.focus();
         };
     }, []);
 
@@ -240,7 +241,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                         e.stopPropagation();
                         toggleFullscreen();
                     }}
-                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                    aria-label={isFullscreen ? t('viewer.fullscreen') : t('aria.openFullscreen')}
                 >
                     {isFullscreen ? (
                         <Minimize className="h-5 w-5" />

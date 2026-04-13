@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
@@ -139,6 +140,7 @@ export function Search() {
                             size="icon"
                             onClick={() => setIsOpen(false)}
                             className="h-8 w-8 shrink-0"
+                            aria-label={t('aria.close')}
                         >
                             <X className="h-4 w-4" />
                         </Button>
@@ -155,16 +157,18 @@ export function Search() {
                                         className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
                                     >
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
-                                            <img
+                                            <Image
                                                 src={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`)}
-                                                alt={image.title || `Photo`}
+                                                alt={image.title || t('common.photo')}
+                                                width={48}
+                                                height={48}
                                                 className="w-full h-full object-cover"
                                                 loading="lazy"
                                             />
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <p className="font-medium text-sm truncate">
-                                                {image.title || image.description || `Photo ${image.id}`}
+                                                {image.title || image.description || `${t('common.photo')} ${image.id}`}
                                             </p>
                                             <p className="text-xs text-muted-foreground truncate">
                                                 {[image.topic, image.camera_model].filter(Boolean).join(' \u00b7 ')}

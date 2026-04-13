@@ -32,7 +32,7 @@ type Tag = {
 };
 
 export function TagManager({ initialTags }: { initialTags: Tag[] }) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const [editingTag, setEditingTag] = useState<Tag | null>(null);
     const router = useRouter();
 
@@ -64,7 +64,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     return (
         <div>
              <div className="flex items-center gap-4 mb-6">
-                <Link href="/admin/dashboard">
+                <Link href={`/${locale}/admin/dashboard`}>
                     <Button variant="ghost" size="icon">
                         <ChevronLeft className="h-4 w-4" />
                     </Button>

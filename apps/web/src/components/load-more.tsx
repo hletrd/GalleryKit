@@ -47,6 +47,14 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
     // on every state change (loading/offset updates cause callback churn).
     const loadMoreRef = useRef(loadMore);
     loadMoreRef.current = loadMore;
+    const queryKey = `${topicSlug ?? ''}::${(tagSlugs ?? []).join(',')}`;
+
+    useEffect(() => {
+        loadingRef.current = false;
+        setLoading(false);
+        setOffset(initialOffset);
+        setHasMore(initialHasMore);
+    }, [initialHasMore, initialOffset, queryKey]);
 
     useEffect(() => {
         const sentinel = sentinelRef.current;

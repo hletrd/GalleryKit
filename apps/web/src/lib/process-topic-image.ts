@@ -89,3 +89,8 @@ export async function processTopicImage(file: File): Promise<string> {
 
     return filename;
 }
+
+export async function deleteTopicImage(filename: string) {
+    if (!filename) return;
+    await fs.unlink(path.join(RESOURCES_DIR, filename)).catch(() => {});
+}

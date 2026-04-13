@@ -8,6 +8,13 @@
       "when": 1766198349853,
       "tag": "0000_nappy_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1776114026325,
+      "tag": "0001_sync_current_schema",
+      "breakpoints": true
     }
   ]
 }

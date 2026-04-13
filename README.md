@@ -99,7 +99,7 @@ npm install
 cp apps/web/.env.local.example apps/web/.env.local
 ```
 
-Edit `apps/web/.env.local` with your MySQL credentials:
+Edit `apps/web/.env.local` with your MySQL credentials and public URLs:
 
 ```env
 DB_HOST=127.0.0.1
@@ -107,7 +107,12 @@ DB_PORT=3306
 DB_USER=your_user
 DB_PASSWORD=your_password
 DB_NAME=gallery
+BASE_URL=http://localhost:3000
+# Optional: serve uploaded assets from a CDN or reverse proxy prefix
+# IMAGE_BASE_URL=https://cdn.example.com
 ```
+
+If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP.
 
 ### Development
 

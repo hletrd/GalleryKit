@@ -5,11 +5,14 @@ import { getTranslations } from 'next-intl/server';
 
 export default async function ProtectedLayout({
     children,
+    params,
 }: {
     children: React.ReactNode;
+    params: Promise<{ locale: string }>;
 }) {
+    const { locale } = await params;
     if (!(await isAdmin())) {
-        redirect('/admin');
+        redirect(`/${locale}/admin`);
     }
 
     const t = await getTranslations('common');

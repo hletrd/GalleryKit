@@ -199,12 +199,12 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (
-                <Link href={`/p/${image.prevId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                <Link href={`/${locale}/p/${image.prevId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
                     prev
                 </Link>
             )}
             {image.nextId && (
-                <Link href={`/p/${image.nextId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                <Link href={`/${locale}/p/${image.nextId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
                     next
                 </Link>
             )}

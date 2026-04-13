@@ -46,7 +46,8 @@ export function TagInput({
     );
 
     // Determine if we should show "Create new tag" option
-    const showCreateOption = inputValue.trim().length > 0 && !exactMatch && !selectedTags.includes(inputValue.trim());
+    const cleanInputValue = inputValue.trim();
+    const showCreateOption = cleanInputValue.length > 0 && !cleanInputValue.includes(',') && !exactMatch && !selectedTags.includes(cleanInputValue);
 
     const reset = () => {
         setInputValue('');
@@ -56,7 +57,7 @@ export function TagInput({
 
     const addTag = (tag: string) => {
         const clean = tag.trim();
-        if (!clean) return;
+        if (!clean || clean.includes(',')) return;
         if (!selectedTags.includes(clean)) {
             onTagsChange([...selectedTags, clean]);
         }

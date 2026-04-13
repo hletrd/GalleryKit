@@ -3,31 +3,42 @@ import Database from 'better-sqlite3';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 
-
 dotenv.config({ path: '.env.local' });
 
-// SQLite connection
 const sqlitePath = process.env.DB_FILE_NAME || 'sqlite.db';
 const sqlite = new Database(sqlitePath);
 
-// MySQL connection
-// Parse connection string or use variables.
-// Assuming DATABASE_URL format: mysql://user:pass@host:port/db
-const connectionString = process.env.DATABASE_URL || `mysql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
-if (!connectionString) {
-    console.error("DATABASE_URL is not defined");
-    process.exit(1);
+function getRequiredEnv(name: string): string {
+    const value = process.env[name]?.trim();
+    if (!value) {
+        throw new Error(`Missing required environment variable: ${name}`);
+    }
+    return value;
+}
+
+const connectionString = process.env.DATABASE_URL || `mysql://${getRequiredEnv('DB_USER')}:${getRequiredEnv('DB_PASSWORD')}@${getRequiredEnv('DB_HOST')}:${getRequiredEnv('DB_PORT')}/${getRequiredEnv('DB_NAME')}`;
+
+function formatMysqlTarget() {
+    if (process.env.DATABASE_URL) {
+        try {
+            const target = new URL(process.env.DATABASE_URL);
+            return `${target.protocol}//${target.hostname}:${target.port || '3306'}${target.pathname}`;
+        } catch {
+            return '[invalid DATABASE_URL]';
+        }
+    }
+
+    return `mysql://${getRequiredEnv('DB_HOST')}:${getRequiredEnv('DB_PORT')}/${getRequiredEnv('DB_NAME')}`;
 }
 
 async function migrate() {
     console.log(`Reading from SQLite: ${sqlitePath}`);
-    console.log(`Writing to MySQL: ${connectionString}`);
+    console.log(`Writing to MySQL: ${formatMysqlTarget()}`);
 
-    const mysqlConn = await mysql.createConnection(connectionString!);
+    const mysqlConn = await mysql.createConnection(connectionString);
 
-    // Explicitly truncate all tables first
-    console.log("Truncating all MySQL tables...");
-    await mysqlConn.query("SET FOREIGN_KEY_CHECKS=0");
+    console.log('Truncating all MySQL tables...');
+    await mysqlConn.query('SET FOREIGN_KEY_CHECKS=0');
     const tables = [
         'image_tags',
         'shared_group_images',
@@ -35,28 +46,26 @@ async function migrate() {
         'topics',
         'tags',
         'shared_groups',
-        'admin_settings'
+        'admin_settings',
     ];
     for (const table of tables) {
         await mysqlConn.query(`TRUNCATE TABLE \`${table}\``);
     }
-    console.log("Truncation complete.");
+    console.log('Truncation complete.');
 
     try {
-        // 1. Topics
-        console.log("Migrating Topics...");
-        const topics = sqlite.prepare("SELECT * FROM topics").all() as any[];
+        console.log('Migrating Topics...');
+        const topics = sqlite.prepare('SELECT * FROM topics').all() as any[];
         for (const topic of topics) {
             await mysqlConn.execute(
-                "INSERT INTO topics (slug, label, `order`, image_filename) VALUES (?, ?, ?, ?)",
+                'INSERT INTO topics (slug, label, `order`, image_filename) VALUES (?, ?, ?, ?)',
                 [topic.slug, topic.label, topic.order, topic.image_filename]
             );
         }
         console.log(`Migrated ${topics.length} topics.`);
 
-        // 2. Images
-        console.log("Migrating Images...");
-        const images = sqlite.prepare("SELECT * FROM images").all() as any[];
+        console.log('Migrating Images...');
+        const images = sqlite.prepare('SELECT * FROM images').all() as any[];
         for (const img of images) {
             await mysqlConn.execute(
                 `INSERT INTO images (
@@ -71,75 +80,85 @@ async function migrate() {
                     img.width ?? null, img.height ?? null, img.original_width ?? null, img.original_height ?? null, img.title ?? null, img.description ?? null,
                     img.share_key ?? null, img.topic ?? null, img.capture_date ?? null, img.camera_model ?? null, img.lens_model ?? null, img.iso ?? null,
                     img.f_number ?? null, img.exposure_time ?? null, img.focal_length ?? null, img.latitude ?? null, img.longitude ?? null,
-                    img.color_space ?? null, img.created_at ?? null, img.updated_at ?? null, img.processed ?? null
+                    img.color_space ?? null, img.created_at ?? null, img.updated_at ?? null, img.processed ?? null,
                 ]
             );
         }
         console.log(`Migrated ${images.length} images.`);
 
-        // 3. Tags
-        console.log("Migrating Tags...");
-        const tags = sqlite.prepare("SELECT * FROM tags").all() as any[];
+        console.log('Migrating Tags...');
+        const tags = sqlite.prepare('SELECT * FROM tags').all() as any[];
         for (const tag of tags) {
             await mysqlConn.execute(
-                "INSERT INTO tags (id, name, slug) VALUES (?, ?, ?)",
+                'INSERT INTO tags (id, name, slug) VALUES (?, ?, ?)',
                 [tag.id, tag.name, tag.slug]
             );
         }
         console.log(`Migrated ${tags.length} tags.`);
 
-        // 4. ImageTags
-        console.log("Migrating ImageTags...");
-        const imageTags = sqlite.prepare("SELECT * FROM image_tags").all() as any[];
-        for (const it of imageTags) {
+        console.log('Migrating ImageTags...');
+        const imageTags = sqlite.prepare('SELECT * FROM image_tags').all() as any[];
+        for (const imageTag of imageTags) {
             await mysqlConn.execute(
-                "INSERT INTO image_tags (image_id, tag_id) VALUES (?, ?)",
-                [it.image_id, it.tag_id]
+                'INSERT INTO image_tags (image_id, tag_id) VALUES (?, ?)',
+                [imageTag.image_id, imageTag.tag_id]
             );
         }
         console.log(`Migrated ${imageTags.length} image_tags.`);
 
-        // 5. SharedGroups
-        console.log("Migrating SharedGroups...");
-        const sharedGroups = sqlite.prepare("SELECT * FROM shared_groups").all() as any[];
-        for (const sg of sharedGroups) {
+        console.log('Migrating SharedGroups...');
+        const sharedGroups = sqlite.prepare('SELECT * FROM shared_groups').all() as any[];
+        for (const sharedGroup of sharedGroups) {
             await mysqlConn.execute(
-                "INSERT INTO shared_groups (id, `key`, created_at) VALUES (?, ?, ?)",
-                [sg.id, sg.key, sg.created_at]
+                'INSERT INTO shared_groups (id, `key`, view_count, expires_at, created_at) VALUES (?, ?, ?, ?, ?)',
+                [
+                    sharedGroup.id,
+                    sharedGroup.key,
+                    sharedGroup.view_count ?? 0,
+                    sharedGroup.expires_at ?? null,
+                    sharedGroup.created_at,
+                ]
             );
         }
         console.log(`Migrated ${sharedGroups.length} shared_groups.`);
 
-        // 6. SharedGroupImages
-        console.log("Migrating SharedGroupImages...");
-        const sharedGroupImages = sqlite.prepare("SELECT * FROM shared_group_images").all() as any[];
-        for (const sgi of sharedGroupImages) {
+        console.log('Migrating SharedGroupImages...');
+        const sharedGroupImages = sqlite.prepare('SELECT * FROM shared_group_images ORDER BY group_id, rowid').all() as any[];
+        const nextPositionByGroup = new Map<number, number>();
+        for (const sharedGroupImage of sharedGroupImages) {
+            const fallbackPosition = nextPositionByGroup.get(sharedGroupImage.group_id) ?? 0;
+            const position = sharedGroupImage.position ?? fallbackPosition;
+            nextPositionByGroup.set(sharedGroupImage.group_id, position + 1);
+
             await mysqlConn.execute(
-                "INSERT INTO shared_group_images (group_id, image_id) VALUES (?, ?)",
-                [sgi.group_id, sgi.image_id]
+                'INSERT INTO shared_group_images (group_id, image_id, position) VALUES (?, ?, ?)',
+                [sharedGroupImage.group_id, sharedGroupImage.image_id, position]
             );
         }
         console.log(`Migrated ${sharedGroupImages.length} shared_group_images.`);
 
-        // 7. AdminSettings
-        console.log("Migrating AdminSettings...");
-        const adminSettings = sqlite.prepare("SELECT * FROM admin_settings").all() as any[];
+        console.log('Migrating AdminSettings...');
+        const adminSettings = sqlite.prepare('SELECT * FROM admin_settings').all() as any[];
         for (const setting of adminSettings) {
             await mysqlConn.execute(
-                "INSERT INTO admin_settings (`key`, value) VALUES (?, ?)",
+                'INSERT INTO admin_settings (`key`, value) VALUES (?, ?)',
                 [setting.key, setting.value]
             );
         }
         console.log(`Migrated ${adminSettings.length} admin_settings.`);
 
-        console.log("Migration complete!");
-    } catch (e) {
-        console.error("Migration failed:", e);
+        console.log('Migration complete!');
+    } catch (error) {
+        console.error('Migration failed:', error);
+        process.exitCode = 1;
     } finally {
-        await mysqlConn.query("SET FOREIGN_KEY_CHECKS=1");
+        await mysqlConn.query('SET FOREIGN_KEY_CHECKS=1');
         await mysqlConn.end();
         sqlite.close();
     }
 }
 
-migrate();
+migrate().catch((error) => {
+    console.error('Migration failed:', error);
+    process.exit(1);
+});

@@ -15,7 +15,7 @@ const SWIPE_THRESHOLD = 80;
 const VERTICAL_LIMIT = 30;
 
 export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const router = useRouter();
     const [swipeOffset, setSwipeOffset] = useState(0);
     const [isSnapping, setIsSnapping] = useState(false);
@@ -77,13 +77,13 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                 if (typeof navigator.vibrate === 'function') {
                     navigator.vibrate(10);
                 }
-                router.push(`/p/${nextId}`);
+                router.push(`/${locale}/p/${nextId}`);
             } else if (deltaX > SWIPE_THRESHOLD && prevId) {
                 // Swipe right -> prev photo
                 if (typeof navigator.vibrate === 'function') {
                     navigator.vibrate(10);
                 }
-                router.push(`/p/${prevId}`);
+                router.push(`/${locale}/p/${prevId}`);
             } else {
                 // Snap back
                 setIsSnapping(true);
@@ -102,7 +102,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
             window.removeEventListener('touchmove', handleTouchMove);
             window.removeEventListener('touchend', handleTouchEnd);
         };
-    }, [prevId, nextId, router]);
+    }, [locale, prevId, nextId, router]);
 
     // Opacity of swipe indicators proportional to displacement
     const prevIndicatorOpacity = swipeOffset > 0
@@ -177,7 +177,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                         variant="secondary"
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
-                        onClick={() => router.push(`/p/${prevId}`)}
+                        onClick={() => router.push(`/${locale}/p/${prevId}`)}
                         aria-label={t('aria.previousPhoto')}
                     >
                         <ChevronLeft className="h-6 w-6" />
@@ -191,7 +191,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                         variant="secondary"
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
-                        onClick={() => router.push(`/p/${nextId}`)}
+                        onClick={() => router.push(`/${locale}/p/${nextId}`)}
                         aria-label={t('aria.nextPhoto')}
                     >
                         <ChevronRight className="h-6 w-6" />

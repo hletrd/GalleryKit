@@ -1,5 +1,6 @@
 'use client';
 
+import Image from "next/image";
 import Link from "next/link";
 import { ChevronUp, ChevronDown, Sun, Moon } from "lucide-react";
 import { useState } from "react";
@@ -25,6 +26,9 @@ export function NavClient({ topics }: NavClientProps) {
     const [isExpanded, setIsExpanded] = useState(false);
 
     const otherLocale = locale === 'en' ? 'ko' : 'en';
+    const localizedHomeHref = siteConfig.home_link.startsWith('http')
+        ? siteConfig.home_link
+        : `/${locale}${siteConfig.home_link === '/' ? '' : siteConfig.home_link.startsWith('/') ? siteConfig.home_link : `/${siteConfig.home_link}`}`;
     // Swap locale prefix in the current path, preserving query params
     const localeSwitchHref = (() => {
         const localePrefix = `/${locale}`;
@@ -46,7 +50,7 @@ export function NavClient({ topics }: NavClientProps) {
                 isExpanded ? "h-auto py-4 items-start" : "h-16"
             )}>
                 <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1.5")}>
-                    <Link href={siteConfig.home_link} className="flex items-center space-x-2 shrink-0">
+                    <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0">
                         <span className="font-bold text-xl tracking-tight">{siteConfig.nav_title}</span>
                     </Link>
                 </div>
@@ -61,11 +65,12 @@ export function NavClient({ topics }: NavClientProps) {
                     "md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap"
                 )}>
                     {topics.map((topic) => {
-                        const isActive = pathname === `/${topic.slug}` || pathname === `/${locale}/${topic.slug}`;
+                        const href = `/${locale}/${topic.slug}`;
+                        const isActive = pathname === href || pathname === `/${topic.slug}`;
                         return (
                             <Link
                                 key={topic.slug}
-                                href={`/${topic.slug}`}
+                                href={href}
                                 className={cn(
                                     "transition-all duration-200 flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap shrink-0",
                                     isActive
@@ -74,10 +79,12 @@ export function NavClient({ topics }: NavClientProps) {
                                 )}
                             >
                                 {topic.image_filename ? (
-                                    <img
+                                    <Image
                                         src={`/resources/${topic.image_filename}`}
                                         alt={topic.label}
                                         title={topic.label}
+                                        width={24}
+                                        height={24}
                                         className="w-6 h-6 object-cover rounded-full"
                                     />
                                 ) : (

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getLocale } from 'next-intl/server';
 import siteConfig from "@/site-config.json";
 
 
@@ -22,7 +23,9 @@ function GithubIcon({ className }: { className?: string }) {
     )
 }
 
-export function Footer() {
+export async function Footer() {
+    const locale = await getLocale();
+
     return (
         <footer className="border-t py-6 md:py-0">
             <div className="container mx-auto px-4 flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
@@ -39,7 +42,7 @@ export function Footer() {
                         <GithubIcon className="h-4 w-4" />
                         GitHub
                     </Link>
-                    <Link href="/admin" rel="nofollow" className="text-xs text-muted-foreground/50 hover:text-muted-foreground hover:underline transition-colors">
+                    <Link href={`/${locale}/admin`} rel="nofollow" className="text-xs text-muted-foreground/50 hover:text-muted-foreground hover:underline transition-colors">
                         Admin
                     </Link>
                 </div>

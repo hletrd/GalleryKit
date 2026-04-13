@@ -14,8 +14,11 @@
  * Safe to run multiple times — checks column type before modifying.
  */
 
-require('dotenv').config({ path: '.env.local' });
+/* eslint-disable @typescript-eslint/no-require-imports */
+const dotenv = require('dotenv');
 const mysql = require('mysql2/promise');
+
+dotenv.config({ path: '.env.local' });
 
 async function migrate() {
     const connection = await mysql.createConnection({

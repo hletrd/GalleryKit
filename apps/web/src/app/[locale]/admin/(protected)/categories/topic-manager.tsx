@@ -33,7 +33,7 @@ type Topic = {
 };
 
 export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
     const [newAlias, setNewAlias] = useState('');
@@ -99,7 +99,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         <div>
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
-                    <Link href="/admin/dashboard">
+                    <Link href={`/${locale}/admin/dashboard`}>
                         <Button variant="ghost" size="icon">
                             <ChevronLeft className="h-4 w-4" />
                         </Button>

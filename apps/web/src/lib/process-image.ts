@@ -255,7 +255,7 @@ export async function saveOriginalAndGetMetadata(
         const webStream = file.stream();
         const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
         await pipeline(nodeStream, createWriteStream(originalPath));
-    } catch (e) {
+    } catch {
         await fs.unlink(originalPath).catch(() => {});
         throw new Error('Failed to save uploaded file');
     }

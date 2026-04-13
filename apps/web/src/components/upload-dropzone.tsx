@@ -60,9 +60,13 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         setFiles(prev => [...prev, ...acceptedFiles]);
     }, []);
 
+    const acceptedImageTypes = useMemo(() => ({
+        'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']
+    }), []);
+
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic'] }
+        accept: acceptedImageTypes
     });
 
     const handleUpload = async () => {

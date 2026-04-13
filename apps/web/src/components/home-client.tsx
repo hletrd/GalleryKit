@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
@@ -146,7 +147,7 @@ interface HomeClientProps {
 }
 
 export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMore = false, totalCount }: HomeClientProps) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const [allImages, setAllImages] = useState(images);
     const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
         setAllImages(prev => [...prev, ...newImages]);
@@ -234,7 +235,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                                 containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
                             }}
                         >
-                            <Link href={`/p/${image.id}`} aria-label={`View photo: ${displayTitle}`}>
+                            <Link href={`/${locale}/p/${image.id}`} aria-label={`View photo: ${displayTitle}`}>
                                 <div className="relative w-full">
                                     <picture>
                                         {(() => {
@@ -314,7 +315,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                     {currentTags && currentTags.length > 0 && (
                         <div className="flex flex-col items-center gap-2">
                             <p className="text-sm">{t('home.noResultsHint') || 'Try removing some filters'}</p>
-                            <Link href={topicSlug ? `/${topicSlug}` : '/'} className="text-sm underline hover:text-primary">
+                            <Link href={topicSlug ? `/${locale}/${topicSlug}` : `/${locale}`} className="text-sm underline hover:text-primary">
                                 {t('home.clearFilter')}
                             </Link>
                         </div>

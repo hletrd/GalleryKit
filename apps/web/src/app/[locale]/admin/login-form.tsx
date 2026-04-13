@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useEffect } from 'react';
 
 import { useTranslations } from 'next-intl';
+import { useTranslation } from '@/components/i18n-provider';
 
 const initialState = {
     error: '',
@@ -16,6 +17,7 @@ const initialState = {
 
 export function LoginForm() {
     const t = useTranslations('login');
+    const { locale } = useTranslation();
     const [state, formAction, isPending] = useActionState(login, initialState);
 
     useEffect(() => {
@@ -33,6 +35,7 @@ export function LoginForm() {
                 </CardHeader>
                 <CardContent>
                     <form action={formAction} className="space-y-4">
+                        <input type="hidden" name="locale" value={locale} />
                         <label htmlFor="login-username" className="sr-only">{t('username')}</label>
                         <Input id="login-username" type="text" name="username" placeholder={t('username')} required autoFocus autoComplete="username" />
                         <label htmlFor="login-password" className="sr-only">{t('password')}</label>

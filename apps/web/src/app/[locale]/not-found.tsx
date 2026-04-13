@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { getLocale, getTranslations } from 'next-intl/server';
 
-export default function NotFound() {
-  const t = useTranslations('notFound');
+export default async function NotFound() {
+  const t = await getTranslations('notFound');
+  const locale = await getLocale();
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
@@ -11,7 +12,7 @@ export default function NotFound() {
         {t('description')}
       </p>
       <Link
-        href="/"
+        href={`/${locale}`}
         className="text-primary hover:underline text-sm"
       >
         {t('backHome')}

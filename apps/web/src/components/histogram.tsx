@@ -140,12 +140,16 @@ function drawHistogram(
 
 export function Histogram({ imageUrl, className }: HistogramProps) {
     const { t } = useTranslation();
-    const [histogramData, setHistogramData] = useState<HistogramData | null>(null);
+    const [histogramState, setHistogramState] = useState<{ imageUrl: string | null; data: HistogramData | null }>({
+        imageUrl: null,
+        data: null,
+    });
     const [mode, setMode] = useState<HistogramMode>('luminance');
-    const [loading, setLoading] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
+    const histogramData = histogramState.imageUrl === imageUrl ? histogramState.data : null;
+    const loading = Boolean(imageUrl) && histogramState.imageUrl !== imageUrl;
 
     // Create worker once, terminate on unmount
     useEffect(() => {
@@ -158,8 +162,6 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
 
     useEffect(() => {
         if (!imageUrl) return;
-        setLoading(true);
-        setHistogramData(null);
         let aborted = false;
 
         const img = new Image();
@@ -168,23 +170,25 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
             if (aborted) return;
             const worker = workerRef.current;
             if (!worker) {
-                setLoading(false);
+                setHistogramState({ imageUrl, data: null });
                 return;
             }
             computeHistogramAsync(img, worker)
                 .then((data) => {
-                    if (!aborted) setHistogramData(data);
+                    if (!aborted) {
+                        setHistogramState({ imageUrl, data });
+                    }
                 })
                 .catch(() => {
                     // Canvas tainted or worker error — silently fail
-                })
-                .finally(() => {
-                    if (!aborted) setLoading(false);
+                    if (!aborted) {
+                        setHistogramState({ imageUrl, data: null });
+                    }
                 });
         };
         img.onerror = () => {
             if (aborted) return;
-            setLoading(false);
+            setHistogramState({ imageUrl, data: null });
         };
         img.src = imageUrl;
         return () => {
@@ -211,7 +215,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
         <div className={cn('flex flex-col gap-1', className)}>
             <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-                    Histogram
+                    {t('viewer.histogram')}
                 </span>
                 <button
                     type="button"
@@ -228,7 +232,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                     <div className="relative w-[200px] h-[100px] bg-black/20 rounded overflow-hidden">
                         {loading && (
                             <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-[10px] text-muted-foreground">Loading…</span>
+                                <span className="text-[10px] text-muted-foreground">{t('common.loading')}</span>
                             </div>
                         )}
                         <canvas

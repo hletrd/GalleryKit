@@ -65,7 +65,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
     const [editDescription, setEditDescription] = useState("");
     const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
 
     useEffect(() => {
         setImages(initialImages);
@@ -137,7 +137,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
         try {
             const result = await createGroupShareLink(ids);
             if (result.success) {
-                 const url = `${window.location.origin}/g/${result.key}`;
+                 const url = `${window.location.origin}/${locale}/g/${result.key}`;
                  await copyToClipboard(url);
                  toast.success(t('imageManager.linkCopied'));
                  setSelectedIds(new Set());
@@ -302,8 +302,8 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 <TableCell>
                                     <div className="relative h-32 w-32 overflow-hidden rounded border bg-muted flex items-center justify-center">
                                         <OptimisticImage
-                                            src={`/uploads/avif/${image.filename_avif}`}
-                                            alt={image.title || `Photo`}
+                                            src={`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, '_640.avif')}`}
+                                            alt={image.title || t('common.photo')}
                                             fill
                                             sizes="128px"
                                             className="h-full w-full object-contain"
@@ -418,11 +418,11 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                             <Label htmlFor="title">{t('imageManager.titleField') || 'Title'}</Label>
-                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Image Title" />
+                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField') || 'Title'} />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="description">{t('imageManager.descField') || 'Description'}</Label>
-                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Image Description" />
+                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField') || 'Description'} />
                         </div>
                     </div>
                     <DialogFooter>

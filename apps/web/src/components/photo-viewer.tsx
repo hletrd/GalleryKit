@@ -33,7 +33,7 @@ interface PhotoViewerProps {
 }
 
 export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false }: PhotoViewerProps) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
@@ -59,12 +59,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         } else {
             // Check for external prev/next logic (for single photo page)
             if (direction === -1 && prevId) {
-                router.push(`/p/${prevId}`);
+                router.push(`/${locale}/p/${prevId}`);
             } else if (direction === 1 && nextId) {
-                router.push(`/p/${nextId}`);
+                router.push(`/${locale}/p/${nextId}`);
             }
         }
-    }, [currentIndex, images, prevId, nextId, router]);
+    }, [currentIndex, images, locale, prevId, nextId, router]);
 
     // Handle keyboard navigation (skip when lightbox is active — it handles its own keys)
     useEffect(() => {
@@ -87,7 +87,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     return (
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
-                <Link href={`/${image.topic}`}>
+                <Link href={`/${locale}/${image.topic}`}>
                     <Button variant="ghost" className="pl-0 gap-2">
                         <ArrowLeft className="h-4 w-4" />
                         {t('viewer.backTo', { topic: image.topic_label || image.topic })}
@@ -115,7 +115,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             try {
                                 const result = await createPhotoShareLink(image.id);
                                 if (result.success) {
-                                    const url = `${window.location.origin}/s/${result.key}`;
+                                    const url = `${window.location.origin}/${locale}/s/${result.key}`;
                                     await copyToClipboard(url);
                                     toast.success(t('viewer.linkCopied'));
                                 } else {

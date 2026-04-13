@@ -97,8 +97,10 @@ export const sharedGroups = mysqlTable("shared_groups", {
 export const sharedGroupImages = mysqlTable("shared_group_images", {
     groupId: int("group_id").references(() => sharedGroups.id, { onDelete: 'cascade' }).notNull(),
     imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
+    position: int("position").default(0).notNull(),
 }, (table) => ({
     groupIdImageIdUnique: uniqueIndex('shared_group_images_group_id_image_id_unique').on(table.groupId, table.imageId),
+    groupIdPositionIdx: index('idx_shared_group_images_group_position').on(table.groupId, table.position),
 }));
 
 export const adminUsers = mysqlTable("admin_users", {

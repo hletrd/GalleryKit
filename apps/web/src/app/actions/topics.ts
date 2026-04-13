@@ -82,6 +82,9 @@ export async function createTopic(formData: FormData) {
         revalidateLocalizedPaths('/admin/categories', '/');
         return { success: true };
     } catch (e: unknown) {
+        if (imageFilename) {
+            await deleteTopicImage(imageFilename);
+        }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
             return { error: 'Topic slug already exists' };
         }
@@ -120,6 +123,10 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, currentSlug)).limit(1);
     const previousImageFilename = currentTopic?.image_filename ?? null;
 
+    if (slug !== currentSlug && await topicRouteSegmentExists(slug)) {
+        return { error: 'Topic slug already conflicts with an existing topic route' };
+    }
+
     let imageFilename = undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
@@ -130,9 +137,6 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     try {
-        if (slug !== currentSlug && await topicRouteSegmentExists(slug)) {
-            return { error: 'Topic slug already conflicts with an existing topic route' };
-        }
 
         if (slug !== currentSlug) {
             // Cascade slug change in a transaction: update references first (while old FK target exists), then rename the PK

@@ -53,6 +53,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 
 export default async function SharedPhotoPage({ params }: { params: Promise<{ key: string }> }) {
     const { key } = await params;
+    const locale = await getLocale();
     const image = await getImageByShareKey(key);
 
     if (!image) {
@@ -62,7 +63,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     return (
         <>
             <div className="flex items-center justify-between mb-4 px-4 pt-4">
-                <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                     ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                 </Link>
             </div>

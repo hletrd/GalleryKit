@@ -7,7 +7,7 @@ import { eq, sql, and, desc, or, isNull, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
@@ -27,8 +27,12 @@ export async function uploadImages(formData: FormData) {
     }
 
     const tagNames = tagsString
-        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && t.length <= 100)
+        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && isValidTagName(t))
         : [];
+
+    if (tagsString && tagNames.length !== tagsString.split(',').map(t => t.trim()).filter(Boolean).length) {
+        return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
+    }
 
     if (!files.length) return { error: 'No files provided' };
     if (files.length > 100) return { error: 'Too many files at once (max 100)' };
