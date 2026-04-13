@@ -50,7 +50,8 @@ export async function exportImagesCsv() {
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
-        .groupBy(images.id);
+        .groupBy(images.id)
+        .limit(50000); // Cap to prevent OOM on very large galleries
 
     // Convert to CSV
     const headers = ["ID", "Filename", "Title", "Width", "Height", "Capture Date", "Topic", "Tags"];
