@@ -50,7 +50,7 @@ const getProcessingQueueState = (): ProcessingQueueState => {
 
     if (!globalWithQueue[processingQueueKey]) {
         globalWithQueue[processingQueueKey] = {
-            queue: new PQueue({ concurrency: 1 }),
+            queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 2 }),
             enqueued: new Set<number>(),
             bootstrapped: false,
         };
