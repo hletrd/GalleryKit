@@ -137,25 +137,31 @@ export interface ExifDataRaw {
 
 function parseExifDateTime(value: unknown): string | null {
     if (typeof value === 'string') {
-        // Common EXIF format: "YYYY:MM:DD HH:MM:SS" (no timezone)
+        // Common EXIF format: "YYYY:MM:DD HH:MM:SS" (no timezone info from camera).
+        // Output directly as "YYYY-MM-DD HH:MM:SS" for MySQL DATETIME without
+        // passing through new Date() which would interpret it as local time and
+        // shift it by the server's timezone offset.
         const match = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(value);
         if (match) {
             const [, year, month, day, hour, minute, second] = match;
-            const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
-            if (!Number.isNaN(date.getTime())) {
-                return date.toISOString();
+            // Validate ranges
+            const y = Number(year), m = Number(month), d = Number(day);
+            const h = Number(hour), mi = Number(minute), s = Number(second);
+            if (y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31
+                && h >= 0 && h <= 23 && mi >= 0 && mi <= 59 && s >= 0 && s <= 59) {
+                return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
             }
         }
     }
 
     // Handle Date objects and numeric timestamps explicitly
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return value.toISOString();
+        return value.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     }
     if (typeof value === 'number' && !Number.isNaN(value)) {
         const date = new Date(value);
         if (!Number.isNaN(date.getTime())) {
-            return date.toISOString();
+            return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
         }
     }
 
