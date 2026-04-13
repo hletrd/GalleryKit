@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
-import { useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
@@ -31,7 +30,34 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const shouldReduceMotion = useReducedMotion();
+    const [shouldReduceMotion, setShouldReduceMotion] = useState(false);
+    const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
+    useEffect(() => {
+        const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+        setShouldReduceMotion(mq.matches);
+        const handler = (e: MediaQueryListEvent) => setShouldReduceMotion(e.matches);
+        mq.addEventListener('change', handler);
+        return () => mq.removeEventListener('change', handler);
+    }, []);
+
+    // Swipe navigation for mobile
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: Date.now() };
+    }, []);
+
+    const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+        if (!touchStartRef.current) return;
+        const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+        const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+        const dt = Date.now() - touchStartRef.current.time;
+        touchStartRef.current = null;
+        // Only trigger on horizontal swipe (dx > dy) with enough distance or velocity
+        if (Math.abs(dx) > Math.abs(dy) && (Math.abs(dx) > 50 || Math.abs(dx) / dt > 0.3)) {
+            if (dx > 0 && prevId !== null) onNavigate(-1);
+            else if (dx < 0 && nextId !== null) onNavigate(1);
+        }
+    }, [prevId, nextId, onNavigate]);
 
     const showControls = useCallback(() => {
         setControlsVisible(true);
@@ -153,6 +179,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
             className="fixed inset-0 z-50 flex items-center justify-center bg-black"
             onClick={handleBackdropClick}
             onMouseMove={handleMouseMove}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
         >
             {/* Image */}
             <picture className="w-full h-full flex items-center justify-center">
