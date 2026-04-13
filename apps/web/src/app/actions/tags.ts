@@ -25,8 +25,8 @@ export async function getAdminTags() {
         .orderBy(sql`count(${imageTags.imageId}) desc`);
 
         return { success: true, tags: allTags };
-    } catch {
-        console.error("Failed to fetch tags");
+    } catch (err) {
+        console.error("Failed to fetch tags", err);
         return { error: 'Failed to fetch tags' };
     }
 }

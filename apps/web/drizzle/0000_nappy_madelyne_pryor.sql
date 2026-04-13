@@ -24,7 +24,7 @@ CREATE TABLE `images` (
 	`description` text,
 	`share_key` varchar(255),
 	`topic` varchar(255) NOT NULL,
-	`capture_date` varchar(255),
+	`capture_date` datetime DEFAULT NULL,
 	`camera_model` varchar(255),
 	`lens_model` varchar(255),
 	`iso` int,

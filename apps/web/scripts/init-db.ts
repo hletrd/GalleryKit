@@ -74,7 +74,7 @@ async function run() {
                 \`user_filename\` varchar(255) DEFAULT NULL,
                 \`share_key\` varchar(255) DEFAULT NULL,
                 \`topic\` varchar(255) NOT NULL,
-                \`capture_date\` varchar(255) DEFAULT NULL,
+                \`capture_date\` datetime DEFAULT NULL,
                 \`camera_model\` varchar(255) DEFAULT NULL,
                 \`lens_model\` varchar(255) DEFAULT NULL,
                 \`iso\` int DEFAULT NULL,
