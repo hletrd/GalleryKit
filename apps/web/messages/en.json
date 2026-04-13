@@ -256,5 +256,32 @@
     "aliasConflictsWithTopic": "This slug is already taken.",
     "aliasAlreadyExists": "This alias already exists.",
     "invalidAlias": "Invalid alias"
+  },
+  "aria": {
+    "searchPhotos": "Search photos",
+    "toggleTheme": "Toggle theme",
+    "expandMenu": "Expand menu",
+    "collapseMenu": "Collapse menu",
+    "openFullscreen": "Open fullscreen view",
+    "lightbox": "Photo lightbox",
+    "close": "Close",
+    "previousImage": "Previous image",
+    "nextImage": "Next image",
+    "previousPhoto": "Previous photo",
+    "nextPhoto": "Next photo",
+    "zoomIn": "Click to zoom in",
+    "zoomOut": "Click to zoom out",
+    "expandHistogram": "Expand histogram",
+    "collapseHistogram": "Collapse histogram",
+    "cycleHistogram": "Cycle histogram mode",
+    "selectAll": "Select all images",
+    "removeFile": "Remove file"
+  },
+  "common": {
+    "untitled": "Untitled",
+    "unknown": "Unknown",
+    "photo": "Photo",
+    "loading": "Loading...",
+    "imageUnavailable": "Image unavailable"
   }
 }

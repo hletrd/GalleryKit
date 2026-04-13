@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 
 import { usePathname } from "next/navigation";
 import { useLocale } from "next-intl";
+import { useTranslation } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
 import siteConfig from "@/site-config.json";
 import { Search } from "@/components/search";
@@ -18,6 +19,7 @@ interface NavClientProps {
 export function NavClient({ topics }: NavClientProps) {
     const pathname = usePathname();
     const locale = useLocale();
+    const { t } = useTranslation();
     const { resolvedTheme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -90,7 +92,7 @@ export function NavClient({ topics }: NavClientProps) {
                     <button
                         onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
-                        aria-label="Toggle theme"
+                        aria-label={t('aria.toggleTheme')}
                     >
                         <Sun className="h-4 w-4 hidden dark:block" />
                         <Moon className="h-4 w-4 block dark:hidden" />
@@ -110,7 +112,7 @@ export function NavClient({ topics }: NavClientProps) {
                         "ml-2 p-2 hover:bg-accent rounded-full md:hidden shrink-0",
                         isExpanded && "mt-1.5"
                     )}
-                    aria-label={isExpanded ? "Collapse menu" : "Expand menu"}
+                    aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
                     aria-expanded={isExpanded}
                 >
                     {isExpanded ? (
