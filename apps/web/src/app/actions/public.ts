@@ -13,8 +13,10 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     const safeOffset = Math.max(Number(offset) || 0, 0);
     // Cap maximum offset to prevent deep pagination DoS
     if (safeOffset > 10000) return [];
-    // Cap tag array to prevent complex query DoS
-    const safeTags = (tagSlugs || []).slice(0, 20);
+    // Cap tag array and validate format to prevent complex query DoS
+    const safeTags = (tagSlugs || [])
+        .slice(0, 20)
+        .filter(s => /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
     const images = await getImagesLite(topicSlug, safeTags, safeLimit, safeOffset);
     return images;
 }
@@ -27,6 +29,13 @@ export async function searchImagesAction(query: string) {
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
+    // Proactively prune expired entries every 100 calls to prevent unbounded growth
+    if (searchRateLimit.size > 50) {
+        for (const [key, val] of searchRateLimit) {
+            if (val.resetAt <= now) searchRateLimit.delete(key);
+        }
+    }
+
     const entry = searchRateLimit.get(ip);
     if (entry && entry.resetAt > now && entry.count >= SEARCH_MAX_REQUESTS) {
         return [];
@@ -35,13 +44,6 @@ export async function searchImagesAction(query: string) {
         searchRateLimit.set(ip, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
     } else {
         entry.count++;
-    }
-    // Evict stale entries if map grows too large
-    if (searchRateLimit.size > SEARCH_RATE_LIMIT_MAX_KEYS) {
-        for (const [key, val] of searchRateLimit) {
-            if (val.resetAt <= now) searchRateLimit.delete(key);
-            if (searchRateLimit.size <= SEARCH_RATE_LIMIT_MAX_KEYS) break;
-        }
     }
 
     const safeQuery = query.trim().slice(0, 200);
