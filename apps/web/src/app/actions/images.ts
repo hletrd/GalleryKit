@@ -32,6 +32,18 @@ export async function uploadImages(formData: FormData) {
     if (!files.length) return { error: 'No files provided' };
     if (files.length > 100) return { error: 'Too many files at once (max 100)' };
 
+    // Disk space pre-check: require at least 1GB free before accepting uploads
+    try {
+        const { statfs } = await import('fs/promises');
+        const stats = await statfs(UPLOAD_DIR_ORIGINAL);
+        const freeBytes = stats.bfree * stats.bsize;
+        if (freeBytes < 1024 * 1024 * 1024) {
+            return { error: 'Insufficient disk space for upload' };
+        }
+    } catch {
+        // statfs may fail on some platforms; proceed anyway
+    }
+
     // Validate total upload size
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > 10 * 1024 * 1024 * 1024) {
