@@ -2,13 +2,17 @@ import { getImageIdsForSitemap, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
 // force-dynamic required: sitemap queries the DB which isn't available at build time.
-// Caching is handled by the ISR-like behavior of Next.js route handlers in production.
 export const dynamic = 'force-dynamic';
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
+
+// Google recommends max 50,000 URLs per sitemap file.
+// With 2 locales, cap images at 24,000 to stay well under the limit
+// (24,000 * 2 locales + homepage + topics = ~48,000).
+const MAX_SITEMAP_IMAGES = 24000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [images, topics] = await Promise.all([
@@ -32,7 +36,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
-  const imageEntries: MetadataRoute.Sitemap = images.flatMap((image) =>
+  // Cap images to stay under Google's 50K URL limit
+  const cappedImages = images.slice(0, MAX_SITEMAP_IMAGES);
+
+  const imageEntries: MetadataRoute.Sitemap = cappedImages.flatMap((image) =>
     LOCALES.map((locale) => ({
       url: `${BASE_URL}/${locale}/p/${image.id}`,
       lastModified: new Date(image.created_at || Date.now()),
