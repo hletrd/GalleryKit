@@ -1,12 +1,23 @@
-import { getImages, getTopics, getTags } from "@/lib/data";
+import { getImages, getTopics, getTags, getImageCount } from "@/lib/data";
 import { DashboardClient } from "./dashboard-client";
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminDashboard() {
-    const images = await getImages(undefined, undefined, 200, 0, true);
-    const topics = await getTopics();
-    const tags = await getTags();
+const PAGE_SIZE = 50;
 
-    return <DashboardClient images={images} topics={topics} tags={tags} />;
+export default async function AdminDashboard({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+    const { page: pageParam } = await searchParams;
+    const page = Math.max(1, parseInt(pageParam || '1', 10) || 1);
+    const offset = (page - 1) * PAGE_SIZE;
+
+    const [images, topics, tags, totalCount] = await Promise.all([
+        getImages(undefined, undefined, PAGE_SIZE, offset, true),
+        getTopics(),
+        getTags(),
+        getImageCount(),
+    ]);
+
+    const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+
+    return <DashboardClient images={images} topics={topics} tags={tags} page={page} totalPages={totalPages} />;
 }
