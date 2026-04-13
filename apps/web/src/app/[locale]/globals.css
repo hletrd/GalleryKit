@@ -132,10 +132,10 @@
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
-/* Virtual masonry: skip layout/paint for offscreen cards */
+/* Virtual masonry: skip layout/paint for offscreen cards.
+   contain-intrinsic-size is set per-card via inline style using actual aspect ratio. */
 .masonry-card {
   content-visibility: auto;
-  contain-intrinsic-size: auto 300px;
 }
 
 @media (prefers-reduced-motion: reduce) {
