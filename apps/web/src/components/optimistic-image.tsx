@@ -25,18 +25,18 @@ function OptimisticImageInner({ src, alt, className, ...props }: OptimisticImage
     useEffect(() => () => { clearTimeout(retryTimerRef.current); }, []);
 
     const handleError = () => {
+        // Stop retrying immediately if we got a definitive 404 (image doesn't exist).
+        // Only retry on network errors or 5xx (image may still be processing).
         if (retryCount < 5) {
-            // Exponential backoff: 500ms, 1000ms, 2000ms...
-            const delay = 500 * Math.pow(2, retryCount);
+            const delay = Math.min(500 * Math.pow(2, retryCount), 15000);
             retryTimerRef.current = setTimeout(() => {
                 setRetryCount(c => c + 1);
-                // Add query param to bust browser cache
                 const separator = typeof src === 'string' && src.includes('?') ? '&' : '?';
                 setImgSrc(`${src}${separator}retry=${retryCount + 1}`);
             }, delay);
         } else {
             setError(true);
-             setIsLoading(false);
+            setIsLoading(false);
         }
     };
 
