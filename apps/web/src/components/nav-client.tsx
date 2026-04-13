@@ -61,7 +61,7 @@ export function NavClient({ topics }: NavClientProps) {
                     "md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap"
                 )}>
                     {topics.map((topic) => {
-                        const isActive = pathname === `/${topic.slug}`;
+                        const isActive = pathname === `/${topic.slug}` || pathname === `/${locale}/${topic.slug}`;
                         return (
                             <Link
                                 key={topic.slug}
