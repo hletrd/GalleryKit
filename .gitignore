@@ -13,3 +13,4 @@ apps/web/data/
 *.db-journal
 test
 .omc
+.omx/
