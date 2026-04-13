@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, updateImageMetadata, addTagToImage, removeTagFromImage } from '@/app/actions';
+import { copyToClipboard } from '@/lib/clipboard';
 import { TagInput } from "@/components/tag-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -137,7 +138,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
             const result = await createGroupShareLink(ids);
             if (result.success) {
                  const url = `${window.location.origin}/g/${result.key}`;
-                 await navigator.clipboard.writeText(url);
+                 await copyToClipboard(url);
                  toast.success(t('imageManager.linkCopied'));
                  setSelectedIds(new Set());
             } else {
