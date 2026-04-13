@@ -9,7 +9,7 @@ import { isValidSlug } from '@/lib/validation';
 
 // Tag Management
 
-export async function getTags() {
+export async function getAdminTags() {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
     try {

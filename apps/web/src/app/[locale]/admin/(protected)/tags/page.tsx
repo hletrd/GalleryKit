@@ -1,8 +1,8 @@
 import { TagManager } from "./tag-manager";
-import { getTags } from "@/app/actions";
+import { getAdminTags } from "@/app/actions";
 
 export default async function TagsPage() {
-    const { tags } = await getTags();
+    const { tags } = await getAdminTags();
 
     return (
         <div className="space-y-8 container mx-auto py-8">
