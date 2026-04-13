@@ -1,6 +1,38 @@
+const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
+    'admin',
+    'g',
+    'p',
+    's',
+    'uploads',
+]);
+
 // Validate slug format (alphanumeric, hyphens, underscores only)
 export function isValidSlug(slug: string): boolean {
     return /^[a-z0-9_-]+$/i.test(slug) && slug.length > 0 && slug.length <= 100;
+}
+
+const RESERVED_ROUTE_SEGMENTS = new Set([
+    'admin',
+    'api',
+    'g',
+    'icon',
+    'manifest.webmanifest',
+    'p',
+    'robots.txt',
+    's',
+    'sitemap.xml',
+    'uploads',
+    '_next',
+    '_vercel',
+    'apple-icon',
+]);
+
+export function isReservedRouteSegment(value: string): boolean {
+    return RESERVED_ROUTE_SEGMENTS.has(value.trim().toLowerCase());
+}
+
+export function isReservedTopicRouteSegment(segment: string): boolean {
+    return RESERVED_TOPIC_ROUTE_SEGMENTS.has(segment.trim().toLowerCase());
 }
 
 // Allow CJK characters, emojis, and most symbols for aliases, but disallow:
@@ -11,6 +43,11 @@ export function isValidSlug(slug: string): boolean {
 // - Whitespace (better UX for URLs, though encoded spaces theoretically work)
 export function isValidTopicAlias(alias: string): boolean {
     return /^[^/\\\s?#]+$/.test(alias);
+}
+
+export function isValidTagName(tagName: string): boolean {
+    const trimmed = tagName.trim();
+    return trimmed.length > 0 && trimmed.length <= 100 && !trimmed.includes(',');
 }
 
 // Validate filename (no path traversal, only safe characters)

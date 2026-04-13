@@ -15,7 +15,7 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const locale = await getLocale();
-    const group = await getSharedGroup(key);
+    const group = await getSharedGroup(key, { incrementViewCount: false });
     if (!group) return {
         title: 'Shared Photos Not Found',
         description: 'This shared collection could not be found.',
@@ -54,8 +54,8 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
 }
 
-export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }) {
-    const { key } = await params;
+export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string, locale: string }>, searchParams: Promise<{ photoId?: string }> }) {
+    const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
     const group = await getSharedGroup(key);
 
@@ -75,15 +75,11 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     }
 
     let selectedImage = null;
-    let prevId: number | null = null;
-    let nextId: number | null = null;
 
     if (photoId) {
         const index = group.images.findIndex(img => img.id === photoId);
         if (index !== -1) {
             selectedImage = group.images[index];
-            prevId = index > 0 ? group.images[index - 1].id : null;
-            nextId = index < group.images.length - 1 ? group.images[index + 1].id : null;
         }
     }
 
@@ -91,7 +87,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return (
             <>
                 <div className="flex items-center justify-between mb-4 px-4 pt-4">
-                    <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                    <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                         ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                     </Link>
                 </div>
@@ -109,7 +105,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         <div className="container mx-auto px-4 py-8">
             <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold">{t('title')}</h1>
-                <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                     ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                 </Link>
             </div>
@@ -121,7 +117,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     return (
                         <Link
                             key={image.id}
-                            href={`/g/${key}?photoId=${image.id}`}
+                            href={`/${locale}/g/${key}?photoId=${image.id}`}
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20"
                         >
                              <Image

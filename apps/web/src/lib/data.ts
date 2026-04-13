@@ -94,7 +94,11 @@ export async function getTags(topic?: string) {
     .orderBy(desc(sql`count(${imageTags.imageId})`), asc(tags.name));
 }
 
-export async function getImageCount(topic?: string, tagSlugs?: string[]): Promise<number> {
+export async function getImageCount(
+    topic?: string,
+    tagSlugs?: string[],
+    options?: { includeUnprocessed?: boolean },
+): Promise<number> {
     const conditions = [];
 
     if (topic !== undefined) {
@@ -102,7 +106,9 @@ export async function getImageCount(topic?: string, tagSlugs?: string[]): Promis
         conditions.push(eq(images.topic, topic));
     }
 
-    conditions.push(eq(images.processed, true));
+    if (!options?.includeUnprocessed) {
+        conditions.push(eq(images.processed, true));
+    }
 
     const validTagSlugs = (tagSlugs || [])
         .map(s => s.trim())
@@ -352,7 +358,10 @@ export async function getImageByShareKey(key: string) {
     };
 }
 
-export async function getSharedGroup(key: string) {
+export async function getSharedGroup(
+    key: string,
+    options?: { incrementViewCount?: boolean },
+) {
     // Validate key format (Base56; supports legacy 6-char and newer longer keys)
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, [6, 10])) {
@@ -369,8 +378,12 @@ export async function getSharedGroup(key: string) {
         if (expCheck?.expired) return null;
     }
 
-    // Increment view count (fire-and-forget)
-    db.update(sharedGroups).set({ view_count: sql`${sharedGroups.view_count} + 1` }).where(eq(sharedGroups.id, group.id)).catch(err => console.debug('view_count increment failed:', err.message));
+    if (options?.incrementViewCount !== false) {
+        db.update(sharedGroups)
+            .set({ view_count: sql`${sharedGroups.view_count} + 1` })
+            .where(eq(sharedGroups.id, group.id))
+            .catch(err => console.debug('view_count increment failed:', err.message));
+    }
 
     const groupImages = await db.select(selectFields)
     .from(sharedGroupImages)
@@ -381,6 +394,7 @@ export async function getSharedGroup(key: string) {
             eq(images.processed, true)
         )
     )
+    .orderBy(asc(sharedGroupImages.position), asc(sharedGroupImages.imageId))
     .limit(100);
 
     return {
@@ -392,8 +406,7 @@ export async function getSharedGroup(key: string) {
 export async function getTopicBySlug(slug: string) {
     if (!/^[a-z0-9_-]+$/i.test(slug)) return null;
 
-    // Single query: direct match OR alias resolution via LEFT JOIN
-    const [result] = await db
+    const [directMatch] = await db
         .select({
             slug: topics.slug,
             label: topics.label,
@@ -401,11 +414,26 @@ export async function getTopicBySlug(slug: string) {
             image_filename: topics.image_filename,
         })
         .from(topics)
-        .leftJoin(topicAliases, eq(topics.slug, topicAliases.topicSlug))
-        .where(or(eq(topics.slug, slug), eq(topicAliases.alias, slug)))
+        .where(eq(topics.slug, slug))
         .limit(1);
 
-    return result || null;
+    if (directMatch) {
+        return directMatch;
+    }
+
+    const [aliasMatch] = await db
+        .select({
+            slug: topics.slug,
+            label: topics.label,
+            order: topics.order,
+            image_filename: topics.image_filename,
+        })
+        .from(topicAliases)
+        .innerJoin(topics, eq(topicAliases.topicSlug, topics.slug))
+        .where(eq(topicAliases.alias, slug))
+        .limit(1);
+
+    return aliasMatch || null;
 }
 
 interface SearchResult {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidSlug, isValidFilename, isValidTopicAlias } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName } from '@/lib/validation';
 
 describe('isValidSlug', () => {
     it('accepts lowercase alphanumeric with hyphens and underscores', () => {
@@ -76,5 +76,32 @@ describe('isValidTopicAlias', () => {
     it('rejects query and fragment markers', () => {
         expect(isValidTopicAlias('a?b')).toBe(false);
         expect(isValidTopicAlias('a#b')).toBe(false);
+    });
+});
+
+describe('isReservedTopicRouteSegment', () => {
+    it('rejects static locale route segments', () => {
+        expect(isReservedTopicRouteSegment('admin')).toBe(true);
+        expect(isReservedTopicRouteSegment('P')).toBe(true);
+        expect(isReservedTopicRouteSegment('uploads')).toBe(true);
+    });
+
+    it('allows normal topic names', () => {
+        expect(isReservedTopicRouteSegment('travel')).toBe(false);
+        expect(isReservedTopicRouteSegment('landscape-2026')).toBe(false);
+    });
+});
+
+describe('isValidTagName', () => {
+    it('accepts normal tag names without commas', () => {
+        expect(isValidTagName('Black and White')).toBe(true);
+        expect(isValidTagName('seoul-night')).toBe(true);
+    });
+
+    it('rejects commas and invalid lengths', () => {
+        expect(isValidTagName('Black, White')).toBe(false);
+        expect(isValidTagName('')).toBe(false);
+        expect(isValidTagName(' '.repeat(5))).toBe(false);
+        expect(isValidTagName('a'.repeat(101))).toBe(false);
     });
 });

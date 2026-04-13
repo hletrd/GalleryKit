@@ -10,8 +10,9 @@ import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
-import { getClientIp, pruneLoginRateLimit, loginRateLimit, LOGIN_WINDOW_MS, LOGIN_MAX_ATTEMPTS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, loginRateLimit, LOGIN_WINDOW_MS, LOGIN_MAX_ATTEMPTS, checkRateLimit, incrementRateLimit, resetRateLimit } from '@/lib/rate-limit';
 import { logAuditEvent } from '@/lib/audit';
+import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -65,6 +66,8 @@ async function getDummyHash(): Promise<string> {
 export async function login(prevState: { error?: string } | null, formData: FormData) {
     const username = formData.get('username')?.toString() ?? '';
     const password = formData.get('password')?.toString() ?? '';
+    const rawLocale = formData.get('locale')?.toString() ?? '';
+    const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
 
     // Validate inputs before touching rate-limit state so that missing-field
     // requests don't consume rate-limit attempts.
@@ -135,6 +138,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
         // Successful auth: drop any accumulated failures for this IP.
         loginRateLimit.delete(ip);
+        await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS).catch(() => {});
         logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
         try {
@@ -166,7 +170,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
                 path: '/',
             });
 
-            redirect('/admin/dashboard');
+            redirect(localizePath(locale, '/admin/dashboard'));
         } catch (e) {
             if (isRedirectError(e)) throw e;
             console.error("Session creation failed after successful auth", e);
@@ -180,9 +184,11 @@ export async function login(prevState: { error?: string } | null, formData: Form
     return { error: 'Invalid credentials' };
 }
 
-export async function logout() {
+export async function logout(formData?: FormData) {
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
+    const rawLocale = formData?.get('locale')?.toString() ?? '';
+    const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
 
     // Delete session from database if it exists
     if (token) {
@@ -190,7 +196,7 @@ export async function logout() {
     }
 
     cookieStore.delete({ name: COOKIE_NAME, path: '/' });
-    redirect('/admin');
+    redirect(localizePath(locale, '/admin'));
 }
 
 export async function updatePassword(prevState: { error?: string; success?: boolean; message?: string } | null, formData: FormData) {

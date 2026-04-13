@@ -1,12 +1,16 @@
 import PQueue from 'p-queue';
 import path from 'path';
 import fs from 'fs/promises';
-import { db, images, sessions } from '@/db';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+
+import { connection, db, images, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
+import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
+const CLAIM_RETRY_DELAY_MS = 5000;
 
 export type ImageProcessingJob = {
     id: number;
@@ -21,6 +25,8 @@ export type ProcessingQueueState = {
     queue: PQueue;
     enqueued: Set<number>;
     bootstrapped: boolean;
+    shuttingDown: boolean;
+    shutdownPromise?: Promise<void>;
     gcInterval?: ReturnType<typeof setInterval>;
 };
 
@@ -34,14 +40,59 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
             queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 2 }),
             enqueued: new Set<number>(),
             bootstrapped: false,
+            shuttingDown: false,
         };
     }
 
     return globalWithQueue[processingQueueKey]!;
 };
 
+function getProcessingLockName(jobId: number) {
+    return `gallerykit:image-processing:${jobId}`;
+}
+
+async function acquireImageProcessingClaim(jobId: number): Promise<PoolConnection | null> {
+    const lockConnection = await connection.getConnection();
+    try {
+        const [rows] = await lockConnection.query<(RowDataPacket & { acquired: number | null })[]>(
+            'SELECT GET_LOCK(?, 0) AS acquired',
+            [getProcessingLockName(jobId)],
+        );
+        if (rows[0]?.acquired === 1) {
+            return lockConnection;
+        }
+    } catch (err) {
+        lockConnection.release();
+        throw err;
+    }
+
+    lockConnection.release();
+    return null;
+}
+
+async function releaseImageProcessingClaim(jobId: number, lockConnection: PoolConnection | null) {
+    if (!lockConnection) return;
+
+    try {
+        await lockConnection.query('SELECT RELEASE_LOCK(?)', [getProcessingLockName(jobId)]);
+    } finally {
+        lockConnection.release();
+    }
+}
+
+export async function shutdownImageProcessingQueue(
+    state: ProcessingQueueState = getProcessingQueueState(),
+    queue: Pick<PQueue, 'pause' | 'clear' | 'onPendingZero'> = state.queue,
+) {
+    await drainProcessingQueueForShutdown(state, queue);
+}
+
 export const enqueueImageProcessing = (job: ImageProcessingJob) => {
     const state = getProcessingQueueState();
+    if (state.shuttingDown) {
+        console.debug(`[Queue] Ignoring job ${job.id} during shutdown`);
+        return;
+    }
     if (state.enqueued.has(job.id)) return;
 
     console.debug(`[Queue] Enqueuing job ${job.id}`);
@@ -53,7 +104,18 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
     // Explicitly add to queue
     state.queue.add(async () => {
         console.debug(`[Queue] Processing job ${job.id} started`);
+        let lockConnection: PoolConnection | null = null;
         try {
+            lockConnection = await acquireImageProcessingClaim(job.id);
+            if (!lockConnection) {
+                console.debug(`[Queue] Job ${job.id} already claimed by another worker, retrying later`);
+                const retryTimer = setTimeout(() => {
+                    enqueueImageProcessing(job);
+                }, CLAIM_RETRY_DELAY_MS);
+                retryTimer.unref?.();
+                return;
+            }
+
             // US-009: Claim check — verify the row still exists and is unprocessed
             const [check] = await db.select({ id: images.id }).from(images)
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
@@ -118,6 +180,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
             console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up`);
         } finally {
+            await releaseImageProcessingClaim(job.id, lockConnection).catch((err) => {
+                console.debug(`[Queue] Failed to release lock for job ${job.id}:`, err);
+            });
             state.enqueued.delete(job.id);
         }
     });
@@ -133,7 +198,7 @@ export async function purgeExpiredSessions() {
 
 export const bootstrapImageProcessingQueue = async () => {
     const state = getProcessingQueueState();
-    if (state.bootstrapped) return;
+    if (state.bootstrapped || state.shuttingDown) return;
 
     try {
         // Select only the columns needed for enqueue — avoids fetching blob-like fields

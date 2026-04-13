@@ -1,0 +1,41 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { revalidatePath } = vi.hoisted(() => ({
+    revalidatePath: vi.fn(),
+}));
+
+vi.mock('next/cache', () => ({
+    revalidatePath,
+}));
+
+import { getLocalizedPathVariants, revalidateLocalizedPaths } from '@/lib/revalidation';
+
+describe('getLocalizedPathVariants', () => {
+    it('expands unprefixed paths to every locale plus the original path', () => {
+        expect(getLocalizedPathVariants('/')).toEqual(['/', '/en', '/ko']);
+        expect(getLocalizedPathVariants('/admin/dashboard')).toEqual([
+            '/admin/dashboard',
+            '/en/admin/dashboard',
+            '/ko/admin/dashboard',
+        ]);
+    });
+
+    it('does not duplicate paths that are already locale-prefixed', () => {
+        expect(getLocalizedPathVariants('/ko/admin/dashboard')).toEqual(['/ko/admin/dashboard']);
+    });
+});
+
+describe('revalidateLocalizedPaths', () => {
+    beforeEach(() => {
+        revalidatePath.mockClear();
+    });
+
+    it('revalidates each localized variant only once', () => {
+        revalidateLocalizedPaths('/admin/dashboard', '/admin/dashboard', '/ko/admin/dashboard');
+
+        expect(revalidatePath).toHaveBeenCalledTimes(3);
+        expect(revalidatePath).toHaveBeenNthCalledWith(1, '/admin/dashboard');
+        expect(revalidatePath).toHaveBeenNthCalledWith(2, '/en/admin/dashboard');
+        expect(revalidatePath).toHaveBeenNthCalledWith(3, '/ko/admin/dashboard');
+    });
+});

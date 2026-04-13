@@ -6,18 +6,9 @@ export async function register() {
         process.once('SIGTERM', async () => {
             console.log('[Shutdown] SIGTERM received, draining queue...');
             try {
-                // Direct import — image-queue.ts has no 'use server' directive, so this is safe and type-safe.
-                const { getProcessingQueueState } = await import('@/lib/image-queue');
-                const state = getProcessingQueueState();
-
-                if (state) {
-                    state.queue.pause();
-                    if (state.gcInterval) clearInterval(state.gcInterval);
-                    await state.queue.onIdle();
-                    console.log('[Shutdown] Queue drained, exiting.');
-                } else {
-                    console.log('[Shutdown] No active queue, exiting.');
-                }
+                const { shutdownImageProcessingQueue } = await import('@/lib/image-queue');
+                await shutdownImageProcessingQueue();
+                console.log('[Shutdown] In-flight queue work drained, exiting.');
             } catch (e) {
                 console.error('[Shutdown] Failed to drain queue:', e);
             }

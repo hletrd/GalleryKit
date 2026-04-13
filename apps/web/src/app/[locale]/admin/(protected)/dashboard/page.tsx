@@ -14,7 +14,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
         getImagesLite(undefined, undefined, PAGE_SIZE, offset, true),
         getTopics(),
         getTags(),
-        getImageCount(),
+        getImageCount(undefined, undefined, { includeUnprocessed: true }),
     ]);
 
     const totalPages = Math.ceil(totalCount / PAGE_SIZE);

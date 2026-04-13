@@ -2,12 +2,31 @@
 
 import { db, images, topics, topicAliases } from '@/db';
 import { eq, and } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { getTranslations } from 'next-intl/server';
-import { processTopicImage } from '@/lib/process-topic-image';
+import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
+import { revalidateLocalizedPaths } from '@/lib/revalidation';
 
 import { isAdmin } from '@/app/actions/auth';
-import { isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
+import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
+
+async function topicRouteSegmentExists(segment: string): Promise<boolean> {
+    const normalizedSegment = segment.trim();
+    const [topicMatch] = await db.select({ slug: topics.slug })
+        .from(topics)
+        .where(eq(topics.slug, normalizedSegment))
+        .limit(1);
+
+    if (topicMatch) {
+        return true;
+    }
+
+    const [aliasMatch] = await db.select({ alias: topicAliases.alias })
+        .from(topicAliases)
+        .where(eq(topicAliases.alias, normalizedSegment))
+        .limit(1);
+
+    return !!aliasMatch;
+}
 
 export async function createTopic(formData: FormData) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
@@ -28,10 +47,17 @@ export async function createTopic(formData: FormData) {
     if (!isValidSlug(slug)) {
         return { error: 'Invalid slug format. Use only lowercase letters, numbers, hyphens, and underscores.' };
     }
+    if (isReservedTopicRouteSegment(slug)) {
+        return { error: 'This slug is reserved for an application route' };
+    }
 
     // Validate label length
     if (label.length > 100) {
         return { error: 'Label is too long (max 100 characters)' };
+    }
+
+    if (await topicRouteSegmentExists(slug)) {
+        return { error: 'Topic slug already conflicts with an existing topic route' };
     }
 
     let imageFilename = null;
@@ -53,8 +79,7 @@ export async function createTopic(formData: FormData) {
             image_filename: imageFilename,
         });
 
-        revalidatePath('/admin/categories');
-        revalidatePath('/');
+        revalidateLocalizedPaths('/admin/categories', '/');
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -88,6 +113,12 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     if (!isValidSlug(slug)) {
         return { error: t('invalidSlugFormat') };
     }
+    if (isReservedTopicRouteSegment(slug)) {
+        return { error: 'This slug is reserved for an application route' };
+    }
+
+    const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, currentSlug)).limit(1);
+    const previousImageFilename = currentTopic?.image_filename ?? null;
 
     let imageFilename = undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
@@ -99,6 +130,10 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     try {
+        if (slug !== currentSlug && await topicRouteSegmentExists(slug)) {
+            return { error: 'Topic slug already conflicts with an existing topic route' };
+        }
+
         if (slug !== currentSlug) {
             // Cascade slug change in a transaction: update references first (while old FK target exists), then rename the PK
             await db.transaction(async (tx) => {
@@ -123,10 +158,16 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                 .where(eq(topics.slug, currentSlug));
         }
 
-        revalidatePath('/admin/categories');
-        revalidatePath('/');
+        if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
+            await deleteTopicImage(previousImageFilename);
+        }
+
+        revalidateLocalizedPaths('/admin/categories', '/');
         return { success: true };
     } catch (e: unknown) {
+         if (imageFilename) {
+             await deleteTopicImage(imageFilename);
+         }
          if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
              return { error: 'Topic slug already exists' };
          }
@@ -146,15 +187,20 @@ export async function deleteTopic(slug: string) {
     try {
         // Wrap check + delete in a transaction to prevent TOCTOU race
         // (image could be added between the check and delete otherwise)
+        let deletedImageFilename: string | null = null;
         await db.transaction(async (tx) => {
             const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, slug)).limit(1);
             if (headerImages.length > 0) {
                 throw new Error('HAS_IMAGES');
             }
+            const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, slug)).limit(1);
+            deletedImageFilename = topicRecord?.image_filename ?? null;
             await tx.delete(topics).where(eq(topics.slug, slug));
         });
-        revalidatePath('/admin/categories');
-        revalidatePath('/');
+        if (deletedImageFilename) {
+            await deleteTopicImage(deletedImageFilename);
+        }
+        revalidateLocalizedPaths('/admin/categories', '/');
 
         return { success: true };
     } catch (e) {
@@ -177,6 +223,12 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     if (!isValidTopicAlias(alias)) {
         return { error: t('invalidAliasFormat') };
     }
+    if (isReservedTopicRouteSegment(alias)) {
+        return { error: 'This alias is reserved for an application route' };
+    }
+    if (await topicRouteSegmentExists(alias)) {
+        return { error: 'Alias already conflicts with an existing topic or alias' };
+    }
 
     // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
     try {
@@ -185,7 +237,7 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
             topicSlug
         });
 
-        revalidatePath('/admin/categories');
+        revalidateLocalizedPaths('/admin/categories');
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -215,6 +267,6 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         )
     );
 
-    revalidatePath('/admin/categories');
+    revalidateLocalizedPaths('/admin/categories');
     return { success: true };
 }

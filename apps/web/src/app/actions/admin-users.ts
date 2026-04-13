@@ -3,11 +3,11 @@
 import * as argon2 from 'argon2';
 import { db, adminUsers, sessions } from '@/db';
 import { eq, desc, sql } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
+import { revalidateLocalizedPaths } from '@/lib/revalidation';
 
 // Admin User Management
 export async function getAdminUsers() {
@@ -43,7 +43,7 @@ export async function createAdminUser(formData: FormData) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(result.insertId)).catch(console.debug);
 
-        revalidatePath('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard');
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('users.username'))) {
@@ -79,7 +79,7 @@ export async function deleteAdminUser(id: number) {
             await tx.delete(adminUsers).where(eq(adminUsers.id, id));
         });
         logAuditEvent(currentUser.id, 'user_delete', 'user', String(id)).catch(console.debug);
-        revalidatePath('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard');
         return { success: true };
     } catch (e: unknown) {
         if (e instanceof Error && e.message === 'LAST_ADMIN') {

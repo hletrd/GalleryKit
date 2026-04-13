@@ -1,11 +1,15 @@
 'use server';
 
 import { db, tags, imageTags } from '@/db';
-import { eq, and, sql, inArray } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
+import { eq, and, sql } from 'drizzle-orm';
 
 import { isAdmin } from '@/app/actions/auth';
-import { isValidSlug } from '@/lib/validation';
+import { isValidSlug, isValidTagName } from '@/lib/validation';
+import { revalidateLocalizedPaths } from '@/lib/revalidation';
+
+function getTagSlug(name: string) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
 
 // Tag Management
 
@@ -42,19 +46,20 @@ export async function updateTag(id: number, name: string) {
     if (!name || name.trim().length === 0) return { error: 'Name is required' };
 
     // Validate name length
-    if (name.length > 100) {
-        return { error: 'Tag name too long (max 100 characters)' };
+    if (!isValidTagName(name)) {
+        return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
     }
 
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const trimmedName = name.trim();
+    const slug = getTagSlug(trimmedName);
 
     if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
 
     try {
         await db.update(tags)
-            .set({ name: name.trim(), slug })
+            .set({ name: trimmedName, slug })
             .where(eq(tags.id, id));
-        revalidatePath('/admin/tags');
+        revalidateLocalizedPaths('/admin/tags');
         return { success: true };
     } catch {
         console.error("Failed to update tag");
@@ -72,7 +77,7 @@ export async function deleteTag(id: number) {
 
     try {
         await db.delete(tags).where(eq(tags.id, id));
-        revalidatePath('/admin/tags');
+        revalidateLocalizedPaths('/admin/tags');
         return { success: true };
     } catch {
         console.error("Failed to delete tag");
@@ -86,9 +91,9 @@ export async function addTagToImage(imageId: number, tagName: string) {
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: 'Invalid image ID' };
     const cleanName = tagName?.trim();
     if (!cleanName) return { error: 'Tag name required' };
-    if (cleanName.length > 100) return { error: 'Tag name too long' };
+    if (!isValidTagName(cleanName)) return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
 
-    const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const slug = getTagSlug(cleanName);
     if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
 
     try {
@@ -110,7 +115,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
             tagId: tagRecord.id
         });
 
-        revalidatePath('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard');
         return { success: true };
     } catch (e) {
         console.error("Failed to add tag", e);
@@ -125,7 +130,7 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
     const cleanName = tagName?.trim();
     if (!cleanName) return { error: 'Tag name required' };
 
-    const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const slug = getTagSlug(cleanName);
 
     try {
         const [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
@@ -137,7 +142,7 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
                 eq(imageTags.tagId, tagRecord.id)
             ));
 
-        revalidatePath('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard');
         return { success: true };
     } catch (e) {
         console.error("Failed to remove tag", e);
@@ -161,9 +166,9 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
 
     const cleanName = tagName?.trim();
     if (!cleanName) return { error: 'Tag name required' };
-    if (cleanName.length > 100) return { error: 'Tag name too long' };
+    if (!isValidTagName(cleanName)) return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
 
-    const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const slug = getTagSlug(cleanName);
     if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
 
     try {
@@ -185,7 +190,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
 
         await db.insert(imageTags).ignore().values(values);
 
-        revalidatePath('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard');
         return { success: true };
     } catch (e) {
         console.error("Failed to batch add tags", e);

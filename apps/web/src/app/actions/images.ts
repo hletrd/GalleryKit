@@ -4,13 +4,13 @@ import path from 'path';
 import fs from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
 import { eq, sql, and, desc, or, isNull, inArray } from 'drizzle-orm';
-import { revalidatePath } from 'next/cache';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidFilename } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
+import { revalidateLocalizedPaths } from '@/lib/revalidation';
 
 export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
@@ -61,9 +61,6 @@ export async function uploadImages(formData: FormData) {
     let successCount = 0;
     const failedFiles: string[] = [];
     const replacedFiles: string[] = [];
-
-    // Track processed IDs for revalidation
-    const processedIds: number[] = [];
 
     for (const file of files) {
         try {
@@ -181,8 +178,6 @@ export async function uploadImages(formData: FormData) {
             const insertedImage = { id: result.insertId, ...insertValues };
 
             {
-                processedIds.push(insertedImage.id);
-
                 // Phase 3: Process Tags (batched)
                 if (tagNames.length > 0) {
                     try {
@@ -245,8 +240,7 @@ export async function uploadImages(formData: FormData) {
     }
 
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
-    revalidatePath('/');
-    revalidatePath('/admin/dashboard');
+    revalidateLocalizedPaths('/', '/admin/dashboard');
 
     return {
         success: true,
@@ -308,8 +302,7 @@ export async function deleteImage(id: number) {
         console.error("Error deleting files");
     }
 
-    revalidatePath('/');
-    revalidatePath('/admin/dashboard');
+    revalidateLocalizedPaths('/', '/admin/dashboard');
     return { success: true };
 }
 
@@ -393,8 +386,7 @@ export async function deleteImages(ids: number[]) {
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount }).catch(console.debug);
 
-    revalidatePath('/');
-    revalidatePath('/admin/dashboard');
+    revalidateLocalizedPaths('/', '/admin/dashboard');
     return { success: true, count: successCount, errors: errorCount };
 }
 
@@ -424,8 +416,7 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             })
             .where(eq(images.id, id));
 
-        revalidatePath('/admin/dashboard');
-        revalidatePath('/'); // In case it's in the gallery
+        revalidateLocalizedPaths('/admin/dashboard', '/');
         return { success: true };
     } catch (e) {
         console.error("Failed to update image metadata", e);

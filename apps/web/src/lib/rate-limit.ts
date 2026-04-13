@@ -84,7 +84,7 @@ export function pruneLoginRateLimit(now: number) {
  * Align a timestamp to the start of its rate-limit window.
  * Returns unix seconds (not ms) aligned to the window boundary.
  */
-function bucketStart(nowMs: number, windowMs: number): number {
+export function getRateLimitBucketStart(nowMs: number, windowMs: number): number {
     const windowSec = Math.floor(windowMs / 1000);
     const nowSec = Math.floor(nowMs / 1000);
     return nowSec - (nowSec % windowSec);
@@ -100,7 +100,7 @@ export async function checkRateLimit(
     maxRequests: number,
     windowMs: number,
 ): Promise<{ limited: boolean; count: number }> {
-    const start = bucketStart(Date.now(), windowMs);
+    const start = getRateLimitBucketStart(Date.now(), windowMs);
 
     const rows = await db
         .select({ count: rateLimitBuckets.count })
@@ -127,7 +127,7 @@ export async function incrementRateLimit(
     type: string,
     windowMs: number,
 ): Promise<void> {
-    const start = bucketStart(Date.now(), windowMs);
+    const start = getRateLimitBucketStart(Date.now(), windowMs);
 
     await db.insert(rateLimitBuckets).values({
         ip,
@@ -137,6 +137,22 @@ export async function incrementRateLimit(
     }).onDuplicateKeyUpdate({
         set: { count: sql`${rateLimitBuckets.count} + 1` },
     });
+}
+
+export async function resetRateLimit(
+    ip: string,
+    type: string,
+    windowMs: number,
+): Promise<void> {
+    const start = getRateLimitBucketStart(Date.now(), windowMs);
+
+    await db.delete(rateLimitBuckets).where(
+        and(
+            eq(rateLimitBuckets.ip, ip),
+            eq(rateLimitBuckets.bucketType, type),
+            eq(rateLimitBuckets.bucketStart, start),
+        ),
+    );
 }
 
 /**
