@@ -30,12 +30,12 @@ export async function uploadImages(formData: FormData) {
         : [];
 
     if (!files.length) return { error: 'No files provided' };
-    if (files.length > 10) return { error: 'Too many files at once (max 10)' };
+    if (files.length > 100) return { error: 'Too many files at once (max 100)' };
 
-    // Validate total upload size to prevent excessive memory pressure
+    // Validate total upload size
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > 250 * 1024 * 1024) {
-        return { error: 'Total upload size exceeds 250MB limit' };
+    if (totalSize > 10 * 1024 * 1024 * 1024) {
+        return { error: 'Total upload size exceeds 10GB limit' };
     }
 
     if (!topic) return { error: 'Topic required' };

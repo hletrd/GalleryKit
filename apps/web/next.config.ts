@@ -25,10 +25,10 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       // Keep this close to the app-level MAX_FILE_SIZE to reduce DoS blast radius.
-      bodySizeLimit: '250mb',
+      bodySizeLimit: '10gb',
     },
     // Allow large requests to pass through middleware
-    proxyClientMaxBodySize: '250mb',
+    proxyClientMaxBodySize: '10gb',
   },
   images: {
     formats: ['image/avif', 'image/webp'],

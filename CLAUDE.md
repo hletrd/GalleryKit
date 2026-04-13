@@ -192,7 +192,7 @@ Connection pool: 8 connections, queue limit 20, keepalive enabled.
 
 - **Node.js 24+** required, **TypeScript 6.0+**
 - Images stored in `apps/web/public/uploads/` — **ensure persistence in Docker**
-- Max upload size: 200MB per file, 250MB total (configurable)
+- Max upload size: 200MB per file, 10GB total per batch, 100 files max (configurable)
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
 
