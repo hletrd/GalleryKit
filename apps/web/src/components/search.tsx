@@ -16,7 +16,9 @@ export function Search() {
     const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_webp: string; filename_jpeg: string; blur_data_url: string | null; width: number; height: number; topic: string; camera_model: string | null }[]>([]);
     const [loading, setLoading] = useState(false);
     const [isMac, setIsMac] = useState(true);
+    const [activeIndex, setActiveIndex] = useState(-1);
     const inputRef = useRef<HTMLInputElement>(null);
+    const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
     const debounceRef = useRef<NodeJS.Timeout>(undefined);
 
     // Detect platform for keyboard shortcut hint (SSR-safe: default to Mac, correct on client)
@@ -114,7 +116,19 @@ export function Search() {
                         <Input
                             ref={inputRef}
                             value={query}
-                            onChange={(e) => setQuery(e.target.value)}
+                            onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setActiveIndex(i => Math.min(i + 1, results.length - 1));
+                                } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setActiveIndex(i => Math.max(i - 1, -1));
+                                } else if (e.key === 'Enter' && activeIndex >= 0 && resultRefs.current[activeIndex]) {
+                                    e.preventDefault();
+                                    resultRefs.current[activeIndex]?.click();
+                                }
+                            }}
                             placeholder={t('search.placeholder') || 'Search photos, tags, cameras...'}
                             className="border-0 focus-visible:ring-0 shadow-none h-8 p-0"
                         />
@@ -131,12 +145,13 @@ export function Search() {
                     <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
                         {results.length > 0 ? (
                             <div className="p-2">
-                                {results.map((image) => (
+                                {results.map((image, idx) => (
                                     <Link
                                         key={image.id}
+                                        ref={(el) => { resultRefs.current[idx] = el; }}
                                         href={`/${locale}/p/${image.id}`}
                                         onClick={() => setIsOpen(false)}
-                                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                                        className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
                                     >
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                                             <img
