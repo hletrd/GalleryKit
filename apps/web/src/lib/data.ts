@@ -172,7 +172,7 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
         tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
     })
         .from(images)
-        .orderBy(desc(images.capture_date), desc(images.created_at));
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = conditions.length > 0
         ? baseQuery.where(and(...conditions))
@@ -198,7 +198,7 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
         .groupBy(images.id)
-        .orderBy(desc(images.capture_date), desc(images.created_at));
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = conditions.length > 0
         ? baseQuery.where(and(...conditions))
