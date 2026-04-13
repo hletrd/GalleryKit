@@ -1,0 +1,29 @@
+// Validate slug format (alphanumeric, hyphens, underscores only)
+export function isValidSlug(slug: string): boolean {
+    return /^[a-z0-9_-]+$/i.test(slug) && slug.length > 0 && slug.length <= 100;
+}
+
+// Allow CJK characters, emojis, and most symbols for aliases, but disallow:
+// - Slashes (path separators)
+// - Backslashes (path separators/escapes)
+// - Question marks (query parameters)
+// - Hash/Pound (fragments)
+// - Whitespace (better UX for URLs, though encoded spaces theoretically work)
+export function isValidTopicAlias(alias: string): boolean {
+    return /^[^/\\\s?#]+$/.test(alias);
+}
+
+// Validate filename (no path traversal, only safe characters)
+export function isValidFilename(filename: string): boolean {
+    // Check for path traversal attempts
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        return false;
+    }
+    // Only allow safe characters and require the name to start with an alphanumeric
+    return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(filename) && filename.length <= 255;
+}
+
+/** Type guard for MySQL/Drizzle errors with `.code` property. */
+export function isMySQLError(e: unknown): e is Error & { code: string; cause?: { code?: string } } {
+    return e instanceof Error && 'code' in e && typeof (e as { code: unknown }).code === 'string';
+}
