@@ -1,6 +1,9 @@
 import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs/promises';
+import { createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 
 // Cap total pixels to reduce decompression-bomb risk (override via env if needed).
@@ -65,14 +68,22 @@ export async function processTopicImage(file: File): Promise<string> {
     const filename = `${id}.webp`;
     const outputPath = path.join(RESOURCES_DIR, filename);
 
-    // Topic images only produce a 512x512 thumbnail so the buffer is small in practice.
+    // Stream to temp file first, then pass path to Sharp (avoids heap buffer)
+    const tempPath = path.join(RESOURCES_DIR, `tmp-${id}`);
     try {
-        const buffer = Buffer.from(await file.arrayBuffer());
-        await sharp(buffer, { limitInputPixels: maxInputPixels })
+        const webStream = file.stream();
+        const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
+        await pipeline(nodeStream, createWriteStream(tempPath));
+
+        await sharp(tempPath, { limitInputPixels: maxInputPixels })
             .resize({ width: 512, height: 512, fit: 'cover' })
             .webp({ quality: 90 })
             .toFile(outputPath);
+
+        await fs.unlink(tempPath).catch(() => {});
     } catch {
+        await fs.unlink(tempPath).catch(() => {});
+        await fs.unlink(outputPath).catch(() => {});
         throw new Error('Invalid image file');
     }
 
