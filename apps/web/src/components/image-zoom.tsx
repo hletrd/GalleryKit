@@ -127,6 +127,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             role="button"
             tabIndex={0}
             aria-label={isZoomed ? 'Click to zoom out' : 'Click to zoom in'}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(e as unknown as React.MouseEvent); } }}
         >
             <div
                 ref={innerRef}
