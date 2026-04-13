@@ -7,9 +7,10 @@ import { eq, sql, and, desc, or, isNull, inArray } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 
-import { isAdmin } from '@/app/actions/auth';
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidFilename } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
+import { logAuditEvent } from '@/lib/audit';
 
 export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
@@ -46,8 +47,8 @@ export async function uploadImages(formData: FormData) {
 
     // Validate total upload size
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > 2 * 1024 * 1024 * 1024) {
-        return { error: 'Total upload size exceeds 2GB limit' };
+    if (totalSize > 10 * 1024 * 1024 * 1024) {
+        return { error: 'Total upload size exceeds 10GB limit' };
     }
 
     if (!topic) return { error: 'Topic required' };
@@ -388,6 +389,9 @@ export async function deleteImages(ids: number[]) {
 
     const successCount = foundIds.length;
     const errorCount = notFoundCount;
+
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount }).catch(console.debug);
 
     revalidatePath('/');
     revalidatePath('/admin/dashboard');
