@@ -174,7 +174,8 @@
     "clearFilter": "필터 해제",
     "allTags": "전체",
     "tagFilter": "태그 필터",
-    "noResultsHint": "필터를 줄여 보세요"
+    "noResultsHint": "필터를 줄여 보세요",
+    "backToTop": "맨 위로"
   },
   "login": {
     "title": "관리자 로그인",

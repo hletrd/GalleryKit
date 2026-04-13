@@ -174,7 +174,8 @@
     "clearFilter": "Clear",
     "allTags": "All",
     "tagFilter": "Filter by tag",
-    "noResultsHint": "Try fewer filters"
+    "noResultsHint": "Try fewer filters",
+    "backToTop": "Back to top"
   },
   "login": {
     "title": "Admin",
