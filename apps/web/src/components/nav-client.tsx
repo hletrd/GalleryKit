@@ -5,7 +5,7 @@ import { ChevronUp, ChevronDown, Sun, Moon } from "lucide-react";
 import { useState } from "react";
 import { useTheme } from "next-themes";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useTranslation } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ interface NavClientProps {
 
 export function NavClient({ topics }: NavClientProps) {
     const pathname = usePathname();
+    const searchParams = useSearchParams();
     const locale = useLocale();
     const { t } = useTranslation();
     const { resolvedTheme, setTheme } = useTheme();
@@ -33,9 +34,9 @@ export function NavClient({ topics }: NavClientProps) {
         } else {
             path = `/${otherLocale}${pathname}`;
         }
-        // Preserve search params (e.g., ?tags=landscape)
-        const search = typeof window !== 'undefined' ? window.location.search : '';
-        return search ? `${path}${search}` : path;
+        // Preserve search params (e.g., ?tags=landscape) via useSearchParams (SSR-safe)
+        const search = searchParams.toString();
+        return search ? `${path}?${search}` : path;
     })();
 
     return (
