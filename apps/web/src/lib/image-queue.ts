@@ -47,6 +47,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
     state.enqueued.add(job.id);
     state.queue.start();
 
+    const MAX_RETRIES = 3;
+
     // Explicitly add to queue
     state.queue.add(async () => {
         console.debug(`[Queue] Processing job ${job.id} started`);
@@ -102,6 +104,18 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             // (in uploadImages) is sufficient.
         } catch (err) {
             console.error(`Background processing failed for ${job.id}`, err);
+            // Retry up to MAX_RETRIES times for transient errors
+            const retryKey = `retry_${job.id}`;
+            const g = globalThis as unknown as Record<string, number>;
+            const retries = (g[retryKey] || 0) + 1;
+            g[retryKey] = retries;
+            if (retries < MAX_RETRIES) {
+                console.warn(`[Queue] Retrying job ${job.id} (attempt ${retries + 1}/${MAX_RETRIES})`);
+                state.enqueued.delete(job.id);
+                enqueueImageProcessing(job);
+                return;
+            }
+            console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up`);
         } finally {
             state.enqueued.delete(job.id);
         }
