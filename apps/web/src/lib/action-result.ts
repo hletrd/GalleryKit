@@ -1,0 +1,4 @@
+/** Standardized return type for all server actions. */
+export type ActionResult<T = void> =
+    | { success: true; data?: T; message?: string }
+    | { success: false; error: string };
