@@ -229,7 +229,8 @@
   "search": {
     "placeholder": "Search photos, tags, cameras...",
     "noResults": "No results",
-    "hint": "Search by title, tag, camera, or description"
+    "hint": "Search by title, tag, camera, or description",
+    "toggleHint": "to toggle search"
   },
   "notFound": {
     "description": "Page not found.",
@@ -276,13 +277,26 @@
     "collapseHistogram": "Collapse histogram",
     "cycleHistogram": "Cycle histogram mode",
     "selectAll": "Select all images",
-    "removeFile": "Remove file"
+    "removeFile": "Remove file",
+    "histogramLabel": "Color histogram, {mode} mode",
+    "photoNavStatus": "Photo navigation available",
+    "mainNav": "Main navigation",
+    "adminNav": "Admin navigation"
   },
   "common": {
     "untitled": "Untitled",
     "unknown": "Unknown",
     "photo": "Photo",
     "loading": "Loading...",
-    "imageUnavailable": "Image unavailable"
+    "imageUnavailable": "Image unavailable",
+    "skipToContent": "Skip to content"
+  },
+  "error": {
+    "title": "Error",
+    "description": "Something went wrong loading this page.",
+    "tryAgain": "Try again",
+    "backToGallery": "Return to Gallery",
+    "adminDescription": "Something went wrong in the admin panel.",
+    "backToDashboard": "Back to Dashboard"
   }
 }

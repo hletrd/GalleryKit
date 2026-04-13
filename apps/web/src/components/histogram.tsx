@@ -97,11 +97,7 @@ function drawHistogram(
         for (let i = 0; i < 256; i++) {
             const x = (i / 255) * W;
             const y = H - (bins[i] / max) * H;
-            if (i === 0) {
-                ctx.lineTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
+            ctx.lineTo(x, y);
         }
         ctx.lineTo(W, H);
         ctx.closePath();
@@ -153,7 +149,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
 
     // Create worker once, terminate on unmount
     useEffect(() => {
-        workerRef.current = new Worker('/histogram-worker.js');
+        workerRef.current = new Worker('/histogram-worker.js?v=1');
         return () => {
             workerRef.current?.terminate();
             workerRef.current = null;
@@ -241,7 +237,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                             height={100}
                             className="w-full h-full"
                             role="img"
-                            aria-label={`Color histogram, ${MODE_LABELS[mode]} mode`}
+                            aria-label={t('aria.histogramLabel', { mode: MODE_LABELS[mode] })}
                         />
                     </div>
                     <button

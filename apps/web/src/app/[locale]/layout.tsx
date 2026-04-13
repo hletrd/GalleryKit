@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Nav } from "@/components/nav";
 import { Toaster } from "@/components/ui/sonner";
 import { NextIntlClientProvider } from 'next-intl';
-import { getMessages } from 'next-intl/server';
+import { getMessages, getTranslations } from 'next-intl/server';
 import { Footer } from "@/components/footer";
 import siteConfig from "@/site-config.json";
 import { notFound } from 'next/navigation';
@@ -70,6 +70,7 @@ export default async function RootLayout({
   // Providing all messages to the client
   // side is the easiest way to get started
   const messages = await getMessages();
+  const t = await getTranslations('common');
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -78,7 +79,7 @@ export default async function RootLayout({
         className="antialiased min-h-screen bg-background font-sans flex flex-col"
       >
         <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md">
-          Skip to content
+          {t('skipToContent')}
         </a>
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider

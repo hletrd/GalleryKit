@@ -200,7 +200,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
             )}
 
             <div className="sr-only" aria-live="polite" aria-atomic="true">
-                {prevId !== null || nextId !== null ? `Photo navigation: ${prevId ? 'previous' : ''} ${nextId ? 'next' : ''} available` : ''}
+                {prevId !== null || nextId !== null ? t('aria.photoNavStatus') : ''}
             </div>
         </>
     );

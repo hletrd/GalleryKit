@@ -133,7 +133,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
             )}
 
             {/* Sheet */}
-            <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
+            <FocusTrap active={isOpen && sheetState === 'expanded'} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
             <div
                 ref={sheetRef}
                 role="dialog"

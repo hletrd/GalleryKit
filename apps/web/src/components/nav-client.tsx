@@ -40,7 +40,7 @@ export function NavClient({ topics }: NavClientProps) {
     })();
 
     return (
-        <nav className="sticky top-0 z-50 w-full bg-background/50 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
+        <nav aria-label={t('aria.mainNav')} className="sticky top-0 z-50 w-full bg-background/50 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
             <div className={cn(
                 "container mx-auto flex items-center px-4 overflow-hidden transition-all duration-300",
                 isExpanded ? "h-auto py-4 items-start" : "h-16"

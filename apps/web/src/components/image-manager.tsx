@@ -275,7 +275,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                     className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                                     checked={images.length > 0 && selectedIds.size === images.length}
                                     onChange={toggleSelectAll}
-                                    aria-label="Select all images"
+                                    aria-label={t('aria.selectAll')}
                                 />
                             </TableHead>
                             <TableHead>{t('imageManager.preview')}</TableHead>
