@@ -188,6 +188,9 @@ Connection pool: 8 connections, queue limit 20, keepalive enabled.
 - **ImageZoom**: Ref-based DOM manipulation (no React re-renders on mousemove)
 - **Histogram**: Canvas capped at 256x256 for fast computation
 
+## Permanently Deferred
+- **2FA/WebAuthn**: Not planned. Single-user admin with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.
+
 ## Important Notes
 
 - **Node.js 24+** required, **TypeScript 6.0+**
