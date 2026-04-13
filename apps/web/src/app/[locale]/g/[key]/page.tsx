@@ -95,11 +95,9 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     </Link>
                 </div>
                 <PhotoViewer
-                    images={[selectedImage]}
+                    images={group.images}
                     initialImageId={selectedImage.id}
                     tags={[]}
-                    prevId={prevId}
-                    nextId={nextId}
                 />
             </>
         );
