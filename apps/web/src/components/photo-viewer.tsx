@@ -12,6 +12,7 @@ import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { PhotoNavigation } from '@/components/photo-navigation';
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/clipboard";
 import { createPhotoShareLink } from '@/app/actions';
 import { ImageZoom } from '@/components/image-zoom';
 import { Lightbox, LightboxTrigger } from '@/components/lightbox';
@@ -114,7 +115,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 const result = await createPhotoShareLink(image.id);
                                 if (result.success) {
                                     const url = `${window.location.origin}/s/${result.key}`;
-                                    await navigator.clipboard.writeText(url);
+                                    await copyToClipboard(url);
                                     toast.success(t('viewer.linkCopied'));
                                 } else {
                                     toast.error(result.error || 'Failed to share');
@@ -224,7 +225,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             </div>
                         </motion.div>
                     </AnimatePresence>
-                    {(prevId != null || nextId != null) && (
+                    {images.length > 1 && (
                         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10">
                             {currentIndex + 1} / {images.length}
                         </div>
