@@ -4,7 +4,7 @@ import { headers } from 'next/headers';
 import { getImagesLite, searchImages } from '@/lib/data';
 
 import { isValidSlug } from '@/lib/validation';
-import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, SEARCH_RATE_LIMIT_MAX_KEYS } from '@/lib/rate-limit';
+import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
     // Validate slug format before passing to data layer (defense in depth)
@@ -36,15 +36,28 @@ export async function searchImagesAction(query: string) {
         }
     }
 
+    // Fast-path check from in-memory Map
     const entry = searchRateLimit.get(ip);
     if (entry && entry.resetAt > now && entry.count >= SEARCH_MAX_REQUESTS) {
         return [];
     }
+
+    // Fall through to DB-backed check for accuracy across restarts
+    try {
+        const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
+        if (dbLimit.limited) {
+            return [];
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map
+    }
+
     if (!entry || entry.resetAt <= now) {
         searchRateLimit.set(ip, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
     } else {
         entry.count++;
     }
+    incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch(() => {});
 
     const safeQuery = query.trim().slice(0, 200);
     return searchImages(safeQuery, 20);

@@ -10,7 +10,8 @@ import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
-import { getClientIp, pruneLoginRateLimit, loginRateLimit, LOGIN_WINDOW_MS, LOGIN_MAX_ATTEMPTS } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, loginRateLimit, LOGIN_WINDOW_MS, LOGIN_MAX_ATTEMPTS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+import { logAuditEvent } from '@/lib/audit';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -74,7 +75,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
         return { error: 'Password is required' };
     }
 
-    // Rate Limiting
+    // Rate Limiting — in-memory Map as fast cache, DB as source of truth
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
@@ -88,15 +89,27 @@ export async function login(prevState: { error?: string } | null, formData: Form
         limitData.count = 0;
     }
 
+    // Fast-path check from in-memory Map
     if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
         return { error: 'Too many login attempts. Please try again later.' };
     }
 
-    // Increment count and re-insert to maintain Map insertion order (LRU eviction)
+    // Fall through to DB-backed check for accuracy across restarts
+    try {
+        const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        if (dbLimit.limited) {
+            return { error: 'Too many login attempts. Please try again later.' };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map
+    }
+
+    // Increment count in both Map and DB
     limitData.count++;
     limitData.lastAttempt = now;
     loginRateLimit.delete(ip);
     loginRateLimit.set(ip, limitData);
+    incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS).catch(() => {});
 
     try {
         const [user] = await db.select({
@@ -116,11 +129,13 @@ export async function login(prevState: { error?: string } | null, formData: Form
         const verified = await argon2.verify(hashToCheck, password);
 
         if (!user || !verified) {
+            logAuditEvent(null, 'login_failure', 'user', username, ip).catch(console.debug);
             return { error: 'Invalid credentials' };
         }
 
         // Successful auth: drop any accumulated failures for this IP.
         loginRateLimit.delete(ip);
+        logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
         try {
             const cookieStore = await cookies();

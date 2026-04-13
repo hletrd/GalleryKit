@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import { db, images, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
+import { purgeOldBuckets } from '@/lib/rate-limit';
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 
@@ -158,10 +159,14 @@ export const bootstrapImageProcessingQueue = async () => {
         }
         state.bootstrapped = true;
 
-        // US-004: Purge expired sessions on startup and periodically
+        // US-004: Purge expired sessions and stale rate-limit buckets on startup and periodically
         purgeExpiredSessions();
+        purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
         if (state.gcInterval) clearInterval(state.gcInterval);
-        state.gcInterval = setInterval(purgeExpiredSessions, 60 * 60 * 1000); // every hour
+        state.gcInterval = setInterval(() => {
+            purgeExpiredSessions();
+            purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
+        }, 60 * 60 * 1000); // every hour
     } catch (err: unknown) {
         // Suppress connection refused errors during build/startup to avoid noise
         if (!(err instanceof Error && (('code' in err && (err as { code: string }).code === 'ECONNREFUSED') || (err.cause && typeof err.cause === 'object' && 'code' in err.cause && (err.cause as { code: string }).code === 'ECONNREFUSED')))) {
