@@ -6,6 +6,7 @@ import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
+import { useTranslation } from '@/components/i18n-provider';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -16,14 +17,16 @@ interface LightboxProps {
 }
 
 export function LightboxTrigger({ onClick }: { onClick: () => void }) {
+    const { t } = useTranslation();
     return (
-        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8" aria-label="Open fullscreen view">
+        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8" aria-label={t('aria.openFullscreen')}>
             <Maximize className="h-4 w-4" />
         </Button>
     );
 }
 
 export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: LightboxProps) {
+    const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,7 +148,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         <div
             role="dialog"
             aria-modal="true"
-            aria-label="Photo lightbox"
+            aria-label={t('aria.lightbox')}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black"
             onClick={handleBackdropClick}
             onMouseMove={handleMouseMove}
@@ -196,7 +199,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                             onClose();
                         }
                     }}
-                    aria-label="Close"
+                    aria-label={t('aria.close')}
                 >
                     <X className="h-5 w-5" />
                 </button>
@@ -225,7 +228,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                             e.stopPropagation();
                             onNavigate(-1);
                         }}
-                        aria-label="Previous image"
+                        aria-label={t('aria.previousImage')}
                     >
                         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
                             <ChevronLeft className="h-6 w-6" />
@@ -241,7 +244,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                             e.stopPropagation();
                             onNavigate(1);
                         }}
-                        aria-label="Next image"
+                        aria-label={t('aria.nextImage')}
                     >
                         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
                             <ChevronRight className="h-6 w-6" />

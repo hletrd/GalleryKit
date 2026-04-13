@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useTranslation } from '@/components/i18n-provider';
 
 interface PhotoNavigationProps {
     prevId: number | null;
@@ -14,6 +15,7 @@ const SWIPE_THRESHOLD = 80;
 const VERTICAL_LIMIT = 30;
 
 export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
+    const { t } = useTranslation();
     const router = useRouter();
     const [swipeOffset, setSwipeOffset] = useState(0);
     const [isSnapping, setIsSnapping] = useState(false);
@@ -176,7 +178,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => router.push(`/p/${prevId}`)}
-                        aria-label="Previous photo"
+                        aria-label={t('aria.previousPhoto')}
                     >
                         <ChevronLeft className="h-6 w-6" />
                     </Button>
@@ -190,7 +192,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => router.push(`/p/${nextId}`)}
-                        aria-label="Next photo"
+                        aria-label={t('aria.nextPhoto')}
                     >
                         <ChevronRight className="h-6 w-6" />
                     </Button>

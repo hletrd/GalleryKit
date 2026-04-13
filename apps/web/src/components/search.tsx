@@ -89,7 +89,7 @@ export function Search() {
                 variant="ghost"
                 size="icon"
                 onClick={() => setIsOpen(true)}
-                aria-label="Search photos"
+                aria-label={t('aria.searchPhotos')}
                 className="h-9 w-9"
             >
                 <SearchIcon className="h-4 w-4" />
@@ -107,7 +107,7 @@ export function Search() {
             />
             {/* Search Panel */}
             <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
-            <div role="dialog" aria-modal="true" aria-label="Search photos" className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]">
+            <div role="dialog" aria-modal="true" aria-label={t('aria.searchPhotos')} className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]">
                 <div className="mx-auto h-full sm:h-auto sm:max-w-xl bg-card sm:border sm:rounded-xl shadow-2xl overflow-hidden flex flex-col">
                     <div className="flex items-center gap-2 p-4 border-b">
                         <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />

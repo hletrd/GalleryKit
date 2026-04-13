@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/components/i18n-provider';
 
 interface ImageZoomProps {
     children: React.ReactNode;
@@ -9,6 +10,7 @@ interface ImageZoomProps {
 }
 
 export function ImageZoom({ children, className }: ImageZoomProps) {
+    const { t } = useTranslation();
     const containerRef = useRef<HTMLDivElement>(null);
     const innerRef = useRef<HTMLDivElement>(null);
     const [isZoomed, setIsZoomed] = useState(false);
@@ -126,7 +128,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             onTouchEnd={handleTouchEnd}
             role="button"
             tabIndex={0}
-            aria-label={isZoomed ? 'Click to zoom out' : 'Click to zoom in'}
+            aria-label={isZoomed ? t('aria.zoomOut') : t('aria.zoomIn')}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(e as unknown as React.MouseEvent); } }}
         >
             <div

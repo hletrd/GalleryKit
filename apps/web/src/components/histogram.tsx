@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/components/i18n-provider';
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 
@@ -137,6 +138,7 @@ function drawHistogram(
 }
 
 export function Histogram({ imageUrl, className }: HistogramProps) {
+    const { t } = useTranslation();
     const [histogramData, setHistogramData] = useState<HistogramData | null>(null);
     const [mode, setMode] = useState<HistogramMode>('luminance');
     const [loading, setLoading] = useState(false);
@@ -197,7 +199,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                     type="button"
                     onClick={() => setCollapsed((v) => !v)}
                     className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1"
-                    aria-label={collapsed ? 'Expand histogram' : 'Collapse histogram'}
+                    aria-label={collapsed ? t('aria.expandHistogram') : t('aria.collapseHistogram')}
                 >
                     {collapsed ? '▸' : '▾'}
                 </button>
@@ -224,7 +226,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                         type="button"
                         onClick={cycleMode}
                         className="self-start text-[10px] font-mono px-2 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                        aria-label="Cycle histogram mode"
+                        aria-label={t('aria.cycleHistogram')}
                     >
                         {MODE_LABELS[mode]}
                     </button>
