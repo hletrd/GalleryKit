@@ -1,9 +1,10 @@
-import { getImagesLite, getTags, getTopicBySlugCached, getImageCount } from '@/lib/data';
+import { getImagesLite, getTags, getTopicBySlugCached, getImageCount, getTopics } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 import { getLocale } from 'next-intl/server';
+import { safeJsonLd } from '@/lib/safe-json-ld';
 
 
 export const revalidate = 3600;
@@ -82,7 +83,7 @@ export default async function TopicPage({
       redirect(`/${locale}/${topicData.slug}`);
   }
 
-  const allTags = await getTags(topic);
+  const [allTags, allTopics] = await Promise.all([getTags(topic), getTopics()]);
 
   // Parse and validate tag slugs
   const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
@@ -117,11 +118,11 @@ export default async function TopicPage({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(galleryLd).replace(/</g, '\\u003c')
+            __html: safeJsonLd(galleryLd)
           }}
         />
       )}
-      <HomeClient images={images} tags={tags} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} totalCount={totalCount} />
+      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} totalCount={totalCount} />
     </>
   );
 }

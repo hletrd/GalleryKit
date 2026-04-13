@@ -362,13 +362,15 @@ export async function getSharedGroup(key: string) {
     const [group] = await db.select().from(sharedGroups).where(eq(sharedGroups.key, trimmedKey)).limit(1);
     if (!group) return null;
 
-    // Check expiry
-    if (group.expires_at && new Date(group.expires_at) < new Date()) {
-        return null;
+    // Check expiry using SQL NOW() to avoid timezone mismatch between JS and MySQL
+    if (group.expires_at) {
+        const [expCheck] = await db.select({ expired: sql<number>`${sharedGroups.expires_at} < NOW()` })
+            .from(sharedGroups).where(eq(sharedGroups.id, group.id)).limit(1);
+        if (expCheck?.expired) return null;
     }
 
     // Increment view count (fire-and-forget)
-    db.update(sharedGroups).set({ view_count: sql`${sharedGroups.view_count} + 1` }).where(eq(sharedGroups.id, group.id)).catch(() => {});
+    db.update(sharedGroups).set({ view_count: sql`${sharedGroups.view_count} + 1` }).where(eq(sharedGroups.id, group.id)).catch(err => console.debug('view_count increment failed:', err.message));
 
     const groupImages = await db.select(selectFields)
     .from(sharedGroupImages)

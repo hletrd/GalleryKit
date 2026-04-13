@@ -1,7 +1,8 @@
-import { getImagesLite, getTags, getImageCount } from '@/lib/data';
+import { getImagesLite, getTags, getImageCount, getTopics } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
+import { safeJsonLd } from '@/lib/safe-json-ld';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -57,7 +58,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const { tags: tagsParam } = await searchParams;
 
   // Root always gets latest uploads (no topic)
-  const allTags = await getTags();
+  const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);
 
   // Parse and validate tag slugs
   const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
@@ -98,18 +99,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify(websiteLd).replace(/</g, '\\u003c')
+          __html: safeJsonLd(websiteLd)
         }}
       />
       {galleryLd && (
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(galleryLd).replace(/</g, '\\u003c')
+            __html: safeJsonLd(galleryLd)
           }}
         />
       )}
-      <HomeClient images={images} tags={allTags} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />
+      <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />
     </>
   );
 }

@@ -6,11 +6,9 @@ export async function register() {
         process.once('SIGTERM', async () => {
             console.log('[Shutdown] SIGTERM received, draining queue...');
             try {
-                // Access the queue via the same global Symbol used by actions.ts.
-                // This avoids importing from 'use server' which restricts exports.
-                const queueKey = Symbol.for('gallerykit.imageProcessingQueue');
-                const state = (globalThis as Record<symbol, unknown>)[queueKey] as
-                    { queue: { pause: () => void; onIdle: () => Promise<void> }; gcInterval?: ReturnType<typeof setInterval> } | undefined;
+                // Direct import — image-queue.ts has no 'use server' directive, so this is safe and type-safe.
+                const { getProcessingQueueState } = await import('@/lib/image-queue');
+                const state = getProcessingQueueState();
 
                 if (state) {
                     state.queue.pause();

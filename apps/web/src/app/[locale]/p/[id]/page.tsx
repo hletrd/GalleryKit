@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
 import { getLocale } from 'next-intl/server';
+import { safeJsonLd } from '@/lib/safe-json-ld';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -179,13 +180,13 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             <script
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{
-                    __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c')
+                    __html: safeJsonLd(jsonLd)
                 }}
             />
             <script
                 type="application/ld+json"
                 dangerouslySetInnerHTML={{
-                    __html: JSON.stringify(breadcrumbLd).replace(/</g, '\\u003c')
+                    __html: safeJsonLd(breadcrumbLd)
                 }}
             />
             <PhotoViewer
