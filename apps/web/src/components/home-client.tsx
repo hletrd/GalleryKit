@@ -199,7 +199,7 @@ export function HomeClient({ images, tags, currentTags, topicSlug, hasMore = fal
                         <div
                             key={image.id}
                             className={cn(
-                                "break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]",
+                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)]",
                                 image.blur_data_url && "skeleton-shimmer"
                             )}
                             style={image.blur_data_url ? {

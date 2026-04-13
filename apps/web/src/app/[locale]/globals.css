@@ -132,6 +132,12 @@
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
+/* Virtual masonry: skip layout/paint for offscreen cards */
+.masonry-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
