@@ -82,6 +82,29 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         } catch {}
     }, []);
 
+    // Sync info state across breakpoints: mobile bottom sheet ↔ desktop sidebar
+    useEffect(() => {
+        const LG = 1024;
+        const mql = window.matchMedia(`(min-width: ${LG}px)`);
+        const handler = (e: MediaQueryListEvent) => {
+            if (e.matches) {
+                // Crossing into desktop: if bottom sheet is open, transfer to sidebar
+                if (showBottomSheet) {
+                    setShowBottomSheet(false);
+                    setIsPinned(true);
+                }
+            } else {
+                // Crossing into mobile: close sidebar (user can reopen via button)
+                if (isPinned) {
+                    setIsPinned(false);
+                    setTimerShowInfo(false);
+                }
+            }
+        };
+        mql.addEventListener('change', handler);
+        return () => mql.removeEventListener('change', handler);
+    }, [showBottomSheet, isPinned]);
+
     // Handle keyboard navigation (skip when lightbox is active — it handles its own keys)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
