@@ -11,6 +11,7 @@ import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { formatUploadLimit, MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 
 export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
@@ -51,8 +52,8 @@ export async function uploadImages(formData: FormData) {
 
     // Validate total upload size
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > 10 * 1024 * 1024 * 1024) {
-        return { error: 'Total upload size exceeds 10GB limit' };
+    if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
+        return { error: `Total upload size exceeds ${formatUploadLimit(MAX_TOTAL_UPLOAD_BYTES)} limit` };
     }
 
     if (!topic) return { error: 'Topic required' };

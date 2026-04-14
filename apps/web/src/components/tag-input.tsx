@@ -4,6 +4,7 @@ import * as React from 'react';
 import { X, Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/components/i18n-provider';
 
 export interface Tag {
     id: number;
@@ -26,13 +27,13 @@ export function TagInput({
     placeholder,
     className,
 }: TagInputProps) {
+    const { t } = useTranslation();
     const [inputValue, setInputValue] = React.useState('');
     const [isOpen, setIsOpen] = React.useState(false);
     const [highlightedIndex, setHighlightedIndex] = React.useState(0);
     const inputRef = React.useRef<HTMLInputElement>(null);
     const containerRef = React.useRef<HTMLDivElement>(null);
 
-    // Filter available tags: exclude already selected ones, and match input
     const filteredTags = React.useMemo(() => {
         const lowerInput = inputValue.trim().toLowerCase();
         return availableTags
@@ -156,7 +157,7 @@ export function TagInput({
                     <div className="max-h-[300px] overflow-auto p-1">
                         {filteredTags.length === 0 && !showCreateOption && (
                             <div className="py-2 px-2 text-sm text-muted-foreground text-center">
-                                No matching tags
+                                {t('tagInput.noMatches')}
                             </div>
                         )}
 
@@ -185,7 +186,7 @@ export function TagInput({
                                 onMouseEnter={() => setHighlightedIndex(filteredTags.length)}
                             >
                                 <span className="mr-2 h-4 w-4 flex items-center justify-center">+</span>
-                                <span>Create &quot;{inputValue}&quot;</span>
+                                <span>{t('tagInput.create', { value: inputValue })}</span>
                             </div>
                         )}
                     </div>

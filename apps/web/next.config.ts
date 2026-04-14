@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from 'next-intl/plugin';
+import { NEXT_UPLOAD_BODY_SIZE_LIMIT } from './src/lib/upload-limits';
 
 const withNextIntl = createNextIntlPlugin();
 
@@ -82,13 +83,10 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      // Matches the gallery's intentional 10GB multi-file upload cap; individual
-      // actions still enforce their own smaller per-file limits.
-      bodySizeLimit: '10gb',
+      // Keep framework-level request parsing aligned with the app-level total batch cap.
+      bodySizeLimit: NEXT_UPLOAD_BODY_SIZE_LIMIT,
     },
-    // Large multipart batches are allowed intentionally; mutation actions enforce
-    // lower per-file limits and additional server-side validation.
-    proxyClientMaxBodySize: '10gb',
+    proxyClientMaxBodySize: NEXT_UPLOAD_BODY_SIZE_LIMIT,
   },
   images: {
     formats: ['image/avif', 'image/webp'],

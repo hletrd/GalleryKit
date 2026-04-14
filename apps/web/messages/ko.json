@@ -80,6 +80,11 @@
     "created": "카테고리를 생성했습니다",
     "updated": "카테고리를 저장했습니다",
     "deleted": "카테고리를 삭제했습니다",
+    "aliases": "별칭",
+    "aliasAdded": "별칭을 추가했습니다",
+    "aliasRemoved": "별칭을 제거했습니다",
+    "noAliases": "별칭이 없습니다",
+    "aliasPlaceholder": "새 별칭 추가",
     "placeholderLabel": "이름 (예: 풍경)",
     "placeholderSlug": "슬러그 (예: nature)",
     "placeholderOrder": "순서 (예: 1)"
@@ -94,6 +99,10 @@
     "updated": "태그를 저장했습니다",
     "deleted": "태그를 삭제했습니다",
     "noTags": "태그가 없습니다."
+  },
+  "tagInput": {
+    "noMatches": "일치하는 태그가 없습니다",
+    "create": "\"{value}\" 생성"
   },
   "password": {
     "title": "비밀번호 변경",

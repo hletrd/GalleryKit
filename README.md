@@ -110,9 +110,11 @@ DB_NAME=gallery
 BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix
 # IMAGE_BASE_URL=https://cdn.example.com
+# UPLOAD_MAX_TOTAL_BYTES=2147483648
 ```
 
 If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP.
+If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size.
 
 ### Development
 

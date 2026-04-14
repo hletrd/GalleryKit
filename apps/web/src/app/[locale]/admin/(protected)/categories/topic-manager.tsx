@@ -75,7 +75,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         if (res?.error) {
             toast.error(res.error);
         } else {
-            toast.success('Alias added');
+            toast.success(t('categories.aliasAdded'));
             setNewAlias('');
             // Optimistically update the editing topic state or rely on revalidation?
             // Revalidation should cause a refresh, but local state 'editingTopic' won't update automatically if it's detached.
@@ -90,7 +90,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         if (res?.error) {
             toast.error(res.error);
         } else {
-            toast.success('Alias removed');
+            toast.success(t('categories.aliasRemoved'));
              setEditingTopic(prev => prev ? ({ ...prev, aliases: prev.aliases.filter(a => a !== alias) }) : null);
         }
     }
@@ -135,7 +135,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                         <TableHead>{t('categories.order')}</TableHead>
                         <TableHead>{t('categories.label')}</TableHead>
                         <TableHead>{t('categories.slug')}</TableHead>
-                        <TableHead>Aliases</TableHead>
+                        <TableHead>{t('categories.aliases')}</TableHead>
                         <TableHead className="text-right">{t('imageManager.actions')}</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -189,7 +189,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                             </form>
 
                             <div className="border-t pt-4">
-                                <h3 className="text-sm font-medium mb-3">Aliases</h3>
+                                <h3 className="text-sm font-medium mb-3">{t('categories.aliases')}</h3>
                                 <div className="flex flex-wrap gap-2 mb-4">
                                     {editingTopic.aliases.map(alias => (
                                         <div key={alias} className="flex items-center gap-1 px-2 py-1 bg-secondary rounded-md text-sm">
@@ -202,11 +202,11 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                             </button>
                                         </div>
                                     ))}
-                                    {editingTopic.aliases.length === 0 && <span className="text-sm text-muted-foreground italic">No aliases</span>}
+                                    {editingTopic.aliases.length === 0 && <span className="text-sm text-muted-foreground italic">{t('categories.noAliases')}</span>}
                                 </div>
                                 <div className="flex gap-2">
                                     <Input
-                                        placeholder="Add new alias"
+                                        placeholder={t('categories.aliasPlaceholder')}
                                         value={newAlias}
                                         onChange={(e) => setNewAlias(e.target.value)}
                                         onKeyDown={(e) => {
@@ -217,7 +217,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         }}
                                         className="max-w-[200px]"
                                     />
-                                    <Button type="button" variant="secondary" onClick={() => handleAddAlias(editingTopic.slug)}>Add</Button>
+                                    <Button type="button" variant="secondary" onClick={() => handleAddAlias(editingTopic.slug)}>{t('categories.add')}</Button>
                                 </div>
                             </div>
                         </div>

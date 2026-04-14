@@ -80,6 +80,11 @@
     "created": "Created",
     "updated": "Saved",
     "deleted": "Deleted",
+    "aliases": "Aliases",
+    "aliasAdded": "Alias added",
+    "aliasRemoved": "Alias removed",
+    "noAliases": "No aliases",
+    "aliasPlaceholder": "Add new alias",
     "placeholderLabel": "Name (e.g. Nature)",
     "placeholderSlug": "Slug (e.g. nature)",
     "placeholderOrder": "Order (e.g. 1)"
@@ -94,6 +99,10 @@
     "updated": "Saved",
     "deleted": "Deleted",
     "noTags": "No tags yet."
+  },
+  "tagInput": {
+    "noMatches": "No matching tags",
+    "create": "Create \"{value}\""
   },
   "password": {
     "title": "Change Password",
