@@ -344,14 +344,14 @@ async function reconcileLegacySchema(connection, dbName) {
     const addedPosition = await ensureColumn(connection, dbName, 'shared_group_images', 'position', 'ALTER TABLE shared_group_images ADD COLUMN position int NOT NULL DEFAULT 0');
     if (addedPosition) {
         await connection.query(`
-            UPDATE shared_group_images AS current
-            SET position = (
-                SELECT COUNT(*) - 1
-                FROM shared_group_images AS earlier
-                WHERE earlier.group_id = current.group_id
-                  AND earlier.image_id <= current.image_id
-            )
-            WHERE current.position = 0
+            UPDATE shared_group_images AS sgi
+            JOIN (
+                SELECT group_id, image_id, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY image_id) - 1 AS computed_position
+                FROM shared_group_images
+            ) AS ordered
+              ON ordered.group_id = sgi.group_id AND ordered.image_id = sgi.image_id
+            SET sgi.position = ordered.computed_position
+            WHERE sgi.position = 0
         `);
     }
 

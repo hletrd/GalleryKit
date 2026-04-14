@@ -56,14 +56,14 @@ ALTER TABLE `images` ADD `original_format` varchar(10);--> statement-breakpoint
 ALTER TABLE `images` ADD `original_file_size` bigint;--> statement-breakpoint
 ALTER TABLE `images` ADD `blur_data_url` text;--> statement-breakpoint
 ALTER TABLE `shared_group_images` ADD `position` int DEFAULT 0 NOT NULL;--> statement-breakpoint
-UPDATE `shared_group_images` AS `current`
-SET `position` = (
-	SELECT COUNT(*) - 1
-	FROM `shared_group_images` AS `earlier`
-	WHERE `earlier`.`group_id` = `current`.`group_id`
-	  AND `earlier`.`image_id` <= `current`.`image_id`
-)
-WHERE `current`.`position` = 0;--> statement-breakpoint
+UPDATE `shared_group_images` AS `sgi`
+JOIN (
+	SELECT `group_id`, `image_id`, ROW_NUMBER() OVER (PARTITION BY `group_id` ORDER BY `image_id`) - 1 AS `computed_position`
+	FROM `shared_group_images`
+) AS `ordered`
+	ON `ordered`.`group_id` = `sgi`.`group_id` AND `ordered`.`image_id` = `sgi`.`image_id`
+SET `sgi`.`position` = `ordered`.`computed_position`
+WHERE `sgi`.`position` = 0;--> statement-breakpoint
 ALTER TABLE `shared_groups` ADD `view_count` int DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE `shared_groups` ADD `expires_at` datetime;--> statement-breakpoint
 ALTER TABLE `audit_log` ADD CONSTRAINT `audit_log_user_id_admin_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `admin_users`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
