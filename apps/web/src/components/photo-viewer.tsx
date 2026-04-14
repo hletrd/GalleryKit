@@ -160,6 +160,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
+                        disabled={showLightbox}
                     />
 
                     <AnimatePresence mode="wait" initial={false}>

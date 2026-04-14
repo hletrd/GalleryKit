@@ -9,12 +9,13 @@ import { useTranslation } from '@/components/i18n-provider';
 interface PhotoNavigationProps {
     prevId: number | null;
     nextId: number | null;
+    disabled?: boolean;
 }
 
 const SWIPE_THRESHOLD = 80;
 const VERTICAL_LIMIT = 30;
 
-export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
+export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const [swipeOffset, setSwipeOffset] = useState(0);
@@ -24,6 +25,9 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
     const isSwiping = useRef(false);
 
     useEffect(() => {
+        // Skip touch handling when lightbox is open — it handles its own navigation
+        if (disabled) return;
+
         const handleTouchStart = (e: TouchEvent) => {
             touchStartX.current = e.changedTouches[0].screenX;
             touchStartY.current = e.changedTouches[0].screenY;
@@ -35,8 +39,16 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
             const deltaX = e.changedTouches[0].screenX - touchStartX.current;
             const deltaY = e.changedTouches[0].screenY - touchStartY.current;
 
-            // Only handle horizontal swipes where vertical movement is minimal
-            if (Math.abs(deltaY) > VERTICAL_LIMIT && !isSwiping.current) {
+            // Cancel swipe if movement becomes predominantly vertical
+            if (isSwiping.current && Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > VERTICAL_LIMIT) {
+                setIsSnapping(true);
+                setSwipeOffset(0);
+                isSwiping.current = false;
+                return;
+            }
+
+            // Only activate for predominantly horizontal movement
+            if (Math.abs(deltaY) > Math.abs(deltaX)) {
                 return;
             }
 
@@ -102,7 +114,7 @@ export function PhotoNavigation({ prevId, nextId }: PhotoNavigationProps) {
             window.removeEventListener('touchmove', handleTouchMove);
             window.removeEventListener('touchend', handleTouchEnd);
         };
-    }, [locale, prevId, nextId, router]);
+    }, [locale, prevId, nextId, router, disabled]);
 
     // Opacity of swipe indicators proportional to displacement
     const prevIndicatorOpacity = swipeOffset > 0

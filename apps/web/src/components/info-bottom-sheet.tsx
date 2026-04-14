@@ -42,7 +42,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
             case 'peek':
                 return `calc(100% - ${PEEK_HEIGHT}px)`;
             case 'expanded':
-                return '5vh';
+                return '0';
         }
     }, []);
 
@@ -143,7 +143,9 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                 style={{
                     transform: `translateY(${getTranslateY(sheetState)})`,
                     maxHeight: '95vh',
+                    ...({'maxHeight': '95dvh'} as React.CSSProperties),
                     overflowY: sheetState === 'expanded' ? 'auto' : 'hidden',
+                    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}
                 onTouchStart={handleTouchStart}
                 onTouchEnd={handleTouchEnd}
