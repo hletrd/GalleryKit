@@ -55,8 +55,8 @@ export function NavClient({ topics }: NavClientProps) {
                     </Link>
                 </div>
 
-                {/* Controls: hidden on mobile to give topics more room */}
-                <div className={cn("hidden md:flex items-center gap-1 shrink-0", isExpanded && "pt-1")}>
+                {/* Controls: hidden on mobile when collapsed, shown when expanded */}
+                <div className={cn("items-center gap-1 shrink-0", isExpanded ? "flex w-full pt-2" : "hidden md:flex")}>
                     <Search />
                     <button
                         onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}

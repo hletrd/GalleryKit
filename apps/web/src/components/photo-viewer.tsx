@@ -59,12 +59,28 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         } else {
             // Check for external prev/next logic (for single photo page)
             if (direction === -1 && prevId) {
+                if (showLightbox) {
+                    try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
+                }
                 router.push(`/${locale}/p/${prevId}`);
             } else if (direction === 1 && nextId) {
+                if (showLightbox) {
+                    try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
+                }
                 router.push(`/${locale}/p/${nextId}`);
             }
         }
-    }, [currentIndex, images, locale, prevId, nextId, router]);
+    }, [currentIndex, images, locale, prevId, nextId, router, showLightbox]);
+
+    // Auto-open lightbox if returning from a lightbox navigation (single-photo page)
+    useEffect(() => {
+        try {
+            if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
+                sessionStorage.removeItem('gallery_auto_lightbox');
+                setShowLightbox(true);
+            }
+        } catch {}
+    }, []);
 
     // Handle keyboard navigation (skip when lightbox is active — it handles its own keys)
     useEffect(() => {

@@ -144,6 +144,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                     transform: `translateY(${getTranslateY(sheetState)})`,
                     maxHeight: '95vh',
                     ...({'maxHeight': '95dvh'} as React.CSSProperties),
+                    minHeight: `${PEEK_HEIGHT}px`,
                     overflowY: sheetState === 'expanded' ? 'auto' : 'hidden',
                     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}

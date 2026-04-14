@@ -15,11 +15,11 @@ test('mobile: search, theme toggle, and language switch are hidden', async ({ pa
   await expect(nav).toBeVisible();
 
   // The controls div (search + theme + lang) should NOT be visible on mobile
-  // Theme toggle
+  // Theme toggle should be hidden when collapsed on mobile
   const themeToggle = nav.locator('button[aria-label="Toggle theme"]');
   await expect(themeToggle).toBeHidden();
 
-  // Language switch
+  // Language switch should be hidden when collapsed on mobile
   const langSwitch = nav.locator('a:has-text("KO")');
   await expect(langSwitch).toBeHidden();
 });
@@ -141,14 +141,13 @@ test('bottom sheet opens and is positioned at viewport bottom', async ({ page })
     const sheet = page.getByRole('dialog', { name: 'Photo Info' });
     await expect(sheet).toBeVisible();
 
-    // In peek state, the sheet's top should be near viewportHeight - PEEK_HEIGHT (140px)
-    // This verifies the sheet is anchored to the bottom, not floating above it
+    // In peek state, the sheet should reach the viewport bottom (no gap)
+    // and its top should be near viewportHeight - PEEK_HEIGHT (140px)
     const box = await sheet.boundingBox();
     if (box) {
-      const PEEK_HEIGHT = 140;
-      const expectedTop = MOBILE.height - PEEK_HEIGHT;
-      // Sheet top should be within 10px of expected peek position
-      expect(Math.abs(box.y - expectedTop)).toBeLessThan(10);
+      const bottomGap = MOBILE.height - (box.y + box.height);
+      // Bottom of sheet should be flush with viewport bottom (within 5px)
+      expect(Math.abs(bottomGap)).toBeLessThan(5);
     }
   }
 });
