@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronUp, ChevronDown, Sun, Moon } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
 
 import { usePathname, useSearchParams } from "next/navigation";
@@ -17,6 +17,8 @@ interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
 }
 
+const MD_BREAKPOINT = 768;
+
 export function NavClient({ topics }: NavClientProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -24,6 +26,16 @@ export function NavClient({ topics }: NavClientProps) {
     const { t } = useTranslation();
     const { resolvedTheme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
+
+    // Auto-collapse when viewport crosses into desktop
+    useEffect(() => {
+        const mql = window.matchMedia(`(min-width: ${MD_BREAKPOINT}px)`);
+        const handler = (e: MediaQueryListEvent) => {
+            if (e.matches) setIsExpanded(false);
+        };
+        mql.addEventListener('change', handler);
+        return () => mql.removeEventListener('change', handler);
+    }, []);
 
     const otherLocale = locale === 'en' ? 'ko' : 'en';
     const localizedHomeHref = siteConfig.home_link.startsWith('http')
@@ -47,39 +59,21 @@ export function NavClient({ topics }: NavClientProps) {
         <nav aria-label={t('aria.mainNav')} className="sticky top-0 z-50 w-full bg-background/50 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
             <div className={cn(
                 "container mx-auto flex items-center px-4 transition-all duration-300",
-                isExpanded ? "h-auto py-4 flex-wrap items-start" : "h-16 overflow-hidden"
+                isExpanded ? "h-auto py-3 flex-wrap items-start" : "h-16 overflow-hidden"
             )}>
-                <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1.5")}>
+                {/* Title */}
+                <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1")}>
                     <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0">
                         <span className="font-bold text-xl tracking-tight">{siteConfig.nav_title}</span>
                     </Link>
                 </div>
 
-                {/* Controls: hidden on mobile when collapsed, shown when expanded */}
-                <div className={cn("items-center gap-1 shrink-0", isExpanded ? "flex w-full pt-2" : "hidden md:flex")}>
-                    <Search />
-                    <button
-                        onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
-                        aria-label={t('aria.toggleTheme')}
-                    >
-                        <Sun className="h-4 w-4 hidden dark:block" />
-                        <Moon className="h-4 w-4 block dark:hidden" />
-                    </button>
-                    <Link
-                        href={localeSwitchHref}
-                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
-                    >
-                        {otherLocale.toUpperCase()}
-                    </Link>
-                </div>
-
-                {/* Mobile Expand Toggle — placed before topics for proper flex wrapping */}
+                {/* Mobile Expand Toggle */}
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
                     className={cn(
                         "ml-auto p-2 hover:bg-accent rounded-full md:hidden shrink-0",
-                        isExpanded && "mt-1.5"
+                        isExpanded && "mt-1"
                     )}
                     aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
                     aria-expanded={isExpanded}
@@ -91,13 +85,12 @@ export function NavClient({ topics }: NavClientProps) {
                     )}
                 </button>
 
+                {/* Topics */}
                 <div className={cn(
                     "flex items-center gap-2 text-sm font-medium min-w-0 transition-all duration-300",
-                    // Mobile: Expanded vs Collapsed
                     isExpanded
-                        ? "flex-wrap content-start w-full mt-2"
+                        ? "flex-wrap content-start w-full mt-1"
                         : "flex-1 overflow-x-auto scrollbar-hide mask-gradient-right pr-4",
-                    // Desktop: Always right aligned, no mask if not overflowing
                     "md:flex-1 md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap md:w-auto md:mt-0"
                 )}>
                     {topics.map((topic) => {
@@ -129,6 +122,28 @@ export function NavClient({ topics }: NavClientProps) {
                             </Link>
                         );
                     })}
+                </div>
+
+                {/* Controls: hidden on mobile when collapsed, shown when expanded; always rightmost on desktop */}
+                <div className={cn(
+                    "items-center gap-1 shrink-0",
+                    isExpanded ? "flex w-full mt-2" : "hidden md:flex"
+                )}>
+                    <Search />
+                    <button
+                        onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
+                        aria-label={t('aria.toggleTheme')}
+                    >
+                        <Sun className="h-4 w-4 hidden dark:block" />
+                        <Moon className="h-4 w-4 block dark:hidden" />
+                    </button>
+                    <Link
+                        href={localeSwitchHref}
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
+                    >
+                        {otherLocale.toUpperCase()}
+                    </Link>
                 </div>
             </div>
         </nav>

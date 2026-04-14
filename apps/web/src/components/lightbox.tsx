@@ -220,7 +220,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                 {/* Close button — top right */}
                 <button
                     ref={closeButtonRef}
-                    className="pointer-events-auto absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
                         if (document.fullscreenElement) {
@@ -236,7 +236,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
 
                 {/* Fullscreen toggle — top right, second from right */}
                 <button
-                    className="pointer-events-auto absolute top-4 right-16 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
                         toggleFullscreen();
