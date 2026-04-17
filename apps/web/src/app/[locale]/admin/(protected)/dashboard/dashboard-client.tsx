@@ -16,7 +16,7 @@ interface DashboardClientProps {
 }
 
 export function DashboardClient({ images, topics, tags, page, totalPages }: DashboardClientProps) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
 
     return (
         <div className="space-y-8">
