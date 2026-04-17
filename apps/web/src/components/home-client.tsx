@@ -80,7 +80,7 @@ function reorderForColumns<T extends { id: number; width?: number; height?: numb
 }
 
 function useColumnCount() {
-    const [count, setCount] = useState(4);
+    const [count, setCount] = useState(2);
 
     useEffect(() => {
         let rafId: number | null = null;

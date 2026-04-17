@@ -70,7 +70,7 @@ const nextConfig: NextConfig = {
               "script-src 'self' 'strict-dynamic' 'unsafe-inline' https://www.googletagmanager.com",
               "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
               `img-src ${cspImgSrc.join(' ')}`,
-              "font-src 'self' data: https://cdn.jsdelivr.net",
+              "font-src 'self' data:",
               "connect-src 'self' https://www.google-analytics.com",
               "frame-ancestors 'self'",
               "base-uri 'self'",
