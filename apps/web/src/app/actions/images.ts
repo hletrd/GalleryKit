@@ -3,7 +3,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
-import { eq, sql, and, desc, or, isNull, inArray } from 'drizzle-orm';
+import { eq, sql, desc, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
