@@ -21,6 +21,11 @@ export default function DbPage() {
             try {
                 const result = await dumpDatabase();
                 if (result.success && result.url) {
+                    // Validate URL prefix to prevent open redirect
+                    if (!result.url.startsWith('/api/admin/db/download')) {
+                        toast.error(`${t('errorBackup')}: Invalid download URL`);
+                        return;
+                    }
                     const link = document.createElement('a');
                     link.href = result.url;
                     link.download = result.url.split('/').pop() || 'backup.sql';
@@ -67,8 +72,16 @@ export default function DbPage() {
     const handleExportCsv = () => {
         startTransition(async () => {
             try {
-                const csvData = await exportImagesCsv();
-                const blob = new Blob([csvData], { type: 'text/csv' });
+                const result = await exportImagesCsv();
+                if (result.error) {
+                    toast.error(`${t('errorExport')}: ${result.error}`);
+                    return;
+                }
+                if (!result.data) {
+                    toast.error(t('errorExport'));
+                    return;
+                }
+                const blob = new Blob([result.data], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;

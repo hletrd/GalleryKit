@@ -25,19 +25,12 @@ const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels >
 // limitInputPixels is passed per-constructor call (Sharp 0.33+ API)
 
 const UPLOAD_ROOT = (() => {
-    // In Docker (prod), we might be in /app, so we need apps/web/public
-    // In Dev, we might be in apps/web, so we need public
+    const envRoot = process.env.UPLOAD_ROOT?.trim();
+    if (envRoot) return envRoot;
+
+    // Fallback heuristic based on CWD
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/uploads');
     const simplePath = path.join(process.cwd(), 'public/uploads');
-
-    // We can't easily check 'existsSync' at top level easily without potentially slowing start
-    // But for Docker specifically, we know the CWD is /app and structure is copied
-    // Let's safe bet: if CWD ends in apps/web, use simplePath. Else try monorepoPath.
-
-    // Better yet, let's just export a function or lazily evaluate if we want to be 100% sure,
-    // but constants are easier.
-
-    // Quick heuristic:
     if (process.cwd().endsWith('apps/web')) {
         return simplePath;
     }

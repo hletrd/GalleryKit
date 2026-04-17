@@ -251,6 +251,8 @@ export async function getImage(id: number) {
             .where(eq(imageTags.imageId, id)),
 
         // Prev: Newer image by (capture_date, created_at, id) — matches gallery grid sort order
+        // When capture_date is NULL, all dated images are "newer" (NULLs sort last in DESC).
+        // Using DESC ordering picks the LATEST-dated image (closest newer), not the earliest.
         db.select({ id: images.id })
             .from(images)
             .where(
@@ -276,7 +278,7 @@ export async function getImage(id: number) {
                     eq(images.processed, true)
                 )
             )
-            .orderBy(asc(images.capture_date), asc(images.created_at), asc(images.id))
+            .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
             .limit(1),
 
         // Next: Older image by (capture_date, created_at, id) — matches gallery grid sort order.
@@ -368,15 +370,19 @@ export async function getSharedGroup(
         return null;
     }
 
-    const [group] = await db.select().from(sharedGroups).where(eq(sharedGroups.key, trimmedKey)).limit(1);
+    // Single query: fetch group and check expiry atomically
+    const [group] = await db.select().from(sharedGroups)
+        .where(
+            and(
+                eq(sharedGroups.key, trimmedKey),
+                or(
+                    sql`${sharedGroups.expires_at} > NOW()`,
+                    sql`${sharedGroups.expires_at} IS NULL`
+                )
+            )
+        )
+        .limit(1);
     if (!group) return null;
-
-    // Check expiry using SQL NOW() to avoid timezone mismatch between JS and MySQL
-    if (group.expires_at) {
-        const [expCheck] = await db.select({ expired: sql<number>`${sharedGroups.expires_at} < NOW()` })
-            .from(sharedGroups).where(eq(sharedGroups.id, group.id)).limit(1);
-        if (expCheck?.expired) return null;
-    }
 
     if (options?.incrementViewCount !== false) {
         db.update(sharedGroups)

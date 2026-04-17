@@ -118,6 +118,9 @@ export async function revokePhotoShareLink(imageId: number) {
         return { error: 'Invalid image ID' };
     }
 
+    const [image] = await db.select({ id: images.id }).from(images).where(eq(images.id, imageId));
+    if (!image) return { error: 'Image not found' };
+
     await db.update(images)
         .set({ share_key: null })
         .where(eq(images.id, imageId));

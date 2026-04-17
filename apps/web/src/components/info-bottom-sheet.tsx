@@ -107,7 +107,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
         ? image.title
         : (image.tags && image.tags.length > 0
             ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
-            : (image.user_filename || t('imageManager.untitled')));
+            : t('imageManager.untitled'));
 
     const formattedShutterSpeed = (() => {
         if (!hasExifData(image.exposure_time)) return null;

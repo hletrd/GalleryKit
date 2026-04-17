@@ -28,9 +28,9 @@ function escapeCsvField(value: string): string {
 
 // --- CSV Export ---
 
-export async function exportImagesCsv() {
+export async function exportImagesCsv(): Promise<{ data?: string; error?: string }> {
     if (!(await isAdmin())) {
-        throw new Error("Unauthorized");
+        return { error: 'Unauthorized' };
     }
 
     // Query images with aggregated tags
@@ -71,20 +71,20 @@ export async function exportImagesCsv() {
         ...rows.map(r => r.join(","))
     ].join("\n");
 
-    return csvContent;
+    return { data: csvContent };
 }
 
 // --- DB Backup (Dump) ---
 
 export async function dumpDatabase() {
     if (!(await isAdmin())) {
-        throw new Error("Unauthorized");
+        return { error: 'Unauthorized' };
     }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
     if (!DB_HOST || !DB_USER || !DB_NAME) {
-        throw new Error("Missing database configuration");
+        return { error: 'Missing database configuration' };
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -96,6 +96,10 @@ export async function dumpDatabase() {
 
     await fs.mkdir(backupsDir, { recursive: true });
 
+    // Use TLS for non-localhost DB connections
+    const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
+    const sslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
+
     return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
         const dump = spawn('mysqldump', [
             `-h${DB_HOST}`,
@@ -103,6 +107,7 @@ export async function dumpDatabase() {
             `-u${DB_USER}`,
             '--single-transaction', // Good for InnoDB
             '--quick',
+            ...sslArgs,
             DB_NAME
         ], {
             env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
@@ -163,7 +168,7 @@ let restoreInProgress = false;
 
 export async function restoreDatabase(formData: FormData) {
     if (!(await isAdmin())) {
-        throw new Error("Unauthorized");
+        return { success: false, error: 'Unauthorized' };
     }
 
     if (restoreInProgress) {
@@ -247,6 +252,13 @@ async function runRestore(formData: FormData) {
         // Schema modifications that --one-database does not fully block
         /\bRENAME\s+TABLE\b/i,
         /\bCREATE\s+(OR\s+REPLACE\s+)?VIEW\b/i,
+        // Prepared statements allow indirect execution of any SQL
+        /\bPREPARE\b/i,
+        /\bEXECUTE\b/i,
+        /\bDEALLOCATE\s+PREPARE\b/i,
+        // Hex/binary variable assignment can encode dangerous keywords
+        /\bSET\s+@\w+\s*=\s*0x/i,
+        /\bSET\s+@\w+\s*=\s*b'/i,
     ];
     const CHUNK_SIZE = 1024 * 1024;
     const OVERLAP = 256; // overlap to catch patterns split across chunks
@@ -277,12 +289,17 @@ async function runRestore(formData: FormData) {
         return { success: false, error: "Missing database configuration" };
     }
 
+    // Use TLS for non-localhost DB connections
+    const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
+    const restoreSslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
+
     return new Promise<{ success: boolean, error?: string }>((resolve) => {
         const restore = spawn('mysql', [
             `-h${DB_HOST}`,
             `-P${DB_PORT || '3306'}`,
             `-u${DB_USER}`,
             '--one-database',
+            ...restoreSslArgs,
             DB_NAME
         ], {
             env: { ...process.env, MYSQL_PWD: DB_PASSWORD }

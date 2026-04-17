@@ -8,13 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
 
-
-
-// Define explicit return type for the action to make TS happy
-// or just cast initialState to any if we want to be lazy, but let's try to be correct.
-// The action returns { error: string } | { success: boolean, message: string }
-// We need a common supertype.
-
 type ActionState = {
     error?: string;
     success?: boolean;
@@ -28,10 +21,6 @@ const startState: ActionState = {
 };
 
 import { useTranslation } from "@/components/i18n-provider";
-
-// ... (keep imports)
-
-// ... (keep ActionState type and initialState)
 
 export function PasswordForm() {
     const [state, formAction, isPending] = useActionState(updatePassword, startState);

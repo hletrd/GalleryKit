@@ -5,6 +5,7 @@ import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
+import { isValidFilename } from '@/lib/validation';
 
 // Cap total pixels to reduce decompression-bomb risk (override via env if needed).
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
@@ -12,6 +13,8 @@ const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels >
     ? envMaxInputPixels
     : 64 * 1024 * 1024;
 const RESOURCES_ROOT = (() => {
+    const envRoot = process.env.UPLOAD_ROOT?.trim();
+    if (envRoot) return path.join(path.dirname(envRoot), 'resources');
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/resources');
     const simplePath = path.join(process.cwd(), 'public/resources');
     if (process.cwd().endsWith('apps/web')) {
@@ -91,6 +94,6 @@ export async function processTopicImage(file: File): Promise<string> {
 }
 
 export async function deleteTopicImage(filename: string) {
-    if (!filename) return;
+    if (!filename || !isValidFilename(filename)) return;
     await fs.unlink(path.join(RESOURCES_DIR, filename)).catch(() => {});
 }

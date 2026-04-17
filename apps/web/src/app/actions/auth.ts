@@ -110,7 +110,6 @@ export async function login(prevState: { error?: string } | null, formData: Form
     // Increment count in both Map and DB
     limitData.count++;
     limitData.lastAttempt = now;
-    loginRateLimit.delete(ip);
     loginRateLimit.set(ip, limitData);
     incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS).catch(() => {});
 
@@ -151,6 +150,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
                 userId: user.id,
                 expiresAt: expiresAt
             });
+
+            // Invalidate any pre-existing sessions for this user to prevent session fixation
+            await db.delete(sessions).where(and(
+                eq(sessions.userId, user.id),
+                sql`${sessions.id} != ${hashSessionToken(sessionToken)}`
+            ));
 
             // Require HTTPS for the session cookie whenever the underlying
             // request came in over TLS (via the reverse proxy), and always

@@ -86,7 +86,7 @@ export async function createTopic(formData: FormData) {
             await deleteTopicImage(imageFilename);
         }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
-            return { error: 'Topic slug already exists' };
+            return { error: 'Topic slug or alias already exists' };
         }
         console.error('Failed to create topic', e);
         return { error: 'Failed to create topic' };

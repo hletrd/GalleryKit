@@ -83,11 +83,12 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
     }, [isZoomed]);
 
     const handleTouchMove = useCallback((e: React.TouchEvent) => {
-        if (!isZoomed || !isDraggingRef.current || e.touches.length !== 1) return;
+        if (!isZoomed || !isDraggingRef.current || e.touches.length !== 1 || !containerRef.current) return;
         e.preventDefault();
         e.stopPropagation();
-        const x = Math.max(-100, Math.min(100, e.touches[0].clientX - dragStartRef.current.x));
-        const y = Math.max(-100, Math.min(100, e.touches[0].clientY - dragStartRef.current.y));
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = Math.max(-100, Math.min(100, ((e.touches[0].clientX - rect.left) / rect.width - 0.5) * -100));
+        const y = Math.max(-100, Math.min(100, ((e.touches[0].clientY - rect.top) / rect.height - 0.5) * -100));
         positionRef.current = { x, y };
         applyTransform(true, x, y);
     }, [isZoomed, applyTransform]);

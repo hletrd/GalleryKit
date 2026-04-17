@@ -37,7 +37,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-4 mt-4">
                             {page > 1 ? (
-                                <Link href={`/admin/dashboard?page=${page - 1}`}>
+                                <Link href={`/${locale}/admin/dashboard?page=${page - 1}`}>
                                     <Button variant="outline" size="sm">
                                         <ChevronLeft className="h-4 w-4 mr-1" />
                                         {page - 1}
@@ -52,7 +52,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                                 {page} / {totalPages}
                             </span>
                             {page < totalPages ? (
-                                <Link href={`/admin/dashboard?page=${page + 1}`}>
+                                <Link href={`/${locale}/admin/dashboard?page=${page + 1}`}>
                                     <Button variant="outline" size="sm">
                                         {page + 1}
                                         <ChevronRight className="h-4 w-4 ml-1" />

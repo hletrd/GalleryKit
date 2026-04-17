@@ -24,6 +24,7 @@ export type ImageProcessingJob = {
 export type ProcessingQueueState = {
     queue: PQueue;
     enqueued: Set<number>;
+    retryCounts: Map<number, number>;
     bootstrapped: boolean;
     shuttingDown: boolean;
     shutdownPromise?: Promise<void>;
@@ -39,6 +40,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
         globalWithQueue[processingQueueKey] = {
             queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 2 }),
             enqueued: new Set<number>(),
+            retryCounts: new Map<number, number>(),
             bootstrapped: false,
             shuttingDown: false,
         };
@@ -168,16 +170,15 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
         } catch (err) {
             console.error(`Background processing failed for ${job.id}`, err);
             // Retry up to MAX_RETRIES times for transient errors
-            const retryKey = `retry_${job.id}`;
-            const g = globalThis as unknown as Record<string, number>;
-            const retries = (g[retryKey] || 0) + 1;
-            g[retryKey] = retries;
+            const retries = (state.retryCounts.get(job.id) || 0) + 1;
             if (retries < MAX_RETRIES) {
+                state.retryCounts.set(job.id, retries);
                 console.warn(`[Queue] Retrying job ${job.id} (attempt ${retries + 1}/${MAX_RETRIES})`);
                 state.enqueued.delete(job.id);
                 enqueueImageProcessing(job);
                 return;
             }
+            state.retryCounts.delete(job.id);
             console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up`);
         } finally {
             await releaseImageProcessingClaim(job.id, lockConnection).catch((err) => {

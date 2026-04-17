@@ -70,7 +70,10 @@ export async function getSessionSecret(): Promise<string> {
                 where: eq(adminSettings.key, 'session_secret')
             });
 
-            cachedSessionSecret = finalSetting?.value || newSecret;
+            if (!finalSetting?.value) {
+                throw new Error('Session secret persistence failed — re-fetch returned null after INSERT IGNORE');
+            }
+            cachedSessionSecret = finalSetting.value;
             return cachedSessionSecret;
         } finally {
             sessionSecretPromise = null;
