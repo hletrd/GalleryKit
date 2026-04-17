@@ -104,7 +104,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
         const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
         if (!tagRecord) return { error: 'Failed to retrieve tag' };
 
-        // US-002: Warn on tag slug collision
+        // Warn on tag slug collision
         if (tagRecord.name !== cleanName) {
             console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
         }
@@ -116,7 +116,9 @@ export async function addTagToImage(imageId: number, tagName: string) {
         });
 
         revalidateLocalizedPaths('/admin/dashboard');
-        return { success: true };
+        return tagRecord.name !== cleanName
+            ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
+            : { success: true as const };
     } catch (e) {
         console.error("Failed to add tag", e);
         return { error: 'Failed to add tag' };
@@ -191,7 +193,9 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         await db.insert(imageTags).ignore().values(values);
 
         revalidateLocalizedPaths('/admin/dashboard');
-        return { success: true };
+        return tagRecord.name !== cleanName
+            ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
+            : { success: true as const };
     } catch (e) {
         console.error("Failed to batch add tags", e);
         return { error: 'Failed to batch add tags' };

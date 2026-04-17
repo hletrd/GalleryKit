@@ -80,10 +80,9 @@ export async function uploadImages(formData: FormData) {
                         filename_jpeg: images.filename_jpeg,
                     })
                     .from(images)
-                    .where(or(
-                        eq(images.user_filename, originalFilename),
-                        and(isNull(images.user_filename), eq(images.title, originalFilename))
-                    ))
+                    // Match only on user_filename — title fallback was removed because a
+                    // different image with the same title as a new file's name caused silent overwrite.
+                    .where(eq(images.user_filename, originalFilename))
                     .orderBy(desc(images.id))
                     .limit(1))[0]
                 : null;
