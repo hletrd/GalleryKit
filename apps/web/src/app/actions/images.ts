@@ -412,13 +412,17 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     }
 
     try {
-        await db.update(images)
+        const [result] = await db.update(images)
             .set({
                 title: title?.trim() || null,
                 description: description?.trim() || null,
                 updated_at: sql`CURRENT_TIMESTAMP`
             })
             .where(eq(images.id, id));
+
+        if (result.affectedRows === 0) {
+            return { error: 'Image not found' };
+        }
 
         revalidateLocalizedPaths('/admin/dashboard', '/');
         return { success: true };

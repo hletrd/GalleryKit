@@ -21,11 +21,11 @@ async function main() {
             );
         `);
         console.log('Created topic_aliases table.');
+        process.exit(0);
     } catch (e) {
         console.error('Migration failed:', e);
+        process.exit(1);
     }
-
-    process.exit(0);
 }
 
 main();

@@ -131,7 +131,11 @@ export async function deleteGroupShareLink(groupId: number) {
     }
 
     // sharedGroupImages cascade-deletes via FK
-    await db.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
+    const [result] = await db.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
+
+    if (result.affectedRows === 0) {
+        return { error: 'Group not found' };
+    }
 
     return { success: true };
 }
