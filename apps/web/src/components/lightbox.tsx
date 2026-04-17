@@ -111,6 +111,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                 e.stopPropagation();
             }
             if (e.key === 'f' || e.key === 'F') {
+                if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
                 toggleFullscreen();
             } else if (e.key === 'ArrowLeft' && prevId !== null) {
                 onNavigate(-1);
@@ -129,8 +130,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
     }, [prevId, nextId, onNavigate, onClose, toggleFullscreen]);
 
     const handleBackdropClick = useCallback(() => {
-        showControls();
-    }, [showControls]);
+        onClose();
+    }, [onClose]);
 
     const handleMouseMove = useCallback(() => {
         showControls();

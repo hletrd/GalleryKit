@@ -117,6 +117,10 @@ export function Search() {
                         <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                         <Input
                             ref={inputRef}
+                            role="combobox"
+                            aria-expanded={results.length > 0}
+                            aria-controls="search-results"
+                            aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
                             value={query}
                             onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
                             onKeyDown={(e) => {
@@ -147,11 +151,14 @@ export function Search() {
                     </div>
                     <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
                         {results.length > 0 ? (
-                            <div className="p-2">
+                            <div className="p-2" id="search-results" role="listbox">
                                 {results.map((image, idx) => (
                                     <Link
                                         key={image.id}
                                         ref={(el) => { resultRefs.current[idx] = el; }}
+                                        role="option"
+                                        id={`search-result-${idx}`}
+                                        aria-selected={idx === activeIndex}
                                         href={`/${locale}/p/${image.id}`}
                                         onClick={() => setIsOpen(false)}
                                         className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}

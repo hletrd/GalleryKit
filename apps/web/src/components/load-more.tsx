@@ -80,6 +80,9 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
                     {loading && <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />}
                 </div>
             )}
+            <div className="sr-only" aria-live="polite" aria-atomic="true">
+                {loading ? 'Loading more images…' : ''}
+            </div>
         </>
     );
 }

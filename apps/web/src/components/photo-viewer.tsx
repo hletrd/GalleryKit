@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -42,10 +42,19 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [showLightbox, setShowLightbox] = useState(() => {
         try { return sessionStorage.getItem('gallery_auto_lightbox') === 'true'; } catch { return false; }
     });
+    const showLightboxRef = useRef(showLightbox);
+    useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
     const [showBottomSheet, setShowBottomSheet] = useState(false);
 
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
     const image = images[currentIndex];
+
+    // Update document.title when navigating between photos
+    useEffect(() => {
+        if (image?.title) {
+            document.title = `${image.title} — GalleryKit`;
+        }
+    }, [image?.id, image?.title]);
 
     const showInfo = isPinned || timerShowInfo;
     const downloadFilename = image?.filename_jpeg;
@@ -58,18 +67,18 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             setCurrentImageId(images[newIndex].id);
         } else {
             if (direction === -1 && prevId) {
-                if (showLightbox) {
+                if (showLightboxRef.current) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
                 }
                 router.push(`/${locale}/p/${prevId}`);
             } else if (direction === 1 && nextId) {
-                if (showLightbox) {
+                if (showLightboxRef.current) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
                 }
                 router.push(`/${locale}/p/${nextId}`);
             }
         }
-    }, [currentIndex, images, locale, prevId, nextId, router, showLightbox]);
+    }, [currentIndex, images, locale, prevId, nextId, router]);
 
     // Clean up auto-lightbox flag after lazy init consumes it
     useEffect(() => {

@@ -83,6 +83,9 @@ function drawHistogram(
 
     ctx.clearRect(0, 0, W, H);
 
+    const isDark = document.documentElement.classList.contains('dark');
+    const gridColor = isDark ? '#404040' : '#d4d4d4';
+
     const drawChannel = (
         bins: number[],
         color: string,
@@ -106,7 +109,7 @@ function drawHistogram(
     };
 
     if (mode === 'luminance') {
-        drawChannel(data.l, '#d4d4d4', 1.0);
+        drawChannel(data.l, gridColor, 1.0);
     } else if (mode === 'rgb') {
         // Normalize all three channels to their shared maximum for overlay
         const maxAll = Math.max(...data.r, ...data.g, ...data.b, 1);

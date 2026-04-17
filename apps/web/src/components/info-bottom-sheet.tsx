@@ -59,6 +59,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
         const isSwipeUp = deltaY < -30 || (deltaY < 0 && velocity > 0.3);
         const isSwipeDown = deltaY > 30 || (deltaY > 0 && velocity > 0.3);
 
+        let shouldClose = false;
         setSheetState(prev => {
             if (isSwipeUp) {
                 if (prev === 'collapsed') return 'peek';
@@ -69,13 +70,14 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                 if (prev === 'expanded') return 'peek';
                 if (prev === 'peek') return 'collapsed';
                 if (prev === 'collapsed') {
-                    onClose();
+                    shouldClose = true;
                     return 'collapsed';
                 }
                 return prev;
             }
             return prev;
         });
+        if (shouldClose) onClose();
 
         touchStartY.current = null;
         touchStartTime.current = null;
