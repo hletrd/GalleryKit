@@ -39,7 +39,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
     const [timerShowInfo, setTimerShowInfo] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
-    const [showLightbox, setShowLightbox] = useState(false);
+    const [showLightbox, setShowLightbox] = useState(() => {
+        try { return sessionStorage.getItem('gallery_auto_lightbox') === 'true'; } catch { return false; }
+    });
     const [showBottomSheet, setShowBottomSheet] = useState(false);
 
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
@@ -69,14 +71,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         }
     }, [currentIndex, images, locale, prevId, nextId, router, showLightbox]);
 
-    // Auto-open lightbox if returning from a lightbox navigation (single-photo page)
+    // Clean up auto-lightbox flag after lazy init consumes it
     useEffect(() => {
-        try {
-            if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
-                sessionStorage.removeItem('gallery_auto_lightbox');
-                setShowLightbox(true);
-            }
-        } catch {}
+        try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch {}
     }, []);
 
     // Sync info state across breakpoints: mobile bottom sheet ↔ desktop sidebar
