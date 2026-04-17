@@ -42,11 +42,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [showLightbox, setShowLightbox] = useState(false);
     const [showBottomSheet, setShowBottomSheet] = useState(false);
 
-    // Find current image index and object
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
     const image = images[currentIndex];
 
-    // Derived state: visible if pinned OR if timer hasn't expired yet
     const showInfo = isPinned || timerShowInfo;
     const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
@@ -57,7 +55,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         if (newIndex >= 0 && newIndex < images.length) {
             setCurrentImageId(images[newIndex].id);
         } else {
-            // Check for external prev/next logic (for single photo page)
             if (direction === -1 && prevId) {
                 if (showLightbox) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
@@ -220,11 +217,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             if (img.tags && img.tags.length > 0) return img.tags.map((t: TagInfo) => t.name).join(', ');
                                             return t('common.photo');
                                         };
-                                        // Extract base UUID from filename (e.g. "uuid.webp" -> "uuid")
+                                        // Extract base UUID from filename
                                         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
                                         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
 
-                                        // If we don't have the filenames for some reason, fallback to basic Image
+                                        // Fallback to basic Image if filenames missing
                                         if (!baseWebp || !baseAvif) {
                                             return (
                                                 <Image
@@ -340,10 +337,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                     const val = Number(image.exposure_time);
                                                     if (!Number.isFinite(val)) return image.exposure_time;
 
-                                                    // Should likely format as fraction if < 1
                                                     if (val < 1 && val > 0) {
                                                         const denominator = Math.round(1 / val);
-                                                        // Check if it's close enough to a standard fraction
                                                         if (Math.abs(1 / denominator - val) < 0.00001) {
                                                             return `1/${denominator}s`;
                                                         }

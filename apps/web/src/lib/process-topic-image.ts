@@ -7,7 +7,7 @@ import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { isValidFilename } from '@/lib/validation';
 
-// Cap total pixels to reduce decompression-bomb risk (override via env if needed).
+// Cap total pixels to reduce decompression-bomb risk.
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
@@ -25,13 +25,11 @@ const RESOURCES_ROOT = (() => {
 
 const RESOURCES_DIR = RESOURCES_ROOT;
 
-// Allowed extensions
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
 
-// Maximum file size (200MB for topic images)
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
-// Ensure directory exists — singleton promise to avoid concurrent mkdir races (matches process-image.ts pattern)
+// Singleton promise to avoid concurrent mkdir races
 let dirPromise: Promise<void> | null = null;
 const ensureDir = () => {
     if (!dirPromise) {
@@ -43,24 +41,20 @@ const ensureDir = () => {
     return dirPromise;
 };
 
-// Validate file extension
 function isAllowedExtension(filename: string): boolean {
     const ext = path.extname(filename).toLowerCase();
     return ALLOWED_EXTENSIONS.has(ext);
 }
 
 export async function processTopicImage(file: File): Promise<string> {
-    // Validate file size
     if (file.size > MAX_FILE_SIZE) {
         throw new Error(`File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`);
     }
 
-    // Validate file is not empty
     if (file.size === 0) {
         throw new Error('File is empty');
     }
 
-    // Validate file extension
     if (!isAllowedExtension(file.name)) {
         throw new Error('File type not allowed');
     }
@@ -71,7 +65,7 @@ export async function processTopicImage(file: File): Promise<string> {
     const filename = `${id}.webp`;
     const outputPath = path.join(RESOURCES_DIR, filename);
 
-    // Stream to temp file first, then pass path to Sharp (avoids heap buffer)
+    // Stream to temp file first, then pass path to Sharp
     const tempPath = path.join(RESOURCES_DIR, `tmp-${id}`);
     try {
         const webStream = file.stream();

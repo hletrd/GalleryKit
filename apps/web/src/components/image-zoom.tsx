@@ -21,7 +21,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
 
     const zoomLevel = 2.5;
 
-    // Apply transform directly to the DOM node to avoid re-renders on every mousemove
+    // Apply transform directly to DOM to avoid re-renders on every mousemove
     const applyTransform = useCallback((zoomed: boolean, x: number, y: number) => {
         if (!innerRef.current) return;
         innerRef.current.style.transform = zoomed
@@ -50,7 +50,6 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         });
     }, [applyTransform]);
 
-    // Double-tap for mobile
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         const now = Date.now();
         if (now - lastTapRef.current < 300) {
@@ -71,7 +70,6 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         isDraggingRef.current = false;
     }, [isZoomed, applyTransform]);
 
-    // Touch drag when zoomed
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
         if (!isZoomed || e.touches.length !== 1) return;
         e.stopPropagation();
@@ -93,7 +91,6 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         applyTransform(true, x, y);
     }, [isZoomed, applyTransform]);
 
-    // Reset zoom on escape
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape' && isZoomed) {
@@ -106,7 +103,6 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isZoomed, applyTransform]);
 
-    // Sync transform when zoom state changes via state setter
     useEffect(() => {
         if (!isZoomed) {
             positionRef.current = { x: 0, y: 0 };

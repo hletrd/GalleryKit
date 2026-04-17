@@ -69,8 +69,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
     const rawLocale = formData.get('locale')?.toString() ?? '';
     const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
 
-    // Validate inputs before touching rate-limit state so that missing-field
-    // requests don't consume rate-limit attempts.
+    // Validate before consuming rate-limit attempts
     if (!username) {
         return { error: 'Username is required' };
     }
@@ -97,7 +96,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
         return { error: 'Too many login attempts. Please try again later.' };
     }
 
-    // Fall through to DB-backed check for accuracy across restarts
+    // DB-backed check for accuracy across restarts
     try {
         const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
         if (dbLimit.limited) {
@@ -107,7 +106,6 @@ export async function login(prevState: { error?: string } | null, formData: Form
         // DB unavailable — rely on in-memory Map
     }
 
-    // Increment count in both Map and DB
     limitData.count++;
     limitData.lastAttempt = now;
     loginRateLimit.set(ip, limitData);
@@ -122,11 +120,8 @@ export async function login(prevState: { error?: string } | null, formData: Form
             .where(eq(adminUsers.username, username))
             .limit(1);
 
-        // Always run Argon2 verification against either the real hash or a
-        // precomputed dummy hash so both branches take the same wall time.
-        // Without this, the "user does not exist" branch returns in ~1ms while
-        // the "user exists, wrong password" branch takes ~100ms, enabling
-        // user enumeration via timing side-channel.
+        // Always verify Argon2 against a real or dummy hash to prevent
+        // timing-based user enumeration (exists=~100ms, missing=~1ms).
         const hashToCheck = user?.password_hash ?? await getDummyHash();
         const verified = await argon2.verify(hashToCheck, password);
 
@@ -135,7 +130,6 @@ export async function login(prevState: { error?: string } | null, formData: Form
             return { error: 'Invalid credentials' };
         }
 
-        // Successful auth: drop any accumulated failures for this IP.
         loginRateLimit.delete(ip);
         await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS).catch(() => {});
         logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
@@ -151,22 +145,17 @@ export async function login(prevState: { error?: string } | null, formData: Form
                 expiresAt: expiresAt
             });
 
-            // Invalidate any pre-existing sessions for this user to prevent session fixation
+            // Invalidate pre-existing sessions to prevent session fixation
             await db.delete(sessions).where(and(
                 eq(sessions.userId, user.id),
                 sql`${sessions.id} != ${hashSessionToken(sessionToken)}`
             ));
 
-            // Require HTTPS for the session cookie whenever the underlying
-            // request came in over TLS (via the reverse proxy), and always
-            // require it in production regardless of NODE_ENV introspection.
-            // This prevents session cookies from being emitted without Secure
-            // if someone misconfigures NODE_ENV on a prod box.
+            // Require Secure when behind TLS or in production.
             const forwardedProto = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
             const requestIsHttps = forwardedProto === 'https';
             const requireSecureCookie = requestIsHttps || process.env.NODE_ENV === 'production';
 
-            // Set secure cookie with proper attributes
             cookieStore.set(COOKIE_NAME, sessionToken, {
                 httpOnly: true,
                 secure: requireSecureCookie,
@@ -195,7 +184,6 @@ export async function logout(formData?: FormData) {
     const rawLocale = formData?.get('locale')?.toString() ?? '';
     const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
 
-    // Delete session from database if it exists
     if (token) {
         await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
     }
@@ -231,28 +219,25 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     }
 
     try {
-        // Fetch user with hash for password verification (getCurrentUser no longer returns hash)
+        // getCurrentUser doesn't return hash — fetch separately
         const userWithHash = await getAdminUserWithHash(currentUser.id);
         if (!userWithHash) {
             return { error: 'Unauthorized' };
         }
 
-        // Verify current password
         const match = await argon2.verify(userWithHash.password_hash, currentPassword);
 
         if (!match) {
             return { error: 'Incorrect current password' };
         }
 
-        // Hash new password
         const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
 
-        // Update password
         await db.update(adminUsers)
             .set({ password_hash: newHash })
             .where(eq(adminUsers.id, currentUser.id));
 
-        // Invalidate all sessions for this user EXCEPT the current one
+        // Invalidate all sessions except the current one
         const currentSession = await getSession();
         if (currentSession) {
              await db.delete(sessions).where(and(

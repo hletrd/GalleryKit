@@ -12,7 +12,6 @@ const GROUP_SHARE_KEY_LENGTH = 10;
 export async function createPhotoShareLink(imageId: number) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
-    // Validate imageId
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { error: 'Invalid image ID' };
     }
@@ -25,13 +24,12 @@ export async function createPhotoShareLink(imageId: number) {
         return { success: true, key: image.share_key };
     }
 
-    // Generate new key with atomic update to prevent race conditions
+    // Atomic update to prevent race conditions
     let retries = 0;
     while (retries < 5) {
         const key = generateBase56(PHOTO_SHARE_KEY_LENGTH);
         try {
-            // Use WHERE clause to ensure we only update if share_key is still null
-            // This prevents race condition where two requests try to set the key
+            // Only update if share_key is still null (prevents race)
             const [result] = await db.update(images)
                 .set({ share_key: key })
                 .where(and(eq(images.id, imageId), sql`${images.share_key} IS NULL`));
@@ -40,7 +38,7 @@ export async function createPhotoShareLink(imageId: number) {
                 return { success: true, key: key };
             }
 
-            // If no rows updated, another request may have set it - re-fetch
+            // Another request may have set it — re-fetch
             const [refreshedImage] = await db.select({ share_key: images.share_key })
                 .from(images)
                 .where(eq(images.id, imageId));
@@ -61,19 +59,16 @@ export async function createPhotoShareLink(imageId: number) {
 export async function createGroupShareLink(imageIds: number[]) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
 
-    // Validate imageIds
     if (!Array.isArray(imageIds) || imageIds.length === 0) {
         return { error: 'No images selected' };
     }
 
     const uniqueImageIds = Array.from(new Set(imageIds));
 
-    // Limit maximum images per group
     if (uniqueImageIds.length > 100) {
         return { error: 'Too many images (max 100)' };
     }
 
-    // Validate all IDs are positive integers
     for (const id of uniqueImageIds) {
         if (!Number.isInteger(id) || id <= 0) {
             return { error: 'Invalid image ID' };

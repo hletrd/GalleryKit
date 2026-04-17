@@ -38,12 +38,10 @@ export async function createTopic(formData: FormData) {
 
     if (!label || !slug) return { error: 'Label and Slug are required' };
 
-    // Validate and sanitize order (default to 0, limit range)
     let order = parseInt(orderStr, 10);
     if (Number.isNaN(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order)); // Limit to reasonable range
 
-    // Validate slug format
     if (!isValidSlug(slug)) {
         return { error: 'Invalid slug format. Use only lowercase letters, numbers, hyphens, and underscores.' };
     }
@@ -51,7 +49,6 @@ export async function createTopic(formData: FormData) {
         return { error: 'This slug is reserved for an application route' };
     }
 
-    // Validate label length
     if (label.length > 100) {
         return { error: 'Label is too long (max 100 characters)' };
     }
@@ -66,7 +63,7 @@ export async function createTopic(formData: FormData) {
              imageFilename = await processTopicImage(imageFile);
          } catch (e) {
              console.warn('Topic image processing failed, continuing without image:', e);
-             // For now, fail safely without image
+             // Fail safely without image
          }
     }
 
@@ -97,7 +94,6 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    // Validate currentSlug
     if (!currentSlug || !isValidSlug(currentSlug)) {
         return { error: t('invalidCurrentSlug') };
     }
@@ -189,8 +185,7 @@ export async function deleteTopic(slug: string) {
     }
 
     try {
-        // Wrap check + delete in a transaction to prevent TOCTOU race
-        // (image could be added between the check and delete otherwise)
+        // Transaction prevents TOCTOU: image could be added between check and delete
         let deletedImageFilename: string | null = null;
         await db.transaction(async (tx) => {
             const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, slug)).limit(1);
@@ -259,7 +254,7 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidTopicSlug') };
     }
 
-    // Use permissive check for delete too, ensuring we can delete legacy/weird aliases if they exist
+    // Permissive check to allow deleting legacy aliases
     if (!alias || !isValidTopicAlias(alias)) {
         return { error: t('invalidAlias') };
     }

@@ -103,7 +103,6 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
     const MAX_RETRIES = 3;
 
-    // Explicitly add to queue
     state.queue.add(async () => {
         console.debug(`[Queue] Processing job ${job.id} started`);
         let lockConnection: PoolConnection | null = null;
@@ -128,7 +127,6 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
             const originalPath = path.join(UPLOAD_DIR_ORIGINAL, job.filenameOriginal);
 
-            // Check if file exists before processing to avoid errors
             try {
                 await fs.access(originalPath);
             } catch {
@@ -136,8 +134,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 return;
             }
 
-            // Pass file path (not buffer) so Sharp uses native mmap — avoids
-            // pinning the entire image (up to 200MB) on the Node.js heap.
+            // Pass file path so Sharp uses native mmap instead of pinning on the heap.
             await processImageFormats(
                 originalPath,
                 job.filenameWebp,
@@ -152,7 +149,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
 
             if (updateResult.affectedRows === 0) {
-                // Image was deleted during processing — clean up generated format files
+                // Image was deleted during processing
                 console.debug(`[Queue] Image ${job.id} was deleted during processing, cleaning up`);
                 await Promise.all([
                     deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp),
@@ -169,7 +166,6 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             // (in uploadImages) is sufficient.
         } catch (err) {
             console.error(`Background processing failed for ${job.id}`, err);
-            // Retry up to MAX_RETRIES times for transient errors
             const retries = (state.retryCounts.get(job.id) || 0) + 1;
             if (retries < MAX_RETRIES) {
                 state.retryCounts.set(job.id, retries);
@@ -202,8 +198,7 @@ export const bootstrapImageProcessingQueue = async () => {
     if (state.bootstrapped || state.shuttingDown) return;
 
     try {
-        // Select only the columns needed for enqueue — avoids fetching blob-like fields
-        // (blur_data_url, description) for potentially hundreds of unprocessed images.
+        // Select only columns needed for enqueue — skip blob-like fields for potentially hundreds of rows.
         const pending = await db.select({
             id: images.id,
             filename_original: images.filename_original,
@@ -234,7 +229,7 @@ export const bootstrapImageProcessingQueue = async () => {
             purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
         }, 60 * 60 * 1000); // every hour
     } catch (err: unknown) {
-        // Suppress connection refused errors during build/startup to avoid noise
+        // Suppress connection refused errors during build/startup
         if (!(err instanceof Error && (('code' in err && (err as { code: string }).code === 'ECONNREFUSED') || (err.cause && typeof err.cause === 'object' && 'code' in err.cause && (err.cause as { code: string }).code === 'ECONNREFUSED')))) {
             console.error('Failed to bootstrap image processing queue', err);
         } else {

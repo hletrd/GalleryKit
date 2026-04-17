@@ -15,8 +15,6 @@ import { isAdmin, getCurrentUser } from "@/app/actions";
 import { revalidatePath } from "next/cache";
 import { logAuditEvent } from "@/lib/audit";
 
-// --- CSV helpers ---
-
 function escapeCsvField(value: string): string {
     // Prefix formula injection characters with a single quote
     if (value.match(/^[=+\-@\t\r]/)) {
@@ -26,16 +24,11 @@ function escapeCsvField(value: string): string {
     return '"' + value.replace(/"/g, '""') + '"';
 }
 
-// --- CSV Export ---
-
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string }> {
     if (!(await isAdmin())) {
         return { error: 'Unauthorized' };
     }
 
-    // Query images with aggregated tags
-    // Group concat is database specific. MySQL uses GROUP_CONCAT.
-    // Drizzle query builder:
     const results = await db
         .select({
             id: images.id,
@@ -53,7 +46,6 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         .groupBy(images.id)
         .limit(50000); // Cap to prevent OOM on very large galleries
 
-    // Convert to CSV
     const headers = ["ID", "Filename", "Title", "Width", "Height", "Capture Date", "Topic", "Tags"];
     const rows = results.map(row => [
         escapeCsvField(String(row.id)),
@@ -74,8 +66,6 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     return { data: csvContent };
 }
 
-// --- DB Backup (Dump) ---
-
 export async function dumpDatabase() {
     if (!(await isAdmin())) {
         return { error: 'Unauthorized' };
@@ -90,13 +80,11 @@ export async function dumpDatabase() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `backup-${timestamp}.sql`;
 
-    // Save to a non-public backups directory (mounted as volume in Docker)
     const backupsDir = path.join(process.cwd(), 'data', 'backups');
     const outputPath = path.join(backupsDir, filename);
 
     await fs.mkdir(backupsDir, { recursive: true });
 
-    // Use TLS for non-localhost DB connections
     const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
     const sslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
 
@@ -153,17 +141,12 @@ export async function dumpDatabase() {
     });
 }
 
-// --- DB Restore ---
-
 // Keep in sync with next.config.ts `serverActions.bodySizeLimit` — uploads above
 // that value are rejected by the Next.js framework before reaching this action,
 // so a larger value here would be misleading.
 const MAX_RESTORE_SIZE = 250 * 1024 * 1024; // 250 MB
 
-// Process-level mutex so a compromised or buggy admin session can't queue up
-// concurrent 250MB uploads that fill /tmp. Single-writer per Node process is
-// fine here because restoreDatabase is already the slowest admin operation
-// and there is no legitimate reason to run two at once.
+// Process-level mutex: prevents concurrent 250MB uploads filling /tmp.
 let restoreInProgress = false;
 
 export async function restoreDatabase(formData: FormData) {
@@ -190,12 +173,11 @@ async function runRestore(formData: FormData) {
     }
     const file = fileEntry;
 
-    // File size validation
     if (file.size > MAX_RESTORE_SIZE) {
         return { success: false, error: "File too large (max 250MB)" };
     }
 
-    // Stream uploaded file to disk to avoid holding up to 250MB in Node.js heap.
+    // Stream to disk to avoid holding up to 250MB in Node.js heap.
     const tempPath = path.join(os.tmpdir(), `restore-${randomUUID()}.sql`);
     try {
         const webStream = file.stream();
@@ -206,7 +188,7 @@ async function runRestore(formData: FormData) {
         return { success: false, error: "Failed to save uploaded file" };
     }
 
-    // Validate file header: must start with mysqldump headers
+    // Validate file header
     const headerBuf = Buffer.alloc(256);
     const fd = await fs.open(tempPath, 'r');
     try {
@@ -221,8 +203,7 @@ async function runRestore(formData: FormData) {
         return { success: false, error: "Invalid SQL dump file" };
     }
 
-    // Reject dangerous SQL statements that --one-database does not block.
-    // Scan the file from disk in overlapping 1MB chunks (not in-memory).
+    // Scan for dangerous SQL that --one-database does not block.
     const dangerousPatterns = [
         /\bGRANT\s/i,
         /\bCREATE\s+USER\b/i,
@@ -289,7 +270,6 @@ async function runRestore(formData: FormData) {
         return { success: false, error: "Missing database configuration" };
     }
 
-    // Use TLS for non-localhost DB connections
     const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
     const restoreSslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
 

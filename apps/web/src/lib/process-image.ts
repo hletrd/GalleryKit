@@ -17,7 +17,6 @@ const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
     : maxConcurrency;
 // Limit libvips worker threads to keep the server responsive during conversions.
 sharp.concurrency(sharpConcurrency);
-// Cap total pixels to reduce decompression-bomb risk (override via env if needed).
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
@@ -28,7 +27,6 @@ const UPLOAD_ROOT = (() => {
     const envRoot = process.env.UPLOAD_ROOT?.trim();
     if (envRoot) return envRoot;
 
-    // Fallback heuristic based on CWD
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/uploads');
     const simplePath = path.join(process.cwd(), 'public/uploads');
     if (process.cwd().endsWith('apps/web')) {
@@ -42,16 +40,13 @@ export const UPLOAD_DIR_WEBP = path.join(UPLOAD_ROOT, 'webp');
 export const UPLOAD_DIR_AVIF = path.join(UPLOAD_ROOT, 'avif');
 export const UPLOAD_DIR_JPEG = path.join(UPLOAD_ROOT, 'jpeg');
 
-// Allowed image extensions (lowercase)
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
 ]);
 
-// Maximum file size (200MB for RAW files)
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
-// Ensure directories exist — only runs once (promise-based singleton to avoid races)
-// Clears on failure so a transient error doesn't permanently break uploads.
+// Singleton promise — clears on failure so transient errors don't permanently break uploads.
 let dirsPromise: Promise<void> | null = null;
 const ensureDirs = () => {
     if (!dirsPromise) {
@@ -68,16 +63,12 @@ const ensureDirs = () => {
     return dirsPromise;
 };
 
-// Sanitize and validate file extension.
-// NOTE: ALLOWED_EXTENSIONS entries must only contain [a-z0-9.] characters
-// since the sanitizer strips everything else.
+// NOTE: ALLOWED_EXTENSIONS entries must only contain [a-z0-9.] — the sanitizer strips everything else.
 function getSafeExtension(filename: string): string {
     let ext = path.extname(filename).toLowerCase();
 
-    // Strip any non-alphanumeric characters except dot
     ext = ext.replace(/[^a-z0-9.]/g, '');
 
-    // Validate against allowed extensions
     if (!ALLOWED_EXTENSIONS.has(ext)) {
         throw new Error(`File extension not allowed: ${ext}`);
     }
@@ -218,12 +209,10 @@ export async function saveOriginalAndGetMetadata(
     file: File,
     options?: { id?: string }
 ): Promise<ImageProcessingResult> {
-    // Validate file size
     if (file.size > MAX_FILE_SIZE) {
         throw new Error(`File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`);
     }
 
-    // Validate file size is not zero
     if (file.size === 0) {
         throw new Error('File is empty');
     }
@@ -241,8 +230,7 @@ export async function saveOriginalAndGetMetadata(
         await deleteByPrefix(UPLOAD_DIR_ORIGINAL, id);
     }
 
-    // Stream upload to disk first to avoid materializing up to 200MB on the heap.
-    // Sharp will then use native mmap via the file path.
+    // Stream to disk first to avoid materializing up to 200MB on the heap.
     const originalPath = path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal);
     try {
         const webStream = file.stream();
@@ -253,10 +241,8 @@ export async function saveOriginalAndGetMetadata(
         throw new Error('Failed to save uploaded file');
     }
 
-    // Use file path for Sharp (mmap, no heap buffer copy)
     const image = sharp(originalPath, { limitInputPixels: maxInputPixels });
 
-    // Validate the file is a valid image and get metadata in one shot
     let metadata: sharp.Metadata;
     try {
         metadata = await image.metadata();
@@ -266,7 +252,6 @@ export async function saveOriginalAndGetMetadata(
         throw new Error('Invalid image file. Could not process the file as an image.');
     }
 
-    // Parse EXIF
     let exifData: ExifDataRaw = {};
     if (metadata.exif) {
         try {
@@ -276,12 +261,9 @@ export async function saveOriginalAndGetMetadata(
         }
     }
 
-    // Default to 2048 if width is missing or 0 to avoid crash
     const width = (metadata.width && metadata.width > 0) ? metadata.width : 2048;
-    // Ensure height is always a positive number so Next/Image does not throw
     const height = (metadata.height && metadata.height > 0) ? metadata.height : width;
 
-    // Generate tiny blur placeholder using a clone of the single Sharp instance
     let blurDataUrl: string | null = null;
     try {
         const blurBuffer = await image.clone()
@@ -291,10 +273,9 @@ export async function saveOriginalAndGetMetadata(
             .toBuffer();
         blurDataUrl = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
     } catch {
-        // Non-critical, skip blur placeholder
+        // Non-critical
     }
 
-    // Parse ICC profile name if available
     let iccProfileName: string | null = null;
     if (metadata.icc && metadata.icc.length > 132) {
         try {
@@ -341,7 +322,6 @@ export async function saveOriginalAndGetMetadata(
         }
     }
 
-    // Extract bit depth from Sharp metadata
     const rawBitDepth = metadata.depth ? (typeof metadata.depth === 'string' ? parseInt(metadata.depth, 10) : metadata.depth) : null;
     const bitDepth = (rawBitDepth !== null && Number.isFinite(rawBitDepth)) ? rawBitDepth : null;
 
@@ -352,7 +332,6 @@ export async function saveOriginalAndGetMetadata(
         filenameAvif,
         filenameJpeg,
         width,
-        // Height defaults to width when missing to keep aspect ratio sane and avoid zero-dimension errors
         height,
         originalWidth: (metadata.width && metadata.width > 0) ? metadata.width : width,
         originalHeight: (metadata.height && metadata.height > 0) ? metadata.height : height,
@@ -370,8 +349,7 @@ export async function processImageFormats(
     filenameJpeg: string,
     baseWidth: number // The width from metadata
 ) {
-    // Use file path instead of buffer to let Sharp use native mmap/streaming,
-    // avoiding a full copy of the image (up to 200MB) on the Node.js heap.
+    // Use file path so Sharp can mmap/stream instead of buffering on the heap.
     const image = sharp(inputPath, { limitInputPixels: maxInputPixels });
 
     const sizes = OUTPUT_SIZES;
@@ -430,7 +408,7 @@ export async function processImageFormats(
         generateForFormat('jpeg', UPLOAD_DIR_JPEG, filenameJpeg),
     ]);
 
-    // Verify files exist and are not empty
+    // Verify output file is not empty
     try {
         const stats = await fs.stat(path.join(UPLOAD_DIR_WEBP, filenameWebp));
         if (stats.size === 0) throw new Error('Generated WebP file is empty');
@@ -440,7 +418,6 @@ export async function processImageFormats(
     }
 }
 
-// Helper to clean strings
 function cleanString(val: unknown): string | null {
     if (val === undefined || val === null) return null;
     const s = String(val).trim();
@@ -448,7 +425,6 @@ function cleanString(val: unknown): string | null {
     return s;
 }
 
-// Helper to clean numbers
 function cleanNumber(val: unknown): number | null {
     if (val === undefined || val === null) return null;
     const v = Array.isArray(val) ? val[0] : val; // Handle arrays like [100]
@@ -456,13 +432,8 @@ function cleanNumber(val: unknown): number | null {
     return !Number.isFinite(n) ? null : n;
 }
 
-// Helper to extract EXIF data for DB insertion
 export function extractExifForDb(exifData: ExifDataRaw) {
     // exif-reader returns top-level objects: image, thumbnail, exif, gps, interloper
-    // Standard tags are usually in 'exif' (e.g. FNumber, ISO, ExposureTime)
-    // Model is often in 'image'
-
-    // Fallbacks just in case
     const exifParams = exifData.exif || exifData.Photo || {};
     const imageParams = exifData.image || exifData.Image || {};
     const gpsParams = exifData.gps || exifData.GPSInfo || {};
@@ -471,7 +442,6 @@ export function extractExifForDb(exifData: ExifDataRaw) {
     const iso = exifParams.ISO || exifParams.ISOSpeedRatings;
     const exposureTime = exifParams.ExposureTime;
 
-    // DateTimeOriginal is usually in 'exif'
     const dateTimeOriginal = exifParams.DateTimeOriginal;
 
     let latitude: number | null = null;
@@ -498,7 +468,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
 
     return {
         capture_date: parseExifDateTime(dateTimeOriginal) ?? undefined,
-        camera_model: cleanString(imageParams.Model) || undefined, // undefined to allow DB default if any, or null
+        camera_model: cleanString(imageParams.Model) || undefined,
         lens_model: cleanString(exifParams.LensModel),
         iso: cleanNumber(iso),
         f_number: cleanNumber(fNumber),
@@ -511,22 +481,14 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             const cs = exifParams.ColorSpace;
             if (cs === 1) return 'sRGB';
 
-            // If strictly 65535 or undefined, often indicates wide gamut or other profile.
-            // We can try to look at Interop or other markers, but often 'Uncalibrated' with a profile is what we get for P3.
-            // Some cameras write '65535' for P3.
+            // 65535 = Uncalibrated; actual profile determined by ICC parsing.
             if (cs === 65535) {
-               // Checking for P3 specifically is hard without parsing ICC profile fully,
-               // but we can assume "Uncalibrated" usually implies something wider than sRGB in modern contexts (or AdobeRGB).
-               // If we want to be more specific, we'd need to parse the ICC profile buffer from sharp metadata,
-               // but exif-reader doesn't give us that easily here.
-               // However, Apple devices often set "Uncalibrated" for Display P3.
-               return 'Uncalibrated'; // 65535 = Uncalibrated; actual profile determined by ICC parsing below
+               return 'Uncalibrated';
             }
 
             return null;
         })(),
 
-        // White Balance
         white_balance: (() => {
             const wb = exifParams.WhiteBalance;
             if (wb === 0) return 'Auto';
@@ -534,7 +496,6 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             return null;
         })(),
 
-        // Metering Mode
         metering_mode: (() => {
             const mm = exifParams.MeteringMode;
             const modes: Record<number, string> = {
@@ -544,7 +505,6 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             return (typeof mm === 'number' ? modes[mm] : null) ?? null;
         })(),
 
-        // Exposure Compensation
         exposure_compensation: (() => {
             const ec = exifParams.ExposureBiasValue ?? exifParams.ExposureCompensation;
             if (ec === undefined || ec === null) return null;
@@ -554,7 +514,6 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             return `${val > 0 ? '+' : ''}${val.toFixed(1)} EV`;
         })(),
 
-        // Exposure Program
         exposure_program: (() => {
             const ep = exifParams.ExposureProgram;
             const programs: Record<number, string> = {
@@ -564,7 +523,6 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             return (typeof ep === 'number' ? programs[ep] : null) ?? null;
         })(),
 
-        // Flash
         flash: (() => {
             const f = exifParams.Flash;
             if (f === undefined || f === null) return null;
@@ -579,7 +537,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             return fired ? 'Fired' : 'Not Fired';
         })(),
 
-        // Bit Depth — set from Sharp metadata in saveOriginalAndGetMetadata
+        // Set from Sharp metadata in saveOriginalAndGetMetadata
         bit_depth: null as number | null,
     };
 }

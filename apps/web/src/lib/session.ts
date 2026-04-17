@@ -9,14 +9,10 @@ export function hashSessionToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
 }
 
-// In-memory cache for the session secret (persists as long as the process runs)
 let cachedSessionSecret: string | null = null;
-
-// Mutex to prevent race condition in getSessionSecret
 let sessionSecretPromise: Promise<string> | null = null;
 
 export async function getSessionSecret(): Promise<string> {
-    // Return cached value if available
     if (cachedSessionSecret) return cachedSessionSecret;
 
     // Prefer SESSION_SECRET env var (recommended for production)
@@ -38,10 +34,9 @@ export async function getSessionSecret(): Promise<string> {
         );
     }
 
-    // Use existing promise if another request is already fetching/generating
     if (sessionSecretPromise) return sessionSecretPromise;
 
-    // Dev-only fallback: fetch or generate from DB (for zero-config bootstrap)
+    // Dev-only fallback: fetch or generate from DB
     sessionSecretPromise = (async () => {
         try {
             if (cachedSessionSecret) return cachedSessionSecret;
@@ -83,7 +78,6 @@ export async function getSessionSecret(): Promise<string> {
     return sessionSecretPromise;
 }
 
-// Generate a secure session token
 export async function generateSessionToken(secretOverride?: string): Promise<string> {
     const secret = secretOverride || await getSessionSecret();
     const timestamp = Date.now().toString();
@@ -93,7 +87,6 @@ export async function generateSessionToken(secretOverride?: string): Promise<str
     return `${data}:${signature}`;
 }
 
-// Verify session token and return the session record on success, null on failure
 export async function verifySessionToken(token: string): Promise<{ id: string; userId: number; expiresAt: Date } | null> {
     if (!token) {
         return null;
@@ -110,7 +103,6 @@ export async function verifySessionToken(token: string): Promise<{ id: string; u
     const secret = await getSessionSecret();
     const expectedSignature = createHmac('sha256', secret).update(data).digest('hex');
 
-    // Constant-time comparison to prevent timing attacks
     const signatureBuffer = Buffer.from(signature);
     const expectedSignatureBuffer = Buffer.from(expectedSignature);
 
@@ -141,7 +133,6 @@ export async function verifySessionToken(token: string): Promise<{ id: string; u
     }
 
     if (session.expiresAt < new Date()) {
-        // Cleanup expired session
         await db.delete(sessions).where(eq(sessions.id, tokenHash));
         return null;
     }

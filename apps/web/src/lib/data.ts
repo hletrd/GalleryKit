@@ -40,7 +40,6 @@ const selectFields = {
 };
 
 // Admin-only fields — extend selectFields with PII columns.
-// Used inline where needed; not a separate object to avoid dead exports.
 const adminExtraFields = {
     user_filename: images.user_filename,
     latitude: images.latitude,
@@ -215,7 +214,6 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
 }
 
 export async function getImage(id: number) {
-    // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
         return null;
     }
@@ -234,14 +232,11 @@ export async function getImage(id: number) {
             )
         );
 
-    // Return null if image not found (instead of spreading undefined)
     if (!image) {
         return null;
     }
 
-    // Fetch tags, prev, and next image in parallel (all independent of each other)
     const [imageTagsResult, prevResult, nextResult] = await Promise.all([
-        // Fetch tags
         db.select({
             name: tags.name,
             slug: tags.slug
@@ -325,7 +320,6 @@ export async function getImage(id: number) {
 }
 
 export async function getImageByShareKey(key: string) {
-    // Validate key format (Base56; supports legacy 5-char and newer longer keys)
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, [5, 10])) {
         return null;
@@ -343,7 +337,6 @@ export async function getImageByShareKey(key: string) {
     const image = result[0];
     if (!image) return null;
 
-    // Fetch tags for this image
     const imageTagsResult = await db.select({
             slug: tags.slug,
             name: tags.name
@@ -364,7 +357,6 @@ export async function getSharedGroup(
     key: string,
     options?: { incrementViewCount?: boolean },
 ) {
-    // Validate key format (Base56; supports legacy 6-char and newer longer keys)
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, [6, 10])) {
         return null;
@@ -496,7 +488,6 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .orderBy(desc(images.created_at))
         .limit(limit);
 
-    // Deduplicate by id
     const seen = new Set<number>();
     const combined: SearchResult[] = [];
     for (const r of [...results, ...tagResults]) {
