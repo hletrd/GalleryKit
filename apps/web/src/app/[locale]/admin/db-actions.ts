@@ -222,8 +222,7 @@ async function runRestore(formData: FormData) {
         /\bCREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\b/i,
         /\bCREATE\s+(OR\s+REPLACE\s+)?EVENT\b/i,
         /\bALTER\s+EVENT\b/i,
-        // MySQL conditional comments can hide executable SQL: /*!50003 GRANT ... */
-        /\/\*!\d*\s*(GRANT|CREATE\s+USER|ALTER\s+USER|SET\s+PASSWORD|DROP\s+DATABASE|LOAD\s+DATA|SHUTDOWN)/i,
+        // Conditional comments are stripped before matching (see below).
         // DELIMITER changes can defeat statement-level pattern matching
         /\bDELIMITER\b/i,
         // Plugin installation and global config changes
@@ -251,8 +250,10 @@ async function runRestore(formData: FormData) {
             const chunkBuf = Buffer.alloc(readSize);
             await scanFd.read(chunkBuf, 0, readSize, off);
             const chunk = chunkBuf.toString('utf8');
+            // Strip conditional comments so /*!50000PREPARE*/ is caught by \bPREPARE\b.
+            const strippedChunk = chunk.replace(/\/\*!\d*.*?\*\//gs, ' ');
             for (const pattern of dangerousPatterns) {
-                if (pattern.test(chunk)) {
+                if (pattern.test(strippedChunk)) {
                     // Don't close scanFd here — the finally block handles it
                     await fs.unlink(tempPath).catch(() => {});
                     return { success: false, error: "SQL file contains disallowed statements" };
