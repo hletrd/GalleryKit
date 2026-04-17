@@ -116,15 +116,15 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
             if (res?.success) {
                 toast.success(t('imageManager.bulkDeleteSuccess', { count: res.count }));
                 if (res.errors && res.errors > 0) {
-                    toast.warning(`${res.errors} images failed to delete`);
+                    toast.warning(t('imageManager.bulkDeletePartial', { count: res.errors }));
                 }
                 setImages(prev => prev.filter(img => !selectedIds.has(img.id)));
                 setSelectedIds(new Set());
             } else {
-                toast.error(res?.error || 'Failed to delete images');
+                toast.error(res?.error || t('imageManager.deleteFailed'));
             }
         } catch {
-            toast.error('Bulk delete failed');
+            toast.error(t('imageManager.bulkDeleteFailed'));
         } finally {
             setIsBulkDeleting(false);
         }
@@ -142,10 +142,10 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                  toast.success(t('imageManager.linkCopied'));
                  setSelectedIds(new Set());
             } else {
-                 toast.error(result.error || 'Failed to share group');
+                 toast.error(result.error || t('imageManager.shareFailed'));
             }
         } catch {
-            toast.error('Error sharing group');
+            toast.error(t('imageManager.shareFailed'));
         } finally {
             setIsSharing(false);
         }
@@ -187,10 +187,10 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                 setImages(prev => prev.map(img => img.id === editingImage.id ? { ...img, title: editTitle, description: editDescription } : img));
                 setEditingImage(null);
             } else {
-                toast.error(res.error || "Failed to update");
+                toast.error(res.error || t('imageManager.updateFailed'));
             }
         } catch {
-            toast.error("Failed to update");
+            toast.error(t('imageManager.updateFailed'));
         } finally {
             setIsSavingEdit(false);
         }

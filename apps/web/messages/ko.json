@@ -174,7 +174,11 @@
     "descField": "설명",
     "save": "저장",
     "saving": "저장 중...",
-    "updateSuccess": "이미지 정보를 저장했습니다."
+    "updateSuccess": "이미지 정보를 저장했습니다.",
+    "bulkDeletePartial": "{count}장 삭제 실패",
+    "bulkDeleteFailed": "일괄 삭제에 실패했습니다",
+    "shareFailed": "그룹 공유에 실패했습니다",
+    "updateFailed": "수정에 실패했습니다"
   },
   "home": {
     "latestUploads": "최근 사진",

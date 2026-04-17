@@ -174,7 +174,11 @@
     "descField": "Description",
     "save": "Save",
     "saving": "Saving...",
-    "updateSuccess": "Saved."
+    "updateSuccess": "Saved.",
+    "bulkDeletePartial": "{count} images failed to delete",
+    "bulkDeleteFailed": "Bulk delete failed",
+    "shareFailed": "Failed to share group",
+    "updateFailed": "Failed to update"
   },
   "home": {
     "latestUploads": "Latest",

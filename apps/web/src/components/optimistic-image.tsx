@@ -3,6 +3,7 @@
 import Image, { ImageProps } from 'next/image';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/components/i18n-provider';
 import { Loader2 } from 'lucide-react';
 
 interface OptimisticImageProps extends ImageProps {
@@ -15,6 +16,7 @@ export function OptimisticImage(props: OptimisticImageProps) {
 }
 
 function OptimisticImageInner({ src, alt, className, ...props }: OptimisticImageProps) {
+    const { t } = useTranslation();
     const [imgSrc, setImgSrc] = useState(src);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(false);
@@ -61,7 +63,7 @@ function OptimisticImageInner({ src, alt, className, ...props }: OptimisticImage
             )}
              {error && (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-xs p-2 text-center">
-                    Image unavailable
+                    {t('common.imageUnavailable')}
                 </div>
             )}
         </div>
