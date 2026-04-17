@@ -453,6 +453,7 @@ export type { SearchResult };
 
 export async function searchImages(query: string, limit: number = 20): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
+    const effectiveLimit = Math.min(Math.max(limit, 1), 500);
 
     const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
     const searchTerm = `%${escaped}%`;
@@ -477,16 +478,16 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
             )
         ))
         .orderBy(desc(images.created_at))
-        .limit(limit);
+        .limit(effectiveLimit);
 
     // Only search tags if main results are insufficient
-    const tagResults = results.length >= limit ? [] : await db.select(searchFields)
+    const tagResults = results.length >= effectiveLimit ? [] : await db.select(searchFields)
         .from(images)
         .innerJoin(imageTags, eq(images.id, imageTags.imageId))
         .innerJoin(tags, eq(imageTags.tagId, tags.id))
         .where(and(eq(images.processed, true), like(tags.name, searchTerm)))
         .orderBy(desc(images.created_at))
-        .limit(limit);
+        .limit(effectiveLimit);
 
     const seen = new Set<number>();
     const combined: SearchResult[] = [];

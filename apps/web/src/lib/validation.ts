@@ -42,7 +42,7 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 // - Hash/Pound (fragments)
 // - Whitespace (better UX for URLs, though encoded spaces theoretically work)
 export function isValidTopicAlias(alias: string): boolean {
-    return /^[^/\\\s?#]+$/.test(alias);
+    return alias.length > 0 && alias.length <= 255 && /^[^/\\\s?#]+$/.test(alias);
 }
 
 export function isValidTagName(tagName: string): boolean {

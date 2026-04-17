@@ -146,23 +146,27 @@ export async function dumpDatabase() {
 // so a larger value here would be misleading.
 const MAX_RESTORE_SIZE = 250 * 1024 * 1024; // 250 MB
 
-// Process-level mutex: prevents concurrent 250MB uploads filling /tmp.
-let restoreInProgress = false;
+// DB advisory lock: prevents concurrent 250MB uploads filling /tmp.
+// GET_LOCK is released automatically on connection close (crash-safe).
 
 export async function restoreDatabase(formData: FormData) {
     if (!(await isAdmin())) {
         return { success: false, error: 'Unauthorized' };
     }
 
-    if (restoreInProgress) {
+    const [lockResult] = await db.execute<{ GET_LOCK(name: string, timeout: number): number | null }>(
+        sql`SELECT GET_LOCK('gallerykit_db_restore', 0) AS \`GET_LOCK(name, timeout)\``
+    );
+    const lockRow = lockResult as unknown as Record<string, unknown>;
+    const acquired = Object.values(lockRow)[0];
+    if (acquired !== 1 && acquired !== BigInt(1)) {
         return { success: false, error: "Another restore is already in progress" };
     }
-    restoreInProgress = true;
 
     try {
         return await runRestore(formData);
     } finally {
-        restoreInProgress = false;
+        await db.execute(sql`SELECT RELEASE_LOCK('gallerykit_db_restore')`).catch(() => {});
     }
 }
 
