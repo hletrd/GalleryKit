@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { cache } from 'react';
 import { db, adminSettings, sessions } from '@/db';
 import { eq } from 'drizzle-orm';
 
@@ -87,7 +88,10 @@ export async function generateSessionToken(secretOverride?: string): Promise<str
     return `${data}:${signature}`;
 }
 
-export async function verifySessionToken(token: string): Promise<{ id: string; userId: number; expiresAt: Date } | null> {
+// Per-request deduplication: if the same token is verified multiple times
+// within a single React server context (e.g. isAdmin() → getCurrentUser()),
+// the DB query is only executed once.
+export const verifySessionToken = cache(async function verifySessionToken(token: string): Promise<{ id: string; userId: number; expiresAt: Date } | null> {
     if (!token) {
         return null;
     }
@@ -138,4 +142,4 @@ export async function verifySessionToken(token: string): Promise<{ id: string; u
     }
 
     return session;
-}
+});

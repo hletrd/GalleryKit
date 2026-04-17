@@ -41,17 +41,19 @@ export function normalizeIp(value: string | null): string | null {
 }
 
 export function getClientIp(headerStore: HeaderLike): string {
-    // Prefer X-Real-IP if set by a trusted reverse proxy (e.g., nginx).
-    const xRealIp = normalizeIp(headerStore.get('x-real-ip'));
-    if (xRealIp) return xRealIp;
+    // Only trust proxy headers when TRUST_PROXY is explicitly set.
+    // Without it, an attacker can spoof X-Forwarded-For to bypass rate limits.
+    if (process.env.TRUST_PROXY === 'true') {
+        const xRealIp = normalizeIp(headerStore.get('x-real-ip'));
+        if (xRealIp) return xRealIp;
 
-    // Fall back to X-Forwarded-For; take the last IP (commonly the one added by the proxy).
-    const xForwardedFor = headerStore.get('x-forwarded-for');
-    if (xForwardedFor && xForwardedFor.length <= 512) {
-        const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
-        for (let i = parts.length - 1; i >= 0; i--) {
-            const normalized = normalizeIp(parts[i] || null);
-            if (normalized) return normalized;
+        const xForwardedFor = headerStore.get('x-forwarded-for');
+        if (xForwardedFor && xForwardedFor.length <= 512) {
+            const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
+            for (let i = parts.length - 1; i >= 0; i--) {
+                const normalized = normalizeIp(parts[i] || null);
+                if (normalized) return normalized;
+            }
         }
     }
 
