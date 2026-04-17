@@ -11,13 +11,14 @@ interface InfoBottomSheetProps {
     image: ImageDetail;
     isOpen: boolean;
     onClose: () => void;
+    isAdmin?: boolean;
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false }: InfoBottomSheetProps) {
     const { t } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const sheetRef = useRef<HTMLDivElement>(null);
@@ -272,7 +273,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose }: InfoBottomSh
                                     </p>
                                 </div>
                             )}
-                            {(image.latitude != null && image.longitude != null) && (
+                            {(isAdminProp && image.latitude != null && image.longitude != null) && (
                                 <div className="col-span-2">
                                     <p className="text-muted-foreground text-xs">{t('viewer.location')}</p>
                                     <a

@@ -432,7 +432,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <p className="font-medium">{image.bit_depth}-bit</p>
                                         </div>
                                     )}
-                                    {(image.latitude != null && image.longitude != null) && (
+                                    {(canShare && image.latitude != null && image.longitude != null) && (
                                         <div className="col-span-2">
                                              <p className="text-muted-foreground text-xs">{t('viewer.location')}</p>
                                              <a
@@ -504,6 +504,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 image={image}
                 isOpen={showBottomSheet}
                 onClose={() => setShowBottomSheet(false)}
+                isAdmin={canShare}
             />
         </div>
     );
