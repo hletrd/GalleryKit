@@ -115,7 +115,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
             tagId: tagRecord.id
         });
 
-        revalidateLocalizedPaths('/admin/dashboard');
+        revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
         return tagRecord.name !== cleanName
             ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
             : { success: true as const };
@@ -144,7 +144,7 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
                 eq(imageTags.tagId, tagRecord.id)
             ));
 
-        revalidateLocalizedPaths('/admin/dashboard');
+        revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
         return { success: true };
     } catch (e) {
         console.error("Failed to remove tag", e);

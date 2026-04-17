@@ -424,7 +424,7 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             return { error: 'Image not found' };
         }
 
-        revalidateLocalizedPaths('/admin/dashboard', '/');
+        revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/');
         return { success: true };
     } catch (e) {
         console.error("Failed to update image metadata", e);
