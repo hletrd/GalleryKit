@@ -105,6 +105,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
     state.queue.add(async () => {
         console.debug(`[Queue] Processing job ${job.id} started`);
+        let retried = false;
         let lockConnection: PoolConnection | null = null;
         try {
             lockConnection = await acquireImageProcessingClaim(job.id);
@@ -172,6 +173,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 console.warn(`[Queue] Retrying job ${job.id} (attempt ${retries + 1}/${MAX_RETRIES})`);
                 state.enqueued.delete(job.id);
                 enqueueImageProcessing(job);
+                retried = true;
                 return;
             }
             state.retryCounts.delete(job.id);
@@ -180,7 +182,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             await releaseImageProcessingClaim(job.id, lockConnection).catch((err) => {
                 console.debug(`[Queue] Failed to release lock for job ${job.id}:`, err);
             });
-            state.enqueued.delete(job.id);
+            if (!retried) {
+                state.enqueued.delete(job.id);
+            }
         }
     });
 };
