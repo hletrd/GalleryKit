@@ -31,7 +31,7 @@ async function main() {
                 process.exit(1);
             }
         } else {
-             console.log(`Hash found: ${hash.substring(0, 10)}... (length: ${hash.length})`);
+             console.log(`Using pre-hashed password (length: ${hash.length})`);
         }
 
         // Upsert the admin user

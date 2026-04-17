@@ -16,6 +16,8 @@ import { revalidatePath } from "next/cache";
 import { logAuditEvent } from "@/lib/audit";
 
 function escapeCsvField(value: string): string {
+    // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
+    value = value.replace(/[\r\n]/g, ' ');
     // Prefix formula injection characters with a single quote
     if (value.match(/^[=+\-@\t\r]/)) {
         value = "'" + value;
@@ -98,7 +100,7 @@ export async function dumpDatabase() {
             ...sslArgs,
             DB_NAME
         ], {
-            env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
+            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
         });
 
         const writeStream = createWriteStream(outputPath);
@@ -186,7 +188,7 @@ async function runRestore(formData: FormData) {
     try {
         const webStream = file.stream();
         const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
-        await pipeline(nodeStream, createWriteStream(tempPath));
+        await pipeline(nodeStream, createWriteStream(tempPath, { mode: 0o600 }));
     } catch {
         await fs.unlink(tempPath).catch(() => {});
         return { success: false, error: "Failed to save uploaded file" };
@@ -287,7 +289,7 @@ async function runRestore(formData: FormData) {
             ...restoreSslArgs,
             DB_NAME
         ], {
-            env: { ...process.env, MYSQL_PWD: DB_PASSWORD }
+            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
         });
 
         const readStream = createReadStream(tempPath);

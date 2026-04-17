@@ -1,8 +1,9 @@
 import { getImageIdsForSitemap, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
-// force-dynamic required: sitemap queries the DB which isn't available at build time.
+// ISR: revalidate daily; force-dynamic required because DB isn't available at build time.
 export const dynamic = 'force-dynamic';
+export const revalidate = 86400;
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';

@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "prebuild": "cp -n src/site-config.example.json src/site-config.json || true",
+    "prebuild": "test -f src/site-config.json || cp src/site-config.example.json src/site-config.json",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
