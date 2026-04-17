@@ -68,13 +68,13 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
 
 export async function dumpDatabase() {
     if (!(await isAdmin())) {
-        return { error: 'Unauthorized' };
+        return { success: false as const, error: 'Unauthorized' };
     }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
     if (!DB_HOST || !DB_USER || !DB_NAME) {
-        return { error: 'Missing database configuration' };
+        return { success: false as const, error: 'Missing database configuration' };
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
