@@ -56,9 +56,12 @@ export async function updateTag(id: number, name: string) {
     if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
 
     try {
-        await db.update(tags)
+        const [result] = await db.update(tags)
             .set({ name: trimmedName, slug })
             .where(eq(tags.id, id));
+        if (result.affectedRows === 0) {
+            return { error: 'Tag not found' };
+        }
         revalidateLocalizedPaths('/admin/tags', '/');
         return { success: true };
     } catch {
