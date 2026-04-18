@@ -53,7 +53,8 @@ COPY --from=builder --chown=node:node /app/apps/web/drizzle ./apps/web/drizzle
 COPY --from=builder --chown=node:node /app/apps/web/scripts/migrate.js ./apps/web/scripts/migrate.js
 COPY --chown=node:node apps/web/scripts/entrypoint.sh /usr/local/bin/
 
-# Production dependencies for migrate.js/runtime
+# Production dependencies for migrate.js (needs argon2, mysql2, drizzle-orm natively).
+# Standalone output already bundles runtime deps — this is only for the migration script.
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 
 # Create persistence directories and cache
