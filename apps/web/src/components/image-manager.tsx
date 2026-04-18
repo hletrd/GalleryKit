@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, updateImageMetadata, addTagToImage, removeTagFromImage } from '@/app/actions';
+import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, batchUpdateImageTags, updateImageMetadata } from '@/app/actions';
 import { copyToClipboard } from '@/lib/clipboard';
 import { TagInput } from "@/components/tag-input";
 import { Button } from "@/components/ui/button";
@@ -329,37 +329,23 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                                 const oldTags = image.tag_names ? image.tag_names.split(',').filter(Boolean) : [];
                                                 const added = newTags.filter(t => !oldTags.includes(t));
                                                 const removed = oldTags.filter(t => !newTags.includes(t));
-                                                let allSucceeded = true;
 
-                                                for (const tag of added) {
-                                                    const res = await addTagToImage(image.id, tag);
-                                                    if (res?.success) {
-                                                        toast.success(t('imageManager.tagAdded'));
-                                                    } else {
-                                                        toast.error(res?.error || t('imageManager.batchAddFailed'));
-                                                        allSucceeded = false;
+                                                if (added.length === 0 && removed.length === 0) return;
+
+                                                const res = await batchUpdateImageTags(image.id, added, removed);
+                                                if (res.success) {
+                                                    if (res.warnings.length > 0) {
+                                                        res.warnings.forEach(w => toast.warning(w));
                                                     }
-                                                }
-
-                                                for (const tag of removed) {
-                                                    const res = await removeTagFromImage(image.id, tag);
-                                                    if (res?.success) {
-                                                        toast.success(t('imageManager.tagRemoved'));
-                                                    } else {
-                                                        toast.error(res?.error || t('imageManager.deleteFailed'));
-                                                        allSucceeded = false;
-                                                    }
-                                                }
-
-                                                // Only update local state if all operations succeeded;
-                                                // otherwise let revalidation bring the correct state.
-                                                if (allSucceeded) {
+                                                    toast.success(t('imageManager.tagAdded'));
                                                     setImages(prev => prev.map(img => {
                                                         if (img.id === image.id) {
                                                             return { ...img, tag_names: newTags.join(',') };
                                                         }
                                                         return img;
                                                     }));
+                                                } else {
+                                                    toast.error(t('imageManager.batchAddFailed'));
                                                 }
                                             }}
                                             placeholder={t('imageManager.addTag')}
