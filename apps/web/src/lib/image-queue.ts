@@ -144,6 +144,21 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 job.width,
             );
 
+            // Verify all 3 output formats exist and are non-zero before marking processed
+            const verifyFile = (filePath: string) => fs.stat(filePath).then(s => s.size > 0).catch(() => false);
+            const webpPath = path.join(UPLOAD_DIR_WEBP, job.filenameWebp);
+            const avifPath = path.join(UPLOAD_DIR_AVIF, job.filenameAvif);
+            const jpegPath = path.join(UPLOAD_DIR_JPEG, job.filenameJpeg);
+            const [webpOk, avifOk, jpegOk] = await Promise.all([
+                verifyFile(webpPath),
+                verifyFile(avifPath),
+                verifyFile(jpegPath),
+            ]);
+            if (!webpOk || !avifOk || !jpegOk) {
+                console.error(`Image processing incomplete for ${job.id}: webp=${webpOk} avif=${avifOk} jpeg=${jpegOk}`);
+                return; // Don't mark as processed — retry will handle it
+            }
+
             // US-001: Conditional update — only mark processed if still unprocessed (not deleted)
             const [updateResult] = await db.update(images)
                 .set({ processed: true })
@@ -184,6 +199,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             });
             if (!retried) {
                 state.enqueued.delete(job.id);
+                state.retryCounts.delete(job.id);
             }
         }
     });
