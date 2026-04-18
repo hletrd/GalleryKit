@@ -10,6 +10,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useTranslation } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
+import { DEFAULT_LOCALE } from "@/lib/constants";
 import siteConfig from "@/site-config.json";
 import { Search } from "@/components/search";
 
@@ -46,13 +47,17 @@ export function NavClient({ topics }: NavClientProps) {
         const localePrefix = `/${locale}`;
         let path: string;
         if (pathname.startsWith(localePrefix + '/') || pathname === localePrefix) {
-            path = `/${otherLocale}${pathname.slice(localePrefix.length) || '/'}`;
+            path = pathname.slice(localePrefix.length) || '/';
         } else {
-            path = `/${otherLocale}${pathname}`;
+            path = pathname;
         }
+        // With localePrefix: 'as-needed', default locale has no prefix
+        const targetPath = otherLocale === DEFAULT_LOCALE
+            ? path
+            : `/${otherLocale}${path}`;
         // Preserve search params (e.g., ?tags=landscape) via useSearchParams (SSR-safe)
         const search = searchParams.toString();
-        return search ? `${path}?${search}` : path;
+        return search ? `${targetPath}?${search}` : targetPath;
     })();
 
     return (
