@@ -3,7 +3,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
-import { eq, sql, desc, inArray } from 'drizzle-orm';
+import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -65,90 +65,16 @@ export async function uploadImages(formData: FormData) {
 
     let successCount = 0;
     const failedFiles: string[] = [];
-    const replacedFiles: string[] = [];
 
     for (const file of files) {
         try {
             const originalFilename = path.basename(file.name).trim();
 
-            const existingImage = originalFilename.length > 0
-                ? (await db.select({
-                        id: images.id,
-                        filename_original: images.filename_original,
-                        filename_webp: images.filename_webp,
-                        filename_avif: images.filename_avif,
-                        filename_jpeg: images.filename_jpeg,
-                    })
-                    .from(images)
-                    // Match only on user_filename — title fallback was removed because a
-                    // different image with the same title as a new file's name caused silent overwrite.
-                    .where(eq(images.user_filename, originalFilename))
-                    .orderBy(desc(images.id))
-                    .limit(1))[0]
-                : null;
-
-            const existingId = existingImage
-                ? path.basename(existingImage.filename_webp, path.extname(existingImage.filename_webp))
-                : null;
-
-            if (existingImage) {
-                if (
-                    !isValidFilename(existingImage.filename_original)
-                    || !isValidFilename(existingImage.filename_webp)
-                    || !isValidFilename(existingImage.filename_avif)
-                    || !isValidFilename(existingImage.filename_jpeg)
-                ) {
-                    throw new Error('Invalid filename in database record');
-                }
-            }
-
             // Phase 1: Save original and get metadata (fast)
-            const data = await saveOriginalAndGetMetadata(
-                file,
-                existingId ? { id: existingId } : undefined
-            );
+            const data = await saveOriginalAndGetMetadata(file);
 
             // Extract EXIF
             const exifDb = extractExifForDb(data.exifData);
-
-            if (existingImage && existingId) {
-                await db.update(images)
-                    .set({
-                        filename_original: data.filenameOriginal,
-                        filename_webp: data.filenameWebp,
-                        filename_avif: data.filenameAvif,
-                        filename_jpeg: data.filenameJpeg,
-                        width: data.width,
-                        height: data.height,
-                        original_width: data.originalWidth,
-                        original_height: data.originalHeight,
-                        user_filename: originalFilename, // Ensure user_filename is set on update (migration-like)
-                        blur_data_url: data.blurDataUrl,
-                        processed: false,
-                        updated_at: sql`CURRENT_TIMESTAMP`,
-                        ...exifDb,
-                        color_space: data.iccProfileName || exifDb.color_space,
-                        bit_depth: data.bitDepth,
-                        original_format: data.filenameOriginal.split('.').pop()?.toUpperCase() || null,
-                        original_file_size: file.size,
-                    })
-                    .where(eq(images.id, existingImage.id));
-
-                replacedFiles.push(originalFilename || file.name);
-
-                // Phase 4: Queue heavy processing (Fire and Forget)
-                enqueueImageProcessing({
-                    id: existingImage.id,
-                    filenameOriginal: data.filenameOriginal,
-                    filenameWebp: data.filenameWebp,
-                    filenameAvif: data.filenameAvif,
-                    filenameJpeg: data.filenameJpeg,
-                    width: data.width,
-                });
-
-                successCount++;
-                continue;
-            }
 
             // Phase 2: Insert into DB immediately so it shows up in UI
             const insertValues = {
@@ -250,7 +176,7 @@ export async function uploadImages(formData: FormData) {
         success: true,
         count: successCount,
         failed: failedFiles,
-        replaced: replacedFiles
+        replaced: []
     };
 }
 

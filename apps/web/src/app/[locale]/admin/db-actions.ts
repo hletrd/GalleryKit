@@ -14,6 +14,7 @@ import { randomUUID } from "crypto";
 import { isAdmin, getCurrentUser } from "@/app/actions";
 import { logAuditEvent } from "@/lib/audit";
 import { revalidateAllAppData } from "@/lib/revalidation";
+import { containsDangerousSql } from "@/lib/sql-restore-scan";
 
 function escapeCsvField(value: string): string {
     // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
@@ -209,44 +210,6 @@ async function runRestore(formData: FormData) {
         return { success: false, error: "Invalid SQL dump file" };
     }
 
-    // Scan for dangerous SQL that --one-database does not block.
-    const dangerousPatterns = [
-        /\bGRANT\s/i,
-        /\bCREATE\s+USER\b/i,
-        /\bALTER\s+USER\b/i,
-        /\bSET\s+PASSWORD\b/i,
-        /\bDROP\s+DATABASE\b/i,
-        /\bLOAD\s+DATA\b/i,
-        /\bINTO\s+OUTFILE\b/i,
-        /\bINTO\s+DUMPFILE\b/i,
-        /\bSYSTEM\s+\w/i,
-        /\bSHUTDOWN\b/i,
-        /\bSOURCE\s/i,
-        // Stored routines / events can execute arbitrary SQL on triggers
-        /\bCREATE\s+(OR\s+REPLACE\s+)?TRIGGER\b/i,
-        /\bCREATE\s+(OR\s+REPLACE\s+)?FUNCTION\b/i,
-        /\bCREATE\s+(OR\s+REPLACE\s+)?PROCEDURE\b/i,
-        /\bCREATE\s+(OR\s+REPLACE\s+)?EVENT\b/i,
-        /\bALTER\s+EVENT\b/i,
-        // Conditional comments are stripped before matching (see below).
-        // DELIMITER changes can defeat statement-level pattern matching
-        /\bDELIMITER\b/i,
-        // Plugin installation and global config changes
-        /\bINSTALL\s+PLUGIN\b/i,
-        /\bSET\s+GLOBAL\b/i,
-        /\bCREATE\s+SERVER\b/i,
-        // Schema modifications that --one-database does not fully block
-        /\bRENAME\s+TABLE\b/i,
-        /\bCREATE\s+(OR\s+REPLACE\s+)?VIEW\b/i,
-        // Prepared statements allow indirect execution of any SQL
-        /\bPREPARE\b/i,
-        /\bEXECUTE\b/i,
-        /\bDEALLOCATE\s+PREPARE\b/i,
-        // Hex/binary variable assignment can encode dangerous keywords
-        /\bSET\s+@\w+\s*=\s*0x/i,
-        /\bSET\s+@\w+\s*=\s*b'/i,
-        /\bSET\s+@\w+\s*=\s*X'/i,
-    ];
     const CHUNK_SIZE = 1024 * 1024;
     const OVERLAP = 256; // overlap to catch patterns split across chunks
     const fileSize = (await fs.stat(tempPath)).size;
@@ -257,15 +220,10 @@ async function runRestore(formData: FormData) {
             const chunkBuf = Buffer.alloc(readSize);
             await scanFd.read(chunkBuf, 0, readSize, off);
             const chunk = chunkBuf.toString('utf8');
-            // Strip all multi-line comments (both /*!...*/ and /* ... */) so that
-            // GR/**/ANT and /*!50000PREPARE*/ are caught by word-boundary patterns.
-            const strippedChunk = chunk.replace(/\/\*.*?\*\//gs, ' ');
-            for (const pattern of dangerousPatterns) {
-                if (pattern.test(strippedChunk)) {
-                    // Don't close scanFd here — the finally block handles it
-                    await fs.unlink(tempPath).catch(() => {});
-                    return { success: false, error: "SQL file contains disallowed statements" };
-                }
+            if (containsDangerousSql(chunk)) {
+                // Don't close scanFd here — the finally block handles it
+                await fs.unlink(tempPath).catch(() => {});
+                return { success: false, error: "SQL file contains disallowed statements" };
             }
         }
     } finally {

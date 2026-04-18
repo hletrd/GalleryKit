@@ -1,7 +1,7 @@
 'use server';
 
 import { db, images, sharedGroups, sharedGroupImages } from '@/db';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 
 import { isAdmin } from '@/app/actions/auth';
@@ -17,9 +17,10 @@ export async function createPhotoShareLink(imageId: number) {
         return { error: 'Invalid image ID' };
     }
 
-    const [image] = await db.select({ id: images.id, share_key: images.share_key })
+    const [image] = await db.select({ id: images.id, share_key: images.share_key, processed: images.processed })
         .from(images).where(eq(images.id, imageId));
     if (!image) return { error: 'Image not found' };
+    if (!image.processed) return { error: 'Image is still processing' };
 
     if (image.share_key) {
         return { success: true, key: image.share_key };
@@ -75,6 +76,18 @@ export async function createGroupShareLink(imageIds: number[]) {
         if (!Number.isInteger(id) || id <= 0) {
             return { error: 'Invalid image ID' };
         }
+    }
+
+    const groupImages = await db.select({
+        id: images.id,
+        processed: images.processed,
+    }).from(images).where(inArray(images.id, uniqueImageIds));
+
+    if (groupImages.length !== uniqueImageIds.length) {
+        return { error: 'One or more selected images could not be found' };
+    }
+    if (groupImages.some((image) => !image.processed)) {
+        return { error: 'All selected images must finish processing before sharing' };
     }
 
     let retries = 0;

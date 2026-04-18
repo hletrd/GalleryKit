@@ -13,7 +13,14 @@ export async function register() {
             });
             try {
                 const { shutdownImageProcessingQueue } = await import('@/lib/image-queue');
-                await Promise.race([shutdownImageProcessingQueue(), shutdownTimeout]);
+                const { flushBufferedSharedGroupViewCounts } = await import('@/lib/data');
+                await Promise.race([
+                    Promise.all([
+                        shutdownImageProcessingQueue(),
+                        flushBufferedSharedGroupViewCounts(),
+                    ]).then(() => undefined),
+                    shutdownTimeout,
+                ]);
                 console.log('[Shutdown] In-flight queue work drained, exiting.');
             } catch (e) {
                 console.error('[Shutdown] Failed to drain queue:', e);

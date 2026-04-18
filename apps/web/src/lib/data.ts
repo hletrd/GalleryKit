@@ -27,6 +27,19 @@ async function flushGroupViewCounts() {
     }
 }
 
+export async function flushBufferedSharedGroupViewCounts() {
+    if (viewCountFlushTimer) {
+        clearTimeout(viewCountFlushTimer);
+        viewCountFlushTimer = null;
+    }
+
+    if (viewCountBuffer.size === 0) {
+        return;
+    }
+
+    await flushGroupViewCounts();
+}
+
 const selectFields = {
     id: images.id,
     // filename_original is intentionally omitted for privacy

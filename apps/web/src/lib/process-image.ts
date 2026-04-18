@@ -173,21 +173,6 @@ export async function deleteImageVariants(dir: string, baseFilename: string) {
     );
 }
 
-async function deleteByPrefix(dir: string, prefix: string) {
-    // Deterministic deletion — try all allowed original extensions.
-    // This is only called for the original/ directory when replacing an image.
-    try {
-        const allExts = Array.from(ALLOWED_EXTENSIONS);
-        await Promise.all(
-            allExts.map(ext => fs.unlink(path.join(dir, `${prefix}${ext}`)).catch(() => {})),
-        );
-    } catch {
-        // Best-effort cleanup.
-    }
-}
-
-
-
 export interface ImageProcessingResult {
     id: string;
     filenameOriginal: string;
@@ -205,10 +190,7 @@ export interface ImageProcessingResult {
     bitDepth?: number | null;
 }
 
-export async function saveOriginalAndGetMetadata(
-    file: File,
-    options?: { id?: string }
-): Promise<ImageProcessingResult> {
+export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProcessingResult> {
     if (file.size > MAX_FILE_SIZE) {
         throw new Error(`File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`);
     }
@@ -220,15 +202,11 @@ export async function saveOriginalAndGetMetadata(
     await ensureDirs();
 
     const originalExt = getSafeExtension(file.name);
-    const id = options?.id || randomUUID();
+    const id = randomUUID();
     const filenameOriginal = `${id}${originalExt}`;
     const filenameWebp = `${id}.webp`;
     const filenameAvif = `${id}.avif`;
     const filenameJpeg = `${id}.jpg`;
-
-    if (options?.id) {
-        await deleteByPrefix(UPLOAD_DIR_ORIGINAL, id);
-    }
 
     // Stream to disk first to avoid materializing up to 200MB on the heap.
     const originalPath = path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal);

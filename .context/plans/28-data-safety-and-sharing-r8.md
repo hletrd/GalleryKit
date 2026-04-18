@@ -3,7 +3,7 @@
 **Priority:** HIGH
 **Estimated effort:** 3-4 hours
 **Sources:** Comprehensive audit 2026-04-18 findings #2, #3, #4, #5 and likely risk C
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ---
 
@@ -22,4 +22,10 @@
 5. Flush buffered shared-group view counts on shutdown if implementation is low-risk
 
 ## Ralph progress
-- 2026-04-18: Plan created from the full audit. No implementation committed yet.
+- 2026-04-18: Plan created from the full audit.
+- 2026-04-18: Completed the data-safety/sharing pass:
+  - removed implicit filename-based replacement from uploads
+  - eliminated the unsafe pre-validation original-file deletion path
+  - blocked photo/group share creation for unprocessed images
+  - extracted restore scanning so quoted SQL literals no longer trigger false positives
+  - flush buffered shared-group view counts during shutdown
