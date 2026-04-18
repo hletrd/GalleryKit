@@ -2,15 +2,14 @@
 
 ## Active Plans (R8 — 2026-04-18)
 
-| Plan | Title | Priority | Effort | Items |
-|------|-------|----------|--------|-------|
-| [27](27-routing-metadata-state-r8.md) | Routing, Metadata, and View-State Consistency | HIGH | 3-4h | 7: locale-aware URL generation, shared-group query sync, landmark cleanup, search race guard, manifest icon fix, tag-filter refresh cleanup, topic heading |
-| [28](28-data-safety-and-sharing-r8.md) | Upload, Restore, and Sharing Safety | HIGH | 3-4h | 5: explicit replace path, replacement file safety, processed-share gating, restore scanner quoting, shared-group flush |
-| [29](29-admin-refresh-and-docs-r8.md) | Admin Refresh, Proxy Semantics, and Docs/Deploy Alignment | MEDIUM | 2-3h | 5: categories refresh, users refresh, trusted proxy semantics, Docker/deploy docs, CLAUDE test docs |
+No tracked `.context/plans` items are currently open. Plans 27-29 were completed during the current Ralph run and verified with lint, tests, TypeScript, build, and architect sign-off.
 
 ## Completed Plans
 
 - Plans 00-26 remain complete as previously recorded.
+- 27 — Routing, Metadata, and View-State Consistency — DONE (2026-04-18)
+- 28 — Upload, Restore, and Sharing Safety — DONE (2026-04-18)
+- 29 — Admin Refresh, Proxy Semantics, and Docs/Deploy Alignment — DONE (2026-04-18)
 
 ---
 
@@ -18,7 +17,7 @@
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
-| **Comprehensive Code Review (full audit)** | 2026-04-18 | 15 confirmed + 3 likely/risk | 15 confirmed + 2 low-risk likely fixes | 1 manual-validation risk (`/api/og` throttle architecture) |
+| **Comprehensive Code Review (full audit)** | 2026-04-18 | 15 confirmed + 3 likely/risk | 15 confirmed + 2 low-risk likely fixes complete | 1 manual-validation risk (`/api/og` throttle architecture) |
 | UI/UX Deep Review R7 | 2026-04-18 | 11 (6H/3M/2L) | Complete via Plan 26 | 0 |
 | Comprehensive Review R6 | 2026-04-18 | 40 (2C/9H/18M/11L) | Complete | 0 |
 

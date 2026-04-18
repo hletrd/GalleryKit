@@ -28,3 +28,4 @@
   - documented `TRUST_PROXY=true` in the nginx-hosted deployment path
   - corrected Docker/deploy script messaging about required env vars and host assumptions
   - updated CLAUDE testing guidance to describe the real unit/E2E suite
+- 2026-04-18: Final verification passed (`lint`, `test`, `tsc`, `build`) and architect review approved the plan scope.
