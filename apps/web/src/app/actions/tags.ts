@@ -224,41 +224,38 @@ export async function batchUpdateImageTags(
     let added = 0;
     let removed = 0;
 
-    // Add tags
-    for (const name of addTagNames) {
-        const cleanName = name.trim();
-        if (!cleanName || !isValidTagName(cleanName)) continue;
-        const slug = getTagSlug(cleanName);
-        if (!isValidSlug(slug)) continue;
-        try {
-            // Ensure tag exists
-            await db.insert(tags).ignore().values({ name: cleanName, slug });
-            const [tagRecord] = await db.select().from(tags).where(eq(tags.slug, slug));
-            if (tagRecord) {
-                await db.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
-                added++;
+    try {
+        await db.transaction(async (tx) => {
+            // Add tags
+            for (const name of addTagNames) {
+                const cleanName = name.trim();
+                if (!cleanName || !isValidTagName(cleanName)) continue;
+                const slug = getTagSlug(cleanName);
+                if (!isValidSlug(slug)) continue;
+                // Ensure tag exists
+                await tx.insert(tags).ignore().values({ name: cleanName, slug });
+                const [tagRecord] = await tx.select().from(tags).where(eq(tags.slug, slug));
+                if (tagRecord) {
+                    await tx.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
+                    added++;
+                }
             }
-        } catch (err) {
-            console.error(`Failed to add tag "${cleanName}"`, err);
-            warnings.push(`Failed to add tag "${cleanName}"`);
-        }
-    }
 
-    // Remove tags
-    for (const name of removeTagNames) {
-        const cleanName = name.trim();
-        if (!cleanName) continue;
-        try {
-            const slug = getTagSlug(cleanName);
-            const [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
-            if (tagRecord) {
-                await db.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, tagRecord.id)));
-                removed++;
+            // Remove tags
+            for (const name of removeTagNames) {
+                const cleanName = name.trim();
+                if (!cleanName) continue;
+                const slug = getTagSlug(cleanName);
+                const [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+                if (tagRecord) {
+                    await tx.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, tagRecord.id)));
+                    removed++;
+                }
             }
-        } catch (err) {
-            console.error(`Failed to remove tag "${cleanName}"`, err);
-            warnings.push(`Failed to remove tag "${cleanName}"`);
-        }
+        });
+    } catch (err) {
+        console.error('batchUpdateImageTags transaction failed:', err);
+        return { success: false, added: 0, removed: 0, warnings: ['Failed to update tags — all changes rolled back'] };
     }
 
     revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/dashboard');
