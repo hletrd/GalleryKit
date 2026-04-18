@@ -158,7 +158,8 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
     const [showBackToTop, setShowBackToTop] = useState(false);
     useEffect(() => {
         const handleScroll = () => {
-            setShowBackToTop(window.scrollY > 600);
+            const shouldShow = window.scrollY > 600;
+            setShowBackToTop(prev => prev === shouldShow ? prev : shouldShow);
         };
         window.addEventListener('scroll', handleScroll, { passive: true });
         return () => window.removeEventListener('scroll', handleScroll);
@@ -171,10 +172,12 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
         for (const t of topics || []) map[t.slug] = t.label;
         return map;
     }, [topics]);
-    const displayTags = (currentTags || []).map((tag) => {
-        const match = tags.find((t) => t.slug === tag.trim().toLowerCase());
-        return match?.name ?? tag;
-    });
+    const displayTags = useMemo(() => {
+        return (currentTags || []).map((tag) => {
+            const match = tags.find((t) => t.slug === tag.trim().toLowerCase());
+            return match?.name ?? tag;
+        });
+    }, [currentTags, tags]);
 
     return (
         <div className="space-y-8">
