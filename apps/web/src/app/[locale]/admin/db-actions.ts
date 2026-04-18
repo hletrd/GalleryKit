@@ -75,7 +75,7 @@ export async function dumpDatabase() {
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
-    if (!DB_HOST || !DB_USER || !DB_NAME) {
+    if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
         return { success: false as const, error: 'Missing database configuration' };
     }
 
@@ -245,6 +245,7 @@ async function runRestore(formData: FormData) {
         // Hex/binary variable assignment can encode dangerous keywords
         /\bSET\s+@\w+\s*=\s*0x/i,
         /\bSET\s+@\w+\s*=\s*b'/i,
+        /\bSET\s+@\w+\s*=\s*X'/i,
     ];
     const CHUNK_SIZE = 1024 * 1024;
     const OVERLAP = 256; // overlap to catch patterns split across chunks
@@ -256,8 +257,9 @@ async function runRestore(formData: FormData) {
             const chunkBuf = Buffer.alloc(readSize);
             await scanFd.read(chunkBuf, 0, readSize, off);
             const chunk = chunkBuf.toString('utf8');
-            // Strip conditional comments so /*!50000PREPARE*/ is caught by \bPREPARE\b.
-            const strippedChunk = chunk.replace(/\/\*!\d*.*?\*\//gs, ' ');
+            // Strip all multi-line comments (both /*!...*/ and /* ... */) so that
+            // GR/**/ANT and /*!50000PREPARE*/ are caught by word-boundary patterns.
+            const strippedChunk = chunk.replace(/\/\*.*?\*\//gs, ' ');
             for (const pattern of dangerousPatterns) {
                 if (pattern.test(strippedChunk)) {
                     // Don't close scanFd here — the finally block handles it
@@ -272,7 +274,7 @@ async function runRestore(formData: FormData) {
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
-    if (!DB_HOST || !DB_USER || !DB_NAME) {
+    if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
         await fs.unlink(tempPath).catch(() => {});
         return { success: false, error: "Missing database configuration" };
     }
