@@ -25,6 +25,8 @@ export function getLocalizedPathVariants(path: string): string[] {
     return [...variants];
 }
 
+// Note: This function invalidates N paths per locale (O(N*L) total where L=locale count).
+// With 2 locales this is manageable. If more locales are added, consider batching.
 export function revalidateLocalizedPaths(...paths: string[]) {
     const seen = new Set<string>();
 
