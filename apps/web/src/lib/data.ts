@@ -432,23 +432,25 @@ export async function getSharedGroup(
 }
 
 export async function getTopicBySlug(slug: string) {
-    if (!/^[a-z0-9_-]+$/i.test(slug)) return null;
+    // Direct topic slugs are always ASCII-safe; aliases may contain CJK/emoji
+    if (/^[a-z0-9_-]+$/i.test(slug)) {
+        const [directMatch] = await db
+            .select({
+                slug: topics.slug,
+                label: topics.label,
+                order: topics.order,
+                image_filename: topics.image_filename,
+            })
+            .from(topics)
+            .where(eq(topics.slug, slug))
+            .limit(1);
 
-    const [directMatch] = await db
-        .select({
-            slug: topics.slug,
-            label: topics.label,
-            order: topics.order,
-            image_filename: topics.image_filename,
-        })
-        .from(topics)
-        .where(eq(topics.slug, slug))
-        .limit(1);
-
-    if (directMatch) {
-        return directMatch;
+        if (directMatch) {
+            return directMatch;
+        }
     }
 
+    // Always check aliases regardless of format — CJK/emoji aliases are valid
     const [aliasMatch] = await db
         .select({
             slug: topics.slug,
