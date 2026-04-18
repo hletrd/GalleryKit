@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea"; // Assuming Textarea exists or I use Input for now, but checking dir showed textarea.tsx
+import { Textarea } from "@/components/ui/textarea";
 import { OptimisticImage } from './optimistic-image';
 import { Pencil } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
@@ -154,10 +154,6 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
     const [isAddingTag, setIsAddingTag] = useState(false);
     const [tagInput, setTagInput] = useState('');
 
-    // ... imports need to be updated to include new actions (I'll do this in a separate chunk to avoid import mess if possible, or just assume they are imported)
-    // Actually I need to import them. I'll use a separate replace for imports.
-
-
     const handleBatchAddTag = async () => {
          if (!tagInput.trim()) return;
          const res = await batchAddTags(Array.from(selectedIds), tagInput);
@@ -165,7 +161,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
              toast.success(t('imageManager.batchAddSuccess'));
              setIsAddingTag(false);
              setTagInput('');
-             setSelectedIds(new Set()); // Optional: clear selection?
+             setSelectedIds(new Set());
          } else {
              toast.error(res?.error || t('imageManager.batchAddFailed'));
          }
