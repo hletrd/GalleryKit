@@ -19,12 +19,14 @@ async function flushGroupViewCounts() {
     viewCountFlushTimer = null;
     const batch = new Map(viewCountBuffer);
     viewCountBuffer.clear();
-    for (const [groupId, count] of batch) {
-        await db.update(sharedGroups)
-            .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
-            .where(eq(sharedGroups.id, groupId))
-            .catch(console.debug);
-    }
+    await Promise.all(
+        [...batch].map(([groupId, count]) =>
+            db.update(sharedGroups)
+                .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
+                .where(eq(sharedGroups.id, groupId))
+                .catch(console.debug)
+        )
+    );
 }
 
 export async function flushBufferedSharedGroupViewCounts() {
