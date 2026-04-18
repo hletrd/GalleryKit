@@ -16,3 +16,4 @@ services:
     volumes:
       - ./data:/app/data
       - ./public:/app/apps/web/public
+      - ./src/site-config.json:/app/apps/web/src/site-config.json:ro
