@@ -342,13 +342,15 @@ export async function getImageByShareKey(key: string) {
     const image = result[0];
     if (!image) return null;
 
-    const imageTagsResult = await db.select({
-            slug: tags.slug,
-            name: tags.name
-        })
-        .from(imageTags)
-        .innerJoin(tags, eq(imageTags.tagId, tags.id))
-        .where(eq(imageTags.imageId, image.id));
+    const [imageTagsResult] = await Promise.all([
+        db.select({
+                slug: tags.slug,
+                name: tags.name
+            })
+            .from(imageTags)
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(eq(imageTags.imageId, image.id)),
+    ]);
 
     return {
         ...image,
