@@ -1,6 +1,6 @@
 'use server';
 
-import { db } from "@/db";
+import { db, connection } from "@/db";
 import { images, imageTags, tags } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { spawn } from "child_process";
@@ -157,19 +157,28 @@ export async function restoreDatabase(formData: FormData) {
         return { success: false, error: 'Unauthorized' };
     }
 
-    const [lockResult] = await db.execute<{ GET_LOCK(name: string, timeout: number): number | null }>(
-        sql`SELECT GET_LOCK('gallerykit_db_restore', 0) AS \`GET_LOCK(name, timeout)\``
-    );
-    const lockRow = lockResult as unknown as Record<string, unknown>;
-    const acquired = Object.values(lockRow)[0];
-    if (acquired !== 1 && acquired !== BigInt(1)) {
-        return { success: false, error: "Another restore is already in progress" };
-    }
-
+    // Use a dedicated connection from the pool so GET_LOCK and RELEASE_LOCK
+    // execute on the same session. Advisory locks are session-scoped —
+    // with pooled connections, GET_LOCK and RELEASE_LOCK may run on
+    // different connections, making the lock unreliable.
+    const conn = await connection.getConnection();
     try {
-        return await runRestore(formData);
+        const [lockRows] = await conn.query(
+            "SELECT GET_LOCK('gallerykit_db_restore', 0) AS `GET_LOCK(name, timeout)`"
+        ) as [Record<string, unknown>[], unknown];
+        const lockRow = lockRows[0];
+        const acquired = Object.values(lockRow)[0];
+        if (acquired !== 1 && acquired !== BigInt(1)) {
+            return { success: false, error: "Another restore is already in progress" };
+        }
+
+        try {
+            return await runRestore(formData);
+        } finally {
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch(() => {});
+        }
     } finally {
-        await db.execute(sql`SELECT RELEASE_LOCK('gallerykit_db_restore')`).catch(() => {});
+        conn.release();
     }
 }
 
