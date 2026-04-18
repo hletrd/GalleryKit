@@ -139,4 +139,5 @@ The current Ralph iteration confirmed that several items from this plan had alre
 
 - This plan is now fully closed.
 - 2026-04-18 Ralph follow-up re-verified the R7 UI/UX fixes while closing the last related PRD-level correctness gaps elsewhere in the repository; no additional `.context/plans` follow-up work remains open.
+- 2026-04-18 final Ralph closeout also broadened DB-restore cache invalidation to the full app tree so restored topic/photo pages cannot remain stale behind long ISR windows.
 - Remaining UI review findings that are **not explicitly part of this plan document** should be treated as separate follow-up work rather than open items in Plan 26.

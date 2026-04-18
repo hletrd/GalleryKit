@@ -12,6 +12,7 @@ import {
     ADMIN_SURFACE_REVALIDATION_PATHS,
     getLocalizedPathVariants,
     revalidateAdminSurfaces,
+    revalidateAllAppData,
     revalidateLocalizedPaths,
 } from '@/lib/revalidation';
 
@@ -67,5 +68,11 @@ describe('revalidateLocalizedPaths', () => {
             '/en/admin/tags',
             '/ko/admin/tags',
         ]);
+    });
+
+    it('can invalidate the full app tree after a database restore', () => {
+        revalidateAllAppData();
+
+        expect(revalidatePath).toHaveBeenCalledWith('/', 'layout');
     });
 });

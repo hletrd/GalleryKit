@@ -49,3 +49,7 @@ export const ADMIN_SURFACE_REVALIDATION_PATHS = [
 export function revalidateAdminSurfaces() {
     revalidateLocalizedPaths(...ADMIN_SURFACE_REVALIDATION_PATHS);
 }
+
+export function revalidateAllAppData() {
+    revalidatePath('/', 'layout');
+}
