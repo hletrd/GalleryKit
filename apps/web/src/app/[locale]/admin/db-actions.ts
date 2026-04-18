@@ -20,14 +20,14 @@ function escapeCsvField(value: string): string {
     // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
     value = value.replace(/[\r\n]/g, ' ');
     // Prefix formula injection characters with a single quote
-    if (value.match(/^[=+\-@\t\r]/)) {
+    if (value.match(/^[=+\-@\t]/)) {
         value = "'" + value;
     }
     // Wrap in double quotes and escape embedded double quotes by doubling them
     return '"' + value.replace(/"/g, '""') + '"';
 }
 
-export async function exportImagesCsv(): Promise<{ data?: string; error?: string }> {
+export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
     if (!(await isAdmin())) {
         return { error: 'Unauthorized' };
     }
@@ -66,7 +66,8 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         ...rows.map(r => r.join(","))
     ].join("\n");
 
-    return { data: csvContent };
+    const warning = results.length >= 50000 ? 'Result truncated at 50,000 rows' : undefined;
+    return { data: csvContent, warning };
 }
 
 export async function dumpDatabase() {

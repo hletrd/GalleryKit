@@ -90,7 +90,11 @@ export default function DbPage() {
                 link.click();
                 document.body.removeChild(link);
                 window.URL.revokeObjectURL(url);
-                toast.success(t('successExport'));
+                if (result.warning) {
+                    toast.success(t('successExport'), { description: result.warning });
+                } else {
+                    toast.success(t('successExport'));
+                }
             } catch (e: unknown) {
                 toast.error(`${t('errorExport')}: ${e instanceof Error ? e.message : 'Unknown error'}`);
             }
