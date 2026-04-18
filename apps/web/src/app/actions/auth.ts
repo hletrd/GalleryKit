@@ -130,7 +130,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
         if (!user || !verified) {
             // Rate limit already incremented above — no need to record again.
-            logAuditEvent(null, 'login_failure', 'user', username, ip).catch(console.debug);
+            await logAuditEvent(null, 'login_failure', 'user', username, ip).catch(console.debug);
             return { error: 'Invalid credentials' };
         }
 
@@ -140,7 +140,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
         } catch (err) {
             console.error('Failed to reset login rate limit for IP:', ip, err);
         }
-        logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
+        await logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
         try {
             const cookieStore = await cookies();
@@ -206,6 +206,24 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         return { error: 'Unauthorized' };
     }
 
+    // Rate limit password change attempts
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    const now = Date.now();
+    pruneLoginRateLimit(now);
+    const limitData = getLoginRateLimitEntry(ip, now);
+    if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
+        return { error: 'Too many attempts. Please try again later.' };
+    }
+    try {
+        const dbLimit = await checkRateLimit(ip, 'password_change', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        if (dbLimit.limited) {
+            return { error: 'Too many attempts. Please try again later.' };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map
+    }
+
     const currentPassword = formData.get('currentPassword')?.toString() ?? '';
     const newPassword = formData.get('newPassword')?.toString() ?? '';
     const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
@@ -236,6 +254,15 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         const match = await argon2.verify(userWithHash.password_hash, currentPassword);
 
         if (!match) {
+            // Increment rate limit on failed password attempt
+            try {
+                limitData.count += 1;
+                limitData.lastAttempt = now;
+                loginRateLimit.set(ip, limitData);
+                await incrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+            } catch (err) {
+                console.debug('Failed to increment password change rate limit:', err);
+            }
             return { error: 'Incorrect current password' };
         }
 
