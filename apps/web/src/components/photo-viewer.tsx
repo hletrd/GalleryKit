@@ -22,6 +22,7 @@ import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
 
 import { useRouter } from 'next/navigation';
+import siteConfig from '@/site-config.json';
 
 interface PhotoViewerProps {
     images: ImageDetail[];
@@ -52,7 +53,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     // Update document.title when navigating between photos
     useEffect(() => {
         if (image?.title) {
-            document.title = `${image.title} — GalleryKit`;
+            document.title = `${image.title} — ${siteConfig.nav_title}`;
         }
     }, [image?.id, image?.title]);
 
