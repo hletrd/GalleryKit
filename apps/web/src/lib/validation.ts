@@ -42,12 +42,12 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 // - Hash/Pound (fragments)
 // - Whitespace (better UX for URLs, though encoded spaces theoretically work)
 export function isValidTopicAlias(alias: string): boolean {
-    return alias.length > 0 && alias.length <= 255 && /^[^/\\\s?#]+$/.test(alias);
+    return alias.length > 0 && alias.length <= 255 && /^[^/\\\s?#<>"'&]+$/.test(alias);
 }
 
 export function isValidTagName(tagName: string): boolean {
     const trimmed = tagName.trim();
-    return trimmed.length > 0 && trimmed.length <= 100 && !trimmed.includes(',');
+    return trimmed.length > 0 && trimmed.length <= 100 && !trimmed.includes(',') && !/[<>"'&]/.test(trimmed);
 }
 
 // Validate filename (no path traversal, only safe characters)
