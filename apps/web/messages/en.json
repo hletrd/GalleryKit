@@ -224,6 +224,13 @@
     "errorSharing": "Could not create share link.",
     "noDescription": "No description.",
     "histogram": "Histogram",
+    "histogramModes": {
+      "luminance": "Luminance",
+      "color": "Color",
+      "red": "Red",
+      "green": "Green",
+      "blue": "Blue"
+    },
     "fullscreen": "Fullscreen",
     "bottomSheet": "Photo Info",
     "whiteBalance": "White Balance",

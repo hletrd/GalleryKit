@@ -224,6 +224,13 @@
     "errorSharing": "공유 링크를 생성하지 못했습니다.",
     "noDescription": "설명 없음",
     "histogram": "히스토그램",
+    "histogramModes": {
+      "luminance": "휘도",
+      "color": "색상",
+      "red": "빨강",
+      "green": "초록",
+      "blue": "파랑"
+    },
     "fullscreen": "전체 화면",
     "bottomSheet": "사진 정보",
     "whiteBalance": "화이트 밸런스",
