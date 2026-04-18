@@ -281,7 +281,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                                             );
                                         })()}
                                     </picture>
-                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100">
+                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-4 max-sm:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
                                         <h3 className="text-white font-medium truncate">
                                             {displayTitle}
                                         </h3>

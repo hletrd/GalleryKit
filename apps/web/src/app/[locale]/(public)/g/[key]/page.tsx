@@ -129,6 +129,11 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
                                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                             />
+                            {(image.title && !isTitleFilename) && (
+                                <div className="sm:hidden px-2 py-1.5 text-xs text-muted-foreground truncate">
+                                    {image.title}
+                                </div>
+                            )}
                         </Link>
                     );
                 })}
