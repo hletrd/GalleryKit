@@ -262,12 +262,17 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidAlias') };
     }
 
-    await db.delete(topicAliases).where(
-        and(
-            eq(topicAliases.alias, alias),
-            eq(topicAliases.topicSlug, topicSlug)
-        )
-    );
+    try {
+        await db.delete(topicAliases).where(
+            and(
+                eq(topicAliases.alias, alias),
+                eq(topicAliases.topicSlug, topicSlug)
+            )
+        );
+    } catch (e) {
+        console.error('Failed to delete topic alias:', e);
+        return { error: t('invalidAlias') };
+    }
 
     revalidateLocalizedPaths('/admin/categories', `/${alias}`, `/${topicSlug}`);
     return { success: true };
