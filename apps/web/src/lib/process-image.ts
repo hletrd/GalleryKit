@@ -439,7 +439,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
     const gpsParams = exifData.gps || exifData.GPSInfo || {};
 
     const fNumber = exifParams.FNumber;
-    const iso = exifParams.ISO || exifParams.ISOSpeedRatings;
+    const iso = exifParams.ISO ?? exifParams.ISOSpeedRatings;
     const exposureTime = exifParams.ExposureTime;
 
     const dateTimeOriginal = exifParams.DateTimeOriginal;
