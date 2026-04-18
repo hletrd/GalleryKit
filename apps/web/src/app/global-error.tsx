@@ -16,6 +16,17 @@ const COPY = {
 type SupportedLocale = keyof typeof COPY;
 
 function detectLocale(): SupportedLocale {
+    if (typeof window === 'undefined') return 'en';
+
+    const [, firstSegment] = window.location.pathname.split('/');
+    if (firstSegment?.toLowerCase() === 'ko') {
+        return 'ko';
+    }
+
+    if (firstSegment?.toLowerCase() === 'en') {
+        return 'en';
+    }
+
     if (typeof navigator === 'undefined') return 'en';
     return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
 }

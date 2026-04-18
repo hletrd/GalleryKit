@@ -104,16 +104,16 @@ The current Ralph iteration confirmed that several items from this plan had alre
 **Files:** `apps/web/src/app/global-error.tsx`
 **Confidence:** HIGH
 
-**Outcome:** Replaced the hardcoded English/inline-style fatal error page with a localized client-side variant that selects Korean vs English copy from `navigator.language` and uses the app’s visual language.
+**Outcome:** Replaced the hardcoded English/inline-style fatal error page with a localized client-side variant that prefers the route locale from `window.location.pathname` and falls back to `navigator.language`, while using the app’s visual language.
 
 ---
 
-## 8. Replace placeholder site config defaults ✅ VERIFIED
+## 8. Replace placeholder site config defaults ✅ COMPLETED
 **Source:** UI/UX Review #10
 **Files:** `apps/web/src/site-config.json`
 **Confidence:** HIGH
 
-**Outcome:** Already present in the working tree and verified again during this Ralph run. Placeholder copy has been replaced with sensible GalleryKit defaults.
+**Outcome:** Placeholder runtime defaults are now fully replaced with sensible GalleryKit demo values, including non-placeholder `url` and `parent_url` values.
 
 ---
 
