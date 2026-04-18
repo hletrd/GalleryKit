@@ -307,6 +307,10 @@ export async function deleteImage(id: number) {
     }
 
     revalidateLocalizedPaths('/', '/admin/dashboard');
+
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
+
     return { success: true };
 }
 
