@@ -57,7 +57,7 @@ export const images = mysqlTable("images", {
         .default(sql`CURRENT_TIMESTAMP`)
         .onUpdateNow()
         .notNull(),
-    processed: boolean("processed").default(true),
+    processed: boolean("processed").default(false),
 }, (table) => ({
     idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at),
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
