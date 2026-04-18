@@ -20,8 +20,8 @@ interface HistogramProps {
 }
 
 const MODE_LABELS: Record<HistogramMode, string> = {
-    luminance: 'Lum',
-    rgb: 'RGB',
+    luminance: 'Luminance',
+    rgb: 'Color',
     r: 'R',
     g: 'G',
     b: 'B',
@@ -234,16 +234,16 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
 
             {!collapsed && (
                 <div className="flex flex-col gap-1">
-                    <div className="relative w-[200px] h-[100px] bg-black/20 rounded overflow-hidden">
+                    <div className="relative w-[240px] h-[120px] bg-black/20 rounded overflow-hidden">
                         {loading && (
                             <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-[10px] text-muted-foreground">{t('common.loading')}</span>
+                                <span className="text-xs text-muted-foreground">{t('common.loading')}</span>
                             </div>
                         )}
                         <canvas
                             ref={canvasRef}
-                            width={200}
-                            height={100}
+                            width={240}
+                            height={120}
                             className="w-full h-full"
                             role="img"
                             aria-label={t('aria.histogramLabel', { mode: MODE_LABELS[mode] })}
@@ -252,7 +252,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                     <button
                         type="button"
                         onClick={cycleMode}
-                        className="self-start text-[10px] font-mono px-2 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                        className="self-start text-xs font-mono px-2 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
                         aria-label={t('aria.cycleHistogram')}
                     >
                         {MODE_LABELS[mode]}
