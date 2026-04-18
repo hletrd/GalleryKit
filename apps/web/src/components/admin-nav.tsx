@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/components/i18n-provider";
 import { useLocale } from "next-intl";
+import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
 
 export function AdminNav() {
     const pathname = usePathname();
@@ -12,18 +13,18 @@ export function AdminNav() {
     const locale = useLocale();
 
     const links = [
-        { href: `/${locale}/admin/dashboard`, label: t('nav.dashboard') },
-        { href: `/${locale}/admin/categories`, label: t('nav.categories') },
-        { href: `/${locale}/admin/tags`, label: t('nav.tags') },
-        { href: `/${locale}/admin/password`, label: t('nav.password') },
-        { href: `/${locale}/admin/users`, label: t('nav.users') },
-        { href: `/${locale}/admin/db`, label: t('nav.db') },
+        { href: localizePath(locale, '/admin/dashboard'), label: t('nav.dashboard') },
+        { href: localizePath(locale, '/admin/categories'), label: t('nav.categories') },
+        { href: localizePath(locale, '/admin/tags'), label: t('nav.tags') },
+        { href: localizePath(locale, '/admin/password'), label: t('nav.password') },
+        { href: localizePath(locale, '/admin/users'), label: t('nav.users') },
+        { href: localizePath(locale, '/admin/db'), label: t('nav.db') },
     ];
 
     return (
         <nav aria-label={t('aria.adminNav')} className="flex items-center flex-wrap gap-x-6 gap-y-2 text-sm font-medium">
             {links.map(({ href, label }) => {
-                const isActive = pathname === href || pathname === href.replace(`/${locale}`, '');
+                const isActive = stripLocalePrefix(pathname) === stripLocalePrefix(href);
                 return (
                     <Link
                         key={href}

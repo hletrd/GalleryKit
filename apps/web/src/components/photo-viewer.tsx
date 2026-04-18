@@ -20,6 +20,7 @@ import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';
@@ -32,9 +33,10 @@ interface PhotoViewerProps {
     nextId?: number | null;
     canShare?: boolean;
     isSharedView?: boolean;
+    syncPhotoQueryBasePath?: string;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isSharedView = false }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isSharedView = false, syncPhotoQueryBasePath }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -72,12 +74,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 if (showLightboxRef.current) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
                 }
-                router.push(`/${locale}/p/${prevId}`);
+                router.push(localizePath(locale, `/p/${prevId}`));
             } else if (direction === 1 && nextId) {
                 if (showLightboxRef.current) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
                 }
-                router.push(`/${locale}/p/${nextId}`);
+                router.push(localizePath(locale, `/p/${nextId}`));
             }
         }
     }, [currentIndex, images, locale, prevId, nextId, router]);
@@ -86,6 +88,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     useEffect(() => {
         try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch {}
     }, []);
+
+    useEffect(() => {
+        if (!syncPhotoQueryBasePath || !image) return;
+        router.replace(`${syncPhotoQueryBasePath}?photoId=${image.id}`, { scroll: false });
+    }, [image, router, syncPhotoQueryBasePath]);
 
     // Sync info state across breakpoints: mobile bottom sheet ↔ desktop sidebar
     useEffect(() => {
@@ -181,7 +188,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
                 {!isSharedView && (
-                    <Link href={`/${locale}/${image.topic}`}>
+                    <Link href={localizePath(locale, `/${image.topic}`)}>
                         <Button variant="ghost" className="pl-0 gap-2">
                             <ArrowLeft className="h-4 w-4" />
                             {t('viewer.backTo', { topic: image.topic_label || image.topic })}
@@ -210,7 +217,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             try {
                                 const result = await createPhotoShareLink(image.id);
                                 if (result.success) {
-                                    const url = `${window.location.origin}/${locale}/s/${result.key}`;
+                                    const url = localizeUrl(window.location.origin, locale, `/s/${result.key}`);
                                     await copyToClipboard(url);
                                     toast.success(t('viewer.linkCopied'));
                                 } else {

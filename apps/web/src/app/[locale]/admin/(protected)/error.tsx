@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useTranslation } from '@/components/i18n-provider';
+import { localizePath } from '@/lib/locale-path';
 
 export default function AdminError({
     reset,
@@ -25,7 +26,7 @@ export default function AdminError({
                     {t('error.tryAgain')}
                 </button>
                 <Link
-                    href={`/${locale}/admin/dashboard`}
+                    href={localizePath(locale, '/admin/dashboard')}
                     className="px-4 py-2 border rounded-md hover:bg-muted text-sm"
                 >
                     {t('error.backToDashboard')}

@@ -7,6 +7,7 @@ export const revalidate = 86400;
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
+import { localizeUrl } from '@/lib/locale-path';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
@@ -22,7 +23,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ]);
 
   const homepageEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
-    url: `${BASE_URL}/${locale}`,
+    url: localizeUrl(BASE_URL, locale, '/'),
     lastModified: new Date(),
     changeFrequency: 'daily',
     priority: 1,
@@ -30,7 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const topicEntries: MetadataRoute.Sitemap = topics.flatMap((topic) =>
     LOCALES.map((locale) => ({
-      url: `${BASE_URL}/${locale}/${topic.slug}`,
+      url: localizeUrl(BASE_URL, locale, `/${topic.slug}`),
       lastModified: new Date(),
       changeFrequency: 'weekly' as const,
       priority: 0.8,
@@ -42,7 +43,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const imageEntries: MetadataRoute.Sitemap = cappedImages.flatMap((image) =>
     LOCALES.map((locale) => ({
-      url: `${BASE_URL}/${locale}/p/${image.id}`,
+      url: localizeUrl(BASE_URL, locale, `/p/${image.id}`),
       lastModified: new Date(image.created_at || Date.now()),
       changeFrequency: 'weekly' as const,
       priority: 0.7,

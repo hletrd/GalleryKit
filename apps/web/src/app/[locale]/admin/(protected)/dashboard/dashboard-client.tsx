@@ -6,6 +6,7 @@ import { ImageManager } from "@/components/image-manager";
 import { useTranslation } from "@/components/i18n-provider";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { localizePath } from "@/lib/locale-path";
 
 interface DashboardClientProps {
     images: { id: number; filename_avif: string; title: string | null; topic: string | null; created_at: string | Date | null; tag_names?: string | null; user_filename?: string | null; description?: string | null }[];
@@ -37,7 +38,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-4 mt-4">
                             {page > 1 ? (
-                                <Link href={`/${locale}/admin/dashboard?page=${page - 1}`}>
+                                <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page - 1}`}>
                                     <Button variant="outline" size="sm">
                                         <ChevronLeft className="h-4 w-4 mr-1" />
                                         {page - 1}
@@ -52,7 +53,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                                 {page} / {totalPages}
                             </span>
                             {page < totalPages ? (
-                                <Link href={`/${locale}/admin/dashboard?page=${page + 1}`}>
+                                <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page + 1}`}>
                                     <Button variant="outline" size="sm">
                                         {page + 1}
                                         <ChevronRight className="h-4 w-4 ml-1" />

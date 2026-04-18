@@ -3,10 +3,11 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { NextIntlClientProvider } from 'next-intl';
-import { getMessages, getTranslations } from 'next-intl/server';
+import { getMessages } from 'next-intl/server';
 import siteConfig from "@/site-config.json";
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/lib/constants';
+import { localizeUrl } from '@/lib/locale-path';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
@@ -21,8 +22,8 @@ export const metadata: Metadata = {
   description: siteConfig.description,
   alternates: {
     languages: {
-      'en': `${BASE_URL}/en`,
-      'ko': `${BASE_URL}/ko`,
+      'en': localizeUrl(BASE_URL, 'en', '/'),
+      'ko': localizeUrl(BASE_URL, 'ko', '/'),
       'x-default': BASE_URL,
     },
   },
@@ -66,7 +67,6 @@ export default async function RootLayout({
   }
 
   const messages = await getMessages();
-  const t = await getTranslations('common');
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -74,9 +74,6 @@ export default async function RootLayout({
         suppressHydrationWarning
         className="antialiased min-h-screen bg-background font-sans flex flex-col"
       >
-        <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md">
-          {t('skipToContent')}
-        </a>
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider
             attribute="class"
@@ -84,9 +81,9 @@ export default async function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <main className="flex-1">
+            <div className="flex-1">
               {children}
-            </main>
+            </div>
             <Toaster />
           </ThemeProvider>
         </NextIntlClientProvider>

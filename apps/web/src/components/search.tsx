@@ -10,6 +10,7 @@ import { searchImagesAction } from '@/app/actions';
 import Link from 'next/link';
 import { useTranslation } from '@/components/i18n-provider';
 import { imageUrl } from '@/lib/image-url';
+import { localizePath } from '@/lib/locale-path';
 
 export function Search() {
     const { t, locale } = useTranslation();
@@ -22,6 +23,7 @@ export function Search() {
     const inputRef = useRef<HTMLInputElement>(null);
     const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
     const debounceRef = useRef<NodeJS.Timeout>(undefined);
+    const requestIdRef = useRef(0);
 
     // Detect platform for keyboard shortcut hint (SSR-safe: default to Mac, correct on client)
     useEffect(() => {
@@ -33,14 +35,21 @@ export function Search() {
             setResults([]);
             return;
         }
+        const requestId = ++requestIdRef.current;
         setLoading(true);
         try {
             const data = await searchImagesAction(searchQuery);
-            setResults(data);
+            if (requestId === requestIdRef.current) {
+                setResults(data);
+            }
         } catch {
-            setResults([]);
+            if (requestId === requestIdRef.current) {
+                setResults([]);
+            }
         } finally {
-            setLoading(false);
+            if (requestId === requestIdRef.current) {
+                setLoading(false);
+            }
         }
     }, []);
 
@@ -155,7 +164,7 @@ export function Search() {
                                         role="option"
                                         id={`search-result-${idx}`}
                                         aria-selected={idx === activeIndex}
-                                        href={`/${locale}/p/${image.id}`}
+                                        href={localizePath(locale, `/p/${image.id}`)}
                                         onClick={() => setIsOpen(false)}
                                         className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
                                     >

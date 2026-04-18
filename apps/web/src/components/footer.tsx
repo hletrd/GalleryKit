@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getLocale } from 'next-intl/server';
 import siteConfig from "@/site-config.json";
+import { localizePath } from '@/lib/locale-path';
 
 
 function GithubIcon({ className }: { className?: string }) {
@@ -42,7 +43,7 @@ export async function Footer() {
                         <GithubIcon className="h-4 w-4" />
                         GitHub
                     </Link>
-                    <Link href={`/${locale}/admin`} rel="nofollow" className="text-xs text-muted-foreground/50 hover:text-muted-foreground hover:underline transition-colors">
+                    <Link href={localizePath(locale, '/admin')} rel="nofollow" className="text-xs text-muted-foreground/50 hover:text-muted-foreground hover:underline transition-colors">
                         Admin
                     </Link>
                 </div>

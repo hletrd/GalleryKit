@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_LOCALE } from "@/lib/constants";
 import siteConfig from "@/site-config.json";
 import { Search } from "@/components/search";
+import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
 
 interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
@@ -41,20 +42,14 @@ export function NavClient({ topics }: NavClientProps) {
     const otherLocale = locale === 'en' ? 'ko' : 'en';
     const localizedHomeHref = siteConfig.home_link.startsWith('http')
         ? siteConfig.home_link
-        : `/${locale}${siteConfig.home_link === '/' ? '' : siteConfig.home_link.startsWith('/') ? siteConfig.home_link : `/${siteConfig.home_link}`}`;
+        : localizePath(locale, siteConfig.home_link);
     // Swap locale prefix in the current path, preserving query params
     const localeSwitchHref = (() => {
-        const localePrefix = `/${locale}`;
-        let path: string;
-        if (pathname.startsWith(localePrefix + '/') || pathname === localePrefix) {
-            path = pathname.slice(localePrefix.length) || '/';
-        } else {
-            path = pathname;
-        }
+        const path = stripLocalePrefix(pathname);
         // With localePrefix: 'as-needed', default locale has no prefix
         const targetPath = otherLocale === DEFAULT_LOCALE
-            ? path
-            : `/${otherLocale}${path}`;
+            ? localizePath(DEFAULT_LOCALE, path)
+            : localizePath(otherLocale, path);
         // Preserve search params (e.g., ?tags=landscape) via useSearchParams (SSR-safe)
         const search = searchParams.toString();
         return search ? `${targetPath}?${search}` : targetPath;
@@ -99,8 +94,8 @@ export function NavClient({ topics }: NavClientProps) {
                     "md:flex-1 md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap md:w-auto md:mt-0"
                 )}>
                     {topics.map((topic) => {
-                        const href = `/${locale}/${topic.slug}`;
-                        const isActive = pathname === href || pathname === `/${topic.slug}`;
+                        const href = localizePath(locale, `/${topic.slug}`);
+                        const isActive = stripLocalePrefix(pathname) === `/${topic.slug}`;
                         return (
                             <Link
                                 key={topic.slug}

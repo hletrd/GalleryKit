@@ -40,6 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { OptimisticImage } from './optimistic-image';
 import { Pencil } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
+import { localizeUrl } from '@/lib/locale-path';
 
 interface ImageType {
     id: number;
@@ -138,7 +139,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
         try {
             const result = await createGroupShareLink(ids);
             if (result.success) {
-                 const url = `${window.location.origin}/${locale}/g/${result.key}`;
+                 const url = localizeUrl(window.location.origin, locale, `/g/${result.key}`);
                  await copyToClipboard(url);
                  toast.success(t('imageManager.linkCopied'));
                  setSelectedIds(new Set());

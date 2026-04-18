@@ -3,6 +3,8 @@ import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 import { safeJsonLd } from '@/lib/safe-json-ld';
+import { getLocale } from 'next-intl/server';
+import { localizeUrl } from '@/lib/locale-path';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -13,6 +15,8 @@ export const revalidate = 3600;
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { tags: tagsParam } = await searchParams;
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
+  const locale = await getLocale();
+  const pageUrl = localizeUrl(process.env.BASE_URL || siteConfig.url, locale, '/');
 
   const images = await getImagesLite(undefined, undefined, 1, 0);
   const latestImage = images[0];
@@ -34,7 +38,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     openGraph: {
       title: title,
       description: description,
-      url: `${process.env.BASE_URL || siteConfig.url}`,
+      url: pageUrl,
       siteName: siteConfig.title,
       images: latestImage ? [
         {
@@ -56,6 +60,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
+  const locale = await getLocale();
+  const baseUrl = process.env.BASE_URL || siteConfig.url;
 
   // Root always gets latest uploads (no topic)
   const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);
@@ -76,16 +82,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: siteConfig.title,
-    url: process.env.BASE_URL || siteConfig.url,
+    url: localizeUrl(baseUrl, locale, '/'),
     description: siteConfig.description,
   };
 
-  const baseUrl = process.env.BASE_URL || siteConfig.url;
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
     name: siteConfig.title,
-    url: baseUrl,
+    url: localizeUrl(baseUrl, locale, '/'),
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
       contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,

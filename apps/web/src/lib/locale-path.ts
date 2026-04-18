@@ -33,3 +33,11 @@ export function localizePath(locale: string, path: string): string {
 export function isSupportedLocale(value: string): value is Locale {
     return (LOCALES as readonly string[]).includes(value);
 }
+
+export function absoluteUrl(baseUrl: string, path: string): string {
+    return new URL(path, baseUrl).toString();
+}
+
+export function localizeUrl(baseUrl: string, locale: string, path: string): string {
+    return absoluteUrl(baseUrl, localizePath(locale, path));
+}

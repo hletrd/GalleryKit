@@ -5,6 +5,7 @@ import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 import { getLocale } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 
 export const revalidate = 3600;
@@ -31,7 +32,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     ? `Browse ${tagSlugs.join(', ')} photos in ${topicData.label} category`
     : `Photos in ${topicData.label} category`;
 
-  const pageUrl = `${BASE_URL}/${locale}/${topicData.slug}`;
+  const pageUrl = localizeUrl(BASE_URL, locale, `/${topicData.slug}`);
 
   return {
     title: title,
@@ -80,7 +81,7 @@ export default async function TopicPage({
 
   // If the requested topic slug doesn't match the canonical slug, redirect with locale preserved
   if (topicData.slug !== topic) {
-      redirect(`/${locale}/${topicData.slug}`);
+      redirect(localizePath(locale, `/${topicData.slug}`));
   }
 
   const allTags = await getTags(topic);
@@ -104,7 +105,7 @@ export default async function TopicPage({
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
     name: `${topicData.label} | ${siteConfig.title}`,
-    url: `${baseUrl}/${topic}`,
+    url: localizeUrl(baseUrl, locale, `/${topicData.slug}`),
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
       contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
@@ -123,7 +124,7 @@ export default async function TopicPage({
           }}
         />
       )}
-      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topic} hasMore={hasMore} totalCount={totalCount} />
+      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topicData.slug} heading={topicData.label} hasMore={hasMore} totalCount={totalCount} />
     </>
   );
 }

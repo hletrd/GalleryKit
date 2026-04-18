@@ -3,7 +3,7 @@
 **Priority:** HIGH
 **Estimated effort:** 3-4 hours
 **Sources:** Comprehensive audit 2026-04-18 findings #1, #8, #9, #10, #11, #12, #13
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ---
 
@@ -26,4 +26,13 @@
 7. Show topic-specific heading on topic pages
 
 ## Ralph progress
-- 2026-04-18: Plan created from the full audit. No implementation committed yet.
+- 2026-04-18: Plan created from the full audit.
+- 2026-04-18: Completed the routing/metadata/view-state pass:
+  - centralized locale-aware path/URL generation with default-locale canonical handling
+  - updated metadata/sitemap/nav/internal links to respect `localePrefix: 'as-needed'`
+  - synced shared-group viewer state back into `?photoId=`
+  - removed the extra root `<main>` wrapper and moved the skip link to the public shell
+  - guarded search results against stale async responses
+  - pointed the manifest at the real icon routes
+  - removed redundant tag-filter refresh churn
+  - surfaced the topic label as the visible topic-page heading

@@ -7,6 +7,7 @@ import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
 import { getLocale } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -50,7 +51,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
     const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`;
     const absoluteImageUrl = `${BASE_URL}${imageUrl}`;
-    const pageUrl = `${BASE_URL}/${locale}/p/${id}`;
+    const pageUrl = localizeUrl(BASE_URL, locale, `/p/${id}`);
 
     return {
         title: displayTitle,
@@ -158,19 +159,19 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 '@type': 'ListItem',
                 position: 1,
                 name: siteConfig.title || 'GalleryKit',
-                item: `${BASE_URL}/${locale}`,
+                item: localizeUrl(BASE_URL, locale, '/'),
             },
             image.topic && {
                 '@type': 'ListItem',
                 position: 2,
                 name: image.topic,
-                item: `${BASE_URL}/${locale}/${image.topic}`,
+                item: localizeUrl(BASE_URL, locale, `/${image.topic}`),
             },
             {
                 '@type': 'ListItem',
                 position: image.topic ? 3 : 2,
                 name: displayTitle,
-                item: `${BASE_URL}/${locale}/p/${id}`,
+                item: localizeUrl(BASE_URL, locale, `/p/${id}`),
             },
         ].filter(Boolean),
     };
@@ -199,12 +200,12 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (
-                <Link href={`/${locale}/p/${image.prevId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                <Link href={localizePath(locale, `/p/${image.prevId}`)} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
                     prev
                 </Link>
             )}
             {image.nextId && (
-                <Link href={`/${locale}/p/${image.nextId}`} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
+                <Link href={localizePath(locale, `/p/${image.nextId}`)} prefetch={true} className="hidden" aria-hidden="true" tabIndex={-1}>
                     next
                 </Link>
             )}

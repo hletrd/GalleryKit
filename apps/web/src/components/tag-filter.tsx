@@ -37,7 +37,6 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
 
         const queryString = params.toString();
         router.push(`${pathname}${queryString ? `?${queryString}` : ''}`);
-        router.refresh();
     };
 
     if (tags.length === 0) return null;

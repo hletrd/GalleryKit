@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
+import { localizePath } from '@/lib/locale-path';
 
 export default async function NotFound() {
   const t = await getTranslations('notFound');
@@ -12,7 +13,7 @@ export default async function NotFound() {
         {t('description')}
       </p>
       <Link
-        href={`/${locale}`}
+        href={localizePath(locale, '/')}
         className="text-primary hover:underline text-sm"
       >
         {t('backHome')}

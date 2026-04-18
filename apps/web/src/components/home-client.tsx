@@ -9,6 +9,7 @@ import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
 import { cn } from '@/lib/utils';
 import { imageUrl } from '@/lib/image-url';
+import { localizePath } from '@/lib/locale-path';
 
 function reorderForColumns<T extends { id: number; width?: number; height?: number }>(items: T[], columnCount: number): T[] {
     if (columnCount <= 1 || items.length === 0) return items;
@@ -138,11 +139,12 @@ interface HomeClientProps {
     topics?: GalleryTopic[];
     currentTags?: string[];
     topicSlug?: string;
+    heading?: string;
     hasMore?: boolean;
     totalCount?: number;
 }
 
-export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMore = false, totalCount }: HomeClientProps) {
+export function HomeClient({ images, tags, topics, currentTags, topicSlug, heading, hasMore = false, totalCount }: HomeClientProps) {
     const { t, locale } = useTranslation();
     const [allImages, setAllImages] = useState(images);
     const queryVersionRef = useRef(0);
@@ -187,7 +189,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex flex-col space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight">
-                        {t('home.latestUploads')}
+                        {heading || t('home.latestUploads')}
                         {currentTags && currentTags.length > 0 && (
                             <span className="text-muted-foreground font-normal ml-2">
                                 {displayTags.map(tag => `#${tag}`).join(' ')}
@@ -236,7 +238,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                                 containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
                             }}
                         >
-                            <Link href={`/${locale}/p/${image.id}`} aria-label={t('aria.viewPhoto', { title: displayTitle })}>
+                            <Link href={localizePath(locale, `/p/${image.id}`)} aria-label={t('aria.viewPhoto', { title: displayTitle })}>
                                 <div className="relative w-full">
                                     <picture>
                                         {(() => {
@@ -322,7 +324,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                     {currentTags && currentTags.length > 0 && (
                         <div className="flex flex-col items-center gap-2">
                             <p className="text-sm">{t('home.noResultsHint') || 'Try removing some filters'}</p>
-                            <Link href={topicSlug ? `/${locale}/${topicSlug}` : `/${locale}`} className="text-sm underline hover:text-primary">
+                            <Link href={localizePath(locale, topicSlug ? `/${topicSlug}` : '/')} className="text-sm underline hover:text-primary">
                                 {t('home.clearFilter')}
                             </Link>
                         </div>

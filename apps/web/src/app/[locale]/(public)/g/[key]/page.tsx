@@ -8,6 +8,7 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { imageUrl } from '@/lib/image-url';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
@@ -21,7 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
         title: 'Shared Photos Not Found',
         description: 'This shared collection could not be found.',
     };
-    const pageUrl = `${BASE_URL}/${locale}/g/${key}`;
+    const pageUrl = localizeUrl(BASE_URL, locale, `/g/${key}`);
     const coverImage = group.images[0];
     return {
         title: `Shared Photos`,
@@ -91,7 +92,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return (
             <>
                 <div className="flex items-center justify-between mb-4 px-4 pt-4">
-                    <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                    <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                         <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                     </Link>
                 </div>
@@ -104,6 +105,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     initialImageId={selectedImage.id}
                     tags={[]}
                     isSharedView
+                    syncPhotoQueryBasePath={localizePath(locale, `/g/${key}`)}
                 />
             </>
         );
@@ -113,7 +115,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         <div className="container mx-auto px-4 py-8">
             <div className="flex items-center justify-between mb-6">
                 <h1 className="text-2xl font-bold">{t('title')}</h1>
-                <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                     ← {siteConfig.nav_title || siteConfig.title || 'GalleryKit'}
                 </Link>
             </div>
@@ -125,7 +127,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     return (
                         <Link
                             key={image.id}
-                            href={`/${locale}/g/${key}?photoId=${image.id}`}
+                            href={`${localizePath(locale, `/g/${key}`)}?photoId=${image.id}`}
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20"
                         >
                             <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">

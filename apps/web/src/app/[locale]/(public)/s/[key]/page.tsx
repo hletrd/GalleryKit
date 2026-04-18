@@ -6,6 +6,7 @@ import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
@@ -21,7 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const title = image.title && !isTitleFilename ? image.title : 'Shared Photo';
-    const pageUrl = `${BASE_URL}/${locale}/s/${key}`;
+    const pageUrl = localizeUrl(BASE_URL, locale, `/s/${key}`);
     return {
         title: title,
         description: image.description || `View this photo on ${siteConfig.title}`,
@@ -69,7 +70,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     return (
         <>
             <div className="flex items-center justify-between mb-4 px-4 pt-4">
-                <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                     <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                 </Link>
             </div>

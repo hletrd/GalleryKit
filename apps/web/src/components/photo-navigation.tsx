@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/components/i18n-provider';
+import { localizePath } from '@/lib/locale-path';
 
 interface PhotoNavigationProps {
     prevId: number | null;
@@ -96,13 +97,13 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
                 if (typeof navigator.vibrate === 'function') {
                     navigator.vibrate(10);
                 }
-                router.push(`/${locale}/p/${nextId}`);
+                router.push(localizePath(locale, `/p/${nextId}`));
             } else if (deltaX > SWIPE_THRESHOLD && prevId) {
                 // Swipe right -> prev photo
                 if (typeof navigator.vibrate === 'function') {
                     navigator.vibrate(10);
                 }
-                router.push(`/${locale}/p/${prevId}`);
+                router.push(localizePath(locale, `/p/${prevId}`));
             } else {
                 // Snap back
                 setIsSnapping(true);
@@ -196,7 +197,7 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
                         variant="secondary"
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
-                        onClick={() => router.push(`/${locale}/p/${prevId}`)}
+                        onClick={() => router.push(localizePath(locale, `/p/${prevId}`))}
                         aria-label={t('aria.previousPhoto')}
                     >
                         <ChevronLeft className="h-6 w-6" />
@@ -210,7 +211,7 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
                         variant="secondary"
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
-                        onClick={() => router.push(`/${locale}/p/${nextId}`)}
+                        onClick={() => router.push(localizePath(locale, `/p/${nextId}`))}
                         aria-label={t('aria.nextPhoto')}
                     >
                         <ChevronRight className="h-6 w-6" />
