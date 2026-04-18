@@ -5,6 +5,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 
 import { isAdmin } from '@/app/actions/auth';
+import { revalidateLocalizedPaths } from '@/lib/revalidation';
 
 const PHOTO_SHARE_KEY_LENGTH = 10;
 const GROUP_SHARE_KEY_LENGTH = 10;
@@ -35,6 +36,7 @@ export async function createPhotoShareLink(imageId: number) {
                 .where(and(eq(images.id, imageId), sql`${images.share_key} IS NULL`));
 
             if (result.affectedRows > 0) {
+                revalidateLocalizedPaths(`/p/${imageId}`);
                 return { success: true, key: key };
             }
 
@@ -97,6 +99,7 @@ export async function createGroupShareLink(imageIds: number[]) {
                 return groupKey;
             });
 
+            revalidateLocalizedPaths('/');
             return { success: true, key };
         } catch {
             // Key collision or other error - retry with new key
@@ -120,6 +123,7 @@ export async function revokePhotoShareLink(imageId: number) {
         .set({ share_key: null })
         .where(eq(images.id, imageId));
 
+    revalidateLocalizedPaths(`/p/${imageId}`);
     return { success: true };
 }
 
@@ -137,5 +141,6 @@ export async function deleteGroupShareLink(groupId: number) {
         return { error: 'Group not found' };
     }
 
+    revalidateLocalizedPaths('/');
     return { success: true };
 }
