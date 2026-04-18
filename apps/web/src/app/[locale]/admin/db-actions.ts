@@ -55,7 +55,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         escapeCsvField(row.title || ""),
         escapeCsvField(String(row.width)),
         escapeCsvField(String(row.height)),
-        escapeCsvField(row.captureDate ? (() => { const d = new Date(row.captureDate); return Number.isNaN(d.getTime()) ? '' : d.toISOString(); })() : ""),
+        escapeCsvField(row.captureDate ? String(row.captureDate) : ""),
         escapeCsvField(row.topic || ""),
         escapeCsvField(row.tags || ""),
     ]);
