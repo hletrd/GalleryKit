@@ -131,7 +131,11 @@ export async function login(prevState: { error?: string } | null, formData: Form
         }
 
         loginRateLimit.delete(ip);
-        await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS).catch(() => {});
+        try {
+            await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+        } catch (err) {
+            console.error('Failed to reset login rate limit for IP:', ip, err);
+        }
         logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
         try {
