@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
 const COPY = {
     en: {
         title: 'Something went wrong',
@@ -17,19 +15,18 @@ const COPY = {
 
 type SupportedLocale = keyof typeof COPY;
 
+function detectLocale(): SupportedLocale {
+    if (typeof navigator === 'undefined') return 'en';
+    return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
+}
+
 export default function GlobalError({
     reset,
 }: {
     error: Error & { digest?: string };
     reset: () => void;
 }) {
-    const [locale, setLocale] = useState<SupportedLocale>('en');
-
-    useEffect(() => {
-        const nextLocale = navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
-        setLocale(nextLocale);
-    }, []);
-
+    const locale = detectLocale();
     const copy = COPY[locale];
 
     return (
