@@ -1,6 +1,6 @@
 'use server';
 
-import { db, tags, imageTags } from '@/db';
+import { db, tags, imageTags, images } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 
 import { isAdmin } from '@/app/actions/auth';
@@ -59,7 +59,7 @@ export async function updateTag(id: number, name: string) {
         await db.update(tags)
             .set({ name: trimmedName, slug })
             .where(eq(tags.id, id));
-        revalidateLocalizedPaths('/admin/tags');
+        revalidateLocalizedPaths('/admin/tags', '/');
         return { success: true };
     } catch {
         console.error("Failed to update tag");
@@ -77,7 +77,7 @@ export async function deleteTag(id: number) {
 
     try {
         await db.delete(tags).where(eq(tags.id, id));
-        revalidateLocalizedPaths('/admin/tags');
+        revalidateLocalizedPaths('/admin/tags', '/');
         return { success: true };
     } catch {
         console.error("Failed to delete tag");
@@ -115,7 +115,9 @@ export async function addTagToImage(imageId: number, tagName: string) {
             tagId: tagRecord.id
         });
 
-        revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
+        // Fetch image topic for topic page revalidation
+        const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
+        revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
         return tagRecord.name !== cleanName
             ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
             : { success: true as const };
@@ -144,7 +146,9 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
                 eq(imageTags.tagId, tagRecord.id)
             ));
 
-        revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
+        // Fetch image topic for topic page revalidation
+        const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
+        revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
         return { success: true };
     } catch (e) {
         console.error("Failed to remove tag", e);
@@ -192,7 +196,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
 
         await db.insert(imageTags).ignore().values(values);
 
-        revalidateLocalizedPaths('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard', '/');
         return tagRecord.name !== cleanName
             ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
             : { success: true as const };
@@ -254,6 +258,6 @@ export async function batchUpdateImageTags(
         }
     }
 
-    revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
+    revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/dashboard');
     return { success: true, added, removed, warnings };
 }
