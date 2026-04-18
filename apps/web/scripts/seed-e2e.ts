@@ -98,6 +98,11 @@ async function createVariants(baseName: string, width: number, height: number, h
 }
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+      console.error('Refusing to run seed-e2e in production environment');
+      process.exit(1);
+  }
+
   await ensureDirs();
 
   const { db, images, imageTags, sharedGroupImages, sharedGroups, tags, topics } = await import('../src/db');
