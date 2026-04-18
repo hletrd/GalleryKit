@@ -10,7 +10,8 @@ import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
-import { getClientIp, pruneLoginRateLimit, loginRateLimit, LOGIN_WINDOW_MS, LOGIN_MAX_ATTEMPTS, checkRateLimit, incrementRateLimit, resetRateLimit } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, checkRateLimit } from '@/lib/rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, recordFailedLoginAttempt } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 
@@ -84,12 +85,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
     pruneLoginRateLimit(now);
 
-    const limitData = loginRateLimit.get(ip) || { count: 0, lastAttempt: 0 };
-
-    // Reset if window passed
-    if (now - limitData.lastAttempt > LOGIN_WINDOW_MS) {
-        limitData.count = 0;
-    }
+    const limitData = getLoginRateLimitEntry(ip, now);
 
     // Fast-path check from in-memory Map
     if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
@@ -106,11 +102,6 @@ export async function login(prevState: { error?: string } | null, formData: Form
         // DB unavailable — rely on in-memory Map
     }
 
-    limitData.count++;
-    limitData.lastAttempt = now;
-    loginRateLimit.set(ip, limitData);
-    incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS).catch(() => {});
-
     try {
         const [user] = await db.select({
             id: adminUsers.id,
@@ -126,13 +117,17 @@ export async function login(prevState: { error?: string } | null, formData: Form
         const verified = await argon2.verify(hashToCheck, password);
 
         if (!user || !verified) {
+            try {
+                await recordFailedLoginAttempt(ip, now);
+            } catch (err) {
+                console.debug('Failed to persist login rate limit attempt:', err);
+            }
             logAuditEvent(null, 'login_failure', 'user', username, ip).catch(console.debug);
             return { error: 'Invalid credentials' };
         }
 
-        loginRateLimit.delete(ip);
         try {
-            await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+            await clearSuccessfulLoginAttempts(ip);
         } catch (err) {
             console.error('Failed to reset login rate limit for IP:', ip, err);
         }
