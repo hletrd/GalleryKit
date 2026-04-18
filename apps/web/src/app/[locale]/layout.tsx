@@ -1,11 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Nav } from "@/components/nav";
 import { Toaster } from "@/components/ui/sonner";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations } from 'next-intl/server';
-import { Footer } from "@/components/footer";
 import siteConfig from "@/site-config.json";
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/lib/constants';
@@ -88,11 +86,9 @@ export default async function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <Nav />
-            <main id="main-content" className="container mx-auto px-4 py-8 flex-1">
+            <main className="flex-1">
               {children}
             </main>
-            <Footer />
             <Toaster />
           </ThemeProvider>
         </NextIntlClientProvider>
