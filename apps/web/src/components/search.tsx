@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import FocusTrap from 'focus-trap-react';
+import FocusTrap from '@/components/lazy-focus-trap';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

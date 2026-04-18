@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import FocusTrap from 'focus-trap-react';
+import FocusTrap from '@/components/lazy-focus-trap';
 import { Info, MapPin, Calendar, Clock } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";

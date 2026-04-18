@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import FocusTrap from 'focus-trap-react';
+import FocusTrap from '@/components/lazy-focus-trap';
 import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
