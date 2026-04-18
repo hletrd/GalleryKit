@@ -4,6 +4,29 @@ import { eq, desc, asc, and, gt, lt, or, inArray, like } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
 
+// Module-level buffer for debounced shared-group view count increments
+const viewCountBuffer = new Map<number, number>();
+let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function bufferGroupViewCount(groupId: number) {
+    viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + 1);
+    if (!viewCountFlushTimer) {
+        viewCountFlushTimer = setTimeout(flushGroupViewCounts, 5000);
+    }
+}
+
+async function flushGroupViewCounts() {
+    viewCountFlushTimer = null;
+    const batch = new Map(viewCountBuffer);
+    viewCountBuffer.clear();
+    for (const [groupId, count] of batch) {
+        await db.update(sharedGroups)
+            .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
+            .where(eq(sharedGroups.id, groupId))
+            .catch(console.debug);
+    }
+}
+
 const selectFields = {
     id: images.id,
     // filename_original is intentionally omitted for privacy
@@ -384,10 +407,7 @@ export async function getSharedGroup(
     if (!group) return null;
 
     if (options?.incrementViewCount !== false) {
-        db.update(sharedGroups)
-            .set({ view_count: sql`${sharedGroups.view_count} + 1` })
-            .where(eq(sharedGroups.id, group.id))
-            .catch(err => console.debug('view_count increment failed:', err.message));
+        bufferGroupViewCount(group.id);
     }
 
     const groupImages = await db.select({
