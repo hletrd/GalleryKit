@@ -178,7 +178,7 @@ export function Search() {
                                                 {image.title || image.description || `${t('common.photo')} ${image.id}`}
                                             </p>
                                             <p className="text-xs text-muted-foreground truncate">
-                                                {[image.topic, image.camera_model].filter(Boolean).join(' \u00b7 ')}
+                                                {[image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null, image.camera_model].filter(Boolean).join(' \u00b7 ')}
                                             </p>
                                         </div>
                                     </Link>
@@ -194,7 +194,7 @@ export function Search() {
                             </div>
                         )}
                     </div>
-                    <div className="p-2 border-t text-center">
+                    <div className="hidden sm:block p-2 border-t text-center">
                         <p className="text-xs text-muted-foreground">
                             <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}
                         </p>
