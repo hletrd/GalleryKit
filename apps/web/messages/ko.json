@@ -301,7 +301,10 @@
     "viewPhoto": "사진 보기: {title}",
     "selectImage": "이미지 선택 {title}",
     "removeTag": "{tag} 태그 제거",
-    "photoPosition": "사진 {total}개 중 {current}번째"
+    "photoPosition": "사진 {total}개 중 {current}번째",
+    "editItem": "편집",
+    "deleteItem": "삭제",
+    "goBack": "뒤로"
   },
   "common": {
     "untitled": "제목 없음",

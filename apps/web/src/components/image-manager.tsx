@@ -352,12 +352,12 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 <TableCell suppressHydrationWarning>{image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
-                                        <Button variant="ghost" size="icon" onClick={() => startEdit(image)}>
+                                        <Button variant="ghost" size="icon" onClick={() => startEdit(image)} aria-label={t('aria.editItem')}>
                                             <Pencil className="h-4 w-4" />
                                         </Button>
                                         <AlertDialog>
                                             <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" size="icon">
+                                            <Button variant="destructive" size="icon" aria-label={t('aria.deleteItem')}>
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </AlertDialogTrigger>

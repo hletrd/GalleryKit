@@ -116,7 +116,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                             onClick={() => handleDelete(user.id, user.username)}
                                             className="text-destructive hover:text-destructive/90"
                                             disabled={user.username === 'admin'}
-                                            title={user.username === 'admin' ? t('users.cannotDeleteAdmin') : t('users.deleteTooltip')}
+                                            aria-label={t('aria.deleteItem')}
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </Button>

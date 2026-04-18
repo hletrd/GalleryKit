@@ -65,7 +65,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
         <div>
              <div className="flex items-center gap-4 mb-6">
                 <Link href={`/${locale}/admin/dashboard`}>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" aria-label={t('aria.goBack')}>
                         <ChevronLeft className="h-4 w-4" />
                     </Button>
                 </Link>
@@ -85,10 +85,10 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                             <TableCell>{tag.name}</TableCell>
                             <TableCell>{tag.count}</TableCell>
                             <TableCell className="text-right space-x-2">
-                                <Button variant="ghost" size="icon" onClick={() => setEditingTag(tag)}>
+                                <Button variant="ghost" size="icon" onClick={() => setEditingTag(tag)} aria-label={t('aria.editItem')}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(tag.id)}>
+                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(tag.id)} aria-label={t('aria.deleteItem')}>
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TableCell>

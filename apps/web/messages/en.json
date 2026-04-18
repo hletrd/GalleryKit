@@ -301,7 +301,10 @@
     "viewPhoto": "View photo: {title}",
     "selectImage": "Select image {title}",
     "removeTag": "Remove {tag} tag",
-    "photoPosition": "Photo {current} of {total}"
+    "photoPosition": "Photo {current} of {total}",
+    "editItem": "Edit",
+    "deleteItem": "Delete",
+    "goBack": "Go back"
   },
   "common": {
     "untitled": "Untitled",
