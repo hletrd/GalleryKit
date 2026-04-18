@@ -8,7 +8,7 @@ export default async function CategoriesPage() {
     const topics = await getTopicsWithAliases();
 
     return (
-        <div className="space-y-8 container mx-auto py-8">
+        <div className="max-w-4xl">
             <TopicManager initialTopics={topics} />
         </div>
     );

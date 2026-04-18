@@ -61,6 +61,7 @@ export function PasswordForm() {
                     minLength={12}
                 />
                 <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
+
             </div>
 
             <div className="space-y-2">
