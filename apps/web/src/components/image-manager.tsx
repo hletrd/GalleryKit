@@ -69,6 +69,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
 
     useEffect(() => {
         setImages(initialImages);
+        setSelectedIds(new Set());
     }, [initialImages]);
 
     const toggleSelectAll = () => {
