@@ -1,10 +1,10 @@
 {
-    "title": "Your Title",
-    "description": "Your Description",
+    "title": "GalleryKit",
+    "description": "A self-hosted photo gallery",
     "url": "https://example.com",
     "parent_url": "https://example.com",
     "locale": "en_US",
-    "author": "Your Name",
+    "author": "",
     "nav_title": "GalleryKit",
     "home_link": "/",
     "footer_text": "Powered by GalleryKit",
