@@ -83,7 +83,7 @@ export default async function TopicPage({
       redirect(`/${locale}/${topicData.slug}`);
   }
 
-  const [allTags, allTopics] = await Promise.all([getTags(topic), getTopics()]);
+  const allTags = await getTags(topic);
 
   // Parse and validate tag slugs
   const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
@@ -91,9 +91,10 @@ export default async function TopicPage({
 
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;
-  const [images, totalCount] = await Promise.all([
+  const [images, totalCount, allTopics] = await Promise.all([
     getImagesLite(topic, filterTags, PAGE_SIZE, 0),
     getImageCount(topic, filterTags),
+    getTopics(),
   ]);
   const hasMore = totalCount > PAGE_SIZE;
   const tags = allTags.filter(t => t.count > 1);
