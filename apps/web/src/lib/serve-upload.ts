@@ -66,7 +66,10 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
 
         // Determine content type (no SVG)
         const ext = path.extname(absolutePath).toLowerCase();
-        const contentType = CONTENT_TYPES[ext] || 'application/octet-stream';
+        const contentType = CONTENT_TYPES[ext];
+        if (!contentType) {
+            return new NextResponse('Unsupported file type', { status: 404 });
+        }
 
         // Create stream and convert to web ReadableStream for proper lifecycle management
         fileStream = createReadStream(absolutePath);
