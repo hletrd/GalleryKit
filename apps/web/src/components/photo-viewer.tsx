@@ -286,7 +286,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <Badge variant="outline">{image.topic}</Badge>
-                                    {image.capture_date && <span className="text-xs text-muted-foreground" suppressHydrationWarning>{new Date(image.capture_date).toLocaleDateString()}</span>}
+                                    {image.capture_date && <span className="text-xs text-muted-foreground" suppressHydrationWarning>{new Date(image.capture_date).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' })}</span>}
                                 </div>
 
                                 {image.tags && image.tags.length > 0 && (
@@ -462,7 +462,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         <p className="text-muted-foreground">{t('viewer.capturedAt')}</p>
                                         <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
                                             <Calendar className="w-3 h-3" />
-                                            {image.capture_date ? new Date(image.capture_date).toLocaleDateString() : t('common.unknown')}
+                                            {image.capture_date ? new Date(image.capture_date).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : t('common.unknown')}
                                         </p>
                                         {image.capture_date && (
                                             <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>

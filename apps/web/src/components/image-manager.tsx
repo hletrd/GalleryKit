@@ -367,7 +367,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                         />
                                     </div>
                                 </TableCell>
-                                <TableCell suppressHydrationWarning>{image.created_at ? new Date(image.created_at).toLocaleDateString() : '-'}</TableCell>
+                                <TableCell suppressHydrationWarning>{image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
                                         <Button variant="ghost" size="icon" onClick={() => startEdit(image)}>

@@ -19,7 +19,7 @@ type SheetState = 'collapsed' | 'peek' | 'expanded';
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
 export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false }: InfoBottomSheetProps) {
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const sheetRef = useRef<HTMLDivElement>(null);
     const touchStartY = useRef<number | null>(null);
@@ -170,7 +170,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                         {image.capture_date && (
                             <span className="flex items-center gap-1" suppressHydrationWarning>
                                 <Calendar className="w-3 h-3" />
-                                {new Date(image.capture_date).toLocaleDateString()}
+                                {new Date(image.capture_date).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' })}
                             </span>
                         )}
                     </div>
@@ -292,7 +292,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             <p className="text-muted-foreground text-xs mb-1">{t('viewer.capturedAt')}</p>
                             <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
                                 <Calendar className="w-3 h-3" />
-                                {image.capture_date ? new Date(image.capture_date).toLocaleDateString() : t('common.unknown')}
+                                {image.capture_date ? new Date(image.capture_date).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : t('common.unknown')}
                             </p>
                             {image.capture_date && (
                                 <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>

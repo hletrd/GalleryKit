@@ -25,7 +25,7 @@ interface AdminUserManagerProps {
 export function AdminUserManager({ users }: AdminUserManagerProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [open, setOpen] = useState(false);
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
 
     async function handleCreate(formData: FormData) {
         setIsCreating(true);
@@ -107,7 +107,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                         {user.username}
                                     </TableCell>
                                     <TableCell>
-                                        {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
+                                        {user.created_at ? new Date(user.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}
                                     </TableCell>
                                     <TableCell>
                                         <Button
