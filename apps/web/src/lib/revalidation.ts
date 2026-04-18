@@ -38,3 +38,14 @@ export function revalidateLocalizedPaths(...paths: string[]) {
         }
     }
 }
+
+export const ADMIN_SURFACE_REVALIDATION_PATHS = [
+    '/',
+    '/admin/dashboard',
+    '/admin/categories',
+    '/admin/tags',
+] as const;
+
+export function revalidateAdminSurfaces() {
+    revalidateLocalizedPaths(...ADMIN_SURFACE_REVALIDATION_PATHS);
+}

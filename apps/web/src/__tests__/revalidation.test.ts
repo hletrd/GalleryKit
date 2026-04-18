@@ -8,7 +8,12 @@ vi.mock('next/cache', () => ({
     revalidatePath,
 }));
 
-import { getLocalizedPathVariants, revalidateLocalizedPaths } from '@/lib/revalidation';
+import {
+    ADMIN_SURFACE_REVALIDATION_PATHS,
+    getLocalizedPathVariants,
+    revalidateAdminSurfaces,
+    revalidateLocalizedPaths,
+} from '@/lib/revalidation';
 
 describe('getLocalizedPathVariants', () => {
     it('expands unprefixed paths to every locale plus the original path', () => {
@@ -37,5 +42,30 @@ describe('revalidateLocalizedPaths', () => {
         expect(revalidatePath).toHaveBeenNthCalledWith(1, '/admin/dashboard');
         expect(revalidatePath).toHaveBeenNthCalledWith(2, '/en/admin/dashboard');
         expect(revalidatePath).toHaveBeenNthCalledWith(3, '/ko/admin/dashboard');
+    });
+
+    it('revalidates locale-aware admin restore surfaces', () => {
+        revalidateAdminSurfaces();
+
+        expect(ADMIN_SURFACE_REVALIDATION_PATHS).toEqual([
+            '/',
+            '/admin/dashboard',
+            '/admin/categories',
+            '/admin/tags',
+        ]);
+        expect(revalidatePath.mock.calls.map(([path]) => path)).toEqual([
+            '/',
+            '/en',
+            '/ko',
+            '/admin/dashboard',
+            '/en/admin/dashboard',
+            '/ko/admin/dashboard',
+            '/admin/categories',
+            '/en/admin/categories',
+            '/ko/admin/categories',
+            '/admin/tags',
+            '/en/admin/tags',
+            '/ko/admin/tags',
+        ]);
     });
 });

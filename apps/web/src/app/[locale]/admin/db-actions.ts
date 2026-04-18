@@ -12,8 +12,8 @@ import path from "path";
 import os from "os";
 import { randomUUID } from "crypto";
 import { isAdmin, getCurrentUser } from "@/app/actions";
-import { revalidatePath } from "next/cache";
 import { logAuditEvent } from "@/lib/audit";
+import { revalidateAdminSurfaces } from "@/lib/revalidation";
 
 function escapeCsvField(value: string): string {
     // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
@@ -318,7 +318,7 @@ async function runRestore(formData: FormData) {
             if (code === 0) {
                 const currentUser = await getCurrentUser();
                 logAuditEvent(currentUser?.id ?? null, 'db_restore', 'database', DB_NAME).catch(console.debug);
-                revalidatePath('/');
+                revalidateAdminSurfaces();
                 resolve({ success: true });
             } else {
                 resolve({ success: false, error: `mysql restore exited with code ${code}` });
