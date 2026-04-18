@@ -24,13 +24,16 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
     const [offset, setOffset] = useState(initialOffset);
     const sentinelRef = useRef<HTMLDivElement>(null);
     const loadingRef = useRef(false);
+    const queryVersionRef = useRef(0);
 
     const loadMore = useCallback(async () => {
         if (loadingRef.current || !hasMore) return;
         loadingRef.current = true;
         setLoading(true);
+        const version = queryVersionRef.current;
         try {
             const newImages = await loadMoreImages(topicSlug, tagSlugs, offset, limit);
+            if (version !== queryVersionRef.current) return;
             if (newImages.length < limit) {
                 setHasMore(false);
             }
@@ -42,8 +45,10 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
             console.error('Failed to load more images:', error);
             toast.error(t('home.loadMoreFailed'));
         } finally {
-            loadingRef.current = false;
-            setLoading(false);
+            if (version === queryVersionRef.current) {
+                loadingRef.current = false;
+                setLoading(false);
+            }
         }
     }, [hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore, t]);
 
@@ -54,6 +59,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
     const queryKey = `${topicSlug ?? ''}::${(tagSlugs ?? []).join(',')}`;
 
     useEffect(() => {
+        queryVersionRef.current++;
         loadingRef.current = false;
         setLoading(false);
         setOffset(initialOffset);

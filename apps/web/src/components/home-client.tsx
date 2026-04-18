@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { TagFilter } from '@/components/tag-filter';
 import { useTranslation } from "@/components/i18n-provider";
@@ -145,12 +145,20 @@ interface HomeClientProps {
 export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMore = false, totalCount }: HomeClientProps) {
     const { t, locale } = useTranslation();
     const [allImages, setAllImages] = useState(images);
+    const queryVersionRef = useRef(0);
     const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
-        setAllImages(prev => [...prev, ...newImages]);
+        setAllImages(prev => {
+            return [...prev, ...newImages];
+        });
     }, []);
 
     // Reset allImages when the images prop changes (e.g. topic/filter change)
-    useEffect(() => { setAllImages(images); }, [images]);
+    // Increment version so stale in-flight load-more responses are discarded
+    useEffect(() => {
+        queryVersionRef.current++;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing state from props is a valid pattern
+        setAllImages(images);
+    }, [images]);
 
     const [showBackToTop, setShowBackToTop] = useState(false);
     useEffect(() => {
@@ -278,7 +286,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                                             );
                                         })()}
                                     </picture>
-                                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-4 max-sm:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
+                                    <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/60 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
                                         <h3 className="text-white font-medium truncate">
                                             {displayTitle}
                                         </h3>
@@ -286,6 +294,12 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                                     </div>
                                 </div>
                             </Link>
+                            <div className="sm:hidden px-3 py-2 bg-card/80 backdrop-blur-sm">
+                                <h3 className="text-sm font-medium truncate">{displayTitle}</h3>
+                                <p className="text-xs text-muted-foreground truncate">
+                                    {(image.topic && topicsMap[image.topic]) || image.topic}
+                                </p>
+                            </div>
                         </div>
                     );
                 })}
