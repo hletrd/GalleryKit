@@ -27,6 +27,7 @@ RUN npm ci --omit=dev --workspace=apps/web
 
 FROM base AS builder
 WORKDIR /app
+# Full node_modules for build step (includes devDependencies needed by next build)
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 

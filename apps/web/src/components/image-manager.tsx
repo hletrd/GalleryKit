@@ -183,7 +183,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
         try {
             const res = await updateImageMetadata(editingImage.id, editTitle, editDescription);
             if (res.success) {
-                toast.success(t('imageManager.updateSuccess') || "Image updated");
+                toast.success(t('imageManager.updateSuccess'));
                 setImages(prev => prev.map(img => img.id === editingImage.id ? { ...img, title: editTitle, description: editDescription } : img));
                 setEditingImage(null);
             } else {
