@@ -238,7 +238,7 @@ async function reconcileLegacySchema(connection, dbName) {
             blur_data_url text,
             created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            processed boolean DEFAULT true,
+            processed boolean DEFAULT false,
             PRIMARY KEY (id),
             UNIQUE KEY images_share_key_unique (share_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
