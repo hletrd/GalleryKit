@@ -59,7 +59,10 @@ export function getClientIp(headerStore: HeaderLike): string {
 
     const ip = 'unknown';
     if (process.env.NODE_ENV === 'production') {
-        console.warn('[rate-limit] IP is "unknown" — set TRUST_PROXY=true if behind a reverse proxy');
+        const xff = headerStore.get('x-forwarded-for');
+        if (xff) {
+            console.warn('[rate-limit] X-Forwarded-For present but TRUST_PROXY is not set — rate limiting uses "unknown" IP. Set TRUST_PROXY=true if behind a reverse proxy.');
+        }
     }
     return ip;
 }
