@@ -103,7 +103,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                 <PhotoViewer
                     images={group.images}
                     initialImageId={selectedImage.id}
-                    tags={[]}
+                    tags={selectedImage.tags ?? []}
                     isSharedView
                     syncPhotoQueryBasePath={localizePath(locale, `/g/${key}`)}
                 />

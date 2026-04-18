@@ -438,9 +438,24 @@ export async function getSharedGroup(
     .orderBy(asc(sharedGroupImages.position), asc(sharedGroupImages.imageId))
     .limit(100);
 
+    // Fetch tags for each image in the group
+    const imagesWithTags = await Promise.all(
+        groupImages.map(async (img) => {
+            const imageTagsResult = await db.select({
+                slug: tags.slug,
+                name: tags.name,
+            })
+            .from(imageTags)
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(eq(imageTags.imageId, img.id));
+
+            return { ...img, tags: imageTagsResult };
+        })
+    );
+
     return {
         ...group,
-        images: groupImages
+        images: imagesWithTags
     };
 }
 
