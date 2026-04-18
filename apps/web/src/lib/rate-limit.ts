@@ -57,7 +57,11 @@ export function getClientIp(headerStore: HeaderLike): string {
         }
     }
 
-    return 'unknown';
+    const ip = 'unknown';
+    if (process.env.NODE_ENV === 'production') {
+        console.warn('[rate-limit] IP is "unknown" — set TRUST_PROXY=true if behind a reverse proxy');
+    }
+    return ip;
 }
 
 export function pruneLoginRateLimit(now: number) {
