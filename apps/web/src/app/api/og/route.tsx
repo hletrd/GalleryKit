@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
     }
 
     const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.slice(0, 100)) : [];
+    const cacheControl = 'public, max-age=3600, stale-while-revalidate=86400';
 
     return new ImageResponse(
       (
