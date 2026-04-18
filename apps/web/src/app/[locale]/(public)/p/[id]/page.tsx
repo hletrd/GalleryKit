@@ -89,7 +89,10 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     const { id } = await params;
     const locale = await getLocale();
 
-    // Validate that id is a valid positive integer
+    // Validate that id is a purely numeric positive integer
+    if (!/^\d+$/.test(id)) {
+        return notFound();
+    }
     const imageId = parseInt(id, 10);
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
         return notFound();
