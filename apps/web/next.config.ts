@@ -54,6 +54,31 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ['drizzle-orm', 'sharp'],
   async headers() {
+    const isDev = process.env.NODE_ENV === 'development';
+
+    const cspValue = isDev
+      ? [
+          "default-src 'self'",
+          "script-src 'unsafe-inline' 'unsafe-eval' 'self'",
+          "style-src 'unsafe-inline' 'self'",
+          `img-src ${cspImgSrc.join(' ')}`,
+          "font-src 'self' data:",
+          "connect-src 'self' ws: wss:",
+        ].join('; ')
+      : [
+          "default-src 'self'",
+          "script-src 'self' 'strict-dynamic' 'unsafe-inline' https://www.googletagmanager.com",
+          "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+          `img-src ${cspImgSrc.join(' ')}`,
+          "font-src 'self' data:",
+          "connect-src 'self' https://www.google-analytics.com",
+          "frame-ancestors 'self'",
+          "base-uri 'self'",
+          "form-action 'self'",
+          "object-src 'none'",
+          "manifest-src 'self'",
+        ].join('; ');
+
     return [
       {
         source: '/(.*)',
@@ -62,23 +87,8 @@ const nextConfig: NextConfig = {
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' },
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'strict-dynamic' 'unsafe-inline' https://www.googletagmanager.com",
-              "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-              `img-src ${cspImgSrc.join(' ')}`,
-              "font-src 'self' data:",
-              "connect-src 'self' https://www.google-analytics.com",
-              "frame-ancestors 'self'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "object-src 'none'",
-              "manifest-src 'self'",
-            ].join('; '),
-          },
+          ...(!isDev ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' }] : []),
+          { key: 'Content-Security-Policy', value: cspValue },
         ],
       },
     ];
