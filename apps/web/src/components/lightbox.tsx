@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import FocusTrap from 'focus-trap-react';
 import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -137,22 +137,26 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         showControls();
     }, [showControls]);
 
-    const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
-    const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
+    const { avifSrcSet, webpSrcSet, jpegSrc } = useMemo(() => {
+        const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
+        const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
 
-    const avifSrcSet = baseAvif
-        ? [640, 1536, 2048, 4096]
-              .map((w) => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`)
-              .join(', ')
-        : undefined;
+        const avifSrcSet = baseAvif
+            ? [640, 1536, 2048, 4096]
+                  .map((w) => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`)
+                  .join(', ')
+            : undefined;
 
-    const webpSrcSet = baseWebp
-        ? [640, 1536, 2048, 4096]
-              .map((w) => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`)
-              .join(', ')
-        : undefined;
+        const webpSrcSet = baseWebp
+            ? [640, 1536, 2048, 4096]
+                  .map((w) => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`)
+                  .join(', ')
+            : undefined;
 
-    const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
+        const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
+
+        return { avifSrcSet, webpSrcSet, jpegSrc };
+    }, [image.filename_avif, image.filename_webp, image.filename_jpeg]);
 
     const transitionStyle = shouldReduceMotion
         ? {}
