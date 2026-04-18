@@ -126,9 +126,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [navigate, showLightbox]);
 
-    if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
-
     const srcSetData = useMemo(() => {
+        if (!image) return null;
         const getAltText = (img: ImageDetail) => {
             if (img.description && img.description.trim()) return img.description;
             if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
@@ -174,7 +173,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 />
             </picture>
         );
-    }, [image.id, image.filename_webp, image.filename_avif, image.width]);
+    }, [image, t]);
+
+    if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
     return (
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">

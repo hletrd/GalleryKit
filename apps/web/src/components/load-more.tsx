@@ -45,7 +45,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
             loadingRef.current = false;
             setLoading(false);
         }
-    }, [hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore]);
+    }, [hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore, t]);
 
     // Use a ref for the loadMore callback to avoid re-creating the observer
     // on every state change (loading/offset updates cause callback churn).

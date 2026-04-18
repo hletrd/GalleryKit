@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 
-const BASE = 'http://localhost:3000/en';
+const BASE = process.env.E2E_BASE_URL || 'http://localhost:3000/en';
 
 test.describe('Nav visual checks', () => {
   test('mobile nav collapsed screenshot', async ({ page }) => {
