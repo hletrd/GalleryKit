@@ -433,6 +433,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
             if (ref === 'S' || ref === 'W') {
                 dd = dd * -1;
             }
+            if (Math.abs(dd) > maxDegrees) return null;
             return dd;
         };
 
