@@ -84,12 +84,20 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     }
 
     if (selectedImage) {
+        const isTitleFilename = selectedImage.title && /\.[a-z0-9]{3,4}$/i.test(selectedImage.title);
+        const displayTitle = selectedImage.title && !isTitleFilename ? selectedImage.title : t('photo');
+        const subtitle = selectedImage.description || t('viewCount', { count: group.images.length });
+
         return (
             <>
                 <div className="flex items-center justify-between mb-4 px-4 pt-4">
                     <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                         <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                     </Link>
+                </div>
+                <div className="px-4 pb-3">
+                    <h1 className="text-2xl font-semibold tracking-tight">{displayTitle}</h1>
+                    <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
                 </div>
                 <PhotoViewer
                     images={group.images}

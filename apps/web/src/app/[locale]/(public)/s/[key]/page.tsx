@@ -62,12 +62,20 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
         notFound();
     }
 
+    const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
+    const displayTitle = image.title && !isTitleFilename ? image.title : t('sharedPhoto');
+    const subtitle = image.description || `${siteConfig.nav_title || siteConfig.title} · ${t('sharedPhoto')}`;
+
     return (
         <>
             <div className="flex items-center justify-between mb-4 px-4 pt-4">
                 <Link href={`/${locale}`} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
                     <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                 </Link>
+            </div>
+            <div className="px-4 pb-3">
+                <h1 className="text-2xl font-semibold tracking-tight">{displayTitle}</h1>
+                <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
             </div>
             <PhotoViewer
                 images={[image]}
