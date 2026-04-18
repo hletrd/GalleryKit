@@ -15,7 +15,7 @@ export function Search() {
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
-    const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_webp: string; filename_jpeg: string; blur_data_url: string | null; width: number; height: number; topic: string; camera_model: string | null }[]>([]);
+    const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_webp: string; filename_jpeg: string; width: number; height: number; topic: string; camera_model: string | null }[]>([]);
     const [loading, setLoading] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);

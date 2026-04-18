@@ -118,7 +118,6 @@ interface GalleryImage {
     height: number;
     title: string | null;
     description: string | null;
-    blur_data_url: string | null;
     tag_names?: string | null;
     topic?: string;
     user_filename?: string | null;
@@ -221,15 +220,9 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                         <div
                             key={image.id}
                             className={cn(
-                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2",
-                                image.blur_data_url && "skeleton-shimmer"
+                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2"
                             )}
-                            style={image.blur_data_url ? {
-                                backgroundImage: `url(${image.blur_data_url})`,
-                                backgroundSize: 'cover',
-                                backgroundPosition: 'center',
-                                containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
-                            } : {
+                            style={{
                                 aspectRatio: `${image.width} / ${image.height}`,
                                 backgroundColor: 'hsl(var(--muted))',
                                 containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,

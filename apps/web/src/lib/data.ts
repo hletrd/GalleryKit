@@ -36,7 +36,8 @@ const selectFields = {
     bit_depth: images.bit_depth,
     original_format: images.original_format,
     original_file_size: images.original_file_size,
-    blur_data_url: images.blur_data_url,
+    // blur_data_url excluded from selectFields — fetched only in individual image
+    // queries to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
 };
 
 // Admin-only fields — extend selectFields with PII columns.
@@ -221,6 +222,7 @@ export async function getImage(id: number) {
     // Only return processed images (processed is true OR null/undefined for legacy)
     const [image] = await db.select({
         ...selectFields,
+        blur_data_url: images.blur_data_url,
         topic_label: topics.label
     })
         .from(images)
@@ -325,7 +327,10 @@ export async function getImageByShareKey(key: string) {
         return null;
     }
 
-    const result = await db.select(selectFields)
+    const result = await db.select({
+        ...selectFields,
+        blur_data_url: images.blur_data_url,
+    })
         .from(images)
         .where(
             and(
@@ -383,7 +388,10 @@ export async function getSharedGroup(
             .catch(err => console.debug('view_count increment failed:', err.message));
     }
 
-    const groupImages = await db.select(selectFields)
+    const groupImages = await db.select({
+        ...selectFields,
+        blur_data_url: images.blur_data_url,
+    })
     .from(sharedGroupImages)
     .innerJoin(images, eq(sharedGroupImages.imageId, images.id))
     .where(
