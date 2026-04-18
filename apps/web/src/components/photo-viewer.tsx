@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -126,6 +126,54 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
+    const srcSetData = useMemo(() => {
+        const getAltText = (img: ImageDetail) => {
+            if (img.description && img.description.trim()) return img.description;
+            if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
+            if (img.tags && img.tags.length > 0) return img.tags.map((t: TagInfo) => t.name).join(', ');
+            return t('common.photo');
+        };
+        const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
+        const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
+
+        if (!baseWebp || !baseAvif) {
+            return (
+                <Image
+                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                    alt={getAltText(image)}
+                    width={image.width}
+                    height={image.height}
+                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
+                    priority
+                />
+            );
+        }
+
+        return (
+            <picture className="w-full h-full flex items-center justify-center">
+                <source
+                    type="image/avif"
+                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
+                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
+                />
+                <source
+                    type="image/webp"
+                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
+                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
+                />
+                <img
+                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                    alt={getAltText(image)}
+                    width={image.width}
+                    height={image.height}
+                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
+                    decoding="sync"
+                    loading="eager"
+                />
+            </picture>
+        );
+    }, [image.id, image.filename_webp, image.filename_avif, image.width]);
+
     return (
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
@@ -216,55 +264,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         >
                             <div className="w-full h-full flex items-center justify-center">
                                 <ImageZoom className="w-full h-full flex items-center justify-center">
-                                    {(() => {
-                                        const getAltText = (img: ImageDetail) => {
-                                            if (img.description && img.description.trim()) return img.description;
-                                            if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
-                                            if (img.tags && img.tags.length > 0) return img.tags.map((t: TagInfo) => t.name).join(', ');
-                                            return t('common.photo');
-                                        };
-                                        // Extract base UUID from filename
-                                        const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
-                                        const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
-
-                                        // Fallback to basic Image if filenames missing
-                                        if (!baseWebp || !baseAvif) {
-                                            return (
-                                                <Image
-                                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                                    alt={getAltText(image)}
-                                                    width={image.width}
-                                                    height={image.height}
-                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
-                                                    priority
-                                                />
-                                            );
-                                        }
-
-                                        return (
-                                            <picture className="w-full h-full flex items-center justify-center">
-                                                <source
-                                                    type="image/avif"
-                                                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
-                                                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
-                                                />
-                                                <source
-                                                    type="image/webp"
-                                                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
-                                                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
-                                                />
-                                                <img
-                                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                                    alt={getAltText(image)}
-                                                    width={image.width}
-                                                    height={image.height}
-                                                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
-                                                    decoding="sync"
-                                                    loading="eager"
-                                                />
-                                            </picture>
-                                        );
-                                    })()}
+                                    {srcSetData}
                                 </ImageZoom>
                             </div>
                         </motion.div>
