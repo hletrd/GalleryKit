@@ -270,6 +270,7 @@
     "invalidAliasFormat": "별칭 형식이 올바르지 않습니다.",
     "aliasConflictsWithTopic": "이미 사용 중인 슬러그입니다.",
     "aliasAlreadyExists": "이미 존재하는 별칭입니다.",
+    "topicNotFound": "참조된 토픽이 존재하지 않습니다.",
     "invalidAlias": "잘못된 별칭입니다"
   },
   "aria": {

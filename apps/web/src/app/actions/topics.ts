@@ -242,6 +242,9 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
             return { error: t('aliasAlreadyExists') };
         }
+        if (isMySQLError(e) && e.code === 'ER_NO_REFERENCED_ROW_2') {
+            return { error: t('topicNotFound') };
+        }
         return { error: t('invalidAliasFormat') };
     }
 }

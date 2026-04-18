@@ -270,6 +270,7 @@
     "invalidAliasFormat": "Invalid alias format.",
     "aliasConflictsWithTopic": "This slug is already taken.",
     "aliasAlreadyExists": "This alias already exists.",
+    "topicNotFound": "Referenced topic does not exist.",
     "invalidAlias": "Invalid alias"
   },
   "aria": {
