@@ -412,6 +412,9 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     }
 
     try {
+        const [existingImage] = await db.select({ topic: images.topic })
+            .from(images).where(eq(images.id, id));
+
         const [result] = await db.update(images)
             .set({
                 title: title?.trim() || null,
@@ -424,7 +427,8 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             return { error: 'Image not found' };
         }
 
-        revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/');
+        const topicPath = existingImage?.topic ? `/${existingImage.topic}` : undefined;
+        revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/', ...(topicPath ? [topicPath] : []));
         return { success: true };
     } catch (e) {
         console.error("Failed to update image metadata", e);
