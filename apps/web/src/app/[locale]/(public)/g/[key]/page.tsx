@@ -128,7 +128,10 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                             href={`/${locale}/g/${key}?photoId=${image.id}`}
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20"
                         >
-                             <Image
+                            <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
+                                <p className="text-white text-sm font-medium truncate">{altText}</p>
+                            </div>
+                            <Image
                                 src={imageUrl(`/uploads/webp/${image.filename_webp.replace('.webp', '_1536.webp')}`)}
                                 alt={altText}
                                 width={image.width}
@@ -136,11 +139,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
                                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                             />
-                            {(image.title && !isTitleFilename) && (
-                                <div className="sm:hidden px-2 py-1.5 text-xs text-muted-foreground truncate">
-                                    {image.title}
-                                </div>
-                            )}
                         </Link>
                     );
                 })}

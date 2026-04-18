@@ -263,7 +263,8 @@
     "photo": "Photo",
     "empty": "No photos in this group.",
     "notFound": "Shared album not found.",
-    "viewCount": "{count} shared photos"
+    "viewCount": "{count} shared photos",
+    "viewGallery": "View Gallery"
   },
   "serverActions": {
     "unauthorized": "Not authorized",
