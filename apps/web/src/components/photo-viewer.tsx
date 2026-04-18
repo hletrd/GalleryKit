@@ -55,9 +55,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     // Update document.title when navigating between photos
     useEffect(() => {
+        const previousTitle = document.title;
         if (image?.title) {
             document.title = `${image.title} — ${siteConfig.nav_title}`;
         }
+        return () => { document.title = previousTitle; };
     }, [image?.id, image?.title]);
 
     const showInfo = isPinned || timerShowInfo;
