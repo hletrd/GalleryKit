@@ -249,7 +249,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 "grid gap-8 flex-1 transition-all duration-500 ease-in-out photo-viewer-grid",
                 showInfo ? "grid-cols-1 lg:grid-cols-[1fr_350px]" : "grid-cols-1"
             )}>
-                {/* Main Image Area */}
                 <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[500px] group">
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}

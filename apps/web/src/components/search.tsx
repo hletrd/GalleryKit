@@ -54,11 +54,9 @@ export function Search() {
         };
     }, [query, performSearch]);
 
-    // Keyboard shortcut: Cmd/Ctrl + K to toggle search
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                // Don't toggle search when user is typing in an input/textarea
                 if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
                 e.preventDefault();
                 setIsOpen(prev => !prev);
@@ -103,13 +101,11 @@ export function Search() {
 
     return (
         <>
-            {/* Backdrop */}
             <div
                 className="fixed inset-0 bg-black/50 z-40"
                 onClick={() => setIsOpen(false)}
                 aria-hidden="true"
             />
-            {/* Search Panel */}
             <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
             <div role="dialog" aria-modal="true" aria-label={t('aria.searchPhotos')} className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]">
                 <div className="mx-auto h-full sm:h-auto sm:max-w-xl bg-card sm:border sm:rounded-xl shadow-2xl overflow-hidden flex flex-col">

@@ -66,7 +66,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
 
     const t = await getTranslations('sharedGroup');
 
-    // Validate photoId is a valid positive integer
     let photoId: number | null = null;
     if (photoIdParam) {
         const parsed = parseInt(photoIdParam, 10);
@@ -102,7 +101,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         );
     }
 
-    // Render Grid
     return (
         <div className="container mx-auto px-4 py-8">
             <div className="flex items-center justify-between mb-6">

@@ -13,7 +13,6 @@ import { imageUrl } from '@/lib/image-url';
 function reorderForColumns<T extends { id: number; width?: number; height?: number }>(items: T[], columnCount: number): T[] {
     if (columnCount <= 1 || items.length === 0) return items;
 
-    // Initialize columns with heights
     const columns: { items: T[]; height: number }[] =
         Array.from({ length: columnCount }, () => ({ items: [], height: 0 }));
 
@@ -24,7 +23,6 @@ function reorderForColumns<T extends { id: number; width?: number; height?: numb
             ? item.height / item.width
             : 1;
 
-        // Find the shortest column
         let shortest = 0;
         for (let i = 1; i < columns.length; i++) {
             if (columns[i].height < columns[shortest].height) {
@@ -55,7 +53,6 @@ function reorderForColumns<T extends { id: number; width?: number; height?: numb
         cssColSizes.push(i < extras ? basePerCol + 1 : basePerCol);
     }
 
-    // Build result array in the order CSS columns expects
     const result: T[] = [];
     for (let col = 0; col < columnCount; col++) {
         const count = cssColSizes[col];
@@ -320,7 +317,6 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                     )}
                 </div>
             )}
-            {/* Back to top button — visible after scrolling down */}
             <button
                 onClick={() => {
                         const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

@@ -156,7 +156,6 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
     const histogramData = histogramState.imageUrl === imageUrl ? histogramState.data : null;
     const loading = Boolean(imageUrl) && histogramState.imageUrl !== imageUrl;
 
-    // Create worker once, terminate on unmount
     useEffect(() => {
         workerRef.current = new Worker('/histogram-worker.js?v=1');
         return () => {
