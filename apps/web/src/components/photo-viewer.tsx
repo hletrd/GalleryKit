@@ -198,7 +198,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 showInfo ? "grid-cols-1 lg:grid-cols-[1fr_350px]" : "grid-cols-1"
             )}>
                 {/* Main Image Area */}
-                <div className="relative flex items-center justify-center bg-black/5 rounded-xl border p-2 overflow-hidden min-h-[500px] group">
+                <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[500px] group">
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
@@ -270,7 +270,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         </motion.div>
                     </AnimatePresence>
                     {images.length > 1 && (
-                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10">
+                        <div role="status" aria-live="polite" aria-label={t('aria.photoPosition', { current: currentIndex + 1, total: images.length })} className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10">
                             {currentIndex + 1} / {images.length}
                         </div>
                     )}
