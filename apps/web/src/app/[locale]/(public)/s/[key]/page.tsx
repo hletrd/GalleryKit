@@ -81,7 +81,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
             <PhotoViewer
                 images={[image]}
                 initialImageId={image.id}
-                tags={[]}
+                tags={image.tags ?? []}
                 prevId={null}
                 nextId={null}
                 isSharedView
