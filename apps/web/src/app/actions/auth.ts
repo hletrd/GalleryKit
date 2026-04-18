@@ -10,7 +10,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, checkRateLimit } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit } from '@/lib/rate-limit';
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, recordFailedLoginAttempt } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
