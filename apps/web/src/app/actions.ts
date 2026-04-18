@@ -11,7 +11,7 @@ export { uploadImages, deleteImage, deleteImages, updateImageMetadata } from './
 export { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias } from './actions/topics';
 
 // Tags
-export { getAdminTags, updateTag, deleteTag, addTagToImage, removeTagFromImage, batchAddTags } from './actions/tags';
+export { getAdminTags, updateTag, deleteTag, addTagToImage, removeTagFromImage, batchAddTags, batchUpdateImageTags } from './actions/tags';
 
 // Sharing
 export { createPhotoShareLink, createGroupShareLink, revokePhotoShareLink, deleteGroupShareLink } from './actions/sharing';
