@@ -10,8 +10,8 @@ import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit } from '@/lib/rate-limit';
-import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, recordFailedLoginAttempt } from '@/lib/auth-rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit } from '@/lib/rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 
@@ -102,6 +102,18 @@ export async function login(prevState: { error?: string } | null, formData: Form
         // DB unavailable — rely on in-memory Map
     }
 
+    // ── Increment rate limit BEFORE the expensive Argon2 verify (TOCTOU fix) ──
+    // Without this, concurrent requests all pass the check before any of them
+    // record the failed attempt, allowing burst brute-force attacks.
+    try {
+        limitData.count += 1;
+        limitData.lastAttempt = now;
+        loginRateLimit.set(ip, limitData);
+        await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+    } catch (err) {
+        console.debug('Failed to pre-increment login rate limit:', err);
+    }
+
     try {
         const [user] = await db.select({
             id: adminUsers.id,
@@ -117,15 +129,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
         const verified = await argon2.verify(hashToCheck, password);
 
         if (!user || !verified) {
-            try {
-                await recordFailedLoginAttempt(ip, now);
-            } catch (err) {
-                console.debug('Failed to persist login rate limit attempt:', err);
-            }
+            // Rate limit already incremented above — no need to record again.
             logAuditEvent(null, 'login_failure', 'user', username, ip).catch(console.debug);
             return { error: 'Invalid credentials' };
         }
 
+        // Login succeeded — roll back the pre-incremented rate limit counter
         try {
             await clearSuccessfulLoginAttempts(ip);
         } catch (err) {
@@ -167,7 +176,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
         } catch (e) {
             if (isRedirectError(e)) throw e;
             console.error("Session creation failed after successful auth", e);
-            return { error: 'Login succeeded but session creation failed. Please try again.' };
+            return { error: 'Authentication failed. Please try again.' };
         }
     } catch (e) {
         if (isRedirectError(e)) throw e;
