@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { createAdminUser, deleteAdminUser } from "@/app/actions";
 import { toast } from "sonner";
 import { Trash2, UserPlus } from "lucide-react";
@@ -26,6 +27,7 @@ interface AdminUserManagerProps {
 export function AdminUserManager({ users }: AdminUserManagerProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [open, setOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<{ id: number; username: string } | null>(null);
     const { t, locale } = useTranslation();
     const router = useRouter();
 
@@ -43,9 +45,8 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
         }
     }
 
-    async function handleDelete(id: number, username: string) {
-        if (!confirm(t('users.deleteConfirm', { username }))) return;
-
+    async function handleDelete(id: number) {
+        setDeleteTarget(null);
         const result = await deleteAdminUser(id);
         if (result.error) {
             toast.error(result.error);
@@ -82,7 +83,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                             </div>
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">{t('users.password')}</label>
-                                <Input name="password" type="password" placeholder={t('users.passwordPlaceholder')} required minLength={12} />
+                                <Input name="password" type="password" placeholder={t('users.password')} required minLength={12} />
                                 <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
                             </div>
                             <DialogFooter>
@@ -117,7 +118,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            onClick={() => handleDelete(user.id, user.username)}
+                                            onClick={() => setDeleteTarget({ id: user.id, username: user.username })}
                                             className="text-destructive hover:text-destructive/90"
                                             disabled={user.username === 'admin'}
                                             aria-label={t('aria.deleteItem')}
@@ -138,6 +139,20 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                     </Table>
                 </div>
             </CardContent>
+            <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('users.deleteConfirm', { username: deleteTarget?.username ?? '' })}</AlertDialogTitle>
+                        <AlertDialogDescription>{t('db.dangerZoneDesc')}</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => deleteTarget && handleDelete(deleteTarget.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            {t('imageManager.delete')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </Card>
     );
 }
