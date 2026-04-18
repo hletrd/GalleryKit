@@ -267,6 +267,7 @@ export async function deleteImage(id: number) {
     // Get image to find filenames — select only needed columns
     const [image] = await db.select({
         id: images.id,
+        topic: images.topic,
         filename_original: images.filename_original,
         filename_webp: images.filename_webp,
         filename_avif: images.filename_avif,
@@ -283,6 +284,8 @@ export async function deleteImage(id: number) {
     ) {
          return { error: 'Invalid filename in database record' };
     }
+
+    const imageTopic = image.topic;
 
     // US-001: Remove from processing queue so the queue detects deletion
     const queueState = getProcessingQueueState();
@@ -306,7 +309,7 @@ export async function deleteImage(id: number) {
         console.error("Error deleting files");
     }
 
-    revalidateLocalizedPaths('/', '/admin/dashboard');
+    revalidateLocalizedPaths('/', `/p/${id}`, `/${imageTopic}`, '/admin/dashboard');
 
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
@@ -338,6 +341,7 @@ export async function deleteImages(ids: number[]) {
     // Fetch all images in one query — select only needed columns
     const imageRecords = await db.select({
         id: images.id,
+        topic: images.topic,
         filename_original: images.filename_original,
         filename_webp: images.filename_webp,
         filename_avif: images.filename_avif,
@@ -394,7 +398,17 @@ export async function deleteImages(ids: number[]) {
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount }).catch(console.debug);
 
-    revalidateLocalizedPaths('/', '/admin/dashboard');
+    const affectedTopics = new Set(foundIds.length > 0
+        ? imageRecords.filter(r => foundIdSet.has(r.id)).map(r => r.topic)
+        : []
+    );
+
+    revalidateLocalizedPaths(
+        '/',
+        '/admin/dashboard',
+        ...foundIds.map(id => `/p/${id}`),
+        ...[...affectedTopics].map(topic => `/${topic}`)
+    );
     return { success: true, count: successCount, errors: errorCount };
 }
 
