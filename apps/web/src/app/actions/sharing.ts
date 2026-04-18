@@ -90,9 +90,10 @@ export async function createGroupShareLink(imageIds: number[]) {
                 await tx.insert(sharedGroupImages)
                     .ignore()
                     .values(
-                        uniqueImageIds.map((imgId) => ({
+                        uniqueImageIds.map((imgId, position) => ({
                             groupId: groupId,
                             imageId: imgId,
+                            position,
                         }))
                     );
 
