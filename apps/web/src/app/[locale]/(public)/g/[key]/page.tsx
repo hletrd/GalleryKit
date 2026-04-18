@@ -96,6 +96,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     images={group.images}
                     initialImageId={selectedImage.id}
                     tags={[]}
+                    isSharedView
                 />
             </>
         );

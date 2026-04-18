@@ -75,6 +75,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 tags={[]}
                 prevId={null}
                 nextId={null}
+                isSharedView
             />
         </>
     );

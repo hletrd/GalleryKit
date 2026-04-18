@@ -31,9 +31,10 @@ interface PhotoViewerProps {
     prevId?: number | null;
     nextId?: number | null;
     canShare?: boolean;
+    isSharedView?: boolean;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isSharedView = false }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -178,12 +179,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     return (
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
-                <Link href={`/${locale}/${image.topic}`}>
-                    <Button variant="ghost" className="pl-0 gap-2">
-                        <ArrowLeft className="h-4 w-4" />
-                        {t('viewer.backTo', { topic: image.topic_label || image.topic })}
-                    </Button>
-                </Link>
+                {!isSharedView && (
+                    <Link href={`/${locale}/${image.topic}`}>
+                        <Button variant="ghost" className="pl-0 gap-2">
+                            <ArrowLeft className="h-4 w-4" />
+                            {t('viewer.backTo', { topic: image.topic_label || image.topic })}
+                        </Button>
+                    </Link>
+                )}
 
                 <div className="flex gap-2">
                     <LightboxTrigger onClick={() => setShowLightbox(true)} />
