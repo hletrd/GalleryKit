@@ -185,6 +185,8 @@
     "metaTitle": "사진 {count}장",
     "noImages": "사진이 없습니다.",
     "clearFilter": "필터 해제",
+    "loadingMore": "더 많은 이미지 로드 중…",
+    "loadMoreFailed": "더 많은 이미지를 로드할 수 없습니다",
     "allTags": "전체",
     "tagFilter": "태그 필터",
     "noResultsHint": "필터를 줄여 보세요",
@@ -295,7 +297,11 @@
     "histogramLabel": "컬러 히스토그램, {mode} 모드",
     "photoNavStatus": "사진 탐색 가능",
     "mainNav": "메인 내비게이션",
-    "adminNav": "관리자 내비게이션"
+    "adminNav": "관리자 내비게이션",
+    "viewPhoto": "사진 보기: {title}",
+    "selectImage": "이미지 선택 {title}",
+    "removeTag": "{tag} 태그 제거",
+    "photoPosition": "사진 {total}개 중 {current}번째"
   },
   "common": {
     "untitled": "제목 없음",

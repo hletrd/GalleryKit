@@ -185,6 +185,8 @@
     "metaTitle": "{count} photos",
     "noImages": "No photos.",
     "clearFilter": "Clear",
+    "loadingMore": "Loading more images…",
+    "loadMoreFailed": "Failed to load more images",
     "allTags": "All",
     "tagFilter": "Filter by tag",
     "noResultsHint": "Try fewer filters",
@@ -295,7 +297,11 @@
     "histogramLabel": "Color histogram, {mode} mode",
     "photoNavStatus": "Photo navigation available",
     "mainNav": "Main navigation",
-    "adminNav": "Admin navigation"
+    "adminNav": "Admin navigation",
+    "viewPhoto": "View photo: {title}",
+    "selectImage": "Select image {title}",
+    "removeTag": "Remove {tag} tag",
+    "photoPosition": "Photo {current} of {total}"
   },
   "common": {
     "untitled": "Untitled",

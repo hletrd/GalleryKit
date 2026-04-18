@@ -230,7 +230,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                                 containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
                             }}
                         >
-                            <Link href={`/${locale}/p/${image.id}`} aria-label={`View photo: ${displayTitle}`}>
+                            <Link href={`/${locale}/p/${image.id}`} aria-label={t('aria.viewPhoto', { title: displayTitle })}>
                                 <div className="relative w-full">
                                     <picture>
                                         {(() => {

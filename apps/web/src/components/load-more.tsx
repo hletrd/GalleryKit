@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadMoreImages } from '@/app/actions';
 import { Loader2 } from 'lucide-react';
+import { useTranslation } from '@/components/i18n-provider';
 
 type LoadMoreResult = Awaited<ReturnType<typeof loadMoreImages>>;
 
@@ -16,6 +17,7 @@ interface LoadMoreProps {
 }
 
 export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
+    const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [hasMore, setHasMore] = useState(initialHasMore);
     const [offset, setOffset] = useState(initialOffset);
@@ -81,7 +83,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
                 </div>
             )}
             <div className="sr-only" aria-live="polite" aria-atomic="true">
-                {loading ? 'Loading more images…' : ''}
+                {loading ? t('home.loadingMore') : ''}
             </div>
         </>
     );

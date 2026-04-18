@@ -296,7 +296,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                                         checked={selectedIds.has(image.id)}
                                         onChange={() => toggleSelect(image.id)}
-                                        aria-label={`Select image ${image.title || image.id}`}
+                                        aria-label={t('aria.selectImage', { title: image.title || image.id })}
                                     />
                                 </TableCell>
                                 <TableCell>
@@ -412,17 +412,17 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
             <Dialog open={!!editingImage} onOpenChange={(open) => !open && setEditingImage(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{t('imageManager.editTitle') || 'Edit Metadata'}</DialogTitle>
-                        <DialogDescription>{t('imageManager.editDesc') || 'Update the title and description for this image.'}</DialogDescription>
+                        <DialogTitle>{t('imageManager.editTitle')}</DialogTitle>
+                        <DialogDescription>{t('imageManager.editDesc')}</DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
-                            <Label htmlFor="title">{t('imageManager.titleField') || 'Title'}</Label>
-                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField') || 'Title'} />
+                            <Label htmlFor="title">{t('imageManager.titleField')}</Label>
+                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField')} />
                         </div>
                         <div className="grid gap-2">
-                            <Label htmlFor="description">{t('imageManager.descField') || 'Description'}</Label>
-                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField') || 'Description'} />
+                            <Label htmlFor="description">{t('imageManager.descField')}</Label>
+                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField')} />
                         </div>
                     </div>
                     <DialogFooter>
