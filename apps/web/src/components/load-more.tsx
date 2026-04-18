@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadMoreImages } from '@/app/actions';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 
 type LoadMoreResult = Awaited<ReturnType<typeof loadMoreImages>>;
@@ -39,6 +40,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
             }
         } catch (error) {
             console.error('Failed to load more images:', error);
+            toast.error(t('home.loadMoreFailed'));
         } finally {
             loadingRef.current = false;
             setLoading(false);

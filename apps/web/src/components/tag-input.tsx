@@ -140,6 +140,9 @@ export function TagInput({
                 <input
                     ref={inputRef}
                     type="text"
+                    role="combobox"
+                    aria-expanded={isOpen && !!(inputValue || filteredTags.length > 0)}
+                    aria-controls="tag-suggestions"
                     className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
                     placeholder={selectedTags.length === 0 ? placeholder : ''}
                     value={inputValue}
@@ -154,7 +157,7 @@ export function TagInput({
 
             {isOpen && (inputValue || filteredTags.length > 0) && (
                 <div className="absolute top-full left-0 w-full mt-1 z-50 rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-in fade-in-0 zoom-in-95">
-                    <div className="max-h-[300px] overflow-auto p-1">
+                    <div className="max-h-[300px] overflow-auto p-1" id="tag-suggestions" role="listbox">
                         {filteredTags.length === 0 && !showCreateOption && (
                             <div className="py-2 px-2 text-sm text-muted-foreground text-center">
                                 {t('tagInput.noMatches')}
@@ -164,6 +167,8 @@ export function TagInput({
                         {filteredTags.map((tag, index) => (
                             <div
                                 key={tag.id}
+                                role="option"
+                                aria-selected={highlightedIndex === index}
                                 className={cn(
                                     "relative flex select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none cursor-pointer",
                                     highlightedIndex === index ? "bg-accent text-accent-foreground" : ""
@@ -178,6 +183,8 @@ export function TagInput({
 
                         {showCreateOption && (
                             <div
+                                role="option"
+                                aria-selected={highlightedIndex === filteredTags.length}
                                 className={cn(
                                     "relative flex select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none cursor-pointer border-t mt-1",
                                     highlightedIndex === filteredTags.length ? "bg-accent text-accent-foreground" : ""

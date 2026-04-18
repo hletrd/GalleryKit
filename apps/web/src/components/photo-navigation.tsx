@@ -36,8 +36,15 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
         };
 
         const handleTouchMove = (e: TouchEvent) => {
-            const deltaX = e.changedTouches[0].screenX - touchStartX.current;
-            const deltaY = e.changedTouches[0].screenY - touchStartY.current;
+            const touch = e.changedTouches[0];
+            const dx = Math.abs(touch.clientX - touchStartX.current);
+            const dy = Math.abs(touch.clientY - touchStartY.current);
+            if (dx > dy && dx > 10) {
+                e.preventDefault();
+            }
+
+            const deltaX = touch.screenX - touchStartX.current;
+            const deltaY = touch.screenY - touchStartY.current;
 
             // Cancel swipe if movement becomes predominantly vertical
             if (isSwiping.current && Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > VERTICAL_LIMIT) {
@@ -106,7 +113,7 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
         };
 
         window.addEventListener('touchstart', handleTouchStart, { passive: true });
-        window.addEventListener('touchmove', handleTouchMove, { passive: true });
+        window.addEventListener('touchmove', handleTouchMove, { passive: false });
         window.addEventListener('touchend', handleTouchEnd, { passive: true });
 
         return () => {
