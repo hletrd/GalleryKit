@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
 
@@ -73,7 +74,8 @@ function computeHistogramAsync(
 function drawHistogram(
     canvas: HTMLCanvasElement,
     data: HistogramData,
-    mode: HistogramMode
+    mode: HistogramMode,
+    isDark: boolean
 ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -82,8 +84,6 @@ function drawHistogram(
     const H = canvas.height;
 
     ctx.clearRect(0, 0, W, H);
-
-    const isDark = document.documentElement.classList.contains('dark');
     const gridColor = isDark ? '#404040' : '#d4d4d4';
 
     const drawChannel = (
@@ -143,6 +143,8 @@ function drawHistogram(
 
 export function Histogram({ imageUrl, className }: HistogramProps) {
     const { t } = useTranslation();
+    const { resolvedTheme } = useTheme();
+    const isDark = resolvedTheme === 'dark';
     const [histogramState, setHistogramState] = useState<{ imageUrl: string | null; data: HistogramData | null }>({
         imageUrl: null,
         data: null,
@@ -204,8 +206,8 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
 
     useEffect(() => {
         if (!histogramData || !canvasRef.current || collapsed) return;
-        drawHistogram(canvasRef.current, histogramData, mode);
-    }, [histogramData, mode, collapsed]);
+        drawHistogram(canvasRef.current, histogramData, mode, isDark);
+    }, [histogramData, mode, collapsed, isDark]);
 
     const cycleMode = useCallback(() => {
         setMode((prev) => {
