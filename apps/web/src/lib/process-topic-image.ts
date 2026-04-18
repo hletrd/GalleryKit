@@ -70,7 +70,7 @@ export async function processTopicImage(file: File): Promise<string> {
     try {
         const webStream = file.stream();
         const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
-        await pipeline(nodeStream, createWriteStream(tempPath));
+        await pipeline(nodeStream, createWriteStream(tempPath, { mode: 0o600 }));
 
         await sharp(tempPath, { limitInputPixels: maxInputPixels })
             .resize({ width: 512, height: 512, fit: 'cover' })
