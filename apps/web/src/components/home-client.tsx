@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { TagFilter } from '@/components/tag-filter';
 import { useTranslation } from "@/components/i18n-provider";
@@ -192,7 +192,9 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, hasMo
                         {t('home.metaTitle', { count: totalCount ?? allImages.length })}
                     </p>
                 </div>
-                <TagFilter tags={tags} />
+                <Suspense fallback={null}>
+                    <TagFilter tags={tags} />
+                </Suspense>
             </div>
 
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
