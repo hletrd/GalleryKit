@@ -19,14 +19,6 @@ interface HistogramProps {
     className?: string;
 }
 
-const MODE_LABELS: Record<HistogramMode, string> = {
-    luminance: 'Luminance',
-    rgb: 'Color',
-    r: 'R',
-    g: 'G',
-    b: 'B',
-};
-
 const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
 
 /**
@@ -155,6 +147,13 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
     const workerRef = useRef<Worker | null>(null);
     const histogramData = histogramState.imageUrl === imageUrl ? histogramState.data : null;
     const loading = Boolean(imageUrl) && histogramState.imageUrl !== imageUrl;
+    const modeLabels: Record<HistogramMode, string> = {
+        luminance: t('viewer.histogramModes.luminance'),
+        rgb: t('viewer.histogramModes.color'),
+        r: t('viewer.histogramModes.red'),
+        g: t('viewer.histogramModes.green'),
+        b: t('viewer.histogramModes.blue'),
+    };
 
     useEffect(() => {
         workerRef.current = new Worker('/histogram-worker.js?v=1');
@@ -245,7 +244,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                             height={120}
                             className="w-full h-full"
                             role="img"
-                            aria-label={t('aria.histogramLabel', { mode: MODE_LABELS[mode] })}
+                            aria-label={t('aria.histogramLabel', { mode: modeLabels[mode] })}
                         />
                     </div>
                     <button
@@ -254,7 +253,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                         className="self-start text-xs font-mono px-2 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
                         aria-label={t('aria.cycleHistogram')}
                     >
-                        {MODE_LABELS[mode]}
+                        {modeLabels[mode]}
                     </button>
                 </div>
             )}
