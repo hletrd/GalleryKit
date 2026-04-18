@@ -44,17 +44,17 @@ export function getClientIp(headerStore: HeaderLike): string {
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
     // Without it, an attacker can spoof X-Forwarded-For to bypass rate limits.
     if (process.env.TRUST_PROXY === 'true') {
-        const xRealIp = normalizeIp(headerStore.get('x-real-ip'));
-        if (xRealIp) return xRealIp;
-
         const xForwardedFor = headerStore.get('x-forwarded-for');
         if (xForwardedFor && xForwardedFor.length <= 512) {
             const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
-            for (let i = parts.length - 1; i >= 0; i--) {
-                const normalized = normalizeIp(parts[i] || null);
+            for (const part of parts) {
+                const normalized = normalizeIp(part || null);
                 if (normalized) return normalized;
             }
         }
+
+        const xRealIp = normalizeIp(headerStore.get('x-real-ip'));
+        if (xRealIp) return xRealIp;
     }
 
     const ip = 'unknown';

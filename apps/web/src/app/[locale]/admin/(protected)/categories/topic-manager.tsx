@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +24,7 @@ import { toast } from 'sonner';
 import { Pencil, Trash2, Plus, ChevronLeft, X } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
 import Link from 'next/link';
+import { localizePath } from '@/lib/locale-path';
 
 type Topic = {
     slug: string;
@@ -34,6 +36,7 @@ type Topic = {
 
 export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const { t, locale } = useTranslation();
+    const router = useRouter();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
     const [newAlias, setNewAlias] = useState('');
@@ -45,6 +48,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         } else {
             toast.success(t('categories.created'));
             setIsCreateOpen(false);
+            router.refresh();
         }
     }
 
@@ -56,6 +60,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         } else {
             toast.success(t('categories.updated'));
             setEditingTopic(null);
+            router.refresh();
         }
     }
 
@@ -66,6 +71,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             toast.error(res.error);
         } else {
             toast.success(t('categories.deleted'));
+            router.refresh();
         }
     }
 
@@ -82,6 +88,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             // But since 'initialTopics' updates from parent, we might see it if we close/reopen or if we sync 'editingTopic'
             // For now, let's manually update client state to be snappy
              setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, newAlias.trim()] }) : null);
+             router.refresh();
         }
     }
 
@@ -92,6 +99,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         } else {
             toast.success(t('categories.aliasRemoved'));
              setEditingTopic(prev => prev ? ({ ...prev, aliases: prev.aliases.filter(a => a !== alias) }) : null);
+             router.refresh();
         }
     }
 
@@ -99,7 +107,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         <div>
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
-                    <Link href={`/${locale}/admin/dashboard`}>
+                    <Link href={localizePath(locale, '/admin/dashboard')}>
                         <Button variant="ghost" size="icon" aria-label={t('aria.goBack')}>
                             <ChevronLeft className="h-4 w-4" />
                         </Button>

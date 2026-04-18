@@ -24,6 +24,7 @@ import { Pencil, Trash2, ChevronLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from "@/components/i18n-provider";
 import Link from 'next/link';
+import { localizePath } from '@/lib/locale-path';
 
 type Tag = {
     id: number;
@@ -64,7 +65,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     return (
         <div>
              <div className="flex items-center gap-4 mb-6">
-                <Link href={`/${locale}/admin/dashboard`}>
+                <Link href={localizePath(locale, '/admin/dashboard')}>
                     <Button variant="ghost" size="icon" aria-label={t('aria.goBack')}>
                         <ChevronLeft className="h-4 w-4" />
                     </Button>

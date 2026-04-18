@@ -3,7 +3,7 @@
 **Priority:** MEDIUM
 **Estimated effort:** 2-3 hours
 **Sources:** Comprehensive audit 2026-04-18 findings #6, #7, #14, #15 and likely risk A
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ---
 
@@ -21,4 +21,10 @@
 5. Update CLAUDE testing guidance to reflect the real test suite
 
 ## Ralph progress
-- 2026-04-18: Plan created from the full audit. No implementation committed yet.
+- 2026-04-18: Plan created from the full audit.
+- 2026-04-18: Completed the admin-refresh/docs-alignment pass:
+  - refreshed categories and admin users after successful mutations
+  - aligned trusted-proxy IP parsing with left-most client semantics
+  - documented `TRUST_PROXY=true` in the nginx-hosted deployment path
+  - corrected Docker/deploy script messaging about required env vars and host assumptions
+  - updated CLAUDE testing guidance to describe the real unit/E2E suite

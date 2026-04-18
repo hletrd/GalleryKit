@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeIp, getRateLimitBucketStart } from '@/lib/rate-limit';
+import { afterEach, describe, expect, it } from 'vitest';
+import { getClientIp, normalizeIp, getRateLimitBucketStart } from '@/lib/rate-limit';
+
+const originalTrustProxy = process.env.TRUST_PROXY;
+
+afterEach(() => {
+    if (originalTrustProxy === undefined) {
+        delete process.env.TRUST_PROXY;
+    } else {
+        process.env.TRUST_PROXY = originalTrustProxy;
+    }
+});
 
 describe('normalizeIp', () => {
     it('returns null for null/empty/whitespace input', () => {
@@ -49,5 +59,40 @@ describe('getRateLimitBucketStart', () => {
     it('supports small windows without fractional seconds', () => {
         expect(getRateLimitBucketStart(61_999, 60_000)).toBe(60);
         expect(getRateLimitBucketStart(120_001, 60_000)).toBe(120);
+    });
+});
+
+describe('getClientIp', () => {
+    it('prefers the left-most forwarded IP when TRUST_PROXY is enabled', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10, 203.0.113.7'],
+            ['x-real-ip', '203.0.113.7'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
+    });
+
+    it('falls back to x-real-ip when forwarded-for is absent or invalid', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', 'unknown-proxy'],
+            ['x-real-ip', '203.0.113.9'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.9');
+    });
+
+    it('returns unknown when proxy headers are not trusted', () => {
+        delete process.env.TRUST_PROXY;
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10'],
+            ['x-real-ip', '203.0.113.9'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('unknown');
     });
 });

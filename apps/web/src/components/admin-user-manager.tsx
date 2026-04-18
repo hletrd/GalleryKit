@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { createAdminUser, deleteAdminUser } from "@/app/actions";
 import { toast } from "sonner";
 import { Trash2, UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface AdminUser {
     id: number;
@@ -26,6 +27,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [open, setOpen] = useState(false);
     const { t, locale } = useTranslation();
+    const router = useRouter();
 
     async function handleCreate(formData: FormData) {
         setIsCreating(true);
@@ -37,6 +39,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
         } else {
             toast.success(t('users.createSuccess'));
             setOpen(false);
+            router.refresh();
         }
     }
 
@@ -48,6 +51,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
             toast.error(result.error);
         } else {
             toast.success(t('users.deleteSuccess'));
+            router.refresh();
         }
     }
 

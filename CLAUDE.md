@@ -206,7 +206,11 @@ Connection pool: 8 connections, queue limit 20, keepalive enabled.
 
 ## Testing
 
-No formal test suite. Use the `test/` directory for import utilities and sample data.
+The repository has a formal test surface:
+
+- `npm test --workspace=apps/web` — Vitest unit tests in `apps/web/src/__tests__/`
+- `npm run test:e2e --workspace=apps/web` — Playwright end-to-end tests in `apps/web/e2e/`
+- `npm run lint --workspace=apps/web` — ESLint
 
 ## Deployment Checklist
 
@@ -217,4 +221,3 @@ No formal test suite. Use the `test/` directory for import utilities and sample 
 5. Initialize DB: container runs migrations automatically
 6. Push schema indexes: `npm run db:push` (from apps/web/)
 7. Access at `http://localhost:3000`
-
