@@ -7,6 +7,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { stripControlChars } from '@/lib/sanitize';
 
 const SEO_SETTING_KEYS = [
     'seo_title',
@@ -100,14 +101,14 @@ export async function updateSeoSettings(settings: Record<string, string>) {
         // Upsert each setting atomically in a transaction to prevent partial writes on crash
         await db.transaction(async (tx) => {
             for (const [key, value] of Object.entries(settings)) {
-                const trimmedValue = value.trim();
-                if (trimmedValue === '') {
+                const sanitizedValue = stripControlChars(value.trim());
+                if (!sanitizedValue) {
                     // Delete empty settings so the JSON fallback takes effect
                     await tx.delete(adminSettings).where(eq(adminSettings.key, key));
                 } else {
                     await tx.insert(adminSettings)
-                        .values({ key, value: trimmedValue })
-                        .onDuplicateKeyUpdate({ set: { value: trimmedValue } });
+                        .values({ key, value: sanitizedValue })
+                        .onDuplicateKeyUpdate({ set: { value: sanitizedValue } });
                 }
             }
         });

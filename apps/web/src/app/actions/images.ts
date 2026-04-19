@@ -13,6 +13,7 @@ import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { stripControlChars } from '@/lib/sanitize';
 import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
@@ -475,12 +476,6 @@ export async function deleteImages(ids: number[]) {
         );
     }
     return { success: true, count: successCount, errors: errorCount };
-}
-
-/** Strip null bytes and control characters that can cause MySQL truncation or display issues. */
-function stripControlChars(s: string | null): string | null {
-    if (!s) return s;
-    return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 }
 
 export async function updateImageMetadata(id: number, title: string | null, description: string | null) {
