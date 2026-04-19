@@ -9,6 +9,7 @@ import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
+import { stripControlChars } from '@/lib/sanitize';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     const normalizedSegment = segment.trim();
@@ -33,7 +34,7 @@ export async function createTopic(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    const label = formData.get('label')?.toString() ?? '';
+    const label = stripControlChars(formData.get('label')?.toString() ?? '') ?? '';
     const slug = formData.get('slug')?.toString() ?? '';
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
@@ -103,7 +104,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         return { error: t('invalidCurrentSlug') };
     }
 
-    const label = formData.get('label')?.toString() ?? '';
+    const label = stripControlChars(formData.get('label')?.toString() ?? '') ?? '';
     const slug = formData.get('slug')?.toString() ?? '';
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
@@ -231,27 +232,30 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidTopicSlug') };
     }
 
-    if (!isValidTopicAlias(alias)) {
+    // Sanitize alias before validation — strips control characters that
+    // the regex-based isValidTopicAlias may not reject (defense in depth).
+    const cleanAlias = stripControlChars(alias) ?? '';
+    if (!isValidTopicAlias(cleanAlias)) {
         return { error: t('invalidAliasFormat') };
     }
-    if (isReservedTopicRouteSegment(alias)) {
+    if (isReservedTopicRouteSegment(cleanAlias)) {
         return { error: t('reservedRouteSegment') };
     }
-    if (await topicRouteSegmentExists(alias)) {
+    if (await topicRouteSegmentExists(cleanAlias)) {
         return { error: t('slugConflictsWithRoute') };
     }
 
     // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
     try {
         await db.insert(topicAliases).values({
-            alias,
+            alias: cleanAlias,
             topicSlug
         });
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
+        logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', topicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
 
-        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
+        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${topicSlug}`);
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -279,19 +283,22 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     }
 
     try {
-        await db.delete(topicAliases).where(
+        const [delResult] = await db.delete(topicAliases).where(
             and(
                 eq(topicAliases.alias, alias),
                 eq(topicAliases.topicSlug, topicSlug)
             )
         );
+        // Log audit event only when the alias was actually deleted — avoids
+        // duplicate entries when concurrent deletion causes the delete to affect 0 rows.
+        if (delResult.affectedRows > 0) {
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
+        }
     } catch (e) {
         console.error('Failed to delete topic alias:', e);
         return { error: t('failedToDeleteAlias') };
     }
-
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
 
     revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
     return { success: true };
