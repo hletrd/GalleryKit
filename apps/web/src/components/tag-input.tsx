@@ -141,6 +141,7 @@ export function TagInput({
                     ref={inputRef}
                     type="text"
                     role="combobox"
+                    aria-autocomplete="list"
                     aria-expanded={isOpen && !!(inputValue || filteredTags.length > 0)}
                     aria-controls="tag-suggestions"
                     className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
