@@ -65,6 +65,7 @@ export function PasswordForm() {
                     required
                     maxLength={1024}
                     placeholder={t('password.current')}
+                    autoComplete="current-password"
                 />
             </div>
 
@@ -78,6 +79,7 @@ export function PasswordForm() {
                     placeholder={t('password.new')}
                     minLength={12}
                     maxLength={1024}
+                    autoComplete="new-password"
                 />
                 <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
 
@@ -93,6 +95,7 @@ export function PasswordForm() {
                     placeholder={t('password.confirm')}
                     minLength={12}
                     maxLength={1024}
+                    autoComplete="new-password"
                 />
             </div>
 
