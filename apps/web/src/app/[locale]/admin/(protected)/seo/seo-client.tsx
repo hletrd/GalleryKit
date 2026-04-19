@@ -9,7 +9,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 import { updateSeoSettings } from '@/app/actions/seo';
-import { Save } from 'lucide-react';
+import { Save, ChevronLeft } from 'lucide-react';
+import Link from 'next/link';
+import { localizePath } from '@/lib/locale-path';
+import { useLocale } from 'next-intl';
 
 interface SeoSettings {
     seo_title: string;
@@ -26,6 +29,7 @@ interface SeoSettingsClientProps {
 
 export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     const { t } = useTranslation();
+    const locale = useLocale();
     const [isPending, startTransition] = useTransition();
     const [settings, setSettings] = useState<SeoSettings>(initialSettings);
 
@@ -51,7 +55,14 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold tracking-tight">{t('seo.title')}</h1>
+                <div className="flex items-center gap-4">
+                    <Button asChild variant="ghost" size="icon" aria-label={t('aria.goBack')}>
+                        <Link href={localizePath(locale, '/admin/dashboard')}>
+                            <ChevronLeft className="h-4 w-4" />
+                        </Link>
+                    </Button>
+                    <h1 className="text-3xl font-bold tracking-tight">{t('seo.title')}</h1>
+                </div>
                 <Button onClick={handleSave} disabled={isPending} className="gap-2">
                     <Save className="h-4 w-4" />
                     {isPending ? t('seo.saving') : t('seo.save')}
