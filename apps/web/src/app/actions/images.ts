@@ -245,9 +245,12 @@ export async function uploadImages(formData: FormData) {
     // Update cumulative upload tracker with actual (not pre-incremented) values.
     // Use additive adjustment instead of absolute assignment to avoid overwriting
     // concurrent requests' pre-incremented contributions for the same IP.
-    tracker.count += (successCount - files.length);
-    tracker.bytes += (uploadedBytes - totalSize);
-    uploadTracker.set(uploadIp, tracker);
+    // Re-read from Map to avoid operating on a stale reference if pruneUploadTracker()
+    // evicted this IP's entry during the upload loop.
+    const currentTracker = uploadTracker.get(uploadIp) || tracker;
+    currentTracker.count += (successCount - files.length);
+    currentTracker.bytes += (uploadedBytes - totalSize);
+    uploadTracker.set(uploadIp, currentTracker);
 
     // Audit log for upload action
     const currentUser = await getCurrentUser();
@@ -415,7 +418,7 @@ export async function deleteImages(ids: number[]) {
     const errorCount = notFoundCount;
 
     const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount }).catch(console.debug);
+    logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount, requested: ids.length, notFound: notFoundCount }).catch(console.debug);
 
     const affectedTopics = new Set(imageRecords.map(r => r.topic));
 
