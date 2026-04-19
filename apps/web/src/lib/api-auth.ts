@@ -1,5 +1,6 @@
 import { isAdmin } from '@/app/actions';
 import { NextResponse } from 'next/server';
+import { getTranslations } from 'next-intl/server';
 
 /**
  * Wrap an API route handler with mandatory admin authentication.
@@ -10,7 +11,8 @@ export function withAdminAuth<T extends unknown[]>(
 ): (...args: T) => Promise<Response> {
     return async (...args: T) => {
         if (!(await isAdmin())) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            const t = await getTranslations('serverActions');
+            return NextResponse.json({ error: t('unauthorized') }, { status: 401 });
         }
         return handler(...args);
     };
