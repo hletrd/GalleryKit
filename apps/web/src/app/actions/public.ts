@@ -68,7 +68,11 @@ export async function searchImagesAction(query: string) {
         // DB unavailable — rely on in-memory Map
     }
 
-    incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch(() => {});
+    try {
+        await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS);
+    } catch {
+        // DB unavailable — in-memory Map already incremented
+    }
 
     const safeQuery = query.trim().slice(0, 200);
     return searchImages(safeQuery, 20);
