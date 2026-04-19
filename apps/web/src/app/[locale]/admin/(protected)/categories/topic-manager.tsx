@@ -54,6 +54,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [deleteAliasInfo, setDeleteAliasInfo] = useState<{ topicSlug: string; alias: string } | null>(null);
     const [isDeletingTopic, setIsDeletingTopic] = useState(false);
     const [isDeletingAlias, setIsDeletingAlias] = useState(false);
+    const [isAddingAlias, setIsAddingAlias] = useState(false);
 
     async function handleCreate(formData: FormData) {
         try {
@@ -104,7 +105,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     }
 
     async function handleAddAlias(topicSlug: string) {
-        if (!newAlias.trim()) return;
+        if (!newAlias.trim() || isAddingAlias) return;
+        setIsAddingAlias(true);
         try {
             const res = await createTopicAlias(topicSlug, newAlias.trim());
             if (res?.error) {
@@ -117,6 +119,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             }
         } catch {
             toast.error(t('serverActions.invalidAliasFormat'));
+        } finally {
+            setIsAddingAlias(false);
         }
     }
 
@@ -274,12 +278,12 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') {
                                                 e.preventDefault();
-                                                handleAddAlias(editingTopic.slug);
+                                                if (!isAddingAlias) handleAddAlias(editingTopic.slug);
                                             }
                                         }}
                                         className="max-w-[200px]"
                                     />
-                                    <Button type="button" variant="secondary" onClick={() => handleAddAlias(editingTopic.slug)}>{t('categories.add')}</Button>
+                                    <Button type="button" variant="secondary" onClick={() => handleAddAlias(editingTopic.slug)} disabled={isAddingAlias}>{isAddingAlias ? t('imageManager.adding') : t('categories.add')}</Button>
                                 </div>
                             </div>
                         </div>
