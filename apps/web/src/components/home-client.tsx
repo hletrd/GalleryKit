@@ -155,7 +155,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
     // Increment version so stale in-flight load-more responses are discarded
     useEffect(() => {
         queryVersionRef.current++;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing state from props is a valid pattern
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop-driven state sync: resetting gallery state when the images prop changes (topic/filter change) is a valid React pattern (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
         setAllImages(images);
     }, [images]);
 

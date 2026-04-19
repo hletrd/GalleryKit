@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             type: 'website',
             ...(coverImage ? {
                 images: [{
-                    url: `${BASE_URL}/uploads/webp/${coverImage.filename_webp.replace('.webp', '_2048.webp')}`,
+                    url: `${BASE_URL}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
                     width: coverImage.width,
                     height: coverImage.height,
                     alt: t('ogAlt'),
@@ -50,7 +50,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             title: t('ogTitle'),
             description: t('ogDescriptionWithSite', { count: group.images.length, site: siteConfig.title }),
             ...(coverImage ? {
-                images: [`${BASE_URL}/uploads/webp/${coverImage.filename_webp.replace('.webp', '_2048.webp')}`],
+                images: [`${BASE_URL}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
             } : {}),
         },
     };

@@ -1,6 +1,5 @@
 import { MetadataRoute } from 'next';
-import siteConfig from "@/site-config.json";
-import { LOCALES } from '@/lib/constants';
+import { LOCALES, BASE_URL } from '@/lib/constants';
 
 const adminDisallowPaths = ['/admin', '/admin/'];
 const shareDisallowPaths = ['/s/', '/g/'];
@@ -18,6 +17,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: [...adminDisallowPaths, ...shareDisallowPaths, ...localeDisallowPaths],
     },
-    sitemap: `${process.env.BASE_URL || siteConfig.url}/sitemap.xml`,
+    sitemap: `${BASE_URL}/sitemap.xml`,
   };
 }

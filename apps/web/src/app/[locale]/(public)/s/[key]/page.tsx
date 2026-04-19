@@ -36,19 +36,20 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             siteName: siteConfig.title,
             images: [
                 {
-                    url: `${BASE_URL}/uploads/webp/${image.filename_webp.replace('.webp', '_2048.webp')}`,
+                    url: `${BASE_URL}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
                     width: image.width,
                     height: image.height,
                     alt: title,
                 }
             ],
-            type: 'website',
+            type: 'article',
+            publishedTime: image.capture_date?.toString(),
         },
         twitter: {
             card: 'summary_large_image',
             title: title,
             description: image.description || t('ogDescription', { site: siteConfig.title }),
-            images: [`${BASE_URL}/uploads/webp/${image.filename_webp.replace('.webp', '_2048.webp')}`],
+            images: [`${BASE_URL}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
         },
     };
 }

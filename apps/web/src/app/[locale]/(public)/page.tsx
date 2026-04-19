@@ -44,7 +44,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       siteName: siteConfig.title,
       images: latestImage ? [
         {
-          url: `${BASE_URL}/uploads/jpeg/${latestImage.filename_jpeg}`,
+          url: `${BASE_URL}/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
           width: latestImage.width,
           height: latestImage.height,
           alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),

@@ -48,7 +48,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
       siteName: siteConfig.title,
       images: [
         {
-          url: `${BASE_URL}/api/og?topic=${topicData.slug}&tags=${tagSlugs.join(',')}`,
+          url: `${BASE_URL}/api/og?topic=${encodeURIComponent(topicData.slug)}&tags=${encodeURIComponent(tagSlugs.join(','))}`,
           width: 1200,
           height: 630,
           alt: title,
