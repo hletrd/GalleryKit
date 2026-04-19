@@ -47,7 +47,7 @@ export const images = mysqlTable("images", {
     flash: varchar('flash', { length: 50 }),
     bit_depth: int('bit_depth'),
     original_format: varchar('original_format', { length: 10 }),
-    original_file_size: bigint('original_file_size', { mode: 'number' }),
+    original_file_size: int('original_file_size'),
     blur_data_url: text('blur_data_url'),
 
     created_at: timestamp("created_at")
