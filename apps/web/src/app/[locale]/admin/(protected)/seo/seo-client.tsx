@@ -38,7 +38,7 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     const handleSave = () => {
         startTransition(async () => {
             try {
-                const result = await updateSeoSettings(settings as unknown as Record<string, string>);
+                const result = await updateSeoSettings(Object.fromEntries(Object.entries(settings)));
                 if (result.success) {
                     toast.success(t('seo.saveSuccess'));
                 } else {
