@@ -280,7 +280,10 @@
     "topicNotFound": "Referenced topic does not exist.",
     "invalidAlias": "Invalid alias",
     "reservedRouteSegment": "This slug is reserved for an application route",
-    "slugConflictsWithRoute": "This slug already conflicts with an existing topic route"
+    "slugConflictsWithRoute": "This slug already conflicts with an existing topic route",
+    "labelTooLong": "Label is too long (max 100 characters)",
+    "slugOrAliasExists": "Topic slug or alias already exists",
+    "slugAlreadyExists": "Topic slug already exists"
   },
   "aria": {
     "searchPhotos": "Search photos",

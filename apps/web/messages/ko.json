@@ -280,7 +280,10 @@
     "topicNotFound": "참조된 토픽이 존재하지 않습니다.",
     "invalidAlias": "잘못된 별칭입니다",
     "reservedRouteSegment": "이 슬러그는 애플리케이션 경로로 예약되어 있습니다",
-    "slugConflictsWithRoute": "이 슬러그는 이미 기존 카테고리 경로와 충돌합니다"
+    "slugConflictsWithRoute": "이 슬러그는 이미 기존 카테고리 경로와 충돌합니다",
+    "labelTooLong": "라벨이 너무 깁니다 (최대 100자)",
+    "slugOrAliasExists": "카테고리 슬러그 또는 별칭이 이미 존재합니다",
+    "slugAlreadyExists": "카테고리 슬러그가 이미 존재합니다"
   },
   "aria": {
     "searchPhotos": "사진 검색",

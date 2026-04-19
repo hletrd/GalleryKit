@@ -37,21 +37,21 @@ export async function createTopic(formData: FormData) {
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
-    if (!label || !slug) return { error: 'Label and Slug are required' };
+    if (!label || !slug) return { error: t('labelSlugRequired') };
 
     let order = parseInt(orderStr, 10);
     if (Number.isNaN(order)) order = 0;
     order = Math.max(-1000, Math.min(1000, order)); // Limit to reasonable range
 
     if (!isValidSlug(slug)) {
-        return { error: 'Invalid slug format. Use only lowercase letters, numbers, hyphens, and underscores.' };
+        return { error: t('invalidSlugFormat') };
     }
     if (isReservedTopicRouteSegment(slug)) {
         return { error: t('reservedRouteSegment') };
     }
 
     if (label.length > 100) {
-        return { error: 'Label is too long (max 100 characters)' };
+        return { error: t('labelTooLong') };
     }
 
     if (await topicRouteSegmentExists(slug)) {
@@ -84,7 +84,7 @@ export async function createTopic(formData: FormData) {
             await deleteTopicImage(imageFilename);
         }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
-            return { error: 'Topic slug or alias already exists' };
+            return { error: t('slugOrAliasExists') };
         }
         console.error('Failed to create topic', e);
         return { error: 'Failed to create topic' };
@@ -171,7 +171,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
              await deleteTopicImage(imageFilename);
          }
          if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
-             return { error: 'Topic slug already exists' };
+             return { error: t('slugAlreadyExists') };
          }
          console.error('Failed to update topic', e);
          return { error: 'Failed to update topic' };
