@@ -31,6 +31,7 @@ export function AdminNav() {
                     <Link
                         key={href}
                         href={href}
+                        aria-current={isActive ? "page" : undefined}
                         className={cn(
                             "transition-colors hover:text-foreground/80",
                             isActive ? "text-foreground font-bold" : "text-foreground/60"
