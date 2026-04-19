@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, batchUpdateImageTags, updateImageMetadata } from '@/app/actions';
 import { copyToClipboard } from '@/lib/clipboard';
 import { TagInput } from "@/components/tag-input";
@@ -67,6 +67,13 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
     const [isSavingEdit, setIsSavingEdit] = useState(false);
 
     const { t, locale } = useTranslation();
+
+    const selectAllRef = useRef<HTMLInputElement>(null);
+    useEffect(() => {
+        if (selectAllRef.current) {
+            selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < images.length;
+        }
+    }, [selectedIds, images.length]);
 
     useEffect(() => {
         setImages(initialImages);
@@ -292,6 +299,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                         <TableRow>
                             <TableHead className="w-[50px]">
                                 <input
+                                    ref={selectAllRef}
                                     type="checkbox"
                                     className="h-4 w-4 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     checked={images.length > 0 && selectedIds.size === images.length}
