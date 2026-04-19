@@ -4,7 +4,7 @@ import { db, images, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 import { headers } from 'next/headers';
-import { getClientIp } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -37,16 +37,20 @@ function pruneShareRateLimit() {
     }
 }
 
+/** Pre-increment then check — prevents TOCTOU between concurrent requests.
+ *  Same pattern as login (A-01) and createAdminUser (C11R2-02). */
 function checkShareRateLimit(ip: string): boolean {
     pruneShareRateLimit();
     const now = Date.now();
     const entry = shareRateLimit.get(ip);
     if (!entry || entry.resetAt <= now) {
         shareRateLimit.set(ip, { count: 1, resetAt: now + SHARE_RATE_LIMIT_WINDOW_MS });
-        return false;
+    } else {
+        entry.count++;
     }
-    entry.count++;
-    return entry.count > SHARE_MAX_PER_WINDOW;
+    // Return true if OVER the limit (rate-limited)
+    const currentEntry = shareRateLimit.get(ip)!;
+    return currentEntry.count > SHARE_MAX_PER_WINDOW;
 }
 
 export async function createPhotoShareLink(imageId: number) {
@@ -55,8 +59,19 @@ export async function createPhotoShareLink(imageId: number) {
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
+    // In-memory pre-increment (prevents TOCTOU — same pattern as login A-01)
     if (checkShareRateLimit(ip)) {
         return { error: t('tooManyShareRequests') };
+    }
+    // DB-backed check for accuracy across restarts (pre-increment before check)
+    try {
+        await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
+        if (dbLimit.limited) {
+            return { error: t('tooManyShareRequests') };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map (already incremented above)
     }
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
@@ -123,8 +138,19 @@ export async function createGroupShareLink(imageIds: number[]) {
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
+    // In-memory pre-increment (prevents TOCTOU — same pattern as login A-01)
     if (checkShareRateLimit(ip)) {
         return { error: t('tooManyShareRequests') };
+    }
+    // DB-backed check for accuracy across restarts (pre-increment before check)
+    try {
+        await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
+        if (dbLimit.limited) {
+            return { error: t('tooManyShareRequests') };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map (already incremented above)
     }
 
     if (!Array.isArray(imageIds) || imageIds.length === 0) {
