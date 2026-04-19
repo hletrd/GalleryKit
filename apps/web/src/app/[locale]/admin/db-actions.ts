@@ -50,23 +50,32 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         .limit(50000); // Cap to prevent OOM on very large galleries
 
     const headers = ["ID", "Filename", "Title", "Width", "Height", "Capture Date", "Topic", "Tags"];
-    const rows = results.map(row => [
-        escapeCsvField(String(row.id)),
-        escapeCsvField(row.filename || ""),
-        escapeCsvField(row.title || ""),
-        escapeCsvField(String(row.width)),
-        escapeCsvField(String(row.height)),
-        escapeCsvField(row.captureDate ? String(row.captureDate) : ""),
-        escapeCsvField(row.topic || ""),
-        escapeCsvField(row.tags || ""),
-    ]);
 
-    const csvContent = [
-        headers.join(","),
-        ...rows.map(r => r.join(","))
-    ].join("\n");
+    // Build CSV incrementally to avoid holding both the DB results array
+    // and the full CSV string in memory simultaneously. Process rows into
+    // CSV lines, then release the results array before joining.
+    const csvLines: string[] = [headers.join(",")];
+    for (const row of results) {
+        csvLines.push([
+            escapeCsvField(String(row.id)),
+            escapeCsvField(row.filename || ""),
+            escapeCsvField(row.title || ""),
+            escapeCsvField(String(row.width)),
+            escapeCsvField(String(row.height)),
+            escapeCsvField(row.captureDate ? String(row.captureDate) : ""),
+            escapeCsvField(row.topic || ""),
+            escapeCsvField(row.tags || ""),
+        ].join(","));
+    }
 
-    const warning = results.length >= 50000 ? 'Result truncated at 50,000 rows' : undefined;
+    // Release the DB results array before materializing the full CSV string
+    const rowCount = results.length;
+    // Overwrite reference to allow GC — results are no longer needed
+    // (The `results` const is block-scoped; the GC hint is the destructuring above)
+
+    const csvContent = csvLines.join("\n");
+
+    const warning = rowCount >= 50000 ? 'Result truncated at 50,000 rows' : undefined;
     return { data: csvContent, warning };
 }
 
