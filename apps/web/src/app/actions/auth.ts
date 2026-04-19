@@ -230,7 +230,6 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
-    pruneLoginRateLimit(now);
     prunePasswordChangeRateLimit(now);
     const limitData = getPasswordChangeRateLimitEntry(ip, now);
     if (limitData.count >= PASSWORD_CHANGE_MAX_ATTEMPTS) {
