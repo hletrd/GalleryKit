@@ -239,7 +239,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     await copyToClipboard(url);
                                     toast.success(t('viewer.linkCopied'));
                                 } else {
-                                    toast.error(result.error || 'Failed to share');
+                                    toast.error(result.error || t('viewer.errorSharing'));
                                 }
                             } catch {
                                 toast.error(t('viewer.errorSharing'));
