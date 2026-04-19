@@ -188,7 +188,9 @@
     "allTags": "All",
     "tagFilter": "Filter by tag",
     "noResultsHint": "Try fewer filters",
-    "backToTop": "Back to top"
+    "backToTop": "Back to top",
+    "browsePhotosWithTag": "Browse {tags} photos on {site}",
+    "latestPhoto": "Latest Photo"
   },
   "login": {
     "title": "Admin",
@@ -244,7 +246,11 @@
   "shared": {
     "viewGallery": "View Gallery",
     "sharedPhoto": "Shared Photo",
-    "sharedCollection": "Shared Album"
+    "sharedCollection": "Shared Album",
+    "ogNotFoundTitle": "Photo Not Found",
+    "ogNotFoundDescription": "This shared photo could not be found.",
+    "ogTitle": "Shared Photo",
+    "ogDescription": "View this photo on {site}"
   },
   "search": {
     "placeholder": "Search photos, tags, cameras...",
@@ -410,6 +416,20 @@
     "loading": "Loading...",
     "imageUnavailable": "Image unavailable",
     "skipToContent": "Skip to content"
+  },
+  "photo": {
+    "notFoundTitle": "Photo Not Found",
+    "notFoundDescription": "This photo could not be found.",
+    "untitled": "Untitled",
+    "titleWithId": "Photo {id}",
+    "descriptionByAuthor": "View photo by {author}",
+    "descriptionByAuthorWithTitle": "View photo by {author} ({title})"
+  },
+  "topic": {
+    "notFoundTitle": "Not Found",
+    "notFoundDescription": "The page you are looking for does not exist.",
+    "browsePhotosWithTag": "Browse {tags} photos in {topic} category",
+    "photosInTopic": "Photos in {topic} category"
   },
   "error": {
     "title": "Error",

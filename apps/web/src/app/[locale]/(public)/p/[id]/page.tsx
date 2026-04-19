@@ -5,7 +5,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
-import { getLocale } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 
@@ -22,12 +22,13 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const locale = await getLocale();
+    const t = await getTranslations('photo');
     const imageId = parseInt(id, 10);
     const image = await getImageCached(imageId);
 
     if (!image) {
         return {
-            title: 'Photo Not Found',
+            title: t('notFoundTitle'),
         };
     }
 
@@ -35,7 +36,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const hasTags = image.tags && image.tags.length > 0;
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
 
-    let displayTitle = 'Untitled';
+    let displayTitle = t('untitled');
     let keywords: string[] = [];
 
     if (hasTags) {
@@ -44,7 +45,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     } else if (image.title && !isTitleFilename) {
         displayTitle = image.title.split(/\s+/).map((word: string) => `#${word}`).join(' ');
     } else {
-        displayTitle = `Photo ${image.id}`;
+        displayTitle = t('titleWithId', { id: image.id });
     }
 
     if (image.topic) keywords.push(image.topic);
@@ -55,14 +56,14 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
     return {
         title: displayTitle,
-        description: image.description || `View photo by ${siteConfig.author} (${displayTitle})`,
+        description: image.description || t('descriptionByAuthorWithTitle', { author: siteConfig.author, title: displayTitle }),
         keywords: keywords,
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
             title: displayTitle,
-            description: image.description || `View photo by ${siteConfig.author}`,
+            description: image.description || t('descriptionByAuthor', { author: siteConfig.author }),
             url: pageUrl,
             images: [
                 {
@@ -79,7 +80,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         twitter: {
             card: 'summary_large_image',
             title: displayTitle,
-            description: image.description || `View photo by ${siteConfig.author}`,
+            description: image.description || t('descriptionByAuthor', { author: siteConfig.author }),
             images: [absoluteImageUrl],
         }
     };
@@ -88,6 +89,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function PhotoPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const locale = await getLocale();
+    const t = await getTranslations('photo');
 
     // Validate that id is a purely numeric positive integer
     if (!/^\d+$/.test(id)) {
@@ -110,7 +112,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         ? image.tags.map((t: TagInfo) => `#${t.name}`).join(' ')
         : (image.title && !isTitleFilename
             ? image.title.split(/\s+/).map((word: string) => `#${word}`).join(' ')
-            : 'Untitled');
+            : t('untitled'));
 
     const keywords = image.tags?.map((t: TagInfo) => t.name) || [];
     if (image.topic) keywords.push(image.topic);
