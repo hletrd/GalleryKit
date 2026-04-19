@@ -1,7 +1,7 @@
 # Plan 71 — Cycle 25 Fixes (C25-01, C25-02, C25-03, C25-04, C25-05)
 
 **Created:** 2026-04-19 (Cycle 25)
-**Status:** PENDING
+**Status:** DONE
 **Severity:** 1 MEDIUM, 4 LOW
 
 ---
