@@ -45,11 +45,19 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         }
     }
 
-    // Validate individual setting values
+    // Sanitize before validation so length/format checks operate on the same
+    // value that will be stored. Without this, control characters pass
+    // validation but are stripped later, causing a mismatch between validated
+    // and persisted data (same pattern as seo.ts C29-09 fix).
+    const sanitizedSettings: Record<string, string> = {};
     for (const [key, value] of Object.entries(settings)) {
-        const trimmedValue = value.trim();
-        if (trimmedValue === '') continue; // Empty means "use default" — will be deleted
-        if (!isValidSettingValue(key as GallerySettingKey, trimmedValue)) {
+        sanitizedSettings[key] = stripControlChars(value.trim()) ?? '';
+    }
+
+    // Validate individual setting values (on sanitized values)
+    for (const [key, value] of Object.entries(sanitizedSettings)) {
+        if (!value) continue; // Empty means "use default" — will be deleted
+        if (!isValidSettingValue(key as GallerySettingKey, value)) {
             return { error: t('invalidSettingValue', { key }) };
         }
     }
@@ -57,28 +65,27 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     try {
         // Upsert each setting atomically in a transaction to prevent partial writes on crash
         await db.transaction(async (tx) => {
-            for (const [key, value] of Object.entries(settings)) {
-                const sanitizedValue = stripControlChars(value.trim());
-                if (!sanitizedValue) {
+            for (const [key, value] of Object.entries(sanitizedSettings)) {
+                if (!value) {
                     // Delete empty settings so defaults take effect
                     await tx.delete(adminSettings).where(eq(adminSettings.key, key));
                 } else {
                     await tx.insert(adminSettings)
-                        .values({ key, value: sanitizedValue })
-                        .onDuplicateKeyUpdate({ set: { value: sanitizedValue } });
+                        .values({ key, value })
+                        .onDuplicateKeyUpdate({ set: { value } });
                 }
             }
         });
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'gallery_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(settings).join(',') }).catch(console.debug);
+        logAuditEvent(currentUser?.id ?? null, 'gallery_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(sanitizedSettings).join(',') }).catch(console.debug);
 
         // If storage backend changed, switch the live backend.
         // If the switch fails, roll back the DB setting to prevent a
         // DB/live inconsistency (DB shows the new backend but live
         // module still uses the old one). Deleting the row lets the
         // default ("local") take effect, matching the pre-change state.
-        const newStorageBackend = settings.storage_backend?.trim();
+        const newStorageBackend = sanitizedSettings.storage_backend;
         if (newStorageBackend && ['local', 'minio', 's3'].includes(newStorageBackend)) {
             try {
                 await switchStorageBackend(newStorageBackend as 'local' | 'minio' | 's3');
