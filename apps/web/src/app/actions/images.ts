@@ -477,6 +477,12 @@ export async function deleteImages(ids: number[]) {
     return { success: true, count: successCount, errors: errorCount };
 }
 
+/** Strip null bytes and control characters that can cause MySQL truncation or display issues. */
+function stripControlChars(s: string | null): string | null {
+    if (!s) return s;
+    return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
 export async function updateImageMetadata(id: number, title: string | null, description: string | null) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
@@ -495,14 +501,18 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         return { error: t('descriptionTooLong') };
     }
 
+    // Sanitize title and description: strip control characters after trimming
+    const sanitizedTitle = stripControlChars(title ? title.trim() : null) || null;
+    const sanitizedDescription = stripControlChars(description ? description.trim() : null) || null;
+
     try {
         const [existingImage] = await db.select({ topic: images.topic })
             .from(images).where(eq(images.id, id));
 
         const [result] = await db.update(images)
             .set({
-                title: title?.trim() || null,
-                description: description?.trim() || null,
+                title: sanitizedTitle,
+                description: sanitizedDescription,
                 updated_at: sql`CURRENT_TIMESTAMP`
             })
             .where(eq(images.id, id));
