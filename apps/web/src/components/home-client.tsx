@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
@@ -258,6 +257,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                                                             srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_640.webp`)} 640w, ${imageUrl(`/uploads/webp/${baseWebp}_1536.webp`)} 1536w`}
                                                             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
+                                                        {/* eslint-disable-next-line @next/next/no-img-element */}
                                                         <img
                                                             src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`)}
                                                             alt={altText}
