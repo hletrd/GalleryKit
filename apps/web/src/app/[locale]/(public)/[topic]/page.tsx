@@ -3,7 +3,7 @@ import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
-import { getLocale } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 
@@ -15,13 +15,14 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const { tags: tagsParam } = await searchParams;
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
+  const t = await getTranslations('topic');
   const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
   const topicData = await getTopicBySlugCached(topic);
 
   if (!topicData) return {
-    title: 'Not Found',
-    description: 'The page you are looking for does not exist.',
+    title: t('notFoundTitle'),
+    description: t('notFoundDescription'),
   };
 
   const title = tagSlugs.length > 0
@@ -29,8 +30,8 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     : topicData.label;
 
   const description = tagSlugs.length > 0
-    ? `Browse ${tagSlugs.join(', ')} photos in ${topicData.label} category`
-    : `Photos in ${topicData.label} category`;
+    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), topic: topicData.label })
+    : t('photosInTopic', { topic: topicData.label });
 
   const pageUrl = localizeUrl(BASE_URL, locale, `/${topicData.slug}`);
 
