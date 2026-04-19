@@ -79,8 +79,9 @@ export async function updateGallerySettings(settings: Record<string, string>) {
                 await switchStorageBackend(newStorageBackend as 'local' | 'minio' | 's3');
             } catch (switchErr) {
                 console.error('[Settings] Failed to switch storage backend:', switchErr);
-                const message = switchErr instanceof Error ? switchErr.message : String(switchErr);
-                return { error: `${t('failedToSwitchStorageBackend')}: ${message}` };
+                // Return generic message to avoid leaking internal details
+                // (e.g., S3 endpoint, bucket name) to the admin UI
+                return { error: t('failedToSwitchStorageBackend') };
             }
         }
 
