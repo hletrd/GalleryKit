@@ -296,6 +296,7 @@ export async function uploadImages(formData: FormData) {
         count: successCount,
         failed: failedFiles.length,
         topic,
+        tags: tagNames.join(','),
     }).catch(console.debug);
 
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
