@@ -125,7 +125,8 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                 if (res.errors && res.errors > 0) {
                     toast.warning(t('imageManager.bulkDeletePartial', { count: res.errors }));
                 }
-                setImages(prev => prev.filter(img => !selectedIds.has(img.id)));
+                const deletedIdSet = new Set(ids);
+                setImages(prev => prev.filter(img => !deletedIdSet.has(img.id)));
                 setSelectedIds(new Set());
             } else {
                 toast.error(res?.error || t('imageManager.deleteFailed'));
