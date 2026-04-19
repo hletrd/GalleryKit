@@ -171,6 +171,8 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
              } else {
                  toast.error(res?.error || t('imageManager.batchAddFailed'));
              }
+         } catch {
+             toast.error(t('imageManager.batchAddFailed'));
          } finally {
              setIsAddingTag(false);
          }
@@ -336,19 +338,23 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
 
                                                 if (added.length === 0 && removed.length === 0) return;
 
-                                                const res = await batchUpdateImageTags(image.id, added, removed);
-                                                if (res.success) {
-                                                    if (res.warnings.length > 0) {
-                                                        res.warnings.forEach(w => toast.warning(w));
-                                                    }
-                                                    toast.success(t('imageManager.tagAdded'));
-                                                    setImages(prev => prev.map(img => {
-                                                        if (img.id === image.id) {
-                                                            return { ...img, tag_names: newTags.join(',') };
+                                                try {
+                                                    const res = await batchUpdateImageTags(image.id, added, removed);
+                                                    if (res.success) {
+                                                        if (res.warnings.length > 0) {
+                                                            res.warnings.forEach(w => toast.warning(w));
                                                         }
-                                                        return img;
-                                                    }));
-                                                } else {
+                                                        toast.success(t('imageManager.tagAdded'));
+                                                        setImages(prev => prev.map(img => {
+                                                            if (img.id === image.id) {
+                                                                return { ...img, tag_names: newTags.join(',') };
+                                                            }
+                                                            return img;
+                                                        }));
+                                                    } else {
+                                                        toast.error(t('imageManager.batchAddFailed'));
+                                                    }
+                                                } catch {
                                                     toast.error(t('imageManager.batchAddFailed'));
                                                 }
                                             }}
