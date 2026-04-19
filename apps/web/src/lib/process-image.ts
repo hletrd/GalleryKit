@@ -148,19 +148,20 @@ function parseExifDateTime(value: unknown): string | null {
     return null;
 }
 
-// Known output sizes — used by both processImageFormats and deleteImageVariants.
-const OUTPUT_SIZES = [640, 1536, 2048, 4096];
+// Default output sizes — used when no admin-configured sizes are provided.
+const DEFAULT_OUTPUT_SIZES = [640, 1536, 2048, 4096];
 
 /**
  * Delete all sized variants for a given base filename deterministically.
  * Avoids expensive readdir on directories with thousands of files.
+ * @param sizes Optional array of configured sizes. Defaults to DEFAULT_OUTPUT_SIZES.
  */
-export async function deleteImageVariants(dir: string, baseFilename: string) {
+export async function deleteImageVariants(dir: string, baseFilename: string, sizes: number[] = DEFAULT_OUTPUT_SIZES) {
     const ext = path.extname(baseFilename);
     const name = path.basename(baseFilename, ext);
     const filesToDelete = [
         baseFilename,
-        ...OUTPUT_SIZES.map(size => `${name}_${size}${ext}`),
+        ...sizes.map(size => `${name}_${size}${ext}`),
     ];
     await Promise.all(
         filesToDelete.map(f => fs.unlink(path.join(dir, f)).catch(() => {})),
@@ -329,11 +330,10 @@ export async function processImageFormats(
     filenameJpeg: string,
     baseWidth: number, // The width from metadata
     quality?: ImageQualitySettings, // Admin-configured quality overrides
+    sizes: number[] = DEFAULT_OUTPUT_SIZES, // Admin-configured output sizes
 ) {
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.
     const image = sharp(inputPath, { limitInputPixels: maxInputPixels });
-
-    const sizes = OUTPUT_SIZES;
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
@@ -371,9 +371,9 @@ export async function processImageFormats(
                 lastRendered = { resizeWidth, filePath: outputPath };
             }
 
-            // If this size is 2048, also save as the "base" filename to satisfy existing schema.
+            // The largest configured size serves as the "base" filename to satisfy existing schema.
             // Prefer hard link (zero-copy); fall back to copyFile if the FS doesn't support links.
-            if (size === 2048) {
+            if (size === sizes[sizes.length - 1]) {
                 const basePath = path.join(dir, baseFilename);
                 await fs.unlink(basePath).catch(() => {});
                 try {

@@ -167,8 +167,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             // Pass file path so Sharp uses native mmap instead of pinning on the heap.
-            // Read admin-configured quality settings from DB (cached per SSR request).
+            // Read admin-configured quality and size settings from DB (cached per SSR request).
             let quality: ImageQualitySettings | undefined;
+            let imageSizes: number[] | undefined;
             try {
                 const config = await getGalleryConfig();
                 quality = {
@@ -176,6 +177,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     avif: config.imageQualityAvif,
                     jpeg: config.imageQualityJpeg,
                 };
+                imageSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
             } catch {
                 // DB unavailable during processing — use Sharp defaults (90/85/90)
             }
@@ -186,6 +188,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 job.filenameJpeg,
                 job.width,
                 quality,
+                imageSizes,
             );
 
             // Verify all 3 output formats exist and are non-zero before marking processed
