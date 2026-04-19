@@ -127,7 +127,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
         const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
         revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
         return tagRecord.name !== cleanName
-            ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
+            ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
             : { success: true as const };
     } catch (e) {
         console.error("Failed to add tag", e);
@@ -208,7 +208,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
 
         revalidateLocalizedPaths('/admin/dashboard', '/');
         return tagRecord.name !== cleanName
-            ? { success: true as const, warning: `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)` }
+            ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
             : { success: true as const };
     } catch (e) {
         console.error("Failed to batch add tags", e);
@@ -251,9 +251,8 @@ export async function batchUpdateImageTags(
                 if (tagRecord) {
                     // Warn on tag slug collision (matching addTagToImage/batchAddTags pattern)
                     if (tagRecord.name !== cleanName) {
-                        const msg = `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)`;
                         console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
-                        warnings.push(msg);
+                        warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }));
                     }
                     await tx.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
                     added++;

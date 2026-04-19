@@ -362,7 +362,8 @@
     "disallowedSql": "SQL 파일에 허용되지 않는 구문이 포함되어 있습니다",
     "failedToReadRestore": "복원 파일 읽기에 실패했습니다",
     "restoreFailed": "데이터베이스 복원에 실패했습니다",
-    "restoreExitedWithCode": "복원이 코드 {code}(으)로 종료되었습니다"
+    "restoreExitedWithCode": "복원이 코드 {code}(으)로 종료되었습니다",
+    "tagSlugCollision": "태그 \"{newName}\"이(가) 기존 \"{existingName}\"에 매핑되었습니다 (동일한 슬러그)"
   },
   "aria": {
     "searchPhotos": "사진 검색",
