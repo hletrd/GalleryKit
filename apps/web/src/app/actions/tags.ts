@@ -83,7 +83,11 @@ export async function deleteTag(id: number) {
     }
 
     try {
-        await db.delete(tags).where(eq(tags.id, id));
+        // Delete imageTags explicitly before tag (defense in depth alongside FK cascade)
+        await db.transaction(async (tx) => {
+            await tx.delete(imageTags).where(eq(imageTags.tagId, id));
+            await tx.delete(tags).where(eq(tags.id, id));
+        });
         revalidateLocalizedPaths('/admin/tags', '/');
         return { success: true };
     } catch {
