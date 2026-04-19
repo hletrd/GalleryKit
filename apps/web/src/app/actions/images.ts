@@ -118,10 +118,18 @@ export async function uploadImages(formData: FormData) {
     tracker.count += files.length;
     uploadTracker.set(uploadIp, tracker);
 
-    if (!topic) return { error: t('topicRequired') };
+    if (!topic) {
+        tracker.bytes = originalTrackerBytes;
+        tracker.count = originalTrackerCount;
+        uploadTracker.set(uploadIp, tracker);
+        return { error: t('topicRequired') };
+    }
 
     // Validate topic slug format
     if (!isValidSlug(topic)) {
+        tracker.bytes = originalTrackerBytes;
+        tracker.count = originalTrackerCount;
+        uploadTracker.set(uploadIp, tracker);
         return { error: t('invalidTopicFormat') };
     }
 
