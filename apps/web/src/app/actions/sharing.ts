@@ -7,8 +7,9 @@ import { headers } from 'next/headers';
 import { getClientIp } from '@/lib/rate-limit';
 import { getTranslations } from 'next-intl/server';
 
-import { isAdmin } from '@/app/actions/auth';
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { logAuditEvent } from '@/lib/audit';
 
 const PHOTO_SHARE_KEY_LENGTH = 10;
 const GROUP_SHARE_KEY_LENGTH = 10;
@@ -81,6 +82,8 @@ export async function createPhotoShareLink(imageId: number) {
                 .where(and(eq(images.id, imageId), sql`${images.share_key} IS NULL`));
 
             if (result.affectedRows > 0) {
+                const currentUser = await getCurrentUser();
+                logAuditEvent(currentUser?.id ?? null, 'share_create', 'image', String(imageId), undefined, { key }).catch(console.debug);
                 revalidateLocalizedPaths(`/p/${imageId}`);
                 return { success: true, key: key };
             }
@@ -173,6 +176,8 @@ export async function createGroupShareLink(imageIds: number[]) {
             });
 
             revalidateLocalizedPaths('/');
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'group_share_create', 'shared_group', undefined, undefined, { key, imageCount: uniqueImageIds.length }).catch(console.debug);
             return { success: true, key };
         } catch {
             // Key collision or other error - retry with new key
@@ -205,6 +210,8 @@ export async function revokePhotoShareLink(imageId: number) {
     }
 
     revalidateLocalizedPaths(`/p/${imageId}`, `/s/${oldShareKey}`);
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'share_revoke', 'image', String(imageId), undefined, { key: oldShareKey }).catch(console.debug);
     return { success: true };
 }
 
@@ -220,13 +227,25 @@ export async function deleteGroupShareLink(groupId: number) {
     const [group] = await db.select({ key: sharedGroups.key }).from(sharedGroups).where(eq(sharedGroups.id, groupId));
     if (!group) return { error: t('groupNotFound') };
 
-    // sharedGroupImages cascade-deletes via FK
-    const [result] = await db.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
-
-    if (result.affectedRows === 0) {
-        return { error: t('groupNotFound') };
+    // Delete sharedGroupImages explicitly before group (defense in depth alongside FK cascade)
+    try {
+        await db.transaction(async (tx) => {
+            await tx.delete(sharedGroupImages).where(eq(sharedGroupImages.groupId, groupId));
+            const [result] = await tx.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
+            if (result.affectedRows === 0) {
+                throw new Error('GROUP_NOT_FOUND');
+            }
+        });
+    } catch (e) {
+        if (e instanceof Error && e.message === 'GROUP_NOT_FOUND') {
+            return { error: t('groupNotFound') };
+        }
+        console.error('Failed to delete group share link:', e);
+        return { error: t('failedToCreateGroup') };
     }
 
     revalidateLocalizedPaths('/', `/g/${group.key}`, '/admin/dashboard');
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'group_share_delete', 'shared_group', String(groupId), undefined, { key: group.key }).catch(console.debug);
     return { success: true };
 }
