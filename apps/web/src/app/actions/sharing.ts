@@ -88,7 +88,12 @@ export async function createPhotoShareLink(imageId: number) {
                 .from(images)
                 .where(eq(images.id, imageId));
 
-            if (refreshedImage?.share_key) {
+            // Image may have been deleted between the initial check and now
+            if (!refreshedImage) {
+                return { error: 'Image not found' };
+            }
+
+            if (refreshedImage.share_key) {
                 return { success: true, key: refreshedImage.share_key };
             }
 
