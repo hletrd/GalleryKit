@@ -33,7 +33,7 @@ export function isEditableTarget(e: KeyboardEvent): boolean {
 
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';
-import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface PhotoViewerProps {
     images: ImageDetail[];
@@ -497,7 +497,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 {image.filename_jpeg && (
                                     <div className="mt-4 border-t pt-4">
                                         <Histogram
-                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`)}
+                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
                                             className="w-full"
                                         />
                                     </div>
