@@ -15,7 +15,8 @@ function getTagSlug(name: string) {
 // Tag Management
 
 export async function getAdminTags() {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     try {
         const allTags = await db.select({

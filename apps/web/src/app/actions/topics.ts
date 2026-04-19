@@ -87,7 +87,7 @@ export async function createTopic(formData: FormData) {
             return { error: t('slugOrAliasExists') };
         }
         console.error('Failed to create topic', e);
-        return { error: 'Failed to create topic' };
+        return { error: t('failedToCreateTopic') };
     }
 }
 
@@ -174,7 +174,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
              return { error: t('slugAlreadyExists') };
          }
          console.error('Failed to update topic', e);
-         return { error: 'Failed to update topic' };
+         return { error: t('failedToUpdateTopic') };
     }
 }
 
