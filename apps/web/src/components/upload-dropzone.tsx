@@ -72,11 +72,12 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
 
     // Cleanup all URLs on unmount
     useEffect(() => {
+        const urls = previewUrlsRef.current;
         return () => {
-            for (const url of previewUrlsRef.current.values()) {
+            for (const url of urls.values()) {
                 URL.revokeObjectURL(url);
             }
-            previewUrlsRef.current.clear();
+            urls.clear();
         };
     }, []);
 
