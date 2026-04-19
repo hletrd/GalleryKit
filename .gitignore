@@ -15,5 +15,6 @@ test
 .omc
 .omx/
 .context/
+.agent/
 apps/web/test-results/
 apps/web/playwright-report/
