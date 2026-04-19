@@ -227,6 +227,6 @@ export async function deleteGroupShareLink(groupId: number) {
         return { error: t('groupNotFound') };
     }
 
-    revalidateLocalizedPaths('/', `/g/${group.key}`);
+    revalidateLocalizedPaths('/', `/g/${group.key}`, '/admin/dashboard');
     return { success: true };
 }
