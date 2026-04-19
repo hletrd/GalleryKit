@@ -2,6 +2,22 @@
 
 ## Active Plans
 
+None — all plans complete.
+
+## Completed Plans (Cycle 17)
+
+- 63 — Cycle 17 Fixes (C17-01 through C17-10) — DONE
+
+## Completed Plans (Cycle 16)
+
+- 62 — Cycle 16 Low-Priority Fixes (C16-01 through C16-06) — DONE
+
+## Completed Plans (Cycle 15)
+
+- 61 — Photo/Topic/Home/Shared-Photo Page Metadata i18n (C15-01, C15-02, C15-03) — DONE
+
+## Completed Plans (Cycle 8)
+
 - 48 — Sharing insertId Guard, Login & User Form maxLength — DONE
 - 49 — i18n Remaining Hardcoded Strings, UX Inconsistencies — DONE
 
@@ -45,6 +61,9 @@
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
+| **Cycle 17 Comprehensive Review** | 2026-04-19 | 6 actionable (5L/1VL) | 6 via Plan 63 | 0 |
+| Cycle 16 Comprehensive Review | 2026-04-19 | 6 actionable (6L) | 6 via Plan 62 | 0 |
+| Cycle 15 Comprehensive Review | 2026-04-19 | 3 actionable (2M/1L) | 3 via Plan 61 | 0 |
 | **Cycle 8 Comprehensive Review** | 2026-04-19 | 9 actionable (1M/8L) | 6 via Plans 48-49 | 3 via Plan 50 |
 | **Cycle 7 Comprehensive Review** | 2026-04-19 | 7 actionable (1M/6L) | 7 via Plans 44-46 | 2 via Plan 47 |
 | Cycle 6 Comprehensive Review | 2026-04-19 | 9 actionable (3M/6L) | 9 via Plans 41-42 | 1 via Plan 43 |
@@ -54,44 +73,6 @@
 | Comprehensive Code Review (full audit) | 2026-04-18 | 15 confirmed + 3 likely/risk | 15 confirmed + 2 low-risk likely fixes complete | 1 manual-validation risk (`/api/og` throttle architecture) |
 | UI/UX Deep Review R7 | 2026-04-18 | 11 (6H/3M/2L) | Complete via Plan 26 | 0 |
 | Comprehensive Review R6 | 2026-04-18 | 40 (2C/9H/18M/11L) | Complete | 0 |
-
----
-
-## Cycle 8 Findings → Plan Mapping
-
-### Plan 48 (Sharing insertId + Form maxLength)
-- C8-01 createGroupShareLink insertId guard (already present — false positive)
-- C8-02 maxLength on login form username/password inputs
-- C8-03 maxLength on create-user password input
-
-### Plan 49 (i18n + UX)
-- C8-05 audit log on race-deleted image (no change needed — already guarded)
-- C8-06 shared group page raw arrow → ArrowLeft + i18n
-- C8-09 delete-user dialog wrong translation key
-- C8-11 createTopic remaining hardcoded strings
-- C8-12 updateTopic hardcoded error string
-
-### Plan 50 (Deferred)
-- C8-04 searchImages query length guard (defense in depth, caller already truncates)
-- C8-05 audit log on race-deleted image (control flow analysis shows already guarded)
-- C8-10 batchUpdateImageTags added count accuracy (negligible UX inaccuracy)
-
-### Plan 44 (Password Change Transaction)
-- C7-03 password change + session invalidation not in transaction
-
-### Plan 45 (i18n + Share Link Safety)
-- C7-05 hardcoded English strings in topics.ts
-- C7-01 share link retry loop missing image existence check
-
-### Plan 46 (UI + Password + CSV)
-- C7-06 checkbox styling (downgraded — no component change needed)
-- C7-09 split isDeleting state in topic-manager
-- C7-10 maxLength on password inputs
-- C7-04 CSV results GC release
-
-### Plan 47 (Deferred)
-- C7-07 NULL capture_date prev/next navigation (legacy-only)
-- C7-08 rate limit inconsistency in safe direction (by-design)
 
 ---
 
@@ -112,12 +93,13 @@
 13. C8-04 searchImages query length guard (defense in depth, caller truncates)
 14. C8-05 audit log on race-deleted image (control flow already guards)
 15. C8-10 batchUpdateImageTags added count accuracy (negligible UX inaccuracy)
+16. C17-07 admin-user-manager username pattern (VERY LOW, added in Plan 63 as well)
 
 ---
 
 ## Notes
 
-- Build verified passing after cycle 8 changes.
+- Build verified passing after cycle 17 changes.
 - All `confirm()` calls have been eliminated from the codebase.
-- Cycle 8 found 9 actionable findings (1M + 8L), down from 7 in cycle 7. One MEDIUM finding (C8-01) was a false positive — the insertId guard was already present. 6 findings were implemented, 3 deferred.
-- All topic server action error strings now use i18n consistently.
+- Cycle 17 found 6 findings (5 LOW + 1 VERY LOW), all implemented via Plan 63.
+- Cumulative: 0 CRITICAL, 0 HIGH findings across cycles 1-17.

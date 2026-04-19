@@ -33,15 +33,17 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
 
     async function handleCreate(formData: FormData) {
         setIsCreating(true);
-        const result = await createAdminUser(formData);
-        setIsCreating(false);
-
-        if (result.error) {
-            toast.error(result.error);
-        } else {
-            toast.success(t('users.createSuccess'));
-            setOpen(false);
-            router.refresh();
+        try {
+            const result = await createAdminUser(formData);
+            if (result.error) {
+                toast.error(result.error);
+            } else {
+                toast.success(t('users.createSuccess'));
+                setOpen(false);
+                router.refresh();
+            }
+        } finally {
+            setIsCreating(false);
         }
     }
 
