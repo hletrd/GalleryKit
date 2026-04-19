@@ -78,13 +78,6 @@ const selectFields = {
     // queries to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
 };
 
-// Admin-only fields — extend selectFields with PII columns.
-const adminExtraFields = {
-    user_filename: images.user_filename,
-    latitude: images.latitude,
-    longitude: images.longitude,
-};
-
 export async function getTopics() {
     return db.select().from(topics).orderBy(asc(topics.order));
 }
@@ -588,9 +581,6 @@ export async function getImageIdsForSitemap() {
     .orderBy(desc(images.created_at))
     .limit(50000);
 }
-
-// adminExtraFields is intentionally NOT exported — it contains PII (latitude, longitude, user_filename).
-// Use it locally in admin-specific query builders only.
 
 export const getImageCached = cache(getImage);
 export const getTopicBySlugCached = cache(getTopicBySlug);

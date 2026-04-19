@@ -38,7 +38,7 @@ export function stripSqlCommentsAndLiterals(input: string): string {
     // before stripping. These are EXECUTED by MySQL when server version >= ddddd,
     // so their content must be scanned. Replace the entire conditional comment
     // with its inner statement text so the dangerous-SQL patterns can match it.
-    let withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
+    const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
 
     const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, '');
 
