@@ -11,26 +11,6 @@ export function isValidSlug(slug: string): boolean {
     return /^[a-z0-9_-]+$/i.test(slug) && slug.length > 0 && slug.length <= 100;
 }
 
-const RESERVED_ROUTE_SEGMENTS = new Set([
-    'admin',
-    'api',
-    'g',
-    'icon',
-    'manifest.webmanifest',
-    'p',
-    'robots.txt',
-    's',
-    'sitemap.xml',
-    'uploads',
-    '_next',
-    '_vercel',
-    'apple-icon',
-]);
-
-export function isReservedRouteSegment(value: string): boolean {
-    return RESERVED_ROUTE_SEGMENTS.has(value.trim().toLowerCase());
-}
-
 export function isReservedTopicRouteSegment(segment: string): boolean {
     return RESERVED_TOPIC_ROUTE_SEGMENTS.has(segment.trim().toLowerCase());
 }
