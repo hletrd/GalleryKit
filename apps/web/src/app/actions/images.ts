@@ -248,6 +248,14 @@ export async function uploadImages(formData: FormData) {
     tracker.bytes = originalTrackerBytes + uploadedBytes;
     uploadTracker.set(uploadIp, tracker);
 
+    // Audit log for upload action
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'image_upload', 'image', undefined, undefined, {
+        count: successCount,
+        failed: failedFiles.length,
+        topic,
+    }).catch(console.debug);
+
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
     revalidateLocalizedPaths('/', '/admin/dashboard');
 
@@ -455,6 +463,9 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         if (result.affectedRows === 0) {
             return { error: t('imageNotFound') };
         }
+
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'image_update', 'image', String(id)).catch(console.debug);
 
         const topicPath = existingImage?.topic ? `/${existingImage.topic}` : undefined;
         revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/', ...(topicPath ? [topicPath] : []));
