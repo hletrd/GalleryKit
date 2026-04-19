@@ -154,7 +154,7 @@ The `images` table has composite indexes optimized for query patterns:
 - `(user_filename)` — upload deduplication
 - `image_tags(tag_id)` — tag JOIN performance
 
-Connection pool: 8 connections, queue limit 20, keepalive enabled.
+Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 ## Image Processing Pipeline
 
