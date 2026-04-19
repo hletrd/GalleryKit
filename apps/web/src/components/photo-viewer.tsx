@@ -43,9 +43,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
     const [timerShowInfo, setTimerShowInfo] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
-    const [showLightbox, setShowLightbox] = useState(() => {
-        try { return sessionStorage.getItem('gallery_auto_lightbox') === 'true'; } catch { return false; }
-    });
+    const [showLightbox, setShowLightbox] = useState(false);
+    useEffect(() => {
+        try {
+            if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
+                setShowLightbox(true);
+            }
+        } catch {}
+    }, []);
     const showLightboxRef = useRef(showLightbox);
     useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
     const [showBottomSheet, setShowBottomSheet] = useState(false);

@@ -39,6 +39,9 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
     }, [isZoomed, applyTransform]);
 
     const handleClick = useCallback((e: React.MouseEvent) => {
+        // Don't intercept clicks on interactive elements inside the zoom container
+        const target = e.target as HTMLElement;
+        if (target.closest('a, button, [role="button"], input, textarea, select')) return;
         e.preventDefault();
         setIsZoomed(prev => {
             const next = !prev;

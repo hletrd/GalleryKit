@@ -31,6 +31,8 @@ export function Search() {
     }, []);
 
     const performSearch = useCallback(async (searchQuery: string) => {
+        // Clear stale refs from previous result sets
+        resultRefs.current = [];
         if (!searchQuery.trim()) {
             setResults([]);
             return;

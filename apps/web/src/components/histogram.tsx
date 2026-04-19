@@ -83,7 +83,7 @@ function drawHistogram(
         color: string,
         alpha: number
     ) => {
-        const max = Math.max(...bins, 1);
+        const max = bins.reduce((m, v) => v > m ? v : m, 1);
         ctx.save();
         ctx.globalAlpha = alpha;
         ctx.fillStyle = color;
@@ -104,7 +104,7 @@ function drawHistogram(
         drawChannel(data.l, gridColor, 1.0);
     } else if (mode === 'rgb') {
         // Normalize all three channels to their shared maximum for overlay
-        const maxAll = Math.max(...data.r, ...data.g, ...data.b, 1);
+        const maxAll = [...data.r, ...data.g, ...data.b].reduce((m, v) => v > m ? v : m, 1);
         const drawChannelNormalized = (bins: number[], color: string) => {
             ctx.save();
             ctx.globalAlpha = 0.5;

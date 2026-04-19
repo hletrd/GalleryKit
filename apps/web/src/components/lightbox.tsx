@@ -6,6 +6,7 @@ import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
+import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
 
 interface LightboxProps {
@@ -98,11 +99,13 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
 
     const toggleFullscreen = useCallback(() => {
         if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(() => {});
+            document.documentElement.requestFullscreen().catch(() => {
+                toast.error(t('viewer.fullscreenUnavailable'));
+            });
         } else {
             document.exitFullscreen().catch(() => {});
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {

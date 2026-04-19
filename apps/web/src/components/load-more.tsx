@@ -81,7 +81,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
 
         observer.observe(sentinel);
         return () => observer.disconnect();
-    }, [hasMore]);
+    }, []);
 
     return (
         <>

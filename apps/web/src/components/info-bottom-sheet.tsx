@@ -21,6 +21,7 @@ const PEEK_HEIGHT = 140;   // px visible in peek state
 export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
+    const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
     const sheetRef = useRef<HTMLDivElement>(null);
     const touchStartY = useRef<number | null>(null);
     const touchStartTime = useRef<number | null>(null);
@@ -49,8 +50,17 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
         touchStartTime.current = Date.now();
     }, []);
 
+    const handleTouchMove = useCallback((e: React.TouchEvent) => {
+        if (touchStartY.current === null) return;
+        e.preventDefault(); // prevent background scroll while dragging the sheet
+        const deltaY = e.changedTouches[0].clientY - touchStartY.current;
+        setLiveTranslateY(deltaY);
+    }, []);
+
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         if (touchStartY.current === null || touchStartTime.current === null) return;
+
+        setLiveTranslateY(null); // reset live tracking
 
         const deltaY = e.changedTouches[0].clientY - touchStartY.current;
         const deltaTime = Date.now() - touchStartTime.current;
@@ -140,7 +150,10 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                 aria-label={t('viewer.bottomSheet')}
                 className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl shadow-2xl transition-transform duration-300 ease-out"
                 style={{
-                    transform: `translateY(${getTranslateY(sheetState)})`,
+                    transform: `translateY(${liveTranslateY !== null
+                        ? `calc(${getTranslateY(sheetState)} + ${liveTranslateY}px)`
+                        : getTranslateY(sheetState)})`,
+                    transition: liveTranslateY !== null ? 'none' : undefined,
                     maxHeight: '95vh',
                     ...({'maxHeight': '95dvh'} as React.CSSProperties),
                     minHeight: `${PEEK_HEIGHT}px`,
@@ -148,6 +161,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}
                 onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
             >
                 {/* Drag handle */}

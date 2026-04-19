@@ -39,22 +39,49 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     // Helper to generate a unique ID for a file instance
     const getFileId = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
 
-    // Memoize object URLs keyed by file identity; clean up when files change
-    const previewUrls = useMemo(() => {
-        const map = new Map<string, string>();
-        for (const file of files) {
-            map.set(getFileId(file), URL.createObjectURL(file));
-        }
-        return map;
-    }, [files]);
+    // Incremental object URL management — only creates/revoke URLs for
+    // added/removed files instead of recreating all URLs on every change.
+    const previewUrlsRef = useRef<Map<string, string>>(new Map());
+    const [previewVersion, setPreviewVersion] = useState(0);
 
     useEffect(() => {
+        const currentIds = new Set(files.map(f => getFileId(f)));
+        let changed = false;
+
+        // Revoke URLs for removed files
+        for (const [id, url] of previewUrlsRef.current) {
+            if (!currentIds.has(id)) {
+                URL.revokeObjectURL(url);
+                previewUrlsRef.current.delete(id);
+                changed = true;
+            }
+        }
+
+        // Create URLs for new files
+        for (const file of files) {
+            const id = getFileId(file);
+            if (!previewUrlsRef.current.has(id)) {
+                previewUrlsRef.current.set(id, URL.createObjectURL(file));
+                changed = true;
+            }
+        }
+
+        // Force re-render if URLs changed
+        if (changed) setPreviewVersion(v => v + 1);
+    }, [files]);
+
+    // Cleanup all URLs on unmount
+    useEffect(() => {
         return () => {
-            for (const url of previewUrls.values()) {
+            for (const url of previewUrlsRef.current.values()) {
                 URL.revokeObjectURL(url);
             }
+            previewUrlsRef.current.clear();
         };
-    }, [previewUrls]);
+    }, []);
+
+    // Access the URL map in render (previewVersion ensures re-render on changes)
+    const previewUrls = previewVersion >= 0 ? previewUrlsRef.current : previewUrlsRef.current;
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         setFiles(prev => [...prev, ...acceptedFiles]);
