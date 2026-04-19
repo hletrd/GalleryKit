@@ -48,6 +48,9 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
         return new NextResponse('Invalid path', { status: 400 });
     }
 
+    // Content type is resolved from the extension already extracted above
+    const contentType = CONTENT_TYPES[ext];
+
     for (const segment of pathSegments) {
         if (!segment || segment.length > MAX_SEGMENT_LENGTH || segment === '.' || segment === '..') {
             return new NextResponse('Invalid path', { status: 400 });
@@ -78,9 +81,7 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
             return new NextResponse('Access denied', { status: 403 });
         }
 
-        // Determine content type (no SVG)
-        const ext = path.extname(absolutePath).toLowerCase();
-        const contentType = CONTENT_TYPES[ext];
+        // Content type already resolved from extension above (no SVG)
         if (!contentType) {
             return new NextResponse('Unsupported file type', { status: 404 });
         }

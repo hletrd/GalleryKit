@@ -58,30 +58,39 @@ export async function updateSeoSettings(settings: Record<string, string>) {
         }
     }
 
-    // Validate individual field lengths
-    if (settings.seo_title && settings.seo_title.length > MAX_TITLE_LENGTH) {
+    // Sanitize before validation so length checks operate on the same
+    // value that will be stored. Without this, control characters pass
+    // the length check but are stripped later, causing a mismatch
+    // between validated and persisted data (matches settings.ts pattern).
+    const sanitizedSettings: Record<string, string> = {};
+    for (const [key, value] of Object.entries(settings)) {
+        sanitizedSettings[key] = stripControlChars(value.trim()) ?? '';
+    }
+
+    // Validate individual field lengths (on sanitized values)
+    if (sanitizedSettings.seo_title && sanitizedSettings.seo_title.length > MAX_TITLE_LENGTH) {
         return { error: t('seoTitleTooLong') };
     }
-    if (settings.seo_description && settings.seo_description.length > MAX_DESCRIPTION_LENGTH) {
+    if (sanitizedSettings.seo_description && sanitizedSettings.seo_description.length > MAX_DESCRIPTION_LENGTH) {
         return { error: t('seoDescriptionTooLong') };
     }
-    if (settings.seo_nav_title && settings.seo_nav_title.length > MAX_NAV_TITLE_LENGTH) {
+    if (sanitizedSettings.seo_nav_title && sanitizedSettings.seo_nav_title.length > MAX_NAV_TITLE_LENGTH) {
         return { error: t('seoNavTitleTooLong') };
     }
-    if (settings.seo_author && settings.seo_author.length > MAX_AUTHOR_LENGTH) {
+    if (sanitizedSettings.seo_author && sanitizedSettings.seo_author.length > MAX_AUTHOR_LENGTH) {
         return { error: t('seoAuthorTooLong') };
     }
-    if (settings.seo_locale && settings.seo_locale.length > MAX_LOCALE_LENGTH) {
+    if (sanitizedSettings.seo_locale && sanitizedSettings.seo_locale.length > MAX_LOCALE_LENGTH) {
         return { error: t('seoLocaleTooLong') };
     }
-    if (settings.seo_og_image_url && settings.seo_og_image_url.length > MAX_OG_IMAGE_URL_LENGTH) {
+    if (sanitizedSettings.seo_og_image_url && sanitizedSettings.seo_og_image_url.length > MAX_OG_IMAGE_URL_LENGTH) {
         return { error: t('seoOgImageUrlTooLong') };
     }
 
     // Validate OG image URL format if provided
-    if (settings.seo_og_image_url && settings.seo_og_image_url.trim()) {
+    if (sanitizedSettings.seo_og_image_url && sanitizedSettings.seo_og_image_url.trim()) {
         try {
-            const url = new URL(settings.seo_og_image_url.trim());
+            const url = new URL(sanitizedSettings.seo_og_image_url.trim());
             if (!['http:', 'https:'].includes(url.protocol)) {
                 return { error: t('seoOgImageUrlInvalid') };
             }
@@ -93,21 +102,20 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     try {
         // Upsert each setting atomically in a transaction to prevent partial writes on crash
         await db.transaction(async (tx) => {
-            for (const [key, value] of Object.entries(settings)) {
-                const sanitizedValue = stripControlChars(value.trim());
-                if (!sanitizedValue) {
+            for (const [key, value] of Object.entries(sanitizedSettings)) {
+                if (!value) {
                     // Delete empty settings so the JSON fallback takes effect
                     await tx.delete(adminSettings).where(eq(adminSettings.key, key));
                 } else {
                     await tx.insert(adminSettings)
-                        .values({ key, value: sanitizedValue })
-                        .onDuplicateKeyUpdate({ set: { value: sanitizedValue } });
+                        .values({ key, value })
+                        .onDuplicateKeyUpdate({ set: { value } });
                 }
             }
         });
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'seo_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(settings).join(',') }).catch(console.debug);
+        logAuditEvent(currentUser?.id ?? null, 'seo_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(sanitizedSettings).join(',') }).catch(console.debug);
 
         // Revalidate all public pages so new SEO metadata is reflected
         revalidateLocalizedPaths('/', '/admin/seo', '/admin/dashboard');
