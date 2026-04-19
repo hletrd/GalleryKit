@@ -21,27 +21,11 @@ export {
     getSettingDefaults,
 } from './gallery-config-shared';
 
-import { GALLERY_SETTING_KEYS } from './gallery-config-shared';
+import { GALLERY_SETTING_KEYS, getSettingDefaults } from './gallery-config-shared';
 import type { GallerySettingKey } from './gallery-config-shared';
 
-// ── Defaults (re-imported for server-side use) ────────────────────────────────
-
-const DEFAULTS = Object.fromEntries(
-    Object.entries({
-        image_quality_webp: '90',
-        image_quality_avif: '85',
-        image_quality_jpeg: '90',
-        image_sizes: '640,1536,2048,4096',
-        queue_concurrency: '2',
-        grid_columns_desktop: '4',
-        grid_columns_tablet: '3',
-        grid_columns_mobile: '2',
-        strip_gps_on_upload: 'false',
-        max_file_size_mb: '200',
-        max_files_per_batch: '100',
-        storage_backend: 'local',
-    }),
-) as Record<GallerySettingKey, string>;
+// ── Defaults (imported from shared module to avoid duplication) ────────────────
+const DEFAULTS = getSettingDefaults();
 
 // ── Typed Getters ─────────────────────────────────────────────────────────────
 
