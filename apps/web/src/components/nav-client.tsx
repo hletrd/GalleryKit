@@ -56,6 +56,11 @@ export function NavClient({ topics }: NavClientProps) {
         return search ? `${targetPath}?${search}` : targetPath;
     })();
 
+    const handleLocaleSwitch = useCallback(() => {
+        document.cookie = `NEXT_LOCALE=${otherLocale};path=/;SameSite=Lax;max-age=${60 * 60 * 24 * 365}`;
+        router.push(localeSwitchHref);
+    }, [otherLocale, localeSwitchHref, router]);
+
     return (
         <nav aria-label={t('aria.mainNav')} className="sticky top-0 z-50 w-full bg-background/50 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
             <div className={cn(
@@ -140,10 +145,7 @@ export function NavClient({ topics }: NavClientProps) {
                         <Moon className="h-4 w-4 block dark:hidden" />
                     </button>
                     <button
-                        onClick={useCallback(() => {
-                            document.cookie = `NEXT_LOCALE=${otherLocale};path=/;SameSite=Lax;max-age=${60 * 60 * 24 * 365}`;
-                            router.push(localeSwitchHref);
-                        }, [otherLocale, localeSwitchHref, router])}
+                        onClick={handleLocaleSwitch}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
                     >
                         {otherLocale.toUpperCase()}
