@@ -341,6 +341,8 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                     showBackToTop ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
                 )}
                 aria-label={t('home.backToTop')}
+                aria-hidden={showBackToTop ? undefined : true}
+                tabIndex={showBackToTop ? 0 : -1}
             >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
