@@ -35,7 +35,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     const results = await db
         .select({
             id: images.id,
-            filename: images.filename_original,
+            filename: images.user_filename,
             title: images.title,
             width: images.width,
             height: images.height,
