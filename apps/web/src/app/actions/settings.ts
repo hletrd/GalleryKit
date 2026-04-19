@@ -7,6 +7,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { switchStorageBackend } from '@/lib/storage';
 import { GALLERY_SETTING_KEYS, isValidSettingValue } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 
@@ -67,6 +68,14 @@ export async function updateGallerySettings(settings: Record<string, string>) {
 
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'gallery_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(settings).join(',') }).catch(console.debug);
+
+        // If storage backend changed, switch the live backend
+        const newStorageBackend = settings.storage_backend?.trim();
+        if (newStorageBackend && ['local', 'minio', 's3'].includes(newStorageBackend)) {
+            await switchStorageBackend(newStorageBackend as 'local' | 'minio' | 's3').catch(err => {
+                console.error('[Settings] Failed to switch storage backend:', err);
+            });
+        }
 
         // Revalidate admin settings page and homepage
         revalidateLocalizedPaths('/', '/admin/settings', '/admin/dashboard');
