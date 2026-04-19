@@ -72,10 +72,8 @@ export async function uploadImages(formData: FormData) {
     const requestHeaders = await headers();
     const uploadIp = getClientIp(requestHeaders);
     const now = Date.now();
-    // Prune stale entries periodically to prevent unbounded memory growth
-    if (uploadTracker.size > UPLOAD_TRACKER_MAX_KEYS / 2) {
-        pruneUploadTracker();
-    }
+    // Prune stale entries unconditionally to prevent unbounded memory growth
+    pruneUploadTracker();
     const tracker = uploadTracker.get(uploadIp) || { count: 0, bytes: 0, windowStart: now };
     if (now - tracker.windowStart > UPLOAD_TRACKING_WINDOW_MS) {
         tracker.count = 0;
