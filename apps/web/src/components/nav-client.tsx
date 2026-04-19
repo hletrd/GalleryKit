@@ -57,7 +57,7 @@ export function NavClient({ topics }: NavClientProps) {
     })();
 
     const handleLocaleSwitch = useCallback(() => {
-        document.cookie = `NEXT_LOCALE=${otherLocale};path=/;SameSite=Lax;max-age=${60 * 60 * 24 * 365}`;
+        document.cookie = `NEXT_LOCALE=${otherLocale};path=/;SameSite=Lax;max-age=${60 * 60 * 24 * 365}${window.location.protocol === 'https:' ? ';Secure' : ''}`;
         router.push(localeSwitchHref);
     }, [otherLocale, localeSwitchHref, router]);
 
