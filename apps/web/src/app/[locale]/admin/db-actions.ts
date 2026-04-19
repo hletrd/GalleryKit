@@ -109,16 +109,15 @@ export async function dumpDatabase() {
     const sslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
 
     return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
+        // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
+        // to avoid exposing credentials in /proc/<pid>/cmdline
         const dump = spawn('mysqldump', [
-            `-h${DB_HOST}`,
-            `-P${DB_PORT || '3306'}`,
-            `-u${DB_USER}`,
             '--single-transaction', // Good for InnoDB
             '--quick',
             ...sslArgs,
             DB_NAME
         ], {
-            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
         });
 
         const writeStream = createWriteStream(outputPath);
@@ -303,15 +302,14 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     const restoreSslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
 
     return new Promise<{ success: boolean, error?: string }>((resolve) => {
+        // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
+        // to avoid exposing credentials in /proc/<pid>/cmdline
         const restore = spawn('mysql', [
-            `-h${DB_HOST}`,
-            `-P${DB_PORT || '3306'}`,
-            `-u${DB_USER}`,
             '--one-database',
             ...restoreSslArgs,
             DB_NAME
         ], {
-            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
         });
 
         const readStream = createReadStream(tempPath);
