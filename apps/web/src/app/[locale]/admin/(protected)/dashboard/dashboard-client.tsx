@@ -38,12 +38,12 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-4 mt-4">
                             {page > 1 ? (
-                                <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page - 1}`}>
-                                    <Button variant="outline" size="sm">
+                                <Button asChild variant="outline" size="sm">
+                                    <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page - 1}`}>
                                         <ChevronLeft className="h-4 w-4 mr-1" />
                                         {page - 1}
-                                    </Button>
-                                </Link>
+                                    </Link>
+                                </Button>
                             ) : (
                                 <Button variant="outline" size="sm" disabled>
                                     <ChevronLeft className="h-4 w-4 mr-1" />
@@ -53,12 +53,12 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                                 {page} / {totalPages}
                             </span>
                             {page < totalPages ? (
-                                <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page + 1}`}>
-                                    <Button variant="outline" size="sm">
+                                <Button asChild variant="outline" size="sm">
+                                    <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page + 1}`}>
                                         {page + 1}
                                         <ChevronRight className="h-4 w-4 ml-1" />
-                                    </Button>
-                                </Link>
+                                    </Link>
+                                </Button>
                             ) : (
                                 <Button variant="outline" size="sm" disabled>
                                     <ChevronRight className="h-4 w-4 ml-1" />

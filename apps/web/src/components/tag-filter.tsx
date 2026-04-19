@@ -1,7 +1,6 @@
 'use client';
 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { Fragment } from 'react';
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
@@ -50,36 +49,40 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
 
     return (
         <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
-             <Badge
+            <Badge
+                asChild
                 variant={currentTags.length === 0 ? "default" : "outline"}
                 className={cn("cursor-pointer hover:bg-primary/90", currentTags.length === 0 && "bg-primary text-primary-foreground")}
-                role="button"
-                tabIndex={0}
-                onClick={() => handleTagClick(null)}
-                onKeyDown={handleKeyDown(null)}
-                aria-pressed={currentTags.length === 0}
             >
-                {t('home.allTags')}
+                <button
+                    type="button"
+                    onClick={() => handleTagClick(null)}
+                    onKeyDown={handleKeyDown(null)}
+                    aria-pressed={currentTags.length === 0}
+                >
+                    {t('home.allTags')}
+                </button>
             </Badge>
             {tags.map(tag => (
-                <Fragment key={tag.id}>
-                    <Badge
-                        variant={currentTags.includes(tag.slug) ? "default" : "outline"}
-                        className={cn(
-                            "cursor-pointer hover:bg-primary/90 flex gap-1",
-                            currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
-                        )}
-                        role="button"
-                        tabIndex={0}
+                <Badge
+                    key={tag.id}
+                    asChild
+                    variant={currentTags.includes(tag.slug) ? "default" : "outline"}
+                    className={cn(
+                        "cursor-pointer hover:bg-primary/90 flex gap-1",
+                        currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
+                    )}
+                >
+                    <button
+                        type="button"
                         onClick={() => handleTagClick(tag.slug)}
                         onKeyDown={handleKeyDown(tag.slug)}
                         aria-pressed={currentTags.includes(tag.slug)}
                     >
                         {tag.name}
                         <span className="opacity-60 text-[10px]">({tag.count})</span>
-                    </Badge>
-                    {' '}
-                </Fragment>
+                    </button>
+                </Badge>
             ))}
         </div>
     );

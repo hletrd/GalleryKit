@@ -206,12 +206,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
                 {!isSharedView && (
-                    <Link href={localizePath(locale, `/${image.topic}`)}>
-                        <Button variant="ghost" className="pl-0 gap-2">
+                    <Button asChild variant="ghost" className="pl-0 gap-2">
+                        <Link href={localizePath(locale, `/${image.topic}`)}>
                             <ArrowLeft className="h-4 w-4" />
                             {t('viewer.backTo', { topic: image.topic_label || image.topic })}
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                 )}
 
                 <div className="flex gap-2">

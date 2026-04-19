@@ -147,11 +147,11 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         <div>
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
-                    <Link href={localizePath(locale, '/admin/dashboard')}>
-                        <Button variant="ghost" size="icon" aria-label={t('aria.goBack')}>
+                    <Button asChild variant="ghost" size="icon" aria-label={t('aria.goBack')}>
+                        <Link href={localizePath(locale, '/admin/dashboard')}>
                             <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                    </Link>
+                        </Link>
+                    </Button>
                     <h1 className="text-3xl font-bold">{t('categories.title')}</h1>
                 </div>
 

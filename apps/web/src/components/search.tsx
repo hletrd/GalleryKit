@@ -20,10 +20,12 @@ export function Search() {
     const [loading, setLoading] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
+    const triggerRef = useRef<HTMLButtonElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const resultRefs = useRef<(HTMLAnchorElement | null)[]>([]);
     const debounceRef = useRef<NodeJS.Timeout>(undefined);
     const requestIdRef = useRef(0);
+    const wasOpenRef = useRef(false);
 
     // Detect platform for keyboard shortcut hint (SSR-safe: default to Mac, correct on client)
     useEffect(() => {
@@ -65,6 +67,10 @@ export function Search() {
         };
     }, [query, performSearch]);
 
+    const handleClose = useCallback(() => {
+        setIsOpen(false);
+    }, []);
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -73,16 +79,23 @@ export function Search() {
                 setIsOpen(prev => !prev);
             }
             if (e.key === 'Escape' && isOpen) {
-                setIsOpen(false);
+                handleClose();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen]);
+    }, [handleClose, isOpen]);
 
     useEffect(() => {
-        if (isOpen && inputRef.current) {
-            inputRef.current.focus();
+        if (isOpen) {
+            wasOpenRef.current = true;
+            requestAnimationFrame(() => inputRef.current?.focus());
+            return;
+        }
+
+        if (wasOpenRef.current) {
+            requestAnimationFrame(() => triggerRef.current?.focus());
+            wasOpenRef.current = false;
         }
     }, [isOpen]);
 
@@ -99,10 +112,13 @@ export function Search() {
     if (!isOpen) {
         return (
             <Button
+                ref={triggerRef}
                 variant="ghost"
                 size="icon"
                 onClick={() => setIsOpen(true)}
                 aria-label={t('aria.searchPhotos')}
+                aria-haspopup="dialog"
+                aria-expanded={isOpen}
                 className="h-9 w-9"
             >
                 <SearchIcon className="h-4 w-4" />
@@ -114,21 +130,39 @@ export function Search() {
         <>
             <div
                 className="fixed inset-0 bg-black/50 z-40"
-                onClick={() => setIsOpen(false)}
+                onClick={handleClose}
                 aria-hidden="true"
             />
-            <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
-            <div role="dialog" aria-modal="true" aria-label={t('aria.searchPhotos')} className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]">
+            <FocusTrap
+                active={isOpen}
+                focusTrapOptions={{
+                    allowOutsideClick: true,
+                    initialFocus: '#search-input',
+                    fallbackFocus: '#search-dialog',
+                }}
+            >
+            <div
+                id="search-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label={t('aria.searchPhotos')}
+                className="fixed inset-0 sm:inset-auto sm:top-0 sm:left-0 sm:right-0 z-50 p-0 sm:p-6 sm:pt-[10vh]"
+            >
                 <div className="mx-auto h-full sm:h-auto sm:max-w-xl bg-card sm:border sm:rounded-xl shadow-2xl overflow-hidden flex flex-col">
                     <div className="flex items-center gap-2 p-4 border-b">
                         <SearchIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <label htmlFor="search-input" className="sr-only">
+                            {t('search.placeholder')}
+                        </label>
                         <Input
+                            id="search-input"
                             ref={inputRef}
                             role="combobox"
                             aria-expanded={results.length > 0}
                             aria-autocomplete="list"
                             aria-controls="search-results"
                             aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
+                            aria-label={t('search.placeholder')}
                             value={query}
                             onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
                             onKeyDown={(e) => {
@@ -150,7 +184,7 @@ export function Search() {
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setIsOpen(false)}
+                            onClick={handleClose}
                             className="h-8 w-8 shrink-0"
                             aria-label={t('aria.close')}
                         >
@@ -168,7 +202,7 @@ export function Search() {
                                         id={`search-result-${idx}`}
                                         aria-selected={idx === activeIndex}
                                         href={localizePath(locale, `/p/${image.id}`)}
-                                        onClick={() => setIsOpen(false)}
+                                        onClick={handleClose}
                                         className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
                                     >
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">

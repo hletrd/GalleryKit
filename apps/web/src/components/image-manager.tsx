@@ -159,25 +159,27 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
         }
     };
 
-    const [isAddingTag, setIsAddingTag] = useState(false);
+    const [isBatchTagDialogOpen, setIsBatchTagDialogOpen] = useState(false);
+    const [isBatchAddingTag, setIsBatchAddingTag] = useState(false);
     const [tagInput, setTagInput] = useState('');
 
     const handleBatchAddTag = async () => {
          if (!tagInput.trim()) return;
-         setIsAddingTag(true);
+         setIsBatchAddingTag(true);
          try {
              const res = await batchAddTags(Array.from(selectedIds), tagInput);
              if (res?.success) {
                  toast.success(t('imageManager.batchAddSuccess'));
                  setTagInput('');
                  setSelectedIds(new Set());
+                 setIsBatchTagDialogOpen(false);
              } else {
                  toast.error(res?.error || t('imageManager.batchAddFailed'));
              }
          } catch {
              toast.error(t('imageManager.batchAddFailed'));
          } finally {
-             setIsAddingTag(false);
+             setIsBatchAddingTag(false);
          }
     };
 
@@ -212,7 +214,15 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                 <div className="bg-muted/50 p-2 rounded-md flex items-center justify-between">
                     <span className="text-sm font-medium px-2">{t('imageManager.selected', { count: selectedIds.size })}</span>
                     <div className="flex items-center space-x-2">
-                        <AlertDialog open={isAddingTag} onOpenChange={setIsAddingTag}>
+                        <AlertDialog
+                            open={isBatchTagDialogOpen}
+                            onOpenChange={(open) => {
+                                setIsBatchTagDialogOpen(open);
+                                if (!open) {
+                                    setTagInput('');
+                                }
+                            }}
+                        >
                             <AlertDialogTrigger asChild>
                                 <Button variant="secondary" size="sm">
                                     {t('imageManager.batchAddButton')}
@@ -229,7 +239,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
-                                                    if (!isAddingTag) handleBatchAddTag();
+                                                    if (!isBatchAddingTag) void handleBatchAddTag();
                                                 }
                                             }}
                                         />
@@ -237,7 +247,9 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel onClick={() => setTagInput('')}>{t('imageManager.cancelAdd')}</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleBatchAddTag} disabled={isAddingTag}>{isAddingTag ? t('imageManager.adding') : t('imageManager.addTag')}</AlertDialogAction>
+                                    <AlertDialogAction onClick={handleBatchAddTag} disabled={isBatchAddingTag || !tagInput.trim()}>
+                                        {isBatchAddingTag ? t('imageManager.adding') : t('imageManager.addTag')}
+                                    </AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
