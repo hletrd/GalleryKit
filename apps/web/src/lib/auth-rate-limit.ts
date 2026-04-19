@@ -1,5 +1,6 @@
 import {
     incrementRateLimit,
+    LOGIN_RATE_LIMIT_MAX_KEYS,
     LOGIN_WINDOW_MS,
     loginRateLimit,
     resetRateLimit,
@@ -49,4 +50,24 @@ export function getPasswordChangeRateLimitEntry(ip: string, now: number): RateLi
 export async function clearSuccessfulPasswordAttempts(ip: string) {
     passwordChangeRateLimit.delete(ip);
     await resetRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+}
+
+/** Prune expired entries and enforce hard cap on password change rate-limit Map. */
+export function prunePasswordChangeRateLimit(now: number) {
+    for (const [key, entry] of passwordChangeRateLimit) {
+        if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
+            passwordChangeRateLimit.delete(key);
+        }
+    }
+
+    // Hard cap: evict oldest entries if still over limit after expiry pruning
+    if (passwordChangeRateLimit.size > LOGIN_RATE_LIMIT_MAX_KEYS) {
+        const excess = passwordChangeRateLimit.size - LOGIN_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of passwordChangeRateLimit.keys()) {
+            if (evicted >= excess) break;
+            passwordChangeRateLimit.delete(key);
+            evicted++;
+        }
+    }
 }

@@ -11,7 +11,7 @@ import { cache } from 'react';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit } from '@/lib/rate-limit';
-import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit } from '@/lib/auth-rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 
@@ -211,6 +211,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
     pruneLoginRateLimit(now);
+    prunePasswordChangeRateLimit(now);
     const limitData = getPasswordChangeRateLimitEntry(ip, now);
     if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
         return { error: 'Too many attempts. Please try again later.' };

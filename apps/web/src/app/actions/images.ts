@@ -158,7 +158,7 @@ export async function uploadImages(formData: FormData) {
                 failedFiles.push(file.name);
                 continue;
             }
-            const insertedImage = { id: result.insertId, ...insertValues };
+            const insertedImage = { id: Number(result.insertId), ...insertValues };
 
             {
                 // Phase 3: Process Tags (batched)

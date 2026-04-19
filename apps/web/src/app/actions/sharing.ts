@@ -98,7 +98,10 @@ export async function createGroupShareLink(imageIds: number[]) {
                 const [result] = await tx.insert(sharedGroups)
                     .values({ key: groupKey });
 
-                const groupId = result.insertId;
+                const groupId = Number(result.insertId);
+                if (!Number.isFinite(groupId) || groupId <= 0) {
+                    throw new Error('Invalid insert ID from shared group creation');
+                }
 
                 await tx.insert(sharedGroupImages)
                     .ignore()
