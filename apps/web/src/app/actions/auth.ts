@@ -208,6 +208,10 @@ export async function logout(formData?: FormData) {
     const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
 
     if (token) {
+        const session = await verifySessionToken(token);
+        if (session) {
+            logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
+        }
         await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token))).catch(() => {});
     }
 
@@ -318,6 +322,8 @@ export async function updatePassword(prevState: { error?: string; success?: bool
                 await tx.delete(sessions).where(eq(sessions.userId, currentUser.id));
             }
         });
+
+        logAuditEvent(currentUser.id, 'password_change', 'user', String(currentUser.id)).catch(console.debug);
 
         return { success: true, message: t('passwordUpdated') };
 
