@@ -397,10 +397,16 @@ export async function processImageFormats(
         generateForFormat('jpeg', UPLOAD_DIR_JPEG, filenameJpeg),
     ]);
 
-    // Verify output file is not empty
+    // Verify all three output format base files are not empty
     try {
-        const stats = await fs.stat(path.join(UPLOAD_DIR_WEBP, filenameWebp));
-        if (stats.size === 0) throw new Error('Generated WebP file is empty');
+        const [webpStats, avifStats, jpegStats] = await Promise.all([
+            fs.stat(path.join(UPLOAD_DIR_WEBP, filenameWebp)),
+            fs.stat(path.join(UPLOAD_DIR_AVIF, filenameAvif)),
+            fs.stat(path.join(UPLOAD_DIR_JPEG, filenameJpeg)),
+        ]);
+        if (webpStats.size === 0) throw new Error('Generated WebP file is empty');
+        if (avifStats.size === 0) throw new Error('Generated AVIF file is empty');
+        if (jpegStats.size === 0) throw new Error('Generated JPEG file is empty');
     } catch (e) {
         console.error('File verification failed:', e);
         throw new Error('Image processing failed: generated file could not be verified');
