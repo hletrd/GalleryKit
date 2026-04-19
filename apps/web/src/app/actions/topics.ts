@@ -177,7 +177,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
          if (imageFilename) {
              await deleteTopicImage(imageFilename);
          }
-         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
+         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
              return { error: t('slugAlreadyExists') };
          }
          console.error('Failed to update topic', e);
@@ -286,7 +286,7 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         );
     } catch (e) {
         console.error('Failed to delete topic alias:', e);
-        return { error: t('invalidAlias') };
+        return { error: t('failedToDeleteAlias') };
     }
 
     const currentUser = await getCurrentUser();
