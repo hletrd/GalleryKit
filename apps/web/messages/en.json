@@ -112,6 +112,7 @@
     "new": "New Password",
     "confirm": "Confirm Password",
     "minLength": "At least 12 characters",
+    "mismatch": "Passwords do not match",
     "submit": "Change"
   },
   "upload": {

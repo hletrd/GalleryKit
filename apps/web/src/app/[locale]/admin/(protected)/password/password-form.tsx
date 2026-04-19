@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { updatePassword } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,9 +25,21 @@ import { useTranslation } from "@/components/i18n-provider";
 export function PasswordForm() {
     const [state, formAction, isPending] = useActionState(updatePassword, startState);
     const { t } = useTranslation();
+    const [confirmError, setConfirmError] = useState<string | null>(null);
+
+    const handleSubmit = (formData: FormData) => {
+        const newPw = formData.get('newPassword') as string;
+        const confirmPw = formData.get('confirmPassword') as string;
+        if (newPw !== confirmPw) {
+            setConfirmError(t('password.mismatch'));
+            return;
+        }
+        setConfirmError(null);
+        formAction(formData);
+    };
 
     return (
-        <form action={formAction} className="space-y-4 max-w-md">
+        <form action={handleSubmit} className="space-y-4 max-w-md">
             {state?.error && (
                 <Alert variant="destructive">
                     <AlertDescription>{state.error}</AlertDescription>
@@ -36,6 +48,11 @@ export function PasswordForm() {
             {state?.success && (
                 <Alert className="bg-green-50 text-green-900 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800">
                     <AlertDescription>{state.message}</AlertDescription>
+                </Alert>
+            )}
+            {confirmError && (
+                <Alert variant="destructive">
+                    <AlertDescription>{confirmError}</AlertDescription>
                 </Alert>
             )}
 

@@ -112,6 +112,7 @@
     "new": "새 비밀번호",
     "confirm": "새 비밀번호 확인",
     "minLength": "12자 이상",
+    "mismatch": "비밀번호가 일치하지 않습니다",
     "submit": "변경"
   },
   "upload": {
