@@ -41,11 +41,12 @@ interface PhotoViewerProps {
     prevId?: number | null;
     nextId?: number | null;
     canShare?: boolean;
+    isAdmin?: boolean;
     isSharedView?: boolean;
     syncPhotoQueryBasePath?: string;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isSharedView = false, syncPhotoQueryBasePath }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -68,13 +69,16 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
     const image = images[currentIndex];
 
-    // Update document.title when navigating between photos
+    // Update document.title when navigating between photos.
+    // Use a ref to track the base site title so cleanup doesn't restore
+    // a stale title from a previous photo during rapid navigation.
+    const siteTitleRef = useRef(document.title);
     useEffect(() => {
-        const previousTitle = document.title;
         if (image?.title) {
             document.title = `${image.title} — ${siteConfig.nav_title}`;
+        } else {
+            document.title = siteTitleRef.current;
         }
-        return () => { document.title = previousTitle; };
     }, [image?.id, image?.title]);
 
     const showInfo = isPinned || timerShowInfo;
@@ -467,11 +471,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <p className="font-medium">{image.bit_depth}-bit</p>
                                         </div>
                                     )}
-                                    {/* GPS coordinates: this block is currently unreachable from public photo
-                                        pages because `selectFields` in data.ts intentionally excludes
-                                        latitude/longitude for privacy. It would only render if an admin-only
-                                        data accessor explicitly includes these fields. See SEC-38-01. */}
-                                    {(canShare && image.latitude != null && image.longitude != null) && (
+                                    {/* GPS coordinates: guarded by `isAdmin` (not `canShare`) for
+                                        semantic clarity — this is about data access, not sharing.
+                                        Currently unreachable from public photo pages because
+                                        `selectFields` in data.ts excludes latitude/longitude for
+                                        privacy. It would only render if an admin-only data accessor
+                                        explicitly includes these fields. See SEC-38-01, C3R-01. */}
+                                    {(isAdmin && image.latitude != null && image.longitude != null) && (
                                         <div className="col-span-2">
                                              <p className="text-muted-foreground text-xs">{t('viewer.location')}</p>
                                              <a
@@ -543,7 +549,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 image={image}
                 isOpen={showBottomSheet}
                 onClose={() => setShowBottomSheet(false)}
-                isAdmin={canShare}
+                isAdmin={isAdmin}
             />
         </div>
     );

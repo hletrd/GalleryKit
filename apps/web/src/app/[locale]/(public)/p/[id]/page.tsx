@@ -190,6 +190,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         ].filter(Boolean),
     };
 
+    const isAdminUser = await isAdmin();
+
     return (
         <>
             <script
@@ -210,7 +212,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 tags={image.tags ?? []}
                 prevId={image.prevId}
                 nextId={image.nextId}
-                canShare={await isAdmin()}
+                canShare={isAdminUser}
+                isAdmin={isAdminUser}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (
