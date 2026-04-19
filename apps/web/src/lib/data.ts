@@ -594,6 +594,7 @@ export type { SearchResult };
 
 export async function searchImages(query: string, limit: number = 20): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
+    if (query.length > 200) return [];
     if (limit <= 0) return [];
     const effectiveLimit = Math.min(Math.max(limit, 1), 100);
 
