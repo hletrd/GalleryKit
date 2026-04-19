@@ -570,13 +570,14 @@ export async function getTopicBySlug(slug: string) {
     return aliasMatch || null;
 }
 
+// PRIVACY: SearchResult omits filename_webp and filename_avif to minimize
+// internal filename exposure to unauthenticated users. filename_jpeg is
+// retained because the search UI needs it for thumbnail rendering.
 interface SearchResult {
     id: number;
     title: string | null;
     description: string | null;
     filename_jpeg: string;
-    filename_webp: string;
-    filename_avif: string;
     width: number;
     height: number;
     topic: string;
@@ -595,10 +596,11 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
     const searchTerm = `%${escaped}%`;
 
+    // PRIVACY: Omit filename_webp and filename_avif from public search results
+    // to minimize internal filename exposure. filename_jpeg is needed for thumbnails.
     const searchFields = {
         id: images.id, title: images.title, description: images.description,
-        filename_jpeg: images.filename_jpeg, filename_webp: images.filename_webp,
-        filename_avif: images.filename_avif, width: images.width, height: images.height,
+        filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
         topic: images.topic, camera_model: images.camera_model,
         capture_date: images.capture_date,
     };
