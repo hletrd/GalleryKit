@@ -1,8 +1,10 @@
 # Implementation Plans Index
 
-## Active Plans (R8 — 2026-04-18)
+## Active Plans (Cycle 1 — 2026-04-19)
 
-No tracked `.context/plans` items are currently open. Plans 27-29 were completed during the current Ralph run and verified with lint, tests, TypeScript, build, and architect sign-off.
+- 30 — Security: Rate-Limit TOCTOU and Upload Batch Bypass — PENDING
+- 31 — Data Layer and Queue Hardening — PENDING
+- 32 — UI Component Polish and UX Improvements — PENDING
 
 ## Completed Plans
 

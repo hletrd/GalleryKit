@@ -12,6 +12,14 @@ import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-que
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { formatUploadLimit, MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
+import { getClientIp } from '@/lib/rate-limit';
+import { headers } from 'next/headers';
+
+// Server-side upload tracking to enforce cumulative limits across per-file invocations.
+// The client sends files individually, so per-call batch limits are ineffective.
+const uploadTracker = new Map<string, { count: number; bytes: number; windowStart: number }>();
+const UPLOAD_TRACKING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const UPLOAD_MAX_FILES_PER_WINDOW = 100;
 
 export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
@@ -38,6 +46,21 @@ export async function uploadImages(formData: FormData) {
     if (!files.length) return { error: 'No files provided' };
     if (files.length > 100) return { error: 'Too many files at once (max 100)' };
 
+    // Server-side cumulative upload tracking across per-file invocations.
+    // The client sends files individually, so per-call limits are insufficient.
+    const requestHeaders = await headers();
+    const uploadIp = getClientIp(requestHeaders);
+    const now = Date.now();
+    const tracker = uploadTracker.get(uploadIp) || { count: 0, bytes: 0, windowStart: now };
+    if (now - tracker.windowStart > UPLOAD_TRACKING_WINDOW_MS) {
+        tracker.count = 0;
+        tracker.bytes = 0;
+        tracker.windowStart = now;
+    }
+    if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
+        return { error: `Upload limit reached (max ${UPLOAD_MAX_FILES_PER_WINDOW} files per hour). Please try again later.` };
+    }
+
     // Disk space pre-check: require at least 1GB free before accepting uploads
     try {
         const { statfs } = await import('fs/promises');
@@ -50,10 +73,15 @@ export async function uploadImages(formData: FormData) {
         // statfs may fail on some platforms; proceed anyway
     }
 
-    // Validate total upload size
+    // Validate total upload size (per-call limit)
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
         return { error: `Total upload size exceeds ${formatUploadLimit(MAX_TOTAL_UPLOAD_BYTES)} limit` };
+    }
+
+    // Also enforce cumulative byte limit across per-file invocations
+    if (tracker.bytes + totalSize > MAX_TOTAL_UPLOAD_BYTES) {
+        return { error: `Cumulative upload size exceeds ${formatUploadLimit(MAX_TOTAL_UPLOAD_BYTES)} limit per hour` };
     }
 
     if (!topic) return { error: 'Topic required' };
@@ -168,6 +196,11 @@ export async function uploadImages(formData: FormData) {
     if (failedFiles.length > 0 && successCount === 0) {
         return { error: 'All uploads failed' };
     }
+
+    // Update cumulative upload tracker
+    tracker.count += successCount;
+    tracker.bytes += totalSize;
+    uploadTracker.set(uploadIp, tracker);
 
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
     revalidateLocalizedPaths('/', '/admin/dashboard');

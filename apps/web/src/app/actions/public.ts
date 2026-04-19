@@ -42,7 +42,16 @@ export async function searchImagesAction(query: string) {
         return [];
     }
 
-    // Fall through to DB-backed check for accuracy across restarts
+    // Increment BEFORE the DB-backed check (TOCTOU fix).
+    // Without this, concurrent requests all pass the check before any of them
+    // record the increment, allowing burst searches to exceed the limit.
+    if (!entry || entry.resetAt <= now) {
+        searchRateLimit.set(ip, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+
+    // DB-backed check for accuracy across restarts
     try {
         const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
         if (dbLimit.limited) {
@@ -52,11 +61,6 @@ export async function searchImagesAction(query: string) {
         // DB unavailable — rely on in-memory Map
     }
 
-    if (!entry || entry.resetAt <= now) {
-        searchRateLimit.set(ip, { count: 1, resetAt: now + SEARCH_WINDOW_MS });
-    } else {
-        entry.count++;
-    }
     incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch(() => {});
 
     const safeQuery = query.trim().slice(0, 200);
