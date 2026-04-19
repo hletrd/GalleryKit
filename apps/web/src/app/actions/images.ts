@@ -1,7 +1,7 @@
 'use server';
 
 import path from 'path';
-import fs from 'fs/promises';
+import fs, { statfs } from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
@@ -88,7 +88,6 @@ export async function uploadImages(formData: FormData) {
 
     // Disk space pre-check: require at least 1GB free before accepting uploads
     try {
-        const { statfs } = await import('fs/promises');
         const stats = await statfs(UPLOAD_DIR_ORIGINAL);
         const freeBytes = stats.bfree * stats.bsize;
         if (freeBytes < 1024 * 1024 * 1024) {
