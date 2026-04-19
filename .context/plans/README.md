@@ -4,6 +4,14 @@
 
 None — all plans complete.
 
+## Completed Plans (Cycle 24)
+
+- 70 — Cycle 24 Fixes (C24-01, C24-02, C24-03) — DONE
+
+## Completed Plans (Cycle 22)
+
+- 68 — Cycle 22 Fixes (C22-03, C22-05, C22-02) — DONE
+
 ## Completed Plans (Cycle 20)
 
 - 66 — Cycle 20 Fixes (C20-01 through C20-06) — DONE
@@ -69,6 +77,8 @@ None — all plans complete.
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
+| **Cycle 24 Comprehensive Review** | 2026-04-19 | 3 actionable (3L) | 3 via Plan 70 | 3 via Plan 70-Deferred |
+| **Cycle 22 Comprehensive Review** | 2026-04-19 | 3 actionable (3L) | 3 via Plan 68 | 2 via Plan 68-Deferred |
 | **Cycle 20 Comprehensive Review** | 2026-04-19 | 6 actionable (6L) | 6 via Plan 66 | 0 |
 | **Cycle 17 Comprehensive Review** | 2026-04-19 | 6 actionable (5L/1VL) | 6 via Plan 63 | 0 |
 | Cycle 16 Comprehensive Review | 2026-04-19 | 6 actionable (6L) | 6 via Plan 62 | 0 |
@@ -108,7 +118,7 @@ None — all plans complete.
 
 ## Notes
 
-- Build verified passing after cycle 20 changes.
+- Build verified passing after cycle 22 changes.
 - All `confirm()` calls have been eliminated from the codebase.
-- Cycle 20 found 6 findings (6 LOW), all implemented via Plan 66.
-- Cumulative: 0 CRITICAL, 0 HIGH findings across cycles 1-20.
+- Cycle 22 found 5 findings (3 actionable LOW, 2 not-a-bug/not-worth-fixing), 3 implemented via Plan 68.
+- Cumulative: 0 CRITICAL, 0 HIGH findings across cycles 1-24.
