@@ -22,7 +22,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const { id } = await params;
     const locale = await getLocale();
     const t = await getTranslations('photo');
+
+    // Validate that id is a purely numeric positive integer before parseInt
+    // (matches the default export's validation pattern)
+    if (!/^\d+$/.test(id)) {
+        return { title: t('notFoundTitle') };
+    }
     const imageId = parseInt(id, 10);
+    if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
+        return { title: t('notFoundTitle') };
+    }
+
     const image = await getImageCached(imageId);
 
     if (!image) {
