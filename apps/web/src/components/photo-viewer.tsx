@@ -467,6 +467,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <p className="font-medium">{image.bit_depth}-bit</p>
                                         </div>
                                     )}
+                                    {/* GPS coordinates: this block is currently unreachable from public photo
+                                        pages because `selectFields` in data.ts intentionally excludes
+                                        latitude/longitude for privacy. It would only render if an admin-only
+                                        data accessor explicitly includes these fields. See SEC-38-01. */}
                                     {(canShare && image.latitude != null && image.longitude != null) && (
                                         <div className="col-span-2">
                                              <p className="text-muted-foreground text-xs">{t('viewer.location')}</p>
