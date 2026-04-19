@@ -228,7 +228,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
-                                                    handleBatchAddTag();
+                                                    if (!isAddingTag) handleBatchAddTag();
                                                 }
                                             }}
                                         />
@@ -265,7 +265,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleBulkDelete}>{t('imageManager.delete')}</AlertDialogAction>
+                                    <AlertDialogAction onClick={handleBulkDelete} disabled={isBulkDeleting}>{isBulkDeleting ? t('imageManager.deleting') : t('imageManager.delete')}</AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
