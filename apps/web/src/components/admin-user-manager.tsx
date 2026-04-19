@@ -49,12 +49,16 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
 
     async function handleDelete(id: number) {
         setDeleteTarget(null);
-        const result = await deleteAdminUser(id);
-        if (result.error) {
-            toast.error(result.error);
-        } else {
-            toast.success(t('users.deleteSuccess'));
-            router.refresh();
+        try {
+            const result = await deleteAdminUser(id);
+            if (result.error) {
+                toast.error(result.error);
+            } else {
+                toast.success(t('users.deleteSuccess'));
+                router.refresh();
+            }
+        } catch {
+            toast.error(t('serverActions.failedToDeleteUser'));
         }
     }
 
