@@ -341,7 +341,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     {image.title && image.title.trim() !== ''
                                         ? image.title
                                         : (image.tags && image.tags.length > 0
-                                            ? image.tags.map((tag: TagInfo) => `#${tag.name.replace(/_/g, ' ')}`).join(' ')
+                                            ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
                                             : t('imageManager.untitled'))}
                                 </CardTitle>
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
