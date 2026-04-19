@@ -123,6 +123,7 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                             value={settings.image_sizes || ''}
                             onChange={(e) => handleChange('image_sizes', e.target.value)}
                             placeholder={getPlaceholder('image_sizes')}
+                            pattern="[0-9, ]+"
                         />
                         <p className="text-xs text-muted-foreground">{t('settings.imageSizesHint')}</p>
                     </div>
