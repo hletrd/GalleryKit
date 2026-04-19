@@ -143,7 +143,7 @@ export function Search() {
                                     resultRefs.current[activeIndex]?.click();
                                 }
                             }}
-                            placeholder={t('search.placeholder') || 'Search photos, tags, cameras...'}
+                            placeholder={t('search.placeholder')}
                             className="border-0 focus-visible:ring-0 shadow-none h-8 p-0"
                         />
                         {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
@@ -194,11 +194,11 @@ export function Search() {
                             </div>
                         ) : query.trim() ? (
                             <div className="p-8 text-center text-muted-foreground text-sm">
-                                {loading ? '' : (t('search.noResults') || 'No photos found')}
+                                {loading ? '' : t('search.noResults')}
                             </div>
                         ) : (
                             <div className="p-8 text-center text-muted-foreground text-sm">
-                                {t('search.hint') || 'Search by title, tag, camera, or description'}
+                                {t('search.hint')}
                             </div>
                         )}
                     </div>
