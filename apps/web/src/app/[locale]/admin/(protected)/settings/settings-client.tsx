@@ -10,6 +10,8 @@ import { useTranslation } from '@/components/i18n-provider';
 import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Save, ChevronLeft, ImageIcon, Grid3X3, Shield, HardDrive, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -208,15 +210,12 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                             <Label htmlFor="strip-gps">{t('settings.stripGps')}</Label>
                             <p className="text-xs text-muted-foreground">{t('settings.stripGpsHint')}</p>
                         </div>
-                        <button
+                        <Switch
                             id="strip-gps"
-                            role="switch"
-                            aria-checked={settings.strip_gps_on_upload === 'true'}
-                            onClick={() => handleChange('strip_gps_on_upload', settings.strip_gps_on_upload === 'true' ? 'false' : 'true')}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.strip_gps_on_upload === 'true' ? 'bg-primary' : 'bg-input'}`}
-                        >
-                            <span className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${settings.strip_gps_on_upload === 'true' ? 'translate-x-6' : 'translate-x-1'}`} />
-                        </button>
+                            checked={settings.strip_gps_on_upload === 'true'}
+                            onCheckedChange={(checked) => handleChange('strip_gps_on_upload', checked ? 'true' : 'false')}
+                            aria-label={t('settings.stripGps')}
+                        />
                     </div>
                 </CardContent>
             </Card>
@@ -274,16 +273,19 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                 <CardContent className="space-y-4">
                     <div className="space-y-2">
                         <Label htmlFor="storage-backend">{t('settings.storageBackend')}</Label>
-                        <select
-                            id="storage-backend"
+                        <Select
                             value={settings.storage_backend || 'local'}
-                            onChange={(e) => handleChange('storage_backend', e.target.value)}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            onValueChange={(value) => handleChange('storage_backend', value)}
                         >
-                            <option value="local">{t('settings.storageLocal')}</option>
-                            <option value="minio">{t('settings.storageMinio')}</option>
-                            <option value="s3">{t('settings.storageS3')}</option>
-                        </select>
+                            <SelectTrigger id="storage-backend" className="w-full">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="local">{t('settings.storageLocal')}</SelectItem>
+                                <SelectItem value="minio">{t('settings.storageMinio')}</SelectItem>
+                                <SelectItem value="s3">{t('settings.storageS3')}</SelectItem>
+                            </SelectContent>
+                        </Select>
                         <p className="text-xs text-muted-foreground">{t('settings.storageBackendHint')}</p>
                     </div>
                     {(settings.storage_backend === 'minio' || settings.storage_backend === 's3') && (
