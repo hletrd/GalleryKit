@@ -48,14 +48,16 @@ export async function updateTag(id: number, name: string) {
         return { error: t('invalidTagId') };
     }
 
-    if (!name || name.trim().length === 0) return { error: t('tagNameRequired') };
+    // Sanitize before validation so length/format checks operate on the same
+    // value that will be stored. Without this, control characters pass
+    // validation but are stripped later, causing a mismatch between validated
+    // and persisted data (matches settings.ts/seo.ts pattern, see C29-09/C30-01).
+    const trimmedName = stripControlChars(name?.trim() ?? '') ?? '';
+    if (!trimmedName) return { error: t('tagNameRequired') };
 
-    // Validate name length
-    if (!isValidTagName(name)) {
+    if (!isValidTagName(trimmedName)) {
         return { error: t('invalidTagName') };
     }
-
-    const trimmedName = stripControlChars(name.trim()) ?? '';
     const slug = getTagSlug(trimmedName);
 
     if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
@@ -115,7 +117,8 @@ export async function addTagToImage(imageId: number, tagName: string) {
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
-    const cleanName = tagName?.trim();
+    // Sanitize before validation — matches updateTag pattern (C41-02)
+    const cleanName = stripControlChars(tagName?.trim() ?? '') ?? '';
     if (!cleanName) return { error: t('tagNameRequired') };
     if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
@@ -305,7 +308,7 @@ export async function batchUpdateImageTags(
         await db.transaction(async (tx) => {
             // Add tags
             for (const name of addTagNames) {
-                const cleanName = name.trim();
+                const cleanName = stripControlChars(name.trim()) ?? '';
                 if (!cleanName) continue;
                 if (!isValidTagName(cleanName)) {
                     warnings.push(t('invalidTagName') + `: "${cleanName}"`);
