@@ -4,7 +4,7 @@ import { headers } from 'next/headers';
 import { getImagesLite, searchImages } from '@/lib/data';
 
 import { isValidSlug } from '@/lib/validation';
-import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, SEARCH_RATE_LIMIT_MAX_KEYS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
     // Validate slug format before passing to data layer (defense in depth)
@@ -29,10 +29,17 @@ export async function searchImagesAction(query: string) {
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
-    // Proactively prune expired entries every 100 calls to prevent unbounded growth
-    if (searchRateLimit.size > 50) {
-        for (const [key, val] of searchRateLimit) {
-            if (val.resetAt <= now) searchRateLimit.delete(key);
+    // Prune expired entries unconditionally and enforce hard cap
+    for (const [key, val] of searchRateLimit) {
+        if (val.resetAt <= now) searchRateLimit.delete(key);
+    }
+    if (searchRateLimit.size > SEARCH_RATE_LIMIT_MAX_KEYS) {
+        const excess = searchRateLimit.size - SEARCH_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of searchRateLimit.keys()) {
+            if (evicted >= excess) break;
+            searchRateLimit.delete(key);
+            evicted++;
         }
     }
 
