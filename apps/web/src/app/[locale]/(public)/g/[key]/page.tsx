@@ -62,7 +62,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     const group = await getSharedGroupCached(key);
 
     if (!group) {
-        notFound();
+        return notFound();
     }
 
     const t = await getTranslations('sharedGroup');

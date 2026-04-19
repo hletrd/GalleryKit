@@ -63,7 +63,7 @@ export default async function RootLayout({
 
   // Ensure that the incoming `locale` is valid
   if (!(LOCALES as readonly string[]).includes(locale)) {
-    notFound();
+    return notFound();
   }
 
   const messages = await getMessages();

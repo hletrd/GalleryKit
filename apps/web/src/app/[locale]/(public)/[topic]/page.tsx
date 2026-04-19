@@ -77,7 +77,7 @@ export default async function TopicPage({
 
   const topicData = await getTopicBySlugCached(topic);
   if (!topicData) {
-    notFound();
+    return notFound();
   }
 
   // If the requested topic slug doesn't match the canonical slug, redirect with locale preserved
