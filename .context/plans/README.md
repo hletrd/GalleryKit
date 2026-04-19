@@ -2,7 +2,18 @@
 
 ## Active Plans
 
-_None_
+- 44 — Password Change Transaction Safety — DONE
+- 45 — i18n Topics + Share Link Safety — DONE
+- 46 — UI Checkbox, Password maxLength, CSV GC, Topic Deletion State — DONE
+
+## Completed Plans (Cycle 6)
+
+- 41 — Upload Tracker TOCTOU Fix and CSV Export Memory Safety — DONE (2026-04-19)
+- 42 — Auth Session Transaction Safety and Minor Fixes — DONE (2026-04-19)
+
+## Completed Plans (Cycle 5)
+
+- 39 — Confirm Dialog Consistency and InsertId Guard — DONE (2026-04-19)
 
 ## Completed Plans (Cycle 4)
 
@@ -35,7 +46,10 @@ _None_
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
-| **Cycle 4 Comprehensive Review** | 2026-04-19 | 9 actionable (2M/7L) | 9 complete via Plans 37-38 | 0 |
+| **Cycle 7 Comprehensive Review** | 2026-04-19 | 7 actionable (1M/6L) | 7 via Plans 44-46 | 2 via Plan 47 |
+| Cycle 6 Comprehensive Review | 2026-04-19 | 9 actionable (3M/6L) | 9 via Plans 41-42 | 1 via Plan 43 |
+| Cycle 5 Comprehensive Review | 2026-04-19 | 9 actionable (2M/6L/1I) | 5 complete via Plan 39 | 4 via Plan 40 |
+| Cycle 4 Comprehensive Review | 2026-04-19 | 9 actionable (2M/7L) | 9 complete via Plans 37-38 | 0 |
 | Cycle 3 Comprehensive Review | 2026-04-19 | 12 (2M/10L) | 12 complete via Plans 35-36 | 0 |
 | Comprehensive Code Review (full audit) | 2026-04-18 | 15 confirmed + 3 likely/risk | 15 confirmed + 2 low-risk likely fixes complete | 1 manual-validation risk (`/api/og` throttle architecture) |
 | UI/UX Deep Review R7 | 2026-04-18 | 11 (6H/3M/2L) | Complete via Plan 26 | 0 |
@@ -43,20 +57,24 @@ _None_
 
 ---
 
-## Cycle 4 Findings → Plan Mapping
+## Cycle 7 Findings → Plan Mapping
 
-### Plan 37 (Insert ID Consistency + Confirm Dialog)
-- C4-01 admin-users.ts insertId BigInt inconsistency
-- C4-02 db/page.tsx uses native confirm() for restore
+### Plan 44 (Password Change Transaction)
+- C7-03 password change + session invalidation not in transaction
 
-### Plan 38 (Data Layer Caching + Rate-Limit Hardening)
-- C4-03 getImageByShareKey called twice without cache
-- C4-04 getSharedGroup called twice without cache
-- C4-05 searchImagesAction DB increment fire-and-forget
-- C4-06 No rate limit on share link creation
-- C4-07 retryCounts/claimRetryCounts Maps grow unbounded
-- C4-08 viewCountBuffer can accumulate during DB outage
-- C4-09 uploadTracker prune is conditional
+### Plan 45 (i18n + Share Link Safety)
+- C7-05 hardcoded English strings in topics.ts
+- C7-01 share link retry loop missing image existence check
+
+### Plan 46 (UI + Password + CSV)
+- C7-06 checkbox styling (downgraded — no component change needed)
+- C7-09 split isDeleting state in topic-manager
+- C7-10 maxLength on password inputs
+- C7-04 CSV results GC release
+
+### Plan 47 (Deferred)
+- C7-07 NULL capture_date prev/next navigation (legacy-only)
+- C7-08 rate limit inconsistency in safe direction (by-design)
 
 ---
 
@@ -67,10 +85,18 @@ _None_
 3. /api/og throttle architecture (edge runtime, delegated to reverse proxy)
 4. Font subsetting (Python brotli dependency issue)
 5. Docker node_modules removal (native module dependency)
+6. C5-04 searchRateLimit in-memory race (safe by Node.js single-thread guarantee)
+7. C5-05 original_file_size from client value (acceptable for display metadata)
+8. C5-07 prunePasswordChangeRateLimit infrequent pruning (hard cap sufficient)
+9. C5-08 dumpDatabase partial file cleanup race (negligible risk)
+10. C6-10 queue bootstrap unbounded fetch (by-design, paginated limit if >10K pending)
+11. C7-07 NULL capture_date prev/next navigation (legacy-only, reasonable UX)
+12. C7-08 rate limit inconsistency in safe direction (no fix needed)
 
 ---
 
 ## Notes
 
-- The `/api/og` architectural rate-limiting risk remains a separate manual-validation item unless a clean app-level design emerges during execution.
-- Cycle 4 also fixed a pre-existing type error (`blur_data_url` made optional in `ImageDetail` interface) that was blocking TS compilation for `s/[key]/page.tsx`.
+- Build verified passing after cycle 6 changes.
+- All `confirm()` calls have been eliminated from the codebase.
+- Cycle 7 found fewer issues (7 actionable vs 9 in cycle 6), indicating codebase maturity.

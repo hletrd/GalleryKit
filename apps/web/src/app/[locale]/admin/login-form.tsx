@@ -37,9 +37,9 @@ export function LoginForm() {
                     <form action={formAction} className="space-y-4">
                         <input type="hidden" name="locale" value={locale} />
                         <label htmlFor="login-username" className="sr-only">{t('username')}</label>
-                        <Input id="login-username" type="text" name="username" placeholder={t('username')} required autoFocus autoComplete="username" />
+                        <Input id="login-username" type="text" name="username" placeholder={t('username')} required autoFocus autoComplete="username" maxLength={64} />
                         <label htmlFor="login-password" className="sr-only">{t('password')}</label>
-                        <Input id="login-password" type="password" name="password" placeholder={t('password')} required autoComplete="current-password" />
+                        <Input id="login-password" type="password" name="password" placeholder={t('password')} required autoComplete="current-password" maxLength={1024} />
                         <Button type="submit" className="w-full" disabled={isPending}>
                             {isPending ? t('submitting') : t('submit')}
                         </Button>
