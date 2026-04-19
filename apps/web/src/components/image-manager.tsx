@@ -106,6 +106,8 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
             } else {
                 toast.error(t('imageManager.deleteFailed'));
             }
+        } catch {
+            toast.error(t('imageManager.deleteFailed'));
         } finally {
             setDeletingId(null);
         }
