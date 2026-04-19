@@ -207,7 +207,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             <PhotoViewer
                 images={[image]}
                 initialImageId={image.id}
-                tags={[]}
+                tags={image.tags ?? []}
                 prevId={image.prevId}
                 nextId={image.nextId}
                 canShare={await isAdmin()}
