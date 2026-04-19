@@ -12,7 +12,6 @@ import { updateSeoSettings } from '@/app/actions/seo';
 import { Save, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
-import { useLocale } from 'next-intl';
 
 interface SeoSettings {
     seo_title: string;
@@ -28,8 +27,7 @@ interface SeoSettingsClientProps {
 }
 
 export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
-    const { t } = useTranslation();
-    const locale = useLocale();
+    const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
     const [settings, setSettings] = useState<SeoSettings>(initialSettings);
 
