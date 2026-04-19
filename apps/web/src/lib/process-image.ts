@@ -373,14 +373,25 @@ export async function processImageFormats(
             }
 
             // The largest configured size serves as the "base" filename to satisfy existing schema.
-            // Prefer hard link (zero-copy); fall back to copyFile if the FS doesn't support links.
+            // Use atomic rename via .tmp file to eliminate the window where the base
+            // filename doesn't exist (prevents 404s during concurrent reads).
             if (size === sizes[sizes.length - 1]) {
                 const basePath = path.join(dir, baseFilename);
-                await fs.unlink(basePath).catch(() => {});
+                const tmpPath = basePath + '.tmp';
                 try {
-                    await fs.link(outputPath, basePath);
+                    await fs.link(outputPath, tmpPath);
+                    await fs.rename(tmpPath, basePath);
                 } catch {
-                    await fs.copyFile(outputPath, basePath);
+                    // Fallback: copy to tmp then rename (covers cross-device or link failure)
+                    await fs.copyFile(outputPath, tmpPath).catch(() => {});
+                    try {
+                        await fs.rename(tmpPath, basePath);
+                    } catch {
+                        // Final fallback: direct copy if rename fails
+                        await fs.copyFile(outputPath, basePath);
+                    }
+                } finally {
+                    await fs.unlink(tmpPath).catch(() => {});
                 }
             }
         }
