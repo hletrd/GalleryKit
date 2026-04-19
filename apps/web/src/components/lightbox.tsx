@@ -9,7 +9,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
 import { isEditableTarget } from '@/components/photo-viewer';
-import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -159,7 +159,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                   .join(', ')
             : undefined;
 
-        const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
+        // Use a medium-sized JPEG fallback instead of the base filename (largest size)
+        // to avoid loading full-resolution images for browsers without WebP/AVIF support.
+        const jpegSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
+        const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${jpegSize}.jpg`)}`) : undefined;
 
         return { avifSrcSet, webpSrcSet, jpegSrc };
     }, [image.filename_avif, image.filename_webp, image.filename_jpeg, imageSizes]);
