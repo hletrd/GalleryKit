@@ -354,7 +354,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             {image.capture_date && (
                                 <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>
                                     <Clock className="w-3 h-3" />
-                                    {new Date(image.capture_date).toLocaleTimeString()}
+                                    {new Date(image.capture_date).toLocaleTimeString(locale)}
                                 </p>
                             )}
                         </div>
