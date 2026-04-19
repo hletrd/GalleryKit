@@ -32,7 +32,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         return { error: 'Unauthorized' };
     }
 
-    const results = await db
+    let results = await db
         .select({
             id: images.id,
             filename: images.user_filename,
@@ -70,8 +70,8 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
 
     // Release the DB results array before materializing the full CSV string
     const rowCount = results.length;
-    // Overwrite reference to allow GC — results are no longer needed
-    // (The `results` const is block-scoped; the GC hint is the destructuring above)
+    // Release reference to allow GC — results are no longer needed
+    results = [] as typeof results;
 
     const csvContent = csvLines.join("\n");
 
