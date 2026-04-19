@@ -288,6 +288,42 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                     </p>
                                 </div>
                             )}
+                            {hasExifData(image.white_balance) && (
+                                <div>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.whiteBalance')}</p>
+                                    <p className="font-medium">{image.white_balance}</p>
+                                </div>
+                            )}
+                            {hasExifData(image.metering_mode) && (
+                                <div>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.meteringMode')}</p>
+                                    <p className="font-medium">{image.metering_mode}</p>
+                                </div>
+                            )}
+                            {hasExifData(image.exposure_compensation) && (
+                                <div>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.exposureComp')}</p>
+                                    <p className="font-medium">{image.exposure_compensation}</p>
+                                </div>
+                            )}
+                            {hasExifData(image.exposure_program) && (
+                                <div>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.exposureProgram')}</p>
+                                    <p className="font-medium">{image.exposure_program}</p>
+                                </div>
+                            )}
+                            {hasExifData(image.flash) && (
+                                <div>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.flash')}</p>
+                                    <p className="font-medium">{image.flash}</p>
+                                </div>
+                            )}
+                            {hasExifData(image.bit_depth) && (
+                                <div>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.bitDepth')}</p>
+                                    <p className="font-medium">{image.bit_depth}-bit</p>
+                                </div>
+                            )}
                             {/* GPS coordinates: this block is currently unreachable from public photo
                                 pages because `selectFields` in data.ts intentionally excludes
                                 latitude/longitude for privacy. It would only render if an admin-only
