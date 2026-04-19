@@ -258,7 +258,9 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
             .blur(2)
             .jpeg({ quality: 40 })
             .toBuffer();
-        blurDataUrl = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
+        if (blurBuffer.length > 0) {
+            blurDataUrl = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
+        }
     } catch {
         // Non-critical
     }
