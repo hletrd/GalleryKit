@@ -243,9 +243,10 @@ export async function uploadImages(formData: FormData) {
     }
 
     // Update cumulative upload tracker with actual (not pre-incremented) values.
-    // We pre-incremented before processing; now adjust to the real consumed amount.
-    tracker.count = originalTrackerCount + successCount;
-    tracker.bytes = originalTrackerBytes + uploadedBytes;
+    // Use additive adjustment instead of absolute assignment to avoid overwriting
+    // concurrent requests' pre-incremented contributions for the same IP.
+    tracker.count += (successCount - files.length);
+    tracker.bytes += (uploadedBytes - totalSize);
     uploadTracker.set(uploadIp, tracker);
 
     // Audit log for upload action
