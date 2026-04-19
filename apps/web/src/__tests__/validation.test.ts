@@ -77,6 +77,18 @@ describe('isValidTopicAlias', () => {
         expect(isValidTopicAlias('a?b')).toBe(false);
         expect(isValidTopicAlias('a#b')).toBe(false);
     });
+
+    it('rejects null bytes', () => {
+        expect(isValidTopicAlias('a\x00b')).toBe(false);
+    });
+
+    it('rejects HTML-special characters', () => {
+        expect(isValidTopicAlias('a<b')).toBe(false);
+        expect(isValidTopicAlias('a>b')).toBe(false);
+        expect(isValidTopicAlias('a"b')).toBe(false);
+        expect(isValidTopicAlias("a'b")).toBe(false);
+        expect(isValidTopicAlias('a&b')).toBe(false);
+    });
 });
 
 describe('isReservedTopicRouteSegment', () => {
@@ -103,5 +115,17 @@ describe('isValidTagName', () => {
         expect(isValidTagName('')).toBe(false);
         expect(isValidTagName(' '.repeat(5))).toBe(false);
         expect(isValidTagName('a'.repeat(101))).toBe(false);
+    });
+
+    it('rejects null bytes', () => {
+        expect(isValidTagName('tag\x00name')).toBe(false);
+    });
+
+    it('rejects HTML-special characters', () => {
+        expect(isValidTagName('tag<name')).toBe(false);
+        expect(isValidTagName('tag>name')).toBe(false);
+        expect(isValidTagName('tag"name')).toBe(false);
+        expect(isValidTagName("tag'name")).toBe(false);
+        expect(isValidTagName('tag&name')).toBe(false);
     });
 });
