@@ -7,8 +7,14 @@ import { isBase56 } from './base56';
 // Module-level buffer for debounced shared-group view count increments
 const viewCountBuffer = new Map<number, number>();
 let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const MAX_VIEW_COUNT_BUFFER_SIZE = 1000;
 
 function bufferGroupViewCount(groupId: number) {
+    if (viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)) {
+        // Drop increment to prevent unbounded growth during DB outage
+        console.warn(`[viewCount] Buffer at capacity (${MAX_VIEW_COUNT_BUFFER_SIZE}), dropping increment for group ${groupId}`);
+        return;
+    }
     viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + 1);
     if (!viewCountFlushTimer) {
         viewCountFlushTimer = setTimeout(flushGroupViewCounts, 5000);
