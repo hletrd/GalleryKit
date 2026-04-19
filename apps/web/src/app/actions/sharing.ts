@@ -194,6 +194,8 @@ export async function revokePhotoShareLink(imageId: number) {
     if (!image) return { error: t('imageNotFound') };
     if (!image.share_key) return { error: t('noActiveShareLink') };
 
+    const oldShareKey = image.share_key;
+
     const [result] = await db.update(images)
         .set({ share_key: null })
         .where(eq(images.id, imageId));
@@ -202,7 +204,7 @@ export async function revokePhotoShareLink(imageId: number) {
         return { error: t('failedToRevokeShareLink') };
     }
 
-    revalidateLocalizedPaths(`/p/${imageId}`);
+    revalidateLocalizedPaths(`/p/${imageId}`, `/s/${oldShareKey}`);
     return { success: true };
 }
 
@@ -214,6 +216,10 @@ export async function deleteGroupShareLink(groupId: number) {
         return { error: t('invalidGroupId') };
     }
 
+    // Fetch group key before deletion for cache revalidation
+    const [group] = await db.select({ key: sharedGroups.key }).from(sharedGroups).where(eq(sharedGroups.id, groupId));
+    if (!group) return { error: t('groupNotFound') };
+
     // sharedGroupImages cascade-deletes via FK
     const [result] = await db.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
 
@@ -221,6 +227,6 @@ export async function deleteGroupShareLink(groupId: number) {
         return { error: t('groupNotFound') };
     }
 
-    revalidateLocalizedPaths('/');
+    revalidateLocalizedPaths('/', `/g/${group.key}`);
     return { success: true };
 }
