@@ -383,7 +383,8 @@
     "failedToReadRestore": "Failed to read restore file",
     "restoreFailed": "Database restore failed",
     "restoreExitedWithCode": "Restore exited with code {code}",
-    "tagSlugCollision": "Tag \"{newName}\" was mapped to existing \"{existingName}\" (same slug)"
+    "tagSlugCollision": "Tag \"{newName}\" was mapped to existing \"{existingName}\" (same slug)",
+    "someImagesNotFound": "{count, plural, one {1 image was} other {# images were}} no longer available and could not be tagged"
   },
   "aria": {
     "searchPhotos": "Search photos",

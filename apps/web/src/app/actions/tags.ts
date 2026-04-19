@@ -1,7 +1,7 @@
 'use server';
 
 import { db, tags, imageTags, images } from '@/db';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -213,8 +213,20 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
             console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
         }
 
-        // Batch insert
-        const values = imageIds.map(imageId => ({
+        // Verify which image IDs still exist before linking the tag.
+        // Without this, INSERT IGNORE silently drops rows that fail FK constraints
+        // (e.g., image deleted by another admin between validation and insertion),
+        // and the function returns success with no tags actually linked.
+        const existingImages = await db.select({ id: images.id })
+            .from(images)
+            .where(inArray(images.id, imageIds));
+        const existingIds = new Set(existingImages.map(img => img.id));
+
+        if (existingIds.size === 0) {
+            return { error: t('noImagesSelected') };
+        }
+
+        const values = [...existingIds].map(imageId => ({
             imageId,
             tagId: tagRecord.id
         }));
@@ -222,11 +234,22 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         await db.insert(imageTags).ignore().values(values);
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: imageIds.length, tag: cleanName }).catch(console.debug);
+        logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: existingIds.size, tag: cleanName }).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/dashboard', '/', '/admin/tags');
-        return tagRecord.name !== cleanName
-            ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
+
+        // Build warnings for both slug collision and missing images
+        const warnings: string[] = [];
+        const missingCount = imageIds.length - existingIds.size;
+        if (missingCount > 0) {
+            warnings.push(t('someImagesNotFound', { count: missingCount }));
+        }
+        if (tagRecord.name !== cleanName) {
+            warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }));
+        }
+
+        return warnings.length > 0
+            ? { success: true as const, warning: warnings.join('; ') }
             : { success: true as const };
     } catch (e) {
         console.error("Failed to batch add tags", e);

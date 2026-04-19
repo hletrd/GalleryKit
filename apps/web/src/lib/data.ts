@@ -203,21 +203,8 @@ export async function getImageCount(
         conditions.push(eq(images.processed, true));
     }
 
-    const validTagSlugs = (tagSlugs || [])
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
-
-    if (validTagSlugs.length > 0) {
-        const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
-        const imageIdsWithAllTags = db
-            .select({ imageId: imageTags.imageId })
-            .from(imageTags)
-            .innerJoin(tags, eq(imageTags.tagId, tags.id))
-            .where(or(...tagConditions))
-            .groupBy(imageTags.imageId)
-            .having(sql`COUNT(DISTINCT ${tags.slug}) = ${validTagSlugs.length}`);
-        conditions.push(inArray(images.id, imageIdsWithAllTags));
-    }
+    const tagFilter = buildTagFilterCondition(tagSlugs);
+    if (tagFilter) conditions.push(tagFilter);
 
     const result = await db.select({ count: sql<number>`count(*)` })
         .from(images)
