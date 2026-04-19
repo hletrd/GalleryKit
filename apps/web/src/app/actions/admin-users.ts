@@ -10,6 +10,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, checkRateLimit, incrementRateLimit, resetRateLimit } from '@/lib/rate-limit';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
@@ -91,7 +92,8 @@ export async function createAdminUser(formData: FormData) {
         // DB unavailable — rely on in-memory Map (already incremented above)
     }
 
-    const username = formData.get('username')?.toString() ?? '';
+    const rawUsername = formData.get('username')?.toString() ?? '';
+    const username = stripControlChars(rawUsername) ?? '';
     const password = formData.get('password')?.toString() ?? '';
 
     if (!username || username.length < 3) return { error: t('usernameTooShort') };

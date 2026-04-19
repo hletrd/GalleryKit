@@ -283,15 +283,17 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidTopicSlug') };
     }
 
+    // Sanitize before validation — matches createTopicAlias pattern (C34R2-01)
+    const cleanAlias = stripControlChars(alias) ?? '';
     // Permissive check to allow deleting legacy aliases
-    if (!alias || !isValidTopicAlias(alias)) {
+    if (!cleanAlias || !isValidTopicAlias(cleanAlias)) {
         return { error: t('invalidAlias') };
     }
 
     try {
         const [delResult] = await db.delete(topicAliases).where(
             and(
-                eq(topicAliases.alias, alias),
+                eq(topicAliases.alias, cleanAlias),
                 eq(topicAliases.topicSlug, topicSlug)
             )
         );
@@ -299,13 +301,13 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         // duplicate entries when concurrent deletion causes the delete to affect 0 rows.
         if (delResult.affectedRows > 0) {
             const currentUser = await getCurrentUser();
-            logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
+            logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
         }
     } catch (e) {
         console.error('Failed to delete topic alias:', e);
         return { error: t('failedToDeleteAlias') };
     }
 
-    revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
+    revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${cleanAlias}`, `/${topicSlug}`);
     return { success: true };
 }
