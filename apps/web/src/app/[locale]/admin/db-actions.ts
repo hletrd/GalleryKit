@@ -143,8 +143,27 @@ export async function dumpDatabase() {
             if (settled) return;
             settled = true;
             if (code === 0) {
-                const currentUser = await getCurrentUser();
-                logAuditEvent(currentUser?.id ?? null, 'db_backup', 'database', DB_NAME, undefined, { filename }).catch(console.debug);
+                // Wait for writeStream to finish flushing before resolving —
+                // the 'close' event fires when the process exits, but the piped
+                // writeStream may still be flushing its final buffers to disk.
+                await new Promise<void>((resolveFlush) => {
+                    if (writeStream.writableFinished) {
+                        resolveFlush();
+                    } else {
+                        writeStream.on('finish', resolveFlush);
+                        writeStream.on('error', resolveFlush); // Don't hang on write error
+                    }
+                });
+
+                // Audit logging is fire-and-forget; wrap in try-catch so a
+                // transient DB error doesn't prevent the success resolve.
+                try {
+                    const currentUser = await getCurrentUser();
+                    logAuditEvent(currentUser?.id ?? null, 'db_backup', 'database', DB_NAME, undefined, { filename }).catch(console.debug);
+                } catch (err) {
+                    console.debug('Failed to log audit event for backup:', err);
+                }
+
                 // Return filename; url points to authenticated admin download route
                 resolve({ success: true, filename, url: `/api/admin/db/download?file=${encodeURIComponent(filename)}` });
             } else {
