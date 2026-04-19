@@ -302,6 +302,12 @@ export async function deleteImage(id: number) {
 
     const imageTopic = image.topic;
 
+    // Log audit event before the delete transaction — we already verified the image exists
+    // and have the admin context. Logging here ensures the audit is recorded even if
+    // concurrent deletion causes the transaction to delete 0 rows.
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
+
     // US-001: Remove from processing queue so the queue detects deletion
     const queueState = getProcessingQueueState();
     queueState.enqueued.delete(id);
@@ -325,9 +331,6 @@ export async function deleteImage(id: number) {
     }
 
     revalidateLocalizedPaths('/', `/p/${id}`, `/${imageTopic}`, '/admin/dashboard');
-
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
 
     return { success: true };
 }
