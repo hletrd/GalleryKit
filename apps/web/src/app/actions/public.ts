@@ -81,16 +81,9 @@ export async function searchImagesAction(query: string) {
     try {
         await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS);
     } catch {
-        // DB unavailable — roll back in-memory increment to stay consistent
-        // with DB source of truth. Without this, the in-memory counter
-        // stays overcounted while DB is undercounted, causing premature
-        // rate limiting for the remainder of the window.
-        const currentEntry = searchRateLimit.get(ip);
-        if (currentEntry && currentEntry.count > 1) {
-            currentEntry.count--;
-        } else {
-            searchRateLimit.delete(ip);
-        }
+        // DB unavailable — keep the in-memory pre-increment so the in-memory
+        // rate limit remains effective during DB outages. The in-memory map
+        // is the fallback authority when the DB is unreachable.
     }
 
     const safeQuery = query.trim().slice(0, 200);
