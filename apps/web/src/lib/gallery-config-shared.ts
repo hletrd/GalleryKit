@@ -92,7 +92,7 @@ export const DEFAULT_OG_TARGET_SIZE = 1536;
  * Falls back to the largest size if no close match exists.
  */
 export function findNearestImageSize(sizes: number[], targetSize: number): number {
-    if (sizes.length === 0) return targetSize; // fallback — no sizes configured
+    if (sizes.length === 0) return DEFAULT_IMAGE_SIZES[DEFAULT_IMAGE_SIZES.length - 1]; // fallback — no sizes configured
     let nearest = sizes[0];
     let minDiff = Math.abs(sizes[0] - targetSize);
     for (let i = 1; i < sizes.length; i++) {
