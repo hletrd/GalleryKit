@@ -23,6 +23,7 @@ import { useTranslations } from 'next-intl';
 
 export default function DbPage() {
     const t = useTranslations('db');
+    const tShared = useTranslations('imageManager');
     const [isPending, startTransition] = useTransition();
     const [restoreFile, setRestoreFile] = useState<File | null>(null);
     const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
@@ -188,7 +189,7 @@ export default function DbPage() {
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
-                                    <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                                    <AlertDialogCancel>{tShared('cancel')}</AlertDialogCancel>
                                     <AlertDialogAction onClick={confirmRestore} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                                         {t('restoreButton')}
                                     </AlertDialogAction>
