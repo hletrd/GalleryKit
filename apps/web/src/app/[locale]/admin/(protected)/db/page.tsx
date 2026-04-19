@@ -9,12 +9,23 @@ import { dumpDatabase, restoreDatabase, exportImagesCsv } from '@/app/[locale]/a
 import { toast } from 'sonner';
 import { Download, Upload, FileJson, AlertTriangle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useTranslations } from 'next-intl';
 
 export default function DbPage() {
     const t = useTranslations('db');
     const [isPending, startTransition] = useTransition();
     const [restoreFile, setRestoreFile] = useState<File | null>(null);
+    const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
     const handleBackup = () => {
         startTransition(async () => {
@@ -44,10 +55,12 @@ export default function DbPage() {
 
     const handleRestore = () => {
         if (!restoreFile) return;
+        setShowRestoreConfirm(true);
+    };
 
-        if (!confirm(t('confirmRestore'))) {
-            return;
-        }
+    const confirmRestore = () => {
+        setShowRestoreConfirm(false);
+        if (!restoreFile) return;
 
         const formData = new FormData();
         formData.append('file', restoreFile);
@@ -158,14 +171,30 @@ export default function DbPage() {
                                 {t('dangerZoneDesc')}
                             </AlertDescription>
                         </Alert>
-                        <Button
-                            onClick={handleRestore}
-                            disabled={isPending || !restoreFile}
-                            variant="destructive"
-                            className="w-full"
-                        >
-                            {isPending ? t('restoreButtonProcessing') : t('restoreButton')}
-                        </Button>
+                        <AlertDialog open={showRestoreConfirm} onOpenChange={setShowRestoreConfirm}>
+                            <Button
+                                onClick={handleRestore}
+                                disabled={isPending || !restoreFile}
+                                variant="destructive"
+                                className="w-full"
+                            >
+                                {isPending ? t('restoreButtonProcessing') : t('restoreButton')}
+                            </Button>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>{t('restoreTitle')}</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        {t('restoreWarning')}
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>{t('restoreButton')}</AlertDialogCancel>
+                                    <AlertDialogAction onClick={confirmRestore} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                        {t('restoreButton')}
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
                     </CardContent>
                 </Card>
 
