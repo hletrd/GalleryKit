@@ -60,7 +60,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     const image = await getImageByShareKeyCached(key);
 
     if (!image) {
-        notFound();
+        return notFound();
     }
 
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
