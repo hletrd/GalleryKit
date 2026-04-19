@@ -33,7 +33,6 @@ export async function getAdminTags() {
         return { success: true, tags: allTags };
     } catch (err) {
         console.error("Failed to fetch tags", err);
-        const t = await getTranslations('serverActions');
         return { error: t('failedToFetchTags') };
     }
 }
