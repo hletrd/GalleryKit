@@ -8,6 +8,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
+import { stripControlChars } from '@/lib/sanitize';
 
 function getTagSlug(name: string) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -54,7 +55,7 @@ export async function updateTag(id: number, name: string) {
         return { error: t('invalidTagName') };
     }
 
-    const trimmedName = name.trim();
+    const trimmedName = stripControlChars(name.trim()) ?? '';
     const slug = getTagSlug(trimmedName);
 
     if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
