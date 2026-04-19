@@ -277,7 +277,9 @@
     "aliasConflictsWithTopic": "This slug is already taken.",
     "aliasAlreadyExists": "This alias already exists.",
     "topicNotFound": "Referenced topic does not exist.",
-    "invalidAlias": "Invalid alias"
+    "invalidAlias": "Invalid alias",
+    "reservedRouteSegment": "This slug is reserved for an application route",
+    "slugConflictsWithRoute": "This slug already conflicts with an existing topic route"
   },
   "aria": {
     "searchPhotos": "Search photos",

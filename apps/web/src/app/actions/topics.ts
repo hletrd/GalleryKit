@@ -29,7 +29,8 @@ async function topicRouteSegmentExists(segment: string): Promise<boolean> {
 }
 
 export async function createTopic(formData: FormData) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const label = formData.get('label')?.toString() ?? '';
     const slug = formData.get('slug')?.toString() ?? '';
@@ -46,7 +47,7 @@ export async function createTopic(formData: FormData) {
         return { error: 'Invalid slug format. Use only lowercase letters, numbers, hyphens, and underscores.' };
     }
     if (isReservedTopicRouteSegment(slug)) {
-        return { error: 'This slug is reserved for an application route' };
+        return { error: t('reservedRouteSegment') };
     }
 
     if (label.length > 100) {
@@ -54,7 +55,7 @@ export async function createTopic(formData: FormData) {
     }
 
     if (await topicRouteSegmentExists(slug)) {
-        return { error: 'Topic slug already conflicts with an existing topic route' };
+        return { error: t('slugConflictsWithRoute') };
     }
 
     let imageFilename = null;
@@ -113,14 +114,14 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         return { error: t('invalidSlugFormat') };
     }
     if (isReservedTopicRouteSegment(slug)) {
-        return { error: 'This slug is reserved for an application route' };
+        return { error: t('reservedRouteSegment') };
     }
 
     const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, currentSlug)).limit(1);
     const previousImageFilename = currentTopic?.image_filename ?? null;
 
     if (slug !== currentSlug && await topicRouteSegmentExists(slug)) {
-        return { error: 'Topic slug already conflicts with an existing topic route' };
+        return { error: t('slugConflictsWithRoute') };
     }
 
     let imageFilename = undefined;
@@ -224,10 +225,10 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidAliasFormat') };
     }
     if (isReservedTopicRouteSegment(alias)) {
-        return { error: 'This alias is reserved for an application route' };
+        return { error: t('reservedRouteSegment') };
     }
     if (await topicRouteSegmentExists(alias)) {
-        return { error: 'Alias already conflicts with an existing topic or alias' };
+        return { error: t('slugConflictsWithRoute') };
     }
 
     // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
