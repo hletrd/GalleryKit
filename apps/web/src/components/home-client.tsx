@@ -323,7 +323,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                     <p className="font-medium">{t('home.noImages')}</p>
                     {currentTags && currentTags.length > 0 && (
                         <div className="flex flex-col items-center gap-2">
-                            <p className="text-sm">{t('home.noResultsHint') || 'Try removing some filters'}</p>
+                            <p className="text-sm">{t('home.noResultsHint')}</p>
                             <Link href={localizePath(locale, topicSlug ? `/${topicSlug}` : '/')} className="text-sm underline hover:text-primary">
                                 {t('home.clearFilter')}
                             </Link>
