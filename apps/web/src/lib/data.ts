@@ -434,7 +434,7 @@ export async function getSharedGroup(
     .limit(100);
 
     // Fetch tags for all images in a single batched query (avoids N+1)
-    let imagesWithTags;
+    let imagesWithTags: (typeof groupImages[number] & { tags: { slug: string; name: string }[] })[];
     if (groupImages.length > 0) {
         const imageIds = groupImages.map(img => img.id);
         const allTagRows = await db.select({
