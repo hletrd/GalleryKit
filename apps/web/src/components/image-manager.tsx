@@ -225,7 +225,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel onClick={() => setTagInput('')}>{t('imageManager.cancelAdd')}</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleBatchAddTag}>{t('imageManager.addTag')}</AlertDialogAction>
+                                    <AlertDialogAction onClick={handleBatchAddTag} disabled={isAddingTag}>{isAddingTag ? t('imageManager.adding') : t('imageManager.addTag')}</AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>

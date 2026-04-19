@@ -158,6 +158,7 @@
     "linkCopied": "Group link copied.",
     "tags": "Tags",
     "addTag": "Add Tag",
+    "adding": "Adding...",
     "cancelAdd": "Cancel",
     "placeholderTag": "Tag name",
     "batchAddTitle": "Tag {count} images",

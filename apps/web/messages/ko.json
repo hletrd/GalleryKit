@@ -158,6 +158,7 @@
     "linkCopied": "그룹 링크를 복사했습니다.",
     "tags": "태그",
     "addTag": "태그 추가",
+    "adding": "추가 중...",
     "cancelAdd": "취소",
     "placeholderTag": "태그명",
     "batchAddTitle": "{count}장에 태그 추가",
