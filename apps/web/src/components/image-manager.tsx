@@ -158,14 +158,18 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
 
     const handleBatchAddTag = async () => {
          if (!tagInput.trim()) return;
-         const res = await batchAddTags(Array.from(selectedIds), tagInput);
-         if (res?.success) {
-             toast.success(t('imageManager.batchAddSuccess'));
+         setIsAddingTag(true);
+         try {
+             const res = await batchAddTags(Array.from(selectedIds), tagInput);
+             if (res?.success) {
+                 toast.success(t('imageManager.batchAddSuccess'));
+                 setTagInput('');
+                 setSelectedIds(new Set());
+             } else {
+                 toast.error(res?.error || t('imageManager.batchAddFailed'));
+             }
+         } finally {
              setIsAddingTag(false);
-             setTagInput('');
-             setSelectedIds(new Set());
-         } else {
-             toast.error(res?.error || t('imageManager.batchAddFailed'));
          }
     };
 
