@@ -3,6 +3,7 @@ import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, shared
 import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
+import { SEO_SETTING_KEYS } from './gallery-config-shared';
 import siteConfig from '@/site-config.json';
 
 // Module-level buffer for debounced shared-group view count increments
@@ -685,15 +686,6 @@ export interface SeoSettings {
     url: string;
     og_image_url: string | null;
 }
-
-const SEO_SETTING_KEYS = [
-    'seo_title',
-    'seo_description',
-    'seo_nav_title',
-    'seo_author',
-    'seo_locale',
-    'seo_og_image_url',
-] as const;
 
 async function _getSeoSettings(): Promise<SeoSettings> {
     // Read all SEO keys from admin_settings in a single query

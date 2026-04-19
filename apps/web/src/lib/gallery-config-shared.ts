@@ -33,6 +33,19 @@ export const GALLERY_SETTING_KEYS = [
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
 
+// ── SEO Setting Keys ──────────────────────────────────────────────────────────
+
+export const SEO_SETTING_KEYS = [
+    'seo_title',
+    'seo_description',
+    'seo_nav_title',
+    'seo_author',
+    'seo_locale',
+    'seo_og_image_url',
+] as const;
+
+export type SeoSettingKey = typeof SEO_SETTING_KEYS[number];
+
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
 const DEFAULTS: Record<GallerySettingKey, string> = {

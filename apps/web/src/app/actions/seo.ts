@@ -8,15 +8,8 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
-
-const SEO_SETTING_KEYS = [
-    'seo_title',
-    'seo_description',
-    'seo_nav_title',
-    'seo_author',
-    'seo_locale',
-    'seo_og_image_url',
-] as const;
+import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
+import type { SeoSettingKey } from '@/lib/gallery-config-shared';
 
 // Validation constraints
 const MAX_TITLE_LENGTH = 200;
@@ -60,7 +53,7 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // Validate all provided keys are allowed
     const allowedKeys = new Set(SEO_SETTING_KEYS);
     for (const key of Object.keys(settings)) {
-        if (!allowedKeys.has(key as typeof SEO_SETTING_KEYS[number])) {
+        if (!allowedKeys.has(key as SeoSettingKey)) {
             return { error: t('invalidSeoKey') };
         }
     }
