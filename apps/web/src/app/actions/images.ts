@@ -23,7 +23,7 @@ const UPLOAD_MAX_FILES_PER_WINDOW = 100;
 const UPLOAD_TRACKER_MAX_KEYS = 2000;
 
 /** Prune expired upload tracker entries to prevent unbounded memory growth. */
-export function pruneUploadTracker() {
+function pruneUploadTracker() {
     const now = Date.now();
     for (const [key, entry] of uploadTracker) {
         if (now - entry.windowStart > UPLOAD_TRACKING_WINDOW_MS * 2) {
