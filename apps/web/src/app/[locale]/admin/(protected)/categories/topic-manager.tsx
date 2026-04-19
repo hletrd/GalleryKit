@@ -105,16 +105,17 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     }
 
     async function handleAddAlias(topicSlug: string) {
-        if (!newAlias.trim() || isAddingAlias) return;
+        const aliasValue = newAlias.trim();
+        if (!aliasValue || isAddingAlias) return;
         setIsAddingAlias(true);
         try {
-            const res = await createTopicAlias(topicSlug, newAlias.trim());
+            const res = await createTopicAlias(topicSlug, aliasValue);
             if (res?.error) {
                 toast.error(res.error);
             } else {
                 toast.success(t('categories.aliasAdded'));
                 setNewAlias('');
-                 setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, newAlias.trim()] }) : null);
+                 setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, aliasValue] }) : null);
                  router.refresh();
             }
         } catch {
