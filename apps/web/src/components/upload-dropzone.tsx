@@ -219,8 +219,9 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                 </datalist>
                 <div className="flex flex-col gap-4">
                     <div>
-                        <label className="text-sm font-medium mb-1 block">{t('upload.topic')}</label>
+                        <label htmlFor="upload-topic" className="text-sm font-medium mb-1 block">{t('upload.topic')}</label>
                         <select
+                            id="upload-topic"
                             className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             value={topic}
                             onChange={(e) => setTopic(e.target.value)}
@@ -231,13 +232,15 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                         </select>
                     </div>                    {/* Common Tags Selection */}
                     <div>
-                        <label className="text-sm font-medium mb-1 block">{t('upload.tags')} ({t('home.allTags')})</label>
+                        <label htmlFor="upload-tags" className="text-sm font-medium mb-1 block">{t('upload.tags')} ({t('home.allTags')})</label>
+                        <div id="upload-tags">
                         <TagInput
                             availableTags={availableTags}
                             selectedTags={selectedTags}
                             onTagsChange={setSelectedTags}
                             placeholder={t('upload.addExistingTag')}
                         />
+                        </div>
                     </div>
                 </div>
 
