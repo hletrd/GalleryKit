@@ -21,3 +21,6 @@ export { getAdminUsers, createAdminUser, deleteAdminUser } from './actions/admin
 
 // Public
 export { loadMoreImages, searchImagesAction } from './actions/public';
+
+// SEO
+export { getSeoSettingsAdmin, updateSeoSettings } from './actions/seo';

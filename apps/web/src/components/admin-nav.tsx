@@ -16,6 +16,7 @@ export function AdminNav() {
         { href: localizePath(locale, '/admin/dashboard'), label: t('nav.dashboard') },
         { href: localizePath(locale, '/admin/categories'), label: t('nav.categories') },
         { href: localizePath(locale, '/admin/tags'), label: t('nav.tags') },
+        { href: localizePath(locale, '/admin/seo'), label: t('nav.seo') },
         { href: localizePath(locale, '/admin/password'), label: t('nav.password') },
         { href: localizePath(locale, '/admin/users'), label: t('nav.users') },
         { href: localizePath(locale, '/admin/db'), label: t('nav.db') },

@@ -1,12 +1,11 @@
-import { getImagesLite, getTags, getTopicBySlugCached, getImageCount, getTopics } from '@/lib/data';
+import { getImagesLite, getTags, getTopicBySlugCached, getImageCount, getTopics, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
-import siteConfig from "@/site-config.json";
+
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-import { BASE_URL } from '@/lib/constants';
 
 
 export const revalidate = 3600;
@@ -17,6 +16,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
   const t = await getTranslations('topic');
+  const seo = await getSeoSettings();
 
   const topicData = await getTopicBySlugCached(topic);
 
@@ -33,7 +33,17 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), topic: topicData.label })
     : t('photosInTopic', { topic: topicData.label });
 
-  const pageUrl = localizeUrl(BASE_URL, locale, `/${topicData.slug}`);
+  const pageUrl = localizeUrl(seo.url, locale, `/${topicData.slug}`);
+
+  // Use custom OG image if configured, otherwise use generated OG image
+  const ogImages = seo.og_image_url
+    ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: title }]
+    : [{
+        url: `${seo.url}/api/og?topic=${encodeURIComponent(topicData.slug)}&tags=${encodeURIComponent(tagSlugs.join(','))}`,
+        width: 1200,
+        height: 630,
+        alt: title,
+      }];
 
   return {
     title: title,
@@ -42,23 +52,16 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
       canonical: pageUrl,
     },
     openGraph: {
-      title: `${title} | ${siteConfig.title}`,
+      title: `${title} | ${seo.title}`,
       description: description,
       url: pageUrl,
-      siteName: siteConfig.title,
-      images: [
-        {
-          url: `${BASE_URL}/api/og?topic=${encodeURIComponent(topicData.slug)}&tags=${encodeURIComponent(tagSlugs.join(','))}`,
-          width: 1200,
-          height: 630,
-          alt: title,
-        }
-      ],
+      siteName: seo.title,
+      images: ogImages,
       type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${title} | ${siteConfig.title}`,
+      title: `${title} | ${seo.title}`,
       description: description,
     },
   };
@@ -85,6 +88,7 @@ export default async function TopicPage({
       redirect(localizePath(locale, `/${topicData.slug}`));
   }
 
+  const seo = await getSeoSettings();
   const allTags = await getTags(topic);
 
   // Parse and validate tag slugs
@@ -101,11 +105,11 @@ export default async function TopicPage({
   const hasMore = totalCount > PAGE_SIZE;
   const tags = allTags.filter(t => t.count > 1);
 
-  const baseUrl = BASE_URL;
+  const baseUrl = seo.url;
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
-    name: `${topicData.label} | ${siteConfig.title}`,
+    name: `${topicData.label} | ${seo.title}`,
     url: localizeUrl(baseUrl, locale, `/${topicData.slug}`),
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',

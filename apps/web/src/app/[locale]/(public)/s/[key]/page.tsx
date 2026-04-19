@@ -1,13 +1,11 @@
-import { getImageByShareKeyCached } from '@/lib/data';
+import { getImageByShareKeyCached, getSeoSettings } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-import { BASE_URL } from '@/lib/constants';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
@@ -15,6 +13,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const { key } = await params;
     const locale = await getLocale();
     const t = await getTranslations('shared');
+    const seo = await getSeoSettings();
     const image = await getImageByShareKeyCached(key);
     if (!image) return {
         title: t('ogNotFoundTitle'),
@@ -22,34 +21,38 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const title = image.title && !isTitleFilename ? image.title : t('ogTitle');
-    const pageUrl = localizeUrl(BASE_URL, locale, `/s/${key}`);
+    const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
+
+    // Use custom OG image if configured, otherwise use photo image
+    const ogImages = seo.og_image_url
+        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
+        : [{
+            url: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+            width: image.width,
+            height: image.height,
+            alt: title,
+        }];
+
     return {
         title: title,
-        description: image.description || t('ogDescription', { site: siteConfig.title }),
+        description: image.description || t('ogDescription', { site: seo.title }),
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
             title: title,
-            description: image.description || t('ogDescription', { site: siteConfig.title }),
+            description: image.description || t('ogDescription', { site: seo.title }),
             url: pageUrl,
-            siteName: siteConfig.title,
-            images: [
-                {
-                    url: `${BASE_URL}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
-                    width: image.width,
-                    height: image.height,
-                    alt: title,
-                }
-            ],
+            siteName: seo.title,
+            images: ogImages,
             type: 'article',
             publishedTime: image.capture_date?.toString(),
         },
         twitter: {
             card: 'summary_large_image',
             title: title,
-            description: image.description || t('ogDescription', { site: siteConfig.title }),
-            images: [`${BASE_URL}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
+            description: image.description || t('ogDescription', { site: seo.title }),
+            images: seo.og_image_url ? [seo.og_image_url] : [`${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
         },
     };
 }
@@ -64,9 +67,11 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
         return notFound();
     }
 
+    const seo = await getSeoSettings();
+
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const displayTitle = image.title && !isTitleFilename ? image.title : t('sharedPhoto');
-    const subtitle = image.description || `${siteConfig.nav_title || siteConfig.title} · ${t('sharedPhoto')}`;
+    const subtitle = image.description || `${seo.nav_title || seo.title} · ${t('sharedPhoto')}`;
 
     return (
         <>

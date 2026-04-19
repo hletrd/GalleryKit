@@ -1,15 +1,13 @@
-import { getSharedGroupCached } from '@/lib/data';
+import { getSharedGroupCached, getSeoSettings } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
-import siteConfig from '@/site-config.json';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-import { BASE_URL } from '@/lib/constants';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
 
@@ -17,13 +15,27 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const { key } = await params;
     const locale = await getLocale();
     const t = await getTranslations('sharedGroup');
+    const seo = await getSeoSettings();
     const group = await getSharedGroupCached(key, { incrementViewCount: false });
     if (!group) return {
         title: t('notFoundTitle'),
         description: t('notFoundDescription'),
     };
-    const pageUrl = localizeUrl(BASE_URL, locale, `/g/${key}`);
+    const pageUrl = localizeUrl(seo.url, locale, `/g/${key}`);
     const coverImage = group.images[0];
+
+    // Use custom OG image if configured, otherwise use cover photo
+    const ogImages = seo.og_image_url
+        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
+        : coverImage
+            ? [{
+                url: `${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+                width: coverImage.width,
+                height: coverImage.height,
+                alt: t('ogAlt'),
+            }]
+            : [];
+
     return {
         title: t('ogTitle'),
         description: t('ogDescription', { count: group.images.length }),
@@ -32,25 +44,20 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
         },
         openGraph: {
             title: t('ogTitle'),
-            description: t('ogDescriptionWithSite', { count: group.images.length, site: siteConfig.title }),
+            description: t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }),
             url: pageUrl,
-            siteName: siteConfig.title,
+            siteName: seo.title,
             type: 'website',
-            ...(coverImage ? {
-                images: [{
-                    url: `${BASE_URL}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
-                    width: coverImage.width,
-                    height: coverImage.height,
-                    alt: t('ogAlt'),
-                }],
-            } : {}),
+            images: ogImages,
         },
         twitter: {
             card: 'summary_large_image',
             title: t('ogTitle'),
-            description: t('ogDescriptionWithSite', { count: group.images.length, site: siteConfig.title }),
-            ...(coverImage ? {
-                images: [`${BASE_URL}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
+            description: t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }),
+            ...(coverImage && !seo.og_image_url ? {
+                images: [`${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
+            } : seo.og_image_url ? {
+                images: [seo.og_image_url],
             } : {}),
         },
     };

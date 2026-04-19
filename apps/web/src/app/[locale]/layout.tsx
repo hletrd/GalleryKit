@@ -4,45 +4,49 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
-import siteConfig from "@/site-config.json";
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/lib/constants';
 import { localizeUrl } from '@/lib/locale-path';
-
-const BASE_URL = process.env.BASE_URL || siteConfig.url;
+import { getSeoSettings } from '@/lib/data';
+import siteConfig from "@/site-config.json";
 
 import Script from 'next/script';
 
-export const metadata: Metadata = {
-  metadataBase: new URL(BASE_URL),
-  title: {
-    default: siteConfig.title,
-    template: `%s | ${siteConfig.title}`
-  },
-  description: siteConfig.description,
-  alternates: {
-    languages: {
-      'en': localizeUrl(BASE_URL, 'en', '/'),
-      'ko': localizeUrl(BASE_URL, 'ko', '/'),
-      'x-default': BASE_URL,
+export async function generateMetadata(): Promise<Metadata> {
+  const seo = await getSeoSettings();
+
+  return {
+    metadataBase: new URL(seo.url),
+    title: {
+      default: seo.title,
+      template: `%s | ${seo.title}`
     },
-  },
-  openGraph: {
-    title: siteConfig.title,
-    description: siteConfig.description,
-    url: BASE_URL,
-    siteName: siteConfig.title,
-    locale: siteConfig.locale,
-    type: "website",
-  },
-  twitter: {
-    card: 'summary_large_image',
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
-};
+    description: seo.description,
+    alternates: {
+      languages: {
+        'en': localizeUrl(seo.url, 'en', '/'),
+        'ko': localizeUrl(seo.url, 'ko', '/'),
+        'x-default': seo.url,
+      },
+    },
+    openGraph: {
+      title: seo.title,
+      description: seo.description,
+      url: seo.url,
+      siteName: seo.title,
+      locale: seo.locale,
+      alternateLocale: ['ko_KR', 'en_US'],
+      type: "website",
+    },
+    twitter: {
+      card: 'summary_large_image',
+    },
+    robots: {
+      index: true,
+      follow: true,
+    },
+  };
+}
 
 export const viewport: Viewport = {
   colorScheme: 'light dark',

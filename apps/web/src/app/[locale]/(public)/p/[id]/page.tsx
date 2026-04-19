@@ -1,14 +1,13 @@
-import { getImageCached } from '@/lib/data';
+import { getImageCached, getSeoSettings } from '@/lib/data';
 import { isAdmin } from '@/app/actions';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import siteConfig from "@/site-config.json";
 import { TagInfo } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-import { BASE_URL } from '@/lib/constants';
+import siteConfig from "@/site-config.json";
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -22,6 +21,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const { id } = await params;
     const locale = await getLocale();
     const t = await getTranslations('photo');
+    const seo = await getSeoSettings();
 
     // Validate that id is a purely numeric positive integer before parseInt
     // (matches the default export's validation pattern)
@@ -60,37 +60,41 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     if (image.topic) keywords.push(image.topic);
 
     const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`;
-    const absoluteImageUrl = `${BASE_URL}${imageUrl}`;
-    const pageUrl = localizeUrl(BASE_URL, locale, `/p/${id}`);
+    const absoluteImageUrl = `${seo.url}${imageUrl}`;
+    const pageUrl = localizeUrl(seo.url, locale, `/p/${id}`);
+
+    // Use custom OG image if configured, otherwise use photo image
+    const ogImages = seo.og_image_url
+        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
+        : [{
+            url: absoluteImageUrl,
+            width: image.width,
+            height: image.height,
+            alt: displayTitle,
+        }];
 
     return {
         title: displayTitle,
-        description: image.description || t('descriptionByAuthorWithTitle', { author: siteConfig.author, title: displayTitle }),
+        description: image.description || t('descriptionByAuthorWithTitle', { author: seo.author, title: displayTitle }),
         keywords: keywords,
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
             title: displayTitle,
-            description: image.description || t('descriptionByAuthor', { author: siteConfig.author }),
+            description: image.description || t('descriptionByAuthor', { author: seo.author }),
             url: pageUrl,
-            images: [
-                {
-                    url: absoluteImageUrl,
-                    width: image.width,
-                    height: image.height,
-                    alt: displayTitle,
-                }
-            ],
+            siteName: seo.title,
+            images: ogImages,
             type: 'article',
             publishedTime: image.created_at?.toString(),
-            authors: [siteConfig.author],
+            authors: [seo.author],
         },
         twitter: {
             card: 'summary_large_image',
             title: displayTitle,
-            description: image.description || t('descriptionByAuthor', { author: siteConfig.author }),
-            images: [absoluteImageUrl],
+            description: image.description || t('descriptionByAuthor', { author: seo.author }),
+            images: seo.og_image_url ? [seo.og_image_url] : [absoluteImageUrl],
         }
     };
 }
@@ -113,6 +117,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
 
     if (!image) return notFound();
 
+    const seo = await getSeoSettings();
+
     // Replicate title logic for JSON-LD
     const hasTags = image.tags && image.tags.length > 0;
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
@@ -129,17 +135,17 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     const jsonLd = {
         '@context': 'https://schema.org',
         '@type': 'ImageObject',
-        contentUrl: `${BASE_URL}/uploads/jpeg/${image.filename_jpeg}`,
-        thumbnailUrl: `${BASE_URL}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+        contentUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg}`,
+        thumbnailUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
         encodingFormat: 'image/jpeg',
         license: 'https://creativecommons.org/licenses/by-nc/4.0/',
         acquireLicensePage: siteConfig.parent_url,
-        creditText: siteConfig.author,
+        creditText: seo.author,
         creator: {
             '@type': 'Person',
-            name: siteConfig.author,
+            name: seo.author,
         },
-        copyrightNotice: siteConfig.author,
+        copyrightNotice: seo.author,
         datePublished: image.created_at,
         uploadDate: image.created_at,
         width: {
@@ -172,20 +178,20 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             {
                 '@type': 'ListItem',
                 position: 1,
-                name: siteConfig.title || 'GalleryKit',
-                item: localizeUrl(BASE_URL, locale, '/'),
+                name: seo.title || 'GalleryKit',
+                item: localizeUrl(seo.url, locale, '/'),
             },
             image.topic && {
                 '@type': 'ListItem',
                 position: 2,
                 name: image.topic,
-                item: localizeUrl(BASE_URL, locale, `/${image.topic}`),
+                item: localizeUrl(seo.url, locale, `/${image.topic}`),
             },
             {
                 '@type': 'ListItem',
                 position: image.topic ? 3 : 2,
                 name: displayTitle,
-                item: localizeUrl(BASE_URL, locale, `/p/${id}`),
+                item: localizeUrl(seo.url, locale, `/p/${id}`),
             },
         ].filter(Boolean),
     };

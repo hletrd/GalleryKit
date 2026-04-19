@@ -1,11 +1,9 @@
-import { getImagesLite, getTags, getImageCount, getTopics } from '@/lib/data';
+import { getImagesLite, getTags, getImageCount, getTopics, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
-import siteConfig from "@/site-config.json";
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { localizeUrl } from '@/lib/locale-path';
-import { BASE_URL } from '@/lib/constants';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -18,7 +16,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
   const t = await getTranslations('home');
-  const pageUrl = localizeUrl(BASE_URL, locale, '/');
+  const seo = await getSeoSettings();
+  const pageUrl = localizeUrl(seo.url, locale, '/');
 
   const images = await getImagesLite(undefined, undefined, 1, 0);
   const latestImage = images[0];
@@ -27,12 +26,24 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     : false;
 
   const title = tagSlugs.length > 0
-    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${siteConfig.title}`
-    : siteConfig.title;
+    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${seo.title}`
+    : seo.title;
 
   const description = tagSlugs.length > 0
-    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: siteConfig.title })
-    : siteConfig.description;
+    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: seo.title })
+    : seo.description;
+
+  // Use custom OG image if configured, otherwise use latest photo
+  const ogImages = seo.og_image_url
+    ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
+    : latestImage
+      ? [{
+          url: `${seo.url}/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+          width: latestImage.width,
+          height: latestImage.height,
+          alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
+        }]
+      : [];
 
   return {
     title: title,
@@ -41,15 +52,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       title: title,
       description: description,
       url: pageUrl,
-      siteName: siteConfig.title,
-      images: latestImage ? [
-        {
-          url: `${BASE_URL}/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
-          width: latestImage.width,
-          height: latestImage.height,
-          alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
-        }
-      ] : [],
+      siteName: seo.title,
+      images: ogImages,
       type: 'website',
     },
     twitter: {
@@ -63,7 +67,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
   const locale = await getLocale();
-  const baseUrl = BASE_URL;
+  const seo = await getSeoSettings();
+  const baseUrl = seo.url;
 
   // Root always gets latest uploads (no topic)
   const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);
@@ -83,15 +88,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const websiteLd = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    name: siteConfig.title,
+    name: seo.title,
     url: localizeUrl(baseUrl, locale, '/'),
-    description: siteConfig.description,
+    description: seo.description,
   };
 
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
-    name: siteConfig.title,
+    name: seo.title,
     url: localizeUrl(baseUrl, locale, '/'),
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',

@@ -1,8 +1,9 @@
 import { cache } from 'react';
-import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages } from '@/db';
+import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray, like } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
+import siteConfig from '@/site-config.json';
 
 // Module-level buffer for debounced shared-group view count increments
 const viewCountBuffer = new Map<number, number>();
@@ -650,3 +651,48 @@ export const getTopicBySlugCached = cache(getTopicBySlug);
 export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
 export const getImageByShareKeyCached = cache(getImageByShareKey);
 export const getSharedGroupCached = cache(getSharedGroup);
+
+// ── SEO Settings ──────────────────────────────────────────────────────────────
+// Reads site-wide SEO/OG settings from the `admin_settings` table.
+// Falls back to `site-config.json` defaults for any missing keys.
+// Uses React `cache()` for SSR deduplication within a single request.
+
+export interface SeoSettings {
+    title: string;
+    description: string;
+    nav_title: string;
+    author: string;
+    locale: string;
+    url: string;
+    og_image_url: string | null;
+}
+
+const SEO_SETTING_KEYS = [
+    'seo_title',
+    'seo_description',
+    'seo_nav_title',
+    'seo_author',
+    'seo_locale',
+    'seo_og_image_url',
+] as const;
+
+async function _getSeoSettings(): Promise<SeoSettings> {
+    // Read all SEO keys from admin_settings in a single query
+    const rows = await db.select({ key: adminSettings.key, value: adminSettings.value })
+        .from(adminSettings)
+        .where(inArray(adminSettings.key, [...SEO_SETTING_KEYS]));
+
+    const settingsMap = new Map(rows.map(r => [r.key, r.value]));
+
+    return {
+        title: settingsMap.get('seo_title') || siteConfig.title,
+        description: settingsMap.get('seo_description') || siteConfig.description,
+        nav_title: settingsMap.get('seo_nav_title') || siteConfig.nav_title,
+        author: settingsMap.get('seo_author') || siteConfig.author,
+        locale: settingsMap.get('seo_locale') || siteConfig.locale,
+        url: process.env.BASE_URL || siteConfig.url,
+        og_image_url: settingsMap.get('seo_og_image_url') || null,
+    };
+}
+
+export const getSeoSettings = cache(_getSeoSettings);
