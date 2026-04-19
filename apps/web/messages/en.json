@@ -192,6 +192,7 @@
   },
   "login": {
     "title": "Admin",
+    "description": "Sign in to manage your gallery",
     "username": "Username",
     "password": "Password",
     "submit": "Sign in",
