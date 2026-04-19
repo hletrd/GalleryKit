@@ -159,7 +159,8 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         }
 
         if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
-            await deleteTopicImage(previousImageFilename);
+            try { await deleteTopicImage(previousImageFilename); }
+            catch (e) { console.error('Failed to delete previous topic image:', previousImageFilename, e); }
         }
 
         revalidateLocalizedPaths('/admin/categories', '/', `/${slug}`, slug !== currentSlug ? `/${currentSlug}` : '');

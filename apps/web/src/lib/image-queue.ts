@@ -25,6 +25,7 @@ export type ProcessingQueueState = {
     queue: PQueue;
     enqueued: Set<number>;
     retryCounts: Map<number, number>;
+    claimRetryCounts: Map<number, number>;
     bootstrapped: boolean;
     shuttingDown: boolean;
     shutdownPromise?: Promise<void>;
@@ -41,6 +42,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
             queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 2 }),
             enqueued: new Set<number>(),
             retryCounts: new Map<number, number>(),
+            claimRetryCounts: new Map<number, number>(),
             bootstrapped: false,
             shuttingDown: false,
         };
@@ -110,10 +112,20 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
         try {
             lockConnection = await acquireImageProcessingClaim(job.id);
             if (!lockConnection) {
-                console.debug(`[Queue] Job ${job.id} already claimed by another worker, retrying later`);
+                const claimRetries = (state.claimRetryCounts.get(job.id) || 0) + 1;
+                const MAX_CLAIM_RETRIES = 10;
+                if (claimRetries >= MAX_CLAIM_RETRIES) {
+                    state.claimRetryCounts.delete(job.id);
+                    state.enqueued.delete(job.id);
+                    console.error(`[Queue] Job ${job.id} failed to acquire claim ${claimRetries} times, giving up`);
+                    return;
+                }
+                state.claimRetryCounts.set(job.id, claimRetries);
+                const delay = CLAIM_RETRY_DELAY_MS * Math.min(claimRetries, 5); // escalating up to 25s
+                console.debug(`[Queue] Job ${job.id} already claimed by another worker, retrying later (attempt ${claimRetries}/${MAX_CLAIM_RETRIES})`);
                 const retryTimer = setTimeout(() => {
                     enqueueImageProcessing(job);
-                }, CLAIM_RETRY_DELAY_MS);
+                }, delay);
                 retryTimer.unref?.();
                 return;
             }
@@ -200,6 +212,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             if (!retried) {
                 state.enqueued.delete(job.id);
                 state.retryCounts.delete(job.id);
+                state.claimRetryCounts.delete(job.id);
             }
         }
     });

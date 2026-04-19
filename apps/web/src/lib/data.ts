@@ -440,20 +440,33 @@ export async function getSharedGroup(
     .orderBy(asc(sharedGroupImages.position), asc(sharedGroupImages.imageId))
     .limit(100);
 
-    // Fetch tags for each image in the group
-    const imagesWithTags = await Promise.all(
-        groupImages.map(async (img) => {
-            const imageTagsResult = await db.select({
-                slug: tags.slug,
-                name: tags.name,
-            })
-            .from(imageTags)
-            .innerJoin(tags, eq(imageTags.tagId, tags.id))
-            .where(eq(imageTags.imageId, img.id));
-
-            return { ...img, tags: imageTagsResult };
+    // Fetch tags for all images in a single batched query (avoids N+1)
+    let imagesWithTags;
+    if (groupImages.length > 0) {
+        const imageIds = groupImages.map(img => img.id);
+        const allTagRows = await db.select({
+            imageId: imageTags.imageId,
+            slug: tags.slug,
+            name: tags.name,
         })
-    );
+        .from(imageTags)
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(inArray(imageTags.imageId, imageIds));
+
+        const tagsByImage = new Map<number, { slug: string; name: string }[]>();
+        for (const t of allTagRows) {
+            const arr = tagsByImage.get(t.imageId) || [];
+            arr.push({ slug: t.slug, name: t.name });
+            tagsByImage.set(t.imageId, arr);
+        }
+
+        imagesWithTags = groupImages.map(img => ({
+            ...img,
+            tags: tagsByImage.get(img.id) || [],
+        }));
+    } else {
+        imagesWithTags = [];
+    }
 
     return {
         ...group,
@@ -576,7 +589,8 @@ export async function getImageIdsForSitemap() {
     .limit(50000);
 }
 
-export { adminExtraFields };
+// adminExtraFields is intentionally NOT exported — it contains PII (latitude, longitude, user_filename).
+// Use it locally in admin-specific query builders only.
 
 export const getImageCached = cache(getImage);
 export const getTopicBySlugCached = cache(getTopicBySlug);

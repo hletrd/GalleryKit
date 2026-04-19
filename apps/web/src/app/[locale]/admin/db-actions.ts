@@ -82,7 +82,7 @@ export async function dumpDatabase() {
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `backup-${timestamp}.sql`;
+    const filename = `backup-${timestamp}-${randomUUID().slice(0, 8)}.sql`;
 
     const backupsDir = path.join(process.cwd(), 'data', 'backups');
     const outputPath = path.join(backupsDir, filename);

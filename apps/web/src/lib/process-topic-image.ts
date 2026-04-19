@@ -6,12 +6,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { isValidFilename } from '@/lib/validation';
-
-// Cap total pixels to reduce decompression-bomb risk.
-const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
-const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
-    ? envMaxInputPixels
-    : 64 * 1024 * 1024;
+import { MAX_INPUT_PIXELS_TOPIC } from '@/lib/process-image';
 const RESOURCES_ROOT = (() => {
     const envRoot = process.env.UPLOAD_ROOT?.trim();
     if (envRoot) return path.join(path.dirname(envRoot), 'resources');
@@ -72,7 +67,7 @@ export async function processTopicImage(file: File): Promise<string> {
         const nodeStream = Readable.fromWeb(webStream as import('stream/web').ReadableStream);
         await pipeline(nodeStream, createWriteStream(tempPath, { mode: 0o600 }));
 
-        await sharp(tempPath, { limitInputPixels: maxInputPixels })
+        await sharp(tempPath, { limitInputPixels: MAX_INPUT_PIXELS_TOPIC })
             .resize({ width: 512, height: 512, fit: 'cover' })
             .webp({ quality: 90 })
             .toFile(outputPath);

@@ -130,15 +130,16 @@ export async function revokePhotoShareLink(imageId: number) {
         return { error: 'Invalid image ID' };
     }
 
-    const [image] = await db.select({ id: images.id }).from(images).where(eq(images.id, imageId));
+    const [image] = await db.select({ id: images.id, share_key: images.share_key }).from(images).where(eq(images.id, imageId));
     if (!image) return { error: 'Image not found' };
+    if (!image.share_key) return { error: 'Image does not have an active share link' };
 
     const [result] = await db.update(images)
         .set({ share_key: null })
         .where(eq(images.id, imageId));
 
     if (result.affectedRows === 0) {
-        return { error: 'Share link not found' };
+        return { error: 'Failed to revoke share link' };
     }
 
     revalidateLocalizedPaths(`/p/${imageId}`);

@@ -23,6 +23,15 @@ const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels >
     : 256 * 1024 * 1024;
 // limitInputPixels is passed per-constructor call (Sharp 0.33+ API)
 
+// Topic images are resized to 512x512 and don't need the same pixel headroom.
+// A separate env var allows independent tuning without affecting full-image processing.
+export const MAX_INPUT_PIXELS_TOPIC = (() => {
+    const envTopicPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS_TOPIC ?? '', 10);
+    return Number.isFinite(envTopicPixels) && envTopicPixels > 0
+        ? envTopicPixels
+        : 64 * 1024 * 1024;
+})();
+
 const UPLOAD_ROOT = (() => {
     const envRoot = process.env.UPLOAD_ROOT?.trim();
     if (envRoot) return envRoot;
