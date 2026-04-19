@@ -22,7 +22,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
 }
 
 export async function searchImagesAction(query: string) {
-    if (!query || typeof query !== 'string' || query.length > 1000) return [];
+    if (!query || typeof query !== 'string' || query.length > 200) return [];
     if (query.trim().length < 2) return [];
 
     // Server-side rate limiting for search (LIKE queries are expensive)
