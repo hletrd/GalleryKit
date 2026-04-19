@@ -119,8 +119,13 @@ export async function addTagToImage(imageId: number, tagName: string) {
         // Upsert tag
         await db.insert(tags).ignore().values({ name: cleanName, slug });
 
-        // Get tag id (optimized select)
-        const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
+        // Look up by exact name first, then fall back to slug — avoids returning
+        // the wrong tag when two different names produce the same slug (slug collision).
+        // Same pattern as removeTagFromImage and batchUpdateImageTags remove path.
+        let [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.name, cleanName));
+        if (!tagRecord) {
+            [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
+        }
         if (!tagRecord) return { error: t('tagNotFound') };
 
         // Warn on tag slug collision
@@ -210,7 +215,13 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
     try {
         // Upsert tag
         await db.insert(tags).ignore().values({ name: cleanName, slug });
-        const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
+        // Look up by exact name first, then fall back to slug — avoids returning
+        // the wrong tag when two different names produce the same slug (slug collision).
+        // Same pattern as removeTagFromImage, addTagToImage, and batchUpdateImageTags.
+        let [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.name, cleanName));
+        if (!tagRecord) {
+            [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
+        }
         if (!tagRecord) return { error: t('tagNotFound') };
 
         // US-002: Warn on tag slug collision
@@ -293,7 +304,12 @@ export async function batchUpdateImageTags(
                 if (!isValidSlug(slug)) continue;
                 // Ensure tag exists
                 await tx.insert(tags).ignore().values({ name: cleanName, slug });
-                const [tagRecord] = await tx.select().from(tags).where(eq(tags.slug, slug));
+                // Look up by exact name first, then fall back to slug — same pattern
+                // as addTagToImage and batchAddTags (see C3R-02).
+                let [tagRecord] = await tx.select().from(tags).where(eq(tags.name, cleanName));
+                if (!tagRecord) {
+                    [tagRecord] = await tx.select().from(tags).where(eq(tags.slug, slug));
+                }
                 if (tagRecord) {
                     // Warn on tag slug collision (matching addTagToImage/batchAddTags pattern)
                     if (tagRecord.name !== cleanName) {
