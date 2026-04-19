@@ -38,10 +38,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
-  // Cap images to stay under Google's 50K URL limit
-  const cappedImages = images.slice(0, MAX_SITEMAP_IMAGES);
-
-  const imageEntries: MetadataRoute.Sitemap = cappedImages.flatMap((image) =>
+  // DB query already caps at MAX_SITEMAP_IMAGES — no slice needed
+  const imageEntries: MetadataRoute.Sitemap = images.flatMap((image) =>
     LOCALES.map((locale) => ({
       url: localizeUrl(BASE_URL, locale, `/p/${image.id}`),
       lastModified: new Date(image.created_at || Date.now()),

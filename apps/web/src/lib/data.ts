@@ -594,7 +594,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
 }
 
 /** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns */
-export async function getImageIdsForSitemap(limit: number = 25000) {
+export async function getImageIdsForSitemap(limit: number = 24000) {
     const safeLimit = Math.min(Math.max(limit, 1), 50000);
     return db.select({
         id: images.id,
