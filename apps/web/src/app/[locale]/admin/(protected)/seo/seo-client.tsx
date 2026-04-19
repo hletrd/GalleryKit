@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,6 +30,7 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
     const [settings, setSettings] = useState<SeoSettings>(initialSettings);
+    const initialRef = useRef<SeoSettings>(initialSettings);
 
     const handleChange = (field: keyof SeoSettings, value: string) => {
         setSettings(prev => ({ ...prev, [field]: value }));
@@ -38,8 +39,17 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     const handleSave = () => {
         startTransition(async () => {
             try {
-                const result = await updateSeoSettings(Object.fromEntries(Object.entries(settings)));
+                // Only send changed fields to reduce transaction size and conflict window
+                const changed = Object.fromEntries(
+                    Object.entries(settings).filter(([k, v]) => v !== initialRef.current[k as keyof SeoSettings])
+                );
+                if (Object.keys(changed).length === 0) {
+                    toast.info(t('seo.noChanges'));
+                    return;
+                }
+                const result = await updateSeoSettings(changed);
                 if (result.success) {
+                    initialRef.current = { ...settings };
                     toast.success(t('seo.saveSuccess'));
                 } else {
                     toast.error(result.error || t('seo.saveFailed'));

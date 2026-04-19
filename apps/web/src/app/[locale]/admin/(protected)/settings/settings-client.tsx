@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,6 +25,7 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
     const [isPending, startTransition] = useTransition();
     const defaults = getSettingDefaults();
     const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
+    const initialRef = useRef<Record<string, string>>(initialSettings);
 
     const handleChange = (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
@@ -33,8 +34,17 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
     const handleSave = () => {
         startTransition(async () => {
             try {
-                const result = await updateGallerySettings(settings);
+                // Only send changed fields to reduce transaction size and conflict window
+                const changed = Object.fromEntries(
+                    Object.entries(settings).filter(([k, v]) => v !== initialRef.current[k])
+                );
+                if (Object.keys(changed).length === 0) {
+                    toast.info(t('settings.noChanges'));
+                    return;
+                }
+                const result = await updateGallerySettings(changed);
                 if (result.success) {
+                    initialRef.current = { ...settings };
                     toast.success(t('settings.saveSuccess'));
                 } else {
                     toast.error(result.error || t('settings.saveFailed'));
