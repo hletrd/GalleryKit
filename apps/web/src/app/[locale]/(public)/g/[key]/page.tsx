@@ -17,22 +17,23 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const locale = await getLocale();
+    const t = await getTranslations('sharedGroup');
     const group = await getSharedGroupCached(key, { incrementViewCount: false });
     if (!group) return {
-        title: 'Shared Photos Not Found',
-        description: 'This shared collection could not be found.',
+        title: t('notFoundTitle'),
+        description: t('notFoundDescription'),
     };
     const pageUrl = localizeUrl(BASE_URL, locale, `/g/${key}`);
     const coverImage = group.images[0];
     return {
-        title: `Shared Photos`,
-        description: `View ${group.images.length} shared photos`,
+        title: t('ogTitle'),
+        description: t('ogDescription', { count: group.images.length }),
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
-            title: `Shared Photos`,
-            description: `View ${group.images.length} shared photos from ${siteConfig.title}`,
+            title: t('ogTitle'),
+            description: t('ogDescriptionWithSite', { count: group.images.length, site: siteConfig.title }),
             url: pageUrl,
             siteName: siteConfig.title,
             type: 'website',
@@ -41,14 +42,14 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
                     url: `${BASE_URL}/uploads/webp/${coverImage.filename_webp.replace('.webp', '_2048.webp')}`,
                     width: coverImage.width,
                     height: coverImage.height,
-                    alt: 'Shared Photos',
+                    alt: t('ogAlt'),
                 }],
             } : {}),
         },
         twitter: {
             card: 'summary_large_image',
-            title: 'Shared Photos',
-            description: `View ${group.images.length} shared photos from ${siteConfig.title}`,
+            title: t('ogTitle'),
+            description: t('ogDescriptionWithSite', { count: group.images.length, site: siteConfig.title }),
             ...(coverImage ? {
                 images: [`${BASE_URL}/uploads/webp/${coverImage.filename_webp.replace('.webp', '_2048.webp')}`],
             } : {}),

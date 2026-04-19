@@ -262,7 +262,13 @@
     "empty": "No photos in this group.",
     "notFound": "Shared album not found.",
     "viewCount": "{count} shared photos",
-    "viewGallery": "View Gallery"
+    "viewGallery": "View Gallery",
+    "ogTitle": "Shared Photos",
+    "ogDescription": "View {count} shared photos",
+    "ogDescriptionWithSite": "View {count} shared photos from {site}",
+    "notFoundTitle": "Shared Photos Not Found",
+    "notFoundDescription": "This shared collection could not be found.",
+    "ogAlt": "Shared Photos"
   },
   "serverActions": {
     "unauthorized": "Not authorized",
