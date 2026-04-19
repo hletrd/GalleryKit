@@ -64,13 +64,16 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
 
     async function handleDelete(id: number) {
         setIsDeleting(true);
-        const res = await deleteTag(id);
-        setIsDeleting(false);
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('tags.deleted'));
-            router.refresh();
+        try {
+            const res = await deleteTag(id);
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('tags.deleted'));
+                router.refresh();
+            }
+        } finally {
+            setIsDeleting(false);
         }
     }
 
