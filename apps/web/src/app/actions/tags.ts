@@ -65,7 +65,7 @@ export async function updateTag(id: number, name: string) {
         if (result.affectedRows === 0) {
             return { error: t('tagNotFound') };
         }
-        revalidateLocalizedPaths('/admin/tags', '/');
+        revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         return { success: true };
     } catch {
         console.error("Failed to update tag");
