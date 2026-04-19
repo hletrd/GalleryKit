@@ -78,6 +78,10 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     const csvContent = csvLines.join("\n");
 
     const warning = rowCount >= 50000 ? t('csvTruncated') : undefined;
+
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'csv_export', 'images', undefined, undefined, { rowCount }).catch(console.debug);
+
     return { data: csvContent, warning };
 }
 
