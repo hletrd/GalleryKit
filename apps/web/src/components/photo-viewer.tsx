@@ -59,7 +59,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reading SSR-unavailable sessionStorage on mount
                 setShowLightbox(true);
             }
-        } catch {}
+        } catch { console.debug('sessionStorage read failed') }
     }, []);
     const showLightboxRef = useRef(showLightbox);
     useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
@@ -89,12 +89,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         } else {
             if (direction === -1 && prevId) {
                 if (showLightboxRef.current) {
-                    try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
+                    try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch { console.debug('sessionStorage write failed') }
                 }
                 router.push(localizePath(locale, `/p/${prevId}`));
             } else if (direction === 1 && nextId) {
                 if (showLightboxRef.current) {
-                    try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch {}
+                    try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch { console.debug('sessionStorage write failed') }
                 }
                 router.push(localizePath(locale, `/p/${nextId}`));
             }
@@ -103,7 +103,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     // Clean up auto-lightbox flag after lazy init consumes it
     useEffect(() => {
-        try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch {}
+        try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch { console.debug('sessionStorage remove failed') }
     }, []);
 
     useEffect(() => {
