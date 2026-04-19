@@ -88,12 +88,18 @@ export async function deleteTag(id: number) {
 
     try {
         // Delete imageTags explicitly before tag (defense in depth alongside FK cascade)
+        let deletedRows = 0;
         await db.transaction(async (tx) => {
             await tx.delete(imageTags).where(eq(imageTags.tagId, id));
-            await tx.delete(tags).where(eq(tags.id, id));
+            const [delResult] = await tx.delete(tags).where(eq(tags.id, id));
+            deletedRows = delResult.affectedRows;
         });
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tag_delete', 'tag', String(id)).catch(console.debug);
+        // Log audit event only when the tag was actually deleted — avoids duplicate
+        // entries when concurrent deletion causes the transaction to delete 0 rows.
+        if (deletedRows > 0) {
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'tag_delete', 'tag', String(id)).catch(console.debug);
+        }
 
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         return { success: true };
