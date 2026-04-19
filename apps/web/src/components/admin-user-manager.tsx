@@ -144,7 +144,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                             size="icon"
                                             onClick={() => setDeleteTarget({ id: user.id, username: user.username })}
                                             className="text-destructive hover:text-destructive/90"
-                                            aria-label={t('aria.deleteItem')}
+                                            aria-label={t('aria.deleteUser', { username: user.username })}
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </Button>

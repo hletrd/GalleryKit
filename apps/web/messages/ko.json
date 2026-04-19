@@ -463,6 +463,7 @@
     "photoPosition": "사진 {total}개 중 {current}번째",
     "editItem": "편집",
     "deleteItem": "삭제",
+    "deleteUser": "사용자 {username} 삭제",
     "goBack": "뒤로"
   },
   "common": {

@@ -463,6 +463,7 @@
     "photoPosition": "Photo {current} of {total}",
     "editItem": "Edit",
     "deleteItem": "Delete",
+    "deleteUser": "Delete user {username}",
     "goBack": "Go back"
   },
   "common": {
