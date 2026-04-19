@@ -222,6 +222,9 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
  * grouping the entire result set, while still providing tag names for
  * display titles and alt text in the gallery grid.
  */
+// PRIVACY: `selectFields` intentionally omits latitude, longitude,
+// filename_original, and user_filename for public-facing queries.
+// Do NOT add those fields. See CLAUDE.md "Privacy" section.
 export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
     const conditions = buildImageConditions(topic, tagSlugs, includeUnprocessed);
     if (conditions === null) return [];
@@ -374,6 +377,10 @@ export async function getImage(id: number) {
     };
 }
 
+// PRIVACY: This query serves the public /s/[key] route (unauthenticated).
+// `selectFields` intentionally omits latitude, longitude, filename_original,
+// and user_filename. Do NOT add those fields — they would leak PII to
+// unauthenticated visitors. See CLAUDE.md "Privacy" section.
 export async function getImageByShareKey(key: string) {
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, [5, 10])) {
@@ -412,6 +419,10 @@ export async function getImageByShareKey(key: string) {
     };
 }
 
+// PRIVACY: This query serves the public /g/[key] route (unauthenticated).
+// `selectFields` intentionally omits latitude, longitude, filename_original,
+// and user_filename. Do NOT add those fields — they would leak PII to
+// unauthenticated visitors. See CLAUDE.md "Privacy" section.
 export async function getSharedGroup(
     key: string,
     options?: { incrementViewCount?: boolean },
