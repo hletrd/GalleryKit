@@ -12,7 +12,7 @@ import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
-import { formatUploadLimit, MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
+import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { getClientIp } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 
