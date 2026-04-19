@@ -273,7 +273,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     }
 
     const CHUNK_SIZE = 1024 * 1024;
-    const OVERLAP = 256; // overlap to catch patterns split across chunks
+    const OVERLAP = 1024; // overlap to catch patterns split across chunks (1KB covers multi-line statements)
     const fileSize = (await fs.stat(tempPath)).size;
     const scanFd = await fs.open(tempPath, 'r');
     try {
