@@ -3,7 +3,7 @@ import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import siteConfig from "@/site-config.json";
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { getLocale } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { localizeUrl } from '@/lib/locale-path';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
@@ -16,6 +16,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const { tags: tagsParam } = await searchParams;
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
+  const t = await getTranslations('home');
   const pageUrl = localizeUrl(process.env.BASE_URL || siteConfig.url, locale, '/');
 
   const images = await getImagesLite(undefined, undefined, 1, 0);
@@ -25,11 +26,11 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     : false;
 
   const title = tagSlugs.length > 0
-    ? `${tagSlugs.map(t => '#' + t).join(' ')} | Home`
-    : 'Home';
+    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${siteConfig.title}`
+    : siteConfig.title;
 
   const description = tagSlugs.length > 0
-    ? `Browse ${tagSlugs.join(', ')} photos on ${siteConfig.title}`
+    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: siteConfig.title })
     : siteConfig.description;
 
   return {
@@ -45,7 +46,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
           url: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${latestImage.filename_jpeg}`,
           width: latestImage.width,
           height: latestImage.height,
-          alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : 'Latest Photo',
+          alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
         }
       ] : [],
       type: 'website',
