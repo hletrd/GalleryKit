@@ -229,7 +229,7 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const effectiveLimit = limit > 0 ? Math.min(limit, 500) : 500;
+    const effectiveLimit = limit > 0 ? Math.min(limit, 100) : 100;
     return query.limit(effectiveLimit).offset(offset);
 }
 
@@ -255,7 +255,7 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const effectiveLimit = limit > 0 ? Math.min(limit, 500) : 500;
+    const effectiveLimit = limit > 0 ? Math.min(limit, 100) : 100;
     return query.limit(effectiveLimit).offset(offset);
 }
 
@@ -582,7 +582,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         }
     }
 
-    return combined.slice(0, limit);
+    return combined.slice(0, effectiveLimit);
 }
 
 /** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns */
