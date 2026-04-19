@@ -5,7 +5,7 @@ import FocusTrap from '@/components/lazy-focus-trap';
 import { Info, MapPin, Calendar, Clock } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
-import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
+import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
@@ -121,18 +121,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
             ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
             : t('imageManager.untitled'));
 
-    const formattedShutterSpeed = (() => {
-        if (!hasExifData(image.exposure_time)) return null;
-        const val = Number(image.exposure_time);
-        if (!Number.isFinite(val)) return String(image.exposure_time);
-        if (val < 1 && val > 0) {
-            const denominator = Math.round(1 / val);
-            if (Math.abs(1 / denominator - val) < 0.00001) {
-                return `1/${denominator}s`;
-            }
-        }
-        return `${image.exposure_time}s`;
-    })();
+    const formattedShutterSpeed = formatShutterSpeed(image.exposure_time);
 
     return (
         <>

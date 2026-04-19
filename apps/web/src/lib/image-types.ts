@@ -58,3 +58,21 @@ export function hasExifData(val: string | number | null | undefined): boolean {
 export function nu(val: string | null | undefined): string | undefined {
     return val ?? undefined;
 }
+
+/**
+ * Format a shutter speed value for display.
+ * Converts decimal values like 0.002 to "1/500s" when the conversion is exact.
+ * Returns the original string representation otherwise.
+ */
+export function formatShutterSpeed(exposureTime: string | null): string | null {
+    if (!hasExifData(exposureTime)) return null;
+    const val = Number(exposureTime);
+    if (!Number.isFinite(val)) return String(exposureTime);
+    if (val < 1 && val > 0) {
+        const denominator = Math.round(1 / val);
+        if (Math.abs(1 / denominator - val) < 0.00001) {
+            return `1/${denominator}s`;
+        }
+    }
+    return `${exposureTime}s`;
+}

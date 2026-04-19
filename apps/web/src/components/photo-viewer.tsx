@@ -18,7 +18,7 @@ import { ImageZoom } from '@/components/image-zoom';
 import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
-import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
+import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 
@@ -378,20 +378,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     {hasExifData(image.exposure_time) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.shutterSpeed')}</p>
-                                            <p className="font-medium">
-                                                {(() => {
-                                                    const val = Number(image.exposure_time);
-                                                    if (!Number.isFinite(val)) return image.exposure_time;
-
-                                                    if (val < 1 && val > 0) {
-                                                        const denominator = Math.round(1 / val);
-                                                        if (Math.abs(1 / denominator - val) < 0.00001) {
-                                                            return `1/${denominator}s`;
-                                                        }
-                                                    }
-                                                    return `${image.exposure_time}s`;
-                                                })()}
-                                            </p>
+                                            <p className="font-medium">{formatShutterSpeed(image.exposure_time)}</p>
                                         </div>
                                     )}
                                     {hasExifData(image.iso) && (
