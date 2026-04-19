@@ -347,6 +347,7 @@
     "groupNotFound": "그룹을 찾을 수 없습니다",
     "invalidGroupId": "잘못된 그룹 ID입니다",
     "failedToFetchTags": "태그를 불러오지 못했습니다",
+    "csvTruncated": "50,000행에서 잘렸습니다",
     "failedToDeleteTag": "태그 삭제에 실패했습니다",
     "failedToCreateTopic": "카테고리를 만들 수 없습니다",
     "missingDbConfig": "데이터베이스 설정이 누락되었습니다",

@@ -77,7 +77,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
 
     const csvContent = csvLines.join("\n");
 
-    const warning = rowCount >= 50000 ? 'Result truncated at 50,000 rows' : undefined;
+    const warning = rowCount >= 50000 ? t('csvTruncated') : undefined;
     return { data: csvContent, warning };
 }
 
