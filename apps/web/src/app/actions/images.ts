@@ -62,10 +62,10 @@ export async function uploadImages(formData: FormData) {
     }
 
     const tagNames = tagsString
-        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && isValidTagName(t))
+        ? tagsString.split(',').map(t => stripControlChars(t.trim()) ?? '').filter(t => t.length > 0 && isValidTagName(t))
         : [];
 
-    if (tagsString && tagNames.length !== tagsString.split(',').map(t => t.trim()).filter(Boolean).length) {
+    if (tagsString && tagNames.length !== tagsString.split(',').map(t => stripControlChars(t.trim()) ?? '').filter(Boolean).length) {
         return { error: t('invalidTagNames') };
     }
 
