@@ -19,6 +19,16 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias } from '@/app/actions';
 import { toast } from 'sonner';
 import { Pencil, Trash2, Plus, ChevronLeft, X } from 'lucide-react';
@@ -40,6 +50,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
     const [newAlias, setNewAlias] = useState('');
+    const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
+    const [deleteAliasInfo, setDeleteAliasInfo] = useState<{ topicSlug: string; alias: string } | null>(null);
 
     async function handleCreate(formData: FormData) {
         const res = await createTopic(formData);
@@ -65,7 +77,6 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     }
 
     async function handleDelete(slug: string) {
-        if (!confirm(t('categories.deleteConfirm'))) return;
         const res = await deleteTopic(slug);
         if (res?.error) {
             toast.error(res.error);
@@ -83,10 +94,6 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         } else {
             toast.success(t('categories.aliasAdded'));
             setNewAlias('');
-            // Optimistically update the editing topic state or rely on revalidation?
-            // Revalidation should cause a refresh, but local state 'editingTopic' won't update automatically if it's detached.
-            // But since 'initialTopics' updates from parent, we might see it if we close/reopen or if we sync 'editingTopic'
-            // For now, let's manually update client state to be snappy
              setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, newAlias.trim()] }) : null);
              router.refresh();
         }
@@ -166,7 +173,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                 <Button variant="ghost" size="icon" onClick={() => setEditingTopic(topic)} aria-label={t('aria.editItem')}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(topic.slug)} aria-label={t('aria.deleteItem')}>
+                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteSlug(topic.slug)} aria-label={t('aria.deleteItem')}>
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TableCell>
@@ -174,6 +181,24 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     ))}
                 </TableBody>
             </Table>
+
+            {/* Delete Topic Confirmation */}
+            <AlertDialog open={!!deleteSlug} onOpenChange={(open) => !open && setDeleteSlug(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('categories.deleteConfirmTitle')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t('categories.deleteConfirm')}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => { if (deleteSlug) handleDelete(deleteSlug); setDeleteSlug(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            {t('imageManager.delete')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <Dialog open={!!editingTopic} onOpenChange={(open) => !open && setEditingTopic(null)}>
                 <DialogContent className="max-w-xl">
@@ -203,7 +228,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         <div key={alias} className="flex items-center gap-1 px-2 py-1 bg-secondary rounded-md text-sm">
                                             <span>{alias}</span>
                                             <button
-                                              onClick={() => handleDeleteAlias(editingTopic.slug, alias)}
+                                              onClick={() => setDeleteAliasInfo({ topicSlug: editingTopic.slug, alias })}
                                               className="text-muted-foreground hover:text-destructive"
                                             >
                                                 <X className="h-3 w-3" />
@@ -232,6 +257,24 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     )}
                 </DialogContent>
             </Dialog>
+
+            {/* Delete Alias Confirmation */}
+            <AlertDialog open={!!deleteAliasInfo} onOpenChange={(open) => !open && setDeleteAliasInfo(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('categories.deleteAliasTitle')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t('categories.deleteAliasConfirm')}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => { if (deleteAliasInfo) handleDeleteAlias(deleteAliasInfo.topicSlug, deleteAliasInfo.alias); setDeleteAliasInfo(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            {t('imageManager.delete')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

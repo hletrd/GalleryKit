@@ -16,8 +16,17 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
-    // DialogTrigger
 } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { updateTag, deleteTag } from '@/app/actions';
 import { toast } from 'sonner';
 import { Pencil, Trash2, ChevronLeft } from 'lucide-react';
@@ -35,6 +44,7 @@ type Tag = {
 export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     const { t, locale } = useTranslation();
     const [editingTag, setEditingTag] = useState<Tag | null>(null);
+    const [deleteId, setDeleteId] = useState<number | null>(null);
     const router = useRouter();
 
     async function handleUpdate(formData: FormData) {
@@ -47,12 +57,11 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
         } else {
             toast.success(t('tags.updated'));
             setEditingTag(null);
-            router.refresh(); // Ensure list updates
+            router.refresh();
         }
     }
 
     async function handleDelete(id: number) {
-        if (!confirm(t('tags.deleteConfirm'))) return;
         const res = await deleteTag(id);
         if (res?.error) {
             toast.error(res.error);
@@ -89,7 +98,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                                 <Button variant="ghost" size="icon" onClick={() => setEditingTag(tag)} aria-label={t('aria.editItem')}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(tag.id)} aria-label={t('aria.deleteItem')}>
+                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteId(tag.id)} aria-label={t('aria.deleteItem')}>
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TableCell>
@@ -104,6 +113,24 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                     )}
                 </TableBody>
             </Table>
+
+            {/* Delete Tag Confirmation */}
+            <AlertDialog open={deleteId !== null} onOpenChange={(open) => !open && setDeleteId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('tags.deleteConfirmTitle')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t('tags.deleteConfirm')}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => { if (deleteId !== null) handleDelete(deleteId); setDeleteId(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            {t('imageManager.delete')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <Dialog open={!!editingTag} onOpenChange={(open) => !open && setEditingTag(null)}>
                 <DialogContent>
