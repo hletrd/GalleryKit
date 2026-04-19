@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings } from '@/db';
-import { eq, desc, asc, and, gt, lt, or, inArray, like } from 'drizzle-orm';
+import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import siteConfig from '@/site-config.json';
@@ -619,13 +619,20 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .orderBy(desc(images.created_at), desc(images.id))
         .limit(effectiveLimit);
 
-    // Only search tags if main results are insufficient; limit to remaining slots
+    // Only search tags if main results are insufficient; limit to remaining slots.
+    // Exclude IDs already found by the main query so tag-result slots aren't
+    // wasted on duplicates (especially with small effectiveLimit values).
     const remainingLimit = effectiveLimit - results.length;
+    const mainIds = results.map(r => r.id);
+    const tagConditions = [eq(images.processed, true), like(tags.name, searchTerm)];
+    if (mainIds.length > 0) {
+        tagConditions.push(notInArray(images.id, mainIds));
+    }
     const tagResults = remainingLimit <= 0 ? [] : await db.select(searchFields)
         .from(images)
         .innerJoin(imageTags, eq(images.id, imageTags.imageId))
         .innerJoin(tags, eq(imageTags.tagId, tags.id))
-        .where(and(eq(images.processed, true), like(tags.name, searchTerm)))
+        .where(and(...tagConditions))
         .orderBy(desc(images.created_at), desc(images.id))
         .limit(remainingLimit);
 
