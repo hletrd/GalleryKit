@@ -4,6 +4,10 @@
 
 None — all plans complete.
 
+## Completed Plans (Cycle 26)
+
+- 72 — Cycle 26 Fixes (C26-01, C26-02, C26-03, C26-04, C26-06, C26-07, C26-08) — DONE
+
 ## Completed Plans (Cycle 24)
 
 - 70 — Cycle 24 Fixes (C24-01, C24-02, C24-03) — DONE
