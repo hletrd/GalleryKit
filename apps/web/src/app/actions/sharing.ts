@@ -68,6 +68,14 @@ export async function createPhotoShareLink(imageId: number) {
         await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
         if (dbLimit.limited) {
+            // Roll back in-memory pre-increment to stay consistent with DB source of truth.
+            // Without this, the in-memory counter over-counts, causing premature rate limiting.
+            const currentEntry = shareRateLimit.get(ip);
+            if (currentEntry && currentEntry.count > 1) {
+                currentEntry.count--;
+            } else {
+                shareRateLimit.delete(ip);
+            }
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -147,6 +155,13 @@ export async function createGroupShareLink(imageIds: number[]) {
         await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
         if (dbLimit.limited) {
+            // Roll back in-memory pre-increment to stay consistent with DB source of truth.
+            const currentEntry = shareRateLimit.get(ip);
+            if (currentEntry && currentEntry.count > 1) {
+                currentEntry.count--;
+            } else {
+                shareRateLimit.delete(ip);
+            }
             return { error: t('tooManyShareRequests') };
         }
     } catch {

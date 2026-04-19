@@ -78,6 +78,13 @@ export async function createAdminUser(formData: FormData) {
         await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
         if (dbLimit.limited) {
+            // Roll back in-memory pre-increment to stay consistent with DB source of truth.
+            const currentEntry = userCreateRateLimit.get(ip);
+            if (currentEntry && currentEntry.count > 1) {
+                currentEntry.count--;
+            } else {
+                userCreateRateLimit.delete(ip);
+            }
             return { error: t('tooManyAttempts') };
         }
     } catch {
