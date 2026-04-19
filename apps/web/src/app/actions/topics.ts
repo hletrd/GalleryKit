@@ -164,7 +164,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
             catch (e) { console.error('Failed to delete previous topic image:', previousImageFilename, e); }
         }
 
-        revalidateLocalizedPaths('/admin/categories', '/', `/${slug}`, slug !== currentSlug ? `/${currentSlug}` : '');
+        revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/', `/${slug}`, slug !== currentSlug ? `/${currentSlug}` : '');
         return { success: true };
     } catch (e: unknown) {
          if (imageFilename) {
@@ -238,7 +238,7 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
             topicSlug
         });
 
-        revalidateLocalizedPaths('/admin/categories', `/${alias}`, `/${topicSlug}`);
+        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -276,6 +276,6 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         return { error: t('invalidAlias') };
     }
 
-    revalidateLocalizedPaths('/admin/categories', `/${alias}`, `/${topicSlug}`);
+    revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
     return { success: true };
 }
