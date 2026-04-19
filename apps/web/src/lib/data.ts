@@ -24,7 +24,10 @@ async function flushGroupViewCounts() {
             db.update(sharedGroups)
                 .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
                 .where(eq(sharedGroups.id, groupId))
-                .catch(console.debug)
+                .catch(() => {
+                    // Re-buffer failed increment for next flush
+                    viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
+                })
         )
     );
 }
@@ -360,7 +363,6 @@ export async function getImageByShareKey(key: string) {
 
     const result = await db.select({
         ...selectFields,
-        blur_data_url: images.blur_data_url,
     })
         .from(images)
         .where(
@@ -514,7 +516,6 @@ interface SearchResult {
     topic: string;
     camera_model: string | null;
     capture_date: string | null;
-    blur_data_url: string | null;
 }
 
 export type { SearchResult };
@@ -532,7 +533,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         filename_jpeg: images.filename_jpeg, filename_webp: images.filename_webp,
         filename_avif: images.filename_avif, width: images.width, height: images.height,
         topic: images.topic, camera_model: images.camera_model,
-        capture_date: images.capture_date, blur_data_url: images.blur_data_url,
+        capture_date: images.capture_date,
     };
 
     // Run main query first; only query tags if we need more results (saves a connection)
