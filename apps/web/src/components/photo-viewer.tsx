@@ -53,6 +53,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [timerShowInfo, setTimerShowInfo] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
     const [showLightbox, setShowLightbox] = useState(false);
+    const [isSharingPhoto, setIsSharingPhoto] = useState(false);
     useEffect(() => {
         try {
             if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
@@ -231,7 +232,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     <Button
                         variant="outline"
                         size="sm"
+                        disabled={isSharingPhoto}
                         onClick={async () => {
+                            if (isSharingPhoto) return;
+                            setIsSharingPhoto(true);
                             try {
                                 const result = await createPhotoShareLink(image.id);
                                 if (result.success) {
@@ -243,12 +247,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 }
                             } catch {
                                 toast.error(t('viewer.errorSharing'));
+                            } finally {
+                                setIsSharingPhoto(false);
                             }
                         }}
                         className="gap-2"
                     >
                         <Share2 className="h-4 w-4" />
-                        {t('viewer.share')}
+                        {isSharingPhoto ? t('viewer.sharing') : t('viewer.share')}
                     </Button>
                     )}
 

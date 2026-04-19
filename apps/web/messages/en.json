@@ -225,6 +225,7 @@
     "downloadOriginal": "Download JPEG",
     "linkCopied": "Link copied.",
     "errorSharing": "Could not create share link.",
+    "sharing": "Sharing...",
     "noDescription": "No description.",
     "histogram": "Histogram",
     "histogramModes": {
@@ -364,6 +365,7 @@
     "failedToFetchTags": "Failed to fetch tags",
     "csvTruncated": "Result truncated at 50,000 rows",
     "failedToDeleteTag": "Failed to delete tag",
+    "failedToDeleteAlias": "Failed to delete alias",
     "failedToCreateTopic": "Could not create category",
     "missingDbConfig": "Missing database configuration",
     "failedToWriteBackup": "Failed to write backup file",
