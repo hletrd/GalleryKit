@@ -123,10 +123,12 @@ export async function dumpDatabase() {
 
         const writeStream = createWriteStream(outputPath);
         let settled = false;
+        let writeStreamHadError = false;
 
         dump.stdout.pipe(writeStream);
 
         writeStream.on('error', (err) => {
+            writeStreamHadError = true;
             if (settled) return;
             settled = true;
             console.error('Backup writeStream error:', err);
@@ -151,9 +153,21 @@ export async function dumpDatabase() {
                         resolveFlush();
                     } else {
                         writeStream.on('finish', resolveFlush);
-                        writeStream.on('error', resolveFlush); // Don't hang on write error
+                        writeStream.on('error', () => {
+                            writeStreamHadError = true;
+                            resolveFlush();
+                        });
                     }
                 });
+
+                // If the writeStream had an error during flush, the backup file
+                // may be truncated or corrupt. Report failure instead of success.
+                if (writeStreamHadError) {
+                    console.error('Backup writeStream error during flush — file may be corrupt');
+                    fs.unlink(outputPath).catch(() => {});
+                    resolve({ success: false, error: t('failedToWriteBackup') });
+                    return;
+                }
 
                 // Audit logging is fire-and-forget; wrap in try-catch so a
                 // transient DB error doesn't prevent the success resolve.
