@@ -27,6 +27,7 @@ const DANGEROUS_SQL_PATTERNS = [
     /\bSET\s+@\w+\s*=\s*0x/i,
     /\bSET\s+@\w+\s*=\s*b'/i,
     /\bSET\s+@\w+\s*=\s*X'/i,
+    /\bSET\s+@@global\./i,
 ] as const;
 
 function maskMatches(input: string, pattern: RegExp): string {
