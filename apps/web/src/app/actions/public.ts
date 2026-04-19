@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { getImagesLite, searchImages } from '@/lib/data';
 
 import { isValidSlug } from '@/lib/validation';
+import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, SEARCH_RATE_LIMIT_MAX_KEYS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
@@ -90,6 +91,6 @@ export async function searchImagesAction(query: string) {
         // DB unavailable — rely on in-memory Map
     }
 
-    const safeQuery = query.trim().slice(0, 200);
+    const safeQuery = stripControlChars(query.trim().slice(0, 200)) ?? '';
     return searchImages(safeQuery, 20);
 }
