@@ -156,10 +156,15 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
     const cleanName = tagName?.trim();
     if (!cleanName) return { error: t('tagNameRequired') };
 
-    const slug = getTagSlug(cleanName);
-
     try {
-        const [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+        // Look up by exact name first to avoid removing the wrong tag when
+        // two different names produce the same slug (slug collision).
+        // Fall back to slug lookup only if no exact name match exists.
+        let [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, cleanName));
+        if (!tagRecord) {
+            const slug = getTagSlug(cleanName);
+            [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+        }
         if (!tagRecord) return { error: t('tagNotFound') };
 
         await db.delete(imageTags)
