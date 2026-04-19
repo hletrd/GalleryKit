@@ -143,6 +143,8 @@ export async function dumpDatabase() {
             if (settled) return;
             settled = true;
             if (code === 0) {
+                const currentUser = await getCurrentUser();
+                logAuditEvent(currentUser?.id ?? null, 'db_backup', 'database', DB_NAME, undefined, { filename }).catch(console.debug);
                 // Return filename; url points to authenticated admin download route
                 resolve({ success: true, filename, url: `/api/admin/db/download?file=${encodeURIComponent(filename)}` });
             } else {
