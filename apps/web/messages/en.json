@@ -54,7 +54,8 @@
     "deleteTooltip": "Delete",
     "deleteSuccess": "User deleted.",
     "createSuccess": "User created.",
-    "noUsers": "No users yet."
+    "noUsers": "No users yet.",
+    "usernameFormat": "Letters, numbers, underscores, and hyphens only"
   },
   "dashboard": {
     "title": "Dashboard",

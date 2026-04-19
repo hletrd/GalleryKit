@@ -54,7 +54,8 @@
     "deleteTooltip": "삭제",
     "deleteSuccess": "사용자를 삭제했습니다.",
     "createSuccess": "사용자를 생성했습니다.",
-    "noUsers": "사용자가 없습니다."
+    "noUsers": "사용자가 없습니다.",
+    "usernameFormat": "영문, 숫자, 밑줄, 하이픈만 사용 가능"
   },
   "dashboard": {
     "title": "대시보드",
