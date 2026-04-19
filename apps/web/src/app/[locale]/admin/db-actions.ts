@@ -322,8 +322,14 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             settled = true;
             await fs.unlink(tempPath).catch(() => {});
             if (code === 0) {
-                const currentUser = await getCurrentUser();
-                logAuditEvent(currentUser?.id ?? null, 'db_restore', 'database', DB_NAME).catch(console.debug);
+                // Audit logging is fire-and-forget; wrap in try-catch so a
+                // transient DB error doesn't prevent the success resolve.
+                try {
+                    const currentUser = await getCurrentUser();
+                    logAuditEvent(currentUser?.id ?? null, 'db_restore', 'database', DB_NAME).catch(console.debug);
+                } catch (err) {
+                    console.debug('Failed to log audit event for restore:', err);
+                }
                 revalidateAllAppData();
                 resolve({ success: true });
             } else {
