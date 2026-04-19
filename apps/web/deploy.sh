@@ -3,25 +3,25 @@
 # Gallery Deployment Script
 # Must be run from the repo root (e.g., /home/ubuntu/gallery)
 
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$REPO_ROOT"
+
 echo "Pulling latest changes..."
 git pull
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
 
 echo "Starting Gallery Deployment..."
 
 # Check if .env.local exists
-if [ ! -f .env.local ]; then
-    echo "Error: .env.local file not found!"
+if [ ! -f apps/web/.env.local ]; then
+    echo "Error: apps/web/.env.local file not found!"
     echo "Please create apps/web/.env.local with DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, SESSION_SECRET, and ADMIN_PASSWORD."
     exit 1
 fi
 
 echo "Building and Starting Containers..."
 
-# Build and start detached
-docker compose up -d --build
+# Build and start detached (docker-compose.yml references Dockerfile via relative paths from repo root)
+docker compose -f apps/web/docker-compose.yml up -d --build
 
 echo "Deployment Complete!"
 echo "App is running at http://localhost:3000"
