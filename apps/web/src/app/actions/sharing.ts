@@ -241,7 +241,7 @@ export async function deleteGroupShareLink(groupId: number) {
             return { error: t('groupNotFound') };
         }
         console.error('Failed to delete group share link:', e);
-        return { error: t('failedToCreateGroup') };
+        return { error: t('failedToDeleteGroup') };
     }
 
     revalidateLocalizedPaths('/', `/g/${group.key}`, '/admin/dashboard');

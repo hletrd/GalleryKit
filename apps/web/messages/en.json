@@ -360,6 +360,7 @@
     "imagesNotFound": "One or more selected images could not be found",
     "failedToGenerateKey": "Failed to generate unique key",
     "failedToCreateGroup": "Failed to create group",
+    "failedToDeleteGroup": "Failed to delete group",
     "noActiveShareLink": "Image does not have an active share link",
     "failedToRevokeShareLink": "Failed to revoke share link",
     "groupNotFound": "Group not found",

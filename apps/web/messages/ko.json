@@ -360,6 +360,7 @@
     "imagesNotFound": "선택한 이미지 중 일부를 찾을 수 없습니다",
     "failedToGenerateKey": "고유 키 생성에 실패했습니다",
     "failedToCreateGroup": "그룹 생성에 실패했습니다",
+    "failedToDeleteGroup": "그룹 삭제에 실패했습니다",
     "noActiveShareLink": "활성 공유 링크가 없습니다",
     "failedToRevokeShareLink": "공유 링크 해제에 실패했습니다",
     "groupNotFound": "그룹을 찾을 수 없습니다",
