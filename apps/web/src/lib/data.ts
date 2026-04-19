@@ -22,25 +22,33 @@ function bufferGroupViewCount(groupId: number) {
     }
 }
 
+let isFlushing = false;
+
 async function flushGroupViewCounts() {
+    if (isFlushing) return; // Prevent concurrent flush
+    isFlushing = true;
     viewCountFlushTimer = null;
     const batch = new Map(viewCountBuffer);
     viewCountBuffer.clear();
-    await Promise.all(
-        [...batch].map(([groupId, count]) =>
-            db.update(sharedGroups)
-                .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
-                .where(eq(sharedGroups.id, groupId))
-                .catch(() => {
-                    // Re-buffer failed increment for next flush, respecting hard cap
-                    if (viewCountBuffer.size < MAX_VIEW_COUNT_BUFFER_SIZE || viewCountBuffer.has(groupId)) {
-                        viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
-                    } else {
-                        console.warn(`[viewCount] Buffer at capacity during re-buffer, dropping ${count} views for group ${groupId}`);
-                    }
-                })
-        )
-    );
+    try {
+        await Promise.all(
+            [...batch].map(([groupId, count]) =>
+                db.update(sharedGroups)
+                    .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
+                    .where(eq(sharedGroups.id, groupId))
+                    .catch(() => {
+                        // Re-buffer failed increment for next flush, respecting hard cap
+                        if (viewCountBuffer.size < MAX_VIEW_COUNT_BUFFER_SIZE || viewCountBuffer.has(groupId)) {
+                            viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
+                        } else {
+                            console.warn(`[viewCount] Buffer at capacity during re-buffer, dropping ${count} views for group ${groupId}`);
+                        }
+                    })
+            )
+        );
+    } finally {
+        isFlushing = false;
+    }
 }
 
 export async function flushBufferedSharedGroupViewCounts() {
@@ -560,7 +568,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 like(images.topic, searchTerm),
             )
         ))
-        .orderBy(desc(images.created_at))
+        .orderBy(desc(images.created_at), desc(images.id))
         .limit(effectiveLimit);
 
     // Only search tags if main results are insufficient; limit to remaining slots
@@ -570,7 +578,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .innerJoin(imageTags, eq(images.id, imageTags.imageId))
         .innerJoin(tags, eq(imageTags.tagId, tags.id))
         .where(and(eq(images.processed, true), like(tags.name, searchTerm)))
-        .orderBy(desc(images.created_at))
+        .orderBy(desc(images.created_at), desc(images.id))
         .limit(remainingLimit);
 
     const seen = new Set<number>();
