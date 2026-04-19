@@ -288,20 +288,27 @@ export async function updatePassword(prevState: { error?: string; success?: bool
 
         const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
 
-        await db.update(adminUsers)
-            .set({ password_hash: newHash })
-            .where(eq(adminUsers.id, currentUser.id));
-
-        // Invalidate all sessions except the current one
+        // Invalidate all sessions except the current one — fetch before the
+        // transaction so getSession() doesn't execute inside the tx boundary.
         const currentSession = await getSession();
-        if (currentSession) {
-             await db.delete(sessions).where(and(
-                 eq(sessions.userId, currentUser.id),
-                 sql`${sessions.id} != ${currentSession.id}`
-             ));
-        } else {
-             await db.delete(sessions).where(eq(sessions.userId, currentUser.id));
-        }
+
+        // Wrap password update + session invalidation in a transaction so that
+        // if session deletion fails, the password change is also rolled back.
+        // This prevents old sessions from surviving a password change on DB error.
+        await db.transaction(async (tx) => {
+            await tx.update(adminUsers)
+                .set({ password_hash: newHash })
+                .where(eq(adminUsers.id, currentUser.id));
+
+            if (currentSession) {
+                await tx.delete(sessions).where(and(
+                    eq(sessions.userId, currentUser.id),
+                    sql`${sessions.id} != ${currentSession.id}`
+                ));
+            } else {
+                await tx.delete(sessions).where(eq(sessions.userId, currentUser.id));
+            }
+        });
 
         return { success: true, message: 'Password updated successfully.' };
 
