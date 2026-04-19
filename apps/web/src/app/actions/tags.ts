@@ -168,7 +168,8 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
-    const cleanName = tagName?.trim();
+    // Sanitize before lookup — matches addTagToImage/updateTag pattern (C42-02)
+    const cleanName = stripControlChars(tagName?.trim() ?? '') ?? '';
     if (!cleanName) return { error: t('tagNameRequired') };
 
     try {
@@ -215,7 +216,8 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         if (!Number.isInteger(id) || id <= 0) return { error: t('invalidImageId') };
     }
 
-    const cleanName = tagName?.trim();
+    // Sanitize before validation — matches addTagToImage/updateTag pattern (C42-01)
+    const cleanName = stripControlChars(tagName?.trim() ?? '') ?? '';
     if (!cleanName) return { error: t('tagNameRequired') };
     if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
@@ -339,7 +341,7 @@ export async function batchUpdateImageTags(
             // to avoid removing the wrong tag when slug collisions exist (same
             // pattern as removeTagFromImage, see C38-01).
             for (const name of removeTagNames) {
-                const cleanName = name.trim();
+                const cleanName = stripControlChars(name.trim()) ?? '';
                 if (!cleanName) continue;
                 let [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.name, cleanName));
                 if (!tagRecord) {
