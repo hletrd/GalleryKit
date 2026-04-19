@@ -253,12 +253,16 @@ export async function revokePhotoShareLink(imageId: number) {
 
     const oldShareKey = image.share_key;
 
+    // Use conditional WHERE to prevent race with concurrent share-key recreation:
+    // if another admin created a new share_key between our SELECT and UPDATE,
+    // the conditional WHERE will match 0 rows instead of revoking the new key.
     const [result] = await db.update(images)
         .set({ share_key: null })
-        .where(eq(images.id, imageId));
+        .where(and(eq(images.id, imageId), eq(images.share_key, oldShareKey)));
 
     if (result.affectedRows === 0) {
-        return { error: t('failedToRevokeShareLink') };
+        // Share key was changed by a concurrent request — don't revoke the new key
+        return { error: t('noActiveShareLink') };
     }
 
     revalidateLocalizedPaths(`/p/${imageId}`, `/s/${oldShareKey}`, '/admin/dashboard');
