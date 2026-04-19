@@ -1,13 +1,11 @@
 import { getImageByShareKeyCached, getSeoSettings } from '@/lib/data';
 import { notFound } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-
-const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
+import PhotoViewer from '@/components/photo-viewer';
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
