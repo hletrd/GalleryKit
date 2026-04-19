@@ -56,25 +56,33 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [isDeletingAlias, setIsDeletingAlias] = useState(false);
 
     async function handleCreate(formData: FormData) {
-        const res = await createTopic(formData);
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('categories.created'));
-            setIsCreateOpen(false);
-            router.refresh();
+        try {
+            const res = await createTopic(formData);
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('categories.created'));
+                setIsCreateOpen(false);
+                router.refresh();
+            }
+        } catch {
+            toast.error(t('serverActions.failedToCreateTopic'));
         }
     }
 
     async function handleUpdate(formData: FormData) {
         if (!editingTopic) return;
-        const res = await updateTopic(editingTopic.slug, formData);
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('categories.updated'));
-            setEditingTopic(null);
-            router.refresh();
+        try {
+            const res = await updateTopic(editingTopic.slug, formData);
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('categories.updated'));
+                setEditingTopic(null);
+                router.refresh();
+            }
+        } catch {
+            toast.error(t('serverActions.failedToUpdateTopic'));
         }
     }
 
@@ -95,14 +103,18 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
 
     async function handleAddAlias(topicSlug: string) {
         if (!newAlias.trim()) return;
-        const res = await createTopicAlias(topicSlug, newAlias.trim());
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('categories.aliasAdded'));
-            setNewAlias('');
-             setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, newAlias.trim()] }) : null);
-             router.refresh();
+        try {
+            const res = await createTopicAlias(topicSlug, newAlias.trim());
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('categories.aliasAdded'));
+                setNewAlias('');
+                 setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, newAlias.trim()] }) : null);
+                 router.refresh();
+            }
+        } catch {
+            toast.error(t('serverActions.invalidAliasFormat'));
         }
     }
 
