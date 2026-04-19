@@ -1,6 +1,5 @@
 import {
     incrementRateLimit,
-    LOGIN_RATE_LIMIT_MAX_KEYS,
     LOGIN_WINDOW_MS,
     loginRateLimit,
     resetRateLimit,
@@ -65,7 +64,7 @@ export function prunePasswordChangeRateLimit(now: number) {
 
     // Hard cap: evict oldest entries if still over limit after expiry pruning
     if (passwordChangeRateLimit.size > PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS) {
-        const excess = passwordChangeRateLimit.size - LOGIN_RATE_LIMIT_MAX_KEYS;
+        const excess = passwordChangeRateLimit.size - PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS;
         let evicted = 0;
         for (const key of passwordChangeRateLimit.keys()) {
             if (evicted >= excess) break;
