@@ -6,8 +6,9 @@ import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 
-import { isAdmin } from '@/app/actions/auth';
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
+import { logAuditEvent } from '@/lib/audit';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     const normalizedSegment = segment.trim();
@@ -77,7 +78,10 @@ export async function createTopic(formData: FormData) {
             image_filename: imageFilename,
         });
 
-        revalidateLocalizedPaths('/admin/categories', '/');
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'topic_create', 'topic', slug).catch(console.debug);
+
+        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/');
         return { success: true };
     } catch (e: unknown) {
         if (imageFilename) {
@@ -164,6 +168,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
             catch (e) { console.error('Failed to delete previous topic image:', previousImageFilename, e); }
         }
 
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'topic_update', 'topic', slug).catch(console.debug);
+
         revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/', `/${slug}`, slug !== currentSlug ? `/${currentSlug}` : '');
         return { success: true };
     } catch (e: unknown) {
@@ -201,7 +208,10 @@ export async function deleteTopic(slug: string) {
         if (deletedImageFilename) {
             await deleteTopicImage(deletedImageFilename);
         }
-        revalidateLocalizedPaths('/admin/categories', '/', `/${slug}`);
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', slug).catch(console.debug);
+
+        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/', `/${slug}`);
 
         return { success: true };
     } catch (e) {
@@ -237,6 +247,9 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
             alias,
             topicSlug
         });
+
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
         return { success: true };
@@ -275,6 +288,9 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         console.error('Failed to delete topic alias:', e);
         return { error: t('invalidAlias') };
     }
+
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
 
     revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
     return { success: true };
