@@ -18,6 +18,7 @@ function bufferGroupViewCount(groupId: number) {
     viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + 1);
     if (!viewCountFlushTimer) {
         viewCountFlushTimer = setTimeout(flushGroupViewCounts, 5000);
+        viewCountFlushTimer.unref?.();
     }
 }
 
@@ -535,7 +536,7 @@ export type { SearchResult };
 export async function searchImages(query: string, limit: number = 20): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
     if (limit <= 0) return [];
-    const effectiveLimit = Math.min(Math.max(limit, 1), 500);
+    const effectiveLimit = Math.min(Math.max(limit, 1), 100);
 
     const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
     const searchTerm = `%${escaped}%`;
