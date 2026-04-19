@@ -133,11 +133,14 @@ export async function uploadImages(formData: FormData) {
     const failedFiles: string[] = [];
 
     for (const file of files) {
+        // Track saved original filename for cleanup on DB insert failure
+        let savedOriginalFilename: string | null = null;
         try {
             const originalFilename = path.basename(file.name).trim();
 
             // Phase 1: Save original and get metadata (fast)
             const data = await saveOriginalAndGetMetadata(file);
+            savedOriginalFilename = data.filenameOriginal;
 
             // Extract EXIF
             const exifDb = extractExifForDb(data.exifData);
@@ -183,7 +186,10 @@ export async function uploadImages(formData: FormData) {
             const insertedId = Number(result.insertId);
             if (!Number.isFinite(insertedId) || insertedId <= 0) {
                 console.error(`Invalid insertId for file: ${file.name}`);
+                // Clean up saved original file — no DB record references it
+                await fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, savedOriginalFilename)).catch(() => {});
                 failedFiles.push(file.name);
+                savedOriginalFilename = null; // Already cleaned up
                 continue;
             }
             const insertedImage = { id: insertedId, ...insertValues };
@@ -255,6 +261,10 @@ export async function uploadImages(formData: FormData) {
         } catch (e) {
             // Log full error server-side; only return filename to client (no internal details)
             console.error(`Failed to process file ${file.name}:`, e);
+            // Clean up saved original file if it was written but DB insert failed
+            if (savedOriginalFilename) {
+                await fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, savedOriginalFilename)).catch(() => {});
+            }
             failedFiles.push(file.name);
         }
     }
@@ -340,14 +350,18 @@ export async function deleteImage(id: number) {
     queueState.enqueued.delete(id);
 
     // US-008: Delete DB records in a transaction for consistency
+    let deletedRows = 0;
     await db.transaction(async (tx) => {
         await tx.delete(imageTags).where(eq(imageTags.imageId, id));
-        await tx.delete(images).where(eq(images.id, id));
+        const [delResult] = await tx.delete(images).where(eq(images.id, id));
+        deletedRows = delResult.affectedRows;
     });
 
-    // Log audit event after the transaction succeeds — avoids false-positive entries
-    // when concurrent deletion causes the transaction to delete 0 rows.
-    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
+    // Log audit event only when the image was actually deleted — avoids duplicate
+    // entries when concurrent deletion causes the transaction to delete 0 rows.
+    if (deletedRows > 0) {
+        logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
+    }
 
     // Delete files deterministically (no readdir) — best effort, all in parallel
     // Read configured sizes to ensure all variants are cleaned up
