@@ -197,9 +197,8 @@ export async function login(prevState: { error?: string } | null, formData: Form
         } catch (rollbackErr) {
             console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
         }
+        return { error: t('authFailed') };
     }
-
-    return { error: t('invalidCredentials') };
 }
 
 export async function logout(formData?: FormData) {
