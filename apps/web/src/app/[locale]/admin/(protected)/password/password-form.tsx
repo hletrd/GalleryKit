@@ -46,7 +46,7 @@ export function PasswordForm() {
                     name="currentPassword"
                     type="password"
                     required
-                    placeholder={t('password.currentPlaceholder')}
+                    placeholder={t('password.current')}
                 />
             </div>
 
@@ -57,7 +57,7 @@ export function PasswordForm() {
                     name="newPassword"
                     type="password"
                     required
-                    placeholder={t('password.newPlaceholder')}
+                    placeholder={t('password.new')}
                     minLength={12}
                 />
                 <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
@@ -71,7 +71,7 @@ export function PasswordForm() {
                     name="confirmPassword"
                     type="password"
                     required
-                    placeholder={t('password.confirmPlaceholder')}
+                    placeholder={t('password.confirm')}
                     minLength={12}
                 />
             </div>
