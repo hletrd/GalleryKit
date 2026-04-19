@@ -23,7 +23,7 @@ test('mobile nav keeps secondary controls hidden until expanded', async ({ page 
   await expect(nav.getByRole('button', { name: 'Search photos' })).toBeHidden();
   await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeHidden();
 
-  await nav.locator('button[aria-expanded]').click();
+  await nav.getByRole('button', { name: 'Expand menu' }).click();
   await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
   await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeVisible();
   await expect(nav.locator('button, a').filter({ hasText: 'KO' }).first()).toBeVisible();

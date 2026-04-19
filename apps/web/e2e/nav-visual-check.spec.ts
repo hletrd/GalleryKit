@@ -18,7 +18,7 @@ test.describe('Nav visual checks', () => {
     await expectNoNextError(page);
 
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
-    await nav.locator('button[aria-expanded]').click();
+    await nav.getByRole('button', { name: 'Expand menu' }).click();
     await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
     await page.screenshot({ path: 'test-results/nav-expanded-mobile.png', fullPage: false });
   });
