@@ -73,13 +73,24 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'gallery_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(settings).join(',') }).catch(console.debug);
 
-        // If storage backend changed, switch the live backend
+        // If storage backend changed, switch the live backend.
+        // If the switch fails, roll back the DB setting to prevent a
+        // DB/live inconsistency (DB shows the new backend but live
+        // module still uses the old one). Deleting the row lets the
+        // default ("local") take effect, matching the pre-change state.
         const newStorageBackend = settings.storage_backend?.trim();
         if (newStorageBackend && ['local', 'minio', 's3'].includes(newStorageBackend)) {
             try {
                 await switchStorageBackend(newStorageBackend as 'local' | 'minio' | 's3');
             } catch (switchErr) {
                 console.error('[Settings] Failed to switch storage backend:', switchErr);
+                // Roll back the DB setting so getGalleryConfig() returns
+                // the default backend instead of the broken one
+                try {
+                    await db.delete(adminSettings).where(eq(adminSettings.key, 'storage_backend'));
+                } catch (rollbackErr) {
+                    console.error('[Settings] Failed to roll back storage_backend setting:', rollbackErr);
+                }
                 // Return generic message to avoid leaking internal details
                 // (e.g., S3 endpoint, bucket name) to the admin UI
                 return { error: t('failedToSwitchStorageBackend') };
