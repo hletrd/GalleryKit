@@ -51,14 +51,17 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     async function handleUpdate(formData: FormData) {
         if (!editingTag) return;
         const name = formData.get('name') as string;
-
-        const res = await updateTag(editingTag.id, name);
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('tags.updated'));
-            setEditingTag(null);
-            router.refresh();
+        try {
+            const res = await updateTag(editingTag.id, name);
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('tags.updated'));
+                setEditingTag(null);
+                router.refresh();
+            }
+        } catch {
+            toast.error(t('serverActions.failedToUpdateTag'));
         }
     }
 
