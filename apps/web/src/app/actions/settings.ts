@@ -72,9 +72,13 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         // If storage backend changed, switch the live backend
         const newStorageBackend = settings.storage_backend?.trim();
         if (newStorageBackend && ['local', 'minio', 's3'].includes(newStorageBackend)) {
-            await switchStorageBackend(newStorageBackend as 'local' | 'minio' | 's3').catch(err => {
-                console.error('[Settings] Failed to switch storage backend:', err);
-            });
+            try {
+                await switchStorageBackend(newStorageBackend as 'local' | 'minio' | 's3');
+            } catch (switchErr) {
+                console.error('[Settings] Failed to switch storage backend:', switchErr);
+                const message = switchErr instanceof Error ? switchErr.message : String(switchErr);
+                return { error: `${t('failedToSwitchStorageBackend')}: ${message}` };
+            }
         }
 
         // Revalidate admin settings page and homepage

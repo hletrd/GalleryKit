@@ -428,7 +428,8 @@
     "failedToFetchGallerySettings": "Failed to fetch gallery settings",
     "invalidSettingKey": "Invalid setting key",
     "invalidSettingValue": "Invalid value for setting: {key}",
-    "failedToUpdateGallerySettings": "Failed to update gallery settings"
+    "failedToUpdateGallerySettings": "Failed to update gallery settings",
+    "failedToSwitchStorageBackend": "Failed to switch storage backend"
   },
   "aria": {
     "searchPhotos": "Search photos",

@@ -428,7 +428,8 @@
     "failedToFetchGallerySettings": "갤러리 설정을 불러오지 못했습니다",
     "invalidSettingKey": "잘못된 설정 키입니다",
     "invalidSettingValue": "설정값이 올바르지 않습니다: {key}",
-    "failedToUpdateGallerySettings": "갤러리 설정 저장에 실패했습니다"
+    "failedToUpdateGallerySettings": "갤러리 설정 저장에 실패했습니다",
+    "failedToSwitchStorageBackend": "스토리지 백엔드 전환에 실패했습니다"
   },
   "aria": {
     "searchPhotos": "사진 검색",

@@ -72,8 +72,39 @@ export function getStorageSync(): StorageBackend {
 }
 
 /**
+ * Validate that required environment variables are set for the given backend type.
+ * Throws an error with a descriptive message if credentials are missing.
+ */
+function validateStorageCredentials(type: StorageBackendType): void {
+    if (type === 's3') {
+        const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim();
+        const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim();
+        if (!accessKeyId || !secretAccessKey) {
+            throw new Error(
+                'S3 credentials not configured. Set S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY environment variables.',
+            );
+        }
+    } else if (type === 'minio') {
+        const endpoint = process.env.MINIO_ENDPOINT?.trim() || process.env.S3_ENDPOINT?.trim();
+        const accessKeyId = process.env.MINIO_ACCESS_KEY_ID?.trim() || process.env.S3_ACCESS_KEY_ID?.trim();
+        const secretAccessKey = process.env.MINIO_SECRET_ACCESS_KEY?.trim() || process.env.S3_SECRET_ACCESS_KEY?.trim();
+        if (!endpoint) {
+            throw new Error(
+                'MinIO endpoint not configured. Set MINIO_ENDPOINT (or S3_ENDPOINT) environment variable.',
+            );
+        }
+        if (!accessKeyId || !secretAccessKey) {
+            throw new Error(
+                'MinIO credentials not configured. Set MINIO_ACCESS_KEY_ID and MINIO_SECRET_ACCESS_KEY (or S3_* equivalents) environment variables.',
+            );
+        }
+    }
+    // 'local' requires no credentials
+}
+
+/**
  * Switch the storage backend type. Called when admin changes the setting.
- * Disposes the old backend and creates a new one.
+ * Disposes the old backend and creates a new one. Rolls back on failure.
  */
 export async function switchStorageBackend(type: StorageBackendType): Promise<void> {
     const state = getGlobalState();
@@ -81,6 +112,14 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
     if (state.type === type && state.initialized) {
         return; // No change needed
     }
+
+    // Validate credentials before attempting the switch
+    validateStorageCredentials(type);
+
+    // Save old backend for rollback on failure
+    const oldBackend = state.backend;
+    const oldType = state.type;
+    const wasInitialized = state.initialized;
 
     // Dispose old backend
     if (state.backend.dispose) {
@@ -112,10 +151,28 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
     state.initialized = false;
     state.initPromise = null;
 
-    // Initialize the new backend
-    await getStorage();
+    // Initialize the new backend — roll back on failure
+    try {
+        await getStorage();
+        console.log(`[Storage] Switched to ${type} backend`);
+    } catch (err) {
+        // Roll back to the old backend so the app remains functional
+        console.error(`[Storage] Failed to initialize ${type} backend, rolling back to ${oldType}:`, err);
+        state.backend = oldBackend;
+        state.type = oldType;
+        state.initialized = wasInitialized;
+        state.initPromise = null;
+        throw err;
+    }
+}
 
-    console.log(`[Storage] Switched to ${type} backend`);
+/**
+ * Get the current backend status (type and initialization state).
+ * Useful for admin UI to display storage health.
+ */
+export function getStorageBackendStatus(): { type: StorageBackendType; initialized: boolean } {
+    const state = getGlobalState();
+    return { type: state.type, initialized: state.initialized };
 }
 
 /**
