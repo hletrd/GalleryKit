@@ -54,17 +54,20 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     }
 
     try {
-        for (const [key, value] of Object.entries(settings)) {
-            const trimmedValue = value.trim();
-            if (trimmedValue === '') {
-                // Delete empty settings so defaults take effect
-                await db.delete(adminSettings).where(eq(adminSettings.key, key));
-            } else {
-                await db.insert(adminSettings)
-                    .values({ key, value: trimmedValue })
-                    .onDuplicateKeyUpdate({ set: { value: trimmedValue } });
+        // Upsert each setting atomically in a transaction to prevent partial writes on crash
+        await db.transaction(async (tx) => {
+            for (const [key, value] of Object.entries(settings)) {
+                const trimmedValue = value.trim();
+                if (trimmedValue === '') {
+                    // Delete empty settings so defaults take effect
+                    await tx.delete(adminSettings).where(eq(adminSettings.key, key));
+                } else {
+                    await tx.insert(adminSettings)
+                        .values({ key, value: trimmedValue })
+                        .onDuplicateKeyUpdate({ set: { value: trimmedValue } });
+                }
             }
-        }
+        });
 
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'gallery_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(settings).join(',') }).catch(console.debug);
