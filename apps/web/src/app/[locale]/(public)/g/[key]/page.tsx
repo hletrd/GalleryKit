@@ -141,7 +141,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>
                             </div>
                             <Image
-                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace('.webp', '_1536.webp')}`)}
+                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, '_1536.webp')}`)}
                                 alt={altText}
                                 width={image.width}
                                 height={image.height}
