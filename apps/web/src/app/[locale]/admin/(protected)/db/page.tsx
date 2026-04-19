@@ -47,8 +47,8 @@ export default function DbPage() {
                 } else {
                     toast.error(`${t('errorBackup')}: ${result.error}`);
                 }
-            } catch (e: unknown) {
-                toast.error(`${t('errorBackup')}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+            } catch {
+                toast.error(t('errorBackup'));
             }
         });
     };
@@ -76,8 +76,8 @@ export default function DbPage() {
                 } else {
                     toast.error(`${t('errorRestore')}: ${result.error}`);
                 }
-            } catch (e: unknown) {
-                toast.error(`${t('errorRestore')}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+            } catch {
+                toast.error(t('errorRestore'));
             }
         });
     };
@@ -108,8 +108,8 @@ export default function DbPage() {
                 } else {
                     toast.success(t('successExport'));
                 }
-            } catch (e: unknown) {
-                toast.error(`${t('errorExport')}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+            } catch {
+                toast.error(t('errorExport'));
             }
         });
     };
