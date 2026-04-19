@@ -49,6 +49,7 @@
     "createdAt": "Created",
     "actions": "",
     "deleteConfirm": "Delete user \"{username}\"?",
+    "deleteConfirmDesc": "This action cannot be undone. The user's sessions will be terminated immediately.",
     "cannotDeleteAdmin": "Cannot delete the default admin.",
     "deleteTooltip": "Delete",
     "deleteSuccess": "User deleted.",

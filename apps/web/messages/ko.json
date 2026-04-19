@@ -49,6 +49,7 @@
     "createdAt": "생성일",
     "actions": "",
     "deleteConfirm": "\"{username}\" 사용자를 삭제하시겠습니까?",
+    "deleteConfirmDesc": "이 작업은 되돌릴 수 없습니다. 해당 사용자의 세션이 즉시 종료됩니다.",
     "cannotDeleteAdmin": "기본 관리자는 삭제할 수 없습니다.",
     "deleteTooltip": "삭제",
     "deleteSuccess": "사용자를 삭제했습니다.",

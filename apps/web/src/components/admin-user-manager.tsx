@@ -142,7 +142,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>{t('users.deleteConfirm', { username: deleteTarget?.username ?? '' })}</AlertDialogTitle>
-                        <AlertDialogDescription>{t('db.dangerZoneDesc')}</AlertDialogDescription>
+                        <AlertDialogDescription>{t('users.deleteConfirmDesc')}</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
