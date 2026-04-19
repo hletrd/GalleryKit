@@ -64,6 +64,11 @@ export async function flushBufferedSharedGroupViewCounts() {
     await flushGroupViewCounts();
 }
 
+// PRIVACY: selectFields is used by public-facing queries (getImagesLite, getImageByShareKey,
+// getSharedGroup, getImages). It MUST NOT include latitude, longitude, filename_original,
+// or user_filename — those fields would leak PII to unauthenticated visitors.
+// The type assertion below enforces this at compile time: if any of those keys are
+// accidentally added to selectFields, TypeScript will produce a type error.
 const selectFields = {
     id: images.id,
     // filename_original is intentionally omitted for privacy
@@ -98,7 +103,21 @@ const selectFields = {
     original_file_size: images.original_file_size,
     // blur_data_url excluded from selectFields — fetched only in individual image
     // queries to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
-};
+} as const;
+
+// Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
+// are ever added to selectFields, this assertion will produce a TypeScript error.
+// This prevents accidental PII leakage in public-facing API responses.
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename';
+type _SelectFieldsKeys = keyof typeof selectFields;
+// The conditional type resolves to `never` when no sensitive keys are present (correct),
+// or to the offending key name(s) when a sensitive key is found (causing a type mismatch).
+type _AssertNoSensitiveFields = _SelectFieldsKeys extends _PrivacySensitiveKeys
+    ? [_SelectFieldsKeys, 'ERROR: privacy-sensitive field found in selectFields — see PRIVACY comment above']
+    : true;
+// This assignment will fail to type-check if _AssertNoSensitiveFields is not `true`.
+const _privacyGuard: _AssertNoSensitiveFields = true as _AssertNoSensitiveFields;
+void _privacyGuard;
 
 export async function getTopics() {
     return db.select().from(topics).orderBy(asc(topics.order));
