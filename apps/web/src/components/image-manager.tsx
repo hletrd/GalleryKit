@@ -93,19 +93,22 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
 
     const handleDelete = async (id: number) => {
         setDeletingId(id);
-        const res = await deleteImage(id);
-        if (res?.success) {
-            toast.success(t('imageManager.imageDeleted'));
-            setImages(prev => prev.filter(img => img.id !== id));
-            setSelectedIds(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(id);
-                return newSet;
-            });
-        } else {
-            toast.error(t('imageManager.deleteFailed'));
+        try {
+            const res = await deleteImage(id);
+            if (res?.success) {
+                toast.success(t('imageManager.imageDeleted'));
+                setImages(prev => prev.filter(img => img.id !== id));
+                setSelectedIds(prev => {
+                    const newSet = new Set(prev);
+                    newSet.delete(id);
+                    return newSet;
+                });
+            } else {
+                toast.error(t('imageManager.deleteFailed'));
+            }
+        } finally {
+            setDeletingId(null);
         }
-        setDeletingId(null);
     };
 
     const handleBulkDelete = async () => {
