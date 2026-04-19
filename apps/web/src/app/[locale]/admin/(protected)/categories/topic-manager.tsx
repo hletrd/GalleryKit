@@ -96,6 +96,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 toast.success(t('categories.deleted'));
                 router.refresh();
             }
+        } catch {
+            toast.error(t('serverActions.failedToDeleteTopic'));
         } finally {
             setIsDeletingTopic(false);
         }
@@ -129,6 +131,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                  setEditingTopic(prev => prev ? ({ ...prev, aliases: prev.aliases.filter(a => a !== alias) }) : null);
                  router.refresh();
             }
+        } catch {
+            toast.error(t('serverActions.failedToDeleteAlias'));
         } finally {
             setIsDeletingAlias(false);
         }
