@@ -9,6 +9,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 
 const PHOTO_SHARE_KEY_LENGTH = 10;
@@ -103,9 +104,14 @@ export async function createPhotoShareLink(imageId: number) {
             }
 
             retries++;
-        } catch {
-            // Likely unique constraint violation - retry with new key
-            retries++;
+        } catch (e) {
+            // Only retry on key collision (duplicate entry), not on other errors
+            if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
+                retries++;
+                continue;
+            }
+            // Non-retryable error — fail immediately
+            return { error: t('failedToGenerateKey') };
         }
     }
     return { error: t('failedToGenerateKey') };
@@ -179,9 +185,14 @@ export async function createGroupShareLink(imageIds: number[]) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'group_share_create', 'shared_group', undefined, undefined, { key, imageCount: uniqueImageIds.length }).catch(console.debug);
             return { success: true, key };
-        } catch {
-            // Key collision or other error - retry with new key
-            retries++;
+        } catch (e) {
+            // Only retry on key collision (duplicate entry), not on other errors
+            if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
+                retries++;
+                continue;
+            }
+            // Non-retryable error — fail immediately
+            return { error: t('failedToCreateGroup') };
         }
     }
     return { error: t('failedToCreateGroup') };
