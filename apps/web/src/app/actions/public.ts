@@ -62,6 +62,16 @@ export async function searchImagesAction(query: string) {
     try {
         const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
         if (dbLimit.limited) {
+            // Roll back the pre-incremented in-memory counter to stay consistent
+            // with DB source of truth. Without this, the in-memory counter
+            // stays overcounted while DB is undercounted, causing premature
+            // rate limiting for the remainder of the window.
+            const currentEntry = searchRateLimit.get(ip);
+            if (currentEntry && currentEntry.count > 1) {
+                currentEntry.count--;
+            } else {
+                searchRateLimit.delete(ip);
+            }
             return [];
         }
     } catch {
