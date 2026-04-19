@@ -84,7 +84,7 @@ export async function createPhotoShareLink(imageId: number) {
             if (result.affectedRows > 0) {
                 const currentUser = await getCurrentUser();
                 logAuditEvent(currentUser?.id ?? null, 'share_create', 'image', String(imageId), undefined, { key }).catch(console.debug);
-                revalidateLocalizedPaths(`/p/${imageId}`);
+                revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
                 return { success: true, key: key };
             }
 
@@ -209,7 +209,7 @@ export async function revokePhotoShareLink(imageId: number) {
         return { error: t('failedToRevokeShareLink') };
     }
 
-    revalidateLocalizedPaths(`/p/${imageId}`, `/s/${oldShareKey}`);
+    revalidateLocalizedPaths(`/p/${imageId}`, `/s/${oldShareKey}`, '/admin/dashboard');
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'share_revoke', 'image', String(imageId), undefined, { key: oldShareKey }).catch(console.debug);
     return { success: true };
