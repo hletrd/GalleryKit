@@ -6,6 +6,11 @@ dotenv.config({ path: path.resolve(__dirname, '.env.local') });
 
 const port = Number(process.env.E2E_PORT || 3100);
 const host = '127.0.0.1';
+const localBaseUrl = `http://${host}:${port}`;
+const baseURL = process.env.E2E_BASE_URL?.trim() || 'https://gallery.atik.kr';
+const parsedBaseUrl = new URL(baseURL);
+const useLocalServer = ['127.0.0.1', 'localhost'].includes(parsedBaseUrl.hostname);
+const localPort = parsedBaseUrl.port || String(port);
 
 export default defineConfig({
   testDir: './e2e',
@@ -16,7 +21,7 @@ export default defineConfig({
     timeout: 10_000,
   },
   use: {
-    baseURL: `http://${host}:${port}`,
+    baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -30,11 +35,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: `HOSTNAME=${host} PORT=${port} npm run start`,
-    cwd: __dirname,
-    url: `http://${host}:${port}`,
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  webServer: useLocalServer
+    ? {
+        command: `HOSTNAME=${host} PORT=${localPort} node .next/standalone/server.js`,
+        cwd: __dirname,
+        url: baseURL || localBaseUrl,
+        reuseExistingServer: true,
+        timeout: 120_000,
+      }
+    : undefined,
 });

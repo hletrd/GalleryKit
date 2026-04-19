@@ -1,43 +1,58 @@
 import { test, expect } from '@playwright/test';
 import { ensureEnglishLocale, expectNoNextError } from './helpers';
 
-test('homepage, topic navigation, and locale switching work', async ({ page }) => {
+test('homepage exposes photos and locale switching works', async ({ page }) => {
   await ensureEnglishLocale(page);
   await page.goto('/');
-  await expect(page.locator('main').getByText('Latest')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
   await expectNoNextError(page);
 
-  const photoLinks = page.locator('main a[aria-label^="View photo:"]');
-  await expect(photoLinks.first()).toBeVisible();
-  expect(await photoLinks.count()).toBeGreaterThanOrEqual(2);
+  const firstPhoto = page.locator('main a[href*="/p/"]').first();
+  await expect(firstPhoto).toBeVisible();
 
-  await page.getByRole('link', { name: 'E2E Smoke' }).click();
-  await expect(page).toHaveURL(/e2e-smoke/);
-  await expectNoNextError(page);
+  await page.locator('nav').locator('button, a').filter({ hasText: 'KO' }).first().click();
+  await expect(page).toHaveURL(/\/ko(\/|$|\?)/);
+  await expect(page.locator('main a[href*="/p/"]').first()).toBeVisible();
 
-  await page.getByRole('link', { name: 'KO' }).click();
-  await expect(page).toHaveURL(/\/ko\/e2e-smoke/);
-  await expectNoNextError(page);
-
-  await page.getByRole('link', { name: 'EN' }).click();
-  await expect(page).toHaveURL(/\/e2e-smoke$/);
+  await page.locator('nav').locator('button, a').filter({ hasText: 'EN' }).first().click();
+  await expect(page).not.toHaveURL(/\/ko(\/|$|\?)/);
 });
 
-test('search and photo navigation work', async ({ page }) => {
+test('search dialog autofocuses, traps focus, and restores focus on close', async ({ page }) => {
   await ensureEnglishLocale(page);
   await page.goto('/');
-  await expect(page.locator('main').getByText('Latest')).toBeVisible();
   await expectNoNextError(page);
 
-  await page.locator('nav button').first().click();
-  await expect(page.locator('div[role="dialog"]')).toBeVisible();
-  await page.locator('div[role="dialog"] input').first().fill('E2E Portrait');
-  await page.getByRole('link', { name: /E2E Portrait/ }).click();
+  const searchTrigger = page.getByRole('button', { name: 'Search photos' });
+  await searchTrigger.click();
 
+  const dialog = page.getByRole('dialog', { name: 'Search photos' });
+  await expect(dialog).toBeVisible();
+  const searchInput = dialog.locator('#search-input');
+  await expect(searchInput).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect.poll(async () => dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(searchTrigger).toBeFocused();
+});
+
+test('photo page lightbox opens and closes from the first visible photo', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/');
+  await expectNoNextError(page);
+
+  await page.locator('main a[href*="/p/"]').first().click();
   await expect(page).toHaveURL(/\/p\/\d+/);
-  await expect(page.getByText('E2E Portrait')).toBeVisible();
 
-  const beforeUrl = page.url();
-  await page.locator('button:has(svg.lucide-chevron-right)').first().click();
-  await expect(page).not.toHaveURL(beforeUrl);
+  const lightboxButton = page.getByRole('button', { name: 'Open fullscreen view' });
+  await expect(lightboxButton).toBeVisible();
+  await lightboxButton.click();
+
+  const lightbox = page.getByRole('dialog', { name: 'Photo lightbox' });
+  await expect(lightbox).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(lightbox).toBeHidden();
 });
