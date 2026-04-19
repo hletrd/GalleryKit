@@ -346,7 +346,21 @@
     "groupNotFound": "그룹을 찾을 수 없습니다",
     "invalidGroupId": "잘못된 그룹 ID입니다",
     "failedToFetchTags": "태그를 불러오지 못했습니다",
-    "failedToDeleteTag": "태그 삭제에 실패했습니다"
+    "failedToDeleteTag": "태그 삭제에 실패했습니다",
+    "failedToCreateTopic": "카테고리를 만들 수 없습니다",
+    "missingDbConfig": "데이터베이스 설정이 누락되었습니다",
+    "failedToWriteBackup": "백업 파일 쓰기에 실패했습니다",
+    "backupFailed": "데이터베이스 백업에 실패했습니다",
+    "backupExitedWithCode": "백업이 코드 {code}(으)로 종료되었습니다",
+    "restoreInProgress": "다른 복원 작업이 이미 진행 중입니다",
+    "noFileProvided": "파일이 제공되지 않았습니다",
+    "fileTooLarge": "파일이 너무 큽니다 (최대 250MB)",
+    "failedToSaveUpload": "업로드 파일 저장에 실패했습니다",
+    "invalidSqlDump": "올바르지 않은 SQL 덤프 파일입니다",
+    "disallowedSql": "SQL 파일에 허용되지 않는 구문이 포함되어 있습니다",
+    "failedToReadRestore": "복원 파일 읽기에 실패했습니다",
+    "restoreFailed": "데이터베이스 복원에 실패했습니다",
+    "restoreExitedWithCode": "복원이 코드 {code}(으)로 종료되었습니다"
   },
   "aria": {
     "searchPhotos": "사진 검색",

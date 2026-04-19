@@ -346,7 +346,21 @@
     "groupNotFound": "Group not found",
     "invalidGroupId": "Invalid group ID",
     "failedToFetchTags": "Failed to fetch tags",
-    "failedToDeleteTag": "Failed to delete tag"
+    "failedToDeleteTag": "Failed to delete tag",
+    "failedToCreateTopic": "Could not create category",
+    "missingDbConfig": "Missing database configuration",
+    "failedToWriteBackup": "Failed to write backup file",
+    "backupFailed": "Database backup failed",
+    "backupExitedWithCode": "Backup exited with code {code}",
+    "restoreInProgress": "Another restore is already in progress",
+    "noFileProvided": "No file provided",
+    "fileTooLarge": "File too large (max 250MB)",
+    "failedToSaveUpload": "Failed to save uploaded file",
+    "invalidSqlDump": "Invalid SQL dump file",
+    "disallowedSql": "SQL file contains disallowed statements",
+    "failedToReadRestore": "Failed to read restore file",
+    "restoreFailed": "Database restore failed",
+    "restoreExitedWithCode": "Restore exited with code {code}"
   },
   "aria": {
     "searchPhotos": "Search photos",

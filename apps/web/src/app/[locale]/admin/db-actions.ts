@@ -13,6 +13,7 @@ import os from "os";
 import { randomUUID } from "crypto";
 import { isAdmin, getCurrentUser } from "@/app/actions";
 import { logAuditEvent } from "@/lib/audit";
+import { getTranslations } from 'next-intl/server';
 import { revalidateAllAppData } from "@/lib/revalidation";
 import { containsDangerousSql } from "@/lib/sql-restore-scan";
 
@@ -28,8 +29,9 @@ function escapeCsvField(value: string): string {
 }
 
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { error: 'Unauthorized' };
+        return { error: t('unauthorized') };
     }
 
     let results = await db
@@ -80,14 +82,15 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
 }
 
 export async function dumpDatabase() {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { success: false as const, error: 'Unauthorized' };
+        return { success: false as const, error: t('unauthorized') };
     }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
     if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
-        return { success: false as const, error: 'Missing database configuration' };
+        return { success: false as const, error: t('missingDbConfig') };
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -125,7 +128,7 @@ export async function dumpDatabase() {
             console.error('Backup writeStream error:', err);
             dump.kill();
             fs.unlink(outputPath).catch(() => {});
-            resolve({ success: false, error: 'Failed to write backup file' });
+            resolve({ success: false, error: t('failedToWriteBackup') });
         });
 
         dump.stderr.on('data', (data: Buffer) => {
@@ -140,7 +143,7 @@ export async function dumpDatabase() {
                 resolve({ success: true, filename, url: `/api/admin/db/download?file=${encodeURIComponent(filename)}` });
             } else {
                 fs.unlink(outputPath).catch(() => {});
-                resolve({ success: false, error: `mysqldump exited with code ${code}` });
+                resolve({ success: false, error: t('backupExitedWithCode', { code }) });
             }
         });
 
@@ -149,7 +152,7 @@ export async function dumpDatabase() {
             settled = true;
             console.error('mysqldump spawn error:', err);
             fs.unlink(outputPath).catch(() => {});
-            resolve({ success: false, error: 'Database backup failed' });
+            resolve({ success: false, error: t('backupFailed') });
         });
     });
 }
@@ -163,8 +166,9 @@ const MAX_RESTORE_SIZE = 250 * 1024 * 1024; // 250 MB
 // GET_LOCK is released automatically on connection close (crash-safe).
 
 export async function restoreDatabase(formData: FormData) {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { success: false, error: 'Unauthorized' };
+        return { success: false, error: t('unauthorized') };
     }
 
     // Use a dedicated connection from the pool so GET_LOCK and RELEASE_LOCK
@@ -179,11 +183,11 @@ export async function restoreDatabase(formData: FormData) {
         const lockRow = lockRows[0];
         const acquired = Object.values(lockRow)[0];
         if (acquired !== 1 && acquired !== BigInt(1)) {
-            return { success: false, error: "Another restore is already in progress" };
+            return { success: false, error: t('restoreInProgress') };
         }
 
         try {
-            return await runRestore(formData);
+            return await runRestore(formData, t);
         } finally {
             await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch(() => {});
         }
@@ -192,15 +196,15 @@ export async function restoreDatabase(formData: FormData) {
     }
 }
 
-async function runRestore(formData: FormData) {
+async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTranslations>>) {
     const fileEntry = formData.get('file');
     if (!fileEntry || !(fileEntry instanceof File)) {
-        return { success: false, error: "No file provided" };
+        return { success: false, error: t('noFileProvided') };
     }
     const file = fileEntry;
 
     if (file.size > MAX_RESTORE_SIZE) {
-        return { success: false, error: "File too large (max 250MB)" };
+        return { success: false, error: t('fileTooLarge') };
     }
 
     // Stream to disk to avoid holding up to 250MB in Node.js heap.
@@ -211,7 +215,7 @@ async function runRestore(formData: FormData) {
         await pipeline(nodeStream, createWriteStream(tempPath, { mode: 0o600 }));
     } catch {
         await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: "Failed to save uploaded file" };
+        return { success: false, error: t('failedToSaveUpload') };
     }
 
     // Validate file header
@@ -226,7 +230,7 @@ async function runRestore(formData: FormData) {
     const validHeader = /^(--)|(CREATE\s)|(INSERT\s)|(DROP\s)|(SET\s)|(\/\*!)/.test(headerBytes.trimStart());
     if (!validHeader) {
         await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: "Invalid SQL dump file" };
+        return { success: false, error: t('invalidSqlDump') };
     }
 
     const CHUNK_SIZE = 1024 * 1024;
@@ -242,7 +246,7 @@ async function runRestore(formData: FormData) {
             if (containsDangerousSql(chunk)) {
                 // Don't close scanFd here — the finally block handles it
                 await fs.unlink(tempPath).catch(() => {});
-                return { success: false, error: "SQL file contains disallowed statements" };
+                return { success: false, error: t('disallowedSql') };
             }
         }
     } finally {
@@ -253,7 +257,7 @@ async function runRestore(formData: FormData) {
 
     if (!DB_HOST || !DB_USER || !DB_PASSWORD || !DB_NAME) {
         await fs.unlink(tempPath).catch(() => {});
-        return { success: false, error: "Missing database configuration" };
+        return { success: false, error: t('missingDbConfig') };
     }
 
     const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
@@ -281,7 +285,7 @@ async function runRestore(formData: FormData) {
             console.error('Failed to read restore file:', err);
             restore.stdin.end();
             await fs.unlink(tempPath).catch(() => {});
-            resolve({ success: false, error: 'Failed to read restore file' });
+            resolve({ success: false, error: t('failedToReadRestore') });
         });
 
         restore.stderr.on('data', (data: Buffer) => {
@@ -298,7 +302,7 @@ async function runRestore(formData: FormData) {
                 revalidateAllAppData();
                 resolve({ success: true });
             } else {
-                resolve({ success: false, error: `mysql restore exited with code ${code}` });
+                resolve({ success: false, error: t('restoreExitedWithCode', { code }) });
             }
         });
 
@@ -307,7 +311,7 @@ async function runRestore(formData: FormData) {
             settled = true;
             console.error('mysql restore spawn error:', err);
             await fs.unlink(tempPath).catch(() => {});
-            resolve({ success: false, error: 'Database restore failed' });
+            resolve({ success: false, error: t('restoreFailed') });
         });
 
         // Start piping after all handlers are registered
