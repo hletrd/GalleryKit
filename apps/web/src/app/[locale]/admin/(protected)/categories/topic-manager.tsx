@@ -80,13 +80,16 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
 
     async function handleDelete(slug: string) {
         setIsDeletingTopic(true);
-        const res = await deleteTopic(slug);
-        setIsDeletingTopic(false);
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('categories.deleted'));
-            router.refresh();
+        try {
+            const res = await deleteTopic(slug);
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('categories.deleted'));
+                router.refresh();
+            }
+        } finally {
+            setIsDeletingTopic(false);
         }
     }
 
@@ -105,14 +108,17 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
 
     async function handleDeleteAlias(topicSlug: string, alias: string) {
         setIsDeletingAlias(true);
-        const res = await deleteTopicAlias(topicSlug, alias);
-        setIsDeletingAlias(false);
-        if (res?.error) {
-            toast.error(res.error);
-        } else {
-            toast.success(t('categories.aliasRemoved'));
-             setEditingTopic(prev => prev ? ({ ...prev, aliases: prev.aliases.filter(a => a !== alias) }) : null);
-             router.refresh();
+        try {
+            const res = await deleteTopicAlias(topicSlug, alias);
+            if (res?.error) {
+                toast.error(res.error);
+            } else {
+                toast.success(t('categories.aliasRemoved'));
+                 setEditingTopic(prev => prev ? ({ ...prev, aliases: prev.aliases.filter(a => a !== alias) }) : null);
+                 router.refresh();
+            }
+        } finally {
+            setIsDeletingAlias(false);
         }
     }
 
