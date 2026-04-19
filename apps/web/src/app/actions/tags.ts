@@ -284,8 +284,8 @@ export async function batchUpdateImageTags(
                 const slug = getTagSlug(cleanName);
                 const [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
                 if (tagRecord) {
-                    await tx.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, tagRecord.id)));
-                    removed++;
+                    const [deleteResult] = await tx.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, tagRecord.id)));
+                    if (deleteResult.affectedRows > 0) removed++;
                 }
             }
         });
