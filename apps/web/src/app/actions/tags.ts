@@ -192,7 +192,7 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
         // Fetch image topic for topic page revalidation
         const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: tagName }).catch(console.debug);
+        logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
         revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
         return { success: true };
     } catch (e) {
