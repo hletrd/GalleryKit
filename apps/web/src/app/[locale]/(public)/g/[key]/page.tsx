@@ -68,9 +68,9 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     const t = await getTranslations('sharedGroup');
 
     let photoId: number | null = null;
-    if (photoIdParam) {
+    if (photoIdParam && /^\d+$/.test(photoIdParam)) {
         const parsed = parseInt(photoIdParam, 10);
-        if (!isNaN(parsed) && parsed > 0 && Number.isInteger(parsed)) {
+        if (parsed > 0) {
             photoId = parsed;
         }
     }
