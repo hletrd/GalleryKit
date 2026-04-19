@@ -79,7 +79,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                         <form action={handleCreate} className="space-y-4">
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">{t('users.username')}</label>
-                                <Input name="username" placeholder={t('users.username')} required minLength={3} />
+                                <Input name="username" placeholder={t('users.username')} required minLength={3} maxLength={64} />
                             </div>
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">{t('users.password')}</label>

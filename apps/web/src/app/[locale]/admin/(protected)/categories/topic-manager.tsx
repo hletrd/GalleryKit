@@ -137,8 +137,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                             <DialogTitle>{t('categories.add')}</DialogTitle>
                         </DialogHeader>
                         <form action={handleCreate} className="space-y-4">
-                            <Input name="label" placeholder={t('categories.placeholderLabel')} required />
-                            <Input name="slug" placeholder={t('categories.placeholderSlug')} required />
+                            <Input name="label" placeholder={t('categories.placeholderLabel')} required maxLength={100} />
+                            <Input name="slug" placeholder={t('categories.placeholderSlug')} required maxLength={100} />
                             <Input type="number" name="order" placeholder={t('categories.placeholderOrder')} />
                             <div className="grid w-full items-center gap-1.5">
                                 <label htmlFor="image" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{t('categories.image')}</label>
@@ -215,8 +215,8 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     {editingTopic && (
                         <div className="space-y-6">
                             <form action={handleUpdate} className="space-y-4">
-                                <Input name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required />
-                                <Input name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required />
+                                <Input name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required maxLength={100} />
+                                <Input name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required maxLength={100} />
                                 <Input type="number" name="order" defaultValue={editingTopic.order ?? 0} placeholder={t('categories.order')} />
                                 <div className="grid w-full items-center gap-1.5">
                                     <label htmlFor="edit-image" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{t('categories.image')}</label>

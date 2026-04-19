@@ -143,7 +143,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                     </DialogHeader>
                     {editingTag && (
                         <form action={handleUpdate} className="space-y-4">
-                            <Input name="name" defaultValue={editingTag.name} placeholder={t('tags.name')} required />
+                            <Input name="name" defaultValue={editingTag.name} placeholder={t('tags.name')} required maxLength={100} />
                             <Button type="submit">{t('categories.update')}</Button>
                         </form>
                     )}

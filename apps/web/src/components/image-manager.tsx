@@ -401,11 +401,11 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                             <Label htmlFor="title">{t('imageManager.titleField')}</Label>
-                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField')} />
+                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField')} maxLength={255} />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="description">{t('imageManager.descField')}</Label>
-                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField')} />
+                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField')} maxLength={5000} />
                         </div>
                     </div>
                     <DialogFooter>
