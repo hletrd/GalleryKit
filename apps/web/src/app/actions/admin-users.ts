@@ -41,7 +41,10 @@ export async function createAdminUser(formData: FormData) {
         });
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(result.insertId)).catch(console.debug);
+        const newUserId = Number(result.insertId);
+        if (Number.isFinite(newUserId) && newUserId > 0) {
+            logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(newUserId)).catch(console.debug);
+        }
 
         revalidateLocalizedPaths('/admin/dashboard');
         return { success: true };
