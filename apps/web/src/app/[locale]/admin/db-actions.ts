@@ -139,7 +139,7 @@ export async function dumpDatabase() {
             console.error(`mysqldump stderr: ${data}`);
         });
 
-        dump.on('close', (code: number) => {
+        dump.on('close', async (code: number) => {
             if (settled) return;
             settled = true;
             if (code === 0) {
