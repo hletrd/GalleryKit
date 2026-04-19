@@ -34,7 +34,8 @@
     "errorBackup": "백업에 실패했습니다",
     "errorRestore": "복원에 실패했습니다",
     "errorExport": "내보내기에 실패했습니다",
-    "confirmRestore": "전체 데이터베이스를 덮어씁니다. 계속하시겠습니까?"
+    "confirmRestore": "전체 데이터베이스를 덮어씁니다. 계속하시겠습니까?",
+    "cancel": "취소"
   },
   "users": {
     "title": "사용자 관리",

@@ -188,7 +188,7 @@ export default function DbPage() {
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
-                                    <AlertDialogCancel>{t('restoreButton')}</AlertDialogCancel>
+                                    <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
                                     <AlertDialogAction onClick={confirmRestore} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                                         {t('restoreButton')}
                                     </AlertDialogAction>

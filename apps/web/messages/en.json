@@ -34,7 +34,8 @@
     "errorBackup": "Backup failed",
     "errorRestore": "Restore failed",
     "errorExport": "Export failed",
-    "confirmRestore": "This will overwrite the entire database. Continue?"
+    "confirmRestore": "This will overwrite the entire database. Continue?",
+    "cancel": "Cancel"
   },
   "users": {
     "title": "Users",
