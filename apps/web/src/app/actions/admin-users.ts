@@ -153,7 +153,8 @@ export async function deleteAdminUser(id: number) {
         return { error: t('cannotDeleteSelf') };
     }
 
-    // Atomically check last-admin and delete inside a transaction to prevent TOCTOU race
+    // Atomically check last-admin, verify user exists, and delete inside a transaction
+    // to prevent TOCTOU race and no-op success on concurrent deletion.
     try {
         await db.transaction(async (tx) => {
             const [adminCount] = await tx.select({ count: sql<number>`count(*)` }).from(adminUsers);
