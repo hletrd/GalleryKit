@@ -12,7 +12,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit } from '@/lib/rate-limit';
-import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit } from '@/lib/auth-rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 
@@ -233,11 +233,11 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     pruneLoginRateLimit(now);
     prunePasswordChangeRateLimit(now);
     const limitData = getPasswordChangeRateLimitEntry(ip, now);
-    if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
+    if (limitData.count >= PASSWORD_CHANGE_MAX_ATTEMPTS) {
         return { error: t('tooManyAttempts') };
     }
     try {
-        const dbLimit = await checkRateLimit(ip, 'password_change', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'password_change', PASSWORD_CHANGE_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
         if (dbLimit.limited) {
             return { error: t('tooManyAttempts') };
         }

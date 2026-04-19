@@ -53,6 +53,8 @@ export async function clearSuccessfulPasswordAttempts(ip: string) {
 }
 
 /** Prune expired entries and enforce hard cap on password change rate-limit Map. */
+export const PASSWORD_CHANGE_MAX_ATTEMPTS = 10;
+
 export function prunePasswordChangeRateLimit(now: number) {
     for (const [key, entry] of passwordChangeRateLimit) {
         if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
