@@ -1,10 +1,23 @@
 # Implementation Plans Index
 
-## Active Plans (Cycle 1 — 2026-04-19)
+## Active Plans
 
-- 30 — Security: Rate-Limit TOCTOU and Upload Batch Bypass — PENDING
-- 31 — Data Layer and Queue Hardening — PENDING
-- 32 — UI Component Polish and UX Improvements — PENDING
+_None_
+
+## Completed Plans (Cycle 4)
+
+- 37 — Insert ID Consistency and Confirm Dialog Replacement — DONE (2026-04-19)
+- 38 — Data Layer Caching and Rate-Limit Hardening — DONE (2026-04-19)
+
+## Completed Plans (Cycle 3)
+
+- 35 — Insert ID Safety and Rate-Limit Map Pruning — DONE (2026-04-19)
+- 36 — Data Layer Optimizations and ARIA Improvements — DONE (2026-04-19)
+
+## Completed Plans (Cycle 2)
+
+- 33 — Rate-Limit TOCTOU Fix (updatePassword) and Upload Tracker Hardening — DONE (2026-04-19)
+- 34 — Tag Operations Validation, Search Optimization, and ARIA Improvements — DONE (2026-04-19)
 
 ## Completed Plans
 
@@ -12,6 +25,9 @@
 - 27 — Routing, Metadata, and View-State Consistency — DONE (2026-04-18)
 - 28 — Upload, Restore, and Sharing Safety — DONE (2026-04-18)
 - 29 — Admin Refresh, Proxy Semantics, and Docs/Deploy Alignment — DONE (2026-04-18)
+- 30 — Security: Rate-Limit TOCTOU and Upload Batch Bypass — DONE (2026-04-19)
+- 31 — Data Layer and Queue Hardening — DONE (2026-04-19)
+- 32 — UI Component Polish and UX Improvements — DONE (2026-04-19)
 
 ---
 
@@ -19,38 +35,42 @@
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
-| **Comprehensive Code Review (full audit)** | 2026-04-18 | 15 confirmed + 3 likely/risk | 15 confirmed + 2 low-risk likely fixes complete | 1 manual-validation risk (`/api/og` throttle architecture) |
+| **Cycle 4 Comprehensive Review** | 2026-04-19 | 9 actionable (2M/7L) | 9 complete via Plans 37-38 | 0 |
+| Cycle 3 Comprehensive Review | 2026-04-19 | 12 (2M/10L) | 12 complete via Plans 35-36 | 0 |
+| Comprehensive Code Review (full audit) | 2026-04-18 | 15 confirmed + 3 likely/risk | 15 confirmed + 2 low-risk likely fixes complete | 1 manual-validation risk (`/api/og` throttle architecture) |
 | UI/UX Deep Review R7 | 2026-04-18 | 11 (6H/3M/2L) | Complete via Plan 26 | 0 |
 | Comprehensive Review R6 | 2026-04-18 | 40 (2C/9H/18M/11L) | Complete | 0 |
 
 ---
 
-## R8 Findings → Plan Mapping
+## Cycle 4 Findings → Plan Mapping
 
-### Plan 27
-- Audit #1 locale URL generation inconsistency
-- Audit #8 shared-group URL drift
-- Audit #9 nested main / skip-link mismatch
-- Audit #10 search stale-result race
-- Audit #11 manifest icon mismatch
-- Audit #12 tag-filter double refresh
-- Audit #13 topic page heading mismatch
+### Plan 37 (Insert ID Consistency + Confirm Dialog)
+- C4-01 admin-users.ts insertId BigInt inconsistency
+- C4-02 db/page.tsx uses native confirm() for restore
 
-### Plan 28
-- Audit #2 filename-based implicit replacement
-- Audit #3 replacement deletes old original too early
-- Audit #4 unprocessed images can be shared
-- Audit #5 restore scanner false positives on quoted SQL data
-- Risk C buffered shared-group view counts lost on shutdown
+### Plan 38 (Data Layer Caching + Rate-Limit Hardening)
+- C4-03 getImageByShareKey called twice without cache
+- C4-04 getSharedGroup called twice without cache
+- C4-05 searchImagesAction DB increment fire-and-forget
+- C4-06 No rate limit on share link creation
+- C4-07 retryCounts/claimRetryCounts Maps grow unbounded
+- C4-08 viewCountBuffer can accumulate during DB outage
+- C4-09 uploadTracker prune is conditional
 
-### Plan 29
-- Audit #6 categories page stale after mutations
-- Audit #7 admin users page stale after mutations
-- Audit #14 Docker/deploy docs mismatch
-- Audit #15 CLAUDE testing mismatch
-- Likely issue A trusted proxy / X-Forwarded-For semantics
+---
+
+## Deferred Carry-Forward
+
+1. U-15 connection limit docs mismatch (very low priority)
+2. U-18 enumerative revalidatePath (low priority, current approach works)
+3. /api/og throttle architecture (edge runtime, delegated to reverse proxy)
+4. Font subsetting (Python brotli dependency issue)
+5. Docker node_modules removal (native module dependency)
 
 ---
 
 ## Notes
+
 - The `/api/og` architectural rate-limiting risk remains a separate manual-validation item unless a clean app-level design emerges during execution.
+- Cycle 4 also fixed a pre-existing type error (`blur_data_url` made optional in `ImageDetail` interface) that was blocking TS compilation for `s/[key]/page.tsx`.
