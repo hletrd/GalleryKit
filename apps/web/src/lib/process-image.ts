@@ -316,17 +316,27 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     };
 }
 
+export interface ImageQualitySettings {
+    webp?: number;
+    avif?: number;
+    jpeg?: number;
+}
+
 export async function processImageFormats(
     inputPath: string,
     filenameWebp: string,
     filenameAvif: string,
     filenameJpeg: string,
-    baseWidth: number // The width from metadata
+    baseWidth: number, // The width from metadata
+    quality?: ImageQualitySettings, // Admin-configured quality overrides
 ) {
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.
     const image = sharp(inputPath, { limitInputPixels: maxInputPixels });
 
     const sizes = OUTPUT_SIZES;
+    const qualityWebp = quality?.webp ?? 90;
+    const qualityAvif = quality?.avif ?? 85;
+    const qualityJpeg = quality?.jpeg ?? 90;
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -351,11 +361,11 @@ export async function processImageFormats(
                 const sharpInstance = image.clone().resize({ width: resizeWidth }).keepIccProfile();
 
                 if (format === 'webp') {
-                    await sharpInstance.webp({ quality: 90 }).toFile(outputPath);
+                    await sharpInstance.webp({ quality: qualityWebp }).toFile(outputPath);
                 } else if (format === 'avif') {
-                    await sharpInstance.avif({ quality: 85 }).toFile(outputPath);
+                    await sharpInstance.avif({ quality: qualityAvif }).toFile(outputPath);
                 } else {
-                    await sharpInstance.jpeg({ quality: 90 }).toFile(outputPath);
+                    await sharpInstance.jpeg({ quality: qualityJpeg }).toFile(outputPath);
                 }
 
                 lastRendered = { resizeWidth, filePath: outputPath };

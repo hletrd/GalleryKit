@@ -6,7 +6,9 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { connection, db, images, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
+import type { ImageQualitySettings } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
+import { getGalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
@@ -165,12 +167,25 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             // Pass file path so Sharp uses native mmap instead of pinning on the heap.
+            // Read admin-configured quality settings from DB (cached per SSR request).
+            let quality: ImageQualitySettings | undefined;
+            try {
+                const config = await getGalleryConfig();
+                quality = {
+                    webp: config.imageQualityWebp,
+                    avif: config.imageQualityAvif,
+                    jpeg: config.imageQualityJpeg,
+                };
+            } catch {
+                // DB unavailable during processing — use Sharp defaults (90/85/90)
+            }
             await processImageFormats(
                 originalPath,
                 job.filenameWebp,
                 job.filenameAvif,
                 job.filenameJpeg,
                 job.width,
+                quality,
             );
 
             // Verify all 3 output formats exist and are non-zero before marking processed
