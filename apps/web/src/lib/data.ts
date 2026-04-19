@@ -9,6 +9,18 @@ const viewCountBuffer = new Map<number, number>();
 let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_VIEW_COUNT_BUFFER_SIZE = 1000;
 
+// Backoff for flush during DB outages: after N consecutive fully-failed flushes,
+// the timer interval increases exponentially to avoid hammering an unreachable DB.
+const BASE_FLUSH_INTERVAL_MS = 5000;
+const MAX_FLUSH_INTERVAL_MS = 300000; // 5 minutes
+let consecutiveFlushFailures = 0;
+
+function getNextFlushInterval(): number {
+    if (consecutiveFlushFailures < 3) return BASE_FLUSH_INTERVAL_MS;
+    const backoff = BASE_FLUSH_INTERVAL_MS * Math.pow(2, Math.min(consecutiveFlushFailures - 3, 5));
+    return Math.min(backoff, MAX_FLUSH_INTERVAL_MS);
+}
+
 function bufferGroupViewCount(groupId: number) {
     if (viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)) {
         // Drop increment to prevent unbounded growth during DB outage
@@ -17,7 +29,7 @@ function bufferGroupViewCount(groupId: number) {
     }
     viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + 1);
     if (!viewCountFlushTimer) {
-        viewCountFlushTimer = setTimeout(flushGroupViewCounts, 5000);
+        viewCountFlushTimer = setTimeout(flushGroupViewCounts, getNextFlushInterval());
         viewCountFlushTimer.unref?.();
     }
 }
@@ -30,12 +42,14 @@ async function flushGroupViewCounts() {
     viewCountFlushTimer = null;
     const batch = new Map(viewCountBuffer);
     viewCountBuffer.clear();
+    let succeeded = 0;
     try {
         await Promise.all(
             [...batch].map(([groupId, count]) =>
                 db.update(sharedGroups)
                     .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
                     .where(eq(sharedGroups.id, groupId))
+                    .then((result) => { succeeded++; return result; })
                     .catch(() => {
                         // Re-buffer failed increment for next flush, respecting hard cap
                         if (viewCountBuffer.size < MAX_VIEW_COUNT_BUFFER_SIZE || viewCountBuffer.has(groupId)) {
@@ -48,6 +62,13 @@ async function flushGroupViewCounts() {
         );
     } finally {
         isFlushing = false;
+        // Update backoff counter: reset on any success, increment on total failure
+        if (succeeded > 0) {
+            consecutiveFlushFailures = 0;
+        } else if (batch.size > 0) {
+            consecutiveFlushFailures++;
+            console.warn(`[viewCount] Flush fully failed (${consecutiveFlushFailures} consecutive), next flush in ${getNextFlushInterval() / 1000}s`);
+        }
     }
 }
 
