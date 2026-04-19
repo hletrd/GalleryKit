@@ -3,6 +3,8 @@
 import { db, images, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
+import { headers } from 'next/headers';
+import { getClientIp } from '@/lib/rate-limit';
 
 import { isAdmin } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
@@ -10,8 +12,48 @@ import { revalidateLocalizedPaths } from '@/lib/revalidation';
 const PHOTO_SHARE_KEY_LENGTH = 10;
 const GROUP_SHARE_KEY_LENGTH = 10;
 
+// In-memory rate limit for share link creation (per admin IP, per window)
+const SHARE_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const SHARE_MAX_PER_WINDOW = 20;
+const SHARE_RATE_LIMIT_MAX_KEYS = 500;
+const shareRateLimit = new Map<string, { count: number; resetAt: number }>();
+
+function pruneShareRateLimit() {
+    const now = Date.now();
+    for (const [key, entry] of shareRateLimit) {
+        if (entry.resetAt <= now) shareRateLimit.delete(key);
+    }
+    if (shareRateLimit.size > SHARE_RATE_LIMIT_MAX_KEYS) {
+        const excess = shareRateLimit.size - SHARE_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of shareRateLimit.keys()) {
+            if (evicted >= excess) break;
+            shareRateLimit.delete(key);
+            evicted++;
+        }
+    }
+}
+
+function checkShareRateLimit(ip: string): boolean {
+    pruneShareRateLimit();
+    const now = Date.now();
+    const entry = shareRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        shareRateLimit.set(ip, { count: 1, resetAt: now + SHARE_RATE_LIMIT_WINDOW_MS });
+        return false;
+    }
+    entry.count++;
+    return entry.count > SHARE_MAX_PER_WINDOW;
+}
+
 export async function createPhotoShareLink(imageId: number) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    if (checkShareRateLimit(ip)) {
+        return { error: 'Too many share link requests. Please try again later.' };
+    }
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { error: 'Invalid image ID' };
@@ -61,6 +103,12 @@ export async function createPhotoShareLink(imageId: number) {
 
 export async function createGroupShareLink(imageIds: number[]) {
     if (!(await isAdmin())) return { error: 'Unauthorized' };
+
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    if (checkShareRateLimit(ip)) {
+        return { error: 'Too many share link requests. Please try again later.' };
+    }
 
     if (!Array.isArray(imageIds) || imageIds.length === 0) {
         return { error: 'No images selected' };
