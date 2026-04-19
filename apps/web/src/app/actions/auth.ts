@@ -190,6 +190,13 @@ export async function login(prevState: { error?: string } | null, formData: Form
     } catch (e) {
         if (isRedirectError(e)) throw e;
         console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
+        // Roll back pre-incremented rate limit on unexpected errors —
+        // the user didn't fail authentication, the infrastructure did.
+        try {
+            await clearSuccessfulLoginAttempts(ip);
+        } catch (rollbackErr) {
+            console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
+        }
     }
 
     return { error: t('invalidCredentials') };
@@ -317,6 +324,13 @@ export async function updatePassword(prevState: { error?: string; success?: bool
 
     } catch (e) {
         console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
+        // Roll back pre-incremented rate limit on unexpected errors —
+        // the user didn't fail authentication, the infrastructure did.
+        try {
+            await clearSuccessfulPasswordAttempts(ip);
+        } catch (rollbackErr) {
+            console.debug('Failed to roll back password change rate limit after unexpected error:', rollbackErr);
+        }
         return { error: t('failedToUpdatePassword') };
     }
 }
