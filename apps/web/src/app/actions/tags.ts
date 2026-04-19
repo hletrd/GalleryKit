@@ -272,8 +272,8 @@ export async function batchUpdateImageTags(
                         console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
                         warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }));
                     }
-                    await tx.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
-                    added++;
+                    const [tagInsertResult] = await tx.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
+                    if (tagInsertResult.affectedRows > 0) added++;
                 }
             }
 
