@@ -11,6 +11,21 @@ import { purgeOldBuckets } from '@/lib/rate-limit';
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 const CLAIM_RETRY_DELAY_MS = 5000;
+const MAX_RETRY_MAP_SIZE = 10000;
+
+/** Prune retry Maps to prevent unbounded growth from abandoned jobs. */
+function pruneRetryMaps(state: ProcessingQueueState) {
+    for (const map of [state.retryCounts, state.claimRetryCounts] as const) {
+        if (map.size <= MAX_RETRY_MAP_SIZE) continue;
+        const excess = map.size - MAX_RETRY_MAP_SIZE;
+        let evicted = 0;
+        for (const key of map.keys()) {
+            if (evicted >= excess) break;
+            map.delete(key);
+            evicted++;
+        }
+    }
+}
 
 export type ImageProcessingJob = {
     id: number;
@@ -214,6 +229,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 state.retryCounts.delete(job.id);
                 state.claimRetryCounts.delete(job.id);
             }
+            pruneRetryMaps(state);
         }
     });
 };
@@ -260,6 +276,7 @@ export const bootstrapImageProcessingQueue = async () => {
         state.gcInterval = setInterval(() => {
             purgeExpiredSessions();
             purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
+            pruneRetryMaps(state);
         }, 60 * 60 * 1000); // every hour
     } catch (err: unknown) {
         // Suppress connection refused errors during build/startup
