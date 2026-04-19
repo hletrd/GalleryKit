@@ -280,6 +280,8 @@ export async function batchUpdateImageTags(
         return { success: false, added: 0, removed: 0, warnings: [t('failedToAddTag')] };
     }
 
-    revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/dashboard');
+    // Fetch image topic for topic page revalidation (matching addTagToImage/removeTagFromImage pattern)
+    const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
+    revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
     return { success: true, added, removed, warnings };
 }
