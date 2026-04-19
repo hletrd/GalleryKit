@@ -368,6 +368,7 @@
     "failedToCreateUser": "Failed to create user",
     "cannotDeleteSelf": "Cannot delete your own account",
     "cannotDeleteLastAdmin": "Cannot delete the last admin user",
+    "userNotFound": "User not found",
     "failedToDeleteUser": "Failed to delete user",
     "noFilesProvided": "No files provided",
     "tooManyFiles": "Too many files at once (max 100)",

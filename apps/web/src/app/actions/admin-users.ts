@@ -160,6 +160,11 @@ export async function deleteAdminUser(id: number) {
             if (Number(adminCount.count) <= 1) {
                 throw new Error('LAST_ADMIN');
             }
+            // Verify target user exists inside the transaction to prevent no-op success
+            const [target] = await tx.select({ id: adminUsers.id }).from(adminUsers).where(eq(adminUsers.id, id));
+            if (!target) {
+                throw new Error('USER_NOT_FOUND');
+            }
             // Explicitly delete sessions before user (defense in depth alongside FK cascade)
             await tx.delete(sessions).where(eq(sessions.userId, id));
             await tx.delete(adminUsers).where(eq(adminUsers.id, id));
@@ -170,6 +175,9 @@ export async function deleteAdminUser(id: number) {
     } catch (e: unknown) {
         if (e instanceof Error && e.message === 'LAST_ADMIN') {
             return { error: t('cannotDeleteLastAdmin') };
+        }
+        if (e instanceof Error && e.message === 'USER_NOT_FOUND') {
+            return { error: t('userNotFound') };
         }
         console.error('Delete user failed', e);
         return { error: t('failedToDeleteUser') };
