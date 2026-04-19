@@ -19,9 +19,10 @@ export {
     type GallerySettingKey,
     isValidSettingValue,
     getSettingDefaults,
+    parseImageSizes,
 } from './gallery-config-shared';
 
-import { GALLERY_SETTING_KEYS, getSettingDefaults } from './gallery-config-shared';
+import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, parseImageSizes } from './gallery-config-shared';
 import type { GallerySettingKey } from './gallery-config-shared';
 
 // ── Defaults (imported from shared module to avoid duplication) ────────────────
@@ -67,22 +68,47 @@ export interface GalleryConfig {
     storageBackend: 'local' | 'minio' | 's3';
 }
 
+/**
+ * Parse a numeric setting with validation and fallback.
+ * If the DB value is corrupted or invalid, falls back to the default.
+ */
+function validatedNumber(map: Map<string, string>, key: GallerySettingKey): number {
+    const raw = getSetting(map, key);
+    if (!isValidSettingValue(key, raw)) return Number(DEFAULTS[key]);
+    return Number(raw);
+}
+
+const VALID_STORAGE_BACKENDS = ['local', 'minio', 's3'] as const;
+
 async function _getGalleryConfig(): Promise<GalleryConfig> {
     const map = await getSettingsMap();
 
+    // Use parseImageSizes for sorted output and invalid-input fallback (C13-01)
+    const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
+
+    // Validate storageBackend against allowed values (C13-02)
+    const rawBackend = getSetting(map, 'storage_backend');
+    const storageBackend: 'local' | 'minio' | 's3' = VALID_STORAGE_BACKENDS.includes(rawBackend as typeof VALID_STORAGE_BACKENDS[number])
+        ? (rawBackend as 'local' | 'minio' | 's3')
+        : 'local';
+
     return {
-        imageQualityWebp: Number(getSetting(map, 'image_quality_webp')),
-        imageQualityAvif: Number(getSetting(map, 'image_quality_avif')),
-        imageQualityJpeg: Number(getSetting(map, 'image_quality_jpeg')),
-        imageSizes: getSetting(map, 'image_sizes').split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0),
-        queueConcurrency: Number(getSetting(map, 'queue_concurrency')),
-        gridColumnsDesktop: Number(getSetting(map, 'grid_columns_desktop')),
-        gridColumnsTablet: Number(getSetting(map, 'grid_columns_tablet')),
-        gridColumnsMobile: Number(getSetting(map, 'grid_columns_mobile')),
-        stripGpsOnUpload: getSetting(map, 'strip_gps_on_upload') === 'true',
-        maxFileSizeMb: Number(getSetting(map, 'max_file_size_mb')),
-        maxFilesPerBatch: Number(getSetting(map, 'max_files_per_batch')),
-        storageBackend: getSetting(map, 'storage_backend') as 'local' | 'minio' | 's3',
+        imageQualityWebp: validatedNumber(map, 'image_quality_webp'),
+        imageQualityAvif: validatedNumber(map, 'image_quality_avif'),
+        imageQualityJpeg: validatedNumber(map, 'image_quality_jpeg'),
+        imageSizes,
+        queueConcurrency: validatedNumber(map, 'queue_concurrency'),
+        gridColumnsDesktop: validatedNumber(map, 'grid_columns_desktop'),
+        gridColumnsTablet: validatedNumber(map, 'grid_columns_tablet'),
+        gridColumnsMobile: validatedNumber(map, 'grid_columns_mobile'),
+        stripGpsOnUpload: (() => {
+            const raw = getSetting(map, 'strip_gps_on_upload');
+            if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
+            return raw === 'true';
+        })(),
+        maxFileSizeMb: validatedNumber(map, 'max_file_size_mb'),
+        maxFilesPerBatch: validatedNumber(map, 'max_files_per_batch'),
+        storageBackend,
     };
 }
 
