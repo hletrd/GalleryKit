@@ -28,6 +28,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
     const [isCreating, setIsCreating] = useState(false);
     const [open, setOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<{ id: number; username: string } | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const { t, locale } = useTranslation();
     const router = useRouter();
 
@@ -51,6 +52,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
 
     async function handleDelete(id: number) {
         setDeleteTarget(null);
+        setIsDeleting(true);
         try {
             const result = await deleteAdminUser(id);
             if (result.error) {
@@ -61,6 +63,8 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
             }
         } catch {
             toast.error(t('serverActions.failedToDeleteUser'));
+        } finally {
+            setIsDeleting(false);
         }
     }
 
@@ -154,7 +158,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => deleteTarget && handleDelete(deleteTarget.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        <AlertDialogAction onClick={() => deleteTarget && handleDelete(deleteTarget.id)} disabled={isDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                             {t('imageManager.delete')}
                         </AlertDialogAction>
                     </AlertDialogFooter>
