@@ -4,11 +4,47 @@ import * as argon2 from 'argon2';
 import { db, adminUsers, sessions } from '@/db';
 import { eq, desc, sql } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
+import { headers } from 'next/headers';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { getClientIp, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+
+// In-memory rate limit for admin user creation (per admin IP, per window)
+const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const USER_CREATE_MAX_ATTEMPTS = 10;
+const USER_CREATE_RATE_LIMIT_MAX_KEYS = 500;
+const userCreateRateLimit = new Map<string, { count: number; resetAt: number }>();
+
+function pruneUserCreateRateLimit() {
+    const now = Date.now();
+    for (const [key, entry] of userCreateRateLimit) {
+        if (entry.resetAt <= now) userCreateRateLimit.delete(key);
+    }
+    if (userCreateRateLimit.size > USER_CREATE_RATE_LIMIT_MAX_KEYS) {
+        const excess = userCreateRateLimit.size - USER_CREATE_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of userCreateRateLimit.keys()) {
+            if (evicted >= excess) break;
+            userCreateRateLimit.delete(key);
+            evicted++;
+        }
+    }
+}
+
+function checkUserCreateRateLimit(ip: string): boolean {
+    pruneUserCreateRateLimit();
+    const now = Date.now();
+    const entry = userCreateRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        userCreateRateLimit.set(ip, { count: 1, resetAt: now + USER_CREATE_WINDOW_MS });
+        return false;
+    }
+    entry.count++;
+    return entry.count > USER_CREATE_MAX_ATTEMPTS;
+}
 
 // Admin User Management
 export async function getAdminUsers() {
@@ -25,6 +61,28 @@ export async function getAdminUsers() {
 export async function createAdminUser(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+
+    // Rate limit admin user creation to prevent brute-force / CPU DoS
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    if (checkUserCreateRateLimit(ip)) {
+        return { error: t('tooManyAttempts') };
+    }
+    // DB-backed check for accuracy across restarts
+    try {
+        const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
+        if (dbLimit.limited) {
+            return { error: t('tooManyAttempts') };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map
+    }
+    // Pre-increment rate limit before expensive Argon2 hash
+    try {
+        await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
+    } catch {
+        // DB unavailable — in-memory Map already counted
+    }
 
     const username = formData.get('username')?.toString() ?? '';
     const password = formData.get('password')?.toString() ?? '';
