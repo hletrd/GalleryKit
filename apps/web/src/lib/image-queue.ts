@@ -5,7 +5,8 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, images, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
-import { processImageFormats, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
+import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';

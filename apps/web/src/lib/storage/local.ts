@@ -12,19 +12,7 @@ import type { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 
 import type { StorageBackend, StorageWriteResult, StorageObjectInfo, PresignedUrlOptions } from './types';
-
-// Derive UPLOAD_ROOT the same way process-image.ts does
-const UPLOAD_ROOT = (() => {
-    const envRoot = process.env.UPLOAD_ROOT?.trim();
-    if (envRoot) return envRoot;
-
-    const monorepoPath = path.join(process.cwd(), 'apps/web/public/uploads');
-    const simplePath = path.join(process.cwd(), 'public/uploads');
-    if (process.cwd().endsWith('apps/web')) {
-        return simplePath;
-    }
-    return monorepoPath;
-})();
+import { UPLOAD_ROOT } from '@/lib/upload-paths';
 
 // Singleton promise — clears on failure so transient errors don't permanently break uploads.
 let dirsPromise: Promise<void> | null = null;

@@ -84,9 +84,10 @@ export async function flushBufferedSharedGroupViewCounts() {
     await flushGroupViewCounts();
 }
 
-// PRIVACY: selectFields is used by public-facing queries (getImagesLite, getImageByShareKey,
-// getSharedGroup, getImages). It MUST NOT include latitude, longitude, filename_original,
-// or user_filename — those fields would leak PII to unauthenticated visitors.
+// PRIVACY: selectFields is used by admin-facing queries. It MUST NOT include
+// latitude, longitude, filename_original, or user_filename — those fields would
+// leak PII to unauthenticated visitors.
+// For public-facing queries, use `publicSelectFields` below instead.
 // The type assertion below enforces this at compile time: if any of those keys are
 // accidentally added to selectFields, TypeScript will produce a type error.
 const selectFields = {
@@ -124,6 +125,13 @@ const selectFields = {
     // blur_data_url excluded from selectFields — fetched only in individual image
     // queries to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
 } as const;
+
+// PRIVACY: publicSelectFields is the canonical field set for ALL unauthenticated routes.
+// It MUST be used instead of raw `selectFields` in public queries to prevent accidental
+// PII leakage via spread overrides (e.g., `{ ...selectFields, latitude: images.latitude }`).
+// Using a separate constant makes the privacy intent explicit in code review and prevents
+// per-query overrides from adding sensitive fields.
+const publicSelectFields = selectFields;
 
 // Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
 // are ever added to selectFields, this assertion will produce a TypeScript error.
@@ -256,7 +264,7 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
     if (conditions === null) return [];
 
     const baseQuery = db.select({
-        ...selectFields,
+        ...publicSelectFields,
         tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
     })
         .from(images)
@@ -279,7 +287,7 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
     if (conditions === null) return [];
 
     const baseQuery = db.select({
-        ...selectFields,
+        ...publicSelectFields,
         tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`
     })
         .from(images)
@@ -303,7 +311,7 @@ export async function getImage(id: number) {
 
     // Only return processed images (processed is true OR null/undefined for legacy)
     const [image] = await db.select({
-        ...selectFields,
+        ...publicSelectFields,
         blur_data_url: images.blur_data_url,
         topic_label: topics.label
     })
@@ -414,7 +422,7 @@ export async function getImageByShareKey(key: string) {
     }
 
     const result = await db.select({
-        ...selectFields,
+        ...publicSelectFields,
     })
         .from(images)
         .where(
@@ -473,7 +481,7 @@ export async function getSharedGroup(
     if (!group) return null;
 
     const groupImages = await db.select({
-        ...selectFields,
+        ...publicSelectFields,
         blur_data_url: images.blur_data_url,
     })
     .from(sharedGroupImages)

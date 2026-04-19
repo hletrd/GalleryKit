@@ -9,6 +9,8 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 
+import { UPLOAD_ROOT, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
+
 const cpuCount = os.cpus()?.length ?? 1;
 const maxConcurrency = Math.max(1, cpuCount - 1);
 const envConcurrency = Number.parseInt(process.env.SHARP_CONCURRENCY ?? '', 10);
@@ -31,23 +33,6 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
         ? envTopicPixels
         : 64 * 1024 * 1024;
 })();
-
-const UPLOAD_ROOT = (() => {
-    const envRoot = process.env.UPLOAD_ROOT?.trim();
-    if (envRoot) return envRoot;
-
-    const monorepoPath = path.join(process.cwd(), 'apps/web/public/uploads');
-    const simplePath = path.join(process.cwd(), 'public/uploads');
-    if (process.cwd().endsWith('apps/web')) {
-        return simplePath;
-    }
-    return monorepoPath;
-})();
-
-export const UPLOAD_DIR_ORIGINAL = path.join(UPLOAD_ROOT, 'original');
-export const UPLOAD_DIR_WEBP = path.join(UPLOAD_ROOT, 'webp');
-export const UPLOAD_DIR_AVIF = path.join(UPLOAD_ROOT, 'avif');
-export const UPLOAD_DIR_JPEG = path.join(UPLOAD_ROOT, 'jpeg');
 
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'

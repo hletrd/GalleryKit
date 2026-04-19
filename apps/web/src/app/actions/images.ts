@@ -4,7 +4,8 @@ import path from 'path';
 import fs, { statfs } from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';

@@ -5,7 +5,14 @@
  * `storage_backend` admin setting. Re-initializes when the
  * setting changes.
  *
- * Usage:
+ * NOTE: The storage backend is not yet integrated into the image processing
+ * pipeline. Direct fs operations are still used for uploads and serving.
+ * This module provides the abstraction layer that will be used once
+ * integration is complete. The admin settings page allows switching backends,
+ * but the switch only affects the singleton state — actual file I/O still
+ * goes through process-image.ts and serve-upload.ts directly.
+ *
+ * Usage (once integrated):
  *   import { getStorage } from '@/lib/storage';
  *   const storage = getStorage();
  *   await storage.writeBuffer('webp/foo.webp', buffer, 'image/webp');

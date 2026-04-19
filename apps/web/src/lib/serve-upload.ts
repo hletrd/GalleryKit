@@ -3,10 +3,7 @@ import path from 'path';
 import { createReadStream } from 'fs';
 import { lstat } from 'fs/promises';
 import { Readable } from 'stream';
-import { UPLOAD_DIR_ORIGINAL } from '@/lib/process-image';
-
-// Derive UPLOAD_ROOT from the exported original uploads directory
-const UPLOAD_ROOT = path.dirname(UPLOAD_DIR_ORIGINAL);
+import { UPLOAD_ROOT } from '@/lib/upload-paths';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
