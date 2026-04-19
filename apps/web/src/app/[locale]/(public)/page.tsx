@@ -4,6 +4,8 @@ import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { localizeUrl } from '@/lib/locale-path';
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -21,6 +23,9 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
   const images = await getImagesLite(undefined, undefined, 1, 0);
   const latestImage = images[0];
+  // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
+  const config = await getGalleryConfig();
+  const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
   const isLatestTitleFilename = latestImage?.title
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
     : false;
@@ -38,7 +43,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
     : latestImage
       ? [{
-          url: `${seo.url}/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+          url: `${seo.url}/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`,
           width: latestImage.width,
           height: latestImage.height,
           alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
@@ -69,6 +74,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const locale = await getLocale();
   const seo = await getSeoSettings();
   const baseUrl = seo.url;
+  const config = await getGalleryConfig();
 
   // Root always gets latest uploads (no topic)
   const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);
@@ -101,7 +107,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
       contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
-      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`,
       name: img.title || `Photo ${img.id}`,
     })),
   } : null;
@@ -122,7 +128,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
           }}
         />
       )}
-      <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} />
+      <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
     </>
   );
 }

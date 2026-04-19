@@ -6,6 +6,8 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 
 
 export const revalidate = 3600;
@@ -106,6 +108,7 @@ export default async function TopicPage({
   const tags = allTags.filter(t => t.count > 1);
 
   const baseUrl = seo.url;
+  const config = await getGalleryConfig();
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
@@ -114,7 +117,7 @@ export default async function TopicPage({
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
       contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
-      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`,
       name: img.title || `Photo ${img.id}`,
     })),
   } : null;
@@ -129,7 +132,7 @@ export default async function TopicPage({
           }}
         />
       )}
-      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topicData.slug} heading={topicData.label} hasMore={hasMore} totalCount={totalCount} />
+      <HomeClient images={images} tags={tags} topics={allTopics} currentTags={tagSlugs} topicSlug={topicData.slug} heading={topicData.label} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
     </>
   );
 }

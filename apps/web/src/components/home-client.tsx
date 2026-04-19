@@ -9,6 +9,7 @@ import { LoadMore } from '@/components/load-more';
 import { cn } from '@/lib/utils';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 function reorderForColumns<T extends { id: number; width?: number; height?: number }>(items: T[], columnCount: number): T[] {
     if (columnCount <= 1 || items.length === 0) return items;
@@ -141,9 +142,10 @@ interface HomeClientProps {
     heading?: string;
     hasMore?: boolean;
     totalCount?: number;
+    imageSizes?: number[];
 }
 
-export function HomeClient({ images, tags, topics, currentTags, topicSlug, heading, hasMore = false, totalCount }: HomeClientProps) {
+export function HomeClient({ images, tags, topics, currentTags, topicSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES }: HomeClientProps) {
     const { t, locale } = useTranslation();
     const [allImages, setAllImages] = useState(images);
     const queryVersionRef = useRef(0);
@@ -245,21 +247,24 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                                             const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
 
                                             if (baseWebp && baseAvif) {
+                                                // Use the two smallest configured sizes for masonry grid thumbnails
+                                                const smallSize = imageSizes.length >= 2 ? imageSizes[0] : findNearestImageSize(imageSizes, 640);
+                                                const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
                                                 return (
                                                     <>
                                                         <source
                                                             type="image/avif"
-                                                            srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_640.avif`)} 640w, ${imageUrl(`/uploads/avif/${baseAvif}_1536.avif`)} 1536w`}
+                                                            srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`}
                                                             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
                                                         <source
                                                             type="image/webp"
-                                                            srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_640.webp`)} 640w, ${imageUrl(`/uploads/webp/${baseWebp}_1536.webp`)} 1536w`}
+                                                            srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
                                                             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
                                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                                         <img
-                                                            src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`)}
+                                                            src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`)}
                                                             alt={altText}
                                                             width={image.width}
                                                             height={image.height}

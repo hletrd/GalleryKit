@@ -77,3 +77,40 @@ export function isValidSettingValue(key: GallerySettingKey, value: string): bool
 export function getSettingDefaults(): Record<GallerySettingKey, string> {
     return { ...DEFAULTS };
 }
+
+// ── Image Size Helpers ────────────────────────────────────────────────────────
+
+/** Default image output sizes — used when no admin-configured sizes are provided. */
+export const DEFAULT_IMAGE_SIZES = [640, 1536, 2048, 4096];
+
+/** Default OG image target size — used for social media previews. */
+export const DEFAULT_OG_TARGET_SIZE = 1536;
+
+/**
+ * Find the nearest configured image size to a target size.
+ * Used for OG images and thumbnails where a specific size is expected.
+ * Falls back to the largest size if no close match exists.
+ */
+export function findNearestImageSize(sizes: number[], targetSize: number): number {
+    if (sizes.length === 0) return targetSize; // fallback — no sizes configured
+    let nearest = sizes[0];
+    let minDiff = Math.abs(sizes[0] - targetSize);
+    for (let i = 1; i < sizes.length; i++) {
+        const diff = Math.abs(sizes[i] - targetSize);
+        if (diff < minDiff) {
+            minDiff = diff;
+            nearest = sizes[i];
+        }
+    }
+    return nearest;
+}
+
+/**
+ * Parse image_sizes string into sorted number array.
+ * Returns DEFAULT_IMAGE_SIZES if the input is empty or invalid.
+ */
+export function parseImageSizes(sizesStr: string): number[] {
+    if (!sizesStr || !sizesStr.trim()) return DEFAULT_IMAGE_SIZES;
+    const parsed = sizesStr.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
+    return parsed.length > 0 ? parsed.sort((a, b) => a - b) : DEFAULT_IMAGE_SIZES;
+}

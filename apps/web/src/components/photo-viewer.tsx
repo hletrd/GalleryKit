@@ -33,6 +33,7 @@ export function isEditableTarget(e: KeyboardEvent): boolean {
 
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface PhotoViewerProps {
     images: ImageDetail[];
@@ -44,9 +45,10 @@ interface PhotoViewerProps {
     isAdmin?: boolean;
     isSharedView?: boolean;
     syncPhotoQueryBasePath?: string;
+    imageSizes?: number[];
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -183,12 +185,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             <picture className="w-full h-full flex items-center justify-center">
                 <source
                     type="image/avif"
-                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
+                    srcSet={imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
                     sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
                 />
                 <source
                     type="image/webp"
-                    srcSet={[640, 1536, 2048, 4096].map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
+                    srcSet={imageSizes.map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
                     sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
                 />
                 <img
@@ -202,7 +204,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 />
             </picture>
         );
-    }, [image, t]);
+    }, [image, t, imageSizes]);
 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
@@ -542,6 +544,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
                     onClose={() => setShowLightbox(false)}
                     onNavigate={navigate}
+                    imageSizes={imageSizes}
                 />
             )}
 

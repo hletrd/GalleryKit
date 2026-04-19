@@ -10,6 +10,7 @@ import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 const cpuCount = os.cpus()?.length ?? 1;
 const maxConcurrency = Math.max(1, cpuCount - 1);
@@ -148,8 +149,8 @@ function parseExifDateTime(value: unknown): string | null {
     return null;
 }
 
-// Default output sizes — used when no admin-configured sizes are provided.
-const DEFAULT_OUTPUT_SIZES = [640, 1536, 2048, 4096];
+// Default output sizes — shared with gallery-config-shared.ts for client components
+const DEFAULT_OUTPUT_SIZES = DEFAULT_IMAGE_SIZES;
 
 /**
  * Delete all sized variants for a given base filename deterministically.

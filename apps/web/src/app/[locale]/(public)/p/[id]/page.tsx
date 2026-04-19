@@ -8,6 +8,8 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -59,7 +61,10 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
     if (image.topic) keywords.push(image.topic);
 
-    const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`;
+    // Use configured image sizes for OG image URLs (avoids 404s if admin changes image_sizes)
+    const config = await getGalleryConfig();
+    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
+    const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`;
     const absoluteImageUrl = `${seo.url}${imageUrl}`;
     const pageUrl = localizeUrl(seo.url, locale, `/p/${id}`);
 
@@ -118,6 +123,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     if (!image) return notFound();
 
     const seo = await getSeoSettings();
+    const config = await getGalleryConfig();
 
     // Replicate title logic for JSON-LD
     const hasTags = image.tags && image.tags.length > 0;
@@ -136,7 +142,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         '@context': 'https://schema.org',
         '@type': 'ImageObject',
         contentUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg}`,
-        thumbnailUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+        thumbnailUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`,
         encodingFormat: 'image/jpeg',
         license: 'https://creativecommons.org/licenses/by-nc/4.0/',
         acquireLicensePage: siteConfig.parent_url,
@@ -220,6 +226,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 nextId={image.nextId}
                 canShare={isAdminUser}
                 isAdmin={isAdminUser}
+                imageSizes={config.imageSizes}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (

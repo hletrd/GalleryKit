@@ -9,6 +9,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
 import { isEditableTarget } from '@/components/photo-viewer';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -16,6 +17,7 @@ interface LightboxProps {
     nextId: number | null;
     onClose: () => void;
     onNavigate: (direction: number) => void;
+    imageSizes?: number[];
 }
 
 export function LightboxTrigger({ onClick }: { onClick: () => void }) {
@@ -27,7 +29,7 @@ export function LightboxTrigger({ onClick }: { onClick: () => void }) {
     );
 }
 
-export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: LightboxProps) {
+export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSizes = DEFAULT_IMAGE_SIZES }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -146,13 +148,13 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
 
         const avifSrcSet = baseAvif
-            ? [640, 1536, 2048, 4096]
+            ? imageSizes
                   .map((w) => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`)
                   .join(', ')
             : undefined;
 
         const webpSrcSet = baseWebp
-            ? [640, 1536, 2048, 4096]
+            ? imageSizes
                   .map((w) => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`)
                   .join(', ')
             : undefined;
@@ -160,7 +162,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
         const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
 
         return { avifSrcSet, webpSrcSet, jpegSrc };
-    }, [image.filename_avif, image.filename_webp, image.filename_jpeg]);
+    }, [image.filename_avif, image.filename_webp, image.filename_jpeg, imageSizes]);
 
     const transitionStyle = shouldReduceMotion
         ? {}

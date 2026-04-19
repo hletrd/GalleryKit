@@ -8,6 +8,8 @@ import { ArrowLeft } from 'lucide-react';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
@@ -21,13 +23,16 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
     const pageUrl = localizeUrl(seo.url, locale, `/g/${key}`);
     const coverImage = group.images[0];
+    // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
+    const config = await getGalleryConfig();
+    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
     // Use custom OG image if configured, otherwise use cover photo
     const ogImages = seo.og_image_url
         ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
         : coverImage
             ? [{
-                url: `${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+                url: `${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`,
                 width: coverImage.width,
                 height: coverImage.height,
                 alt: t('ogAlt'),
@@ -53,7 +58,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             title: t('ogTitle'),
             description: t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }),
             ...(coverImage && !seo.og_image_url ? {
-                images: [`${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
+                images: [`${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`],
             } : seo.og_image_url ? {
                 images: [seo.og_image_url],
             } : {}),
@@ -71,6 +76,8 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     }
 
     const t = await getTranslations('sharedGroup');
+    const config = await getGalleryConfig();
+    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
     let photoId: number | null = null;
     if (photoIdParam && /^\d+$/.test(photoIdParam)) {
@@ -111,6 +118,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     tags={selectedImage.tags ?? []}
                     isSharedView
                     syncPhotoQueryBasePath={localizePath(locale, `/g/${key}`)}
+                    imageSizes={config.imageSizes}
                 />
             </>
         );
@@ -139,7 +147,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>
                             </div>
                             <Image
-                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, '_1536.webp')}`)}
+                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${ogImageSize}.webp`)}`)}
                                 alt={altText}
                                 width={image.width}
                                 height={image.height}

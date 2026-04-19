@@ -6,6 +6,8 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
@@ -20,12 +22,15 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const title = image.title && !isTitleFilename ? image.title : t('ogTitle');
     const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
+    // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
+    const config = await getGalleryConfig();
+    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
     // Use custom OG image if configured, otherwise use photo image
     const ogImages = seo.og_image_url
         ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
         : [{
-            url: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`,
+            url: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`,
             width: image.width,
             height: image.height,
             alt: title,
@@ -50,7 +55,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             card: 'summary_large_image',
             title: title,
             description: image.description || t('ogDescription', { site: seo.title }),
-            images: seo.og_image_url ? [seo.og_image_url] : [`${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_1536.jpg')}`],
+            images: seo.og_image_url ? [seo.og_image_url] : [`${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`],
         },
     };
 }
@@ -66,6 +71,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     }
 
     const seo = await getSeoSettings();
+    const config = await getGalleryConfig();
 
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const displayTitle = image.title && !isTitleFilename ? image.title : t('sharedPhoto');
@@ -89,6 +95,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 prevId={null}
                 nextId={null}
                 isSharedView
+                imageSizes={config.imageSizes}
             />
         </>
     );
