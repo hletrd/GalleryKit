@@ -103,6 +103,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         setProgress(0);
         setCompletedCount(0);
 
+        try {
         const UPLOAD_CONCURRENCY = 3;
 
         let successCount = 0;
@@ -163,8 +164,6 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
 
         await Promise.all(inFlight);
 
-        setUploading(false);
-
         if (duplicateFiles.length > 0) {
             const maxNames = 3;
             const visibleNames = duplicateFiles.slice(0, maxNames);
@@ -188,6 +187,9 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
             const failedSet = new Set(failedFiles);
             setFiles(prev => prev.filter(f => failedSet.has(f) || !files.includes(f)));
             setProgress(0);
+        }
+        } finally {
+            setUploading(false);
         }
     };
 
