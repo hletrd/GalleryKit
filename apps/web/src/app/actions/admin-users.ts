@@ -10,7 +10,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
-import { getClientIp, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, incrementRateLimit, resetRateLimit } from '@/lib/rate-limit';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -62,26 +62,26 @@ export async function createAdminUser(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    // Rate limit admin user creation to prevent brute-force / CPU DoS
+    // Rate limit admin user creation to prevent brute-force / CPU DoS.
+    // Uses the same pre-increment pattern as login (A-01 fix) to prevent
+    // TOCTOU between check and increment across concurrent requests.
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     if (checkUserCreateRateLimit(ip)) {
         return { error: t('tooManyAttempts') };
     }
-    // DB-backed check for accuracy across restarts
+    // Pre-increment DB rate limit BEFORE the expensive Argon2 hash.
+    // This ensures concurrent requests both increment the counter before
+    // either can proceed, preventing burst attacks that exploit the gap
+    // between check and increment.
     try {
+        await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
         if (dbLimit.limited) {
             return { error: t('tooManyAttempts') };
         }
     } catch {
-        // DB unavailable — rely on in-memory Map
-    }
-    // Pre-increment rate limit before expensive Argon2 hash
-    try {
-        await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
-    } catch {
-        // DB unavailable — in-memory Map already counted
+        // DB unavailable — rely on in-memory Map (already incremented above)
     }
 
     const username = formData.get('username')?.toString() ?? '';
@@ -106,6 +106,14 @@ export async function createAdminUser(formData: FormData) {
             logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(newUserId)).catch(console.debug);
         }
 
+        // Roll back DB rate limit on successful creation — this was a legitimate
+        // action, not a brute-force attempt. Matches login pattern (A-01 fix).
+        try {
+            await resetRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
+        } catch {
+            // DB unavailable — in-memory Map will expire naturally
+        }
+
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
     } catch (e: unknown) {
@@ -113,6 +121,13 @@ export async function createAdminUser(formData: FormData) {
             return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
+        // Roll back DB rate limit on unexpected errors — the user didn't
+        // fail due to brute-force, the infrastructure did.
+        try {
+            await resetRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
+        } catch {
+            // DB unavailable — in-memory Map will expire naturally
+        }
         return { error: t('failedToCreateUser') };
     }
 }
