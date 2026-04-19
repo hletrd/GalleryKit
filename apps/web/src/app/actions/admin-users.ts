@@ -48,7 +48,7 @@ export async function createAdminUser(formData: FormData) {
             logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(newUserId)).catch(console.debug);
         }
 
-        revalidateLocalizedPaths('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('users.username'))) {
@@ -85,7 +85,7 @@ export async function deleteAdminUser(id: number) {
             await tx.delete(adminUsers).where(eq(adminUsers.id, id));
         });
         logAuditEvent(currentUser.id, 'user_delete', 'user', String(id)).catch(console.debug);
-        revalidateLocalizedPaths('/admin/dashboard');
+        revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
     } catch (e: unknown) {
         if (e instanceof Error && e.message === 'LAST_ADMIN') {
