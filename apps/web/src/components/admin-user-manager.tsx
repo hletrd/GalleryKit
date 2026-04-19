@@ -42,6 +42,8 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                 setOpen(false);
                 router.refresh();
             }
+        } catch {
+            toast.error(t('serverActions.failedToCreateUser'));
         } finally {
             setIsCreating(false);
         }
