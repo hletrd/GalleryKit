@@ -44,8 +44,14 @@ export async function logAuditEvent(
  * Default retention: 90 days. Override with AUDIT_LOG_RETENTION_DAYS env var.
  */
 export async function purgeOldAuditLog(maxAgeMs?: number): Promise<void> {
-    const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10) || 90;
-    const effectiveMaxAgeMs = maxAgeMs ?? retentionDays * 24 * 60 * 60 * 1000;
+    // Precedence: 1) explicit parameter, 2) AUDIT_LOG_RETENTION_DAYS env var, 3) default 90 days
+    let effectiveMaxAgeMs: number;
+    if (maxAgeMs !== undefined) {
+        effectiveMaxAgeMs = maxAgeMs;
+    } else {
+        const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10) || 90;
+        effectiveMaxAgeMs = retentionDays * 24 * 60 * 60 * 1000;
+    }
     const cutoff = new Date(Date.now() - effectiveMaxAgeMs);
     await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));
 }
