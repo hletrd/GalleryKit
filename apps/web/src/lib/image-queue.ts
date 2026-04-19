@@ -8,6 +8,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
+import { purgeOldAuditLog } from '@/lib/audit';
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 const CLAIM_RETRY_DELAY_MS = 5000;
@@ -269,13 +270,15 @@ export const bootstrapImageProcessingQueue = async () => {
         }
         state.bootstrapped = true;
 
-        // US-004: Purge expired sessions and stale rate-limit buckets on startup and periodically
+        // US-004: Purge expired sessions, stale rate-limit buckets, and old audit log entries on startup and periodically
         purgeExpiredSessions();
         purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
+        purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
         if (state.gcInterval) clearInterval(state.gcInterval);
         state.gcInterval = setInterval(() => {
             purgeExpiredSessions();
             purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
+            purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
             pruneRetryMaps(state);
         }, 60 * 60 * 1000); // every hour
         state.gcInterval.unref?.();

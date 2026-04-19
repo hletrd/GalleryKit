@@ -1,4 +1,5 @@
 import { db, auditLog } from '@/db';
+import { lt } from 'drizzle-orm';
 
 /**
  * Fire-and-forget audit log writer.
@@ -36,4 +37,15 @@ export async function logAuditEvent(
         ip: ip ?? null,
         metadata: serializedMetadata,
     });
+}
+
+/**
+ * Purge audit log entries older than the specified age.
+ * Default retention: 90 days. Override with AUDIT_LOG_RETENTION_DAYS env var.
+ */
+export async function purgeOldAuditLog(maxAgeMs?: number): Promise<void> {
+    const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10) || 90;
+    const effectiveMaxAgeMs = maxAgeMs ?? retentionDays * 24 * 60 * 60 * 1000;
+    const cutoff = new Date(Date.now() - effectiveMaxAgeMs);
+    await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));
 }
