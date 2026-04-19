@@ -244,12 +244,16 @@ export async function uploadImages(formData: FormData) {
     // Update cumulative upload tracker with actual (not pre-incremented) values.
     // Use additive adjustment instead of absolute assignment to avoid overwriting
     // concurrent requests' pre-incremented contributions for the same IP.
-    // Re-read from Map to avoid operating on a stale reference if pruneUploadTracker()
-    // evicted this IP's entry during the upload loop.
-    const currentTracker = uploadTracker.get(uploadIp) || tracker;
-    currentTracker.count += (successCount - files.length);
-    currentTracker.bytes += (uploadedBytes - totalSize);
-    uploadTracker.set(uploadIp, currentTracker);
+    // Only adjust if the entry still exists in the Map — if pruneUploadTracker()
+    // evicted this IP's entry during the upload loop, the entry is gone and
+    // there's nothing to correct. Using the stale `tracker` fallback would
+    // overwrite concurrent requests' pre-incremented contributions.
+    const currentTracker = uploadTracker.get(uploadIp);
+    if (currentTracker) {
+        currentTracker.count += (successCount - files.length);
+        currentTracker.bytes += (uploadedBytes - totalSize);
+        uploadTracker.set(uploadIp, currentTracker);
+    }
 
     // Audit log for upload action
     const currentUser = await getCurrentUser();
@@ -391,6 +395,12 @@ export async function deleteImages(ids: number[]) {
         queueState.enqueued.delete(id);
     }
 
+    // Log audit event before the transaction — we already verified the images exist
+    // and have admin context. Logging here ensures the audit is recorded even if
+    // concurrent deletion causes the transaction to delete 0 rows (matches deleteImage pattern).
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: foundIds.length, requested: ids.length, notFound: notFoundCount }).catch(console.debug);
+
     // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
     if (foundIds.length > 0) {
         await db.transaction(async (tx) => {
@@ -415,9 +425,6 @@ export async function deleteImages(ids: number[]) {
 
     const successCount = foundIds.length;
     const errorCount = notFoundCount;
-
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount, requested: ids.length, notFound: notFoundCount }).catch(console.debug);
 
     const affectedTopics = new Set(imageRecords.map(r => r.topic));
 

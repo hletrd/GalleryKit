@@ -10,7 +10,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     // Validate slug format before passing to data layer (defense in depth)
     if (topicSlug && (!isValidSlug(topicSlug))) return [];
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
-    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const safeOffset = Math.max(Math.floor(Number(offset)) || 0, 0);
     // Cap maximum offset to prevent deep pagination DoS
     if (safeOffset > 10000) return [];
     // Cap tag array and validate format to prevent complex query DoS

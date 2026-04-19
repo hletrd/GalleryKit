@@ -260,7 +260,8 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
         if (isMySQLError(e) && e.code === 'ER_NO_REFERENCED_ROW_2') {
             return { error: t('topicNotFound') };
         }
-        return { error: t('invalidAliasFormat') };
+        console.error('Failed to create topic alias:', e);
+        return { error: t('failedToCreateTopic') };
     }
 }
 
