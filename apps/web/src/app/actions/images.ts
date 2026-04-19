@@ -20,6 +20,27 @@ import { headers } from 'next/headers';
 const uploadTracker = new Map<string, { count: number; bytes: number; windowStart: number }>();
 const UPLOAD_TRACKING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const UPLOAD_MAX_FILES_PER_WINDOW = 100;
+const UPLOAD_TRACKER_MAX_KEYS = 2000;
+
+/** Prune expired upload tracker entries to prevent unbounded memory growth. */
+export function pruneUploadTracker() {
+    const now = Date.now();
+    for (const [key, entry] of uploadTracker) {
+        if (now - entry.windowStart > UPLOAD_TRACKING_WINDOW_MS * 2) {
+            uploadTracker.delete(key);
+        }
+    }
+    // Hard cap: evict oldest if still over limit after expiry pruning
+    if (uploadTracker.size > UPLOAD_TRACKER_MAX_KEYS) {
+        const excess = uploadTracker.size - UPLOAD_TRACKER_MAX_KEYS;
+        let evicted = 0;
+        for (const key of uploadTracker.keys()) {
+            if (evicted >= excess) break;
+            uploadTracker.delete(key);
+            evicted++;
+        }
+    }
+}
 
 export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
@@ -51,6 +72,10 @@ export async function uploadImages(formData: FormData) {
     const requestHeaders = await headers();
     const uploadIp = getClientIp(requestHeaders);
     const now = Date.now();
+    // Prune stale entries periodically to prevent unbounded memory growth
+    if (uploadTracker.size > UPLOAD_TRACKER_MAX_KEYS / 2) {
+        pruneUploadTracker();
+    }
     const tracker = uploadTracker.get(uploadIp) || { count: 0, bytes: 0, windowStart: now };
     if (now - tracker.windowStart > UPLOAD_TRACKING_WINDOW_MS) {
         tracker.count = 0;
