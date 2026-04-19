@@ -57,7 +57,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     useEffect(() => {
         try {
             if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
-                // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reading SSR-unavailable sessionStorage on mount
                 setShowLightbox(true);
             }
         } catch { console.debug('sessionStorage read failed') }

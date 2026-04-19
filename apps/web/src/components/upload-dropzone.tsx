@@ -232,8 +232,8 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                         </select>
                     </div>                    {/* Common Tags Selection */}
                     <div>
-                        <label htmlFor="upload-tags" className="text-sm font-medium mb-1 block">{t('upload.tags')} ({t('home.allTags')})</label>
-                        <div id="upload-tags">
+                        <label id="upload-tags-label" className="text-sm font-medium mb-1 block">{t('upload.tags')} ({t('home.allTags')})</label>
+                        <div role="group" aria-labelledby="upload-tags-label">
                         <TagInput
                             availableTags={availableTags}
                             selectedTags={selectedTags}
