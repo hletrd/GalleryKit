@@ -150,7 +150,10 @@ export async function uploadImages(formData: FormData) {
                     exifDb.longitude = null;
                 }
             } catch {
-                // DB unavailable — proceed without stripping (privacy-safe default is to keep)
+                // DB unavailable — strip GPS by default (privacy-safe: err on the side of
+                // privacy when the admin's preference can't be verified)
+                exifDb.latitude = null;
+                exifDb.longitude = null;
             }
 
             // Phase 2: Insert into DB immediately so it shows up in UI
