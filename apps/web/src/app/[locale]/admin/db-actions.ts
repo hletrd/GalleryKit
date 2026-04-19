@@ -117,7 +117,7 @@ export async function dumpDatabase() {
             ...sslArgs,
             DB_NAME
         ], {
-            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
         });
 
         const writeStream = createWriteStream(outputPath);
@@ -309,7 +309,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             ...restoreSslArgs,
             DB_NAME
         ], {
-            env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
         });
 
         const readStream = createReadStream(tempPath);
