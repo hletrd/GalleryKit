@@ -292,6 +292,6 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias }).catch(console.debug);
 
-    revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
+    revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${alias}`, `/${topicSlug}`);
     return { success: true };
 }
