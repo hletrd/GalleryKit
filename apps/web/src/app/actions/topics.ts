@@ -197,6 +197,7 @@ export async function deleteTopic(slug: string) {
     try {
         // Transaction prevents TOCTOU: image could be added between check and delete
         let deletedImageFilename: string | null = null;
+        let deletedRows = 0;
         await db.transaction(async (tx) => {
             const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, slug)).limit(1);
             if (headerImages.length > 0) {
@@ -204,13 +205,18 @@ export async function deleteTopic(slug: string) {
             }
             const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, slug)).limit(1);
             deletedImageFilename = topicRecord?.image_filename ?? null;
-            await tx.delete(topics).where(eq(topics.slug, slug));
+            const [delResult] = await tx.delete(topics).where(eq(topics.slug, slug));
+            deletedRows = delResult.affectedRows;
         });
         if (deletedImageFilename) {
             await deleteTopicImage(deletedImageFilename);
         }
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', slug).catch(console.debug);
+        // Log audit event only when the topic was actually deleted — avoids duplicate
+        // entries when concurrent deletion causes the transaction to delete 0 rows.
+        if (deletedRows > 0) {
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', slug).catch(console.debug);
+        }
 
         revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/', `/${slug}`);
 
