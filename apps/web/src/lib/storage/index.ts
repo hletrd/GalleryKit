@@ -128,12 +128,10 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
     const oldType = state.type;
     const wasInitialized = state.initialized;
 
-    // Dispose old backend
-    if (state.backend.dispose) {
-        await state.backend.dispose().catch(err => {
-            console.warn('[Storage] Failed to dispose old backend:', err);
-        });
-    }
+    // NOTE: Do NOT dispose the old backend until the new one is confirmed working.
+    // If we dispose first and the new backend fails to init, the rollback would
+    // restore a destroyed backend (e.g., S3Client.destroy() has been called),
+    // causing all subsequent storage operations to fail until server restart.
 
     let newBackend: StorageBackend;
     switch (type) {
@@ -162,6 +160,12 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
     try {
         await getStorage();
         console.log(`[Storage] Switched to ${type} backend`);
+        // New backend is confirmed working — now safe to dispose the old one
+        if (oldBackend.dispose) {
+            await oldBackend.dispose().catch(err => {
+                console.warn('[Storage] Failed to dispose old backend:', err);
+            });
+        }
     } catch (err) {
         // Roll back to the old backend so the app remains functional
         console.error(`[Storage] Failed to initialize ${type} backend, rolling back to ${oldType}:`, err);
