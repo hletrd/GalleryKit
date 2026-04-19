@@ -54,6 +54,7 @@ export async function clearSuccessfulPasswordAttempts(ip: string) {
 
 /** Prune expired entries and enforce hard cap on password change rate-limit Map. */
 export const PASSWORD_CHANGE_MAX_ATTEMPTS = 10;
+const PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS = 5000;
 
 export function prunePasswordChangeRateLimit(now: number) {
     for (const [key, entry] of passwordChangeRateLimit) {
@@ -63,7 +64,7 @@ export function prunePasswordChangeRateLimit(now: number) {
     }
 
     // Hard cap: evict oldest entries if still over limit after expiry pruning
-    if (passwordChangeRateLimit.size > LOGIN_RATE_LIMIT_MAX_KEYS) {
+    if (passwordChangeRateLimit.size > PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS) {
         const excess = passwordChangeRateLimit.size - LOGIN_RATE_LIMIT_MAX_KEYS;
         let evicted = 0;
         for (const key of passwordChangeRateLimit.keys()) {

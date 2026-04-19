@@ -58,6 +58,18 @@ export async function searchImagesAction(query: string) {
         entry.count++;
     }
 
+    // DB-backed increment BEFORE the check (matches sharing.ts and admin-users.ts pattern).
+    // Placing incrementRateLimit before checkRateLimit ensures the counter reflects
+    // the current request when the check runs, preventing burst attacks that exploit
+    // the gap between check and increment.
+    try {
+        await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS);
+    } catch {
+        // DB unavailable — keep the in-memory pre-increment so the in-memory
+        // rate limit remains effective during DB outages. The in-memory map
+        // is the fallback authority when the DB is unreachable.
+    }
+
     // DB-backed check for accuracy across restarts
     try {
         const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
@@ -76,14 +88,6 @@ export async function searchImagesAction(query: string) {
         }
     } catch {
         // DB unavailable — rely on in-memory Map
-    }
-
-    try {
-        await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS);
-    } catch {
-        // DB unavailable — keep the in-memory pre-increment so the in-memory
-        // rate limit remains effective during DB outages. The in-memory map
-        // is the fallback authority when the DB is unreachable.
     }
 
     const safeQuery = query.trim().slice(0, 200);
