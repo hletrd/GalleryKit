@@ -146,18 +146,25 @@ export async function login(prevState: { error?: string } | null, formData: Form
             const cookieStore = await cookies();
             const sessionToken = await generateSessionToken();
             const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+            const sessionId = hashSessionToken(sessionToken);
 
-            await db.insert(sessions).values({
-                id: hashSessionToken(sessionToken),
-                userId: user.id,
-                expiresAt: expiresAt
+            // Insert new session and invalidate pre-existing sessions in an
+            // explicit transaction to prevent session fixation. This ensures
+            // the insert succeeds before deleting other sessions, avoiding the
+            // edge case where both old and new sessions could be lost.
+            await db.transaction(async (tx) => {
+                await tx.insert(sessions).values({
+                    id: sessionId,
+                    userId: user.id,
+                    expiresAt: expiresAt
+                });
+
+                // Invalidate pre-existing sessions to prevent session fixation
+                await tx.delete(sessions).where(and(
+                    eq(sessions.userId, user.id),
+                    sql`${sessions.id} != ${sessionId}`
+                ));
             });
-
-            // Invalidate pre-existing sessions to prevent session fixation
-            await db.delete(sessions).where(and(
-                eq(sessions.userId, user.id),
-                sql`${sessions.id} != ${hashSessionToken(sessionToken)}`
-            ));
 
             // Require Secure when behind TLS or in production.
             const forwardedProto = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
