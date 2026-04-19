@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias } from '@/app/actions';
 import { toast } from 'sonner';
-import { Pencil, Trash2, Plus, ChevronLeft, X } from 'lucide-react';
+import { Pencil, Trash2, Plus, ChevronLeft, X, Loader2 } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -52,6 +52,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [newAlias, setNewAlias] = useState('');
     const [deleteSlug, setDeleteSlug] = useState<string | null>(null);
     const [deleteAliasInfo, setDeleteAliasInfo] = useState<{ topicSlug: string; alias: string } | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     async function handleCreate(formData: FormData) {
         const res = await createTopic(formData);
@@ -77,7 +78,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     }
 
     async function handleDelete(slug: string) {
+        setIsDeleting(true);
         const res = await deleteTopic(slug);
+        setIsDeleting(false);
         if (res?.error) {
             toast.error(res.error);
         } else {
@@ -100,7 +103,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     }
 
     async function handleDeleteAlias(topicSlug: string, alias: string) {
+        setIsDeleting(true);
         const res = await deleteTopicAlias(topicSlug, alias);
+        setIsDeleting(false);
         if (res?.error) {
             toast.error(res.error);
         } else {
@@ -193,8 +198,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { if (deleteSlug) handleDelete(deleteSlug); setDeleteSlug(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            {t('imageManager.delete')}
+                        <AlertDialogAction onClick={() => { if (deleteSlug) handleDelete(deleteSlug); setDeleteSlug(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={isDeleting}>
+                            {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isDeleting ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
@@ -269,8 +275,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { if (deleteAliasInfo) handleDeleteAlias(deleteAliasInfo.topicSlug, deleteAliasInfo.alias); setDeleteAliasInfo(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            {t('imageManager.delete')}
+                        <AlertDialogAction onClick={() => { if (deleteAliasInfo) handleDeleteAlias(deleteAliasInfo.topicSlug, deleteAliasInfo.alias); setDeleteAliasInfo(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={isDeleting}>
+                            {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isDeleting ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

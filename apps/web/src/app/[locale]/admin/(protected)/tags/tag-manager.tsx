@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { updateTag, deleteTag } from '@/app/actions';
 import { toast } from 'sonner';
-import { Pencil, Trash2, ChevronLeft } from 'lucide-react';
+import { Pencil, Trash2, ChevronLeft, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from "@/components/i18n-provider";
 import Link from 'next/link';
@@ -45,6 +45,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     const { t, locale } = useTranslation();
     const [editingTag, setEditingTag] = useState<Tag | null>(null);
     const [deleteId, setDeleteId] = useState<number | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const router = useRouter();
 
     async function handleUpdate(formData: FormData) {
@@ -62,7 +63,9 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     }
 
     async function handleDelete(id: number) {
+        setIsDeleting(true);
         const res = await deleteTag(id);
+        setIsDeleting(false);
         if (res?.error) {
             toast.error(res.error);
         } else {
@@ -125,8 +128,9 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { if (deleteId !== null) handleDelete(deleteId); setDeleteId(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            {t('imageManager.delete')}
+                        <AlertDialogAction onClick={() => { if (deleteId !== null) handleDelete(deleteId); setDeleteId(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={isDeleting}>
+                            {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isDeleting ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
