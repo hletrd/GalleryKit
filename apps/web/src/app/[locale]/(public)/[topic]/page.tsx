@@ -6,6 +6,7 @@ import siteConfig from "@/site-config.json";
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { BASE_URL } from '@/lib/constants';
 
 
 export const revalidate = 3600;
@@ -16,7 +17,6 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
   const t = await getTranslations('topic');
-  const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
   const topicData = await getTopicBySlugCached(topic);
 
@@ -101,7 +101,7 @@ export default async function TopicPage({
   const hasMore = totalCount > PAGE_SIZE;
   const tags = allTags.filter(t => t.count > 1);
 
-  const baseUrl = process.env.BASE_URL || siteConfig.url;
+  const baseUrl = BASE_URL;
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',

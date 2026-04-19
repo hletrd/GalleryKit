@@ -5,6 +5,7 @@ import siteConfig from "@/site-config.json";
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { localizeUrl } from '@/lib/locale-path';
+import { BASE_URL } from '@/lib/constants';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -17,7 +18,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
   const t = await getTranslations('home');
-  const pageUrl = localizeUrl(process.env.BASE_URL || siteConfig.url, locale, '/');
+  const pageUrl = localizeUrl(BASE_URL, locale, '/');
 
   const images = await getImagesLite(undefined, undefined, 1, 0);
   const latestImage = images[0];
@@ -43,7 +44,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       siteName: siteConfig.title,
       images: latestImage ? [
         {
-          url: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${latestImage.filename_jpeg}`,
+          url: `${BASE_URL}/uploads/jpeg/${latestImage.filename_jpeg}`,
           width: latestImage.width,
           height: latestImage.height,
           alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
@@ -62,7 +63,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
   const locale = await getLocale();
-  const baseUrl = process.env.BASE_URL || siteConfig.url;
+  const baseUrl = BASE_URL;
 
   // Root always gets latest uploads (no topic)
   const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);

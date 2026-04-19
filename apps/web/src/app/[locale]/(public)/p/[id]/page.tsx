@@ -8,6 +8,7 @@ import { TagInfo } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { BASE_URL } from '@/lib/constants';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -16,8 +17,6 @@ const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
 
 // Cache for 1 week (604800s) as photo content rarely changes
 export const revalidate = 604800;
-
-const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
@@ -120,8 +119,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     const jsonLd = {
         '@context': 'https://schema.org',
         '@type': 'ImageObject',
-        contentUrl: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${image.filename_jpeg}`,
-        thumbnailUrl: `${process.env.BASE_URL || siteConfig.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
+        contentUrl: `${BASE_URL}/uploads/jpeg/${image.filename_jpeg}`,
+        thumbnailUrl: `${BASE_URL}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, '_640.jpg')}`,
         encodingFormat: 'image/jpeg',
         license: 'https://creativecommons.org/licenses/by-nc/4.0/',
         acquireLicensePage: siteConfig.parent_url,

@@ -7,10 +7,9 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { BASE_URL } from '@/lib/constants';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'));
-
-const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
