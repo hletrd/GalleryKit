@@ -185,9 +185,21 @@ export async function uploadImages(formData: FormData) {
                             }));
                             // Single batch insert for all tags
                             await db.insert(tags).ignore().values(tagEntries);
-                            const slugs = tagEntries.map(t => t.slug);
-                            // Single batch fetch for all tag records
-                            const tagRecords = await db.select().from(tags).where(inArray(tags.slug, slugs));
+                            // Look up by exact name first, then fall back to slug — avoids returning
+                            // the wrong tag when two different names produce the same slug (slug collision).
+                            // Same pattern as addTagToImage, batchAddTags, and batchUpdateImageTags.
+                            const tagRecordsByName = await db.select().from(tags).where(inArray(tags.name, uniqueTagNames));
+                            const foundByName = new Set(tagRecordsByName.map(r => r.name));
+                            const missingNames = uniqueTagNames.filter(n => !foundByName.has(n));
+                            const missingSlugs = missingNames.map(n => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                            const tagRecordsBySlug = missingSlugs.length > 0
+                                ? await db.select().from(tags).where(inArray(tags.slug, missingSlugs))
+                                : [];
+                            // Merge: prefer name-match records, then slug-fallback records
+                            const tagRecords = [
+                                ...tagRecordsByName,
+                                ...tagRecordsBySlug.filter(r => !foundByName.has(r.name) && !tagRecordsByName.some(nr => nr.id === r.id)),
+                            ];
                             // US-002: Warn on tag slug collisions
                             const intendedBySlug = new Map(tagEntries.map(t => [t.slug, t.name]));
                             for (const rec of tagRecords) {
