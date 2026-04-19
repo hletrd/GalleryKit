@@ -426,10 +426,6 @@ export async function getSharedGroup(
         .limit(1);
     if (!group) return null;
 
-    if (options?.incrementViewCount !== false) {
-        bufferGroupViewCount(group.id);
-    }
-
     const groupImages = await db.select({
         ...selectFields,
         blur_data_url: images.blur_data_url,
@@ -471,6 +467,12 @@ export async function getSharedGroup(
         }));
     } else {
         imagesWithTags = [];
+    }
+
+    // Increment view count only after the image fetch succeeds — avoids
+    // overcounting on DB errors during the image JOIN query.
+    if (options?.incrementViewCount !== false) {
+        bufferGroupViewCount(group.id);
     }
 
     return {
