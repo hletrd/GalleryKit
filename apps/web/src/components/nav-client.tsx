@@ -3,10 +3,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronUp, ChevronDown, Sun, Moon } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "next-themes";
 
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useTranslation } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,7 @@ export function NavClient({ topics }: NavClientProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const locale = useLocale();
+    const router = useRouter();
     const { t } = useTranslation();
     const { resolvedTheme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
@@ -138,12 +139,15 @@ export function NavClient({ topics }: NavClientProps) {
                         <Sun className="h-4 w-4 hidden dark:block" />
                         <Moon className="h-4 w-4 block dark:hidden" />
                     </button>
-                    <Link
-                        href={localeSwitchHref}
+                    <button
+                        onClick={useCallback(() => {
+                            document.cookie = `NEXT_LOCALE=${otherLocale};path=/;SameSite=Lax;max-age=${60 * 60 * 24 * 365}`;
+                            router.push(localeSwitchHref);
+                        }, [otherLocale, localeSwitchHref, router])}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
                     >
                         {otherLocale.toUpperCase()}
-                    </Link>
+                    </button>
                 </div>
             </div>
         </nav>
