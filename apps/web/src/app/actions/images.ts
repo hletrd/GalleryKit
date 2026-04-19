@@ -107,6 +107,15 @@ export async function uploadImages(formData: FormData) {
         return { error: `Cumulative upload size exceeds ${formatUploadLimit(MAX_TOTAL_UPLOAD_BYTES)} limit per hour` };
     }
 
+    // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
+    // the same IP could all read the same tracker state and bypass the limit.
+    // We optimistically claim the bytes now and adjust after processing.
+    const originalTrackerBytes = tracker.bytes;
+    const originalTrackerCount = tracker.count;
+    tracker.bytes += totalSize;
+    tracker.count += files.length;
+    uploadTracker.set(uploadIp, tracker);
+
     if (!topic) return { error: 'Topic required' };
 
     // Validate topic slug format
@@ -223,9 +232,10 @@ export async function uploadImages(formData: FormData) {
         return { error: 'All uploads failed' };
     }
 
-    // Update cumulative upload tracker
-    tracker.count += successCount;
-    tracker.bytes += uploadedBytes;
+    // Update cumulative upload tracker with actual (not pre-incremented) values.
+    // We pre-incremented before processing; now adjust to the real consumed amount.
+    tracker.count = originalTrackerCount + successCount;
+    tracker.bytes = originalTrackerBytes + uploadedBytes;
     uploadTracker.set(uploadIp, tracker);
 
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
