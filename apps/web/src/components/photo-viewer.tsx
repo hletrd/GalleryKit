@@ -22,6 +22,15 @@ import { ImageDetail, TagInfo, hasExifData, nu } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 
+/** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
+export function isEditableTarget(e: KeyboardEvent): boolean {
+    const target = e.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
+    if (target instanceof HTMLElement && target.isContentEditable) return true;
+    if (target instanceof HTMLElement && target.getAttribute('role') === 'textbox') return true;
+    return false;
+}
+
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';
 
@@ -129,6 +138,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (showLightbox) return;
+            if (isEditableTarget(e)) return;
             if (e.key === "ArrowLeft") {
                 navigate(-1);
             } else if (e.key === "ArrowRight") {

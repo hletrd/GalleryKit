@@ -8,6 +8,7 @@ import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
 import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
+import { isEditableTarget } from '@/components/photo-viewer';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -114,7 +115,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate }: Lightbo
                 e.stopPropagation();
             }
             if (e.key === 'f' || e.key === 'F') {
-                if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+                if (isEditableTarget(e)) return;
                 toggleFullscreen();
             } else if (e.key === 'ArrowLeft' && prevId !== null) {
                 onNavigate(-1);
