@@ -31,8 +31,12 @@ async function flushGroupViewCounts() {
                 .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
                 .where(eq(sharedGroups.id, groupId))
                 .catch(() => {
-                    // Re-buffer failed increment for next flush
-                    viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
+                    // Re-buffer failed increment for next flush, respecting hard cap
+                    if (viewCountBuffer.size < MAX_VIEW_COUNT_BUFFER_SIZE || viewCountBuffer.has(groupId)) {
+                        viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
+                    } else {
+                        console.warn(`[viewCount] Buffer at capacity during re-buffer, dropping ${count} views for group ${groupId}`);
+                    }
                 })
         )
     );
