@@ -14,6 +14,7 @@ import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-que
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
+import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
 
@@ -139,6 +140,17 @@ export async function uploadImages(formData: FormData) {
 
             // Extract EXIF
             const exifDb = extractExifForDb(data.exifData);
+
+            // Strip GPS coordinates if the privacy setting is enabled
+            try {
+                const config = await getGalleryConfig();
+                if (config.stripGpsOnUpload) {
+                    exifDb.latitude = null;
+                    exifDb.longitude = null;
+                }
+            } catch {
+                // DB unavailable — proceed without stripping (privacy-safe default is to keep)
+            }
 
             // Phase 2: Insert into DB immediately so it shows up in UI
             const insertValues = {
@@ -314,11 +326,7 @@ export async function deleteImage(id: number) {
 
     const imageTopic = image.topic;
 
-    // Log audit event before the delete transaction — we already verified the image exists
-    // and have the admin context. Logging here ensures the audit is recorded even if
-    // concurrent deletion causes the transaction to delete 0 rows.
     const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
 
     // US-001: Remove from processing queue so the queue detects deletion
     const queueState = getProcessingQueueState();
@@ -330,13 +338,25 @@ export async function deleteImage(id: number) {
         await tx.delete(images).where(eq(images.id, id));
     });
 
+    // Log audit event after the transaction succeeds — avoids false-positive entries
+    // when concurrent deletion causes the transaction to delete 0 rows.
+    logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
+
     // Delete files deterministically (no readdir) — best effort, all in parallel
+    // Read configured sizes to ensure all variants are cleaned up
+    let deleteSizes: number[] | undefined;
+    try {
+        const config = await getGalleryConfig();
+        deleteSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
+    } catch {
+        // DB unavailable — use default sizes
+    }
     try {
         await Promise.all([
             fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, image.filename_original)).catch(() => {}),
-            deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp),
-            deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif),
-            deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg),
+            deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, deleteSizes),
+            deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, deleteSizes),
+            deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, deleteSizes),
         ]);
     } catch {
         console.error("Error deleting files");
@@ -416,13 +436,21 @@ export async function deleteImages(ids: number[]) {
     }
 
     // Clean up files deterministically (no readdir) for all images concurrently
+    // Read configured sizes to ensure all variants are cleaned up
+    let batchDeleteSizes: number[] | undefined;
+    try {
+        const config = await getGalleryConfig();
+        batchDeleteSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
+    } catch {
+        // DB unavailable — use default sizes
+    }
     await Promise.all(imageRecords.map(async (image) => {
         try {
             await Promise.all([
                 fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, image.filename_original)).catch(() => {}),
-                deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp),
-                deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif),
-                deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg),
+                deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, batchDeleteSizes),
+                deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, batchDeleteSizes),
+                deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, batchDeleteSizes),
             ]);
         } catch {
             console.error(`Error deleting files for image ${image.id}`);
