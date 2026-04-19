@@ -75,6 +75,8 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                 toast.success(t('tags.deleted'));
                 router.refresh();
             }
+        } catch {
+            toast.error(t('serverActions.failedToDeleteTag'));
         } finally {
             setIsDeleting(false);
         }
