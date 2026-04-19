@@ -117,6 +117,7 @@ export async function uploadImages(formData: FormData) {
     }
 
     let successCount = 0;
+    let uploadedBytes = 0;
     const failedFiles: string[] = [];
 
     for (const file of files) {
@@ -148,7 +149,7 @@ export async function uploadImages(formData: FormData) {
                 ...exifDb,
                 color_space: data.iccProfileName || exifDb.color_space,
                 bit_depth: data.bitDepth,
-                original_format: data.filenameOriginal.split('.').pop()?.toUpperCase() || null,
+                original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
                 original_file_size: file.size,
             };
 
@@ -210,6 +211,7 @@ export async function uploadImages(formData: FormData) {
                 });
 
                 successCount++;
+                uploadedBytes += file.size;
             }
         } catch (e) {
             // Log full error server-side; only return filename to client (no internal details)
@@ -224,7 +226,7 @@ export async function uploadImages(formData: FormData) {
 
     // Update cumulative upload tracker
     tracker.count += successCount;
-    tracker.bytes += totalSize;
+    tracker.bytes += uploadedBytes;
     uploadTracker.set(uploadIp, tracker);
 
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
@@ -384,12 +386,18 @@ export async function deleteImages(ids: number[]) {
 
     const affectedTopics = new Set(imageRecords.map(r => r.topic));
 
-    revalidateLocalizedPaths(
-        '/',
-        '/admin/dashboard',
-        ...foundIds.map(id => `/p/${id}`),
-        ...[...affectedTopics].map(topic => `/${topic}`)
-    );
+    // For large batches, use layout-level revalidation to avoid ISR cache thrash
+    // from hundreds of individual revalidatePath calls
+    if (foundIds.length > 20) {
+        revalidateLocalizedPaths('/', '/admin/dashboard');
+    } else {
+        revalidateLocalizedPaths(
+            '/',
+            '/admin/dashboard',
+            ...foundIds.map(id => `/p/${id}`),
+            ...[...affectedTopics].map(topic => `/${topic}`)
+        );
+    }
     return { success: true, count: successCount, errors: errorCount };
 }
 
