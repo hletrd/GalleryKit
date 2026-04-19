@@ -188,6 +188,8 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
             setFiles(prev => prev.filter(f => failedSet.has(f) || !files.includes(f)));
             setProgress(0);
         }
+        } catch {
+            toast.error(t('upload.failed'));
         } finally {
             setUploading(false);
         }

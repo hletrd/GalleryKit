@@ -132,7 +132,8 @@
     "success": "Uploaded {count} photos.",
     "partialSuccess": "{count} uploaded, {failed} failed.",
     "duplicateWarning": "Duplicate filenames ({count}): {names}. Replaced.",
-    "addTagPlaceholder": "+ Tag"
+    "addTagPlaceholder": "+ Tag",
+    "failed": "Upload failed."
   },
   "imageManager": {
     "selected": "{count} selected",

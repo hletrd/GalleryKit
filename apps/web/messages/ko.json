@@ -132,7 +132,8 @@
     "success": "{count}장을 업로드했습니다.",
     "partialSuccess": "{count}장 성공, {failed}장 실패했습니다.",
     "duplicateWarning": "중복된 파일명 {count}개: {names}. 기존 사진을 교체했습니다.",
-    "addTagPlaceholder": "+ 태그"
+    "addTagPlaceholder": "+ 태그",
+    "failed": "업로드에 실패했습니다."
   },
   "imageManager": {
     "selected": "{count}장 선택됨",
