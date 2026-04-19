@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/process-image';
+import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
@@ -43,8 +44,9 @@ function pruneUploadTracker() {
 }
 
 export async function uploadImages(formData: FormData) {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { error: 'Unauthorized' };
+        return { error: t('unauthorized') };
     }
 
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
@@ -53,7 +55,7 @@ export async function uploadImages(formData: FormData) {
     const tagsString = formData.get('tags')?.toString() ?? '';
 
     if (tagsString && tagsString.length > 1000) {
-        return { error: 'Tags string is too long (max 1000 chars)' };
+        return { error: t('tagsStringTooLong') };
     }
 
     const tagNames = tagsString
@@ -61,11 +63,11 @@ export async function uploadImages(formData: FormData) {
         : [];
 
     if (tagsString && tagNames.length !== tagsString.split(',').map(t => t.trim()).filter(Boolean).length) {
-        return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
+        return { error: t('invalidTagNames') };
     }
 
-    if (!files.length) return { error: 'No files provided' };
-    if (files.length > 100) return { error: 'Too many files at once (max 100)' };
+    if (!files.length) return { error: t('noFilesProvided') };
+    if (files.length > 100) return { error: t('tooManyFiles') };
 
     // Server-side cumulative upload tracking across per-file invocations.
     // The client sends files individually, so per-call limits are insufficient.
@@ -81,7 +83,7 @@ export async function uploadImages(formData: FormData) {
         tracker.windowStart = now;
     }
     if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
-        return { error: `Upload limit reached (max ${UPLOAD_MAX_FILES_PER_WINDOW} files per hour). Please try again later.` };
+        return { error: t('uploadLimitReached') };
     }
 
     // Disk space pre-check: require at least 1GB free before accepting uploads
@@ -90,7 +92,7 @@ export async function uploadImages(formData: FormData) {
         const stats = await statfs(UPLOAD_DIR_ORIGINAL);
         const freeBytes = stats.bfree * stats.bsize;
         if (freeBytes < 1024 * 1024 * 1024) {
-            return { error: 'Insufficient disk space for upload' };
+            return { error: t('insufficientDiskSpace') };
         }
     } catch {
         // statfs may fail on some platforms; proceed anyway
@@ -99,12 +101,12 @@ export async function uploadImages(formData: FormData) {
     // Validate total upload size (per-call limit)
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
-        return { error: `Total upload size exceeds ${formatUploadLimit(MAX_TOTAL_UPLOAD_BYTES)} limit` };
+        return { error: t('totalUploadSizeExceeded') };
     }
 
     // Also enforce cumulative byte limit across per-file invocations
     if (tracker.bytes + totalSize > MAX_TOTAL_UPLOAD_BYTES) {
-        return { error: `Cumulative upload size exceeds ${formatUploadLimit(MAX_TOTAL_UPLOAD_BYTES)} limit per hour` };
+        return { error: t('cumulativeUploadSizeExceeded') };
     }
 
     // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
@@ -116,11 +118,11 @@ export async function uploadImages(formData: FormData) {
     tracker.count += files.length;
     uploadTracker.set(uploadIp, tracker);
 
-    if (!topic) return { error: 'Topic required' };
+    if (!topic) return { error: t('topicRequired') };
 
     // Validate topic slug format
     if (!isValidSlug(topic)) {
-        return { error: 'Invalid topic format' };
+        return { error: t('invalidTopicFormat') };
     }
 
     let successCount = 0;
@@ -229,7 +231,7 @@ export async function uploadImages(formData: FormData) {
     }
 
     if (failedFiles.length > 0 && successCount === 0) {
-        return { error: 'All uploads failed' };
+        return { error: t('allUploadsFailed') };
     }
 
     // Update cumulative upload tracker with actual (not pre-incremented) values.
@@ -250,13 +252,14 @@ export async function uploadImages(formData: FormData) {
 }
 
 export async function deleteImage(id: number) {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { error: 'Unauthorized' };
+        return { error: t('unauthorized') };
     }
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
-        return { error: 'Invalid image ID' };
+        return { error: t('invalidImageId') };
     }
 
     // Get image to find filenames — select only needed columns
@@ -268,7 +271,7 @@ export async function deleteImage(id: number) {
         filename_avif: images.filename_avif,
         filename_jpeg: images.filename_jpeg,
     }).from(images).where(eq(images.id, id));
-    if (!image) return { error: 'Image not found' };
+    if (!image) return { error: t('imageNotFound') };
 
     // Validate filenames before attempting to delete (security check)
     if (
@@ -277,7 +280,7 @@ export async function deleteImage(id: number) {
         || !isValidFilename(image.filename_avif)
         || !isValidFilename(image.filename_jpeg)
     ) {
-         return { error: 'Invalid filename in database record' };
+         return { error: t('invalidFilename') };
     }
 
     const imageTopic = image.topic;
@@ -313,23 +316,24 @@ export async function deleteImage(id: number) {
 }
 
 export async function deleteImages(ids: number[]) {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { error: 'Unauthorized' };
+        return { error: t('unauthorized') };
     }
 
     if (!Array.isArray(ids) || ids.length === 0) {
-        return { error: 'No images selected' };
+        return { error: t('noImagesSelected') };
     }
 
     // Limit batch size to prevent DoS
     if (ids.length > 100) {
-        return { error: 'Too many images to delete at once (max 100)' };
+        return { error: t('tooManyImages') };
     }
 
     // Validate all IDs upfront
     for (const id of ids) {
         if (!Number.isInteger(id) || id <= 0) {
-            return { error: 'Invalid image ID in selection' };
+            return { error: t('invalidImageId') };
         }
     }
 
@@ -351,7 +355,7 @@ export async function deleteImages(ids: number[]) {
             || !isValidFilename(image.filename_avif)
             || !isValidFilename(image.filename_jpeg)
         ) {
-            return { error: 'Invalid filename in database record' };
+            return { error: t('invalidFilename') };
         }
     }
 
@@ -411,20 +415,21 @@ export async function deleteImages(ids: number[]) {
 }
 
 export async function updateImageMetadata(id: number, title: string | null, description: string | null) {
+    const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
-        return { error: 'Unauthorized' };
+        return { error: t('unauthorized') };
     }
 
     if (!Number.isInteger(id) || id <= 0) {
-        return { error: 'Invalid image ID' };
+        return { error: t('invalidImageId') };
     }
 
     if (title && title.length > 255) {
-        return { error: 'Title is too long (max 255 chars)' };
+        return { error: t('titleTooLong') };
     }
 
     if (description && description.length > 5000) {
-        return { error: 'Description is too long (max 5000 chars)' };
+        return { error: t('descriptionTooLong') };
     }
 
     try {
@@ -440,7 +445,7 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             .where(eq(images.id, id));
 
         if (result.affectedRows === 0) {
-            return { error: 'Image not found' };
+            return { error: t('imageNotFound') };
         }
 
         const topicPath = existingImage?.topic ? `/${existingImage.topic}` : undefined;
@@ -448,6 +453,6 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         return { success: true };
     } catch (e) {
         console.error("Failed to update image metadata", e);
-        return { error: 'Failed to update image' };
+        return { error: t('failedToUpdateImage') };
     }
 }

@@ -5,6 +5,7 @@ import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 import { headers } from 'next/headers';
 import { getClientIp } from '@/lib/rate-limit';
+import { getTranslations } from 'next-intl/server';
 
 import { isAdmin } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
@@ -47,22 +48,23 @@ function checkShareRateLimit(ip: string): boolean {
 }
 
 export async function createPhotoShareLink(imageId: number) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     if (checkShareRateLimit(ip)) {
-        return { error: 'Too many share link requests. Please try again later.' };
+        return { error: t('tooManyShareRequests') };
     }
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
-        return { error: 'Invalid image ID' };
+        return { error: t('invalidImageId') };
     }
 
     const [image] = await db.select({ id: images.id, share_key: images.share_key, processed: images.processed })
         .from(images).where(eq(images.id, imageId));
-    if (!image) return { error: 'Image not found' };
-    if (!image.processed) return { error: 'Image is still processing' };
+    if (!image) return { error: t('imageNotFound') };
+    if (!image.processed) return { error: t('imageStillProcessing') };
 
     if (image.share_key) {
         return { success: true, key: image.share_key };
@@ -90,7 +92,7 @@ export async function createPhotoShareLink(imageId: number) {
 
             // Image may have been deleted between the initial check and now
             if (!refreshedImage) {
-                return { error: 'Image not found' };
+                return { error: t('imageNotFound') };
             }
 
             if (refreshedImage.share_key) {
@@ -103,31 +105,32 @@ export async function createPhotoShareLink(imageId: number) {
             retries++;
         }
     }
-    return { error: 'Failed to generate unique key' };
+    return { error: t('failedToGenerateKey') };
 }
 
 export async function createGroupShareLink(imageIds: number[]) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     if (checkShareRateLimit(ip)) {
-        return { error: 'Too many share link requests. Please try again later.' };
+        return { error: t('tooManyShareRequests') };
     }
 
     if (!Array.isArray(imageIds) || imageIds.length === 0) {
-        return { error: 'No images selected' };
+        return { error: t('noImagesSelected') };
     }
 
     const uniqueImageIds = Array.from(new Set(imageIds));
 
     if (uniqueImageIds.length > 100) {
-        return { error: 'Too many images (max 100)' };
+        return { error: t('tooManyImages') };
     }
 
     for (const id of uniqueImageIds) {
         if (!Number.isInteger(id) || id <= 0) {
-            return { error: 'Invalid image ID' };
+            return { error: t('invalidImageId') };
         }
     }
 
@@ -137,10 +140,10 @@ export async function createGroupShareLink(imageIds: number[]) {
     }).from(images).where(inArray(images.id, uniqueImageIds));
 
     if (groupImages.length !== uniqueImageIds.length) {
-        return { error: 'One or more selected images could not be found' };
+        return { error: t('imagesNotFound') };
     }
     if (groupImages.some((image) => !image.processed)) {
-        return { error: 'All selected images must finish processing before sharing' };
+        return { error: t('imagesMustBeProcessed') };
     }
 
     let retries = 0;
@@ -176,26 +179,27 @@ export async function createGroupShareLink(imageIds: number[]) {
             retries++;
         }
     }
-    return { error: 'Failed to create group' };
+    return { error: t('failedToCreateGroup') };
 }
 
 export async function revokePhotoShareLink(imageId: number) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
-        return { error: 'Invalid image ID' };
+        return { error: t('invalidImageId') };
     }
 
     const [image] = await db.select({ id: images.id, share_key: images.share_key }).from(images).where(eq(images.id, imageId));
-    if (!image) return { error: 'Image not found' };
-    if (!image.share_key) return { error: 'Image does not have an active share link' };
+    if (!image) return { error: t('imageNotFound') };
+    if (!image.share_key) return { error: t('noActiveShareLink') };
 
     const [result] = await db.update(images)
         .set({ share_key: null })
         .where(eq(images.id, imageId));
 
     if (result.affectedRows === 0) {
-        return { error: 'Failed to revoke share link' };
+        return { error: t('failedToRevokeShareLink') };
     }
 
     revalidateLocalizedPaths(`/p/${imageId}`);
@@ -203,17 +207,18 @@ export async function revokePhotoShareLink(imageId: number) {
 }
 
 export async function deleteGroupShareLink(groupId: number) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(groupId) || groupId <= 0) {
-        return { error: 'Invalid group ID' };
+        return { error: t('invalidGroupId') };
     }
 
     // sharedGroupImages cascade-deletes via FK
     const [result] = await db.delete(sharedGroups).where(eq(sharedGroups.id, groupId));
 
     if (result.affectedRows === 0) {
-        return { error: 'Group not found' };
+        return { error: t('groupNotFound') };
     }
 
     revalidateLocalizedPaths('/');

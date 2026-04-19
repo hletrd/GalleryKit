@@ -3,6 +3,7 @@
 import * as argon2 from 'argon2';
 import { db, adminUsers, sessions } from '@/db';
 import { eq, desc, sql } from 'drizzle-orm';
+import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isMySQLError } from '@/lib/validation';
@@ -22,16 +23,17 @@ export async function getAdminUsers() {
 }
 
 export async function createAdminUser(formData: FormData) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const username = formData.get('username')?.toString() ?? '';
     const password = formData.get('password')?.toString() ?? '';
 
-    if (!username || username.length < 3) return { error: 'Username must be at least 3 chars' };
-    if (username.length > 64) return { error: 'Username is too long (max 64 chars)' };
-    if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: 'Username can only contain letters, numbers, underscores, and hyphens' };
-    if (!password || password.length < 12) return { error: 'Password must be at least 12 characters long' };
-    if (password.length > 1024) return { error: 'Password is too long (max 1024 chars)' };
+    if (!username || username.length < 3) return { error: t('usernameTooShort') };
+    if (username.length > 64) return { error: t('usernameTooLong') };
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };
+    if (!password || password.length < 12) return { error: t('passwordTooShortCreate') };
+    if (password.length > 1024) return { error: t('passwordTooLongCreate') };
 
     try {
         const hash = await argon2.hash(password, { type: argon2.argon2id });
@@ -50,24 +52,25 @@ export async function createAdminUser(formData: FormData) {
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('users.username'))) {
-            return { error: 'Username already exists' };
+            return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
-        return { error: 'Failed to create user' };
+        return { error: t('failedToCreateUser') };
     }
 }
 
 export async function deleteAdminUser(id: number) {
+    const t = await getTranslations('serverActions');
     const currentUser = await getCurrentUser();
-    if (!currentUser) return { error: 'Unauthorized' };
+    if (!currentUser) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) {
-        return { error: 'Invalid user ID' };
+        return { error: t('invalidUserId') };
     }
 
     // Prevent deleting self
     if (currentUser.id === id) {
-        return { error: 'Cannot delete your own account' };
+        return { error: t('cannotDeleteSelf') };
     }
 
     // Atomically check last-admin and delete inside a transaction to prevent TOCTOU race
@@ -86,9 +89,9 @@ export async function deleteAdminUser(id: number) {
         return { success: true };
     } catch (e: unknown) {
         if (e instanceof Error && e.message === 'LAST_ADMIN') {
-            return { error: 'Cannot delete the last admin user' };
+            return { error: t('cannotDeleteLastAdmin') };
         }
         console.error('Delete user failed', e);
-        return { error: 'Failed to delete user' };
+        return { error: t('failedToDeleteUser') };
     }
 }

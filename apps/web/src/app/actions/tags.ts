@@ -2,6 +2,7 @@
 
 import { db, tags, imageTags, images } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
+import { getTranslations } from 'next-intl/server';
 
 import { isAdmin } from '@/app/actions/auth';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
@@ -31,51 +32,54 @@ export async function getAdminTags() {
         return { success: true, tags: allTags };
     } catch (err) {
         console.error("Failed to fetch tags", err);
-        return { error: 'Failed to fetch tags' };
+        const t = await getTranslations('serverActions');
+        return { error: t('failedToFetchTags') };
     }
 }
 
 export async function updateTag(id: number, name: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
-        return { error: 'Invalid tag ID' };
+        return { error: t('invalidTagId') };
     }
 
-    if (!name || name.trim().length === 0) return { error: 'Name is required' };
+    if (!name || name.trim().length === 0) return { error: t('tagNameRequired') };
 
     // Validate name length
     if (!isValidTagName(name)) {
-        return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
+        return { error: t('invalidTagName') };
     }
 
     const trimmedName = name.trim();
     const slug = getTagSlug(trimmedName);
 
-    if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
+    if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
         const [result] = await db.update(tags)
             .set({ name: trimmedName, slug })
             .where(eq(tags.id, id));
         if (result.affectedRows === 0) {
-            return { error: 'Tag not found' };
+            return { error: t('tagNotFound') };
         }
         revalidateLocalizedPaths('/admin/tags', '/');
         return { success: true };
     } catch {
         console.error("Failed to update tag");
-        return { error: 'Failed to update tag (Name might be taken)' };
+        return { error: t('failedToUpdateTag') };
     }
 }
 
 export async function deleteTag(id: number) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
-        return { error: 'Invalid tag ID' };
+        return { error: t('invalidTagId') };
     }
 
     try {
@@ -84,20 +88,21 @@ export async function deleteTag(id: number) {
         return { success: true };
     } catch {
         console.error("Failed to delete tag");
-        return { error: 'Failed to delete tag' };
+        return { error: t('failedToDeleteTag') };
     }
 }
 
 export async function addTagToImage(imageId: number, tagName: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!Number.isInteger(imageId) || imageId <= 0) return { error: 'Invalid image ID' };
+    if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
     const cleanName = tagName?.trim();
-    if (!cleanName) return { error: 'Tag name required' };
-    if (!isValidTagName(cleanName)) return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
+    if (!cleanName) return { error: t('tagNameRequired') };
+    if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
     const slug = getTagSlug(cleanName);
-    if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
+    if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
         // Upsert tag
@@ -105,7 +110,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
 
         // Get tag id (optimized select)
         const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
-        if (!tagRecord) return { error: 'Failed to retrieve tag' };
+        if (!tagRecord) return { error: t('tagNotFound') };
 
         // Warn on tag slug collision
         if (tagRecord.name !== cleanName) {
@@ -126,22 +131,23 @@ export async function addTagToImage(imageId: number, tagName: string) {
             : { success: true as const };
     } catch (e) {
         console.error("Failed to add tag", e);
-        return { error: 'Failed to add tag' };
+        return { error: t('failedToAddTag') };
     }
 }
 
 export async function removeTagFromImage(imageId: number, tagName: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!Number.isInteger(imageId) || imageId <= 0) return { error: 'Invalid image ID' };
+    if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
     const cleanName = tagName?.trim();
-    if (!cleanName) return { error: 'Tag name required' };
+    if (!cleanName) return { error: t('tagNameRequired') };
 
     const slug = getTagSlug(cleanName);
 
     try {
         const [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
-        if (!tagRecord) return { error: 'Tag not found' };
+        if (!tagRecord) return { error: t('tagNotFound') };
 
         await db.delete(imageTags)
             .where(and(
@@ -155,36 +161,37 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
         return { success: true };
     } catch (e) {
         console.error("Failed to remove tag", e);
-        return { error: 'Failed to remove tag' };
+        return { error: t('failedToRemoveTag') };
     }
 }
 
 export async function batchAddTags(imageIds: number[], tagName: string) {
-    if (!(await isAdmin())) return { error: 'Unauthorized' };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!Array.isArray(imageIds) || imageIds.length === 0) return { error: 'No images selected' };
+    if (!Array.isArray(imageIds) || imageIds.length === 0) return { error: t('noImagesSelected') };
     // Limit batch size to prevent DoS
     if (imageIds.length > 100) {
-        return { error: 'Too many images selected (max 100)' };
+        return { error: t('tooManyImages') };
     }
 
     // Validate ids
     for (const id of imageIds) {
-        if (!Number.isInteger(id) || id <= 0) return { error: 'Invalid image ID' };
+        if (!Number.isInteger(id) || id <= 0) return { error: t('invalidImageId') };
     }
 
     const cleanName = tagName?.trim();
-    if (!cleanName) return { error: 'Tag name required' };
-    if (!isValidTagName(cleanName)) return { error: 'Tag names must be 1-100 characters and cannot contain commas' };
+    if (!cleanName) return { error: t('tagNameRequired') };
+    if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
     const slug = getTagSlug(cleanName);
-    if (!isValidSlug(slug)) return { error: 'Invalid tag name format' };
+    if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
         // Upsert tag
         await db.insert(tags).ignore().values({ name: cleanName, slug });
         const [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
-        if (!tagRecord) return { error: 'Failed to retrieve tag' };
+        if (!tagRecord) return { error: t('tagNotFound') };
 
         // US-002: Warn on tag slug collision
         if (tagRecord.name !== cleanName) {
@@ -205,7 +212,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
             : { success: true as const };
     } catch (e) {
         console.error("Failed to batch add tags", e);
-        return { error: 'Failed to batch add tags' };
+        return { error: t('failedToAddTag') };
     }
 }
 
@@ -214,15 +221,16 @@ export async function batchUpdateImageTags(
     addTagNames: string[],
     removeTagNames: string[],
 ): Promise<{ success: boolean; added: number; removed: number; warnings: string[] }> {
-    if (!(await isAdmin())) return { success: false, added: 0, removed: 0, warnings: ['Unauthorized'] };
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { success: false, added: 0, removed: 0, warnings: [t('unauthorized')] };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
-        return { success: false, added: 0, removed: 0, warnings: ['Invalid image ID'] };
+        return { success: false, added: 0, removed: 0, warnings: [t('invalidImageId')] };
     }
 
     // Limit tag array sizes to prevent DoS (matching batchAddTags pattern)
     if (addTagNames.length > 100 || removeTagNames.length > 100) {
-        return { success: false, added: 0, removed: 0, warnings: ['Too many tags in a single update (max 100 each)'] };
+        return { success: false, added: 0, removed: 0, warnings: [t('tooManyTags')] };
     }
 
     const warnings: string[] = [];
@@ -266,7 +274,7 @@ export async function batchUpdateImageTags(
         });
     } catch (err) {
         console.error('batchUpdateImageTags transaction failed:', err);
-        return { success: false, added: 0, removed: 0, warnings: ['Failed to update tags — all changes rolled back'] };
+        return { success: false, added: 0, removed: 0, warnings: [t('failedToAddTag')] };
     }
 
     revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/dashboard');
