@@ -278,6 +278,7 @@ export const bootstrapImageProcessingQueue = async () => {
             purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
             pruneRetryMaps(state);
         }, 60 * 60 * 1000); // every hour
+        state.gcInterval.unref?.();
     } catch (err: unknown) {
         // Suppress connection refused errors during build/startup
         if (!(err instanceof Error && (('code' in err && (err as { code: string }).code === 'ECONNREFUSED') || (err.cause && typeof err.cause === 'object' && 'code' in err.cause && (err.cause as { code: string }).code === 'ECONNREFUSED')))) {
