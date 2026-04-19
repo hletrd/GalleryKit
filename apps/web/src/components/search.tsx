@@ -126,6 +126,7 @@ export function Search() {
                             ref={inputRef}
                             role="combobox"
                             aria-expanded={results.length > 0}
+                            aria-autocomplete="list"
                             aria-controls="search-results"
                             aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
                             value={query}

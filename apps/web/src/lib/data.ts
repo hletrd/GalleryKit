@@ -549,14 +549,15 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .orderBy(desc(images.created_at))
         .limit(effectiveLimit);
 
-    // Only search tags if main results are insufficient
-    const tagResults = results.length >= effectiveLimit ? [] : await db.select(searchFields)
+    // Only search tags if main results are insufficient; limit to remaining slots
+    const remainingLimit = effectiveLimit - results.length;
+    const tagResults = remainingLimit <= 0 ? [] : await db.select(searchFields)
         .from(images)
         .innerJoin(imageTags, eq(images.id, imageTags.imageId))
         .innerJoin(tags, eq(imageTags.tagId, tags.id))
         .where(and(eq(images.processed, true), like(tags.name, searchTerm)))
         .orderBy(desc(images.created_at))
-        .limit(effectiveLimit);
+        .limit(remainingLimit);
 
     const seen = new Set<number>();
     const combined: SearchResult[] = [];

@@ -267,7 +267,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                             <TableHead className="w-[50px]">
                                 <input
                                     type="checkbox"
-                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     checked={images.length > 0 && selectedIds.size === images.length}
                                     onChange={toggleSelectAll}
                                     aria-label={t('aria.selectAll')}
@@ -288,7 +288,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 <TableCell>
                                      <input
                                         type="checkbox"
-                                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                        className="h-4 w-4 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                         checked={selectedIds.has(image.id)}
                                         onChange={() => toggleSelect(image.id)}
                                         aria-label={t('aria.selectImage', { title: image.title || image.id })}

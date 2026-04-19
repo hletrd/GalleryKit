@@ -382,10 +382,7 @@ export async function deleteImages(ids: number[]) {
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: successCount }).catch(console.debug);
 
-    const affectedTopics = new Set(foundIds.length > 0
-        ? imageRecords.filter(r => foundIdSet.has(r.id)).map(r => r.topic)
-        : []
-    );
+    const affectedTopics = new Set(imageRecords.map(r => r.topic));
 
     revalidateLocalizedPaths(
         '/',

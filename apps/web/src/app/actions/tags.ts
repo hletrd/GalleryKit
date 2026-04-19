@@ -220,6 +220,11 @@ export async function batchUpdateImageTags(
         return { success: false, added: 0, removed: 0, warnings: ['Invalid image ID'] };
     }
 
+    // Limit tag array sizes to prevent DoS (matching batchAddTags pattern)
+    if (addTagNames.length > 100 || removeTagNames.length > 100) {
+        return { success: false, added: 0, removed: 0, warnings: ['Too many tags in a single update (max 100 each)'] };
+    }
+
     const warnings: string[] = [];
     let added = 0;
     let removed = 0;
@@ -236,6 +241,12 @@ export async function batchUpdateImageTags(
                 await tx.insert(tags).ignore().values({ name: cleanName, slug });
                 const [tagRecord] = await tx.select().from(tags).where(eq(tags.slug, slug));
                 if (tagRecord) {
+                    // Warn on tag slug collision (matching addTagToImage/batchAddTags pattern)
+                    if (tagRecord.name !== cleanName) {
+                        const msg = `Tag "${cleanName}" was mapped to existing "${tagRecord.name}" (same slug)`;
+                        console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
+                        warnings.push(msg);
+                    }
                     await tx.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
                     added++;
                 }
