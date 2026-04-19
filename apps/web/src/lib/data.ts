@@ -594,7 +594,8 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
 }
 
 /** Lightweight query for sitemap: only id + created_at, no JOINs, no TEXT columns */
-export async function getImageIdsForSitemap() {
+export async function getImageIdsForSitemap(limit: number = 25000) {
+    const safeLimit = Math.min(Math.max(limit, 1), 50000);
     return db.select({
         id: images.id,
         created_at: images.created_at,
@@ -602,7 +603,7 @@ export async function getImageIdsForSitemap() {
     .from(images)
     .where(eq(images.processed, true))
     .orderBy(desc(images.created_at))
-    .limit(50000);
+    .limit(safeLimit);
 }
 
 export const getImageCached = cache(getImage);

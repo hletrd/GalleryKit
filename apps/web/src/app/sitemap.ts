@@ -18,7 +18,7 @@ const MAX_SITEMAP_IMAGES = 24000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [images, topics] = await Promise.all([
-    getImageIdsForSitemap(),
+    getImageIdsForSitemap(MAX_SITEMAP_IMAGES),
     getTopics(),
   ]);
 
