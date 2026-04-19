@@ -1,4 +1,4 @@
-import { getSharedGroup } from '@/lib/data';
+import { getSharedGroupCached } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
@@ -17,7 +17,7 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const locale = await getLocale();
-    const group = await getSharedGroup(key, { incrementViewCount: false });
+    const group = await getSharedGroupCached(key, { incrementViewCount: false });
     if (!group) return {
         title: 'Shared Photos Not Found',
         description: 'This shared collection could not be found.',
@@ -59,7 +59,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string, locale: string }>, searchParams: Promise<{ photoId?: string }> }) {
     const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
-    const group = await getSharedGroup(key);
+    const group = await getSharedGroupCached(key);
 
     if (!group) {
         notFound();

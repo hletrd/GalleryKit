@@ -1,4 +1,4 @@
-import { getImageByShareKey } from '@/lib/data';
+import { getImageByShareKeyCached } from '@/lib/data';
 import { notFound } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -15,7 +15,7 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const locale = await getLocale();
-    const image = await getImageByShareKey(key);
+    const image = await getImageByShareKeyCached(key);
     if (!image) return {
         title: 'Photo Not Found',
         description: 'This shared photo could not be found.',
@@ -57,7 +57,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     const { key } = await params;
     const locale = await getLocale();
     const t = await getTranslations('shared');
-    const image = await getImageByShareKey(key);
+    const image = await getImageByShareKeyCached(key);
 
     if (!image) {
         notFound();

@@ -29,7 +29,7 @@ export interface ImageDetail {
     bit_depth: number | null;
     original_format: string | null;
     original_file_size: number | null;
-    blur_data_url: string | null;
+    blur_data_url?: string | null;
     share_key?: string | null;
     user_filename?: string | null;
     tag_names?: string | null;
