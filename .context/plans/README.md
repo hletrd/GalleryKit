@@ -2,9 +2,8 @@
 
 ## Active Plans
 
-- 44 — Password Change Transaction Safety — DONE
-- 45 — i18n Topics + Share Link Safety — DONE
-- 46 — UI Checkbox, Password maxLength, CSV GC, Topic Deletion State — DONE
+- 48 — Sharing insertId Guard, Login & User Form maxLength — DONE
+- 49 — i18n Remaining Hardcoded Strings, UX Inconsistencies — DONE
 
 ## Completed Plans (Cycle 6)
 
@@ -46,6 +45,7 @@
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
+| **Cycle 8 Comprehensive Review** | 2026-04-19 | 9 actionable (1M/8L) | 6 via Plans 48-49 | 3 via Plan 50 |
 | **Cycle 7 Comprehensive Review** | 2026-04-19 | 7 actionable (1M/6L) | 7 via Plans 44-46 | 2 via Plan 47 |
 | Cycle 6 Comprehensive Review | 2026-04-19 | 9 actionable (3M/6L) | 9 via Plans 41-42 | 1 via Plan 43 |
 | Cycle 5 Comprehensive Review | 2026-04-19 | 9 actionable (2M/6L/1I) | 5 complete via Plan 39 | 4 via Plan 40 |
@@ -57,7 +57,24 @@
 
 ---
 
-## Cycle 7 Findings → Plan Mapping
+## Cycle 8 Findings → Plan Mapping
+
+### Plan 48 (Sharing insertId + Form maxLength)
+- C8-01 createGroupShareLink insertId guard (already present — false positive)
+- C8-02 maxLength on login form username/password inputs
+- C8-03 maxLength on create-user password input
+
+### Plan 49 (i18n + UX)
+- C8-05 audit log on race-deleted image (no change needed — already guarded)
+- C8-06 shared group page raw arrow → ArrowLeft + i18n
+- C8-09 delete-user dialog wrong translation key
+- C8-11 createTopic remaining hardcoded strings
+- C8-12 updateTopic hardcoded error string
+
+### Plan 50 (Deferred)
+- C8-04 searchImages query length guard (defense in depth, caller already truncates)
+- C8-05 audit log on race-deleted image (control flow analysis shows already guarded)
+- C8-10 batchUpdateImageTags added count accuracy (negligible UX inaccuracy)
 
 ### Plan 44 (Password Change Transaction)
 - C7-03 password change + session invalidation not in transaction
@@ -92,11 +109,15 @@
 10. C6-10 queue bootstrap unbounded fetch (by-design, paginated limit if >10K pending)
 11. C7-07 NULL capture_date prev/next navigation (legacy-only, reasonable UX)
 12. C7-08 rate limit inconsistency in safe direction (no fix needed)
+13. C8-04 searchImages query length guard (defense in depth, caller truncates)
+14. C8-05 audit log on race-deleted image (control flow already guards)
+15. C8-10 batchUpdateImageTags added count accuracy (negligible UX inaccuracy)
 
 ---
 
 ## Notes
 
-- Build verified passing after cycle 6 changes.
+- Build verified passing after cycle 8 changes.
 - All `confirm()` calls have been eliminated from the codebase.
-- Cycle 7 found fewer issues (7 actionable vs 9 in cycle 6), indicating codebase maturity.
+- Cycle 8 found 9 actionable findings (1M + 8L), down from 7 in cycle 7. One MEDIUM finding (C8-01) was a false positive — the insertId guard was already present. 6 findings were implemented, 3 deferred.
+- All topic server action error strings now use i18n consistently.

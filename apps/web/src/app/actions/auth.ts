@@ -8,6 +8,7 @@ import { isRedirectError } from 'next/dist/client/components/redirect-error';
 import { db, adminUsers, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
+import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit } from '@/lib/rate-limit';
@@ -65,6 +66,7 @@ async function getDummyHash(): Promise<string> {
 }
 
 export async function login(prevState: { error?: string } | null, formData: FormData) {
+    const t = await getTranslations('serverActions');
     const username = formData.get('username')?.toString() ?? '';
     const password = formData.get('password')?.toString() ?? '';
     const rawLocale = formData.get('locale')?.toString() ?? '';
@@ -72,10 +74,10 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
     // Validate before consuming rate-limit attempts
     if (!username) {
-        return { error: 'Username is required' };
+        return { error: t('usernameRequired') };
     }
     if (!password) {
-        return { error: 'Password is required' };
+        return { error: t('passwordRequired') };
     }
 
     // Rate Limiting — in-memory Map as fast cache, DB as source of truth
@@ -89,14 +91,14 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
     // Fast-path check from in-memory Map
     if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
-        return { error: 'Too many login attempts. Please try again later.' };
+        return { error: t('tooManyAttempts') };
     }
 
     // DB-backed check for accuracy across restarts
     try {
         const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
         if (dbLimit.limited) {
-            return { error: 'Too many login attempts. Please try again later.' };
+            return { error: t('tooManyAttempts') };
         }
     } catch {
         // DB unavailable — rely on in-memory Map
@@ -131,7 +133,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
         if (!user || !verified) {
             // Rate limit already incremented above — no need to record again.
             await logAuditEvent(null, 'login_failure', 'user', username, ip).catch(console.debug);
-            return { error: 'Invalid credentials' };
+            return { error: t('invalidCredentials') };
         }
 
         // Login succeeded — roll back the pre-incremented rate limit counter
@@ -183,14 +185,14 @@ export async function login(prevState: { error?: string } | null, formData: Form
         } catch (e) {
             if (isRedirectError(e)) throw e;
             console.error("Session creation failed after successful auth", e);
-            return { error: 'Authentication failed. Please try again.' };
+            return { error: t('authFailed') };
         }
     } catch (e) {
         if (isRedirectError(e)) throw e;
         console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
     }
 
-    return { error: 'Invalid credentials' };
+    return { error: t('invalidCredentials') };
 }
 
 export async function logout(formData?: FormData) {
@@ -208,9 +210,10 @@ export async function logout(formData?: FormData) {
 }
 
 export async function updatePassword(prevState: { error?: string; success?: boolean; message?: string } | null, formData: FormData) {
+    const t = await getTranslations('serverActions');
     const currentUser = await getCurrentUser();
     if (!currentUser) {
-        return { error: 'Unauthorized' };
+        return { error: t('unauthorized') };
     }
 
     // Rate limit password change attempts (separate map from login)
@@ -221,12 +224,12 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     prunePasswordChangeRateLimit(now);
     const limitData = getPasswordChangeRateLimitEntry(ip, now);
     if (limitData.count >= LOGIN_MAX_ATTEMPTS) {
-        return { error: 'Too many attempts. Please try again later.' };
+        return { error: t('tooManyAttempts') };
     }
     try {
         const dbLimit = await checkRateLimit(ip, 'password_change', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
         if (dbLimit.limited) {
-            return { error: 'Too many attempts. Please try again later.' };
+            return { error: t('tooManyAttempts') };
         }
     } catch {
         // DB unavailable — rely on in-memory Map
@@ -250,33 +253,33 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
 
     if (!currentPassword || !newPassword || !confirmPassword) {
-        return { error: 'All fields are required' };
+        return { error: t('allFieldsRequired') };
     }
 
     if (newPassword !== confirmPassword) {
-        return { error: 'New passwords do not match' };
+        return { error: t('passwordsDoNotMatch') };
     }
 
     if (newPassword.length < 12) {
-        return { error: 'New password must be at least 12 characters long' };
+        return { error: t('passwordTooShort') };
     }
 
     if (newPassword.length > 1024) {
-        return { error: 'Password is too long (max 1024 characters)' };
+        return { error: t('passwordTooLong') };
     }
 
     try {
         // getCurrentUser doesn't return hash — fetch separately
         const userWithHash = await getAdminUserWithHash(currentUser.id);
         if (!userWithHash) {
-            return { error: 'Unauthorized' };
+            return { error: t('unauthorized') };
         }
 
         const match = await argon2.verify(userWithHash.password_hash, currentPassword);
 
         if (!match) {
             // Rate limit already incremented above — no need to record again.
-            return { error: 'Incorrect current password' };
+            return { error: t('incorrectPassword') };
         }
 
         // Password correct — roll back the pre-incremented rate limit counter
@@ -310,10 +313,10 @@ export async function updatePassword(prevState: { error?: string; success?: bool
             }
         });
 
-        return { success: true, message: 'Password updated successfully.' };
+        return { success: true, message: t('passwordUpdated') };
 
     } catch (e) {
         console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
-        return { error: 'Failed to update password' };
+        return { error: t('failedToUpdatePassword') };
     }
 }
