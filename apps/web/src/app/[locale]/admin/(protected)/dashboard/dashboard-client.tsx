@@ -32,7 +32,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                 </div>
                 <div>
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.recentUploads')}</h2>
-                    <div className="max-h-[600px] overflow-auto">
+                    <div className="max-h-[calc(100vh-16rem)] overflow-auto">
                         <ImageManager initialImages={images} availableTags={tags} />
                     </div>
                     {totalPages > 1 && (

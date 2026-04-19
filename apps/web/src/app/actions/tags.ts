@@ -299,7 +299,11 @@ export async function batchUpdateImageTags(
             // Add tags
             for (const name of addTagNames) {
                 const cleanName = name.trim();
-                if (!cleanName || !isValidTagName(cleanName)) continue;
+                if (!cleanName) continue;
+                if (!isValidTagName(cleanName)) {
+                    warnings.push(t('invalidTagName') + `: "${cleanName}"`);
+                    continue;
+                }
                 const slug = getTagSlug(cleanName);
                 if (!isValidSlug(slug)) continue;
                 // Ensure tag exists

@@ -23,7 +23,7 @@ export function AdminNav() {
     ];
 
     return (
-        <nav aria-label={t('aria.adminNav')} className="flex items-center flex-wrap gap-x-6 gap-y-2 text-sm font-medium">
+        <nav aria-label={t('aria.adminNav')} className="flex items-center flex-nowrap gap-x-6 text-sm font-medium overflow-x-auto scrollbar-hide">
             {links.map(({ href, label }) => {
                 const isActive = stripLocalePrefix(pathname) === stripLocalePrefix(href);
                 return (

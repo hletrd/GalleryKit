@@ -108,29 +108,22 @@ export async function uploadImages(formData: FormData) {
         return { error: t('cumulativeUploadSizeExceeded') };
     }
 
-    // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
-    // the same IP could all read the same tracker state and bypass the limit.
-    // We optimistically claim the bytes now and adjust after processing.
-    const originalTrackerBytes = tracker.bytes;
-    const originalTrackerCount = tracker.count;
-    tracker.bytes += totalSize;
-    tracker.count += files.length;
-    uploadTracker.set(uploadIp, tracker);
-
     if (!topic) {
-        tracker.bytes = originalTrackerBytes;
-        tracker.count = originalTrackerCount;
-        uploadTracker.set(uploadIp, tracker);
         return { error: t('topicRequired') };
     }
 
     // Validate topic slug format
     if (!isValidSlug(topic)) {
-        tracker.bytes = originalTrackerBytes;
-        tracker.count = originalTrackerCount;
-        uploadTracker.set(uploadIp, tracker);
         return { error: t('invalidTopicFormat') };
     }
+
+    // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
+    // the same IP could all read the same tracker state and bypass the limit.
+    // We optimistically claim the bytes now and adjust after processing.
+    // This is placed after all validation checks so no manual rollback is needed.
+    tracker.bytes += totalSize;
+    tracker.count += files.length;
+    uploadTracker.set(uploadIp, tracker);
 
     let successCount = 0;
     let uploadedBytes = 0;
