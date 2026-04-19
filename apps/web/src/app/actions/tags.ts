@@ -298,6 +298,6 @@ export async function batchUpdateImageTags(
     const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
-    revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+    revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
     return { success: true, added, removed, warnings };
 }
