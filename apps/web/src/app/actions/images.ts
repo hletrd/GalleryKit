@@ -263,7 +263,10 @@ export async function uploadImages(formData: FormData) {
         return { error: t('allUploadsFailed') };
     }
 
-    // Update cumulative upload tracker with actual (not pre-incremented) values.
+    // Adjust cumulative upload tracker by the difference between actual and
+    // pre-incremented values. Clamped to >= 0 to prevent negative drift when
+    // all uploads fail (successCount=0 would otherwise subtract the full
+    // pre-incremented amount, inflating the effective rate-limit budget).
     // Use additive adjustment instead of absolute assignment to avoid overwriting
     // concurrent requests' pre-incremented contributions for the same IP.
     // Only adjust if the entry still exists in the Map — if pruneUploadTracker()
@@ -272,8 +275,8 @@ export async function uploadImages(formData: FormData) {
     // overwrite concurrent requests' pre-incremented contributions.
     const currentTracker = uploadTracker.get(uploadIp);
     if (currentTracker) {
-        currentTracker.count += (successCount - files.length);
-        currentTracker.bytes += (uploadedBytes - totalSize);
+        currentTracker.count = Math.max(0, currentTracker.count + (successCount - files.length));
+        currentTracker.bytes = Math.max(0, currentTracker.bytes + (uploadedBytes - totalSize));
         uploadTracker.set(uploadIp, currentTracker);
     }
 
