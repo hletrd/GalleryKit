@@ -8,6 +8,14 @@ const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
 
+/** Map from top-level directory to allowed file extensions. Prevents serving
+ *  mismatched files (e.g., a .webp from /uploads/jpeg/). */
+const DIR_EXTENSION_MAP: Record<string, Set<string>> = {
+    'jpeg': new Set(['.jpg', '.jpeg']),
+    'webp': new Set(['.webp']),
+    'avif': new Set(['.avif']),
+};
+
 const CONTENT_TYPES: Record<string, string> = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
@@ -29,6 +37,15 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
     const [topLevelDir] = pathSegments;
     if (!ALLOWED_UPLOAD_DIRS.has(topLevelDir)) {
         return new NextResponse('Not found', { status: 404 });
+    }
+
+    // Validate file extension matches the directory — prevents serving
+    // mismatched files (e.g., a .webp from /uploads/jpeg/).
+    const filename = pathSegments[pathSegments.length - 1];
+    const ext = path.extname(filename).toLowerCase();
+    const allowedExts = DIR_EXTENSION_MAP[topLevelDir];
+    if (allowedExts && !allowedExts.has(ext)) {
+        return new NextResponse('Invalid path', { status: 400 });
     }
 
     for (const segment of pathSegments) {
