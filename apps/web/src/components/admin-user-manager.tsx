@@ -33,6 +33,14 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
     const router = useRouter();
 
     async function handleCreate(formData: FormData) {
+        // Client-side password confirmation check — prevents typos that would
+        // lock out the new admin account (server doesn't see confirmPassword).
+        const password = formData.get('password')?.toString() ?? '';
+        const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
+        if (password !== confirmPassword) {
+            toast.error(t('password.mismatch'));
+            return;
+        }
         setIsCreating(true);
         try {
             const result = await createAdminUser(formData);
@@ -90,13 +98,17 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                         </DialogHeader>
                         <form action={handleCreate} className="space-y-4">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">{t('users.username')}</label>
-                                <Input name="username" placeholder={t('users.username')} required minLength={3} maxLength={64} pattern="[a-zA-Z0-9_-]+" title={t('users.usernameFormat')} />
+                                <label htmlFor="create-username" className="text-sm font-medium">{t('users.username')}</label>
+                                <Input id="create-username" name="username" placeholder={t('users.username')} required minLength={3} maxLength={64} pattern="[a-zA-Z0-9_-]+" title={t('users.usernameFormat')} />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">{t('users.password')}</label>
-                                <Input name="password" type="password" placeholder={t('users.password')} required minLength={12} maxLength={1024} autoComplete="new-password" />
+                                <label htmlFor="create-password" className="text-sm font-medium">{t('users.password')}</label>
+                                <Input id="create-password" name="password" type="password" placeholder={t('users.password')} required minLength={12} maxLength={1024} autoComplete="new-password" />
                                 <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
+                            </div>
+                            <div className="space-y-2">
+                                <label htmlFor="create-confirm-password" className="text-sm font-medium">{t('password.confirm')}</label>
+                                <Input id="create-confirm-password" name="confirmPassword" type="password" placeholder={t('password.confirm')} required minLength={12} maxLength={1024} autoComplete="new-password" />
                             </div>
                             <DialogFooter>
                                 <Button type="submit" disabled={isCreating}>
