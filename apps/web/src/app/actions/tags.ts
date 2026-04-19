@@ -305,12 +305,17 @@ export async function batchUpdateImageTags(
                 }
             }
 
-            // Remove tags
+            // Remove tags — look up by exact name first, then fall back to slug
+            // to avoid removing the wrong tag when slug collisions exist (same
+            // pattern as removeTagFromImage, see C38-01).
             for (const name of removeTagNames) {
                 const cleanName = name.trim();
                 if (!cleanName) continue;
-                const slug = getTagSlug(cleanName);
-                const [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+                let [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.name, cleanName));
+                if (!tagRecord) {
+                    const slug = getTagSlug(cleanName);
+                    [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+                }
                 if (tagRecord) {
                     const [deleteResult] = await tx.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, tagRecord.id)));
                     if (deleteResult.affectedRows > 0) removed++;
