@@ -4,9 +4,10 @@ import { db, tags, imageTags, images } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 
-import { isAdmin } from '@/app/actions/auth';
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { logAuditEvent } from '@/lib/audit';
 
 function getTagSlug(name: string) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -65,6 +66,9 @@ export async function updateTag(id: number, name: string) {
         if (result.affectedRows === 0) {
             return { error: t('tagNotFound') };
         }
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'tag_update', 'tag', String(id), undefined, { name: trimmedName, slug }).catch(console.debug);
+
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         return { success: true };
     } catch {
@@ -88,7 +92,10 @@ export async function deleteTag(id: number) {
             await tx.delete(imageTags).where(eq(imageTags.tagId, id));
             await tx.delete(tags).where(eq(tags.id, id));
         });
-        revalidateLocalizedPaths('/admin/tags', '/');
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'tag_delete', 'tag', String(id)).catch(console.debug);
+
+        revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         return { success: true };
     } catch {
         console.error("Failed to delete tag");
@@ -129,7 +136,9 @@ export async function addTagToImage(imageId: number, tagName: string) {
 
         // Fetch image topic for topic page revalidation
         const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
-        revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: tagRecord.name }).catch(console.debug);
+        revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
         return tagRecord.name !== cleanName
             ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
             : { success: true as const };
@@ -161,7 +170,9 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
 
         // Fetch image topic for topic page revalidation
         const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
-        revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: tagName }).catch(console.debug);
+        revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
         return { success: true };
     } catch (e) {
         console.error("Failed to remove tag", e);
@@ -210,7 +221,10 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
 
         await db.insert(imageTags).ignore().values(values);
 
-        revalidateLocalizedPaths('/admin/dashboard', '/');
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: imageIds.length, tag: cleanName }).catch(console.debug);
+
+        revalidateLocalizedPaths('/admin/dashboard', '/', '/admin/tags');
         return tagRecord.name !== cleanName
             ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
             : { success: true as const };
@@ -282,6 +296,8 @@ export async function batchUpdateImageTags(
 
     // Fetch image topic for topic page revalidation (matching addTagToImage/removeTagFromImage pattern)
     const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
     revalidateLocalizedPaths(`/p/${imageId}`, '/', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
     return { success: true, added, removed, warnings };
 }
