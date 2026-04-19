@@ -33,6 +33,7 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
+    DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,7 +222,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                 <div className="bg-muted/50 p-2 rounded-md flex items-center justify-between">
                     <span className="text-sm font-medium px-2">{t('imageManager.selected', { count: selectedIds.size })}</span>
                     <div className="flex items-center space-x-2">
-                        <AlertDialog
+                        <Dialog
                             open={isBatchTagDialogOpen}
                             onOpenChange={(open) => {
                                 setIsBatchTagDialogOpen(open);
@@ -230,14 +231,14 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 }
                             }}
                         >
-                            <AlertDialogTrigger asChild>
+                            <DialogTrigger asChild>
                                 <Button variant="secondary" size="sm">
                                     {t('imageManager.batchAddButton')}
                                 </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>{t('imageManager.batchAddTitle', { count: selectedIds.size })}</AlertDialogTitle>
+                            </DialogTrigger>
+                            <DialogContent>
+                                <DialogHeader>
+                                    <DialogTitle>{t('imageManager.batchAddTitle', { count: selectedIds.size })}</DialogTitle>
                                     <div className="py-2">
                                         <Input
                                             value={tagInput}
@@ -251,15 +252,15 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                             }}
                                         />
                                     </div>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel onClick={() => setTagInput('')}>{t('imageManager.cancelAdd')}</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleBatchAddTag} disabled={isBatchAddingTag || !tagInput.trim()}>
+                                </DialogHeader>
+                                <DialogFooter>
+                                    <Button variant="outline" onClick={() => { setTagInput(''); setIsBatchTagDialogOpen(false); }}>{t('imageManager.cancelAdd')}</Button>
+                                    <Button onClick={handleBatchAddTag} disabled={isBatchAddingTag || !tagInput.trim()}>
                                         {isBatchAddingTag ? t('imageManager.adding') : t('imageManager.addTag')}
-                                    </AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
+                                    </Button>
+                                </DialogFooter>
+                            </DialogContent>
+                        </Dialog>
 
                         <Button
                             variant="ghost"
