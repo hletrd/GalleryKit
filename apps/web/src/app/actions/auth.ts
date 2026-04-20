@@ -11,6 +11,7 @@ import { cache } from 'react';
 import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
+import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit } from '@/lib/rate-limit';
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
@@ -67,7 +68,7 @@ async function getDummyHash(): Promise<string> {
 
 export async function login(prevState: { error?: string } | null, formData: FormData) {
     const t = await getTranslations('serverActions');
-    const username = formData.get('username')?.toString() ?? '';
+    const username = stripControlChars(formData.get('username')?.toString() ?? '') ?? '';
     const password = formData.get('password')?.toString() ?? '';
     const rawLocale = formData.get('locale')?.toString() ?? '';
     const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
