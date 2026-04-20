@@ -67,6 +67,12 @@ export function getClientIp(headerStore: HeaderLike): string {
     return ip;
 }
 
+// Warn at startup when in production without TRUST_PROXY — all rate limiting
+// will share a single "unknown" IP bucket, making it ineffective per-user.
+if (process.env.NODE_ENV === 'production' && process.env.TRUST_PROXY !== 'true') {
+    console.warn('[rate-limit] TRUST_PROXY is not set in production. Rate limiting uses "unknown" IP for all requests behind a reverse proxy. Set TRUST_PROXY=true if behind a reverse proxy.');
+}
+
 export function pruneLoginRateLimit(now: number) {
     // Prune expired entries (O(n) single pass)
     for (const [key, entry] of loginRateLimit) {
