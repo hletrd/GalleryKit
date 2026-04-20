@@ -31,6 +31,8 @@ export function revalidateLocalizedPaths(...paths: string[]) {
     const seen = new Set<string>();
 
     for (const path of paths) {
+        // Skip empty/falsy paths to avoid unnecessary root page revalidation
+        if (!path) continue;
         for (const variant of getLocalizedPathVariants(path)) {
             if (seen.has(variant)) continue;
             seen.add(variant);
