@@ -13,6 +13,27 @@ import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
 
+/**
+ * Remove orphaned .tmp files from upload directories.
+ * These are created during atomic rename in processImageFormats and may
+ * persist if the process crashes between link and rename.
+ */
+async function cleanOrphanedTmpFiles(): Promise<void> {
+    const dirs = [UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG];
+    for (const dir of dirs) {
+        try {
+            const entries = await fs.readdir(dir);
+            const tmpFiles = entries.filter(f => f.endsWith('.tmp'));
+            if (tmpFiles.length > 0) {
+                console.info(`[Cleanup] Removing ${tmpFiles.length} orphaned .tmp files from ${dir}`);
+                await Promise.all(tmpFiles.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
+            }
+        } catch {
+            // Directory may not exist yet — skip
+        }
+    }
+}
+
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 const CLAIM_RETRY_DELAY_MS = 5000;
 const MAX_RETRY_MAP_SIZE = 10000;
@@ -288,6 +309,11 @@ export const bootstrapImageProcessingQueue = async () => {
 
         }
         state.bootstrapped = true;
+
+        // Clean up orphaned .tmp files from crashed image processing runs.
+        // These are created during atomic rename in processImageFormats and
+        // may persist if the process crashes between link and rename.
+        cleanOrphanedTmpFiles().catch(err => console.debug('cleanOrphanedTmpFiles failed:', err));
 
         // US-004: Purge expired sessions, stale rate-limit buckets, and old audit log entries on startup and periodically
         purgeExpiredSessions();
