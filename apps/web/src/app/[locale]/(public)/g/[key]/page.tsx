@@ -11,6 +11,18 @@ import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 
+const sharePageRobots = {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+        index: false,
+        follow: false,
+        noarchive: true,
+        noimageindex: true,
+    },
+} as const;
+
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const locale = await getLocale();
@@ -20,6 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     if (!group) return {
         title: t('notFoundTitle'),
         description: t('notFoundDescription'),
+        robots: sharePageRobots,
     };
     const pageUrl = localizeUrl(seo.url, locale, `/g/${key}`);
     const coverImage = group.images[0];
@@ -42,17 +55,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     return {
         title: t('ogTitle'),
         description: t('ogDescription', { count: group.images.length }),
-        robots: {
-            index: false,
-            follow: false,
-            nocache: true,
-            googleBot: {
-                index: false,
-                follow: false,
-                noarchive: true,
-                noimageindex: true,
-            },
-        },
+        robots: sharePageRobots,
         alternates: {
             canonical: pageUrl,
         },

@@ -7,6 +7,7 @@ import { Readable } from 'stream';
 import { isValidBackupFilename } from '@/lib/backup-filename';
 import { getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rate-limit';
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
 
@@ -30,7 +31,8 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         }
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'db_backup_download', 'database_backup', file, undefined, {
+        const requesterIp = getClientIp(request.headers);
+        await logAuditEvent(currentUser?.id ?? null, 'db_backup_download', 'database_backup', file, requesterIp, {
             size: stats.size,
         }).catch(console.debug);
 

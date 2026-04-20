@@ -10,6 +10,18 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 
+const sharePageRobots = {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+        index: false,
+        follow: false,
+        noarchive: true,
+        noimageindex: true,
+    },
+} as const;
+
 function toIsoTimestamp(value: string | Date | null | undefined) {
     if (!value) return undefined;
     const date = value instanceof Date ? value : new Date(value);
@@ -25,6 +37,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     if (!image) return {
         title: t('ogNotFoundTitle'),
         description: t('ogNotFoundDescription'),
+        robots: sharePageRobots,
     };
     const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
     const title = image.title && !isTitleFilename ? image.title : t('ogTitle');
@@ -46,17 +59,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     return {
         title: title,
         description: image.description || t('ogDescription', { site: seo.title }),
-        robots: {
-            index: false,
-            follow: false,
-            nocache: true,
-            googleBot: {
-                index: false,
-                follow: false,
-                noarchive: true,
-                noimageindex: true,
-            },
-        },
+        robots: sharePageRobots,
         alternates: {
             canonical: pageUrl,
         },
