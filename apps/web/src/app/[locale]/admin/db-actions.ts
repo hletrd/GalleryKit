@@ -18,9 +18,11 @@ import { revalidateAllAppData } from "@/lib/revalidation";
 import { containsDangerousSql } from "@/lib/sql-restore-scan";
 
 function escapeCsvField(value: string): string {
-    // Strip null bytes and other control characters (except \r\n which are handled below)
+    // Strip null bytes, tab, and other control characters (except \r\n which are handled below)
     // as defense-in-depth for legacy data stored before stripControlChars was added.
-    value = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    // \x09 (tab) is included: tabs in CSV values can cause column misalignment
+    // in strict parsers, even with double-quote wrapping (C9R2-F01).
+    value = value.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
     // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
     value = value.replace(/[\r\n]/g, ' ');
     // Prefix formula injection characters with a single quote
