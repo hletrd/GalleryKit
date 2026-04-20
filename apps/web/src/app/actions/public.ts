@@ -91,6 +91,6 @@ export async function searchImagesAction(query: string) {
         // DB unavailable — rely on in-memory Map
     }
 
-    const safeQuery = stripControlChars(query.trim().slice(0, 200)) ?? '';
+    const safeQuery = stripControlChars(query.trim())?.slice(0, 200) ?? '';
     return searchImages(safeQuery, 20);
 }
