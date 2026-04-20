@@ -11,7 +11,7 @@ import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, checkRateLimit, incrementRateLimit, resetRateLimit } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, incrementRateLimit, isRateLimitExceeded, resetRateLimit } from '@/lib/rate-limit';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -78,7 +78,7 @@ export async function createAdminUser(formData: FormData) {
     try {
         await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
-        if (dbLimit.limited) {
+        if (isRateLimitExceeded(dbLimit.count, USER_CREATE_MAX_ATTEMPTS, true)) {
             // Roll back in-memory pre-increment to stay consistent with DB source of truth.
             const currentEntry = userCreateRateLimit.get(ip);
             if (currentEntry && currentEntry.count > 1) {

@@ -5,7 +5,7 @@ import { getImagesLite, searchImages } from '@/lib/data';
 
 import { isValidSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, SEARCH_RATE_LIMIT_MAX_KEYS, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, SEARCH_RATE_LIMIT_MAX_KEYS, checkRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
     // Validate slug format before passing to data layer (defense in depth)
@@ -77,7 +77,7 @@ export async function searchImagesAction(query: string) {
     // DB-backed check for accuracy across restarts
     try {
         const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
-        if (dbLimit.limited) {
+        if (isRateLimitExceeded(dbLimit.count, SEARCH_MAX_REQUESTS, true)) {
             // Roll back the pre-incremented in-memory counter to stay consistent
             // with DB source of truth. Without this, the in-memory counter
             // stays overcounted while DB is undercounted, causing premature

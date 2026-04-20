@@ -40,6 +40,10 @@ export function normalizeIp(value: string | null): string | null {
     return isIP(candidate) ? candidate : null;
 }
 
+export function isRateLimitExceeded(count: number, maxRequests: number, includesCurrentRequest: boolean = false) {
+    return includesCurrentRequest ? count > maxRequests : count >= maxRequests;
+}
+
 export function getClientIp(headerStore: HeaderLike): string {
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
     // Without it, an attacker can spoof X-Forwarded-For to bypass rate limits.
@@ -130,7 +134,7 @@ export async function checkRateLimit(
         .limit(1);
 
     const count = rows[0]?.count ?? 0;
-    return { limited: count >= maxRequests, count };
+    return { limited: isRateLimitExceeded(count, maxRequests), count };
 }
 
 /**

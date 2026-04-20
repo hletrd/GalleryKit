@@ -4,13 +4,12 @@ import path from 'path';
 import { createReadStream } from 'fs';
 import { lstat } from 'fs/promises';
 import { Readable } from 'stream';
-
-const SAFE_FILENAME = /^backup-\d{4}-\d{2}-\d{2}T[\d-]+Z\.sql$/;
+import { isValidBackupFilename } from '@/lib/backup-filename';
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
 
     const file = request.nextUrl.searchParams.get('file');
-    if (!file || !SAFE_FILENAME.test(file)) {
+    if (!file || !isValidBackupFilename(file)) {
         return new NextResponse('Invalid filename', { status: 400 });
     }
 

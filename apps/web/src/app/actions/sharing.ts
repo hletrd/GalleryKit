@@ -4,7 +4,7 @@ import { db, images, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 import { headers } from 'next/headers';
-import { getClientIp, checkRateLimit, incrementRateLimit } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -67,7 +67,7 @@ export async function createPhotoShareLink(imageId: number) {
     try {
         await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
-        if (dbLimit.limited) {
+        if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
             // Roll back in-memory pre-increment to stay consistent with DB source of truth.
             // Without this, the in-memory counter over-counts, causing premature rate limiting.
             const currentEntry = shareRateLimit.get(ip);
@@ -154,7 +154,7 @@ export async function createGroupShareLink(imageIds: number[]) {
     try {
         await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
-        if (dbLimit.limited) {
+        if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
             // Roll back in-memory pre-increment to stay consistent with DB source of truth.
             const currentEntry = shareRateLimit.get(ip);
             if (currentEntry && currentEntry.count > 1) {

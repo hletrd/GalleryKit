@@ -12,6 +12,9 @@ services:
     network_mode: host
     env_file:
       - .env.local
+    environment:
+      HOSTNAME: 127.0.0.1
+      TRUST_PROXY: "true"
 
     volumes:
       - ./data:/app/data

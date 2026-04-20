@@ -16,6 +16,7 @@ import { logAuditEvent } from "@/lib/audit";
 import { getTranslations } from 'next-intl/server';
 import { revalidateAllAppData } from "@/lib/revalidation";
 import { containsDangerousSql } from "@/lib/sql-restore-scan";
+import { createBackupFilename } from "@/lib/backup-filename";
 
 function escapeCsvField(value: string): string {
     // Strip null bytes, tab, and other control characters (except \r\n which are handled below)
@@ -102,8 +103,7 @@ export async function dumpDatabase() {
         return { success: false as const, error: t('missingDbConfig') };
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `backup-${timestamp}-${randomUUID().slice(0, 8)}.sql`;
+    const filename = createBackupFilename();
 
     const backupsDir = path.join(process.cwd(), 'data', 'backups');
     const outputPath = path.join(backupsDir, filename);
@@ -128,7 +128,7 @@ export async function dumpDatabase() {
             env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
         });
 
-        const writeStream = createWriteStream(outputPath);
+        const writeStream = createWriteStream(outputPath, { mode: 0o600 });
         let settled = false;
         let writeStreamHadError = false;
 

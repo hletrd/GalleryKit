@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { getClientIp, normalizeIp, getRateLimitBucketStart } from '@/lib/rate-limit';
+import { getClientIp, normalizeIp, getRateLimitBucketStart, isRateLimitExceeded } from '@/lib/rate-limit';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 
@@ -59,6 +59,18 @@ describe('getRateLimitBucketStart', () => {
     it('supports small windows without fractional seconds', () => {
         expect(getRateLimitBucketStart(61_999, 60_000)).toBe(60);
         expect(getRateLimitBucketStart(120_001, 60_000)).toBe(120);
+    });
+});
+
+describe('isRateLimitExceeded', () => {
+    it('treats check-before-increment callers as limited at the configured maximum', () => {
+        expect(isRateLimitExceeded(4, 5)).toBe(false);
+        expect(isRateLimitExceeded(5, 5)).toBe(true);
+    });
+
+    it('lets pre-increment callers consume the final nominally allowed request', () => {
+        expect(isRateLimitExceeded(5, 5, true)).toBe(false);
+        expect(isRateLimitExceeded(6, 5, true)).toBe(true);
     });
 });
 
