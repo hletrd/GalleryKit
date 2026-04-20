@@ -71,10 +71,16 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
     const image = images[currentIndex];
 
-    // Update document.title when navigating between photos.
-    // Use a ref to track the base site title so cleanup doesn't restore
-    // a stale title from a previous photo during rapid navigation.
-    const siteTitleRef = useRef(document.title);
+    // Track the base document title on the client only so the component
+    // stays SSR-safe when rendered in a server environment.
+    const siteTitleRef = useRef(siteConfig.nav_title);
+    useEffect(() => {
+        siteTitleRef.current = document.title;
+        return () => {
+            document.title = siteTitleRef.current;
+        };
+    }, []);
+
     useEffect(() => {
         if (image?.title) {
             document.title = `${image.title} — ${siteConfig.nav_title}`;

@@ -160,12 +160,30 @@ const DEFAULT_OUTPUT_SIZES = DEFAULT_IMAGE_SIZES;
 export async function deleteImageVariants(dir: string, baseFilename: string, sizes: number[] = DEFAULT_OUTPUT_SIZES) {
     const ext = path.extname(baseFilename);
     const name = path.basename(baseFilename, ext);
-    const filesToDelete = [
+    const filesToDelete = new Set([
         baseFilename,
         ...sizes.map(size => `${name}_${size}${ext}`),
-    ];
+    ]);
+
+    try {
+        const dirHandle = await fs.opendir(dir);
+        try {
+            for await (const entry of dirHandle) {
+                if (!entry.isFile()) continue;
+                if (entry.name.startsWith(`${name}_`) && entry.name.endsWith(ext)) {
+                    filesToDelete.add(entry.name);
+                }
+            }
+        } finally {
+            await dirHandle.close().catch(() => {});
+        }
+    } catch {
+        // Best-effort cleanup — if the directory scan fails, fall back to the
+        // known configured-size candidates above.
+    }
+
     await Promise.all(
-        filesToDelete.map(f => fs.unlink(path.join(dir, f)).catch(() => {})),
+        [...filesToDelete].map(f => fs.unlink(path.join(dir, f)).catch(() => {})),
     );
 }
 

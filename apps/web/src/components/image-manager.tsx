@@ -332,7 +332,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 <TableCell>
                                     <div className="relative h-32 w-32 overflow-hidden rounded border bg-muted flex items-center justify-center">
                                         <OptimisticImage
-                                            src={`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, '_640.avif')}`}
+                                            src={`/uploads/avif/${image.filename_avif}`}
                                             alt={image.title || t('common.photo')}
                                             fill
                                             sizes="128px"

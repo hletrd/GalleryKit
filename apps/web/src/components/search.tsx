@@ -207,7 +207,7 @@ export function Search() {
                                     >
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                                             <Image
-                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`)}
+                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                                 alt={image.title || t('common.photo')}
                                                 width={48}
                                                 height={48}

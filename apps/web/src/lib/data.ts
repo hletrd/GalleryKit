@@ -73,6 +73,11 @@ async function flushGroupViewCounts() {
             consecutiveFlushFailures++;
             console.warn(`[viewCount] Flush fully failed (${consecutiveFlushFailures} consecutive), next flush in ${getNextFlushInterval() / 1000}s`);
         }
+
+        if (viewCountBuffer.size > 0 && !viewCountFlushTimer) {
+            viewCountFlushTimer = setTimeout(flushGroupViewCounts, getNextFlushInterval());
+            viewCountFlushTimer.unref?.();
+        }
     }
 }
 
@@ -647,6 +652,17 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .innerJoin(imageTags, eq(images.id, imageTags.imageId))
         .innerJoin(tags, eq(imageTags.tagId, tags.id))
         .where(and(...tagConditions))
+        .groupBy(
+            images.id,
+            images.title,
+            images.description,
+            images.filename_jpeg,
+            images.width,
+            images.height,
+            images.topic,
+            images.camera_model,
+            images.capture_date,
+        )
         .orderBy(desc(images.created_at), desc(images.id))
         .limit(remainingLimit);
 
