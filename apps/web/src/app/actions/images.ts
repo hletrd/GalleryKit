@@ -509,17 +509,19 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         return { error: t('invalidImageId') };
     }
 
-    if (title && title.length > 255) {
+    // Sanitize title and description BEFORE length validation so checks
+    // operate on the same value that will be stored (matches settings.ts/seo.ts
+    // pattern, see C29-09/C30-01 and C45-03).
+    const sanitizedTitle = stripControlChars(title ? title.trim() : null) || null;
+    const sanitizedDescription = stripControlChars(description ? description.trim() : null) || null;
+
+    if (sanitizedTitle && sanitizedTitle.length > 255) {
         return { error: t('titleTooLong') };
     }
 
-    if (description && description.length > 5000) {
+    if (sanitizedDescription && sanitizedDescription.length > 5000) {
         return { error: t('descriptionTooLong') };
     }
-
-    // Sanitize title and description: strip control characters after trimming
-    const sanitizedTitle = stripControlChars(title ? title.trim() : null) || null;
-    const sanitizedDescription = stripControlChars(description ? description.trim() : null) || null;
 
     try {
         const [existingImage] = await db.select({ topic: images.topic })

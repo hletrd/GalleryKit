@@ -35,7 +35,7 @@ export async function createTopic(formData: FormData) {
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     const label = stripControlChars(formData.get('label')?.toString() ?? '') ?? '';
-    const slug = formData.get('slug')?.toString() ?? '';
+    const slug = stripControlChars(formData.get('slug')?.toString() ?? '') ?? '';
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
@@ -234,7 +234,9 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!topicSlug || !isValidSlug(topicSlug)) {
+    // Sanitize before validation — defense in depth (matches updateTopic/deleteTopic pattern)
+    const cleanTopicSlug = stripControlChars(topicSlug) ?? '';
+    if (!cleanTopicSlug || !isValidSlug(cleanTopicSlug)) {
         return { error: t('invalidTopicSlug') };
     }
 
@@ -255,13 +257,13 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     try {
         await db.insert(topicAliases).values({
             alias: cleanAlias,
-            topicSlug
+            topicSlug: cleanTopicSlug
         });
 
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', topicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
+        logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
 
-        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${topicSlug}`);
+        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -279,7 +281,9 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!topicSlug || !isValidSlug(topicSlug)) {
+    // Sanitize before validation — defense in depth (matches createTopicAlias/updateTopic pattern)
+    const cleanTopicSlug = stripControlChars(topicSlug) ?? '';
+    if (!cleanTopicSlug || !isValidSlug(cleanTopicSlug)) {
         return { error: t('invalidTopicSlug') };
     }
 
@@ -294,20 +298,20 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         const [delResult] = await db.delete(topicAliases).where(
             and(
                 eq(topicAliases.alias, cleanAlias),
-                eq(topicAliases.topicSlug, topicSlug)
+                eq(topicAliases.topicSlug, cleanTopicSlug)
             )
         );
         // Log audit event only when the alias was actually deleted — avoids
         // duplicate entries when concurrent deletion causes the delete to affect 0 rows.
         if (delResult.affectedRows > 0) {
             const currentUser = await getCurrentUser();
-            logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', topicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
+            logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
         }
     } catch (e) {
         console.error('Failed to delete topic alias:', e);
         return { error: t('failedToDeleteAlias') };
     }
 
-    revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${cleanAlias}`, `/${topicSlug}`);
+    revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
     return { success: true };
 }
