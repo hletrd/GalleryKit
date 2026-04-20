@@ -18,6 +18,9 @@ import { revalidateAllAppData } from "@/lib/revalidation";
 import { containsDangerousSql } from "@/lib/sql-restore-scan";
 
 function escapeCsvField(value: string): string {
+    // Strip null bytes and other control characters (except \r\n which are handled below)
+    // as defense-in-depth for legacy data stored before stripControlChars was added.
+    value = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
     // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
     value = value.replace(/[\r\n]/g, ' ');
     // Prefix formula injection characters with a single quote
@@ -111,13 +114,16 @@ export async function dumpDatabase() {
     return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
         // to avoid exposing credentials in /proc/<pid>/cmdline
+        // Minimal env: HOME excluded (prevents ~/.my.cnf loading), LANG/LC_ALL
+        // set to C.UTF-8 for deterministic output regardless of server locale,
+        // MYSQL_* vars required for auth (avoid exposing credentials in /proc/cmdline).
         const dump = spawn('mysqldump', [
             '--single-transaction', // Good for InnoDB
             '--quick',
             ...sslArgs,
             DB_NAME
         ], {
-            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
         });
 
         const writeStream = createWriteStream(outputPath);
@@ -163,6 +169,24 @@ export async function dumpDatabase() {
                 // may be truncated or corrupt. Report failure instead of success.
                 if (writeStreamHadError) {
                     console.error('Backup writeStream error during flush — file may be corrupt');
+                    fs.unlink(outputPath).catch(() => {});
+                    resolve({ success: false, error: t('failedToWriteBackup') });
+                    return;
+                }
+
+                // Verify the backup file is non-empty and contains the expected
+                // mysqldump header. An empty file would indicate mysqldump exited
+                // 0 without producing output (e.g., permissions issue on some
+                // MySQL versions that don't set a non-zero exit code).
+                try {
+                    const stats = await fs.stat(outputPath);
+                    if (stats.size === 0) {
+                        console.error('Backup file is empty despite mysqldump exit code 0');
+                        fs.unlink(outputPath).catch(() => {});
+                        resolve({ success: false, error: t('failedToWriteBackup') });
+                        return;
+                    }
+                } catch {
                     fs.unlink(outputPath).catch(() => {});
                     resolve({ success: false, error: t('failedToWriteBackup') });
                     return;
@@ -304,12 +328,15 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     return new Promise<{ success: boolean, error?: string }>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
         // to avoid exposing credentials in /proc/<pid>/cmdline
+        // Minimal env: HOME excluded (prevents ~/.my.cnf loading), LANG/LC_ALL
+        // set to C.UTF-8 for deterministic behavior regardless of server locale,
+        // MYSQL_* vars required for auth (avoid exposing credentials in /proc/cmdline).
         const restore = spawn('mysql', [
             '--one-database',
             ...restoreSslArgs,
             DB_NAME
         ], {
-            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: process.env.LANG, LC_ALL: process.env.LC_ALL }
+            env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, MYSQL_PWD: DB_PASSWORD, MYSQL_USER: DB_USER, MYSQL_HOST: DB_HOST, MYSQL_TCP_PORT: DB_PORT || '3306', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }
         });
 
         const readStream = createReadStream(tempPath);
