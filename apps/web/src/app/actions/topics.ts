@@ -96,8 +96,13 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    // Sanitize before validation — defense in depth (matches stripControlChars pattern)
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and should not silently proceed (defense in
+    // depth for destructive operations — matches deleteTopic pattern).
     const cleanCurrentSlug = stripControlChars(currentSlug) ?? '';
+    if (cleanCurrentSlug !== currentSlug) {
+        return { error: t('invalidCurrentSlug') };
+    }
     if (!cleanCurrentSlug || !isValidSlug(cleanCurrentSlug)) {
         return { error: t('invalidCurrentSlug') };
     }
@@ -188,8 +193,13 @@ export async function deleteTopic(slug: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    // Sanitize before validation — defense in depth (matches updateTopic pattern)
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed on a
+    // destructive operation (defense in depth — matches updateTopic pattern).
     const cleanSlug = stripControlChars(slug) ?? '';
+    if (cleanSlug !== slug) {
+        return { error: t('invalidSlug') };
+    }
     if (!cleanSlug || !isValidSlug(cleanSlug)) {
         return { error: t('invalidSlug') };
     }
@@ -281,14 +291,22 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    // Sanitize before validation — defense in depth (matches createTopicAlias/updateTopic pattern)
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed on a
+    // destructive operation (defense in depth — matches updateTopic/deleteTopic pattern).
     const cleanTopicSlug = stripControlChars(topicSlug) ?? '';
+    if (cleanTopicSlug !== topicSlug) {
+        return { error: t('invalidTopicSlug') };
+    }
     if (!cleanTopicSlug || !isValidSlug(cleanTopicSlug)) {
         return { error: t('invalidTopicSlug') };
     }
 
-    // Sanitize before validation — matches createTopicAlias pattern (C34R2-01)
+    // Sanitize before validation — reject malformed input (defense in depth)
     const cleanAlias = stripControlChars(alias) ?? '';
+    if (cleanAlias !== alias) {
+        return { error: t('invalidAlias') };
+    }
     // Permissive check to allow deleting legacy aliases
     if (!cleanAlias || !isValidTopicAlias(cleanAlias)) {
         return { error: t('invalidAlias') };

@@ -118,7 +118,12 @@ export async function addTagToImage(imageId: number, tagName: string) {
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
     // Sanitize before validation — matches updateTag pattern (C41-02)
-    const cleanName = stripControlChars(tagName?.trim() ?? '') ?? '';
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed (defense in
+    // depth for destructive operations — matches updateTopic/deleteTopic pattern).
+    const trimmedTagName = tagName?.trim() ?? '';
+    const cleanName = stripControlChars(trimmedTagName) ?? '';
+    if (cleanName !== trimmedTagName) return { error: t('invalidTagName') };
     if (!cleanName) return { error: t('tagNameRequired') };
     if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
@@ -168,8 +173,11 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
-    // Sanitize before lookup — matches addTagToImage/updateTag pattern (C42-02)
-    const cleanName = stripControlChars(tagName?.trim() ?? '') ?? '';
+    // Sanitize before lookup — reject malformed input (defense in depth
+    // for destructive operations — matches addTagToImage/updateTopic pattern).
+    const trimmedTagName = tagName?.trim() ?? '';
+    const cleanName = stripControlChars(trimmedTagName) ?? '';
+    if (cleanName !== trimmedTagName) return { error: t('invalidTagName') };
     if (!cleanName) return { error: t('tagNameRequired') };
 
     try {
@@ -310,7 +318,11 @@ export async function batchUpdateImageTags(
         await db.transaction(async (tx) => {
             // Add tags
             for (const name of addTagNames) {
-                const cleanName = stripControlChars(name.trim()) ?? '';
+                const trimmedName = name.trim();
+                const cleanName = stripControlChars(trimmedName) ?? '';
+                // Reject malformed input: skip tag names that contained control
+                // characters (defense in depth — matches addTagToImage pattern).
+                if (cleanName !== trimmedName) continue;
                 if (!cleanName) continue;
                 if (!isValidTagName(cleanName)) {
                     warnings.push(t('invalidTagName') + `: "${cleanName}"`);
@@ -341,7 +353,11 @@ export async function batchUpdateImageTags(
             // to avoid removing the wrong tag when slug collisions exist (same
             // pattern as removeTagFromImage, see C38-01).
             for (const name of removeTagNames) {
-                const cleanName = stripControlChars(name.trim()) ?? '';
+                const trimmedName = name.trim();
+                const cleanName = stripControlChars(trimmedName) ?? '';
+                // Reject malformed input: skip tag names that contained control
+                // characters (defense in depth — matches removeTagFromImage pattern).
+                if (cleanName !== trimmedName) continue;
                 if (!cleanName) continue;
                 let [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.name, cleanName));
                 if (!tagRecord) {
