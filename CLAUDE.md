@@ -39,7 +39,7 @@ gallerykit/
 │   ├── drizzle/              # Database migrations
 │   ├── Dockerfile            # Multi-stage production build
 │   └── docker-compose.yml    # Docker deployment config
-├── test/                     # Test utilities and sample data
+├── .context/                 # Review and plan artifacts generated during OMX loops
 └── package.json              # Monorepo root (npm workspaces)
 ```
 
@@ -92,7 +92,7 @@ SESSION_SECRET=<random-64-char-hex>
 | `apps/web/src/app/api/admin/db/download/route.ts` | Authenticated backup file download |
 | `apps/web/src/site-config.json` | Site metadata (title, SEO, links) |
 
-- **Storage Backend (Not Yet Integrated):** The `@/lib/storage` module provides a `StorageBackend` abstraction (local, MinIO, S3), but it is **not yet integrated** into the upload/processing/serving pipeline. The `storage_backend` admin setting switches the singleton but actual file I/O still uses direct `fs` operations in `process-image.ts` and `serve-upload.ts`.
+- **Storage Backend (Not Yet Integrated):** The `@/lib/storage` module still exists as an internal abstraction, but the product currently supports local filesystem storage only. Do not document or expose S3/MinIO switching as a supported admin feature until the upload/processing/serving pipeline is wired end-to-end.
 
 ## Database Schema (Key Tables)
 
@@ -224,4 +224,4 @@ The repository has a formal test surface:
 4. Run `docker compose up -d --build`
 5. Initialize DB: container runs migrations automatically
 6. Push schema indexes: `npm run db:push` (from apps/web/)
-7. Access at `http://localhost:3000`
+7. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`

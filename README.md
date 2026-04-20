@@ -53,8 +53,7 @@ Site configuration lives in `apps/web/src/site-config.json`:
     "nav_title": "Navigation Title",
     "home_link": "/",
     "footer_text": "Footer Text",
-    "google_analytics_id": "G-XXXXXXXXXX",
-    "external_links": []
+    "google_analytics_id": "G-XXXXXXXXXX"
 }
 ```
 
@@ -116,7 +115,7 @@ BASE_URL=http://localhost:3000
 
 If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size.
-If you deploy behind the provided nginx reverse proxy, set `TRUST_PROXY=true` so login/search rate limits use the real client IP instead of a shared `unknown` bucket.
+The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. Keep those protections if you adapt the compose file.
 
 ### Development
 
@@ -143,7 +142,7 @@ npm run build
 docker compose -f apps/web/docker-compose.yml up -d --build
 ```
 
-The application listens on port 3000.
+The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly.
 
 ## Tech Stack
 

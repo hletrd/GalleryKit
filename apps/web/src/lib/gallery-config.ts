@@ -50,22 +50,9 @@ export interface GalleryConfig {
     imageQualityAvif: number;
     imageQualityJpeg: number;
     imageSizes: number[];
-    queueConcurrency: number;
-
-    // Gallery Display
-    gridColumnsDesktop: number;
-    gridColumnsTablet: number;
-    gridColumnsMobile: number;
 
     // Privacy
     stripGpsOnUpload: boolean;
-
-    // Upload Limits
-    maxFileSizeMb: number;
-    maxFilesPerBatch: number;
-
-    // Storage
-    storageBackend: 'local' | 'minio' | 's3';
 }
 
 /**
@@ -78,37 +65,22 @@ function validatedNumber(map: Map<string, string>, key: GallerySettingKey): numb
     return Number(raw);
 }
 
-const VALID_STORAGE_BACKENDS = ['local', 'minio', 's3'] as const;
-
 async function _getGalleryConfig(): Promise<GalleryConfig> {
     const map = await getSettingsMap();
 
     // Use parseImageSizes for sorted output and invalid-input fallback (C13-01)
     const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
 
-    // Validate storageBackend against allowed values (C13-02)
-    const rawBackend = getSetting(map, 'storage_backend');
-    const storageBackend: 'local' | 'minio' | 's3' = VALID_STORAGE_BACKENDS.includes(rawBackend as typeof VALID_STORAGE_BACKENDS[number])
-        ? (rawBackend as 'local' | 'minio' | 's3')
-        : 'local';
-
     return {
         imageQualityWebp: validatedNumber(map, 'image_quality_webp'),
         imageQualityAvif: validatedNumber(map, 'image_quality_avif'),
         imageQualityJpeg: validatedNumber(map, 'image_quality_jpeg'),
         imageSizes,
-        queueConcurrency: validatedNumber(map, 'queue_concurrency'),
-        gridColumnsDesktop: validatedNumber(map, 'grid_columns_desktop'),
-        gridColumnsTablet: validatedNumber(map, 'grid_columns_tablet'),
-        gridColumnsMobile: validatedNumber(map, 'grid_columns_mobile'),
         stripGpsOnUpload: (() => {
             const raw = getSetting(map, 'strip_gps_on_upload');
             if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
             return raw === 'true';
         })(),
-        maxFileSizeMb: validatedNumber(map, 'max_file_size_mb'),
-        maxFilesPerBatch: validatedNumber(map, 'max_files_per_batch'),
-        storageBackend,
     };
 }
 
