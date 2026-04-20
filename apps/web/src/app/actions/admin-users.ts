@@ -48,6 +48,10 @@ function checkUserCreateRateLimit(ip: string): boolean {
     return entry.count > USER_CREATE_MAX_ATTEMPTS;
 }
 
+function resetUserCreateRateLimit(ip: string) {
+    userCreateRateLimit.delete(ip);
+}
+
 // Admin User Management
 export async function getAdminUsers() {
     if (!(await isAdmin())) return [];
@@ -131,6 +135,7 @@ export async function createAdminUser(formData: FormData) {
         } catch {
             // DB unavailable — in-memory Map will expire naturally
         }
+        resetUserCreateRateLimit(ip);
 
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
@@ -146,6 +151,7 @@ export async function createAdminUser(formData: FormData) {
         } catch {
             // DB unavailable — in-memory Map will expire naturally
         }
+        resetUserCreateRateLimit(ip);
         return { error: t('failedToCreateUser') };
     }
 }

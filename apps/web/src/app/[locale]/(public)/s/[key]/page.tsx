@@ -10,6 +10,12 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 
+function toIsoTimestamp(value: string | Date | null | undefined) {
+    if (!value) return undefined;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     const locale = await getLocale();
@@ -50,7 +56,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             siteName: seo.title,
             images: ogImages,
             type: 'article',
-            publishedTime: image.capture_date?.toString(),
+            publishedTime: toIsoTimestamp(image.created_at),
         },
         twitter: {
             card: 'summary_large_image',

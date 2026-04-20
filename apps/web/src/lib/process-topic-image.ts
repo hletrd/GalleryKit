@@ -8,8 +8,6 @@ import { randomUUID } from 'crypto';
 import { isValidFilename } from '@/lib/validation';
 import { MAX_INPUT_PIXELS_TOPIC } from '@/lib/process-image';
 const RESOURCES_ROOT = (() => {
-    const envRoot = process.env.UPLOAD_ROOT?.trim();
-    if (envRoot) return path.join(path.dirname(envRoot), 'resources');
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/resources');
     const simplePath = path.join(process.cwd(), 'public/resources');
     if (process.cwd().endsWith('apps/web')) {

@@ -30,3 +30,4 @@ npm run dev
 - Total batch upload size defaults to **2 GiB**. Override with `UPLOAD_MAX_TOTAL_BYTES` only if your deployment can safely absorb larger multipart bodies.
 - Set `TRUST_PROXY=true` when running behind the provided nginx reverse proxy or another trusted proxy chain so rate limits use real client IPs.
 - The checked-in `docker-compose.yml` assumes a Linux host with `network_mode: host`, a host-managed MySQL instance, and a host-side `src/site-config.json` bind mount.
+- If `ADMIN_PASSWORD` is stored as an Argon2 hash, set a separate plaintext `E2E_ADMIN_PASSWORD` for opt-in Playwright admin login flows.

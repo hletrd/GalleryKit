@@ -18,9 +18,12 @@ export async function ensureEnglishLocale(page: Page) {
 }
 
 export async function loginAsAdmin(page: Page) {
-  const adminPassword = process.env.ADMIN_PASSWORD;
+  const adminPassword = process.env.E2E_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD;
   if (!adminPassword) {
-    throw new Error('ADMIN_PASSWORD must be set for Playwright admin E2E tests');
+    throw new Error('E2E_ADMIN_PASSWORD or ADMIN_PASSWORD must be set for Playwright admin E2E tests');
+  }
+  if (adminPassword.startsWith('$argon2')) {
+    throw new Error('E2E admin login requires a plaintext E2E_ADMIN_PASSWORD; ADMIN_PASSWORD is currently an Argon2 hash.');
   }
 
   await ensureEnglishLocale(page);
