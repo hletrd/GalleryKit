@@ -53,8 +53,8 @@ export async function uploadImages(formData: FormData) {
     }
 
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
-    // Topic is now a string slug
-    const topic = formData.get('topic')?.toString() ?? '';
+    // Topic is now a string slug — sanitize before validation (defense in depth)
+    const topic = stripControlChars(formData.get('topic')?.toString() ?? '') ?? '';
     const tagsString = formData.get('tags')?.toString() ?? '';
 
     if (tagsString && tagsString.length > 1000) {
