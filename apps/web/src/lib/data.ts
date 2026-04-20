@@ -397,7 +397,7 @@ export async function getImage(id: number) {
                     or(
                         image.capture_date
                             ? lt(images.capture_date, image.capture_date)
-                            : sql`${images.capture_date} IS NOT NULL`,
+                            : sql`FALSE`,
                         and(
                             image.capture_date
                                 ? eq(images.capture_date, image.capture_date)

@@ -1,11 +1,13 @@
 import { MetadataRoute } from 'next';
-import siteConfig from '@/site-config.json';
+import { getSeoSettings } from '@/lib/data';
 
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const seo = await getSeoSettings();
+
   return {
-    name: siteConfig.title,
-    short_name: siteConfig.nav_title,
-    description: siteConfig.description,
+    name: seo.title,
+    short_name: seo.nav_title,
+    description: seo.description,
     start_url: '/',
     display: 'standalone',
     background_color: '#09090b',

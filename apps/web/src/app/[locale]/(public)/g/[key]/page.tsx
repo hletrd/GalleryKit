@@ -69,7 +69,10 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string, locale: string }>, searchParams: Promise<{ photoId?: string }> }) {
     const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
-    const group = await getSharedGroupCached(key);
+    const [group, seo] = await Promise.all([
+        getSharedGroupCached(key),
+        getSeoSettings(),
+    ]);
 
     if (!group) {
         return notFound();
@@ -119,6 +122,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     isSharedView
                     syncPhotoQueryBasePath={localizePath(locale, `/g/${key}`)}
                     imageSizes={config.imageSizes}
+                    siteTitle={seo.title}
                 />
             </>
         );

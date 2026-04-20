@@ -1,13 +1,13 @@
 import { Suspense } from 'react';
-import { getTopics } from "@/lib/data";
+import { getSeoSettings, getTopics } from "@/lib/data";
 import { NavClient } from "./nav-client";
 
 export async function Nav() {
-    const topics = await getTopics();
+    const [topics, seo] = await Promise.all([getTopics(), getSeoSettings()]);
 
     return (
         <Suspense>
-            <NavClient topics={topics} />
+            <NavClient topics={topics} navTitle={seo.nav_title} />
         </Suspense>
     );
 }

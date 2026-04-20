@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { isAdmin } from '@/app/actions';
+import { isAdmin } from '@/app/actions/auth';
 import { localizePath } from '@/lib/locale-path';
 
 export default async function ProtectedLayout({

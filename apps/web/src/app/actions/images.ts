@@ -12,16 +12,17 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
-import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
 import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
+import { settleUploadTrackerClaim, type UploadTrackerEntry } from '@/lib/upload-tracker';
 import { headers } from 'next/headers';
 
 // Server-side upload tracking to enforce cumulative limits across per-file invocations.
 // The client sends files individually, so per-call batch limits are ineffective.
-const uploadTracker = new Map<string, { count: number; bytes: number; windowStart: number }>();
+const uploadTracker = new Map<string, UploadTrackerEntry>();
 const UPLOAD_TRACKING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const UPLOAD_MAX_FILES_PER_WINDOW = 100;
 const UPLOAD_TRACKER_MAX_KEYS = 2000;
@@ -276,25 +277,12 @@ export async function uploadImages(formData: FormData) {
     }
 
     if (failedFiles.length > 0 && successCount === 0) {
+        settleUploadTrackerClaim(uploadTracker, uploadIp, files.length, totalSize, successCount, uploadedBytes);
         return { error: t('allUploadsFailed') };
     }
 
-    // Adjust cumulative upload tracker by the difference between actual and
-    // pre-incremented values. Clamped to >= 0 to prevent negative drift when
-    // all uploads fail (successCount=0 would otherwise subtract the full
-    // pre-incremented amount, inflating the effective rate-limit budget).
-    // Use additive adjustment instead of absolute assignment to avoid overwriting
-    // concurrent requests' pre-incremented contributions for the same IP.
-    // Only adjust if the entry still exists in the Map — if pruneUploadTracker()
-    // evicted this IP's entry during the upload loop, the entry is gone and
-    // there's nothing to correct. Using the stale `tracker` fallback would
-    // overwrite concurrent requests' pre-incremented contributions.
-    const currentTracker = uploadTracker.get(uploadIp);
-    if (currentTracker) {
-        currentTracker.count = Math.max(0, currentTracker.count + (successCount - files.length));
-        currentTracker.bytes = Math.max(0, currentTracker.bytes + (uploadedBytes - totalSize));
-        uploadTracker.set(uploadIp, currentTracker);
-    }
+    // Reconcile the pre-claimed quota with the uploads that actually finished.
+    settleUploadTrackerClaim(uploadTracker, uploadIp, files.length, totalSize, successCount, uploadedBytes);
 
     // Audit log for upload action
     const currentUser = await getCurrentUser();
@@ -493,7 +481,8 @@ export async function deleteImages(ids: number[]) {
     // For large batches, use layout-level revalidation to avoid ISR cache thrash
     // from hundreds of individual revalidatePath calls
     if (foundIds.length > 20) {
-        revalidateLocalizedPaths('/', '/admin/dashboard');
+        revalidateAllAppData();
+        revalidateLocalizedPaths('/admin/dashboard');
     } else {
         revalidateLocalizedPaths(
             '/',

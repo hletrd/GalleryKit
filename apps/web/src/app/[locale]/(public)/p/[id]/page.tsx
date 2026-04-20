@@ -1,5 +1,5 @@
 import { getImageCached, getSeoSettings } from '@/lib/data';
-import { isAdmin } from '@/app/actions';
+import { isAdmin } from '@/app/actions/auth';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -227,6 +227,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 canShare={isAdminUser}
                 isAdmin={isAdminUser}
                 imageSizes={config.imageSizes}
+                siteTitle={seo.title}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (

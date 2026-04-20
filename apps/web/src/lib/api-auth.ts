@@ -1,4 +1,4 @@
-import { isAdmin } from '@/app/actions';
+import { isAdmin } from '@/app/actions/auth';
 import { NextResponse } from 'next/server';
 import { getTranslations } from 'next-intl/server';
 

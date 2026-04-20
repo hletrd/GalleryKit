@@ -96,6 +96,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 nextId={null}
                 isSharedView
                 imageSizes={config.imageSizes}
+                siteTitle={seo.title}
             />
         </>
     );

@@ -6,7 +6,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
-import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import type { SeoSettingKey } from '@/lib/gallery-config-shared';
@@ -117,8 +117,11 @@ export async function updateSeoSettings(settings: Record<string, string>) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'seo_settings_update', 'admin_settings', undefined, undefined, { keys: Object.keys(sanitizedSettings).join(',') }).catch(console.debug);
 
-        // Revalidate all public pages so new SEO metadata is reflected
-        revalidateLocalizedPaths('/', '/admin/seo', '/admin/dashboard');
+        // SEO data is consumed by the localized root layout and long-lived
+        // public metadata pages, so use layout-level invalidation instead of
+        // a short hand-maintained path list.
+        revalidateAllAppData();
+        revalidateLocalizedPaths('/admin/seo', '/admin/dashboard');
 
         return { success: true as const };
     } catch (err) {

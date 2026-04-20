@@ -46,9 +46,10 @@ interface PhotoViewerProps {
     isSharedView?: boolean;
     syncPhotoQueryBasePath?: string;
     imageSizes?: number[];
+    siteTitle?: string;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -73,7 +74,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     // Track the base document title on the client only so the component
     // stays SSR-safe when rendered in a server environment.
-    const siteTitleRef = useRef(siteConfig.nav_title);
+    const siteTitleRef = useRef(siteTitle);
     useEffect(() => {
         siteTitleRef.current = document.title;
         return () => {
@@ -83,11 +84,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     useEffect(() => {
         if (image?.title) {
-            document.title = `${image.title} — ${siteConfig.nav_title}`;
+            document.title = `${image.title} — ${siteTitle}`;
         } else {
             document.title = siteTitleRef.current;
         }
-    }, [image?.id, image?.title]);
+    }, [image?.id, image?.title, siteTitle]);
 
     const showInfo = isPinned || timerShowInfo;
     const downloadFilename = image?.filename_jpeg;

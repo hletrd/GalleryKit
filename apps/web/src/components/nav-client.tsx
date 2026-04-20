@@ -17,11 +17,12 @@ import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
 
 interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
+    navTitle: string;
 }
 
 const MD_BREAKPOINT = 768;
 
-export function NavClient({ topics }: NavClientProps) {
+export function NavClient({ topics, navTitle }: NavClientProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const locale = useLocale();
@@ -69,7 +70,7 @@ export function NavClient({ topics }: NavClientProps) {
                 {/* Title */}
                 <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1")}>
                     <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0">
-                        <span className="font-bold text-xl tracking-tight">{siteConfig.nav_title}</span>
+                        <span className="font-bold text-xl tracking-tight">{navTitle}</span>
                     </Link>
                 </div>
 

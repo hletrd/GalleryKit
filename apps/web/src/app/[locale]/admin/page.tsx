@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { isAdmin } from '@/app/actions';
+import { isAdmin } from '@/app/actions/auth';
 import { LoginForm } from './login-form';
 import { localizePath } from '@/lib/locale-path';
 
