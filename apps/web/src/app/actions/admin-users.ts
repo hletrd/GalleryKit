@@ -96,6 +96,11 @@ export async function createAdminUser(formData: FormData) {
     const username = stripControlChars(rawUsername) ?? '';
     const password = formData.get('password')?.toString() ?? '';
 
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed (defense in
+    // depth — matches updateTopic/deleteTopic pattern, see C7R2-05).
+    if (username !== rawUsername) return { error: t('invalidUsernameFormat') };
+
     if (!username || username.length < 3) return { error: t('usernameTooShort') };
     if (username.length > 64) return { error: t('usernameTooLong') };
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };

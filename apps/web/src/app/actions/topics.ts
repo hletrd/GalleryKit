@@ -34,8 +34,15 @@ export async function createTopic(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    const label = stripControlChars(formData.get('label')?.toString() ?? '') ?? '';
-    const slug = stripControlChars(formData.get('slug')?.toString() ?? '') ?? '';
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed (defense in
+    // depth — matches updateTopic/deleteTopic pattern, see C7R2-02).
+    const rawLabel = formData.get('label')?.toString() ?? '';
+    const rawSlug = formData.get('slug')?.toString() ?? '';
+    const label = stripControlChars(rawLabel) ?? '';
+    const slug = stripControlChars(rawSlug) ?? '';
+    if (label !== rawLabel) return { error: t('invalidSlug') };
+    if (slug !== rawSlug) return { error: t('invalidSlug') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
@@ -107,8 +114,15 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         return { error: t('invalidCurrentSlug') };
     }
 
-    const label = stripControlChars(formData.get('label')?.toString() ?? '') ?? '';
-    const slug = stripControlChars(formData.get('slug')?.toString() ?? '') ?? '';
+    // Reject malformed label/slug: if sanitization changes the value, the
+    // input contained control characters and must not silently proceed
+    // (defense in depth — matches createTopic pattern, see C7R2-02).
+    const rawLabel = formData.get('label')?.toString() ?? '';
+    const rawSlug = formData.get('slug')?.toString() ?? '';
+    const label = stripControlChars(rawLabel) ?? '';
+    const slug = stripControlChars(rawSlug) ?? '';
+    if (label !== rawLabel) return { error: t('invalidSlug') };
+    if (slug !== rawSlug) return { error: t('invalidSlug') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
@@ -244,15 +258,24 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    // Sanitize before validation — defense in depth (matches updateTopic/deleteTopic pattern)
+    // Sanitize before validation — reject malformed input: if sanitization
+    // changes the value, the input contained control characters and must not
+    // silently proceed (defense in depth — matches deleteTopicAlias pattern,
+    // see C7R2-01).
     const cleanTopicSlug = stripControlChars(topicSlug) ?? '';
+    if (cleanTopicSlug !== topicSlug) {
+        return { error: t('invalidTopicSlug') };
+    }
     if (!cleanTopicSlug || !isValidSlug(cleanTopicSlug)) {
         return { error: t('invalidTopicSlug') };
     }
 
-    // Sanitize alias before validation — strips control characters that
-    // the regex-based isValidTopicAlias may not reject (defense in depth).
+    // Sanitize alias before validation — reject malformed input (defense in
+    // depth — matches deleteTopicAlias pattern, see C7R2-01).
     const cleanAlias = stripControlChars(alias) ?? '';
+    if (cleanAlias !== alias) {
+        return { error: t('invalidAlias') };
+    }
     if (!isValidTopicAlias(cleanAlias)) {
         return { error: t('invalidAliasFormat') };
     }

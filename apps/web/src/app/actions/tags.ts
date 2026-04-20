@@ -52,7 +52,12 @@ export async function updateTag(id: number, name: string) {
     // value that will be stored. Without this, control characters pass
     // validation but are stripped later, causing a mismatch between validated
     // and persisted data (matches settings.ts/seo.ts pattern, see C29-09/C30-01).
-    const trimmedName = stripControlChars(name?.trim() ?? '') ?? '';
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed (defense in
+    // depth — matches addTagToImage pattern, see C7R2-04).
+    const rawName = name?.trim() ?? '';
+    const trimmedName = stripControlChars(rawName) ?? '';
+    if (trimmedName !== rawName) return { error: t('invalidTagName') };
     if (!trimmedName) return { error: t('tagNameRequired') };
 
     if (!isValidTagName(trimmedName)) {
@@ -224,8 +229,13 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         if (!Number.isInteger(id) || id <= 0) return { error: t('invalidImageId') };
     }
 
-    // Sanitize before validation — matches addTagToImage/updateTag pattern (C42-01)
-    const cleanName = stripControlChars(tagName?.trim() ?? '') ?? '';
+    // Sanitize before validation — reject malformed input: if sanitization
+    // changes the value, the input contained control characters and must not
+    // silently proceed (defense in depth — matches addTagToImage pattern,
+    // see C7R2-03).
+    const rawTagName = tagName?.trim() ?? '';
+    const cleanName = stripControlChars(rawTagName) ?? '';
+    if (cleanName !== rawTagName) return { error: t('invalidTagName') };
     if (!cleanName) return { error: t('tagNameRequired') };
     if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
