@@ -142,8 +142,10 @@ SESSION_SECRET=<random-64-char-hex>
 
 ### Privacy
 - GPS coordinates (`latitude`, `longitude`) excluded from public API responses
-- `filename_original` excluded from public queries
-- `adminSelectFields` provides full data only to authenticated admin routes
+- `filename_original` and `user_filename` excluded from public queries
+- `adminSelectFields` includes all fields (including PII) for authenticated admin routes
+- `publicSelectFields` derived from `adminSelectFields` by omitting PII fields — separate object reference prevents accidental leakage
+- Compile-time guard (`_SensitiveKeysInPublic`) enforces no sensitive keys in `publicSelectFields`
 
 ## Database Indexes
 
