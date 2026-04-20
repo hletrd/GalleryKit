@@ -43,8 +43,9 @@ export class LocalStorageBackend implements StorageBackend {
         return dirsPromise;
     }
 
-    async writeStream(key: string, stream: Readable | import('stream/web').ReadableStream, _contentType?: string): Promise<StorageWriteResult> {
+    async writeStream(key: string, stream: Readable | import('stream/web').ReadableStream, contentType?: string): Promise<StorageWriteResult> {
         const filePath = this.resolve(key);
+        void contentType;
         // Ensure parent directory exists
         await fs.mkdir(path.dirname(filePath), { recursive: true });
 
@@ -59,8 +60,9 @@ export class LocalStorageBackend implements StorageBackend {
         return { key, size: stats?.size };
     }
 
-    async writeBuffer(key: string, data: Buffer, _contentType?: string): Promise<StorageWriteResult> {
+    async writeBuffer(key: string, data: Buffer, contentType?: string): Promise<StorageWriteResult> {
         const filePath = this.resolve(key);
+        void contentType;
         await fs.mkdir(path.dirname(filePath), { recursive: true });
         await fs.writeFile(filePath, data, { mode: 0o600 });
         return { key, size: data.length };
@@ -109,7 +111,8 @@ export class LocalStorageBackend implements StorageBackend {
         }
     }
 
-    async getUrl(key: string, _options?: PresignedUrlOptions): Promise<string> {
+    async getUrl(key: string, options?: PresignedUrlOptions): Promise<string> {
+        void options;
         // Local files are served via the /uploads/[...path] route
         return `/uploads/${key}`;
     }

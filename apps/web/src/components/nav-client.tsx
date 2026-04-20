@@ -47,7 +47,6 @@ export function NavClient({ topics }: NavClientProps) {
     // Swap locale prefix in the current path, preserving query params
     const localeSwitchHref = (() => {
         const path = stripLocalePrefix(pathname);
-        // With localePrefix: 'as-needed', default locale has no prefix
         const targetPath = otherLocale === DEFAULT_LOCALE
             ? localizePath(DEFAULT_LOCALE, path)
             : localizePath(otherLocale, path);

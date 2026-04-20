@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, LOCALES, type Locale } from '@/lib/constants';
+import { LOCALES, type Locale } from '@/lib/constants';
 
 function normalizePath(path: string): string {
     if (!path) return '/';
@@ -21,7 +21,7 @@ export function stripLocalePrefix(path: string): string {
 }
 
 export function getLocalePrefix(locale: string): string {
-    return locale === DEFAULT_LOCALE ? '' : `/${locale}`;
+    return `/${locale}`;
 }
 
 export function localizePath(locale: string, path: string): string {

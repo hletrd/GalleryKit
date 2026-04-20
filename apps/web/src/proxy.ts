@@ -5,7 +5,8 @@ import { LOCALES, DEFAULT_LOCALE } from '@/lib/constants';
 const intlMiddleware = createMiddleware({
   locales: [...LOCALES],
   defaultLocale: DEFAULT_LOCALE,
-  localePrefix: 'as-needed'
+  localePrefix: 'always',
+  localeDetection: false
 });
 
 // Matches /admin/... subpaths but NOT the login page itself (/admin exactly, or /admin with no trailing slash)

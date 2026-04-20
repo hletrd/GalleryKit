@@ -12,23 +12,23 @@ describe('stripLocalePrefix', () => {
 });
 
 describe('localizePath', () => {
-    it('omits the default locale prefix and keeps non-default locale prefixes', () => {
-        expect(localizePath('en', '/')).toBe('/');
-        expect(localizePath('en', '/admin/dashboard')).toBe('/admin/dashboard');
+    it('prefixes both default and non-default locale paths', () => {
+        expect(localizePath('en', '/')).toBe('/en');
+        expect(localizePath('en', '/admin/dashboard')).toBe('/en/admin/dashboard');
         expect(localizePath('ko', '/')).toBe('/ko');
         expect(localizePath('ko', '/admin/dashboard')).toBe('/ko/admin/dashboard');
     });
 
     it('normalizes already-prefixed input paths', () => {
-        expect(localizePath('en', '/ko/p/7')).toBe('/p/7');
+        expect(localizePath('en', '/ko/p/7')).toBe('/en/p/7');
         expect(localizePath('ko', '/en/p/7')).toBe('/ko/p/7');
     });
 });
 
 describe('absoluteUrl/localizeUrl', () => {
-    it('builds absolute URLs without redundant default-locale prefixes', () => {
+    it('builds absolute URLs with explicit locale prefixes', () => {
         expect(absoluteUrl('https://gallery.example.com', '/p/1')).toBe('https://gallery.example.com/p/1');
-        expect(localizeUrl('https://gallery.example.com', 'en', '/p/1')).toBe('https://gallery.example.com/p/1');
+        expect(localizeUrl('https://gallery.example.com', 'en', '/p/1')).toBe('https://gallery.example.com/en/p/1');
         expect(localizeUrl('https://gallery.example.com', 'ko', '/p/1')).toBe('https://gallery.example.com/ko/p/1');
     });
 });

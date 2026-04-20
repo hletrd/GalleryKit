@@ -7,7 +7,9 @@ dotenv.config({ path: path.resolve(__dirname, '.env.local') });
 const port = Number(process.env.E2E_PORT || 3100);
 const host = '127.0.0.1';
 const localBaseUrl = `http://${host}:${port}`;
-const baseURL = process.env.E2E_BASE_URL?.trim() || 'https://gallery.atik.kr';
+// Default to a local server so `npm run test:e2e` validates the current checkout.
+// Remote smoke tests remain available by setting E2E_BASE_URL explicitly.
+const baseURL = process.env.E2E_BASE_URL?.trim() || localBaseUrl;
 const parsedBaseUrl = new URL(baseURL);
 const useLocalServer = ['127.0.0.1', 'localhost'].includes(parsedBaseUrl.hostname);
 const localPort = parsedBaseUrl.port || String(port);
@@ -37,11 +39,11 @@ export default defineConfig({
   ],
   webServer: useLocalServer
     ? {
-        command: `HOSTNAME=${host} PORT=${localPort} node .next/standalone/server.js`,
+        command: `npm run build && npm run start -- --hostname ${host} --port ${localPort}`,
         cwd: __dirname,
-        url: baseURL || localBaseUrl,
+        url: baseURL,
         reuseExistingServer: true,
-        timeout: 120_000,
+        timeout: 180_000,
       }
     : undefined,
 });
