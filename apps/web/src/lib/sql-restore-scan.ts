@@ -47,6 +47,11 @@ export function stripSqlCommentsAndLiterals(input: string): string {
         /'(?:''|\\.|[^'\\])*'/gs,
         /"(?:\"\"|\\.|[^"\\])*"/gs,
         /`(?:``|\\.|[^`\\])*`/gs,
+        // Hex literals: 0x followed by hex digits (can encode malicious data for INSERT)
+        /0x[0-9a-fA-F]+/g,
+        // Binary literals: b'...' or 0b... (MySQL bit-value literals)
+        /b'[01]+'/g,
+        /0b[01]+/g,
     ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutComments);
 }
 
