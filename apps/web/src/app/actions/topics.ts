@@ -96,7 +96,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!currentSlug || !isValidSlug(currentSlug)) {
+    // Sanitize before validation — defense in depth (matches stripControlChars pattern)
+    const cleanCurrentSlug = stripControlChars(currentSlug) ?? '';
+    if (!cleanCurrentSlug || !isValidSlug(cleanCurrentSlug)) {
         return { error: t('invalidCurrentSlug') };
     }
 
@@ -118,10 +120,10 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         return { error: t('reservedRouteSegment') };
     }
 
-    const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, currentSlug)).limit(1);
+    const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanCurrentSlug)).limit(1);
     const previousImageFilename = currentTopic?.image_filename ?? null;
 
-    if (slug !== currentSlug && await topicRouteSegmentExists(slug)) {
+    if (slug !== cleanCurrentSlug && await topicRouteSegmentExists(slug)) {
         return { error: t('slugConflictsWithRoute') };
     }
 
@@ -136,11 +138,11 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
 
     try {
 
-        if (slug !== currentSlug) {
+        if (slug !== cleanCurrentSlug) {
             // Cascade slug change in a transaction: update references first (while old FK target exists), then rename the PK
             await db.transaction(async (tx) => {
-                await tx.update(images).set({ topic: slug }).where(eq(images.topic, currentSlug));
-                await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, currentSlug));
+                await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
+                await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
                 await tx.update(topics)
                     .set({
                         label,
@@ -148,7 +150,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                         order,
                         ...(imageFilename ? { image_filename: imageFilename } : {})
                     })
-                    .where(eq(topics.slug, currentSlug));
+                    .where(eq(topics.slug, cleanCurrentSlug));
             });
         } else {
             await db.update(topics)
@@ -157,7 +159,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     order,
                     ...(imageFilename ? { image_filename: imageFilename } : {})
                 })
-                .where(eq(topics.slug, currentSlug));
+                .where(eq(topics.slug, cleanCurrentSlug));
         }
 
         if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
@@ -168,7 +170,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'topic_update', 'topic', slug).catch(console.debug);
 
-        revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/', `/${slug}`, slug !== currentSlug ? `/${currentSlug}` : '');
+        revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/', `/${slug}`, slug !== cleanCurrentSlug ? `/${cleanCurrentSlug}` : '');
         return { success: true };
     } catch (e: unknown) {
          if (imageFilename) {
@@ -186,7 +188,9 @@ export async function deleteTopic(slug: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    if (!slug || !isValidSlug(slug)) {
+    // Sanitize before validation — defense in depth (matches updateTopic pattern)
+    const cleanSlug = stripControlChars(slug) ?? '';
+    if (!cleanSlug || !isValidSlug(cleanSlug)) {
         return { error: t('invalidSlug') };
     }
 
@@ -195,13 +199,13 @@ export async function deleteTopic(slug: string) {
         let deletedImageFilename: string | null = null;
         let deletedRows = 0;
         await db.transaction(async (tx) => {
-            const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, slug)).limit(1);
+            const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, cleanSlug)).limit(1);
             if (headerImages.length > 0) {
                 throw new Error('HAS_IMAGES');
             }
-            const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, slug)).limit(1);
+            const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanSlug)).limit(1);
             deletedImageFilename = topicRecord?.image_filename ?? null;
-            const [delResult] = await tx.delete(topics).where(eq(topics.slug, slug));
+            const [delResult] = await tx.delete(topics).where(eq(topics.slug, cleanSlug));
             deletedRows = delResult.affectedRows;
         });
         if (deletedImageFilename) {
@@ -211,10 +215,10 @@ export async function deleteTopic(slug: string) {
         // entries when concurrent deletion causes the transaction to delete 0 rows.
         if (deletedRows > 0) {
             const currentUser = await getCurrentUser();
-            logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', slug).catch(console.debug);
+            logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', cleanSlug).catch(console.debug);
         }
 
-        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/', `/${slug}`);
+        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/', `/${cleanSlug}`);
 
         return { success: true };
     } catch (e) {
