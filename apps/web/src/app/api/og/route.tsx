@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
+import { isValidSlug, isValidTagName } from '@/lib/validation';
 
 export const runtime = 'edge';
 
@@ -9,11 +10,11 @@ export async function GET(req: NextRequest) {
     const topic = searchParams.get('topic');
     const tags = searchParams.get('tags');
 
-    if (!topic || topic.length > 200) {
+    if (!topic || topic.length > 200 || !isValidSlug(topic)) {
       return new Response('Missing or invalid topic param', { status: 400 });
     }
 
-    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.slice(0, 100)) : [];
+    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)) : [];
     const cacheControl = 'public, max-age=3600, stale-while-revalidate=86400';
 
     return new ImageResponse(
