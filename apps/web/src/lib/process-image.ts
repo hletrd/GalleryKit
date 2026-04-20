@@ -423,7 +423,11 @@ export async function processImageFormats(
 function cleanString(val: unknown): string | null {
     if (val === undefined || val === null) return null;
     const s = String(val).trim();
-    if (s.length === 0 || s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') return null;
+    if (s.length === 0) return null;
+    // Only reject literal 'undefined'/'null' strings when the input was not
+    // already a string — prevents dropping legitimate EXIF metadata that
+    // happens to be the word "null" or "undefined".
+    if (typeof val !== 'string' && (s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null')) return null;
     return s;
 }
 
