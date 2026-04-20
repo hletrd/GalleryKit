@@ -92,6 +92,8 @@ SESSION_SECRET=<random-64-char-hex>
 | `apps/web/src/app/api/admin/db/download/route.ts` | Authenticated backup file download |
 | `apps/web/src/site-config.json` | Site metadata (title, SEO, links) |
 
+- **Storage Backend (Not Yet Integrated):** The `@/lib/storage` module provides a `StorageBackend` abstraction (local, MinIO, S3), but it is **not yet integrated** into the upload/processing/serving pipeline. The `storage_backend` admin setting switches the singleton but actual file I/O still uses direct `fs` operations in `process-image.ts` and `serve-upload.ts`.
+
 ## Database Schema (Key Tables)
 
 - `images` - Photo metadata, EXIF data, filenames
