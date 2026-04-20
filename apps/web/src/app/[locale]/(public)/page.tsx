@@ -6,6 +6,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { absoluteImageUrl } from '@/lib/image-url';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -43,7 +44,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
     : latestImage
       ? [{
-          url: `${seo.url}/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`,
+          url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
           width: latestImage.width,
           height: latestImage.height,
           alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
@@ -106,8 +107,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     url: localizeUrl(baseUrl, locale, '/'),
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
-      contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
-      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`,
+      contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
+      thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, baseUrl),
       name: img.title || `Photo ${img.id}`,
     })),
   } : null;

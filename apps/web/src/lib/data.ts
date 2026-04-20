@@ -104,6 +104,7 @@ const adminSelectFields = {
     filename_avif: images.filename_avif,
     filename_webp: images.filename_webp,
     filename_jpeg: images.filename_jpeg,
+    processed: images.processed,
     width: images.width,
     height: images.height,
     original_width: images.original_width,
@@ -137,8 +138,8 @@ const adminSelectFields = {
 } as const;
 
 // PRIVACY: publicSelectFields is the canonical field set for ALL unauthenticated routes.
-// It is derived from adminSelectFields by explicitly OMITTING PII fields (latitude,
-// longitude, filename_original, user_filename). Because it is a separate object (not
+// It is derived from adminSelectFields by explicitly OMITTING PII/internal fields (latitude,
+// longitude, filename_original, user_filename, original_format, original_file_size, processed). Because it is a separate object (not
 // the same reference), adding a field to adminSelectFields does NOT automatically leak
 // it to public queries — the field must be explicitly included here too.
 // This is the primary privacy enforcement mechanism: any developer adding a sensitive
@@ -152,8 +153,20 @@ const {
     filename_original: _omitFilenameOriginal,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
     user_filename: _omitUserFilename,
-    ...publicSelectFields
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
+    original_format: _omitOriginalFormat,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
+    original_file_size: _omitOriginalFileSize,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
+    processed: _omitProcessed,
+    ...publicSelectFieldCore
 } = adminSelectFields;
+
+const publicSelectFields = {
+    ...publicSelectFieldCore,
+    original_format: sql<string | null>`NULL`,
+    original_file_size: sql<number | null>`NULL`,
+} as const;
 
 // Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
 // are ever added to publicSelectFields, this assertion will produce a TypeScript error.
@@ -161,7 +174,7 @@ const {
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -313,6 +326,27 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
         .groupBy(images.id)
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
+
+    const query = conditions.length > 0
+        ? baseQuery.where(and(...conditions))
+        : baseQuery;
+
+    const effectiveLimit = limit > 0 ? Math.min(limit, 100) : 100;
+    return query.limit(effectiveLimit).offset(offset);
+}
+
+export async function getAdminImagesLite(limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
+    const conditions = [];
+    if (!includeUnprocessed) {
+        conditions.push(eq(images.processed, true));
+    }
+
+    const baseQuery = db.select({
+        ...adminSelectFields,
+        tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
+    })
+        .from(images)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = conditions.length > 0

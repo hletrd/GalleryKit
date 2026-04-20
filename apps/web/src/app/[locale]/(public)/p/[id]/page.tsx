@@ -10,6 +10,7 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { absoluteImageUrl } from '@/lib/image-url';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -65,14 +66,14 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const config = await getGalleryConfig();
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
     const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`;
-    const absoluteImageUrl = `${seo.url}${imageUrl}`;
+    const ogImageUrl = absoluteImageUrl(imageUrl, seo.url);
     const pageUrl = localizeUrl(seo.url, locale, `/p/${id}`);
 
     // Use custom OG image if configured, otherwise use photo image
     const ogImages = seo.og_image_url
         ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
         : [{
-            url: absoluteImageUrl,
+            url: ogImageUrl,
             width: image.width,
             height: image.height,
             alt: displayTitle,
@@ -99,7 +100,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             card: 'summary_large_image',
             title: displayTitle,
             description: image.description || t('descriptionByAuthor', { author: seo.author }),
-            images: seo.og_image_url ? [seo.og_image_url] : [absoluteImageUrl],
+            images: seo.og_image_url ? [seo.og_image_url] : [ogImageUrl],
         }
     };
 }
@@ -141,8 +142,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     const jsonLd = {
         '@context': 'https://schema.org',
         '@type': 'ImageObject',
-        contentUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg}`,
-        thumbnailUrl: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`,
+        contentUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg}`, seo.url),
+        thumbnailUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, seo.url),
         encodingFormat: 'image/jpeg',
         license: 'https://creativecommons.org/licenses/by-nc/4.0/',
         acquireLicensePage: siteConfig.parent_url,

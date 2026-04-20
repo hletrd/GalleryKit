@@ -41,11 +41,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { OptimisticImage } from './optimistic-image';
 import { Pencil } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
+import { imageUrl } from '@/lib/image-url';
 import { localizeUrl } from '@/lib/locale-path';
 
 interface ImageType {
     id: number;
     filename_avif: string;
+    filename_jpeg: string;
+    processed: boolean | null;
     title: string | null;
     topic: string | null;
     created_at: string | Date | null;
@@ -331,13 +334,20 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                 </TableCell>
                                 <TableCell>
                                     <div className="relative h-32 w-32 overflow-hidden rounded border bg-muted flex items-center justify-center">
-                                        <OptimisticImage
-                                            src={`/uploads/avif/${image.filename_avif}`}
-                                            alt={image.title || t('common.photo')}
-                                            fill
-                                            sizes="128px"
-                                            className="h-full w-full object-contain"
-                                        />
+                                        {image.processed ? (
+                                            <OptimisticImage
+                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                                alt={image.title || t('common.photo')}
+                                                fill
+                                                sizes="128px"
+                                                className="h-full w-full object-contain"
+                                            />
+                                        ) : (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground text-xs text-center p-2">
+                                                <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                                <span>{t('common.loading')}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </TableCell>
                                 <TableCell className="font-medium">

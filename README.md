@@ -69,7 +69,7 @@ gallerykit/
 │   │   ├── lib/              # Utilities (image processing, data layer)
 │   │   └── i18n/             # Internationalization config
 │   ├── messages/             # Translation files (en.json, ko.json)
-│   ├── public/uploads/       # Uploaded images (persistent volume)
+│   ├── public/uploads/       # Processed public image derivatives (persistent volume)
 │   ├── scripts/              # DB init, migration, seed scripts
 │   ├── Dockerfile            # Multi-stage production build
 │   └── docker-compose.yml    # Docker deployment config
@@ -145,7 +145,7 @@ npm run build
 docker compose -f apps/web/docker-compose.yml up -d --build
 ```
 
-The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly.
+The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
 
 ## Tech Stack
 

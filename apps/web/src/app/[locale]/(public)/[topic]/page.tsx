@@ -8,6 +8,7 @@ import { safeJsonLd } from '@/lib/safe-json-ld';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { absoluteImageUrl } from '@/lib/image-url';
 
 
 export const revalidate = 3600;
@@ -116,8 +117,8 @@ export default async function TopicPage({
     url: localizeUrl(baseUrl, locale, `/${topicData.slug}`),
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
-      contentUrl: `${baseUrl}/uploads/jpeg/${img.filename_jpeg}`,
-      thumbnail: `${baseUrl}/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`,
+      contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
+      thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, baseUrl),
       name: img.title || `Photo ${img.id}`,
     })),
   } : null;

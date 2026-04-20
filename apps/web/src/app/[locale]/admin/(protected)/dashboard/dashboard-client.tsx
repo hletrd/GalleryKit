@@ -9,7 +9,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { localizePath } from "@/lib/locale-path";
 
 interface DashboardClientProps {
-    images: { id: number; filename_avif: string; title: string | null; topic: string | null; created_at: string | Date | null; tag_names?: string | null; user_filename?: string | null; description?: string | null }[];
+    images: { id: number; filename_avif: string; filename_jpeg: string; processed: boolean | null; title: string | null; topic: string | null; created_at: string | Date | null; tag_names?: string | null; user_filename?: string | null; description?: string | null }[];
     topics: { slug: string; label: string }[];
     tags: { id: number; name: string; slug: string }[];
     page: number;

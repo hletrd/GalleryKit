@@ -19,6 +19,7 @@ import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
+import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 
@@ -94,6 +95,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
+    const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
+    const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
 
     const navigate = useCallback((direction: number) => {
         const newIndex = currentIndex + direction;
@@ -333,7 +336,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <Badge variant="outline">{image.topic}</Badge>
-                                    {image.capture_date && <span className="text-xs text-muted-foreground" suppressHydrationWarning>{new Date(image.capture_date).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' })}</span>}
+                                    {formattedCaptureDate && <span className="text-xs text-muted-foreground" suppressHydrationWarning>{formattedCaptureDate}</span>}
                                 </div>
 
                                 {image.tags && image.tags.length > 0 && (
@@ -502,12 +505,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         <p className="text-muted-foreground">{t('viewer.capturedAt')}</p>
                                         <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
                                             <Calendar className="w-3 h-3" />
-                                            {image.capture_date ? new Date(image.capture_date).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : t('common.unknown')}
+                                            {formattedCaptureDate || t('common.unknown')}
                                         </p>
-                                        {image.capture_date && (
+                                        {formattedCaptureTime && (
                                             <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>
                                                 <Clock className="w-3 h-3" />
-                                                {new Date(image.capture_date).toLocaleTimeString(locale)}
+                                                {formattedCaptureTime}
                                             </p>
                                         )}
                                     </div>

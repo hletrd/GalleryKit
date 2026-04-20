@@ -7,7 +7,7 @@ import { connection, db, images, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
-import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
+import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
@@ -179,7 +179,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 return;
             }
 
-            const originalPath = path.join(UPLOAD_DIR_ORIGINAL, job.filenameOriginal);
+            const originalPath = await resolveOriginalUploadPath(job.filenameOriginal);
 
             try {
                 await fs.access(originalPath);

@@ -1,11 +1,11 @@
 'use server';
 
 import path from 'path';
-import fs, { statfs } from 'fs/promises';
+import { statfs } from 'fs/promises';
 import { db, images, tags, imageTags } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
-import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -194,7 +194,7 @@ export async function uploadImages(formData: FormData) {
             if (!Number.isFinite(insertedId) || insertedId <= 0) {
                 console.error(`Invalid insertId for file: ${file.name}`);
                 // Clean up saved original file — no DB record references it
-                await fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, savedOriginalFilename)).catch(() => {});
+                await deleteOriginalUploadFile(savedOriginalFilename);
                 failedFiles.push(file.name);
                 savedOriginalFilename = null; // Already cleaned up
                 continue;
@@ -270,7 +270,7 @@ export async function uploadImages(formData: FormData) {
             console.error(`Failed to process file ${file.name}:`, e);
             // Clean up saved original file if it was written but DB insert failed
             if (savedOriginalFilename) {
-                await fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, savedOriginalFilename)).catch(() => {});
+                await deleteOriginalUploadFile(savedOriginalFilename);
             }
             failedFiles.push(file.name);
         }
@@ -369,7 +369,7 @@ export async function deleteImage(id: number) {
     }
     try {
         await Promise.all([
-            fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, image.filename_original)).catch(() => {}),
+            deleteOriginalUploadFile(image.filename_original),
             deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, deleteSizes),
             deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, deleteSizes),
             deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, deleteSizes),
@@ -463,7 +463,7 @@ export async function deleteImages(ids: number[]) {
     await Promise.all(imageRecords.map(async (image) => {
         try {
             await Promise.all([
-                fs.unlink(path.join(UPLOAD_DIR_ORIGINAL, image.filename_original)).catch(() => {}),
+                deleteOriginalUploadFile(image.filename_original),
                 deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, batchDeleteSizes),
                 deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, batchDeleteSizes),
                 deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, batchDeleteSizes),

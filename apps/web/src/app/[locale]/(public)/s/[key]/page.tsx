@@ -8,6 +8,7 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { absoluteImageUrl } from '@/lib/image-url';
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
@@ -30,7 +31,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const ogImages = seo.og_image_url
         ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
         : [{
-            url: `${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`,
+            url: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
             width: image.width,
             height: image.height,
             alt: title,
@@ -55,7 +56,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             card: 'summary_large_image',
             title: title,
             description: image.description || t('ogDescription', { site: seo.title }),
-            images: seo.og_image_url ? [seo.og_image_url] : [`${seo.url}/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`],
+            images: seo.og_image_url ? [seo.og_image_url] : [absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url)],
         },
     };
 }

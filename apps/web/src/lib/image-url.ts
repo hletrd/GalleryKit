@@ -6,3 +6,16 @@ export function imageUrl(path: string): string {
     const base = IMAGE_BASE_URL.replace(/\/+$/, '');
     return base ? `${base}${normalizedPath}` : normalizedPath;
 }
+
+function isAbsoluteUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+}
+
+/** Return an absolute image URL for metadata/JSON-LD/share surfaces. */
+export function absoluteImageUrl(path: string, siteUrl: string): string {
+    const resolved = imageUrl(path);
+    if (isAbsoluteUrl(resolved)) {
+        return resolved;
+    }
+    return new URL(resolved, siteUrl).toString();
+}

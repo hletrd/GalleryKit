@@ -34,7 +34,7 @@ gallerykit/
 │   │   ├── lib/              # Utilities (image processing, etc.)
 │   │   └── i18n/             # Internationalization config
 │   ├── messages/             # Translation files (en.json, ko.json)
-│   ├── public/uploads/       # Uploaded images (PERSISTENT)
+│   ├── public/uploads/       # Processed public image derivatives (PERSISTENT)
 │   ├── scripts/              # DB init, migration, seed scripts
 │   ├── drizzle/              # Database migrations
 │   ├── Dockerfile            # Multi-stage production build
@@ -105,7 +105,7 @@ SESSION_SECRET=<random-64-char-hex>
 ## Image Upload Flow
 
 1. Files uploaded via `uploadImages()` server action
-2. Original saved to `public/uploads/original/`
+2. Original saved to the private upload store under `data/uploads/original/`
 3. Sharp processes to AVIF/WebP/JPEG (async queue)
 4. EXIF extracted and stored in database
 5. Processed files in `public/uploads/{avif,webp,jpeg}/`
@@ -163,7 +163,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 ## Image Processing Pipeline
 
 1. Files uploaded via `uploadImages()` server action
-2. Original saved to `public/uploads/original/`
+2. Original saved to the private upload store under `data/uploads/original/`
 3. Enqueued to `PQueue` (concurrency: 1) for background processing
 4. Queue job **claims** image (conditional `WHERE processed = false`) before processing
 5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at 4 sizes each
@@ -198,7 +198,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 ## Important Notes
 
 - **Node.js 24+** required, **TypeScript 6.0+**
-- Images stored in `apps/web/public/uploads/` — **ensure persistence in Docker**
+- Processed images are stored in `apps/web/public/uploads/`; original uploads are stored privately under the data volume — **ensure both are persisted in Docker**
 - Max upload size: 200MB per file, 10GB total per batch, 100 files max (configurable)
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)

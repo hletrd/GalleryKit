@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
-import { imageUrl } from '@/lib/image-url';
+import { absoluteImageUrl, imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
         ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
         : coverImage
             ? [{
-                url: `${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`,
+                url: absoluteImageUrl(`/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
                 width: coverImage.width,
                 height: coverImage.height,
                 alt: t('ogAlt'),
@@ -58,7 +58,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             title: t('ogTitle'),
             description: t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }),
             ...(coverImage && !seo.og_image_url ? {
-                images: [`${seo.url}/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`],
+                images: [absoluteImageUrl(`/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url)],
             } : seo.og_image_url ? {
                 images: [seo.og_image_url],
             } : {}),

@@ -7,6 +7,16 @@ const mysql = require('mysql2/promise');
 const { drizzle } = require('drizzle-orm/mysql2');
 const { migrate } = require('drizzle-orm/mysql2/migrator');
 
+const WEAK_PLAINTEXT_PASSWORDS = new Set([
+    'password',
+    'admin',
+    'changeme',
+    'gallerykit',
+    '12345678',
+    '123456789',
+    'qwerty123',
+]);
+
 function resolveAppRoot() {
     const candidates = [
         process.cwd(),
@@ -22,12 +32,63 @@ function resolveAppRoot() {
     throw new Error(`Unable to locate app root from ${process.cwd()}`);
 }
 
+function resolveUploadRoots(appRoot) {
+    const publicRoot = path.join(appRoot, 'public', 'uploads');
+    const privateOriginalRoot = process.env.UPLOAD_ORIGINAL_ROOT
+        ? path.resolve(process.env.UPLOAD_ORIGINAL_ROOT)
+        : path.join(appRoot, 'data', 'uploads', 'original');
+
+    return {
+        legacyOriginalRoot: path.join(publicRoot, 'original'),
+        privateOriginalRoot,
+    };
+}
+
+function migrateLegacyOriginalUploads(appRoot) {
+    const { legacyOriginalRoot, privateOriginalRoot } = resolveUploadRoots(appRoot);
+    if (legacyOriginalRoot === privateOriginalRoot || !fs.existsSync(legacyOriginalRoot)) {
+        return;
+    }
+
+    fs.mkdirSync(privateOriginalRoot, { recursive: true });
+    const entries = fs.readdirSync(legacyOriginalRoot, { withFileTypes: true });
+    let moved = 0;
+
+    for (const entry of entries) {
+        if (!entry.isFile()) continue;
+
+        const source = path.join(legacyOriginalRoot, entry.name);
+        const target = path.join(privateOriginalRoot, entry.name);
+
+        if (fs.existsSync(target)) {
+            fs.unlinkSync(source);
+            continue;
+        }
+
+        fs.renameSync(source, target);
+        moved++;
+    }
+
+    if (moved > 0) {
+        console.log(`[Migration] Moved ${moved} legacy original upload(s) out of the public web root.`);
+    }
+}
+
 function getRequiredEnv(name) {
     const value = process.env[name]?.trim();
     if (!value) {
         throw new Error(`Missing required environment variable: ${name}`);
     }
     return value;
+}
+
+function assertStrongBootstrapPassword(secret) {
+    if (secret.startsWith('$argon2')) return;
+
+    const normalized = secret.trim();
+    if (normalized.length < 16 || WEAK_PLAINTEXT_PASSWORDS.has(normalized.toLowerCase())) {
+        throw new Error('ADMIN_PASSWORD plaintext must be a strong 16+ character secret or an Argon2 hash.');
+    }
 }
 
 function formatError(error) {
@@ -421,13 +482,10 @@ async function seedAdmin(connection) {
     }
 
     let password = process.env.ADMIN_PASSWORD;
-    if (!password || password.length < 12) {
-        password = crypto.randomBytes(16).toString('base64url');
-        const tempPwdPath = '/tmp/gallerykit-admin-password.txt';
-        fs.writeFileSync(tempPwdPath, password, { mode: 0o600 });
-        console.log(`[Migration] Generated random admin password. Saved to ${tempPwdPath}`);
-        console.log('[Migration] Retrieve it from the container and delete the file after saving it.');
+    if (!password) {
+        throw new Error('ADMIN_PASSWORD must be set explicitly before running migrations.');
     }
+    assertStrongBootstrapPassword(password);
 
     const hash = await argon2.hash(password, { type: argon2.argon2id });
     await connection.query('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)', ['admin', hash]);
@@ -436,6 +494,7 @@ async function seedAdmin(connection) {
 
 (async () => {
     const appRoot = resolveAppRoot();
+    migrateLegacyOriginalUploads(appRoot);
     const migrationsFolder = path.join(appRoot, 'drizzle');
     const dbName = getRequiredEnv('DB_NAME');
     const latestMigration = getLatestMigration(migrationsFolder);

@@ -1,4 +1,4 @@
-import { getImagesLite, getTopics, getTags, getImageCount } from "@/lib/data";
+import { getAdminImagesLite, getTopics, getTags, getImageCount } from "@/lib/data";
 import { DashboardClient } from "./dashboard-client";
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
     const offset = (page - 1) * PAGE_SIZE;
 
     const [images, topics, tags, totalCount] = await Promise.all([
-        getImagesLite(undefined, undefined, PAGE_SIZE, offset, true),
+        getAdminImagesLite(PAGE_SIZE, offset, true),
         getTopics(),
         getTags(),
         getImageCount(undefined, undefined, { includeUnprocessed: true }),

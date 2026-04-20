@@ -46,6 +46,7 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV UPLOAD_ORIGINAL_ROOT="/app/data/uploads/original"
 
 # Copy necessary files from apps/web (public is mounted at runtime)
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
@@ -59,7 +60,7 @@ COPY --chown=node:node apps/web/scripts/entrypoint.sh /usr/local/bin/
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 
 # Create persistence directories and cache
-RUN mkdir -p apps/web/public/uploads /app/data apps/web/.next/cache && chown -R node:node apps/web/public/uploads /app/data apps/web/.next
+RUN mkdir -p apps/web/public/uploads /app/data/uploads/original apps/web/.next/cache && chown -R node:node apps/web/public/uploads /app/data apps/web/.next
 
 # Make entrypoint executable
 RUN chmod +x /usr/local/bin/entrypoint.sh
