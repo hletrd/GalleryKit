@@ -56,10 +56,6 @@ export async function createTopic(formData: FormData) {
         return { error: t('labelTooLong') };
     }
 
-    if (await topicRouteSegmentExists(slug)) {
-        return { error: t('slugConflictsWithRoute') };
-    }
-
     let imageFilename = null;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
