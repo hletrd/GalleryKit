@@ -5,6 +5,8 @@ import { createReadStream } from 'fs';
 import { lstat } from 'fs/promises';
 import { Readable } from 'stream';
 import { isValidBackupFilename } from '@/lib/backup-filename';
+import { getCurrentUser } from '@/app/actions/auth';
+import { logAuditEvent } from '@/lib/audit';
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
 
@@ -26,6 +28,11 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         if (stats.isSymbolicLink() || !stats.isFile()) {
             return new NextResponse('Access denied', { status: 403 });
         }
+
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'db_backup_download', 'database_backup', file, undefined, {
+            size: stats.size,
+        }).catch(console.debug);
 
         const stream = createReadStream(filePath);
         const webStream = Readable.toWeb(stream) as ReadableStream;

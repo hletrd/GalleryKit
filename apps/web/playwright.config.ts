@@ -20,6 +20,10 @@ const localServerUrl = (() => {
 })();
 const baseURL = useLocalServer ? localServerUrl : requestedBaseUrl;
 
+if (!useLocalServer && process.env.E2E_ADMIN_ENABLED === 'true' && process.env.E2E_ALLOW_REMOTE_ADMIN !== 'true') {
+  throw new Error('Remote admin E2E is disabled by default. Set E2E_ALLOW_REMOTE_ADMIN=true to opt in.');
+}
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,

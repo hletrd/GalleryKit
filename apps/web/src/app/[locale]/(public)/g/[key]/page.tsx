@@ -42,6 +42,17 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     return {
         title: t('ogTitle'),
         description: t('ogDescription', { count: group.images.length }),
+        robots: {
+            index: false,
+            follow: false,
+            nocache: true,
+            googleBot: {
+                index: false,
+                follow: false,
+                noarchive: true,
+                noimageindex: true,
+            },
+        },
         alternates: {
             canonical: pageUrl,
         },

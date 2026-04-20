@@ -1,5 +1,6 @@
 'use server';
 
+import { createHash } from 'crypto';
 import { db, images, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
@@ -20,6 +21,10 @@ const SHARE_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const SHARE_MAX_PER_WINDOW = 20;
 const SHARE_RATE_LIMIT_MAX_KEYS = 500;
 const shareRateLimit = new Map<string, { count: number; resetAt: number }>();
+
+function getShareKeyFingerprint(key: string) {
+    return createHash('sha256').update(key).digest('hex').slice(0, 12);
+}
 
 function pruneShareRateLimit() {
     const now = Date.now();
@@ -107,7 +112,10 @@ export async function createPhotoShareLink(imageId: number) {
 
             if (result.affectedRows > 0) {
                 const currentUser = await getCurrentUser();
-                logAuditEvent(currentUser?.id ?? null, 'share_create', 'image', String(imageId), undefined, { key }).catch(console.debug);
+                logAuditEvent(currentUser?.id ?? null, 'share_create', 'image', String(imageId), undefined, {
+                    keyFingerprint: getShareKeyFingerprint(key),
+                    keyLength: key.length,
+                }).catch(console.debug);
                 revalidateLocalizedPaths(`/p/${imageId}`, '/admin/dashboard');
                 return { success: true, key: key };
             }
@@ -224,7 +232,11 @@ export async function createGroupShareLink(imageIds: number[]) {
 
             revalidateLocalizedPaths('/');
             const currentUser = await getCurrentUser();
-            logAuditEvent(currentUser?.id ?? null, 'group_share_create', 'shared_group', undefined, undefined, { key, imageCount: uniqueImageIds.length }).catch(console.debug);
+            logAuditEvent(currentUser?.id ?? null, 'group_share_create', 'shared_group', undefined, undefined, {
+                keyFingerprint: getShareKeyFingerprint(key),
+                keyLength: key.length,
+                imageCount: uniqueImageIds.length,
+            }).catch(console.debug);
             return { success: true, key };
         } catch (e) {
             // Only retry on key collision (duplicate entry), not on other errors
@@ -267,7 +279,10 @@ export async function revokePhotoShareLink(imageId: number) {
 
     revalidateLocalizedPaths(`/p/${imageId}`, `/s/${oldShareKey}`, '/admin/dashboard');
     const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'share_revoke', 'image', String(imageId), undefined, { key: oldShareKey }).catch(console.debug);
+    logAuditEvent(currentUser?.id ?? null, 'share_revoke', 'image', String(imageId), undefined, {
+        keyFingerprint: getShareKeyFingerprint(oldShareKey),
+        keyLength: oldShareKey.length,
+    }).catch(console.debug);
     return { success: true };
 }
 
@@ -302,6 +317,9 @@ export async function deleteGroupShareLink(groupId: number) {
 
     revalidateLocalizedPaths('/', `/g/${group.key}`, '/admin/dashboard');
     const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'group_share_delete', 'shared_group', String(groupId), undefined, { key: group.key }).catch(console.debug);
+    logAuditEvent(currentUser?.id ?? null, 'group_share_delete', 'shared_group', String(groupId), undefined, {
+        keyFingerprint: getShareKeyFingerprint(group.key),
+        keyLength: group.key.length,
+    }).catch(console.debug);
     return { success: true };
 }

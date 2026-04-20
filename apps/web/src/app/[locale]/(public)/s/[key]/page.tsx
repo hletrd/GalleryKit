@@ -46,6 +46,17 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     return {
         title: title,
         description: image.description || t('ogDescription', { site: seo.title }),
+        robots: {
+            index: false,
+            follow: false,
+            nocache: true,
+            googleBot: {
+                index: false,
+                follow: false,
+                noarchive: true,
+                noimageindex: true,
+            },
+        },
         alternates: {
             canonical: pageUrl,
         },
