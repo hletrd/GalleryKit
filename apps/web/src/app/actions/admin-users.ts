@@ -178,7 +178,13 @@ export async function deleteAdminUser(id: number) {
             }
             // Explicitly delete sessions before user (defense in depth alongside FK cascade)
             await tx.delete(sessions).where(eq(sessions.userId, id));
-            await tx.delete(adminUsers).where(eq(adminUsers.id, id));
+            const [delResult] = await tx.delete(adminUsers).where(eq(adminUsers.id, id));
+            // Log audit event only when the user was actually deleted — avoids duplicate
+            // entries when concurrent deletion causes the transaction to delete 0 rows
+            // (matches deleteImage, deleteTag, and deleteTopic pattern).
+            if (delResult.affectedRows === 0) {
+                throw new Error('USER_NOT_FOUND');
+            }
         });
         logAuditEvent(currentUser.id, 'user_delete', 'user', String(id)).catch(console.debug);
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
