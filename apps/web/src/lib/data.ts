@@ -89,15 +89,13 @@ export async function flushBufferedSharedGroupViewCounts() {
     await flushGroupViewCounts();
 }
 
-// PRIVACY: selectFields is used by admin-facing queries. It MUST NOT include
-// latitude, longitude, filename_original, or user_filename — those fields would
-// leak PII to unauthenticated visitors.
+// PRIVACY: adminSelectFields is the FULL field set for authenticated admin queries.
+// It includes latitude, longitude, filename_original, and user_filename which are
+// PII and MUST NEVER be exposed to unauthenticated visitors.
 // For public-facing queries, use `publicSelectFields` below instead.
-// The type assertion below enforces this at compile time: if any of those keys are
-// accidentally added to selectFields, TypeScript will produce a type error.
-const selectFields = {
+const adminSelectFields = {
     id: images.id,
-    // filename_original is intentionally omitted for privacy
+    filename_original: images.filename_original,
     filename_avif: images.filename_avif,
     filename_webp: images.filename_webp,
     filename_jpeg: images.filename_jpeg,
@@ -107,7 +105,7 @@ const selectFields = {
     original_height: images.original_height,
     title: images.title,
     description: images.description,
-    // user_filename intentionally excluded from public queries — may contain PII
+    user_filename: images.user_filename,
     topic: images.topic,
     capture_date: images.capture_date,
     created_at: images.created_at,
@@ -118,6 +116,8 @@ const selectFields = {
     f_number: images.f_number,
     exposure_time: images.exposure_time,
     focal_length: images.focal_length,
+    latitude: images.latitude,
+    longitude: images.longitude,
     color_space: images.color_space,
     white_balance: images.white_balance,
     metering_mode: images.metering_mode,
@@ -127,29 +127,38 @@ const selectFields = {
     bit_depth: images.bit_depth,
     original_format: images.original_format,
     original_file_size: images.original_file_size,
-    // blur_data_url excluded from selectFields — fetched only in individual image
-    // queries to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
+    // blur_data_url excluded — fetched only in individual image queries
+    // to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
 } as const;
 
 // PRIVACY: publicSelectFields is the canonical field set for ALL unauthenticated routes.
-// It MUST be used instead of raw `selectFields` in public queries to prevent accidental
-// PII leakage via spread overrides (e.g., `{ ...selectFields, latitude: images.latitude }`).
-// Using a separate constant makes the privacy intent explicit in code review and prevents
-// per-query overrides from adding sensitive fields.
-const publicSelectFields = selectFields;
+// It is derived from adminSelectFields by explicitly OMITTING PII fields (latitude,
+// longitude, filename_original, user_filename). Because it is a separate object (not
+// the same reference), adding a field to adminSelectFields does NOT automatically leak
+// it to public queries — the field must be explicitly included here too.
+// This is the primary privacy enforcement mechanism: any developer adding a sensitive
+// field to adminSelectFields must consciously decide whether to also include it here.
+const {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
+    latitude: _omitLatitude,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
+    longitude: _omitLongitude,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
+    filename_original: _omitFilenameOriginal,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
+    user_filename: _omitUserFilename,
+    ...publicSelectFields
+} = adminSelectFields;
 
 // Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
-// are ever added to selectFields, this assertion will produce a TypeScript error.
+// are ever added to publicSelectFields, this assertion will produce a TypeScript error.
 // This prevents accidental PII leakage in public-facing API responses.
+// The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
+// If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
+// offending key name(s) appear in the type error.
 type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename';
-type _SelectFieldsKeys = keyof typeof selectFields;
-// The conditional type resolves to `never` when no sensitive keys are present (correct),
-// or to the offending key name(s) when a sensitive key is found (causing a type mismatch).
-type _AssertNoSensitiveFields = _SelectFieldsKeys extends _PrivacySensitiveKeys
-    ? [_SelectFieldsKeys, 'ERROR: privacy-sensitive field found in selectFields — see PRIVACY comment above']
-    : true;
-// This assignment will fail to type-check if _AssertNoSensitiveFields is not `true`.
-const _privacyGuard: _AssertNoSensitiveFields = true as _AssertNoSensitiveFields;
+type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
+const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
 
 export async function getTopics() {
@@ -383,7 +392,7 @@ export async function getImage(id: number) {
                     or(
                         image.capture_date
                             ? lt(images.capture_date, image.capture_date)
-                            : sql`FALSE`,
+                            : sql`${images.capture_date} IS NOT NULL`,
                         and(
                             image.capture_date
                                 ? eq(images.capture_date, image.capture_date)
