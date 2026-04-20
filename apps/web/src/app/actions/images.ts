@@ -55,17 +55,23 @@ export async function uploadImages(formData: FormData) {
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
     // Topic is now a string slug — sanitize before validation (defense in depth)
     const topic = stripControlChars(formData.get('topic')?.toString() ?? '') ?? '';
-    const tagsString = formData.get('tags')?.toString() ?? '';
+    // Sanitize before validation so length/format checks operate on the same
+    // value that will be stored. Without this, control characters pass the
+    // length check but are stripped later, causing a mismatch between validated
+    // and persisted data (matches topic/label/seo pattern, see C46-01).
+    const tagsString = stripControlChars(formData.get('tags')?.toString() ?? '') ?? '';
 
     if (tagsString && tagsString.length > 1000) {
         return { error: t('tagsStringTooLong') };
     }
 
     const tagNames = tagsString
-        ? tagsString.split(',').map(t => stripControlChars(t.trim()) ?? '').filter(t => t.length > 0 && isValidTagName(t))
+        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && isValidTagName(t))
         : [];
 
-    if (tagsString && tagNames.length !== tagsString.split(',').map(t => stripControlChars(t.trim()) ?? '').filter(Boolean).length) {
+    // Since tagsString is already sanitized, compare against the pre-split count
+    // without re-sanitizing (defense in depth: ensures no tag names were invalid)
+    if (tagsString && tagNames.length !== tagsString.split(',').filter(t => t.trim().length > 0).length) {
         return { error: t('invalidTagNames') };
     }
 

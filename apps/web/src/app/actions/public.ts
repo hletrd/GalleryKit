@@ -23,8 +23,11 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
 }
 
 export async function searchImagesAction(query: string) {
-    if (!query || typeof query !== 'string' || query.length > 200) return [];
-    if (query.trim().length < 2) return [];
+    if (!query || typeof query !== 'string') return [];
+    // Sanitize before validation so length checks operate on the same value
+    // that will be stored (matches uploadImages/settings.ts pattern, see C46-02).
+    const sanitizedQuery = stripControlChars(query.trim()) ?? '';
+    if (sanitizedQuery.length > 200 || sanitizedQuery.length < 2) return [];
 
     // Server-side rate limiting for search (LIKE queries are expensive)
     const requestHeaders = await headers();
@@ -91,6 +94,7 @@ export async function searchImagesAction(query: string) {
         // DB unavailable — rely on in-memory Map
     }
 
-    const safeQuery = stripControlChars(query.trim())?.slice(0, 200) ?? '';
+    // sanitizedQuery already has stripControlChars applied — belt-and-suspenders slice
+    const safeQuery = sanitizedQuery.slice(0, 200);
     return searchImages(safeQuery, 20);
 }
