@@ -94,7 +94,10 @@ export async function createAdminUser(formData: FormData) {
 
     const rawUsername = formData.get('username')?.toString() ?? '';
     const username = stripControlChars(rawUsername) ?? '';
-    const password = formData.get('password')?.toString() ?? '';
+    // Sanitize before validation so length checks operate on the same value
+    // that will be hashed (matches uploadImages tagsString pattern, see C46-01).
+    // C0 controls in passwords are almost always accidental paste artifacts.
+    const password = stripControlChars(formData.get('password')?.toString() ?? '') ?? '';
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed (defense in

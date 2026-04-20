@@ -69,7 +69,9 @@ async function getDummyHash(): Promise<string> {
 export async function login(prevState: { error?: string } | null, formData: FormData) {
     const t = await getTranslations('serverActions');
     const username = stripControlChars(formData.get('username')?.toString() ?? '') ?? '';
-    const password = formData.get('password')?.toString() ?? '';
+    // Sanitize before use so the value matches what was stored during account
+    // creation (stripControlChars is applied in createAdminUser, see C8-01).
+    const password = stripControlChars(formData.get('password')?.toString() ?? '') ?? '';
     const rawLocale = formData.get('locale')?.toString() ?? '';
     const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
 
@@ -258,9 +260,11 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         console.debug('Failed to pre-increment password change rate limit:', err);
     }
 
-    const currentPassword = formData.get('currentPassword')?.toString() ?? '';
-    const newPassword = formData.get('newPassword')?.toString() ?? '';
-    const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
+    // Sanitize before validation so length checks operate on the same value
+    // that will be hashed (matches createAdminUser pattern, see C8-01).
+    const currentPassword = stripControlChars(formData.get('currentPassword')?.toString() ?? '') ?? '';
+    const newPassword = stripControlChars(formData.get('newPassword')?.toString() ?? '') ?? '';
+    const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
 
     if (!currentPassword || !newPassword || !confirmPassword) {
         return { error: t('allFieldsRequired') };
