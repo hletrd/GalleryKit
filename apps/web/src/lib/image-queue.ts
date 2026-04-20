@@ -12,6 +12,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
+import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -314,6 +315,7 @@ export const bootstrapImageProcessingQueue = async () => {
         // These are created during atomic rename in processImageFormats and
         // may persist if the process crashes between link and rename.
         cleanOrphanedTmpFiles().catch(err => console.debug('cleanOrphanedTmpFiles failed:', err));
+        cleanOrphanedTopicTempFiles().catch(err => console.debug('cleanOrphanedTopicTempFiles failed:', err));
 
         // US-004: Purge expired sessions, stale rate-limit buckets, and old audit log entries on startup and periodically
         purgeExpiredSessions();

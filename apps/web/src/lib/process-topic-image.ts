@@ -86,3 +86,23 @@ export async function deleteTopicImage(filename: string) {
     if (!filename || !isValidFilename(filename)) return;
     await fs.unlink(path.join(RESOURCES_DIR, filename)).catch(() => {});
 }
+
+/**
+ * Remove orphaned tmp-* files from RESOURCES_DIR.
+ * These are created during processTopicImage and may persist if the
+ * process crashes between writing the temp file and renaming/deleting it.
+ * Called at startup from bootstrapImageProcessingQueue (image-queue.ts),
+ * similar to cleanOrphanedTmpFiles for image upload directories.
+ */
+export async function cleanOrphanedTopicTempFiles(): Promise<void> {
+    try {
+        const entries = await fs.readdir(RESOURCES_DIR);
+        const tmpFiles = entries.filter(f => f.startsWith('tmp-'));
+        if (tmpFiles.length > 0) {
+            console.info(`[Cleanup] Removing ${tmpFiles.length} orphaned temp files from ${RESOURCES_DIR}`);
+            await Promise.all(tmpFiles.map(f => fs.unlink(path.join(RESOURCES_DIR, f)).catch(() => {})));
+        }
+    } catch {
+        // Directory may not exist yet — skip
+    }
+}
