@@ -103,7 +103,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     const label = stripControlChars(formData.get('label')?.toString() ?? '') ?? '';
-    const slug = formData.get('slug')?.toString() ?? '';
+    const slug = stripControlChars(formData.get('slug')?.toString() ?? '') ?? '';
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
