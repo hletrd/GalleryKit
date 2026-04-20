@@ -98,7 +98,7 @@ npm install
 cp apps/web/.env.local.example apps/web/.env.local
 ```
 
-Edit `apps/web/.env.local` with your MySQL credentials and public URLs:
+Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap secret, and public URLs:
 
 ```env
 DB_HOST=127.0.0.1
@@ -106,6 +106,8 @@ DB_PORT=3306
 DB_USER=your_user
 DB_PASSWORD=your_password
 DB_NAME=gallery
+ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
+SESSION_SECRET=<openssl rand -hex 32>
 BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix
 # IMAGE_BASE_URL=https://cdn.example.com
@@ -116,6 +118,7 @@ BASE_URL=http://localhost:3000
 If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size.
 The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. Keep those protections if you adapt the compose file.
+For bootstrap auth, prefer a generated secret or a precomputed Argon2 hash; do not deploy with placeholder passwords such as `password`.
 
 ### Development
 

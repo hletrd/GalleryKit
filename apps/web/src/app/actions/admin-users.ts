@@ -1,8 +1,9 @@
 'use server';
 
 import * as argon2 from 'argon2';
-import { db, adminUsers, sessions } from '@/db';
-import { eq, desc, sql } from 'drizzle-orm';
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { connection, db, adminUsers } from '@/db';
+import { desc } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { headers } from 'next/headers';
 
@@ -163,33 +164,54 @@ export async function deleteAdminUser(id: number) {
         return { error: t('cannotDeleteSelf') };
     }
 
-    // Atomically check last-admin, verify user exists, and delete inside a transaction
-    // to prevent TOCTOU race and no-op success on concurrent deletion.
+    // Serialize deletion through a DB advisory lock so concurrent requests
+    // cannot both observe "more than one admin" and remove the final two rows.
+    const conn = await connection.getConnection();
+    let lockAcquired = false;
+
     try {
-        await db.transaction(async (tx) => {
-            const [adminCount] = await tx.select({ count: sql<number>`count(*)` }).from(adminUsers);
-            if (Number(adminCount.count) <= 1) {
-                throw new Error('LAST_ADMIN');
-            }
-            // Verify target user exists inside the transaction to prevent no-op success
-            const [target] = await tx.select({ id: adminUsers.id }).from(adminUsers).where(eq(adminUsers.id, id));
-            if (!target) {
-                throw new Error('USER_NOT_FOUND');
-            }
-            // Explicitly delete sessions before user (defense in depth alongside FK cascade)
-            await tx.delete(sessions).where(eq(sessions.userId, id));
-            const [delResult] = await tx.delete(adminUsers).where(eq(adminUsers.id, id));
-            // Log audit event only when the user was actually deleted — avoids duplicate
-            // entries when concurrent deletion causes the transaction to delete 0 rows
-            // (matches deleteImage, deleteTag, and deleteTopic pattern).
-            if (delResult.affectedRows === 0) {
-                throw new Error('USER_NOT_FOUND');
-            }
-        });
+        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
+            "SELECT GET_LOCK('gallerykit_admin_delete', 5) AS acquired"
+        );
+        lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
+        if (!lockAcquired) {
+            throw new Error('DELETE_LOCK_TIMEOUT');
+        }
+
+        await conn.beginTransaction();
+        const [adminCountRows] = await conn.query<(RowDataPacket & { count: number })[]>(
+            'SELECT COUNT(*) AS count FROM admin_users'
+        );
+        if (Number(adminCountRows[0]?.count ?? 0) <= 1) {
+            throw new Error('LAST_ADMIN');
+        }
+
+        const [targetRows] = await conn.query<(RowDataPacket & { id: number })[]>(
+            'SELECT id FROM admin_users WHERE id = ? LIMIT 1',
+            [id]
+        );
+        if (!targetRows[0]) {
+            throw new Error('USER_NOT_FOUND');
+        }
+
+        await conn.query('DELETE FROM sessions WHERE user_id = ?', [id]);
+        const [deleteResult] = await conn.query<ResultSetHeader>(
+            'DELETE FROM admin_users WHERE id = ?',
+            [id]
+        );
+        if (Number(deleteResult.affectedRows ?? 0) === 0) {
+            throw new Error('USER_NOT_FOUND');
+        }
+
+        await conn.commit();
         logAuditEvent(currentUser.id, 'user_delete', 'user', String(id)).catch(console.debug);
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
     } catch (e: unknown) {
+        await conn.rollback().catch(() => {});
+        if (e instanceof Error && e.message === 'DELETE_LOCK_TIMEOUT') {
+            return { error: t('failedToDeleteUser') };
+        }
         if (e instanceof Error && e.message === 'LAST_ADMIN') {
             return { error: t('cannotDeleteLastAdmin') };
         }
@@ -198,5 +220,10 @@ export async function deleteAdminUser(id: number) {
         }
         console.error('Delete user failed', e);
         return { error: t('failedToDeleteUser') };
+    } finally {
+        if (lockAcquired) {
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_admin_delete')").catch(() => {});
+        }
+        conn.release();
     }
 }

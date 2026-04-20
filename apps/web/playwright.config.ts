@@ -9,10 +9,16 @@ const host = '127.0.0.1';
 const localBaseUrl = `http://${host}:${port}`;
 // Default to a local server so `npm run test:e2e` validates the current checkout.
 // Remote smoke tests remain available by setting E2E_BASE_URL explicitly.
-const baseURL = process.env.E2E_BASE_URL?.trim() || localBaseUrl;
-const parsedBaseUrl = new URL(baseURL);
+const requestedBaseUrl = process.env.E2E_BASE_URL?.trim() || localBaseUrl;
+const parsedBaseUrl = new URL(requestedBaseUrl);
 const useLocalServer = ['127.0.0.1', 'localhost'].includes(parsedBaseUrl.hostname);
 const localPort = parsedBaseUrl.port || String(port);
+const localServerUrl = (() => {
+  const url = new URL(requestedBaseUrl);
+  url.port = localPort;
+  return url.toString().replace(/\/$/, '');
+})();
+const baseURL = useLocalServer ? localServerUrl : requestedBaseUrl;
 
 export default defineConfig({
   testDir: './e2e',

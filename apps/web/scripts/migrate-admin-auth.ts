@@ -8,6 +8,25 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 // import { db, adminUsers } from '../src/db';
 import * as argon2 from 'argon2';
 
+const WEAK_PLAINTEXT_PASSWORDS = new Set([
+    'password',
+    'admin',
+    'changeme',
+    'gallerykit',
+    '12345678',
+    '123456789',
+    'qwerty123',
+]);
+
+function assertStrongBootstrapPassword(secret: string) {
+    if (secret.startsWith('$argon2')) return;
+
+    const normalized = secret.trim();
+    if (normalized.length < 16 || WEAK_PLAINTEXT_PASSWORDS.has(normalized.toLowerCase())) {
+        throw new Error('ADMIN_PASSWORD plaintext must be a strong 16+ character secret or an Argon2 hash.');
+    }
+}
+
 async function main() {
     console.log('Starting migration used to seed admin user...');
 
@@ -25,6 +44,7 @@ async function main() {
 
     // Check if it's already a hash or plaintext
     if (!adminPasswordHash.startsWith('$argon2')) {
+        assertStrongBootstrapPassword(adminPasswordHash);
         console.log('ADMIN_PASSWORD is plain text, hashing it...');
         adminPasswordHash = await argon2.hash(adminPasswordHash);
     }

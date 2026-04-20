@@ -75,7 +75,7 @@ DB_PORT=3306
 DB_USER=gallery
 DB_PASSWORD=password
 DB_NAME=gallery
-ADMIN_PASSWORD=password
+ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<random-64-char-hex>
 ```
 
@@ -221,7 +221,7 @@ The repository has a formal test surface:
 1. Configure `.env.local` with production MySQL credentials
 2. Generate a unique `SESSION_SECRET`: `openssl rand -hex 32`
 3. Copy `site-config.example.json` to `site-config.json`
-4. Run `docker compose up -d --build`
+4. Run `docker compose -f apps/web/docker-compose.yml up -d --build`
 5. Initialize DB: container runs migrations automatically
 6. Push schema indexes: `npm run db:push` (from apps/web/)
 7. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`

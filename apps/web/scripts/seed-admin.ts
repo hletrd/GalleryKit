@@ -4,6 +4,25 @@ import path from 'path';
 // Load .env.local file manually since this script runs outside Next.js context
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
+const WEAK_PLAINTEXT_PASSWORDS = new Set([
+    'password',
+    'admin',
+    'changeme',
+    'gallerykit',
+    '12345678',
+    '123456789',
+    'qwerty123',
+]);
+
+function assertStrongBootstrapPassword(secret: string) {
+    if (secret.startsWith('$argon2')) return;
+
+    const normalized = secret.trim();
+    if (normalized.length < 16 || WEAK_PLAINTEXT_PASSWORDS.has(normalized.toLowerCase())) {
+        throw new Error('ADMIN_PASSWORD plaintext must be a strong 16+ character secret or an Argon2 hash.');
+    }
+}
+
 async function main() {
     try {
         const passwordOrHash = process.env.ADMIN_PASSWORD;
@@ -21,6 +40,7 @@ async function main() {
         let hash = passwordOrHash;
         // Simple heuristic: Argon2 hashes usually start with $argon2
         if (!passwordOrHash.startsWith('$argon2')) {
+            assertStrongBootstrapPassword(passwordOrHash);
             console.log('Detected plain text password. Hashing...');
             try {
                 // Dynamic import for script execution context

@@ -43,7 +43,7 @@ test.describe('admin workflows (opt-in)', () => {
     const uploadPath = path.resolve(process.cwd(), 'public/uploads/original/e2e-landscape.jpg');
     const jpegBuffer = await fs.readFile(uploadPath);
 
-    await page.locator('#admin-content select').selectOption({ index: 1 });
+    await page.locator('#upload-topic').selectOption('e2e-smoke');
     await page.locator('#admin-content input[type="file"]').setInputFiles({
       name: `playwright-upload-${Date.now()}.jpg`,
       mimeType: 'image/jpeg',
