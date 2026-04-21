@@ -61,6 +61,9 @@ export async function createTopic(formData: FormData) {
     if (isReservedTopicRouteSegment(slug)) {
         return { error: t('reservedRouteSegment') };
     }
+    if (await topicRouteSegmentExists(slug)) {
+        return { error: t('slugConflictsWithRoute') };
+    }
 
     if (label.length > 100) {
         return { error: t('labelTooLong') };
@@ -174,19 +177,29 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         let affectedRows = 0;
 
         if (slug !== cleanCurrentSlug) {
-            // Cascade slug change in a transaction: update references first (while old FK target exists), then rename the PK
+            const nextImageFilename = imageFilename ?? previousImageFilename ?? null;
             await db.transaction(async (tx) => {
+                const [existingTopic] = await tx.select({ slug: topics.slug })
+                    .from(topics)
+                    .where(eq(topics.slug, cleanCurrentSlug))
+                    .limit(1);
+
+                if (!existingTopic) {
+                    throw new Error('TOPIC_NOT_FOUND');
+                }
+
+                await tx.insert(topics).values({
+                    label,
+                    slug,
+                    order,
+                    image_filename: nextImageFilename,
+                });
                 await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
                 await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
-                const [updateResult] = await tx.update(topics)
-                    .set({
-                        label,
-                        slug,
-                        order,
-                        ...(imageFilename ? { image_filename: imageFilename } : {})
-                    })
+
+                const [deleteResult] = await tx.delete(topics)
                     .where(eq(topics.slug, cleanCurrentSlug));
-                affectedRows = updateResult.affectedRows;
+                affectedRows = deleteResult.affectedRows;
             });
         } else {
             const [updateResult] = await db.update(topics)
@@ -220,6 +233,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     } catch (e: unknown) {
          if (imageFilename) {
              await deleteTopicImage(imageFilename);
+         }
+         if (e instanceof Error && e.message === 'TOPIC_NOT_FOUND') {
+             return { error: t('topicNotFound') };
          }
          if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
              return { error: t('slugAlreadyExists') };

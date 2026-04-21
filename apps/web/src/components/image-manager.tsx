@@ -401,7 +401,9 @@ export function ImageManager({
                                                         if (res.warnings.length > 0) {
                                                             res.warnings.forEach(w => toast.warning(w));
                                                         }
-                                                        toast.success(t('imageManager.tagAdded'));
+                                                        if (res.added > 0 || res.removed > 0) {
+                                                            toast.success(t('imageManager.tagAdded'));
+                                                        }
                                                         router.refresh();
                                                     } else {
                                                         toast.error(t('imageManager.batchAddFailed'));

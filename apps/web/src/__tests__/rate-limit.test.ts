@@ -75,7 +75,7 @@ describe('isRateLimitExceeded', () => {
 });
 
 describe('getClientIp', () => {
-    it('prefers the left-most forwarded IP when TRUST_PROXY is enabled', () => {
+    it('prefers the right-most forwarded IP when TRUST_PROXY is enabled', () => {
         process.env.TRUST_PROXY = 'true';
 
         const headers = new Map<string, string>([
@@ -83,7 +83,7 @@ describe('getClientIp', () => {
             ['x-real-ip', '203.0.113.7'],
         ]);
 
-        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
     });
 
     it('falls back to x-real-ip when forwarded-for is absent or invalid', () => {

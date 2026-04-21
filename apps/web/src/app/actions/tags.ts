@@ -5,15 +5,12 @@ import { eq, and, sql, inArray } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
+import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/tag-records';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
 import { stripControlChars } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
-
-function getTagSlug(name: string) {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
 
 // Tag Management
 
@@ -146,38 +143,39 @@ export async function addTagToImage(imageId: number, tagName: string) {
     if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
-        // Upsert tag
-        await db.insert(tags).ignore().values({ name: cleanName, slug });
-
-        // Look up by exact name first, then fall back to slug — avoids returning
-        // the wrong tag when two different names produce the same slug (slug collision).
-        // Same pattern as removeTagFromImage and batchUpdateImageTags remove path.
-        let [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.name, cleanName));
-        if (!tagRecord) {
-            [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
+        const [imageRecord] = await db.select({ topic: images.topic })
+            .from(images)
+            .where(eq(images.id, imageId));
+        if (!imageRecord) {
+            return { error: t('imageNotFound') };
         }
-        if (!tagRecord) return { error: t('tagNotFound') };
 
-        // Warn on tag slug collision
-        if (tagRecord.name !== cleanName) {
-            console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
+        const resolvedTag = await ensureTagRecord(db, cleanName, slug);
+        if (resolvedTag.kind === 'collision') {
+            return { error: t('tagSlugCollision', { newName: cleanName, existingName: resolvedTag.existing.name }) };
         }
+        if (resolvedTag.kind !== 'found') return { error: t('tagNotFound') };
 
         // Link tag to image
-        await db.insert(imageTags).ignore().values({
+        const [linkResult] = await db.insert(imageTags).ignore().values({
             imageId,
-            tagId: tagRecord.id
+            tagId: resolvedTag.tag.id
         });
 
-        // Fetch image topic for topic page revalidation
-        const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
+        if (linkResult.affectedRows === 0) {
+            const [stillExisting] = await db.select({ id: images.id })
+                .from(images)
+                .where(eq(images.id, imageId));
+            if (!stillExisting) {
+                return { error: t('imageNotFound') };
+            }
+        }
+
         const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: tagRecord.name }).catch(console.debug);
-        revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+        logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: resolvedTag.tag.name }).catch(console.debug);
+        revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', imageRecord.topic ? `/${imageRecord.topic}` : '', '/admin/dashboard');
         revalidateAllAppData();
-        return tagRecord.name !== cleanName
-            ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
-            : { success: true as const };
+        return { success: true as const };
     } catch (e) {
         console.error("Failed to add tag", e);
         return { error: t('failedToAddTag') };
@@ -199,27 +197,37 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
     if (!cleanName) return { error: t('tagNameRequired') };
 
     try {
-        // Look up by exact name first to avoid removing the wrong tag when
-        // two different names produce the same slug (slug collision).
-        // Fall back to slug lookup only if no exact name match exists.
-        let [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, cleanName));
-        if (!tagRecord) {
-            const slug = getTagSlug(cleanName);
-            [tagRecord] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+        const [imageRecord] = await db.select({ topic: images.topic })
+            .from(images)
+            .where(eq(images.id, imageId));
+        if (!imageRecord) {
+            return { error: t('imageNotFound') };
         }
-        if (!tagRecord) return { error: t('tagNotFound') };
 
-        await db.delete(imageTags)
+        const resolvedTag = await findTagRecordByNameOrSlug(db, cleanName);
+        if (resolvedTag.kind === 'collision') {
+            return { error: t('tagSlugCollision', { newName: cleanName, existingName: resolvedTag.existing.name }) };
+        }
+        if (resolvedTag.kind !== 'found') return { error: t('tagNotFound') };
+
+        const [deleteResult] = await db.delete(imageTags)
             .where(and(
                 eq(imageTags.imageId, imageId),
-                eq(imageTags.tagId, tagRecord.id)
+                eq(imageTags.tagId, resolvedTag.tag.id)
             ));
 
-        // Fetch image topic for topic page revalidation
-        const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
+        if (deleteResult.affectedRows === 0) {
+            const [stillExisting] = await db.select({ id: images.id })
+                .from(images)
+                .where(eq(images.id, imageId));
+            if (!stillExisting) {
+                return { error: t('imageNotFound') };
+            }
+        }
+
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
-        revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+        revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', imageRecord.topic ? `/${imageRecord.topic}` : '', '/admin/dashboard');
         revalidateAllAppData();
         return { success: true };
     } catch (e) {
@@ -259,21 +267,11 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
     if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
-        // Upsert tag
-        await db.insert(tags).ignore().values({ name: cleanName, slug });
-        // Look up by exact name first, then fall back to slug — avoids returning
-        // the wrong tag when two different names produce the same slug (slug collision).
-        // Same pattern as removeTagFromImage, addTagToImage, and batchUpdateImageTags.
-        let [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.name, cleanName));
-        if (!tagRecord) {
-            [tagRecord] = await db.select({ id: tags.id, name: tags.name }).from(tags).where(eq(tags.slug, slug));
+        const resolvedTag = await ensureTagRecord(db, cleanName, slug);
+        if (resolvedTag.kind === 'collision') {
+            return { error: t('tagSlugCollision', { newName: cleanName, existingName: resolvedTag.existing.name }) };
         }
-        if (!tagRecord) return { error: t('tagNotFound') };
-
-        // US-002: Warn on tag slug collision
-        if (tagRecord.name !== cleanName) {
-            console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
-        }
+        if (resolvedTag.kind !== 'found') return { error: t('tagNotFound') };
 
         // Verify which image IDs still exist before linking the tag.
         // Without this, INSERT IGNORE silently drops rows that fail FK constraints
@@ -290,7 +288,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
 
         const values = [...existingIds].map(imageId => ({
             imageId,
-            tagId: tagRecord.id
+            tagId: resolvedTag.tag.id
         }));
 
         await db.insert(imageTags).ignore().values(values);
@@ -306,9 +304,6 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         const missingCount = imageIds.length - existingIds.size;
         if (missingCount > 0) {
             warnings.push(t('someImagesNotFound', { count: missingCount }));
-        }
-        if (tagRecord.name !== cleanName) {
-            warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }));
         }
 
         return warnings.length > 0
@@ -342,9 +337,18 @@ export async function batchUpdateImageTags(
     const warnings: string[] = [];
     let added = 0;
     let removed = 0;
+    let imageTopic: string | null = null;
 
     try {
         await db.transaction(async (tx) => {
+            const [imageRecord] = await tx.select({ topic: images.topic })
+                .from(images)
+                .where(eq(images.id, imageId));
+            if (!imageRecord) {
+                throw new Error('IMAGE_NOT_FOUND');
+            }
+            imageTopic = imageRecord.topic;
+
             // Add tags
             for (const name of addTagNames) {
                 const trimmedName = name.trim();
@@ -359,21 +363,13 @@ export async function batchUpdateImageTags(
                 }
                 const slug = getTagSlug(cleanName);
                 if (!isValidSlug(slug)) continue;
-                // Ensure tag exists
-                await tx.insert(tags).ignore().values({ name: cleanName, slug });
-                // Look up by exact name first, then fall back to slug — same pattern
-                // as addTagToImage and batchAddTags (see C3R-02).
-                let [tagRecord] = await tx.select().from(tags).where(eq(tags.name, cleanName));
-                if (!tagRecord) {
-                    [tagRecord] = await tx.select().from(tags).where(eq(tags.slug, slug));
+                const resolvedTag = await ensureTagRecord(tx, cleanName, slug);
+                if (resolvedTag.kind === 'collision') {
+                    warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: resolvedTag.existing.name }));
+                    continue;
                 }
-                if (tagRecord) {
-                    // Warn on tag slug collision (matching addTagToImage/batchAddTags pattern)
-                    if (tagRecord.name !== cleanName) {
-                        console.warn(`Tag slug collision: "${cleanName}" collides with existing "${tagRecord.name}" on slug "${slug}"`);
-                        warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }));
-                    }
-                    const [tagInsertResult] = await tx.insert(imageTags).ignore().values({ imageId, tagId: tagRecord.id });
+                if (resolvedTag.kind === 'found') {
+                    const [tagInsertResult] = await tx.insert(imageTags).ignore().values({ imageId, tagId: resolvedTag.tag.id });
                     if (tagInsertResult.affectedRows > 0) added++;
                 }
             }
@@ -388,27 +384,28 @@ export async function batchUpdateImageTags(
                 // characters (defense in depth — matches removeTagFromImage pattern).
                 if (cleanName !== trimmedName) continue;
                 if (!cleanName) continue;
-                let [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.name, cleanName));
-                if (!tagRecord) {
-                    const slug = getTagSlug(cleanName);
-                    [tagRecord] = await tx.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug));
+                const resolvedTag = await findTagRecordByNameOrSlug(tx, cleanName);
+                if (resolvedTag.kind === 'collision') {
+                    warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: resolvedTag.existing.name }));
+                    continue;
                 }
-                if (tagRecord) {
-                    const [deleteResult] = await tx.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, tagRecord.id)));
+                if (resolvedTag.kind === 'found') {
+                    const [deleteResult] = await tx.delete(imageTags).where(and(eq(imageTags.imageId, imageId), eq(imageTags.tagId, resolvedTag.tag.id)));
                     if (deleteResult.affectedRows > 0) removed++;
                 }
             }
         });
     } catch (err) {
+        if (err instanceof Error && err.message === 'IMAGE_NOT_FOUND') {
+            return { success: false, added: 0, removed: 0, warnings: [t('imageNotFound')] };
+        }
         console.error('batchUpdateImageTags transaction failed:', err);
         return { success: false, added: 0, removed: 0, warnings: [t('failedToAddTag')] };
     }
 
-    // Fetch image topic for topic page revalidation (matching addTagToImage/removeTagFromImage pattern)
-    const [img] = await db.select({ topic: images.topic }).from(images).where(eq(images.id, imageId));
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
-    revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+    revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', imageTopic ? `/${imageTopic}` : '', '/admin/dashboard');
     revalidateAllAppData();
     return { success: true, added, removed, warnings };
 }

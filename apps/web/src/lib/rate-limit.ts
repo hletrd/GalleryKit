@@ -63,7 +63,10 @@ export function getClientIp(headerStore: HeaderLike): string {
         const xForwardedFor = headerStore.get('x-forwarded-for');
         if (xForwardedFor && xForwardedFor.length <= 512) {
             const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
-            for (const part of parts) {
+            // The shipped nginx config uses proxy_add_x_forwarded_for, which appends
+            // the real client IP to any incoming chain. Prefer the right-most valid
+            // hop so an attacker-controlled left-most value cannot win.
+            for (const part of parts.reverse()) {
                 const normalized = normalizeIp(part || null);
                 if (normalized) return normalized;
             }

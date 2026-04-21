@@ -2,7 +2,7 @@
 
 import path from 'path';
 import { statfs } from 'fs/promises';
-import { db, images, tags, imageTags } from '@/db';
+import { db, images, imageTags } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile } from '@/lib/upload-paths';
@@ -14,6 +14,7 @@ import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-que
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
+import { ensureTagRecord, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
@@ -249,33 +250,15 @@ export async function uploadImages(formData: FormData) {
                         const uniqueTagNames = Array.from(new Set(tagNames))
                             .map(t => t.trim()).filter(Boolean);
                         if (uniqueTagNames.length > 0) {
-                            const tagEntries = uniqueTagNames.map(cleanName => ({
-                                name: cleanName,
-                                slug: cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
-                            }));
-                            // Single batch insert for all tags
-                            await db.insert(tags).ignore().values(tagEntries);
-                            // Look up by exact name first, then fall back to slug — avoids returning
-                            // the wrong tag when two different names produce the same slug (slug collision).
-                            // Same pattern as addTagToImage, batchAddTags, and batchUpdateImageTags.
-                            const tagRecordsByName = await db.select().from(tags).where(inArray(tags.name, uniqueTagNames));
-                            const foundByName = new Set(tagRecordsByName.map(r => r.name));
-                            const missingNames = uniqueTagNames.filter(n => !foundByName.has(n));
-                            const missingSlugs = missingNames.map(n => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
-                            const tagRecordsBySlug = missingSlugs.length > 0
-                                ? await db.select().from(tags).where(inArray(tags.slug, missingSlugs))
-                                : [];
-                            // Merge: prefer name-match records, then slug-fallback records
-                            const tagRecords = [
-                                ...tagRecordsByName,
-                                ...tagRecordsBySlug.filter(r => !foundByName.has(r.name) && !tagRecordsByName.some(nr => nr.id === r.id)),
-                            ];
-                            // US-002: Warn on tag slug collisions
-                            const intendedBySlug = new Map(tagEntries.map(t => [t.slug, t.name]));
-                            for (const rec of tagRecords) {
-                                const intended = intendedBySlug.get(rec.slug);
-                                if (intended && rec.name !== intended) {
-                                    console.warn(`Tag slug collision: "${intended}" collides with existing "${rec.name}" on slug "${rec.slug}"`);
+                            const tagRecords = [];
+                            for (const cleanName of uniqueTagNames) {
+                                const resolvedTag = await ensureTagRecord(db, cleanName, getTagSlug(cleanName));
+                                if (resolvedTag.kind === 'collision') {
+                                    console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
+                                    continue;
+                                }
+                                if (resolvedTag.kind === 'found') {
+                                    tagRecords.push(resolvedTag.tag);
                                 }
                             }
                             if (tagRecords.length > 0) {
@@ -335,7 +318,7 @@ export async function uploadImages(formData: FormData) {
     }).catch(console.debug);
 
     // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
-    revalidateLocalizedPaths('/', '/admin/dashboard');
+    revalidateLocalizedPaths('/', '/admin/dashboard', `/${topic}`);
 
     return {
         success: true,
