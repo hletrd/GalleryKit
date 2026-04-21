@@ -53,7 +53,7 @@ export default defineConfig({
   ],
   webServer: useLocalServer
     ? {
-        command: `npm run build && npm run start -- --hostname ${host} --port ${localPort}`,
+        command: `npm run e2e:seed && npm run build && npm run start -- --hostname ${host} --port ${localPort}`,
         cwd: __dirname,
         url: baseURL,
         reuseExistingServer: true,
