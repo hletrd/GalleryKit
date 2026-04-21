@@ -1,8 +1,12 @@
 import path from 'path';
-import dotenv from 'dotenv';
+import { existsSync } from 'fs';
 import { defineConfig, devices } from '@playwright/test';
 
-dotenv.config({ path: path.resolve(__dirname, '.env.local') });
+const envPath = path.resolve(__dirname, '.env.local');
+const loadEnvFile = (process as NodeJS.Process & { loadEnvFile?: (path: string) => void }).loadEnvFile;
+if (existsSync(envPath) && typeof loadEnvFile === 'function') {
+  loadEnvFile(envPath);
+}
 
 const port = Number(process.env.E2E_PORT || 3100);
 const host = '127.0.0.1';

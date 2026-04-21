@@ -15,7 +15,7 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed-admin.ts",
     "init": "tsx scripts/init-db.ts",
-    "test:e2e": "playwright test",
+    "test:e2e": "npx playwright test",
     "e2e:seed": "tsx scripts/seed-e2e.ts",
     "lint:api-auth": "tsx scripts/check-api-auth.ts"
   },
