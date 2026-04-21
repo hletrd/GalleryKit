@@ -1,18 +1,17 @@
-# Test Engineer Review — Cycle 5 Manual Fallback
+# Cycle 6 Test Engineer Notes
 
-_Manual fallback after child-agent timeout._
+## Findings
 
-## Confirmed gaps
-
-### T5-01 — No regression test proves restore mode blocks conflicting write actions
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Citations:** `apps/web/src/__tests__/restore-maintenance.test.ts:1-25`, representative mutators `apps/web/src/app/actions/settings.ts:35-37`, `apps/web/src/app/actions/tags.ts:42-44`, `apps/web/src/app/actions/topics.ts:33-35`, `apps/web/src/app/actions/sharing.ts:61-63`
-- **Failure scenario:** a future refactor can remove or bypass the restore gate without any failing unit test because the suite never exercises a blocked write path.
-- **Suggested fix:** add pure helper coverage for the guard plus a focused regression test around the upload/restore boundary or another representative mutator.
-
-### T5-02 — No UI-level test covers restore file-size guidance / oversize rejection
+### C6-03 — Missing regression coverage for restore-stream failure handling
 - **Severity:** LOW
-- **Confidence:** Medium
-- **Citations:** `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:57-79,158-180`
-- **Failure scenario:** the DB admin page can regress back to silent oversize selection because there is no browser or component test asserting the warning/precheck path.
+- **Confidence:** High
+- **Citations:** absence of tests covering `apps/web/src/app/[locale]/admin/db-actions.ts:362-416` and `apps/web/src/lib/db-restore.ts`
+- **Failure scenario:** a future refactor drops or broadens stdin error handling and restore failures go back to surfacing raw stream exceptions.
+- **Suggested fix:** add focused unit tests for the restore-pipe error classifier/helper.
+
+### C6-04 — Missing regression coverage for fatal-shell brand derivation
+- **Severity:** LOW
+- **Confidence:** High
+- **Citations:** absence of tests covering `apps/web/src/app/global-error.tsx`
+- **Failure scenario:** a future metadata/layout refactor removes the brand handoff and the fatal shell silently reverts to stale static branding.
+- **Suggested fix:** move the brand-derivation logic into a small pure helper and unit test dataset/document-title/fallback behavior.

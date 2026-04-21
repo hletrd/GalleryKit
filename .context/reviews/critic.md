@@ -1,18 +1,16 @@
-# Critic Review — Cycle 5 Manual Fallback
+# Cycle 6 Critic Notes
 
-_Manual fallback after child-agent timeout._
+## Findings
 
-## Highest-signal critique
-
-### K5-01 — The restore contract still over-promises what the code enforces
-- **Severity:** HIGH
+### C6-02 — The app still has a split source of truth for gallery branding under failure
+- **Severity:** MEDIUM
 - **Confidence:** High
-- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:227-230,235-279`, `apps/web/src/app/actions/*.ts` mutators, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:57-79,158-180`
-- The code and UI now imply a maintenance-style restore window, but the implementation is only partial: queue + buffered views are quiesced, while other live writes remain possible and the restore size limit is only partially enforced.
-- Suggested fix: make restore either a fully enforced maintenance boundary or explicitly scope/document the remaining gaps.
+- **Citations:** `apps/web/src/app/global-error.tsx:45-52`, `apps/web/src/app/[locale]/layout.tsx:15-48,75-109`, `apps/web/src/lib/data.ts:770-790`
+- The healthy path uses DB-backed SEO settings, but the fatal shell still reads a file constant. That creates a configuration split exactly where consistency matters most during incidents.
+- Suggested fix: carry the live brand through the root layout so the error shell can reuse it without introducing a new DB dependency inside the client-only boundary.
 
-### K5-02 — The product still has split branding sources
+### C6-03 — The new failure-path contracts still lack dedicated regression tests
 - **Severity:** LOW
-- **Confidence:** Medium
-- **Citations:** `apps/web/src/app/global-error.tsx:1-3,45-52`, `apps/web/src/app/[locale]/layout.tsx:15-48`
-- Live SEO settings drive the happy path; `site-config.json` still drives the fatal shell. That is easy to miss now that most branding moved to DB-backed settings.
+- **Confidence:** High
+- **Citations:** `apps/web/src/__tests__/restore-maintenance.test.ts:1-43`, absence of any error-shell helper or restore-stream tests in `apps/web/src/__tests__/`
+- The repo has no focused tests for restore stdin error classification or fatal-shell brand derivation, so both can regress silently.

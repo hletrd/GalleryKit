@@ -1,12 +1,10 @@
-# Debugger Review — Cycle 5 Manual Fallback
+# Cycle 6 Debugger Notes
 
-_Manual fallback after child-agent timeout._
+## Findings
 
-## Confirmed latent bug
-
-### G5-01 — `uploadImages()` can still cross the restore boundary after its initial guard
+### C6-01 — Early `mysql` exit can surface as an unhandled child-stdin error
 - **Severity:** HIGH
 - **Confidence:** High
-- **Citations:** `apps/web/src/app/actions/images.ts:81-88,180-227`, `apps/web/src/app/[locale]/admin/db-actions.ts:256-269`
-- **Failure scenario:** an upload request passes the top-of-function `isRestoreMaintenanceActive()` check, then a restore starts while the upload is inside `saveOriginalAndGetMetadata()`. The upload proceeds to DB insert because there is no second guard near the write boundary.
-- **Suggested fix:** re-check the maintenance state after file preprocessing and before DB insert/queue enqueue, cleaning up any saved originals if the restore window opened in the meantime.
+- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:362-416`
+- **Failure mode:** `readStream.pipe(restore.stdin)` keeps writing unless the destination handles errors. If `mysql` exits early, Node can raise `EPIPE` / destroyed-stream errors on `restore.stdin` before the existing `close` handler resolves the action.
+- **Suggested fix:** register `restore.stdin.on('error', ...)` before piping, ignore broken-pipe style errors that simply reflect the child exiting, and fail cleanly for everything else.

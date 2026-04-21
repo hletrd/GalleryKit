@@ -1,18 +1,16 @@
-# Verifier Review — Cycle 5 Manual Fallback
+# Cycle 6 Verifier Notes
 
-_Manual fallback after child-agent timeout._
+## Findings
 
-## Evidence-backed mismatches
-
-### V5-01 — The restore size comment does not match the actual ingress behavior
-- **Severity:** MEDIUM
+### C6-01 — `runRestore()` has no listener for the writable side of the child-process pipe
+- **Severity:** HIGH
 - **Confidence:** High
-- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:227-230,289-290`, `apps/web/next.config.ts:96-101`
-- **What I verified:** the comment claims the restore limit is aligned with Next.js request parsing. In reality `bodySizeLimit` comes from `NEXT_UPLOAD_BODY_SIZE_LIMIT` (default 2 GiB), while `MAX_RESTORE_SIZE` is 250 MB.
-- **Failure scenario:** oversized restore dumps are rejected too late to avoid framework/body-parse cost.
+- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:362-416`
+- **What I verified:** the code registers handlers for `readStream`, `restore`, and `restore.stderr`, but not for `restore.stdin`. The final `readStream.pipe(restore.stdin)` therefore depends on default stream behavior when the child closes early.
+- **Failure scenario:** early `mysql` exit can surface a writable-stream error that bypasses the existing typed restore result handling.
 
-### V5-02 — Current regression coverage only tests the restore flag toggles, not that conflicting writes are actually blocked
+### C6-03 — There is still no regression proof for the restore-stream and fatal-shell fallback contracts
 - **Severity:** LOW
 - **Confidence:** High
-- **Citations:** `apps/web/src/__tests__/restore-maintenance.test.ts:1-25`, `apps/web/src/app/actions/images.ts:81-88,180-227`, `apps/web/src/app/actions/settings.ts:35-37`
-- **What I verified:** the only restore-maintenance tests assert `begin/end/isActive`. There is no regression proof that mutating actions stop when restore starts, nor that uploads re-check before DB insert.
+- **Citations:** `apps/web/src/__tests__/restore-maintenance.test.ts:1-43`
+- **What I verified:** the current test suite covers restore-maintenance flags only; there is no unit coverage for classifying benign restore-pipe errors or deriving the fatal-shell brand from live metadata.

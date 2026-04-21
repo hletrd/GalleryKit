@@ -1,73 +1,69 @@
-# Cycle 5 Aggregate Review
+# Cycle 6 Aggregate Review
 
-**Date:** 2026-04-22  
-**Scope:** review-plan-fix cycle 5 (`deeper`, `ultradeep comprehensive`)
+**Date:** 2026-04-22
+**Scope:** review-plan-fix cycle 6 (`deeper`, `ultradeep comprehensive`)
 
 ## Review fan-out summary
 
-I attempted two parallel Codex reviewer batches for the available reviewer roles (`code-reviewer`, `security-reviewer`, `critic`, `verifier`, `designer` on the first pass; `code-reviewer` + `verifier` on the retry). Both batches failed to return trustworthy artifacts before timing out, so I shut them down and completed a manual repo-wide sweep instead. The per-role markdown files in this folder were refreshed manually as fallback specialist notes so the cycle still has durable provenance.
+I attempted a parallel Codex reviewer batch for the available reviewer roles, but the child-agent lanes did not yield trustworthy completed artifacts before timing out and being shut down. I then completed a manual repo-wide ultradeep sweep and refreshed the per-role markdown files in this folder as fallback specialist notes so the cycle still has durable provenance.
 
-Unavailable reviewer roles in this environment: `perf-reviewer`, `tracer`, `document-specialist`.
+Timed-out reviewer lanes this cycle: `code-reviewer`, `security-reviewer`, `critic`, `verifier`, `test-engineer`.
+Direct reviewer roles not available in this environment: `perf-reviewer`, `tracer`, `document-specialist`.
 
 ## Dedupe rules
 
-- Only findings re-verified against the current working tree at `7dc7dd2` are included below.
-- Overlapping findings from the manual specialist notes were merged under the highest severity/confidence still supported by the code.
-- Architectural or operational items that are real but broader than a bounded patch are listed under **Deferred / risk** rather than inflated into immediate code-fix claims.
+- Only findings re-verified against the current working tree at `01581e5` are included below.
+- Overlapping specialist notes were merged under the highest severity/confidence still supported by the code.
+- Existing deferred risks from prior ultradeep cycles remain tracked in `.context/plans/182-deferred-cycle5-ultradeep-review.md` unless explicitly superseded below.
 
 ## Confirmed findings
 
 | ID | Severity | Confidence | Signals | Finding | Primary citations |
 |---|---|---|---|---|---|
-| C5-01 | HIGH | High | code-reviewer, security-reviewer, debugger, verifier | Restore maintenance still leaves conflicting write paths alive: most mutating admin/auth actions ignore the maintenance window, and `uploadImages()` only checks the guard once at request start. | `apps/web/src/app/[locale]/admin/db-actions.ts:235-279`; `apps/web/src/app/actions/images.ts:81-88,180-227`; `apps/web/src/app/actions/admin-users.ts:67-69`; `apps/web/src/app/actions/settings.ts:35-37`; `apps/web/src/app/actions/seo.ts:49-51`; `apps/web/src/app/actions/sharing.ts:61-63`; `apps/web/src/app/actions/tags.ts:42-44`; `apps/web/src/app/actions/topics.ts:33-35,104-106`; `apps/web/src/app/actions/auth.ts:68-70,251-255` |
-| C5-02 | MEDIUM | High | code-reviewer, critic, verifier, dependency-expert, designer | The restore-size contract is split: the server action rejects files above 250 MB only after crossing a 2 GiB Next.js server-action ingress limit, and the DB UI gives no preflight max-size guidance. | `apps/web/src/app/[locale]/admin/db-actions.ts:227-230,282-290`; `apps/web/next.config.ts:96-101`; `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:57-79,158-180` |
-| C5-03 | MEDIUM | High | test-engineer, verifier | Regression coverage for restore mode is too shallow: tests only assert the process-local flag toggles, not that representative write paths are actually blocked. | `apps/web/src/__tests__/restore-maintenance.test.ts:1-25`; representative mutators `apps/web/src/app/actions/images.ts:81-88,180-227`, `apps/web/src/app/actions/settings.ts:35-37` |
-| C5-04 | LOW | Medium | code-reviewer, critic, designer | Fatal error branding still reads static `site-config.json` instead of the live SEO/settings source used by normal runtime metadata. | `apps/web/src/app/global-error.tsx:1-3,45-52`; `apps/web/src/app/[locale]/layout.tsx:15-48` |
+| C6-01 | HIGH | High | code-reviewer, verifier, debugger, dependency-expert | The SQL-restore pipeline does not handle writable child-stdin errors, so early `mysql` exit can escape the structured restore failure path. | `apps/web/src/app/[locale]/admin/db-actions.ts:362-416` |
+| C6-02 | MEDIUM | High | code-reviewer, critic, architect, designer | The fatal error shell still renders static `site-config.json` branding even though the rest of the app uses live SEO settings, so failure-mode UI can drift from the configured gallery identity. | `apps/web/src/app/global-error.tsx:45-52`, `apps/web/src/app/[locale]/layout.tsx:15-48,75-109`, `apps/web/src/lib/data.ts:770-790` |
+| C6-03 | LOW | High | verifier, test-engineer | There is no dedicated regression coverage for restore-pipe error classification or fatal-shell brand derivation. | `apps/web/src/__tests__/restore-maintenance.test.ts:1-43`, absence of matching tests elsewhere in `apps/web/src/__tests__/` |
 
 ## Why these findings matter
 
-### C5-01 — Restore is still not a real write barrier
-- `restoreDatabase()` now flips a maintenance flag, flushes buffered view counts, and pauses the queue, but almost every other authenticated mutation keeps running normally.
-- `uploadImages()` blocks only when restore is already active before the request begins. If the restore starts while an upload is mid-flight, the upload can still save originals and insert DB rows because there is no second guard near the insert/queue boundary.
-- Concrete failure scenario: one admin triggers restore while another updates tags/settings/users or while an upload is already inside preprocessing. The resulting database no longer matches the restored dump.
-- Suggested fix: add a reusable maintenance guard to conflicting mutators and re-check `uploadImages()` at the write boundary, cleaning up any saved original if the restore window opened mid-request.
+### C6-01 — Restore can fail with raw stream errors instead of a controlled result
+- `runRestore()` handles file-read errors and child-process `close`/`error`, but not the writable side of `readStream.pipe(restore.stdin)`.
+- Concrete failure scenario: `mysql` exits early after encountering invalid SQL or a broken connection, Node surfaces `EPIPE` / destroyed-stream errors on `restore.stdin`, and the action escapes the typed `restoreExitedWithCode` / `restoreFailed` flow.
+- Suggested fix: register a `restore.stdin` error handler before piping, ignore broken-pipe style errors that merely reflect the child exiting, and reserve hard failure handling for non-benign stdin errors.
 
-### C5-02 — Restore-size feedback arrives too late
-- The app advertises a 250 MB restore limit in the action, but the actual Next.js server-action transport still accepts bodies up to `NEXT_UPLOAD_BODY_SIZE_LIMIT` (default 2 GiB).
-- The DB admin page does not tell the operator the real max size or reject oversized files before submit.
-- Concrete failure scenario: an operator selects a 900 MB dump and waits through upload/parse time only to get a late `fileTooLarge` error.
-- Suggested fix: immediately share the 250 MB constant with the client UI and add preflight rejection; defer the bigger transport-boundary redesign if needed.
+### C6-02 — Fatal-shell branding still diverges from live SEO settings
+- The localized root layout and manifest use `getSeoSettings()`, but `global-error.tsx` still hardcodes `siteConfig.nav_title || siteConfig.title`.
+- Concrete failure scenario: an admin updates the gallery title/nav title in SEO settings, normal pages show the new brand, and a fatal fallback screen still shows the old title.
+- Suggested fix: carry the live brand through the root HTML (for example via data attributes) so the client-only error shell can reuse it without performing its own server fetch.
 
-### C5-03 — Tests do not prove the restore barrier works
-- The existing test file checks only `beginRestoreMaintenance()` / `endRestoreMaintenance()` state transitions.
-- No test proves that representative mutators or the upload write boundary stop when restore mode is active.
-- Suggested fix: add focused regression coverage around the shared guard and the upload boundary.
-
-### C5-04 — Branding still has a stale fallback path
-- Normal runtime metadata now comes from `getSeoSettings()`, but `global-error.tsx` still shows `siteConfig.nav_title || siteConfig.title`.
-- Concrete failure scenario: an operator renames the gallery in SEO settings, but fatal error pages still show the old brand.
-- Suggested fix: either intentionally document this as a file-backed fallback shell or align it with the live brand source.
+### C6-03 — The new failure-path contracts are not regression-tested
+- The repo currently tests restore-maintenance state only; it does not test restore stream error classification or fatal-shell branding.
+- Suggested fix: add small pure helpers and unit tests around both behaviors.
 
 ## Deferred / risk items
 
 | ID | Severity | Confidence | Source | Reason for deferral |
 |---|---|---|---|---|
-| R5-01 | MEDIUM | Medium | architect | `restore-maintenance.ts` is process-local (`globalThis` symbol). That is acceptable for today’s single-instance deployment, but a multi-instance deployment would need a durable/shared maintenance authority. |
-| R5-02 | MEDIUM | High | security-reviewer | Historical secret exposure in git history remains an operational remediation task (rotation/history governance), not a bounded source-code patch. |
+| R5-01 | MEDIUM | Medium | prior architect review | Multi-instance-safe restore maintenance still needs a durable/shared authority if deployment topology changes. |
+| R5-02 | MEDIUM | High | prior security review | Historical secret rotation / repo-history cleanup remains operational remediation rather than a bounded source patch. |
+| C6-05 | LOW | Medium | document-specialist | Restore comments/docs still need wording cleanup to distinguish the 250 MB restore cap from the broader server-action transport budget. |
 
 ## Agent failures
 
-The following reviewer lanes were attempted but did not yield trustworthy child-agent output before timeout and shutdown:
-- First batch: `code-reviewer`, `security-reviewer`, `critic`, `verifier`, `designer`
-- Retry batch: `code-reviewer`, `verifier`
+The following reviewer lanes were attempted in parallel but did not yield trustworthy completed child-agent output before timeout and shutdown:
+- `code-reviewer`
+- `security-reviewer`
+- `critic`
+- `verifier`
+- `test-engineer`
 
-Manual fallback specialist files were written instead so this cycle still has per-role provenance.
+Manual fallback specialist files were refreshed instead so this cycle still has per-role provenance.
 
 ## Aggregate conclusions
 
 Highest-value implementation targets this cycle:
-1. **Make restore a real write barrier** — C5-01
-2. **Expose/guard the 250 MB restore limit earlier in the UI** — C5-02
-3. **Add regression coverage for the restore barrier** — C5-03
+1. **Harden the restore child-process stream boundary** — C6-01
+2. **Align the fatal shell with live branding** — C6-02
+3. **Add regression coverage for both contracts** — C6-03
 
-No confirmed finding above was silently dropped.
+No confirmed finding above is silently dropped.

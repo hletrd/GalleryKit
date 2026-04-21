@@ -1,13 +1,13 @@
-# Architect Review — Cycle 5 Manual Fallback
+# Cycle 6 Architect Notes
 
-_Manual fallback after child-agent timeout._
+## Findings
 
-## Architectural risk
-
-### A5-01 — Restore maintenance authority is process-local only
+### C6-02 — The root layout does not currently hand off live branding to the client-only fatal shell
 - **Severity:** MEDIUM
-- **Confidence:** Medium
-- **Citations:** `apps/web/src/lib/restore-maintenance.ts:1-37`, `apps/web/src/app/[locale]/admin/db-actions.ts:235-279`, `apps/web/docker-compose.yml` / deployment docs indicating today's single-instance topology
-- **Why it matters:** the maintenance flag lives in a `globalThis` symbol inside one Node process. That is workable for the current single-instance deployment, but it does not coordinate across multiple app instances or worker processes.
-- **Failure scenario:** if deployment evolves to multiple web instances, one instance could enter restore mode while another continues accepting writes because it never sees the local symbol flip.
-- **Suggested fix:** keep the current process-local guard for now, but document it as a single-instance assumption and re-open the design if/when the app becomes multi-instance.
+- **Confidence:** High
+- **Citations:** `apps/web/src/app/[locale]/layout.tsx:15-48,75-109`, `apps/web/src/app/global-error.tsx:45-52`
+- **Risk:** the current architecture has a server-only SEO source and a client-only fatal shell with no shared bridge, so failure-mode UI drifts from the configured application identity.
+- **Suggested fix:** embed live brand values in the root HTML attributes so the fatal shell can reuse them without adding a new runtime fetch.
+
+## Deferred / carry-forward
+- Multi-instance restore coordination still needs a durable/shared maintenance authority if deployment topology changes beyond the current single-instance model.

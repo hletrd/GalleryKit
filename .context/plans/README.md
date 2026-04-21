@@ -2,6 +2,7 @@
 
 ## Active Plans
 
+- 184 — Deferred Review Coverage (Cycle 6 Ultradeep) — TODO
 - 182 — Deferred Review Coverage (Cycle 5 Ultradeep) — TODO
 - 179 — Deferred Review Coverage (Cycle 3 Ultradeep) — TODO
 - 163 — Deferred Review Coverage (Cycle 2) — TODO
@@ -10,6 +11,10 @@
 - 172 — Deferred Review Coverage (Cycle 3) — TODO
 - 175 — Deferred Review Coverage (Cycle 1 Ultradeep) — TODO
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
+
+## Completed Plans (Cycle 6 Ultradeep)
+
+- 183 — Cycle 6 Ultradeep Fixes — DONE
 
 ## Completed Plans (Cycle 5 Ultradeep)
 

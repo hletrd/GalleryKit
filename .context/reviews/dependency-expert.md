@@ -1,12 +1,10 @@
-# Dependency / Platform Review — Cycle 5 Manual Fallback
+# Cycle 6 Dependency Expert Notes
 
-_Manual fallback after child-agent timeout._
+## Findings
 
-## Platform constraint noted
-
-### P5-01 — The clean fix for restore-size enforcement is platform-boundary work, not just application code
-- **Severity:** MEDIUM
+### C6-01 — The `child_process` + stream boundary for restore lacks explicit writable error handling
+- **Severity:** HIGH
 - **Confidence:** High
-- **Citations:** `apps/web/next.config.ts:96-101`, `apps/web/src/app/[locale]/admin/db-actions.ts:227-230,289-290`
-- **Observation:** Next.js server-action body limits are configured globally here through `NEXT_UPLOAD_BODY_SIZE_LIMIT`. That makes it awkward to keep normal uploads at 2 GiB while restore stays at 250 MB using the same transport.
-- **Implication:** a complete fix likely means moving restore to a dedicated route/ingress boundary or adding proxy-level enforcement specific to restore traffic.
+- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:362-416`
+- **Runtime risk:** when piping a file into `mysql`, the writable side (`restore.stdin`) is part of the child-process contract and can fail independently of the process object. The current code handles the process but not that writable boundary.
+- **Suggested fix:** treat stdin failures as a first-class part of the restore lifecycle and classify benign broken-pipe cases separately from real I/O failures.

@@ -1,24 +1,19 @@
-# Security Review — Cycle 5 Manual Fallback
+# Cycle 6 Security Reviewer Notes
 
-_Manual fallback after child-agent timeout._
+## Inventory
+- Restore/backup actions: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`
+- Deploy and runtime helpers: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `.env.deploy.example`
+- Auth/write barriers from prior cycles: `apps/web/src/app/actions/*.ts`, `apps/web/src/lib/restore-maintenance.ts`
 
-## Scope
-Restore/backup flows, auth/session writes, mutating admin actions, deployment config, and repository-history security posture.
+## Findings
 
-## Confirmed issues
-
-### S5-01 — Restore mode still allows integrity-breaking concurrent writes
-- **Severity:** HIGH
-- **Confidence:** High
-- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:235-279`, `apps/web/src/app/actions/images.ts:81-88,180-227`, `apps/web/src/app/actions/admin-users.ts:67-69`, `apps/web/src/app/actions/settings.ts:35-37`, `apps/web/src/app/actions/seo.ts:49-51`, `apps/web/src/app/actions/sharing.ts:61-63`, `apps/web/src/app/actions/topics.ts:33-35,104-106`, `apps/web/src/app/actions/tags.ts:42-44`, `apps/web/src/app/actions/auth.ts:68-70,251-255`
-- **Why it matters:** this is a data-integrity/security boundary issue. Restore is a destructive administrative operation, but the current maintenance flag only blocks a subset of write paths.
-- **Exploit/failure scenario:** while a privileged admin runs restore, another authenticated session mutates tags/settings/users/passwords or an already-running upload inserts rows into the database. The resulting post-restore state is not the audited dump the admin intended to recover.
-- **Suggested fix:** treat restore as a real maintenance window across all conflicting authenticated mutations and upload write boundaries.
-
-## Deferred / operational risk
-
-### S5-R1 — Historical secret exposure remains an operational remediation item
+### C6-01 — Restore stdin stream failures can escape the structured restore error boundary
 - **Severity:** MEDIUM
 - **Confidence:** High
-- **Citation:** prior history finding confirmed by repo history for `apps/web/.env.local.example`
-- **Reason to defer:** rotating any potentially reused secret and rewriting history/mirrors is operational, not a bounded source-code patch in this cycle.
+- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:362-416`
+- **Why it matters:** this is primarily an availability/integrity issue. Restore is an administrative recovery path and should fail in a controlled, auditable way.
+- **Failure scenario:** a malformed dump or broken DB connection makes `mysql` exit early; the parent action sees an unhandled stdin-stream error instead of the intended typed restore failure, which can interrupt the maintenance workflow and make operator recovery harder.
+- **Suggested fix:** explicitly absorb expected broken-pipe child-stdin errors and let the `close` event own the final restore status.
+
+## Deferred / carry-forward
+- Historical secret rotation / repo-history cleanup remains an operational task and is still carried by the existing deferred review docs.
