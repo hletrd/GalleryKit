@@ -56,3 +56,23 @@ test('photo page lightbox opens and closes from the first visible photo', async 
   await page.keyboard.press('Escape');
   await expect(lightbox).toBeHidden();
 });
+
+test('shared-group navigation keeps the shared route context', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/g/Abc234Def5');
+  await expectNoNextError(page);
+
+  const firstSharedPhoto = page.locator('a[href*="/g/Abc234Def5?photoId="]').first();
+  await expect(firstSharedPhoto).toBeVisible();
+  await firstSharedPhoto.click();
+
+  await expect(page).toHaveURL(/\/g\/Abc234Def5\?photoId=\d+/);
+  const startingUrl = page.url();
+
+  const nextButton = page.getByRole('button', { name: 'Next photo' });
+  await expect(nextButton).toBeVisible();
+  await nextButton.click();
+
+  await expect(page).toHaveURL(/\/g\/Abc234Def5\?photoId=\d+/);
+  await expect(page).not.toHaveURL(startingUrl);
+});

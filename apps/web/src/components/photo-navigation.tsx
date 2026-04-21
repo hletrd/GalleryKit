@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,12 +11,14 @@ interface PhotoNavigationProps {
     prevId: number | null;
     nextId: number | null;
     disabled?: boolean;
+    buildPhotoPath?: (id: number) => string;
+    onSelectId?: (id: number) => void;
 }
 
 const SWIPE_THRESHOLD = 80;
 const VERTICAL_LIMIT = 30;
 
-export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationProps) {
+export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSelectId }: PhotoNavigationProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const [swipeOffset, setSwipeOffset] = useState(0);
@@ -24,6 +26,18 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
     const touchStartX = useRef(0);
     const touchStartY = useRef(0);
     const isSwiping = useRef(false);
+
+    const getPhotoPath = useCallback((id: number) => (
+        buildPhotoPath ? buildPhotoPath(id) : localizePath(locale, `/p/${id}`)
+    ), [buildPhotoPath, locale]);
+
+    const goToPhoto = useCallback((id: number) => {
+        if (onSelectId) {
+            onSelectId(id);
+            return;
+        }
+        router.push(getPhotoPath(id));
+    }, [getPhotoPath, onSelectId, router]);
 
     useEffect(() => {
         // Skip touch handling when lightbox is open — it handles its own navigation
@@ -97,13 +111,13 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
                 if (typeof navigator.vibrate === 'function') {
                     navigator.vibrate(10);
                 }
-                router.push(localizePath(locale, `/p/${nextId}`));
+                goToPhoto(nextId);
             } else if (deltaX > SWIPE_THRESHOLD && prevId) {
                 // Swipe right -> prev photo
                 if (typeof navigator.vibrate === 'function') {
                     navigator.vibrate(10);
                 }
-                router.push(localizePath(locale, `/p/${prevId}`));
+                goToPhoto(prevId);
             } else {
                 // Snap back
                 setIsSnapping(true);
@@ -122,7 +136,7 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
             window.removeEventListener('touchmove', handleTouchMove);
             window.removeEventListener('touchend', handleTouchEnd);
         };
-    }, [locale, prevId, nextId, router, disabled]);
+    }, [goToPhoto, locale, prevId, nextId, router, disabled]);
 
     // Opacity of swipe indicators proportional to displacement
     const prevIndicatorOpacity = swipeOffset > 0
@@ -197,7 +211,7 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
                         variant="secondary"
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
-                        onClick={() => router.push(localizePath(locale, `/p/${prevId}`))}
+                        onClick={() => goToPhoto(prevId)}
                         aria-label={t('aria.previousPhoto')}
                     >
                         <ChevronLeft className="h-6 w-6" />
@@ -211,7 +225,7 @@ export function PhotoNavigation({ prevId, nextId, disabled }: PhotoNavigationPro
                         variant="secondary"
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
-                        onClick={() => router.push(localizePath(locale, `/p/${nextId}`))}
+                        onClick={() => goToPhoto(nextId)}
                         aria-label={t('aria.nextPhoto')}
                     >
                         <ChevronRight className="h-6 w-6" />

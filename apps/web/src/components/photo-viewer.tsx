@@ -98,6 +98,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
 
+    const buildPhotoPath = useCallback((id: number) => {
+        if (isSharedView && syncPhotoQueryBasePath) {
+            return `${syncPhotoQueryBasePath}?photoId=${id}`;
+        }
+        return localizePath(locale, `/p/${id}`);
+    }, [isSharedView, locale, syncPhotoQueryBasePath]);
+
     const navigate = useCallback((direction: number) => {
         const newIndex = currentIndex + direction;
         if (newIndex >= 0 && newIndex < images.length) {
@@ -107,15 +114,15 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 if (showLightboxRef.current) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch { console.debug('sessionStorage write failed') }
                 }
-                router.push(localizePath(locale, `/p/${prevId}`));
+                router.push(buildPhotoPath(prevId));
             } else if (direction === 1 && nextId) {
                 if (showLightboxRef.current) {
                     try { sessionStorage.setItem('gallery_auto_lightbox', 'true'); } catch { console.debug('sessionStorage write failed') }
                 }
-                router.push(localizePath(locale, `/p/${nextId}`));
+                router.push(buildPhotoPath(nextId));
             }
         }
-    }, [currentIndex, images, locale, prevId, nextId, router]);
+    }, [buildPhotoPath, currentIndex, images, prevId, nextId, router]);
 
     // Clean up auto-lightbox flag after lazy init consumes it
     useEffect(() => {
@@ -301,6 +308,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
                         disabled={showLightbox}
+                        buildPhotoPath={buildPhotoPath}
+                        onSelectId={isSharedView ? setCurrentImageId : undefined}
                     />
 
                     <AnimatePresence mode="wait" initial={false}>
