@@ -99,7 +99,12 @@ export default async function TopicPage({
 
   // If the requested topic slug doesn't match the canonical slug, redirect with locale preserved
   if (topicData.slug !== topic) {
-      redirect(localizePath(locale, `/${topicData.slug}`));
+      const destination = localizePath(locale, `/${topicData.slug}`);
+      const redirectSearch = new URLSearchParams();
+      if (tagsParam) {
+        redirectSearch.set('tags', tagsParam);
+      }
+      redirect(redirectSearch.size > 0 ? `${destination}?${redirectSearch.toString()}` : destination);
   }
 
   const seo = await getSeoSettings();

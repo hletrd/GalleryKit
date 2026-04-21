@@ -222,8 +222,7 @@ export async function createGroupShareLink(imageIds: number[]) {
                     throw new Error('Invalid insert ID from shared group creation');
                 }
 
-                await tx.insert(sharedGroupImages)
-                    .ignore()
+                const [linkResult] = await tx.insert(sharedGroupImages)
                     .values(
                         uniqueImageIds.map((imgId, position) => ({
                             groupId: groupId,
@@ -231,6 +230,9 @@ export async function createGroupShareLink(imageIds: number[]) {
                             position,
                         }))
                     );
+                if (Number(linkResult.affectedRows ?? 0) !== uniqueImageIds.length) {
+                    throw new Error('Shared group image link count mismatch');
+                }
 
                 return groupKey;
             });
@@ -248,6 +250,9 @@ export async function createGroupShareLink(imageIds: number[]) {
             if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
                 retries++;
                 continue;
+            }
+            if (isMySQLError(e) && (e.code === 'ER_NO_REFERENCED_ROW_2' || e.cause?.code === 'ER_NO_REFERENCED_ROW_2')) {
+                return { error: t('imagesNotFound') };
             }
             // Non-retryable error — fail immediately
             return { error: t('failedToCreateGroup') };
