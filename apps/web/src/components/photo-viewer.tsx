@@ -48,9 +48,10 @@ interface PhotoViewerProps {
     syncPhotoQueryBasePath?: string;
     imageSizes?: number[];
     siteTitle?: string;
+    shareBaseUrl?: string;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -261,7 +262,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             try {
                                 const result = await createPhotoShareLink(image.id);
                                 if (result.success) {
-                                    const url = localizeUrl(window.location.origin, locale, `/s/${result.key}`);
+                                    const url = localizeUrl(shareBaseUrl, locale, `/s/${result.key}`);
                                     await copyToClipboard(url);
                                     toast.success(t('viewer.linkCopied'));
                                 } else {

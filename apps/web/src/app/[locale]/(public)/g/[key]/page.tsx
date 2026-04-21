@@ -137,6 +137,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     syncPhotoQueryBasePath={localizePath(locale, `/g/${key}`)}
                     imageSizes={config.imageSizes}
                     siteTitle={seo.title}
+                    shareBaseUrl={seo.url}
                 />
             </>
         );

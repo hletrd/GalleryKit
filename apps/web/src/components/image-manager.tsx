@@ -41,8 +41,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { OptimisticImage } from './optimistic-image';
 import { Pencil } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
-import { imageUrl } from '@/lib/image-url';
+import { sizedImageUrl } from '@/lib/image-url';
 import { localizeUrl } from '@/lib/locale-path';
+import { useRouter } from 'next/navigation';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface ImageType {
     id: number;
@@ -57,7 +59,17 @@ interface ImageType {
     description?: string | null;
 }
 
-export function ImageManager({ initialImages, availableTags }: { initialImages: ImageType[], availableTags: { id: number, name: string, slug: string }[] }) {
+export function ImageManager({
+    initialImages,
+    availableTags,
+    imageSizes = DEFAULT_IMAGE_SIZES,
+    shareBaseUrl,
+}: {
+    initialImages: ImageType[],
+    availableTags: { id: number, name: string, slug: string }[],
+    imageSizes?: number[],
+    shareBaseUrl: string,
+}) {
     const [images, setImages] = useState(initialImages);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -71,6 +83,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
     const [isSavingEdit, setIsSavingEdit] = useState(false);
 
     const { t, locale } = useTranslation();
+    const router = useRouter();
 
     const selectAllRef = useRef<HTMLInputElement>(null);
     useEffect(() => {
@@ -162,7 +175,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
         try {
             const result = await createGroupShareLink(ids);
             if (result.success) {
-                 const url = localizeUrl(window.location.origin, locale, `/g/${result.key}`);
+                 const url = localizeUrl(shareBaseUrl, locale, `/g/${result.key}`);
                  await copyToClipboard(url);
                  toast.success(t('imageManager.linkCopied'));
                  setSelectedIds(new Set());
@@ -190,6 +203,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                  setTagInput('');
                  setSelectedIds(new Set());
                  setIsBatchTagDialogOpen(false);
+                 router.refresh();
              } else {
                  toast.error(res?.error || t('imageManager.batchAddFailed'));
              }
@@ -342,7 +356,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                     <div className="relative h-32 w-32 overflow-hidden rounded border bg-muted flex items-center justify-center">
                                         {image.processed ? (
                                             <OptimisticImage
-                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, 128, imageSizes)}
                                                 alt={image.title || t('common.photo')}
                                                 fill
                                                 sizes="128px"
@@ -385,12 +399,7 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                                                             res.warnings.forEach(w => toast.warning(w));
                                                         }
                                                         toast.success(t('imageManager.tagAdded'));
-                                                        setImages(prev => prev.map(img => {
-                                                            if (img.id === image.id) {
-                                                                return { ...img, tag_names: newTags.join(',') };
-                                                            }
-                                                            return img;
-                                                        }));
+                                                        router.refresh();
                                                     } else {
                                                         toast.error(t('imageManager.batchAddFailed'));
                                                     }

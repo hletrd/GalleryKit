@@ -42,7 +42,7 @@ export default function DbPage() {
                     }
                     const link = document.createElement('a');
                     link.href = result.url;
-                    link.download = result.url.split('/').pop() || 'backup.sql';
+                    link.download = result.filename || 'backup.sql';
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);

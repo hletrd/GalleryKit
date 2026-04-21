@@ -9,10 +9,15 @@ import { Input } from '@/components/ui/input';
 import { searchImagesAction } from '@/app/actions';
 import Link from 'next/link';
 import { useTranslation } from '@/components/i18n-provider';
-import { imageUrl } from '@/lib/image-url';
+import { sizedImageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
-export function Search() {
+interface SearchProps {
+    previewImageSizes?: number[];
+}
+
+export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps) {
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -36,6 +41,8 @@ export function Search() {
         // Clear stale refs from previous result sets
         resultRefs.current = [];
         if (!searchQuery.trim()) {
+            requestIdRef.current++;
+            setLoading(false);
             setResults([]);
             return;
         }
@@ -59,6 +66,12 @@ export function Search() {
 
     useEffect(() => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (!query.trim()) {
+            requestIdRef.current++;
+            setLoading(false);
+            setResults([]);
+            return;
+        }
         debounceRef.current = setTimeout(() => {
             performSearch(query);
         }, 300);
@@ -207,7 +220,7 @@ export function Search() {
                                     >
                                         <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
                                             <Image
-                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, 128, previewImageSizes)}
                                                 alt={image.title || t('common.photo')}
                                                 width={48}
                                                 height={48}

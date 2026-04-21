@@ -14,9 +14,11 @@ interface DashboardClientProps {
     tags: { id: number; name: string; slug: string }[];
     page: number;
     totalPages: number;
+    imageSizes: number[];
+    shareBaseUrl: string;
 }
 
-export function DashboardClient({ images, topics, tags, page, totalPages }: DashboardClientProps) {
+export function DashboardClient({ images, topics, tags, page, totalPages, imageSizes, shareBaseUrl }: DashboardClientProps) {
     const { t, locale } = useTranslation();
 
     return (
@@ -33,7 +35,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages }: Dash
                 <div>
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.recentUploads')}</h2>
                     <div className="max-h-[calc(100vh-16rem)] overflow-auto">
-                        <ImageManager initialImages={images} availableTags={tags} />
+                        <ImageManager initialImages={images} availableTags={tags} imageSizes={imageSizes} shareBaseUrl={shareBaseUrl} />
                     </div>
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-4 mt-4">

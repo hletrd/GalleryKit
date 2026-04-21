@@ -118,6 +118,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 isSharedView
                 imageSizes={config.imageSizes}
                 siteTitle={seo.title}
+                shareBaseUrl={seo.url}
             />
         </>
     );

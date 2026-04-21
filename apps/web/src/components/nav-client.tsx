@@ -18,11 +18,12 @@ import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
 interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
     navTitle: string;
+    imageSizes: number[];
 }
 
 const MD_BREAKPOINT = 768;
 
-export function NavClient({ topics, navTitle }: NavClientProps) {
+export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const locale = useLocale();
@@ -136,7 +137,7 @@ export function NavClient({ topics, navTitle }: NavClientProps) {
                     "items-center gap-1 shrink-0",
                     isExpanded ? "flex w-full mt-2" : "hidden md:flex"
                 )}>
-                    <Search />
+                    <Search previewImageSizes={imageSizes} />
                     <button
                         onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"

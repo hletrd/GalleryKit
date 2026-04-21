@@ -229,6 +229,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 isAdmin={isAdminUser}
                 imageSizes={config.imageSizes}
                 siteTitle={seo.title}
+                shareBaseUrl={seo.url}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (
