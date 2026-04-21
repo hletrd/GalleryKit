@@ -1,68 +1,72 @@
-# Cycle 7 Aggregate Review
+# Cycle 8 Aggregate Review
 
 **Date:** 2026-04-22
-**Scope:** review-plan-fix cycle 7 (`deeper`, `ultradeep comprehensive`)
+**Scope:** review-plan-fix cycle 8 (`deeper`, `ultradeep comprehensive`)
 
 ## Review fan-out summary
 
 Completed specialist notes this cycle:
 - `code-reviewer`
 - `security-reviewer`
-- `critic`
-- `verifier`
 - `test-engineer`
+- `critic` (manual file refresh from completed read-only lane output)
+- `architect` (manual fallback)
+- `debugger` (manual fallback)
+- `verifier` (manual fallback after one context-window failure + stalled retry)
+- `designer` (manual fallback)
 
-Manual fallback specialist notes were added for:
-- `architect` (the spawned architect lane reported a read-only-policy completion with no file write)
-- `debugger`
-- `designer`
+Unavailable / not registered in this session:
 - `perf-reviewer`
 - `tracer`
 - `document-specialist`
-- `dependency-expert`
 
-The environment's child-agent lane cap prevented a single all-at-once fan-out across every specialty, so I combined completed agent output with a repo-wide manual fallback sweep and refreshed the missing per-role markdown files directly.
+## Agent failures / execution notes
 
-## Dedupe rules
-
-- Only findings re-verified against the current working tree during cycle 7 are included below.
-- Overlapping specialist notes were merged under the highest severity/confidence still supported by the code.
-- Findings already fixed in this cycle are still listed here because they were new review output for cycle 7 and drove plans 185/186.
+- The first `verifier` lane failed with a context-window exhaustion error before writing its file.
+- A retry `verifier` lane and follow-on `architect`, `debugger`, and `designer` lanes stalled after the initial repo scan; I shut them down and refreshed their review files manually so PROMPT 1 still has per-role provenance.
+- The `critic` lane completed the review but could not write `critic.md` because that role was read-only in this session; the file was updated manually from the agent's returned findings.
+- The `test-engineer` lane also ran extra verification and pushed one review-artifact commit (`fe84db5`). That commit is part of this cycle's commit count.
 
 ## Confirmed findings
 
 | ID | Severity | Confidence | Signals | Finding | Primary citations |
 |---|---|---|---|---|---|
-| C7-01 | HIGH | High | security-reviewer, debugger | `serveUploadFile()` trusted lexical containment and could be tricked through a symlinked parent directory inside `public/uploads`. | `apps/web/src/lib/serve-upload.ts:32-97` |
-| C7-02 | MEDIUM | High | debugger, test-engineer | The admin backup download route masked unexpected filesystem failures as `404`, making operator-facing failures look like missing files. | `apps/web/src/app/api/admin/db/download/route.ts:17-51` |
-| C7-03 | MEDIUM | High | verifier, debugger, tracer | Duplicate tag query params survived parsing and could zero out valid gallery results by inflating the `COUNT(DISTINCT ...)` HAVING clause. | `apps/web/src/lib/tag-slugs.ts:3-10`, `apps/web/src/lib/data.ts:277-289` |
-| C7-04 | MEDIUM | High | code-reviewer | The SQL restore safety scan only used forward overlap, leaving a chunk-boundary bypass path for dangerous statements with long padding between tokens. | `apps/web/src/app/[locale]/admin/db-actions.ts:323-340`, `apps/web/src/lib/sql-restore-scan.ts:1-34` |
-| C7-05 | MEDIUM | High | security-reviewer, document-specialist | nginx accepted bodies far larger than the app-level upload/restore limits, leaving the reverse proxy exposed to oversized request buffering before application validation ran. | `apps/web/nginx/default.conf:13-18,47-60`, `apps/web/src/lib/upload-limits.ts:1-22`, `apps/web/src/lib/db-restore.ts:1-17` |
-| C7-06 | MEDIUM | High | architect, critic | Share-link copy paths still used `window.location.origin` instead of the canonical configured public origin. | `apps/web/src/components/photo-viewer.tsx:253-266`, `apps/web/src/components/image-manager.tsx:158-167`, `apps/web/src/lib/data.ts:783-790` |
-| C7-07 | MEDIUM | High | code-reviewer, designer, perf-reviewer | Tiny search/admin preview surfaces still requested the full base JPEG instead of a small generated derivative. | `apps/web/src/components/search.tsx:208-215`, `apps/web/src/components/image-manager.tsx:342-349`, `apps/web/src/lib/process-image.ts:393-406` |
-| C7-08 | MEDIUM | High | verifier | `batchUpdateImageTags()` silently dropped malformed tag names instead of surfacing a partial-failure signal. | `apps/web/src/app/actions/tags.ts:347-400` |
-| C7-09 | MEDIUM | Medium | verifier | Settings/SEO forms can keep stale local state after the server sanitizes and persists canonical values. | `apps/web/src/app/actions/settings.ts:51-78`, `apps/web/src/app/actions/seo.ts:64-103`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:33-56`, `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:39-53` |
-| C7-10 | LOW | High | dependency-expert | The dev-tooling dependency tree still carries the `drizzle-kit` -> `esbuild` advisory chain reported by `npm audit`. | `apps/web/package.json:56-70`, `package-lock.json` |
+| C8-01 | MEDIUM | High | code-reviewer, debugger | `createGroupShareLink()` can silently succeed with a partial or empty image set if selected images disappear between pre-validation and the transactional insert. | `apps/web/src/app/actions/sharing.ts:200-245` |
+| C8-02 | MEDIUM | High | code-reviewer, architect, verifier | Canonical topic redirects drop active tag filters when alias slugs are normalized to the canonical slug. | `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:87-95` |
+| C8-03 | MEDIUM | High | critic, debugger | The search dialog has a stale-request race: clearing the query does not invalidate in-flight requests, so old results can reappear under an empty input. | `apps/web/src/components/search.tsx:35-57` |
+| C8-04 | MEDIUM | High | critic, designer | Tiny search/admin preview surfaces still request the largest base JPEG derivative instead of a thumbnail-sized asset. | `apps/web/src/components/search.tsx:208-215`, `apps/web/src/components/image-manager.tsx:342-349`, `apps/web/src/lib/process-image.ts:393-414` |
+| C8-05 | MEDIUM | High | critic, verifier, designer | Successful tag mutations do not immediately reconcile the current admin table with the canonical server state, so the UI can stay stale after success. | `apps/web/src/components/image-manager.tsx:183-200`, `apps/web/src/components/image-manager.tsx:371-399`, `apps/web/src/app/actions/tags.ts:347-400` |
+| C8-06 | LOW | High | critic, debugger | Backup downloads use a filename derived from the URL instead of the server-returned filename, producing confusing download names. | `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:36-49`, `apps/web/src/app/[locale]/admin/db-actions.ts:218-219` |
+| C8-07 | MEDIUM | High | architect, designer | Copied share links still use the operator's current browser origin instead of the configured canonical public origin. | `apps/web/src/components/photo-viewer.tsx:253-266`, `apps/web/src/components/image-manager.tsx:158-167`, `apps/web/src/lib/data.ts:783-790` |
+| C8-08 | MEDIUM | High | test-engineer, verifier | `npm run test:e2e` still depends on pre-seeded fixture data even though the default local runner does not seed that state. | `apps/web/playwright.config.ts:27-58`, `apps/web/e2e/public.spec.ts:60-77`, `apps/web/e2e/admin.spec.ts:46-54`, `apps/web/scripts/seed-e2e.ts:22-28,183-186` |
 
-## Manual-validation / operational risks
+## Deferred / broader follow-up items
 
-| ID | Severity | Confidence | Source | Why it stays a risk |
+| ID | Severity | Confidence | Source | Why deferred this cycle |
 |---|---|---|---|---|
-| R7-01 | LOW | High | security-reviewer | `/api/health` remains publicly probeable through the reverse proxy. Tightening it safely depends on the operator's external monitoring contract and was not changed in this bounded cycle. |
-| R7-02 | MEDIUM | Medium | security-reviewer, architect | Restore maintenance is still process-local beyond the DB advisory lock, so true multi-instance restore fencing remains a scale-out concern. |
-| R7-03 | LOW-MEDIUM | High | test-engineer | Broader mutation/share/queue/settings/deploy script coverage remains thinner than the core helper library coverage. |
+| D8-01 | MEDIUM | High | security-reviewer | Production CSP still permits `unsafe-inline`; fixing it safely requires a broader nonce/hash rollout across Next.js rendering and third-party scripts. |
+| D8-02 | LOW | High | security-reviewer | `/api/health` remains publicly probeable; tightening it depends on the live monitoring contract. |
+| D8-03 | MEDIUM | High | security-reviewer | Legacy short share keys are still accepted for backward compatibility; removing them safely needs a migration/rotation strategy. |
+| D8-04 | MEDIUM | High | code-reviewer | Offset-based infinite-scroll pagination remains unstable under concurrent uploads/deletes; a proper fix requires cursor-pagination across route/action/client layers. |
+| D8-05 | LOW | Medium | code-reviewer | Public search still likely ignores topic labels/aliases; the intended search semantics need product confirmation before widening the query model. |
+| D8-06 | MEDIUM | High | critic | Failed background processing still lacks durable recovery metadata and admin retry tooling; this is larger than a bounded cycle-8 fix. |
+| D8-07 | MEDIUM | High | security-reviewer, critic | Restore maintenance and some rate-limit controls still assume a single-process deployment topology. |
+| D8-08 | MEDIUM | High | test-engineer | The repo still lacks an in-repo CI workflow that enforces lint/tests/typecheck/api-auth guard on pushes and PRs. |
+| D8-09 | LOW | High | test-engineer | The visual Playwright specs still capture screenshots without assertions; converting them to stable snapshot tests needs baseline strategy work. |
+| D8-10 | MEDIUM | High | security-reviewer | The `drizzle-kit` → `esbuild` advisory chain remains in the dev dependency tree and should be addressed in a dependency maintenance cycle. |
 
 ## Plan routing
 
-- **Implemented in Plan 185:** C7-01, C7-02, C7-03, C7-04, C7-05 plus fresh regression coverage for the touched contracts.
-- **Deferred in Plan 186:** C7-06 through C7-10 and manual-validation risks R7-01 through R7-03.
+- **Implement in Plan 187:** C8-01 through C8-08.
+- **Defer in Plan 188:** D8-01 through D8-10, with preserved severity/confidence and explicit reopen criteria.
 
 ## Cross-agent agreement
 
-- C7-03 was independently rediscovered by verifier, debugger, and tracer.
-- C7-05 was corroborated by both the security and documentation sweeps.
-- C7-07 appeared as both a UX and performance concern, increasing confidence that it is user-visible.
+- C8-02 was independently surfaced by code-reviewer, architect, and verifier.
+- C8-04 was independently surfaced by critic and designer, increasing confidence that it is user-visible and performance-relevant.
+- C8-05 was corroborated by critic, verifier, and designer, so the stale-state problem is both correctness and UX visible.
+- C8-08 was independently surfaced by test-engineer and verifier.
 
 ## Aggregate conclusion
 
-Highest-value cycle-7 fixes were the upload-serving/download boundary hardening, tag-filter normalization, restore scan carry-over hardening, and aligning nginx body caps with the real app limits. Remaining issues are real but broader product/ops/test-surface follow-up rather than safe bounded fixes for this pass.
+The highest-value bounded cycle-8 fixes are the share/action correctness issues (partial group shares, canonical-topic redirect loss, share URL origin), the stale search/admin UI behaviors, and making the default E2E runner self-contained. Larger architecture/ops follow-ups remain real but are better tracked as explicit deferred work than mixed into this cycle's safe hardening pass.

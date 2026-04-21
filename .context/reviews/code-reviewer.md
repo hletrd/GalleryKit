@@ -1,123 +1,211 @@
-# Code Reviewer — Cycle 7 Ultradeep Review
+# Code Quality / Logic / Maintainability Review
 
-## Review Scope & Inventory
+## Scope
+Entire repository review for `gallerykit`, with emphasis on the runnable app under `apps/web`, its server actions/routes, data layer, image pipeline, admin tooling, and cross-file interactions.
 
-I built a repo-wide review-relevant inventory from `git ls-files` before reviewing and covered the whole repository with emphasis on `apps/web` runtime code, configs, scripts, and tests.
+## Inventory Built First
 
-### Inventory Summary
-- Repo docs/meta/config: 43 tracked files
-- `apps/web` config/build/deploy files: 13
-- `apps/web/src/app`: 54
-- `apps/web/src/components`: 44
-- `apps/web/src/lib`: 40
-- `apps/web/src/db` + i18n/misc runtime files: 7
-- Tests (`src/__tests__` + `e2e`): 24
-- Scripts + SQL migrations: 18
+### Repo / workspace
+- `package.json`
+- `README.md`
+- `scripts/deploy-remote.sh`
 
-### Verification Performed
-- `npm test --workspace=apps/web` ✅ (17 files / 115 tests passed)
-- `npm run lint --workspace=apps/web` ✅
-- `npx tsc -p apps/web/tsconfig.json --noEmit` ✅
-- `npx tsc -p apps/web/tsconfig.scripts.json --noEmit` ✅
-- `npm run build --workspace=apps/web` ✅
-- Final missed-issues sweep: grep review for child-process usage, SQL restore scanning, JSON-LD emission, thumbnail paths, dangerous HTML sinks, TODO/FIXME markers, and route/config edge cases.
+### App / config / deploy
+- `apps/web/package.json`
+- `apps/web/next.config.ts`
+- `apps/web/playwright.config.ts`
+- `apps/web/eslint.config.mjs`
+- `apps/web/tsconfig.json`
+- `apps/web/Dockerfile`
+- `apps/web/docker-compose.yml`
+- `apps/web/nginx/default.conf`
+- `apps/web/messages/{en,ko}.json`
 
-## Confirmed Issues
+### Core app code reviewed
+- `apps/web/src/app/**`
+- `apps/web/src/components/**`
+- `apps/web/src/db/**`
+- `apps/web/src/lib/**`
+- `apps/web/src/i18n/**`
+- `apps/web/src/proxy.ts`
 
-### 1) SQL restore safety scan can still be bypassed across chunk boundaries
-**Severity:** MEDIUM  
-**Confidence:** High  
-**Citations:**
-- `apps/web/src/app/[locale]/admin/db-actions.ts:327-340`
-- `apps/web/src/lib/sql-restore-scan.ts:1-30, 58-60`
+### Supporting code reviewed
+- `apps/web/scripts/**`
+- `apps/web/src/__tests__/**`
+- `apps/web/e2e/**`
 
-**Why this is a problem**
-The restore path scans the uploaded dump in 1 MiB chunks with only a forward 1 KiB overlap. That catches short boundary splits, but it does **not** guarantee detection when a dangerous statement spans the boundary with more than 1 KiB of whitespace/comment padding between tokens. The regex layer in `containsDangerousSql()` still expects the full dangerous statement to exist in a single scanned string.
+## Verification / diagnostics run
+- `git diff` → only prior review artifact changes in `.context/reviews/security-reviewer.md`; no product-code diff in working tree
+- `npm run lint --workspace=apps/web` → passed
+- `npx tsc --noEmit -p apps/web/tsconfig.json` → passed
+- `npm test --workspace=apps/web` → passed (`21` test files, `128` tests)
+- Grep sweeps for: TODO/FIXME/HACK, `console.*`, `dangerouslySetInnerHTML`, child-process use, rate-limit maps, storage backend wiring, pagination patterns
+- Note: `omx_code_intel` MCP calls failed with `Transport closed`, so diagnostics/search fell back to shell + source inspection
 
-**Concrete failure scenario**
-An operator uploads a crafted dump containing a statement like `DROP` + 1500 spaces/newlines + `DATABASE foo;` positioned so `DROP` lands near the end of one chunk and `DATABASE` begins after the 1 KiB forward overlap window. The scan misses it, but the `mysql` process still executes the statement during restore.
-
-**Suggested fix**
-Scan with a sliding carry-over buffer that preserves the **tail of the previous chunk** (not just extra bytes after the current offset), and size that carry-over to cover the longest dangerous pattern including arbitrary whitespace/comments. A safer alternative is statement-aware tokenization/parsing before handing the dump to `mysql`.
-
----
-
-### 2) The photo viewer labels a processed JPEG download as the “original” file
-**Severity:** MEDIUM  
-**Confidence:** High  
-**Citations:**
-- `apps/web/src/components/photo-viewer.tsx:95-97`
-- `apps/web/src/components/photo-viewer.tsx:528-536`
-
-**Why this is a problem**
-The download link always points at `/uploads/jpeg/${image.filename_jpeg}`, which is the generated JPEG derivative, while the UI text says `downloadOriginal`. Those are not the same asset: uploads can start as HEIC/AVIF/TIFF/RAW-like formats, and the original private file is stored separately from the public JPEG derivative.
-
-**Concrete failure scenario**
-An admin uploads a HEIC with richer EXIF/color data, then later clicks “Download original” from the viewer to archive or re-edit it. They receive the processed JPEG instead of the source asset, losing format fidelity and potentially metadata they expected to preserve.
-
-**Suggested fix**
-Either (a) relabel the action to something accurate like “Download JPEG” / “Download processed image”, or (b) add a real authenticated original-download path for admins that serves `filename_original` from the private originals directory.
+## Findings Summary
+- Confirmed issues: 4
+- Likely issues: 1
+- Risks needing manual validation: 2
+- Total findings: 7
 
 ---
 
-### 3) Public search thumbnails and admin image-manager previews fetch the full base JPEG instead of a small derivative
-**Severity:** MEDIUM  
-**Confidence:** High  
-**Citations:**
-- `apps/web/src/components/search.tsx:208-215`
-- `apps/web/src/components/image-manager.tsx:342-349`
+## Confirmed issues
 
-**Why this is a problem**
-Both surfaces render tiny thumbnails (48px and 128px), but they point at `/uploads/jpeg/${filename_jpeg}` — the base JPEG alias that maps to the largest configured derivative. That defeats the configured multi-size pipeline and turns small preview grids into large image downloads.
+### 1. Group share creation can silently succeed with a partial or empty image set under concurrent deletes
+- **Type:** Confirmed issue
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **File / region:** `apps/web/src/app/actions/sharing.ts:200-245`
+
+**Problem**
+`createGroupShareLink()` validates the selected image IDs first, but inside the transaction it inserts `sharedGroupImages` with `.ignore()`. If an image disappears between the validation query and the insert, the FK failure is silently dropped and the function still returns success.
 
 **Concrete failure scenario**
-Open the search dialog after uploading several high-resolution photos. Each 48×48 result thumbnail can trigger download of a multi-megabyte JPEG instead of a 640px derivative, causing visible latency/jank on slower devices and multiplying origin/CDN bandwidth for a UI that should be cheap.
+Admin A selects 10 images and clicks “share”. Admin B deletes 3 of those images just after the pre-check at lines 200-210. The transaction at lines 216-233 creates the group row, silently ignores the 3 failed `sharedGroupImages` rows, and returns a share key that exposes only 7 images. In the worst case, the group row can be created with zero linked images.
 
 **Suggested fix**
-Use the nearest configured small derivative (for example via `findNearestImageSize(imageSizes, 640)` or a dedicated thumbnail helper) in both search and admin preview surfaces, just like the gallery/lightbox pages already do.
+Inside the transaction, verify the inserted association count matches `uniqueImageIds.length`; otherwise throw and roll back. Better yet, remove `.ignore()` here and fail loudly on FK violations, or re-select the candidate image IDs under the transaction before inserting.
 
 ---
 
-### 4) Photo JSON-LD hardcodes a CC BY-NC 4.0 license for every image regardless of site/operator intent
-**Severity:** MEDIUM  
-**Confidence:** High  
-**Citations:**
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:142-149`
+### 2. Canonical topic redirect drops active tag filters
+- **Type:** Confirmed issue
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **File / region:** `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:95-103`
 
-**Why this is a problem**
-The structured data always emits:
-- `license: 'https://creativecommons.org/licenses/by-nc/4.0/'`
-- `acquireLicensePage: siteConfig.parent_url`
-
-There is no matching admin setting or per-image license source. That means the app is publishing rights metadata it cannot verify.
+**Problem**
+When a topic alias is resolved to its canonical slug, the page redirects with `redirect(localizePath(locale, \`/${topicData.slug}\`))` and discards the current query string.
 
 **Concrete failure scenario**
-A customer hosts copyrighted client work or private family photos with no CC grant. Search engines and downstream consumers ingest the page’s JSON-LD and treat the image as CC BY-NC 4.0 licensed, creating compliance/legal confusion that the operator never intended.
+A user opens `/en/my-alias?tags=portrait,travel`. The alias resolves, but the redirect sends them to `/en/canonical-slug` without `?tags=...`. The page content changes from filtered results to the full topic gallery, which is both confusing and inconsistent with the metadata path that already parsed the tag filter.
 
 **Suggested fix**
-Do not emit `license` / `acquireLicensePage` unless those values come from explicit configuration. If licensing is optional, gate these JSON-LD fields behind a real site setting and default to omitting them.
+Preserve `searchParams` during canonicalization, e.g. rebuild the destination URL with the existing query string before calling `redirect()`.
 
-## Likely Issues
-- None strong enough to elevate beyond the confirmed list above.
+---
 
-## Risks Requiring Manual Validation
+### 3. Infinite-scroll pagination is unstable under concurrent uploads/deletes
+- **Type:** Confirmed issue
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **Files / region:**
+  - `apps/web/src/lib/data.ts:315-331`
+  - `apps/web/src/components/load-more.tsx:20-43`
+  - `apps/web/src/app/actions/public.ts:10-22`
 
-### R1) Production deployments without `TRUST_PROXY=true` collapse all rate limiting to the shared `"unknown"` bucket
-**Severity:** MEDIUM  
-**Confidence:** Medium  
-**Citations:**
-- `apps/web/src/lib/rate-limit.ts:59-81`
-
-**Why this is a risk**
-If the app runs behind a reverse proxy and `TRUST_PROXY` is not set, every login/search/share/upload limiter falls back to the literal key `unknown`. The code logs a warning once, but keeps serving traffic.
+**Problem**
+The public gallery uses offset-based pagination over a mutable sort order (`capture_date DESC, created_at DESC, id DESC`). `LoadMore` advances `offset` by the number of rows received, and `loadMoreImages()` re-runs the query with that offset.
 
 **Concrete failure scenario**
-A reverse-proxied production deployment forgets `TRUST_PROXY=true`. One noisy user (or bot) exhausts the shared search/login budget, and unrelated users start hitting rate limits because they all resolve to the same bucket.
+A visitor loads page 1 (`offset=0`, 30 rows). Before they scroll farther, an admin uploads a new photo or deletes one near the top of the feed. The next request uses `offset=30` against a changed ordering, so the visitor can see duplicates or skip rows entirely.
 
 **Suggested fix**
-Fail fast in production when proxy headers are present but `TRUST_PROXY` is unset, or derive a safe direct client address when available instead of collapsing everything to a shared sentinel value.
+Switch gallery pagination to keyset/cursor pagination using the same sort tuple (`capture_date`, `created_at`, `id`) instead of `offset`, and have the client pass the last visible row as the cursor.
 
-## Recommendation
-**REQUEST CHANGES**
+---
 
-The repo is in good operational shape (tests/lint/typecheck/build all pass), but the current code still has review-blocking medium-severity correctness/safety issues in the SQL restore guardrail, user-facing download semantics, thumbnail delivery path, and structured-data licensing output.
+### 4. CSV export still materializes the full export in memory despite the “incremental” comment
+- **Type:** Confirmed issue
+- **Severity:** LOW
+- **Confidence:** High
+- **File / region:** `apps/web/src/app/[locale]/admin/db-actions.ts:51-92`
+
+**Problem**
+The code comment says the CSV is built incrementally to avoid holding both DB results and the full CSV in memory, but the implementation still:
+1. loads up to 50,000 rows into `results`,
+2. stores every rendered CSV line in `csvLines`, and then
+3. builds one large `csvContent` string with `join("\n")`.
+
+That is still a full in-memory materialization with an extra large intermediate array.
+
+**Concrete failure scenario**
+On a large gallery with long titles/descriptions/tags, exporting CSV can spike heap usage much higher than expected. The misleading comment makes this easy to miss during future maintenance because the implementation looks “already optimized”.
+
+**Suggested fix**
+Either stream CSV rows directly to the response/download target, or at minimum correct the comment and explicitly document that the current implementation is capped-but-still-buffered.
+
+---
+
+## Likely issue
+
+### 5. Public search likely misses user-visible topic names and aliases
+- **Type:** Likely issue
+- **Severity:** LOW
+- **Confidence:** Medium
+- **File / region:** `apps/web/src/lib/data.ts:683-691` and `apps/web/src/lib/data.ts:612-645`
+
+**Problem**
+`searchImages()` searches `images.topic`, which stores the canonical topic slug, not the human-facing topic label or any alias values. The topic system explicitly supports labels plus alias routing, but the search query only matches raw slugs.
+
+**Concrete failure scenario**
+If a topic’s canonical slug is `seoul-night` and its visible label is `Seoul Night` (or it has a CJK/emoji alias), searching for the label/alias may return no results even though the gallery visibly presents that term elsewhere.
+
+**Suggested fix**
+If topic-name search is intended, join/search against `topics.label` and optionally `topic_aliases.alias`, or maintain a denormalized searchable field that includes canonical slug + label + aliases.
+
+---
+
+## Risks needing manual validation
+
+### 6. Restore-maintenance safety is process-local, not deployment-wide
+- **Type:** Risk needing manual validation
+- **Severity:** MEDIUM if multiple app instances/processes exist
+- **Confidence:** High
+- **Files / region:**
+  - `apps/web/src/lib/restore-maintenance.ts:1-55`
+  - callers across server actions, e.g. `apps/web/src/app/actions/images.ts:86-89`, `apps/web/src/app/actions/tags.ts:46-47`, `apps/web/src/app/actions/topics.ts:37-38`, `apps/web/src/app/actions/settings.ts:39-40`
+
+**Why this matters**
+The restore gate is a `globalThis` boolean. That protects only the current Node process. If the app is ever run with multiple instances/processes, one instance can enter restore mode while others continue accepting writes.
+
+**Concrete failure scenario**
+Instance A starts a restore and flips its in-process flag. Instance B, which has its own memory, keeps accepting uploads/settings/tag/topic mutations. The restore can then finish with a database state that no longer matches those concurrent writes.
+
+**Suggested validation / fix**
+If deployment is guaranteed single-process, document that assumption explicitly. Otherwise move restore-maintenance state to a shared store (DB flag, advisory lock, Redis, etc.) and have all mutation paths read the shared state.
+
+---
+
+### 7. Multiple abuse-control paths still rely on process-local Maps and assume single-instance behavior
+- **Type:** Risk needing manual validation
+- **Severity:** LOW to MEDIUM depending on deployment topology
+- **Confidence:** High
+- **Files / region:**
+  - `apps/web/src/lib/rate-limit.ts:22-27`
+  - `apps/web/src/app/actions/public.ts:32-99`
+  - `apps/web/src/app/actions/images.ts:54-79,117-171`
+  - `apps/web/src/app/actions/sharing.ts:20-60`
+  - `apps/web/src/app/actions/admin-users.ts:18-54`
+
+**Why this matters**
+There is DB-backed protection in several paths, but important fast-path logic and upload/share tracking still depend on in-memory Maps. In a single-instance deployment that is acceptable. In a scaled or multi-process deployment, these protections become inconsistent per instance.
+
+**Concrete failure scenario**
+One instance sees a user as over limit while another instance still has an empty in-memory map; or upload/share tracking claims are split across instances, letting a client exceed intended per-window limits by hopping between workers.
+
+**Suggested validation / fix**
+Confirm the app is intentionally deployed as a single writable instance. If not, consolidate these counters/claims into shared storage or clearly downgrade the in-memory Maps to best-effort caches layered on top of authoritative shared state.
+
+---
+
+## Missed-issues sweep
+I did a final sweep over:
+- public routes and page loaders
+- admin routes and server actions
+- auth/session/rate-limit helpers
+- upload/serve/image processing pipeline
+- share-link flows
+- DB backup/restore tooling
+- deployment/config/docs/test inventory
+
+### What held up well
+- Lint, typecheck, and test suites are clean.
+- Public/private field separation in `lib/data.ts` is explicit and well-defended.
+- File serving/download routes have solid path-containment and symlink checks.
+- Backup/restore flows show strong defensive thinking overall.
+- Topic/tag mutation paths are generally better race-aware than typical CRUD code.
+
+### Final sweep result
+I did **not** find additional confirmed high-severity logic or maintainability defects beyond the seven findings above.

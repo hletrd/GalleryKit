@@ -1,72 +1,65 @@
-# Cycle 7 Ultradeep Verifier Review
+# Cycle 8 Verifier Review (manual fallback after agent retry failure)
 
-Scope: full repository pass, with a final missed-issues sweep after inspecting the core app/actions/data/storage surfaces and validating the repo with unit tests and lint.
+## Inventory
+- Re-verified public topic routing, share-link creation, admin backup flows, search UI state handling, and tag mutation UX against the current working tree.
+- Cross-checked current specialist reports from `code-reviewer`, `security-reviewer`, and `test-engineer` plus a direct source pass.
 
 ## Confirmed Issues
 
-### V7-01 — Duplicate tag query params can zero out a valid gallery filter
+### V8-01 — Topic alias canonicalization drops the current tag filter
 **Confidence:** High
 
 **Files / regions:**
-- `apps/web/src/lib/tag-slugs.ts:3-10`
-- `apps/web/src/lib/data.ts:277-289`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:22-46, 69-91`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:87-95`
 
 **Why this is a problem:**
-`parseRequestedTagSlugs()` preserves duplicates, and `buildTagFilterCondition()` requires `COUNT(DISTINCT tags.slug) = validTagSlugs.length`. If the request contains the same slug twice, the HAVING clause asks for two distinct slugs even though only one exists, so the query returns no images.
+The route resolves aliases to the canonical topic slug, but the redirect target discards the current `searchParams`, so the canonical page no longer represents the request the user made.
 
 **Concrete failure scenario:**
-A user opens or shares a URL like `?tags=landscape,landscape` (or a client emits the same tag twice). The topic page and the `getImageCount()`/`getImagesLite()` queries can report zero results even though matching photos exist.
+A shared/bookmarked alias URL with `?tags=portrait,travel` lands on the canonical topic without those filters, silently changing the visible gallery.
 
 **Suggested fix:**
-Deduplicate requested tag slugs before building the filter condition, and use the deduped set size in the HAVING clause. The same normalization should be applied wherever requested tag slugs are consumed for display or metadata.
+Preserve the current query string when redirecting to the canonical slug.
 
 ---
 
-### V7-02 — Batch tag updates silently drop malformed tag names
+### V8-02 — Batch tag success can leave the admin UI out of sync with the persisted tag set
 **Confidence:** High
 
-**File / region:**
+**Files / regions:**
+- `apps/web/src/components/image-manager.tsx:183-200`
+- `apps/web/src/components/image-manager.tsx:371-399`
 - `apps/web/src/app/actions/tags.ts:347-400`
 
 **Why this is a problem:**
-In `batchUpdateImageTags()`, malformed names are handled with `continue` in both the add and remove loops. That means a control-character-containing tag name is discarded without surfacing an error or warning. The action can return success even when part of the user’s requested work was ignored.
+The server action can canonicalize, warn, or partially apply tag changes, but the current table keeps rendering stale local state until the operator manually reloads.
 
 **Concrete failure scenario:**
-An admin pastes a comma-separated list that contains an invisible tab/newline inside one tag name. The batch save completes, but that tag is silently skipped. The UI reports success and the operator may not realize the requested change was only partially applied.
+A tag add/remove returns success with warnings, but the visible tag chips remain wrong because the client never refreshes from the server truth.
 
 **Suggested fix:**
-Either fail the batch when any malformed tag name is encountered, or accumulate explicit warnings for every skipped item so the UI can report partial application clearly.
+Refresh the route after successful tag mutations or return canonical persisted tags from the server and reconcile local state with them.
 
 ---
 
-## Likely Issues
-
-### V7-03 — Sanitized settings/SEO values leave the admin forms stale after save
-**Confidence:** Medium
+### V8-03 — The default E2E runner still depends on externally seeded state
+**Confidence:** High
 
 **Files / regions:**
-- `apps/web/src/app/actions/settings.ts:51-78`
-- `apps/web/src/app/actions/seo.ts:64-103`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:33-56`
-- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:39-53`
+- `apps/web/playwright.config.ts:27-58`
+- `apps/web/e2e/public.spec.ts:60-77`
+- `apps/web/e2e/admin.spec.ts:46-54`
+- `apps/web/scripts/seed-e2e.ts:22-28,183-186`
 
 **Why this is a problem:**
-Both server actions strip control characters and normalize values before persisting them, but the client forms keep their local state as-if the original input was stored. `SettingsClient` writes `initialRef.current = nextSettings`, and `SeoSettingsClient` writes `initialRef.current = { ...settings }`, so the saved server value and the form baseline can diverge whenever the server sanitizes or normalizes input.
+`npm run test:e2e` assumes the seeded topic/group already exist, but the default local runner does not create them first.
 
 **Concrete failure scenario:**
-An admin pastes a title or configuration value containing a hidden control character. The save succeeds, but the field remains displayed in its unsanitized form in the UI, and future “no changes” checks compare against the stale local copy rather than the canonical value in the database.
+A fresh checkout runs Playwright against a valid app instance but fails because `/g/Abc234Def5` and `e2e-smoke` were never seeded.
 
 **Suggested fix:**
-Return canonical saved values from the actions and replace the client state with those values, or re-fetch the updated settings after a successful save so the form baseline always matches persisted data.
+Make the default local Playwright runner seed the E2E fixture data before starting the server.
 
----
-
-## Risks Requiring Manual Validation
-
-- `apps/web/src/app/actions/admin-users.ts:77-119`, `apps/web/src/app/actions/sharing.ts:49-114, 141-214` increment rate-limit counters before validation completes. I did not prove whether consuming quota on malformed admin submissions is intentional or acceptable UX, so this remains a manual-validation risk rather than a confirmed issue.
-
-## Notes
-
-- Repo validation run: `npm test --workspace=apps/web` passed (115/115 tests).
-- Repo validation run: `npm run lint --workspace=apps/web` passed.
+## Agent-failure note
+- The first spawned verifier lane failed with a context-window exhaustion error.
+- A retry lane was launched, then shut down after stalling, so this manual fallback note records the current verifier pass for provenance.

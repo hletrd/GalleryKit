@@ -1,23 +1,31 @@
-# Cycle 7 Debugger Review (manual fallback)
+# Cycle 8 Debugger Review (manual fallback)
 
 ## Inventory
-- Traced public topic/tag flow, upload-serving path validation, and backup download route error handling.
-- Rechecked recent restore/maintenance hardening against current request and filesystem boundaries.
+- Traced concurrent-delete/share flow, search request lifecycle, admin backup/download UX, and tag mutation update paths.
+- Focused on race windows, partial-success bugs, and user-visible stale state.
 
 ## Confirmed Issues
 
-### D7-01 — Duplicate tag query params can collapse valid gallery results to an empty set
+### D8-01 — Group share creation can return success after partial association writes
 - **Severity:** MEDIUM
 - **Confidence:** High
-- **Citations:** `apps/web/src/lib/tag-slugs.ts:3-10`, `apps/web/src/lib/data.ts:277-289`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:22-46,104-118`
-- **Why it is a problem:** duplicate tag slugs survive parsing and are used directly in the `COUNT(DISTINCT ...) = requestedTagCount` filter, so repeated tags ask the DB for impossible distinct counts.
-- **Concrete failure scenario:** visiting `?tags=landscape,landscape` on a topic page yields zero photos even though matching images exist.
-- **Suggested fix:** deduplicate requested tag slugs before filtering/query construction and lock the behavior with regression tests.
+- **Citations:** `apps/web/src/app/actions/sharing.ts:200-245`
+- **Why it is a problem:** the action validates image IDs before the transaction, but the transactional insert still uses `.ignore()`, allowing concurrent deletes to silently drop associations.
+- **Concrete failure scenario:** one admin deletes selected images while another creates a group share link; the link succeeds but contains fewer images than requested, or even none.
+- **Suggested fix:** make the association insert fail loudly (no `.ignore()`), and verify the inserted row count matches the requested image count so the transaction rolls back on partial writes.
 
-### D7-02 — Backup download route masks unexpected filesystem failures as 404s
+### D8-02 — Search request cancellation is incomplete when the query becomes empty
 - **Severity:** MEDIUM
 - **Confidence:** High
-- **Citations:** `apps/web/src/app/api/admin/db/download/route.ts:17-51`
-- **Why it is a problem:** the catch-all `404` path hides permission errors and other I/O failures, making operator troubleshooting harder and conflating missing files with broken runtime state.
-- **Concrete failure scenario:** the backups directory becomes unreadable and admins keep seeing “File not found” instead of a server failure signal.
-- **Suggested fix:** preserve `404` only for `ENOENT` and return/log `500` for unexpected filesystem errors.
+- **Citations:** `apps/web/src/components/search.tsx:35-57`
+- **Why it is a problem:** the empty-query branch clears results but does not invalidate previous in-flight requests.
+- **Concrete failure scenario:** stale results reappear after the user clears the search box because an older request still resolves.
+- **Suggested fix:** bump the request token and clear `loading` before returning on an empty query.
+
+### D8-03 — Admin backup downloads can save under the wrong filename
+- **Severity:** LOW
+- **Confidence:** High
+- **Citations:** `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:36-49`, `apps/web/src/app/[locale]/admin/db-actions.ts:218-219`
+- **Why it is a problem:** the client derives the download filename from the URL rather than using the trusted server-returned filename.
+- **Concrete failure scenario:** the browser saves a backup as `download?file=...` instead of the intended timestamped SQL filename.
+- **Suggested fix:** set `link.download = result.filename`.
