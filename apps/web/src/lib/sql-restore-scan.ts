@@ -30,6 +30,8 @@ const DANGEROUS_SQL_PATTERNS = [
     /\bSET\s+@@global\./i,
 ] as const;
 
+export const SQL_SCAN_TAIL_BYTES = 64 * 1024;
+
 function maskMatches(input: string, pattern: RegExp): string {
     return input.replace(pattern, (match) => ' '.repeat(match.length));
 }
@@ -58,4 +60,16 @@ export function stripSqlCommentsAndLiterals(input: string): string {
 export function containsDangerousSql(input: string): boolean {
     const sanitized = stripSqlCommentsAndLiterals(input);
     return DANGEROUS_SQL_PATTERNS.some((pattern) => pattern.test(sanitized));
+}
+
+export function appendSqlScanChunk(
+    previousTail: string,
+    chunk: string,
+    maxTailBytes: number = SQL_SCAN_TAIL_BYTES,
+) {
+    const combined = `${previousTail}${chunk}`;
+    return {
+        combined,
+        nextTail: combined.slice(-maxTailBytes),
+    };
 }

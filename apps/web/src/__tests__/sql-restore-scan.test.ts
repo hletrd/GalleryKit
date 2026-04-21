@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { containsDangerousSql, stripSqlCommentsAndLiterals } from '@/lib/sql-restore-scan';
+import { appendSqlScanChunk, containsDangerousSql, stripSqlCommentsAndLiterals } from '@/lib/sql-restore-scan';
 
 describe('stripSqlCommentsAndLiterals', () => {
     it('masks quoted strings before scanning', () => {
@@ -28,5 +28,16 @@ describe('containsDangerousSql', () => {
     it('ignores dangerous-looking words inside benign data strings', () => {
         expect(containsDangerousSql("INSERT INTO notes VALUES ('Grant Morrison');")).toBe(false);
         expect(containsDangerousSql("INSERT INTO captions VALUES ('Prepare for landing');")).toBe(false);
+    });
+
+    it('keeps enough trailing context to detect dangerous statements split across chunk boundaries', () => {
+        const firstChunk = `DROP${' '.repeat(2048)}`;
+        const secondChunk = 'DATABASE gallerykit;';
+
+        const { combined, nextTail } = appendSqlScanChunk('', firstChunk);
+        expect(containsDangerousSql(combined)).toBe(false);
+
+        const nextWindow = appendSqlScanChunk(nextTail, secondChunk);
+        expect(containsDangerousSql(nextWindow.combined)).toBe(true);
     });
 });

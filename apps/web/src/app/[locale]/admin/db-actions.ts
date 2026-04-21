@@ -15,7 +15,7 @@ import { isAdmin, getCurrentUser } from "@/app/actions";
 import { logAuditEvent } from "@/lib/audit";
 import { getTranslations } from 'next-intl/server';
 import { revalidateAllAppData } from "@/lib/revalidation";
-import { containsDangerousSql } from "@/lib/sql-restore-scan";
+import { appendSqlScanChunk, containsDangerousSql } from "@/lib/sql-restore-scan";
 import { createBackupFilename } from "@/lib/backup-filename";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
@@ -325,20 +325,22 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     }
 
     const CHUNK_SIZE = 1024 * 1024;
-    const OVERLAP = 1024; // overlap to catch patterns split across chunks (1KB covers multi-line statements)
     const fileSize = (await fs.stat(tempPath)).size;
     const scanFd = await fs.open(tempPath, 'r');
     try {
+        let scanTail = '';
         for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
-            const readSize = Math.min(CHUNK_SIZE + OVERLAP, fileSize - off);
+            const readSize = Math.min(CHUNK_SIZE, fileSize - off);
             const chunkBuf = Buffer.alloc(readSize);
             await scanFd.read(chunkBuf, 0, readSize, off);
             const chunk = chunkBuf.toString('utf8');
-            if (containsDangerousSql(chunk)) {
+            const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk);
+            if (containsDangerousSql(combined)) {
                 // Don't close scanFd here — the finally block handles it
                 await fs.unlink(tempPath).catch(() => {});
                 return { success: false, error: t('disallowedSql') };
             }
+            scanTail = nextTail;
         }
     } finally {
         await scanFd.close();
