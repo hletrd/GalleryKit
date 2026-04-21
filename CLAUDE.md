@@ -200,6 +200,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **Node.js 24+** required, **TypeScript 6.0+**
 - Processed images are stored in `apps/web/public/uploads/`; original uploads are stored privately under the data volume — **ensure both are persisted in Docker**
 - Max upload size: 200MB per file, 2 GiB total per batch by default, 100 files max (configurable via `UPLOAD_MAX_TOTAL_BYTES`)
+- Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 GiB** for general requests and **250 MB** for `/admin/db` restore requests
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
 
