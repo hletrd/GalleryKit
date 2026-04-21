@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName } from '@/lib/validation';
+import { hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName } from '@/lib/validation';
 
 describe('isValidSlug', () => {
     it('accepts lowercase alphanumeric with hyphens and underscores', () => {
@@ -127,5 +127,23 @@ describe('isValidTagName', () => {
         expect(isValidTagName('tag"name')).toBe(false);
         expect(isValidTagName("tag'name")).toBe(false);
         expect(isValidTagName('tag&name')).toBe(false);
+    });
+});
+
+describe('hasMySQLErrorCode', () => {
+    it('matches top-level MySQL error codes', () => {
+        expect(hasMySQLErrorCode(Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' }), 'ER_DUP_ENTRY')).toBe(true);
+    });
+
+    it('matches wrapped MySQL error codes', () => {
+        expect(hasMySQLErrorCode(Object.assign(new Error('wrapped'), {
+            code: 'ER_DBACCESS_DENIED_ERROR',
+            cause: { code: 'ER_DUP_ENTRY' },
+        }), 'ER_DUP_ENTRY')).toBe(true);
+    });
+
+    it('rejects unrelated errors', () => {
+        expect(hasMySQLErrorCode(new Error('boom'), 'ER_DUP_ENTRY')).toBe(false);
+        expect(hasMySQLErrorCode(Object.assign(new Error('other'), { code: 'ER_ACCESS_DENIED_ERROR' }), 'ER_DUP_ENTRY')).toBe(false);
     });
 });

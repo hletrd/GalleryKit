@@ -44,3 +44,8 @@ export function isValidFilename(filename: string): boolean {
 export function isMySQLError(e: unknown): e is Error & { code: string; cause?: { code?: string } } {
     return e instanceof Error && 'code' in e && typeof (e as { code: unknown }).code === 'string';
 }
+
+/** True when the top-level or wrapped MySQL/Drizzle error matches the given code. */
+export function hasMySQLErrorCode(e: unknown, code: string): boolean {
+    return isMySQLError(e) && (e.code === code || e.cause?.code === code);
+}

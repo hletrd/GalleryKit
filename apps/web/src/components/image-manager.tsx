@@ -176,8 +176,11 @@ export function ImageManager({
             const result = await createGroupShareLink(ids);
             if (result.success) {
                  const url = localizeUrl(shareBaseUrl, locale, `/g/${result.key}`);
-                 await copyToClipboard(url);
-                 toast.success(t('imageManager.linkCopied'));
+                 if (await copyToClipboard(url)) {
+                     toast.success(t('imageManager.linkCopied'));
+                 } else {
+                     toast.error(t('imageManager.copyFailed'));
+                 }
                  setSelectedIds(new Set());
             } else {
                  toast.error(result.error || t('imageManager.shareFailed'));

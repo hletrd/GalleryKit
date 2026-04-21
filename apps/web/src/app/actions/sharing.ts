@@ -10,7 +10,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
-import { isMySQLError } from '@/lib/validation';
+import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
@@ -140,7 +140,7 @@ export async function createPhotoShareLink(imageId: number) {
             retries++;
         } catch (e) {
             // Only retry on key collision (duplicate entry), not on other errors
-            if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
+            if (hasMySQLErrorCode(e, 'ER_DUP_ENTRY')) {
                 retries++;
                 continue;
             }
@@ -247,11 +247,11 @@ export async function createGroupShareLink(imageIds: number[]) {
             return { success: true, key };
         } catch (e) {
             // Only retry on key collision (duplicate entry), not on other errors
-            if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('Duplicate entry'))) {
+            if (hasMySQLErrorCode(e, 'ER_DUP_ENTRY')) {
                 retries++;
                 continue;
             }
-            if (isMySQLError(e) && (e.code === 'ER_NO_REFERENCED_ROW_2' || e.cause?.code === 'ER_NO_REFERENCED_ROW_2')) {
+            if (hasMySQLErrorCode(e, 'ER_NO_REFERENCED_ROW_2')) {
                 return { error: t('imagesNotFound') };
             }
             // Non-retryable error — fail immediately

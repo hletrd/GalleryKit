@@ -263,8 +263,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 const result = await createPhotoShareLink(image.id);
                                 if (result.success) {
                                     const url = localizeUrl(shareBaseUrl, locale, `/s/${result.key}`);
-                                    await copyToClipboard(url);
-                                    toast.success(t('viewer.linkCopied'));
+                                    if (await copyToClipboard(url)) {
+                                        toast.success(t('viewer.linkCopied'));
+                                    } else {
+                                        toast.error(t('viewer.copyFailed'));
+                                    }
                                 } else {
                                     toast.error(result.error || t('viewer.errorSharing'));
                                 }

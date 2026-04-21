@@ -8,7 +8,7 @@ import { getTranslations } from 'next-intl/server';
 import { headers } from 'next/headers';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isMySQLError } from '@/lib/validation';
+import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
@@ -143,7 +143,7 @@ export async function createAdminUser(formData: FormData) {
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
     } catch (e: unknown) {
-        if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.message?.includes('users.username'))) {
+        if (hasMySQLErrorCode(e, 'ER_DUP_ENTRY')) {
             return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
