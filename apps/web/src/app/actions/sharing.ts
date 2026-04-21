@@ -12,6 +12,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 const PHOTO_SHARE_KEY_LENGTH = 10;
 const GROUP_SHARE_KEY_LENGTH = 10;
@@ -61,6 +62,8 @@ function checkShareRateLimit(ip: string): boolean {
 export async function createPhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
@@ -151,6 +154,8 @@ export async function createPhotoShareLink(imageId: number) {
 export async function createGroupShareLink(imageIds: number[]) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
@@ -254,6 +259,8 @@ export async function createGroupShareLink(imageIds: number[]) {
 export async function revokePhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { error: t('invalidImageId') };
@@ -289,6 +296,8 @@ export async function revokePhotoShareLink(imageId: number) {
 export async function deleteGroupShareLink(groupId: number) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(groupId) || groupId <= 0) {
         return { error: t('invalidGroupId') };

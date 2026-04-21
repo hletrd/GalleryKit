@@ -22,6 +22,25 @@ export function isRestoreMaintenanceActive() {
     return getRestoreMaintenanceState().active;
 }
 
+export function getRestoreMaintenanceMessage(message: string) {
+    return isRestoreMaintenanceActive() ? message : null;
+}
+
+export async function cleanupOriginalIfRestoreMaintenanceBegan(
+    filenameOriginal: string | null,
+    cleanup: (filename: string) => Promise<void>,
+) {
+    if (!isRestoreMaintenanceActive()) {
+        return false;
+    }
+
+    if (filenameOriginal) {
+        await cleanup(filenameOriginal);
+    }
+
+    return true;
+}
+
 export function beginRestoreMaintenance() {
     const state = getRestoreMaintenanceState();
     if (state.active) {

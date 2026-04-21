@@ -15,6 +15,7 @@ import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, 
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -67,6 +68,10 @@ async function getDummyHash(): Promise<string> {
 
 export async function login(prevState: { error?: string } | null, formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     const username = stripControlChars(formData.get('username')?.toString() ?? '') ?? '';
     // Sanitize before use so the value matches what was stored during account
     // creation (stripControlChars is applied in createAdminUser, see C8-01).
@@ -253,6 +258,10 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     const currentUser = await getCurrentUser();
     if (!currentUser) {
         return { error: t('unauthorized') };
+    }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
     }
 
     // Rate limit password change attempts (separate map from login)

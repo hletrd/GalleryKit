@@ -22,6 +22,8 @@
     "restoreDesc": "SQL 덤프 파일에서 복원.",
     "restoreWarning": "경고: 기존 데이터가 덮어씌워집니다.",
     "restoreSelectFile": ".sql 파일 선택",
+    "restoreMaxSize": "지원하는 최대 복원 크기: {size}",
+    "restoreTooLargeClient": "선택한 SQL 덤프가 {size}보다 큽니다.",
     "dangerZone": "위험 구역",
     "dangerZoneDesc": "이 작업은 되돌릴 수 없습니다.",
     "restoreButton": "복원",

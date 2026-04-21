@@ -17,7 +17,7 @@ import { stripControlChars } from '@/lib/sanitize';
 import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
-import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { cleanupOriginalIfRestoreMaintenanceBegan, getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { settleUploadTrackerClaim, type UploadTrackerEntry } from '@/lib/upload-tracker';
 import { headers } from 'next/headers';
 
@@ -83,8 +83,9 @@ export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
-    if (isRestoreMaintenanceActive()) {
-        return { error: t('restoreInProgress') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
     }
 
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
@@ -198,6 +199,12 @@ export async function uploadImages(formData: FormData) {
                 // privacy when the admin's preference can't be verified)
                 exifDb.latitude = null;
                 exifDb.longitude = null;
+            }
+
+            if (await cleanupOriginalIfRestoreMaintenanceBegan(savedOriginalFilename, deleteOriginalUploadFile)) {
+                savedOriginalFilename = null;
+                failedFiles.push(file.name);
+                continue;
             }
 
             // Phase 2: Insert into DB immediately so it shows up in UI
@@ -343,6 +350,10 @@ export async function deleteImage(id: number) {
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
@@ -424,6 +435,10 @@ export async function deleteImages(ids: number[]) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
+    }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
     }
 
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -549,6 +564,10 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
+    }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
     }
 
     if (!Number.isInteger(id) || id <= 0) {

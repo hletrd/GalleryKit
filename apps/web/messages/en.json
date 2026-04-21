@@ -22,6 +22,8 @@
     "restoreDesc": "From a SQL dump file.",
     "restoreWarning": "This will overwrite existing data.",
     "restoreSelectFile": "Choose .sql file",
+    "restoreMaxSize": "Maximum supported restore size: {size}.",
+    "restoreTooLargeClient": "The selected SQL dump is larger than {size}.",
     "dangerZone": "Danger Zone",
     "dangerZoneDesc": "This cannot be undone.",
     "restoreButton": "Restore",

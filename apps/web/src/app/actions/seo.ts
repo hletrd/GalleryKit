@@ -10,6 +10,7 @@ import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidati
 import { stripControlChars } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import type { SeoSettingKey } from '@/lib/gallery-config-shared';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 // Validation constraints
 const MAX_TITLE_LENGTH = 200;
@@ -49,6 +50,8 @@ export async function getSeoSettingsAdmin() {
 export async function updateSeoSettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     // Validate all provided keys are allowed
     const allowedKeys = new Set(SEO_SETTING_KEYS);

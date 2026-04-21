@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { beginRestoreMaintenance, endRestoreMaintenance, isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { beginRestoreMaintenance, cleanupOriginalIfRestoreMaintenanceBegan, endRestoreMaintenance, getRestoreMaintenanceMessage, isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 describe('restore maintenance state', () => {
     it('activates and clears the maintenance window', () => {
@@ -19,6 +19,34 @@ describe('restore maintenance state', () => {
 
         expect(beginRestoreMaintenance()).toBe(true);
         expect(beginRestoreMaintenance()).toBe(false);
+
+        endRestoreMaintenance();
+    });
+
+    it('returns a caller-provided block message while the maintenance window is active', () => {
+        endRestoreMaintenance();
+        expect(getRestoreMaintenanceMessage('blocked')).toBeNull();
+
+        expect(beginRestoreMaintenance()).toBe(true);
+        expect(getRestoreMaintenanceMessage('blocked')).toBe('blocked');
+
+        endRestoreMaintenance();
+        expect(getRestoreMaintenanceMessage('blocked')).toBeNull();
+    });
+
+    it('cleans up the saved original when restore begins before the upload write boundary', async () => {
+        endRestoreMaintenance();
+        const cleanupCalls: string[] = [];
+        const cleanup = async (filename: string) => {
+            cleanupCalls.push(filename);
+        };
+
+        expect(await cleanupOriginalIfRestoreMaintenanceBegan('file.jpg', cleanup)).toBe(false);
+        expect(cleanupCalls).toEqual([]);
+
+        expect(beginRestoreMaintenance()).toBe(true);
+        expect(await cleanupOriginalIfRestoreMaintenanceBegan('file.jpg', cleanup)).toBe(true);
+        expect(cleanupCalls).toEqual(['file.jpg']);
 
         endRestoreMaintenance();
     });

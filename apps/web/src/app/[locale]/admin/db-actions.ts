@@ -19,7 +19,8 @@ import { containsDangerousSql } from "@/lib/sql-restore-scan";
 import { createBackupFilename } from "@/lib/backup-filename";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
-import { beginRestoreMaintenance, endRestoreMaintenance } from "@/lib/restore-maintenance";
+import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
+import { MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 
 function escapeCsvField(value: string): string {
     // Strip null bytes, tab, and other control characters (except \r\n which are handled below)
@@ -41,6 +42,10 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
+    }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
     }
 
     let results = await db
@@ -98,6 +103,10 @@ export async function dumpDatabase() {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
         return { success: false as const, error: t('unauthorized') };
+    }
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { success: false as const, error: maintenanceError };
     }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
@@ -227,8 +236,6 @@ export async function dumpDatabase() {
 // Keep in sync with next.config.ts `serverActions.bodySizeLimit` — uploads above
 // that value are rejected by the Next.js framework before reaching this action,
 // so a larger value here would be misleading.
-const MAX_RESTORE_SIZE = 250 * 1024 * 1024; // 250 MB
-
 // DB advisory lock: prevents concurrent 250MB uploads filling /tmp.
 // GET_LOCK is released automatically on connection close (crash-safe).
 
@@ -286,7 +293,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     }
     const file = fileEntry;
 
-    if (file.size > MAX_RESTORE_SIZE) {
+    if (file.size > MAX_RESTORE_SIZE_BYTES) {
         return { success: false, error: t('fileTooLarge') };
     }
 

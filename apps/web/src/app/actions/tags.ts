@@ -9,6 +9,7 @@ import { isValidSlug, isValidTagName } from '@/lib/validation';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
 import { stripControlChars } from '@/lib/sanitize';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 function getTagSlug(name: string) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -42,6 +43,8 @@ export async function getAdminTags() {
 export async function updateTag(id: number, name: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
@@ -89,6 +92,8 @@ export async function updateTag(id: number, name: string) {
 export async function deleteTag(id: number) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
@@ -123,6 +128,8 @@ export async function deleteTag(id: number) {
 export async function addTagToImage(imageId: number, tagName: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
     // Sanitize before validation — matches updateTag pattern (C41-02)
@@ -180,6 +187,8 @@ export async function addTagToImage(imageId: number, tagName: string) {
 export async function removeTagFromImage(imageId: number, tagName: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(imageId) || imageId <= 0) return { error: t('invalidImageId') };
     // Sanitize before lookup — reject malformed input (defense in depth
@@ -222,6 +231,8 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
 export async function batchAddTags(imageIds: number[], tagName: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     if (!Array.isArray(imageIds) || imageIds.length === 0) return { error: t('noImagesSelected') };
     // Limit batch size to prevent DoS
@@ -316,6 +327,8 @@ export async function batchUpdateImageTags(
 ): Promise<{ success: boolean; added: number; removed: number; warnings: string[] }> {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { success: false, added: 0, removed: 0, warnings: [t('unauthorized')] };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { success: false, added: 0, removed: 0, warnings: [maintenanceError] };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { success: false, added: 0, removed: 0, warnings: [t('invalidImageId')] };

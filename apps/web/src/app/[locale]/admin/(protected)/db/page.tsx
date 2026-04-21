@@ -20,12 +20,14 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useTranslations } from 'next-intl';
+import { MAX_RESTORE_SIZE_BYTES, MAX_RESTORE_SIZE_LABEL } from '@/lib/db-restore';
 
 export default function DbPage() {
     const t = useTranslations('db');
     const tShared = useTranslations('imageManager');
     const [isPending, startTransition] = useTransition();
     const [restoreFile, setRestoreFile] = useState<File | null>(null);
+    const [restoreInputKey, setRestoreInputKey] = useState(0);
     const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
     const handleBackup = () => {
@@ -56,6 +58,12 @@ export default function DbPage() {
 
     const handleRestore = () => {
         if (!restoreFile) return;
+        if (restoreFile.size > MAX_RESTORE_SIZE_BYTES) {
+            toast.error(t('restoreTooLargeClient', { size: MAX_RESTORE_SIZE_LABEL }));
+            setRestoreFile(null);
+            setRestoreInputKey((current) => current + 1);
+            return;
+        }
         setShowRestoreConfirm(true);
     };
 
@@ -158,12 +166,23 @@ export default function DbPage() {
                         <div className="grid w-full max-w-sm items-center gap-1.5">
                             <Label htmlFor="restore-file">{t('restoreSelectFile')}</Label>
                             <Input
+                                key={restoreInputKey}
                                 id="restore-file"
                                 type="file"
                                 accept=".sql"
-                                onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+                                onChange={(e) => {
+                                    const nextFile = e.target.files?.[0] || null;
+                                    if (nextFile && nextFile.size > MAX_RESTORE_SIZE_BYTES) {
+                                        toast.error(t('restoreTooLargeClient', { size: MAX_RESTORE_SIZE_LABEL }));
+                                        setRestoreFile(null);
+                                        setRestoreInputKey((current) => current + 1);
+                                        return;
+                                    }
+                                    setRestoreFile(nextFile);
+                                }}
                                 disabled={isPending}
                             />
+                            <p className="text-xs text-muted-foreground">{t('restoreMaxSize', { size: MAX_RESTORE_SIZE_LABEL })}</p>
                         </div>
                         <Alert variant="destructive" className="py-2">
                             <AlertTriangle className="h-4 w-4" />

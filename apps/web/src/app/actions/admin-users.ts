@@ -13,6 +13,7 @@ import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, checkRateLimit, incrementRateLimit, isRateLimitExceeded, resetRateLimit } from '@/lib/rate-limit';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -67,6 +68,8 @@ export async function getAdminUsers() {
 export async function createAdminUser(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     // Rate limit admin user creation to prevent brute-force / CPU DoS.
     // Uses the same pre-increment pattern as login (A-01 fix) to prevent
@@ -160,6 +163,8 @@ export async function deleteAdminUser(id: number) {
     const t = await getTranslations('serverActions');
     const currentUser = await getCurrentUser();
     if (!currentUser) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(id) || id <= 0) {
         return { error: t('invalidUserId') };

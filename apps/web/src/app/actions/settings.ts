@@ -10,6 +10,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
 import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
+import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 
 export async function getGallerySettingsAdmin() {
     const t = await getTranslations('serverActions');
@@ -35,6 +36,8 @@ export async function getGallerySettingsAdmin() {
 export async function updateGallerySettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     const defaults = getSettingDefaults();
 
     // Validate all provided keys are allowed
