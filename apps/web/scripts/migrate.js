@@ -65,7 +65,16 @@ function migrateLegacyOriginalUploads(appRoot) {
             continue;
         }
 
-        fs.renameSync(source, target);
+        try {
+            fs.renameSync(source, target);
+        } catch (error) {
+            if (error && typeof error === 'object' && error.code === 'EXDEV') {
+                fs.copyFileSync(source, target);
+                fs.unlinkSync(source);
+            } else {
+                throw error;
+            }
+        }
         moved++;
     }
 
