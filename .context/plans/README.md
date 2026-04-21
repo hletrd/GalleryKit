@@ -2,6 +2,7 @@
 
 ## Active Plans
 
+- 192 — Deferred Review Coverage (Cycle 10 Ultradeep) — TODO
 - 186 — Deferred Review Coverage (Cycle 7 Ultradeep) — TODO
 - 184 — Deferred Review Coverage (Cycle 6 Ultradeep) — TODO
 - 182 — Deferred Review Coverage (Cycle 5 Ultradeep) — TODO
@@ -12,6 +13,10 @@
 - 172 — Deferred Review Coverage (Cycle 3) — TODO
 - 175 — Deferred Review Coverage (Cycle 1 Ultradeep) — TODO
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
+
+## Completed Plans (Cycle 10 Ultradeep)
+
+- 191 — Cycle 10 Ultradeep Fixes — DONE
 
 ## Completed Plans (Cycle 7 Ultradeep)
 
@@ -137,6 +142,7 @@
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
+| **Cycle 10 Aggregate Review** | 2026-04-22 | 11 confirmed + 9 deferred/risk | 6 via Plan 191 | 14 via Plan 192 |
 | **Cycle 7 Aggregate Review** | 2026-04-22 | 10 confirmed + 3 risks | 5 via Plan 185 | 5 via Plan 186 |
 | **Cycle 4 Aggregate Review** | 2026-04-22 | 5 confirmed | 5 via Plan 180 | 0 |
 | **Cycle 1 Aggregate Review** | 2026-04-20 | 11 actionable + 8 deferred/manual + 2 closed | 11 via Plans 165-166 | 8 via Plan 167 |

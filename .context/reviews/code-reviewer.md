@@ -1,116 +1,214 @@
-# Code Review — Cycle 9 (code-reviewer)
+# Cycle 10 code-quality / logic / maintainability review
 
-## Scope / inventory
-I built a repo-wide inventory first and examined every **review-relevant tracked text/code file** under the workspace, excluding generated/runtime/vendor artifacts (`.next/`, `node_modules/`, `test-results/`, `.omx/`, `.omc/`, binary assets).
+## Scope and inventory
 
-**Examined file inventory:** 227 files total
-- Root/docs/config/scripts: 16
-- `apps/web/src/app`: 54
-- `apps/web/src/components`: 44
-- `apps/web/src/lib`: 40
-- `apps/web/src/db` + `src/i18n` + `src/instrumentation.ts` + `src/proxy.ts`: 6
-- `apps/web/src/__tests__`: 22
-- `apps/web/scripts`: 10
-- `apps/web/e2e`: 5
-- Migrations/messages/config/support files: remainder
+### Inventory method
+I first inventoried the repository, then focused review time on the non-generated code paths that actually participate in request handling, persistence, image processing, and cross-file routing behavior.
 
-## Verification / diagnostics
-- `npm test --workspace=apps/web` ✅ (`22` test files, `131` tests passed)
-- `npx tsc -p apps/web/tsconfig.json --noEmit` ✅
-- `cd apps/web && npx eslint src scripts e2e --ext .ts,.tsx,.js,.mjs` ✅
-- `npm run lint:api-auth --workspace=apps/web` ✅
-- Attempted OMX code-intel `lsp_diagnostics_directory` / `ast_grep_search`, but the MCP transport was closed during this review, so I used CLI fallback (`tsc`, `eslint`, targeted `rg`, full-file reads).
+### Relevant files reviewed
+- **Core server actions:**
+  - `apps/web/src/app/actions/auth.ts`
+  - `apps/web/src/app/actions/images.ts`
+  - `apps/web/src/app/actions/topics.ts`
+  - `apps/web/src/app/actions/tags.ts`
+  - `apps/web/src/app/actions/sharing.ts`
+  - `apps/web/src/app/actions/public.ts`
+  - `apps/web/src/app/actions/admin-users.ts`
+  - `apps/web/src/app/actions/settings.ts`
+  - `apps/web/src/app/actions/seo.ts`
+- **Admin DB / recovery paths:**
+  - `apps/web/src/app/[locale]/admin/db-actions.ts`
+  - `apps/web/src/app/api/admin/db/download/route.ts`
+  - `apps/web/src/lib/sql-restore-scan.ts`
+  - `apps/web/src/lib/db-restore.ts`
+- **Data / persistence / routing helpers:**
+  - `apps/web/src/lib/data.ts`
+  - `apps/web/src/lib/revalidation.ts`
+  - `apps/web/src/lib/rate-limit.ts`
+  - `apps/web/src/lib/auth-rate-limit.ts`
+  - `apps/web/src/lib/session.ts`
+  - `apps/web/src/lib/validation.ts`
+  - `apps/web/src/lib/restore-maintenance.ts`
+  - `apps/web/src/lib/serve-upload.ts`
+  - `apps/web/src/lib/gallery-config.ts`
+  - `apps/web/src/lib/gallery-config-shared.ts`
+  - `apps/web/src/lib/tag-slugs.ts`
+- **Image pipeline / storage:**
+  - `apps/web/src/lib/process-image.ts`
+  - `apps/web/src/lib/image-queue.ts`
+  - `apps/web/src/lib/process-topic-image.ts`
+  - `apps/web/src/lib/storage/index.ts`
+  - `apps/web/src/lib/storage/local.ts`
+  - `apps/web/src/lib/storage/s3.ts`
+  - `apps/web/src/lib/upload-tracker.ts`
+- **Schema / route interaction:**
+  - `apps/web/src/db/schema.ts`
+  - `apps/web/drizzle/0001_sync_current_schema.sql`
+  - `apps/web/src/app/[locale]/(public)/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+  - `apps/web/src/proxy.ts`
+- **High-logic client components checked for cross-file assumptions:**
+  - `apps/web/src/components/home-client.tsx`
+  - `apps/web/src/components/load-more.tsx`
+  - `apps/web/src/components/search.tsx`
+  - `apps/web/src/components/photo-viewer.tsx`
+  - `apps/web/src/components/lightbox.tsx`
+  - `apps/web/src/components/image-manager.tsx`
 
-## Verdict
-**REQUEST CHANGES**
+### Explicitly excluded from deep review
+- Generated/build artifacts: `.next/`, `test-results/`
+- Installed dependencies: `node_modules/`
+- Uploaded binary assets under `data/uploads/` and `public/uploads/`
+- UI primitive wrappers under `src/components/ui/` except for spot checks where needed
 
-## Findings
-
-### 1) [HIGH] [Confirmed] New topic creation can silently hijack an existing alias route
-**Confidence:** High
-
-**Evidence**
-- `apps/web/src/app/actions/topics.ts:58-87` validates slug format/reserved segments, then inserts directly, but never checks `topic_aliases` for collisions.
-- `apps/web/src/app/actions/topics.ts:15-31` already has the shared `topicRouteSegmentExists()` helper.
-- `apps/web/src/app/actions/topics.ts:158-160` uses that helper for `updateTopic()`.
-- `apps/web/src/app/actions/topics.ts:319-320` uses that helper for `createTopicAlias()`.
-- `apps/web/src/lib/data.ts:612-644` resolves **direct topic slugs before aliases**.
-
-**Failure scenario**
-1. Existing alias `sunset` points to topic `portfolio`.
-2. Admin creates a new topic with slug `sunset`.
-3. The insert succeeds because there is no cross-table collision check.
-4. Public requests to `/sunset` now resolve to the new direct topic instead of the old alias target, breaking bookmarked/shared URLs and silently retargeting traffic.
-
-**Why this matters**
-The repo already treats topic slugs and aliases as one public route namespace everywhere else. `createTopic()` is the one write path that does not enforce that invariant.
-
-**Fix**
-Before inserting in `createTopic()`, call `topicRouteSegmentExists(slug)` and reject when either a topic slug **or alias** already occupies that route segment. Add a regression test covering “create topic with existing alias”.
-
----
-
-### 2) [HIGH] [Confirmed] Completed background image processing never revalidates the public caches that actually depend on `processed=true`
-**Confidence:** High
-
-**Evidence**
-- Upload-time invalidation happens only in `apps/web/src/app/actions/images.ts:337-338`.
-- At that point new rows are inserted with `processed: false` in `apps/web/src/app/actions/images.ts:221-226`.
-- The queue flips rows to processed later in `apps/web/src/lib/image-queue.ts:234-237`.
-- Immediately after success, `apps/web/src/lib/image-queue.ts:250-254` explicitly says per-job revalidation was removed and assumes the upload-time revalidation is sufficient.
-- Public reads filter on processed rows only:
-  - `apps/web/src/lib/data.ts:262-264`
-  - `apps/web/src/lib/data.ts:298-300`
-  - `apps/web/src/lib/data.ts:395-398`
-  - `apps/web/src/lib/data.ts:503-506`
-  - `apps/web/src/lib/data.ts:564-567`
-- Public pages are ISR-cached for long periods:
-  - home: `apps/web/src/app/[locale]/(public)/page.tsx:16`
-  - topic: `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:16`
-  - photo page: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:21`
-
-**Failure scenario**
-1. Admin uploads a photo.
-2. `uploadImages()` revalidates while the row is still `processed=false`, so home/topic/photo pages still render without it.
-3. Background processing later marks the row `processed=true`.
-4. No revalidation occurs at that state transition.
-5. Result: home/topic pages can stay stale for up to 1 hour, and a photo detail URL that was hit early can cache a 404 for up to 1 week.
-
-**Why this matters**
-This is a cross-file regression between the upload action, the async queue, the data-layer `processed` filters, and ISR TTLs. The current invalidation point is attached to the wrong lifecycle event.
-
-**Fix**
-Trigger revalidation **after** the queue successfully marks the image processed, using the affected paths (`/`, topic page, photo page, admin dashboard, and any other dependent surfaces). If per-job invalidation volume is a concern, batch post-processing invalidations rather than removing them entirely.
+## Verification performed
+- `npm test` ✅ (23 files / 137 tests passed)
+- `npx tsc --noEmit -p tsconfig.json` ✅
+- `npx eslint src scripts e2e next.config.ts drizzle.config.ts playwright.config.ts vitest.config.ts --ext .ts,.tsx,.js,.mjs` ✅
+- `npm run build` ✅
+- Repo-wide pattern sweep for suspicious constructs (`console.log`, empty catch, hardcoded credentials, TODO/FIXME)
+- Final targeted sweep for topic-route collisions, FK rename paths, and tag-linking edge cases
 
 ---
 
-### 3) [MEDIUM] [Likely / manual-validation risk] Restore-mode write blocking is process-local, so multi-instance deployments can still mutate data during a restore
-**Confidence:** Medium
+## Confirmed issues
 
-**Evidence**
-- Restore maintenance state lives only in a process-local global symbol in `apps/web/src/lib/restore-maintenance.ts:1-56`.
-- `restoreDatabase()` sets that flag in `apps/web/src/app/[locale]/admin/db-actions.ts:249-286`.
-- Mutation entry points rely on that same process-local flag, for example `apps/web/src/app/actions/images.ts:86-89`, `apps/web/src/app/actions/topics.ts:37-38`, `apps/web/src/app/actions/tags.ts:46-47`, `apps/web/src/app/actions/sharing.ts:65-66`.
-- Shared-group view buffering also skips increments only via the same local flag in `apps/web/src/lib/data.ts:27-40`.
+### 1) New topic creation can silently shadow an existing alias route
+- **Severity:** High
+- **Confidence:** High
+- **Files / regions:**
+  - `apps/web/src/app/actions/topics.ts:34-104`
+  - `apps/web/src/lib/data.ts:612-644`
+- **Problem:**
+  - `createTopic()` validates slug format and reserved route segments, but it never calls `topicRouteSegmentExists()` before inserting the new topic.
+  - `getTopicBySlug()` resolves **direct topic slugs first** and only falls back to aliases second.
+  - That means a new topic slug can legally reuse an existing alias string, and the new direct slug will then take precedence over the old alias route.
+- **Concrete failure scenario:**
+  1. Topic `landscape` has alias `travel`.
+  2. An admin creates a new topic with slug `travel`.
+  3. `/en/travel` now resolves to the new topic, not the alias target.
+  4. Existing links/bookmarks that used the alias silently switch to the wrong content.
+- **Suggested fix:**
+  - In `createTopic()`, run the same collision guard already used by `updateTopic()` / `createTopicAlias()`:
+    - reject creation when `await topicRouteSegmentExists(slug)` is true.
+  - Keep the DB insert as the race-safe final authority, but block alias collisions before the insert.
 
-**Failure scenario**
-If the app is ever run with more than one Node process/container:
-1. Instance A starts a restore and sets its local maintenance flag.
-2. Instance B does not see that flag and continues accepting uploads/tag edits/topic changes/share view increments.
-3. The DB advisory lock prevents only concurrent restore calls, not normal writes from other instances.
-4. Restore can finish with writes interleaved against the restored dataset, producing lost or inconsistent state.
+### 2) Topic slug renames are ordered incompatibly with the schema’s foreign keys
+- **Severity:** High
+- **Confidence:** High
+- **Files / regions:**
+  - `apps/web/src/app/actions/topics.ts:176-190`
+  - `apps/web/src/db/schema.ts:13,30`
+  - `apps/web/drizzle/0001_sync_current_schema.sql:71,75`
+- **Problem:**
+  - On slug change, `updateTopic()` updates `images.topic` and `topicAliases.topicSlug` **before** updating `topics.slug`.
+  - The schema/migration defines both foreign keys with **`ON UPDATE no action`**.
+  - In MySQL, that means the child rows cannot point at the new slug until the parent row already exists with that slug.
+- **Concrete failure scenario:**
+  1. Topic `landscape` already has images or aliases.
+  2. Admin renames it to `travel`.
+  3. The first child update (`images.topic = 'travel'` or `topic_aliases.topic_slug = 'travel'`) violates the FK because `topics.slug='travel'` does not exist yet.
+  4. The rename fails for any populated topic.
+- **Suggested fix:**
+  - Prefer one of these approaches:
+    1. Change the foreign keys to `ON UPDATE CASCADE`, then update `topics.slug` only.
+    2. Or insert a new topic row / migrate children / delete old row in a carefully designed migration flow.
+  - The current “children first, parent last” transaction is not compatible with the shipped schema.
 
-**Why this matters**
-The current implementation is safe only for a single-process deployment model. The checked-in Docker docs lean that way, but the code itself does not enforce it, so this remains an operational correctness trap.
+### 3) Tag slug-collision handling mutates data differently from the admin’s request
+- **Severity:** High
+- **Confidence:** High
+- **Files / regions:**
+  - `apps/web/src/app/actions/tags.ts:148-180`
+  - `apps/web/src/app/actions/tags.ts:261-316`
+  - `apps/web/src/app/actions/tags.ts:363-378`
+  - `apps/web/src/app/actions/images.ts:252-289`
+- **Problem:**
+  - When a requested tag name slugifies to an existing tag’s slug, the code falls back from exact-name lookup to slug lookup and then proceeds with the returned record.
+  - The action warns about the collision, but it still links the **existing different tag** instead of rejecting the request.
+  - This affects single-image tagging, batch tagging, batch tag updates, and upload-time tag creation.
+- **Concrete failure scenario:**
+  1. A gallery already has tag `c` (slug `c`).
+  2. Admin tries to add tag `C++`.
+  3. The insert is ignored because slug `c` already exists.
+  4. The fallback lookup finds tag `c`, links that record, and returns success-with-warning.
+  5. The image ends up tagged `c`, not `C++`.
+- **Suggested fix:**
+  - Treat slug collisions as validation failures, not recoverable warnings.
+  - After exact-name lookup fails, if a slug match exists for a different tag name, return an explicit collision error and do **not** link any tag.
+  - Centralize this in one helper so all four call sites share the same behavior.
 
-**Fix**
-Move restore-maintenance state to a shared coordination surface (DB row, Redis, filesystem lock visible to all instances, etc.) and make write gates consult that shared state. At minimum, document single-instance restore as a hard requirement and validate it operationally.
+### 4) Single-image tag actions can report success even when the target image no longer exists
+- **Severity:** Medium
+- **Confidence:** High
+- **Files / regions:**
+  - `apps/web/src/app/actions/tags.ts:128-180`
+  - `apps/web/src/app/actions/tags.ts:323-413`
+  - `apps/web/src/app/actions/tags.ts:278-296` (internal evidence from the batch path)
+- **Problem:**
+  - `addTagToImage()` and the add/remove work inside `batchUpdateImageTags()` do not verify that the target image still exists before using `INSERT IGNORE` / delete operations.
+  - The same file explicitly documents in the batch-add path that `INSERT IGNORE` can silently drop rows that violate FK constraints.
+  - So the single-image paths can return success even when nothing was actually changed.
+- **Concrete failure scenario:**
+  1. Admin A opens the image manager for image `42`.
+  2. Admin B deletes image `42`.
+  3. Admin A adds a tag.
+  4. `INSERT IGNORE` produces no tag link, but the action still logs success, revalidates, and returns success.
+  5. The UI tells the admin the tag was added even though the image is gone.
+- **Suggested fix:**
+  - Mirror the batch-add guard in the single-image paths:
+    - fetch/verify the target image before mutating,
+    - or inspect `affectedRows`/existing image presence and return `imageNotFound` when no mutation occurred.
+  - Do the same before `batchUpdateImageTags()` returns success.
+
+## Likely issues
+
+### 5) Restore maintenance mode is process-local, so multi-process deployments can still accept writes during restore
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Files / regions:**
+  - `apps/web/src/lib/restore-maintenance.ts:1-56`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:243-284`
+- **Problem:**
+  - `beginRestoreMaintenance()` / `isRestoreMaintenanceActive()` store the maintenance flag on `globalThis`.
+  - `restoreDatabase()` acquires a DB advisory lock and then flips that in-process flag.
+  - All the write actions check the flag, but only within the current Node process.
+- **Concrete failure scenario:**
+  1. Production runs multiple Node workers/containers behind the proxy.
+  2. Admin starts a restore through worker A.
+  3. Worker B never sees the in-memory flag, so uploads/admin mutations hitting worker B still proceed during the restore window.
+  4. The DB advisory lock prevents a second restore, but it does not stop unrelated writes from other workers.
+- **Suggested fix:**
+  - Move maintenance state to a shared source of truth (DB row, Redis, or repeated advisory-lock check in the action guard).
+  - Keep the in-process fast flag only as a cache, not as the primary coordination mechanism.
+
+## Manual-validation risks
+
+### 6) Backup/restore correctness depends on external binaries and production MySQL behavior that the repo’s automated checks do not exercise
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Files / regions:**
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:102-233`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:290-430`
+- **Why this needs manual validation:**
+  - The backup and restore paths shell out to `mysqldump` / `mysql`, require those binaries to exist in the runtime image, and rely on the target MySQL server accepting the chosen SSL/options.
+  - The repo’s current automated verification (`test`/`tsc`/`eslint`/`build`) never runs those disaster-recovery flows end to end.
+- **Concrete failure scenario:**
+  - The app ships successfully, but the deployment image is missing one client binary, or the target DB rejects the CLI flags/SSL mode; the first time anyone notices is during an actual restore incident.
+- **Suggested fix / validation step:**
+  - Add a deployment smoke test that verifies `mysqldump --version`, `mysql --version`, and a non-destructive round-trip backup/restore check against a disposable DB.
+  - If full automation is too heavy, make this a required release checklist item.
+
+---
 
 ## Missed-issues sweep
-I did a final targeted sweep after the main read-through:
-- route-namespace collision sweep (`topicRouteSegmentExists`, topic/alias creation paths)
-- cache invalidation sweep (`revalidate*` usage vs. async queue state transitions)
-- restore/maintenance/auth/path-safety hotspots
-- typecheck/lint/test reruns already noted above
+I did one final sweep specifically for:
+- topic slug / alias collision guards,
+- FK-sensitive rename flows,
+- tag-linking paths that use `INSERT IGNORE`,
+- restore-mode coordination assumptions,
+- deployment-only backup/restore paths.
 
-No additional higher-severity issues surfaced beyond the three listed here.
+I did not find additional grounded issues beyond the findings above.
