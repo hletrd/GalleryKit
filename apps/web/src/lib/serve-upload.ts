@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import path from 'path';
 import { createReadStream } from 'fs';
-import { lstat } from 'fs/promises';
+import { lstat, realpath } from 'fs/promises';
 import { Readable } from 'stream';
 import { UPLOAD_ROOT } from '@/lib/upload-paths';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
@@ -64,20 +64,22 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
     const relativePath = path.join(...pathSegments);
     const absolutePath = path.join(UPLOAD_ROOT, relativePath);
 
-    // Containment check: trailing path.sep ensures resolvedPath is strictly *inside* UPLOAD_ROOT
-    // (not the root directory itself). path.resolve normalizes any trailing separators.
-    const resolvedRoot = path.resolve(UPLOAD_ROOT) + path.sep;
-    const resolvedPath = path.resolve(absolutePath);
-
-    if (!resolvedPath.startsWith(resolvedRoot)) {
-        return new NextResponse('Access denied', { status: 403 });
-    }
-
     let fileStream: ReturnType<typeof createReadStream> | null = null;
     try {
+        const resolvedRoot = await realpath(UPLOAD_ROOT).catch((err: unknown) => {
+            if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+                return path.resolve(UPLOAD_ROOT);
+            }
+            throw err;
+        });
         const stats = await lstat(absolutePath);
 
         if (stats.isSymbolicLink() || !stats.isFile()) {
+            return new NextResponse('Access denied', { status: 403 });
+        }
+
+        const resolvedPath = await realpath(absolutePath);
+        if (!resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
             return new NextResponse('Access denied', { status: 403 });
         }
 

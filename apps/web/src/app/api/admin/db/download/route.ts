@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAdminAuth } from '@/lib/api-auth';
 import path from 'path';
 import { createReadStream } from 'fs';
-import { lstat } from 'fs/promises';
+import { lstat, realpath } from 'fs/promises';
 import { Readable } from 'stream';
 import { isValidBackupFilename } from '@/lib/backup-filename';
 import { getCurrentUser } from '@/app/actions/auth';
@@ -25,8 +25,19 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
     }
 
     try {
+        const resolvedBackupsDir = await realpath(backupsDir).catch((err: unknown) => {
+            if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+                return backupsDir;
+            }
+            throw err;
+        });
         const stats = await lstat(filePath);
         if (stats.isSymbolicLink() || !stats.isFile()) {
+            return new NextResponse('Access denied', { status: 403 });
+        }
+
+        const resolvedFilePath = await realpath(filePath);
+        if (!resolvedFilePath.startsWith(`${resolvedBackupsDir}${path.sep}`)) {
             return new NextResponse('Access denied', { status: 403 });
         }
 
@@ -49,7 +60,11 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
                 'Pragma': 'no-cache',
             },
         });
-    } catch {
-        return new NextResponse('File not found', { status: 404 });
+    } catch (err: unknown) {
+        if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+            return new NextResponse('File not found', { status: 404 });
+        }
+        console.error('Error downloading backup file:', err);
+        return new NextResponse('Internal Server Error', { status: 500 });
     }
 });
