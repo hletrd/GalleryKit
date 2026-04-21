@@ -1,10 +1,14 @@
-# Cycle 6 Dependency Expert Notes
+# Cycle 7 Dependency / Build Review (manual fallback)
 
-## Findings
+## Inventory
+- Reviewed workspace manifests, build/deploy scripts, Dockerfile, nginx config, and dependency posture surfaced by the current lockfile.
 
-### C6-01 — The `child_process` + stream boundary for restore lacks explicit writable error handling
-- **Severity:** HIGH
+## Confirmed Issues
+
+### DEP7-01 — `drizzle-kit` currently resolves to an esbuild advisory in the dev-tooling tree
+- **Severity:** LOW
 - **Confidence:** High
-- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:362-416`
-- **Runtime risk:** when piping a file into `mysql`, the writable side (`restore.stdin`) is part of the child-process contract and can fail independently of the process object. The current code handles the process but not that writable boundary.
-- **Suggested fix:** treat stdin failures as a first-class part of the restore lifecycle and classify benign broken-pipe cases separately from real I/O failures.
+- **Citations:** `apps/web/package.json:56-70`, `package-lock.json` (`drizzle-kit` -> `@esbuild-kit/*` -> `esbuild`)
+- **Why it is a problem:** the production runtime is unaffected, but local/tooling workflows still carry the known `esbuild` advisory chain reported by `npm audit`.
+- **Concrete failure scenario:** a developer runs the vulnerable dev-tooling stack on an untrusted network and inherits the upstream advisory behavior.
+- **Suggested fix:** update `drizzle-kit` (or the transitive esbuild-resolving chain) to a patched version and re-run the audit.
