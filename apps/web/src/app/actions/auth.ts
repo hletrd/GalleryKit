@@ -3,8 +3,7 @@
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
 import { cookies, headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { isRedirectError } from 'next/dist/client/components/redirect-error';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import { db, adminUsers, sessions } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { cache } from 'react';
@@ -208,12 +207,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
             redirect(localizePath(locale, '/admin/dashboard'));
         } catch (e) {
-            if (isRedirectError(e)) throw e;
+            unstable_rethrow(e);
             console.error("Session creation failed after successful auth", e);
             return { error: t('authFailed') };
         }
     } catch (e) {
-        if (isRedirectError(e)) throw e;
+        unstable_rethrow(e);
         console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
         // Roll back pre-incremented rate limit on unexpected errors —
         // the user didn't fail authentication, the infrastructure did.

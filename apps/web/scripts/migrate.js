@@ -6,6 +6,7 @@ const argon2 = require('argon2');
 const mysql = require('mysql2/promise');
 const { drizzle } = require('drizzle-orm/mysql2');
 const { migrate } = require('drizzle-orm/mysql2/migrator');
+const { getMysqlConnectionOptions } = require('./mysql-connection-options');
 
 const WEAK_PLAINTEXT_PASSWORDS = new Set([
     'password',
@@ -528,13 +529,9 @@ async function seedAdmin(connection) {
 
     try {
         console.log('[Migration] Starting migration...');
-        connection = await mysql.createConnection({
-            host: getRequiredEnv('DB_HOST'),
-            port: Number(getRequiredEnv('DB_PORT')),
-            user: getRequiredEnv('DB_USER'),
-            password: getRequiredEnv('DB_PASSWORD'),
+        connection = await mysql.createConnection(getMysqlConnectionOptions({
             database: dbName,
-        });
+        }));
 
         await prepareLegacyDatabaseIfNeeded(connection, dbName, latestMigration);
         await runMigrations(connection, migrationsFolder);

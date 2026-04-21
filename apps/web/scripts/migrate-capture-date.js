@@ -17,17 +17,12 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const dotenv = require('dotenv');
 const mysql = require('mysql2/promise');
+const { getMysqlConnectionOptions } = require('./mysql-connection-options');
 
 dotenv.config({ path: '.env.local' });
 
 async function migrate() {
-    const connection = await mysql.createConnection({
-        host: process.env.DB_HOST || '127.0.0.1',
-        port: Number(process.env.DB_PORT) || 3306,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME,
-    });
+    const connection = await mysql.createConnection(getMysqlConnectionOptions());
 
     try {
         // Check current column type
