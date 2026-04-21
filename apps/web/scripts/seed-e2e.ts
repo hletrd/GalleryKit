@@ -25,6 +25,8 @@ const seedTopic = {
   order: 999,
 };
 
+const seedTopicAliases = ['spotlight-smoke'];
+
 const seedImages: SeedImage[] = [
   {
     key: 'e2e-landscape',
@@ -106,12 +108,21 @@ async function main() {
 
   await ensureDirs();
 
-  const { connection, db, images, imageTags, sharedGroupImages, sharedGroups, tags, topics } = await import('../src/db');
+  const { connection, db, images, imageTags, sharedGroupImages, sharedGroups, tags, topicAliases, topics } = await import('../src/db');
 
   try {
     await db.insert(topics).values(seedTopic).onDuplicateKeyUpdate({
       set: { label: seedTopic.label, order: seedTopic.order },
     });
+    await db.delete(topicAliases).where(eq(topicAliases.topicSlug, seedTopic.slug));
+    if (seedTopicAliases.length > 0) {
+      await db.insert(topicAliases).values(
+        seedTopicAliases.map((alias) => ({
+          alias,
+          topicSlug: seedTopic.slug,
+        }))
+      );
+    }
 
     const existing = await db.select({ id: images.id, filename_original: images.filename_original, filename_jpeg: images.filename_jpeg, filename_webp: images.filename_webp, filename_avif: images.filename_avif })
       .from(images)
@@ -186,7 +197,7 @@ async function main() {
     const groupId = groupResult.insertId;
     await db.insert(sharedGroupImages).values(insertedIds.map((imageId, position) => ({ groupId, imageId, position })));
 
-    console.log(`Seeded E2E topic ${seedTopic.slug} with ${insertedIds.length} images.`);
+    console.log(`Seeded E2E topic ${seedTopic.slug} with ${insertedIds.length} images and aliases ${seedTopicAliases.join(', ') || '(none)'}.`);
   } finally {
     await connection.end();
   }

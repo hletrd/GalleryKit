@@ -39,6 +39,25 @@ test('search dialog autofocuses, traps focus, and restores focus on close', asyn
   await expect(searchTrigger).toBeFocused();
 });
 
+test('search matches canonical topic labels and aliases', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/');
+  await expectNoNextError(page);
+
+  const searchTrigger = page.getByRole('button', { name: 'Search photos' });
+  await searchTrigger.click();
+
+  const dialog = page.getByRole('dialog', { name: 'Search photos' });
+  const searchInput = dialog.locator('#search-input');
+
+  await searchInput.fill('E2E Smoke');
+  await expect(dialog.getByText('E2E Landscape')).toBeVisible();
+  await expect(dialog.getByText('E2E Smoke').first()).toBeVisible();
+
+  await searchInput.fill('spotlight-smoke');
+  await expect(dialog.getByText('E2E Landscape')).toBeVisible();
+});
+
 test('photo page lightbox opens and closes from the first visible photo', async ({ page }) => {
   await ensureEnglishLocale(page);
   await page.goto('/');

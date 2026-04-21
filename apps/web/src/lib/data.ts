@@ -655,6 +655,7 @@ interface SearchResult {
     width: number;
     height: number;
     topic: string;
+    topic_label: string | null;
     camera_model: string | null;
     capture_date: string | null;
 }
@@ -675,12 +676,13 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     const searchFields = {
         id: images.id, title: images.title, description: images.description,
         filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
-        topic: images.topic, camera_model: images.camera_model,
+        topic: images.topic, topic_label: topics.label, camera_model: images.camera_model,
         capture_date: images.capture_date,
     };
 
     // Run main query first; only query tags if we need more results (saves a connection)
     const results = await db.select(searchFields).from(images)
+        .leftJoin(topics, eq(images.topic, topics.slug))
         .where(and(
             eq(images.processed, true),
             or(
@@ -688,6 +690,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 like(images.description, searchTerm),
                 like(images.camera_model, searchTerm),
                 like(images.topic, searchTerm),
+                like(topics.label, searchTerm),
             )
         ))
         .orderBy(desc(images.created_at), desc(images.id))
@@ -704,6 +707,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     }
     const tagResults = remainingLimit <= 0 ? [] : await db.select(searchFields)
         .from(images)
+        .leftJoin(topics, eq(images.topic, topics.slug))
         .innerJoin(imageTags, eq(images.id, imageTags.imageId))
         .innerJoin(tags, eq(imageTags.tagId, tags.id))
         .where(and(...tagConditions))
@@ -715,15 +719,42 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
             images.width,
             images.height,
             images.topic,
+            topics.label,
             images.camera_model,
             images.capture_date,
         )
         .orderBy(desc(images.created_at), desc(images.id))
         .limit(remainingLimit);
 
+    const seenIds = new Set([...mainIds, ...tagResults.map((result) => result.id)]);
+    const aliasConditions = [eq(images.processed, true), like(topicAliases.alias, searchTerm)];
+    if (seenIds.size > 0) {
+        aliasConditions.push(notInArray(images.id, [...seenIds]));
+    }
+    const aliasRemainingLimit = effectiveLimit - seenIds.size;
+    const aliasResults = aliasRemainingLimit <= 0 ? [] : await db.select(searchFields)
+        .from(images)
+        .leftJoin(topics, eq(images.topic, topics.slug))
+        .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))
+        .where(and(...aliasConditions))
+        .groupBy(
+            images.id,
+            images.title,
+            images.description,
+            images.filename_jpeg,
+            images.width,
+            images.height,
+            images.topic,
+            topics.label,
+            images.camera_model,
+            images.capture_date,
+        )
+        .orderBy(desc(images.created_at), desc(images.id))
+        .limit(aliasRemainingLimit);
+
     const seen = new Set<number>();
     const combined: SearchResult[] = [];
-    for (const r of [...results, ...tagResults]) {
+    for (const r of [...results, ...tagResults, ...aliasResults]) {
         if (!seen.has(r.id)) {
             seen.add(r.id);
             combined.push(r);

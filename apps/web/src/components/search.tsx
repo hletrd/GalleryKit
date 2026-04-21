@@ -21,7 +21,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
-    const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; camera_model: string | null }[]>([]);
+    const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null }[]>([]);
     const [loading, setLoading] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
@@ -233,7 +233,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                                                 {image.title || image.description || `${t('common.photo')} ${image.id}`}
                                             </p>
                                             <p className="text-xs text-muted-foreground truncate">
-                                                {[image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null, image.camera_model].filter(Boolean).join(' \u00b7 ')}
+                                                {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model].filter(Boolean).join(' \u00b7 ')}
                                             </p>
                                         </div>
                                     </Link>
