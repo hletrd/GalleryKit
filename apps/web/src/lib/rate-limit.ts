@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { isIP } from 'net';
 import { db, rateLimitBuckets } from '@/db';
 import { and, eq, lt, sql } from 'drizzle-orm';
@@ -13,6 +14,10 @@ export const SEARCH_RATE_LIMIT_MAX_KEYS = 2000;
 export type RateLimitEntry = { count: number; lastAttempt: number };
 
 export type HeaderLike = { get(name: string): string | null };
+
+const RATE_LIMIT_BUCKET_KEY_MAX_LENGTH = 45;
+const ACCOUNT_RATE_LIMIT_PREFIX = 'acct:';
+const ACCOUNT_RATE_LIMIT_HASH_LENGTH = RATE_LIMIT_BUCKET_KEY_MAX_LENGTH - ACCOUNT_RATE_LIMIT_PREFIX.length;
 
 // In-memory Maps kept as fast-path cache. On restart they are empty;
 // the DB is the source of truth.
@@ -42,6 +47,12 @@ export function normalizeIp(value: string | null): string | null {
 
 export function isRateLimitExceeded(count: number, maxRequests: number, includesCurrentRequest: boolean = false) {
     return includesCurrentRequest ? count > maxRequests : count >= maxRequests;
+}
+
+export function buildAccountRateLimitKey(username: string): string {
+    const normalizedUsername = username.trim().toLowerCase();
+    const digest = createHash('sha256').update(normalizedUsername).digest('hex');
+    return `${ACCOUNT_RATE_LIMIT_PREFIX}${digest.slice(0, ACCOUNT_RATE_LIMIT_HASH_LENGTH)}`;
 }
 
 export function getClientIp(headerStore: HeaderLike): string {

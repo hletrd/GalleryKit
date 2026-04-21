@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { getClientIp, normalizeIp, getRateLimitBucketStart, isRateLimitExceeded } from '@/lib/rate-limit';
+import { buildAccountRateLimitKey, getClientIp, normalizeIp, getRateLimitBucketStart, isRateLimitExceeded } from '@/lib/rate-limit';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 
@@ -106,5 +106,19 @@ describe('getClientIp', () => {
         ]);
 
         expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('unknown');
+    });
+});
+
+describe('buildAccountRateLimitKey', () => {
+    it('returns a stable fixed-length key that fits the bucket schema', () => {
+        const key = buildAccountRateLimitKey('VeryLongAdminUsernameThatStillNeedsAccountScopedThrottling123');
+
+        expect(key).toMatch(/^acct:[a-f0-9]+$/);
+        expect(key.length).toBeLessThanOrEqual(45);
+        expect(key).toBe(buildAccountRateLimitKey('verylongadminusernamethatstillneedsaccountscopedthrottling123'));
+    });
+
+    it('returns distinct keys for different usernames', () => {
+        expect(buildAccountRateLimitKey('alice')).not.toBe(buildAccountRateLimitKey('bob'));
     });
 });

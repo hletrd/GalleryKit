@@ -12,7 +12,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, loginRateLimit } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, loginRateLimit, buildAccountRateLimitKey } from '@/lib/rate-limit';
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
@@ -111,8 +111,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
     // This prevents distributed brute-force attacks where each IP gets a fresh
     // budget but all target the same account. The bucket key is prefixed with
     // "acct:" to avoid collisions with IP-based buckets.
-    const normalizedUsername = username.trim().toLowerCase();
-    const accountRateLimitKey = `acct:${normalizedUsername}`;
+    const accountRateLimitKey = buildAccountRateLimitKey(username);
     try {
         const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
         if (accountLimit.limited) {
