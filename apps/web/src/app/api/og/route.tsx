@@ -1,14 +1,36 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
+import siteConfig from '@/site-config.json';
 
 export const runtime = 'edge';
+
+const MAX_TOPIC_LABEL_LENGTH = 100;
+const MAX_SITE_TITLE_LENGTH = 100;
+
+function clampDisplayText(value: string | null, maxLength: number) {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return null;
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function topicLabelFromSlug(topic: string) {
+  return topic
+    .split(/[-_]+/g)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const topic = searchParams.get('topic');
     const tags = searchParams.get('tags');
+    const topicLabel = clampDisplayText(searchParams.get('label'), MAX_TOPIC_LABEL_LENGTH) ?? topicLabelFromSlug(topic ?? '');
+    const siteTitle = clampDisplayText(searchParams.get('site'), MAX_SITE_TITLE_LENGTH) ?? siteConfig.title;
 
     if (!topic || topic.length > 200 || !isValidSlug(topic)) {
       return new Response('Missing or invalid topic param', { status: 400 });
@@ -62,7 +84,7 @@ export async function GET(req: NextRequest) {
                 letterSpacing: '0.1em',
               }}
             >
-              GalleryKit
+              {siteTitle}
             </div>
 
             {/* Topic Title */}
@@ -79,7 +101,7 @@ export async function GET(req: NextRequest) {
                 textAlign: 'center',
               }}
             >
-              {(() => { const t = topic.length > 50 ? topic.slice(0, 50) + '...' : topic; return t.charAt(0).toUpperCase() + t.slice(1); })()}
+              {topicLabel}
             </div>
 
             {/* Tags */}

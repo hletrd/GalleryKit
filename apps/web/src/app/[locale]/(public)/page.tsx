@@ -7,6 +7,7 @@ import { localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
+import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 
 // Homepage is dynamic, but we can set revalidate for better performance if desired.
 // However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
@@ -16,13 +17,14 @@ export const revalidate = 3600;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { tags: tagsParam } = await searchParams;
-  const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
   const t = await getTranslations('home');
   const seo = await getSeoSettings();
   const pageUrl = localizeUrl(seo.url, locale, '/');
+  const allTags = await getTags();
+  const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
-  const images = await getImagesLite(undefined, undefined, 1, 0);
+  const images = await getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0);
   const latestImage = images[0];
   // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
   const config = await getGalleryConfig();
@@ -81,8 +83,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);
 
   // Parse and validate tag slugs
-  const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
-  const tagSlugs = rawTagSlugs.filter(slug => allTags.some(t => t.slug === slug));
+  const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;

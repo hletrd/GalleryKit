@@ -1,5 +1,7 @@
 'use client';
 
+import siteConfig from '@/site-config.json';
+
 const COPY = {
     en: {
         title: 'Something went wrong',
@@ -46,7 +48,7 @@ export default function GlobalError({
                 <main className="min-h-screen flex items-center justify-center px-6">
                     <div className="w-full max-w-md rounded-2xl border border-border bg-card/95 p-8 text-center shadow-lg">
                         <p className="text-sm font-medium text-muted-foreground uppercase tracking-[0.2em]">
-                            GalleryKit
+                            {siteConfig.nav_title || siteConfig.title}
                         </p>
                         <h1 className="mt-4 text-3xl font-semibold tracking-tight">{copy.title}</h1>
                         <p className="mt-3 text-sm text-muted-foreground">{copy.description}</p>

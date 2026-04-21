@@ -2,6 +2,8 @@ export async function register() {
     if (process.env.NEXT_RUNTIME === 'nodejs') {
         const { assertNoLegacyPublicOriginalUploads } = await import('@/lib/upload-paths');
         await assertNoLegacyPublicOriginalUploads({ failInProduction: true });
+        const { bootstrapImageProcessingQueue } = await import('@/lib/image-queue');
+        await bootstrapImageProcessingQueue();
 
         const gracefulShutdown = async (signal: string) => {
             console.log(`[Shutdown] ${signal} received, draining queue...`);

@@ -9,6 +9,8 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
+import siteConfig from '@/site-config.json';
+import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 
 
 export const revalidate = 3600;
@@ -16,7 +18,6 @@ export const revalidate = 3600;
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ topic: string }>, searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
-  const tagSlugs = tagsParam ? tagsParam.split(',').filter(Boolean) : [];
   const locale = await getLocale();
   const t = await getTranslations('topic');
   const seo = await getSeoSettings();
@@ -27,6 +28,9 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     title: t('notFoundTitle'),
     description: t('notFoundDescription'),
   };
+
+  const allTags = await getTags(topicData.slug);
+  const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
   const title = tagSlugs.length > 0
     ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${topicData.label}`
@@ -39,10 +43,17 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const pageUrl = localizeUrl(seo.url, locale, `/${topicData.slug}`);
 
   // Use custom OG image if configured, otherwise use generated OG image
+  const topicOgParams = new URLSearchParams({ topic: topicData.slug });
+  if (tagSlugs.length > 0) {
+    topicOgParams.set('tags', tagSlugs.join(','));
+  }
+  topicOgParams.set('label', topicData.label);
+  topicOgParams.set('site', seo.title || siteConfig.title);
+
   const ogImages = seo.og_image_url
     ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: title }]
     : [{
-        url: `${seo.url}/api/og?topic=${encodeURIComponent(topicData.slug)}&tags=${encodeURIComponent(tagSlugs.join(','))}`,
+        url: `${seo.url}/api/og?${topicOgParams.toString()}`,
         width: 1200,
         height: 630,
         alt: title,
@@ -93,10 +104,7 @@ export default async function TopicPage({
 
   const seo = await getSeoSettings();
   const allTags = await getTags(topic);
-
-  // Parse and validate tag slugs
-  const rawTagSlugs = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : [];
-  const tagSlugs = rawTagSlugs.filter(slug => allTags.some(t => t.slug === slug));
+  const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;

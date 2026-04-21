@@ -177,6 +177,14 @@ const publicSelectFields = {
     original_file_size: sql<number | null>`NULL`,
 } as const;
 
+export const adminSelectFieldKeys = Object.freeze(
+    Object.keys(adminSelectFields).sort(),
+) as readonly (keyof typeof adminSelectFields)[];
+
+export const publicSelectFieldKeys = Object.freeze(
+    Object.keys(publicSelectFields).sort(),
+) as readonly (keyof typeof publicSelectFields)[];
+
 // Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
 // are ever added to publicSelectFields, this assertion will produce a TypeScript error.
 // This prevents accidental PII leakage in public-facing API responses.

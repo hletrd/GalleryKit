@@ -185,7 +185,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             {
                 '@type': 'ListItem',
                 position: 1,
-                name: seo.title || 'GalleryKit',
+                name: seo.title || siteConfig.title,
                 item: localizeUrl(seo.url, locale, '/'),
             },
             image.topic && {

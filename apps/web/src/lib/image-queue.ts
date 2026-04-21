@@ -149,6 +149,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
     state.queue.add(async () => {
         console.debug(`[Queue] Processing job ${job.id} started`);
         let retried = false;
+        let claimRetryScheduled = false;
         let lockConnection: PoolConnection | null = null;
         try {
             lockConnection = await acquireImageProcessingClaim(job.id);
@@ -168,6 +169,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     enqueueImageProcessing(job);
                 }, delay);
                 retryTimer.unref?.();
+                claimRetryScheduled = true;
                 return;
             }
 
@@ -269,7 +271,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             if (!retried) {
                 state.enqueued.delete(job.id);
                 state.retryCounts.delete(job.id);
-                state.claimRetryCounts.delete(job.id);
+                if (!claimRetryScheduled) {
+                    state.claimRetryCounts.delete(job.id);
+                }
             }
             pruneRetryMaps(state);
         }
