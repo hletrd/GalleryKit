@@ -18,6 +18,10 @@
 
 - 176 — Cycle 2 Deploy, Branding, and Privacy Contract Fixes — DONE
 
+## Completed Plans (Cycle 4 Ultradeep)
+
+- 180 — Cycle 4 Ultradeep Fixes — DONE
+
 ## Completed Plans (Cycle 3 Ultradeep)
 
 - 178 — Cycle 3 Ultradeep Hardening — DONE
@@ -118,6 +122,7 @@
 
 | Review | Date | Total Findings | Planned | Deferred/Manual |
 |--------|------|---------------|---------|-----------------|
+| **Cycle 4 Aggregate Review** | 2026-04-22 | 5 confirmed | 5 via Plan 180 | 0 |
 | **Cycle 1 Aggregate Review** | 2026-04-20 | 11 actionable + 8 deferred/manual + 2 closed | 11 via Plans 165-166 | 8 via Plan 167 |
 | **Cycle 24 Comprehensive Review** | 2026-04-19 | 3 actionable (3L) | 3 via Plan 70 | 3 via Plan 70-Deferred |
 | **Cycle 22 Comprehensive Review** | 2026-04-19 | 3 actionable (3L) | 3 via Plan 68 | 2 via Plan 68-Deferred |
