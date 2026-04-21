@@ -24,6 +24,7 @@ const ACCOUNT_RATE_LIMIT_HASH_LENGTH = RATE_LIMIT_BUCKET_KEY_MAX_LENGTH - ACCOUN
 export const loginRateLimit = new Map<string, RateLimitEntry>();
 
 export const searchRateLimit = new Map<string, { count: number; resetAt: number }>();
+let warnedMissingTrustProxy = false;
 
 export function normalizeIp(value: string | null): string | null {
     if (!value) return null;
@@ -73,19 +74,23 @@ export function getClientIp(headerStore: HeaderLike): string {
     }
 
     const ip = 'unknown';
-    if (process.env.NODE_ENV === 'production') {
-        const xff = headerStore.get('x-forwarded-for');
-        if (xff) {
-            console.warn('[rate-limit] X-Forwarded-For present but TRUST_PROXY is not set — rate limiting uses "unknown" IP. Set TRUST_PROXY=true if behind a reverse proxy.');
-        }
+    if (shouldWarnMissingTrustProxy(process.env.NODE_ENV, process.env.TRUST_PROXY, headerStore) && !warnedMissingTrustProxy) {
+        warnedMissingTrustProxy = true;
+        console.warn('[rate-limit] Proxy headers are present but TRUST_PROXY is not set — rate limiting uses "unknown" IP. Set TRUST_PROXY=true if behind a reverse proxy.');
     }
     return ip;
 }
 
-// Warn at startup when in production without TRUST_PROXY — all rate limiting
-// will share a single "unknown" IP bucket, making it ineffective per-user.
-if (process.env.NODE_ENV === 'production' && process.env.TRUST_PROXY !== 'true') {
-    console.warn('[rate-limit] TRUST_PROXY is not set in production. Rate limiting uses "unknown" IP for all requests behind a reverse proxy. Set TRUST_PROXY=true if behind a reverse proxy.');
+export function shouldWarnMissingTrustProxy(
+    nodeEnv: string | undefined,
+    trustProxy: string | undefined,
+    headerStore: HeaderLike,
+) {
+    if (nodeEnv !== 'production' || trustProxy === 'true') {
+        return false;
+    }
+
+    return Boolean(headerStore.get('x-forwarded-for') || headerStore.get('x-real-ip'));
 }
 
 export function pruneLoginRateLimit(now: number) {

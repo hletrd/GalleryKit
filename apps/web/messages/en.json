@@ -161,6 +161,7 @@
     "deleteImageConfirmDesc": "The image and all its files will be permanently deleted.",
     "imageDeleted": "Deleted",
     "deleteFailed": "Delete failed",
+    "deleteCleanupWarning": "Deleted, but {count} file cleanup steps failed. Check server logs.",
     "bulkDeleteSuccess": "{count} deleted",
     "linkCopied": "Group link copied.",
     "tags": "Tags",
@@ -182,6 +183,7 @@
     "saving": "Saving...",
     "updateSuccess": "Saved.",
     "bulkDeletePartial": "{count} images failed to delete",
+    "bulkDeleteCleanupWarning": "Deleted database records, but {count} file cleanup steps failed. Check server logs.",
     "bulkDeleteFailed": "Bulk delete failed",
     "shareFailed": "Failed to share group",
     "updateFailed": "Failed to update"

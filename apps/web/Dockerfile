@@ -1,6 +1,6 @@
 FROM node:24-slim AS base
 
-# Install system dependencies needed for sharp and better-sqlite3 + gosu
+# Install runtime/build tooling needed by the web image
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \

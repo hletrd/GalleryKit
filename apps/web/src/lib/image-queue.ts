@@ -13,6 +13,7 @@ import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -134,8 +135,8 @@ export async function shutdownImageProcessingQueue(
 
 export const enqueueImageProcessing = (job: ImageProcessingJob) => {
     const state = getProcessingQueueState();
-    if (state.shuttingDown) {
-        console.debug(`[Queue] Ignoring job ${job.id} during shutdown`);
+    if (state.shuttingDown || isRestoreMaintenanceActive()) {
+        console.debug(`[Queue] Ignoring job ${job.id} while processing is unavailable`);
         return;
     }
     if (state.enqueued.has(job.id)) return;
@@ -290,7 +291,7 @@ export async function purgeExpiredSessions() {
 
 export const bootstrapImageProcessingQueue = async () => {
     const state = getProcessingQueueState();
-    if (state.bootstrapped || state.shuttingDown) return;
+    if (state.bootstrapped || state.shuttingDown || isRestoreMaintenanceActive()) return;
 
     try {
         // Select only columns needed for enqueue — skip blob-like fields for potentially hundreds of rows.
@@ -342,6 +343,31 @@ export const bootstrapImageProcessingQueue = async () => {
         }
     }
 };
+
+export async function quiesceImageProcessingQueueForRestore(
+    state: ProcessingQueueState = getProcessingQueueState(),
+    queue: Pick<PQueue, 'pause' | 'clear' | 'onPendingZero'> = state.queue,
+) {
+    queue.pause();
+    await queue.onPendingZero();
+    queue.clear();
+    state.enqueued.clear();
+    state.retryCounts.clear();
+    state.claimRetryCounts.clear();
+    state.bootstrapped = false;
+}
+
+export async function resumeImageProcessingQueueAfterRestore(
+    state: ProcessingQueueState = getProcessingQueueState(),
+    queue: Pick<PQueue, 'start'> = state.queue,
+) {
+    if (state.shuttingDown) {
+        return;
+    }
+
+    queue.start();
+    await bootstrapImageProcessingQueue();
+}
 
 // Auto-bootstrap when this module is imported
 void bootstrapImageProcessingQueue();

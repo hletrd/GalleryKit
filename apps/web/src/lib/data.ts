@@ -4,6 +4,7 @@ import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like } from 'drizz
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
+import { isRestoreMaintenanceActive } from './restore-maintenance';
 import siteConfig from '@/site-config.json';
 
 // Module-level buffer for debounced shared-group view count increments
@@ -24,6 +25,9 @@ function getNextFlushInterval(): number {
 }
 
 function bufferGroupViewCount(groupId: number) {
+    if (isRestoreMaintenanceActive()) {
+        return;
+    }
     if (viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)) {
         // Drop increment to prevent unbounded growth during DB outage
         console.warn(`[viewCount] Buffer at capacity (${MAX_VIEW_COUNT_BUFFER_SIZE}), dropping increment for group ${groupId}`);

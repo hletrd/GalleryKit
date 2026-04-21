@@ -73,6 +73,7 @@ export const DEFAULT_IMAGE_SIZES = [640, 1536, 2048, 4096];
 
 /** Default OG image target size — used for social media previews. */
 export const DEFAULT_OG_TARGET_SIZE = 1536;
+export const DEFAULT_GRID_CARD_TARGET_SIZE = DEFAULT_IMAGE_SIZES[0];
 
 /**
  * Canonicalize an admin-provided image_sizes string into a sorted, deduped list.
@@ -116,6 +117,11 @@ export function findNearestImageSize(sizes: number[], targetSize: number): numbe
         }
     }
     return nearest;
+}
+
+/** Pick a thumbnail/grid derivative from the configured size list. */
+export function findGridCardImageSize(sizes: number[]): number {
+    return findNearestImageSize(sizes, DEFAULT_GRID_CARD_TARGET_SIZE);
 }
 
 /**

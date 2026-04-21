@@ -17,8 +17,39 @@ import { stripControlChars } from '@/lib/sanitize';
 import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { settleUploadTrackerClaim, type UploadTrackerEntry } from '@/lib/upload-tracker';
 import { headers } from 'next/headers';
+
+type ImageCleanupFailure = {
+    target: 'original' | 'webp' | 'avif' | 'jpeg';
+    filename: string;
+    reason: string;
+};
+
+async function collectImageCleanupFailures(tasks: {
+    target: ImageCleanupFailure['target'];
+    filename: string;
+    operation: Promise<void>;
+}[]) {
+    const settled = await Promise.allSettled(tasks.map((task) => task.operation));
+
+    return settled.flatMap((result, index) => {
+        if (result.status === 'fulfilled') {
+            return [];
+        }
+
+        const reason = result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason ?? 'unknown cleanup failure');
+
+        return [{
+            target: tasks[index].target,
+            filename: tasks[index].filename,
+            reason,
+        }] satisfies ImageCleanupFailure[];
+    });
+}
 
 // Server-side upload tracking to enforce cumulative limits across per-file invocations.
 // The client sends files individually, so per-call batch limits are ineffective.
@@ -51,6 +82,9 @@ export async function uploadImages(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
+    }
+    if (isRestoreMaintenanceActive()) {
+        return { error: t('restoreInProgress') };
     }
 
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
@@ -367,20 +401,23 @@ export async function deleteImage(id: number) {
     } catch {
         // DB unavailable — use default sizes
     }
-    try {
-        await Promise.all([
-            deleteOriginalUploadFile(image.filename_original),
-            deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, deleteSizes),
-            deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, deleteSizes),
-            deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, deleteSizes),
-        ]);
-    } catch {
-        console.error("Error deleting files");
+    const cleanupFailures = await collectImageCleanupFailures([
+        { target: 'original', filename: image.filename_original, operation: deleteOriginalUploadFile(image.filename_original) },
+        { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, deleteSizes) },
+        { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, deleteSizes) },
+        { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, deleteSizes) },
+    ]);
+
+    if (cleanupFailures.length > 0) {
+        console.error('Image file cleanup incomplete after deleteImage', {
+            imageId: id,
+            cleanupFailures,
+        });
     }
 
     revalidateLocalizedPaths('/', `/p/${id}`, `/${imageTopic}`, '/admin/dashboard');
 
-    return { success: true };
+    return { success: true, cleanupFailureCount: cleanupFailures.length };
 }
 
 export async function deleteImages(ids: number[]) {
@@ -469,18 +506,23 @@ export async function deleteImages(ids: number[]) {
     } catch {
         // DB unavailable — use default sizes
     }
-    await Promise.all(imageRecords.map(async (image) => {
-        try {
-            await Promise.all([
-                deleteOriginalUploadFile(image.filename_original),
-                deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, batchDeleteSizes),
-                deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, batchDeleteSizes),
-                deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, batchDeleteSizes),
-            ]);
-        } catch {
-            console.error(`Error deleting files for image ${image.id}`);
+    const cleanupFailures = (await Promise.all(imageRecords.map(async (image) => {
+        const failures = await collectImageCleanupFailures([
+            { target: 'original', filename: image.filename_original, operation: deleteOriginalUploadFile(image.filename_original) },
+            { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, batchDeleteSizes) },
+            { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, batchDeleteSizes) },
+            { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, batchDeleteSizes) },
+        ]);
+
+        if (failures.length > 0) {
+            console.error('Image file cleanup incomplete after deleteImages', {
+                imageId: image.id,
+                cleanupFailures: failures,
+            });
         }
-    }));
+
+        return failures;
+    }))).flat();
 
     const successCount = deletedRows;
     const errorCount = notFoundCount + staleCount;
@@ -500,7 +542,7 @@ export async function deleteImages(ids: number[]) {
             ...[...affectedTopics].map(topic => `/${topic}`)
         );
     }
-    return { success: true, count: successCount, errors: errorCount };
+    return { success: true, count: successCount, errors: errorCount, cleanupFailureCount: cleanupFailures.length };
 }
 
 export async function updateImageMetadata(id: number, title: string | null, description: string | null) {

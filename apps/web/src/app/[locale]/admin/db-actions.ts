@@ -17,6 +17,9 @@ import { getTranslations } from 'next-intl/server';
 import { revalidateAllAppData } from "@/lib/revalidation";
 import { containsDangerousSql } from "@/lib/sql-restore-scan";
 import { createBackupFilename } from "@/lib/backup-filename";
+import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
+import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
+import { beginRestoreMaintenance, endRestoreMaintenance } from "@/lib/restore-maintenance";
 
 function escapeCsvField(value: string): string {
     // Strip null bytes, tab, and other control characters (except \r\n which are handled below)
@@ -250,9 +253,25 @@ export async function restoreDatabase(formData: FormData) {
             return { success: false, error: t('restoreInProgress') };
         }
 
+        if (!beginRestoreMaintenance()) {
+            return { success: false, error: t('restoreInProgress') };
+        }
+
         try {
+            try {
+                await flushBufferedSharedGroupViewCounts();
+                await quiesceImageProcessingQueueForRestore();
+            } catch (err) {
+                console.error('Failed to prepare restore maintenance window', err);
+                return { success: false, error: t('restoreFailed') };
+            }
+
             return await runRestore(formData, t);
         } finally {
+            endRestoreMaintenance();
+            await resumeImageProcessingQueueAfterRestore().catch((err) => {
+                console.error('Failed to resume image-processing queue after restore', err);
+            });
             await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch(() => {});
         }
     } finally {

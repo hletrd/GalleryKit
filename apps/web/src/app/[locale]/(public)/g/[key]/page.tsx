@@ -9,7 +9,7 @@ import { absoluteImageUrl, imageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 const sharePageRobots = {
     index: false,
@@ -94,7 +94,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
 
     const t = await getTranslations('sharedGroup');
     const config = await getGalleryConfig();
-    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
+    const gridImageSize = findGridCardImageSize(config.imageSizes);
 
     let photoId: number | null = null;
     if (photoIdParam && /^\d+$/.test(photoIdParam)) {
@@ -165,7 +165,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>
                             </div>
                             <Image
-                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${ogImageSize}.webp`)}`)}
+                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${gridImageSize}.webp`)}`)}
                                 alt={altText}
                                 width={image.width}
                                 height={image.height}

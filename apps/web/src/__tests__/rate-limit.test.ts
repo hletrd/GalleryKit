@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildAccountRateLimitKey, getClientIp, normalizeIp, getRateLimitBucketStart, isRateLimitExceeded } from '@/lib/rate-limit';
+import { buildAccountRateLimitKey, getClientIp, normalizeIp, getRateLimitBucketStart, isRateLimitExceeded, shouldWarnMissingTrustProxy } from '@/lib/rate-limit';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 
@@ -106,6 +106,22 @@ describe('getClientIp', () => {
         ]);
 
         expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('unknown');
+    });
+});
+
+describe('shouldWarnMissingTrustProxy', () => {
+    const headers = new Map<string, string>([
+        ['x-forwarded-for', '198.51.100.10'],
+    ]);
+
+    it('warns only when production traffic includes proxy headers without TRUST_PROXY enabled', () => {
+        expect(shouldWarnMissingTrustProxy('production', undefined, { get: (name) => headers.get(name) ?? null })).toBe(true);
+        expect(shouldWarnMissingTrustProxy('production', 'true', { get: (name) => headers.get(name) ?? null })).toBe(false);
+        expect(shouldWarnMissingTrustProxy('development', undefined, { get: (name) => headers.get(name) ?? null })).toBe(false);
+    });
+
+    it('does not warn when there are no proxy headers', () => {
+        expect(shouldWarnMissingTrustProxy('production', undefined, { get: () => null })).toBe(false);
     });
 });
 

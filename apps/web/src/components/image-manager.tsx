@@ -108,6 +108,9 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
             const res = await deleteImage(id);
             if (res?.success) {
                 toast.success(t('imageManager.imageDeleted'));
+                if (res.cleanupFailureCount) {
+                    toast.warning(t('imageManager.deleteCleanupWarning', { count: res.cleanupFailureCount }));
+                }
                 setImages(prev => prev.filter(img => img.id !== id));
                 setSelectedIds(prev => {
                     const newSet = new Set(prev);
@@ -135,6 +138,9 @@ export function ImageManager({ initialImages, availableTags }: { initialImages: 
                 toast.success(t('imageManager.bulkDeleteSuccess', { count: res.count }));
                 if (res.errors && res.errors > 0) {
                     toast.warning(t('imageManager.bulkDeletePartial', { count: res.errors }));
+                }
+                if (res.cleanupFailureCount) {
+                    toast.warning(t('imageManager.bulkDeleteCleanupWarning', { count: res.cleanupFailureCount }));
                 }
                 const deletedIdSet = new Set(ids);
                 setImages(prev => prev.filter(img => !deletedIdSet.has(img.id)));

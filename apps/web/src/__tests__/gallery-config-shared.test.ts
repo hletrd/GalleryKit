@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    DEFAULT_GRID_CARD_TARGET_SIZE,
     DEFAULT_IMAGE_SIZES,
     MAX_IMAGE_SIZE_COUNT,
+    findGridCardImageSize,
     isValidSettingValue,
     normalizeConfiguredImageSizes,
     parseImageSizes,
@@ -28,6 +30,16 @@ describe('parseImageSizes', () => {
     it('falls back to defaults when the input is invalid', () => {
         expect(parseImageSizes('bad-value')).toEqual(DEFAULT_IMAGE_SIZES);
         expect(parseImageSizes('')).toEqual(DEFAULT_IMAGE_SIZES);
+    });
+});
+
+describe('findGridCardImageSize', () => {
+    it('prefers a thumbnail-sized derivative for grid cards', () => {
+        expect(findGridCardImageSize([640, 1536, 2048, 4096])).toBe(DEFAULT_GRID_CARD_TARGET_SIZE);
+    });
+
+    it('falls back to the smallest configured size when no close thumbnail exists', () => {
+        expect(findGridCardImageSize([1800, 2400, 3200])).toBe(1800);
     });
 });
 
