@@ -1,5 +1,6 @@
 'use client';
 
+import { resolveErrorShellBrand } from '@/lib/error-shell';
 import siteConfig from '@/site-config.json';
 
 const COPY = {
@@ -33,6 +34,14 @@ function detectLocale(): SupportedLocale {
     return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
 }
 
+function detectBrandTitle() {
+    if (typeof document === 'undefined') {
+        return resolveErrorShellBrand(null, siteConfig.nav_title, siteConfig.title);
+    }
+
+    return resolveErrorShellBrand(document, siteConfig.nav_title, siteConfig.title);
+}
+
 export default function GlobalError({
     reset,
 }: {
@@ -41,6 +50,7 @@ export default function GlobalError({
 }) {
     const locale = detectLocale();
     const copy = COPY[locale];
+    const brandTitle = detectBrandTitle();
 
     return (
         <html lang={locale}>
@@ -48,7 +58,7 @@ export default function GlobalError({
                 <main className="min-h-screen flex items-center justify-center px-6">
                     <div className="w-full max-w-md rounded-2xl border border-border bg-card/95 p-8 text-center shadow-lg">
                         <p className="text-sm font-medium text-muted-foreground uppercase tracking-[0.2em]">
-                            {siteConfig.nav_title || siteConfig.title}
+                            {brandTitle}
                         </p>
                         <h1 className="mt-4 text-3xl font-semibold tracking-tight">{copy.title}</h1>
                         <p className="mt-3 text-sm text-muted-foreground">{copy.description}</p>

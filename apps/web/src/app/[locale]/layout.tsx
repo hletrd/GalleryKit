@@ -70,10 +70,16 @@ export default async function RootLayout({
     return notFound();
   }
 
+  const seo = await getSeoSettings();
   const messages = await getMessages();
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html
+      lang={locale}
+      suppressHydrationWarning
+      data-gallery-title={seo.title}
+      data-gallery-nav-title={seo.nav_title || seo.title}
+    >
       <body
         suppressHydrationWarning
         className="antialiased min-h-screen bg-background font-sans flex flex-col"
