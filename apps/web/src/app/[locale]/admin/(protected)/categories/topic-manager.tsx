@@ -63,6 +63,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 toast.error(res.error);
             } else {
                 toast.success(t('categories.created'));
+                if (res?.warning) {
+                    toast.warning(res.warning);
+                }
                 setIsCreateOpen(false);
                 router.refresh();
             }
@@ -79,6 +82,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 toast.error(res.error);
             } else {
                 toast.success(t('categories.updated'));
+                if (res?.warning) {
+                    toast.warning(res.warning);
+                }
                 setEditingTopic(null);
                 router.refresh();
             }
@@ -262,8 +268,10 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         <div key={alias} className="flex items-center gap-1 px-2 py-1 bg-secondary rounded-md text-sm">
                                             <span>{alias}</span>
                                             <button
+                                              type="button"
                                               onClick={() => setDeleteAliasInfo({ topicSlug: editingTopic.slug, alias })}
                                               className="text-muted-foreground hover:text-destructive"
+                                              aria-label={t('categories.deleteAliasButton', { alias })}
                                             >
                                                 <X className="h-3 w-3" />
                                             </button>

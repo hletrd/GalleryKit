@@ -4,7 +4,7 @@ import { db, images, topics, topicAliases } from '@/db';
 import { eq, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
-import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
@@ -64,12 +64,13 @@ export async function createTopic(formData: FormData) {
     }
 
     let imageFilename = null;
+    let imageWarning: string | undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
              imageFilename = await processTopicImage(imageFile);
          } catch (e) {
              console.warn('Topic image processing failed, continuing without image:', e);
-             // Fail safely without image
+             imageWarning = t('topicImageProcessingWarning');
          }
     }
 
@@ -86,7 +87,8 @@ export async function createTopic(formData: FormData) {
         logAuditEvent(currentUser?.id ?? null, 'topic_create', 'topic', slug).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/');
-        return { success: true };
+        revalidateAllAppData();
+        return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
     } catch (e: unknown) {
         if (imageFilename) {
             await deleteTopicImage(imageFilename);
@@ -138,6 +140,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     if (isReservedTopicRouteSegment(slug)) {
         return { error: t('reservedRouteSegment') };
     }
+    if (label.length > 100) {
+        return { error: t('labelTooLong') };
+    }
 
     const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanCurrentSlug)).limit(1);
     if (!currentTopic) {
@@ -150,11 +155,13 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     let imageFilename = undefined;
+    let imageWarning: string | undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
              imageFilename = await processTopicImage(imageFile);
          } catch (e) {
              console.error("Failed to process topic image", e);
+             imageWarning = t('topicImageProcessingWarning');
          }
     }
 
@@ -203,7 +210,8 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         logAuditEvent(currentUser?.id ?? null, 'topic_update', 'topic', slug).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/', `/${slug}`, slug !== cleanCurrentSlug ? `/${cleanCurrentSlug}` : '');
-        return { success: true };
+        revalidateAllAppData();
+        return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
     } catch (e: unknown) {
          if (imageFilename) {
              await deleteTopicImage(imageFilename);
@@ -259,6 +267,7 @@ export async function deleteTopic(slug: string) {
         }
 
         revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/', `/${cleanSlug}`);
+        revalidateAllAppData();
 
         return { success: true };
     } catch (e) {
@@ -313,6 +322,7 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
         logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
+        revalidateAllAppData();
         return { success: true };
     } catch (e: unknown) {
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -370,5 +380,6 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     }
 
     revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
+    revalidateAllAppData();
     return { success: true };
 }

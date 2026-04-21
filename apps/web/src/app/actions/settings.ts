@@ -1,6 +1,6 @@
 'use server';
 
-import { db, adminSettings } from '@/db';
+import { db, adminSettings, images } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 
@@ -8,7 +8,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
-import { GALLERY_SETTING_KEYS, isValidSettingValue } from '@/lib/gallery-config-shared';
+import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 
 export async function getGallerySettingsAdmin() {
@@ -35,6 +35,7 @@ export async function getGallerySettingsAdmin() {
 export async function updateGallerySettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    const defaults = getSettingDefaults();
 
     // Validate all provided keys are allowed
     const allowedKeys = new Set<string>(GALLERY_SETTING_KEYS);
@@ -58,6 +59,40 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         if (!value) continue; // Empty means "use default" — will be deleted
         if (!isValidSettingValue(key as GallerySettingKey, value)) {
             return { error: t('invalidSettingValue', { key }) };
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'image_sizes')) {
+        const requestedImageSizes = sanitizedSettings.image_sizes;
+        const normalizedImageSizes = requestedImageSizes
+            ? normalizeConfiguredImageSizes(requestedImageSizes)
+            : defaults.image_sizes;
+        if (!normalizedImageSizes) {
+            return { error: t('invalidSettingValue', { key: 'image_sizes' }) };
+        }
+        if (requestedImageSizes) {
+            sanitizedSettings.image_sizes = normalizedImageSizes;
+        }
+
+        const [currentImageSizesSetting] = await db
+            .select({ value: adminSettings.value })
+            .from(adminSettings)
+            .where(eq(adminSettings.key, 'image_sizes'))
+            .limit(1);
+
+        const currentImageSizes = normalizeConfiguredImageSizes(currentImageSizesSetting?.value ?? defaults.image_sizes)
+            ?? defaults.image_sizes;
+
+        if (normalizedImageSizes !== currentImageSizes) {
+            const [processedImage] = await db
+                .select({ id: images.id })
+                .from(images)
+                .where(eq(images.processed, true))
+                .limit(1);
+
+            if (processedImage) {
+                return { error: t('imageSizesLocked') };
+            }
         }
     }
 

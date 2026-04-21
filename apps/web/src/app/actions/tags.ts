@@ -6,7 +6,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
-import { revalidateLocalizedPaths } from '@/lib/revalidation';
+import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
 import { stripControlChars } from '@/lib/sanitize';
 
@@ -78,6 +78,7 @@ export async function updateTag(id: number, name: string) {
         logAuditEvent(currentUser?.id ?? null, 'tag_update', 'tag', String(id), undefined, { name: trimmedName, slug }).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
+        revalidateAllAppData();
         return { success: true };
     } catch {
         console.error("Failed to update tag");
@@ -111,6 +112,7 @@ export async function deleteTag(id: number) {
         logAuditEvent(currentUser?.id ?? null, 'tag_delete', 'tag', String(id)).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
+        revalidateAllAppData();
         return { success: true };
     } catch {
         console.error("Failed to delete tag");
@@ -165,6 +167,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: tagRecord.name }).catch(console.debug);
         revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+        revalidateAllAppData();
         return tagRecord.name !== cleanName
             ? { success: true as const, warning: t('tagSlugCollision', { newName: cleanName, existingName: tagRecord.name }) }
             : { success: true as const };
@@ -208,6 +211,7 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
         revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+        revalidateAllAppData();
         return { success: true };
     } catch (e) {
         console.error("Failed to remove tag", e);
@@ -284,6 +288,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
         logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: existingIds.size, tag: cleanName }).catch(console.debug);
 
         revalidateLocalizedPaths('/admin/dashboard', '/', '/admin/tags');
+        revalidateAllAppData();
 
         // Build warnings for both slug collision and missing images
         const warnings: string[] = [];
@@ -391,5 +396,6 @@ export async function batchUpdateImageTags(
     const currentUser = await getCurrentUser();
     logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
     revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', img?.topic ? `/${img.topic}` : '', '/admin/dashboard');
+    revalidateAllAppData();
     return { success: true, added, removed, warnings };
 }

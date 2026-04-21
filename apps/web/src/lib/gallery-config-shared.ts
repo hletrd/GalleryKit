@@ -43,13 +43,15 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     strip_gps_on_upload: 'false',
 };
 
+export const MAX_IMAGE_SIZE_COUNT = 8;
+
 // ── Validators ────────────────────────────────────────────────────────────────
 
 const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     image_quality_webp: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 100; },
     image_quality_avif: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 100; },
     image_quality_jpeg: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 100; },
-    image_sizes: (v) => { const parts = v.split(',').map(s => Number(s.trim())); return parts.length > 0 && parts.every(n => Number.isFinite(n) && n > 0 && n <= 10000); },
+    image_sizes: (v) => normalizeConfiguredImageSizes(v) !== null,
     strip_gps_on_upload: (v) => v === 'true' || v === 'false',
 };
 
@@ -71,6 +73,31 @@ export const DEFAULT_IMAGE_SIZES = [640, 1536, 2048, 4096];
 
 /** Default OG image target size — used for social media previews. */
 export const DEFAULT_OG_TARGET_SIZE = 1536;
+
+/**
+ * Canonicalize an admin-provided image_sizes string into a sorted, deduped list.
+ * Returns null when the input is malformed or exceeds the supported list size.
+ */
+export function normalizeConfiguredImageSizes(sizesStr: string): string | null {
+    if (!sizesStr || !sizesStr.trim()) return null;
+
+    const rawParts = sizesStr.split(',').map((segment) => segment.trim());
+    if (rawParts.some((segment) => segment.length === 0)) {
+        return null;
+    }
+
+    const parsed = rawParts.map((segment) => Number(segment));
+    if (parsed.some((value) => !Number.isFinite(value) || value <= 0 || value > 10000)) {
+        return null;
+    }
+
+    const uniqueSorted = Array.from(new Set(parsed)).sort((a, b) => a - b);
+    if (uniqueSorted.length === 0 || uniqueSorted.length > MAX_IMAGE_SIZE_COUNT) {
+        return null;
+    }
+
+    return uniqueSorted.join(',');
+}
 
 /**
  * Find the nearest configured image size to a target size.
@@ -96,7 +123,7 @@ export function findNearestImageSize(sizes: number[], targetSize: number): numbe
  * Returns DEFAULT_IMAGE_SIZES if the input is empty or invalid.
  */
 export function parseImageSizes(sizesStr: string): number[] {
-    if (!sizesStr || !sizesStr.trim()) return DEFAULT_IMAGE_SIZES;
-    const parsed = sizesStr.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
-    return parsed.length > 0 ? parsed.sort((a, b) => a - b) : DEFAULT_IMAGE_SIZES;
+    const normalized = normalizeConfiguredImageSizes(sizesStr);
+    if (!normalized) return DEFAULT_IMAGE_SIZES;
+    return normalized.split(',').map((value) => Number(value));
 }

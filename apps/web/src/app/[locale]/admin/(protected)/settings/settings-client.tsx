@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 import { updateGallerySettings } from '@/app/actions/settings';
-import { getSettingDefaults } from '@/lib/gallery-config-shared';
+import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
 import { Save, ChevronLeft, ImageIcon, Shield, Loader2 } from 'lucide-react';
@@ -35,7 +35,14 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
             try {
                 // Only send changed fields to reduce transaction size and conflict window
                 const changed = Object.fromEntries(
-                    Object.entries(settings).filter(([k, v]) => v !== initialRef.current[k])
+                    Object.entries(settings)
+                        .map(([key, value]) => {
+                            if (key === 'image_sizes' && value.trim()) {
+                                return [key, normalizeConfiguredImageSizes(value) ?? value] as const;
+                            }
+                            return [key, value] as const;
+                        })
+                        .filter(([k, v]) => v !== initialRef.current[k])
                 );
                 if (Object.keys(changed).length === 0) {
                     toast.info(t('settings.noChanges'));
@@ -43,7 +50,9 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                 }
                 const result = await updateGallerySettings(changed);
                 if (result.success) {
-                    initialRef.current = { ...settings };
+                    const nextSettings = { ...settings, ...changed };
+                    setSettings(nextSettings);
+                    initialRef.current = nextSettings;
                     toast.success(t('settings.saveSuccess'));
                 } else {
                     toast.error(result.error || t('settings.saveFailed'));
