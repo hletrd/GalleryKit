@@ -116,7 +116,7 @@ SESSION_SECRET=<random-64-char-hex>
 - Passwords hashed with **Argon2** (industry-standard memory-hard KDF)
 - Session tokens: HMAC-SHA256 signed, verified with `timingSafeEqual` (constant-time)
 - Cookie attributes: `httpOnly`, `secure` (in production), `sameSite: lax`, `path: /`
-- Session secret: auto-generated via `crypto.randomBytes`, stored in `admin_settings` table
+- Session secret: `SESSION_SECRET` env var is required in production; dev/test can fall back to a DB-stored generated secret in `admin_settings`
 - Expired sessions purged automatically (hourly background job)
 - Login rate limiting: 5 attempts per 15-minute window per IP, with bounded Map + LRU eviction
 
@@ -199,7 +199,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 - **Node.js 24+** required, **TypeScript 6.0+**
 - Processed images are stored in `apps/web/public/uploads/`; original uploads are stored privately under the data volume — **ensure both are persisted in Docker**
-- Max upload size: 200MB per file, 10GB total per batch, 100 files max (configurable)
+- Max upload size: 200MB per file, 2 GiB total per batch by default, 100 files max (configurable via `UPLOAD_MAX_TOTAL_BYTES`)
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
 
@@ -228,11 +228,11 @@ The repository has a formal test surface:
 
 ## Remote Deploy Helper
 
-The repo-level deploy helper reads a gitignored root `.env.deploy` file and runs the exact `DEPLOY_CMD` from it:
+The repo-level deploy helper reads a gitignored root `.env.deploy` file and derives the SSH deploy command from it by default:
 
 ```bash
 cp .env.deploy.example .env.deploy
 npm run deploy
 ```
 
-Keep real SSH keys, hostnames, and commands in `.env.deploy`; never commit that file.
+Keep real SSH keys, hostnames, and optional `DEPLOY_CMD` overrides in `.env.deploy`; never commit that file.

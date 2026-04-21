@@ -94,7 +94,7 @@ npm install
 
 ### Remote Deploy Helper
 
-To let local automation deploy without re-entering SSH details each run, keep the remote deploy command in a gitignored root `.env.deploy` file:
+To let local automation deploy without re-entering SSH details each run, keep the target SSH config in a gitignored root `.env.deploy` file:
 
 ```bash
 cp .env.deploy.example .env.deploy
@@ -102,7 +102,7 @@ $EDITOR .env.deploy
 npm run deploy
 ```
 
-The helper script reads `DEPLOY_CMD` from `.env.deploy` and executes it verbatim.
+`npm run deploy` now derives the SSH deploy command from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, and `DEPLOY_PATH`. Keep `DEPLOY_CMD` only as an escape hatch when you need a fully custom command.
 
 ### Environment Setup
 
