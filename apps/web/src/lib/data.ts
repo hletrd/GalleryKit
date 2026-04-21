@@ -756,12 +756,17 @@ export interface SeoSettings {
 }
 
 async function _getSeoSettings(): Promise<SeoSettings> {
-    // Read all SEO keys from admin_settings in a single query
-    const rows = await db.select({ key: adminSettings.key, value: adminSettings.value })
-        .from(adminSettings)
-        .where(inArray(adminSettings.key, [...SEO_SETTING_KEYS]));
-
-    const settingsMap = new Map(rows.map(r => [r.key, r.value]));
+    let settingsMap = new Map<string, string>();
+    try {
+        // Read all SEO keys from admin_settings in a single query
+        const rows = await db.select({ key: adminSettings.key, value: adminSettings.value })
+            .from(adminSettings)
+            .where(inArray(adminSettings.key, [...SEO_SETTING_KEYS]));
+        settingsMap = new Map(rows.map(r => [r.key, r.value]));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[seo] Falling back to site-config defaults because admin_settings could not be read: ${message}`);
+    }
 
     return {
         title: settingsMap.get('seo_title') || siteConfig.title,
