@@ -1,9 +1,12 @@
 /**
  * Storage Backend Interface
  *
- * Abstract interface for file storage operations. All gallery storage
- * goes through this interface so the backend (local, MinIO, S3) can
- * be swapped via admin settings without changing business logic.
+ * Abstract interface for the experimental file-storage layer.
+ *
+ * Not all gallery storage currently goes through this interface: the live
+ * upload, processing, and public-serving paths still use direct filesystem
+ * helpers. Keep docs/comments aligned with that current reality until the
+ * end-to-end pipeline is fully migrated.
  *
  * Key conventions:
  * - `key` is a relative path like `original/abc.jpg` or `webp/abc.webp`

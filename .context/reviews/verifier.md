@@ -1,65 +1,24 @@
-# Cycle 8 Verifier Review (manual fallback after agent retry failure)
+# Cycle 9 Verifier Review (manual fallback after context-window failure)
 
 ## Inventory
-- Re-verified public topic routing, share-link creation, admin backup flows, search UI state handling, and tag mutation UX against the current working tree.
-- Cross-checked current specialist reports from `code-reviewer`, `security-reviewer`, and `test-engineer` plus a direct source pass.
+- Re-checked the public search query/data contract (`apps/web/src/lib/data.ts`, `apps/web/src/components/search.tsx`, `apps/web/e2e/public.spec.ts`, `apps/web/scripts/seed-e2e.ts`).
+- Re-checked share-link creation/copy flows (`apps/web/src/lib/clipboard.ts`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/app/actions/sharing.ts`).
+- Re-checked duplicate-entry handling (`apps/web/src/app/actions/admin-users.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/lib/validation.ts`).
 
-## Confirmed Issues
+## Confirmed issues
 
-### V8-01 — Topic alias canonicalization drops the current tag filter
-**Confidence:** High
+### V9-01 — Share-link copy surfaces can report success even when clipboard writes fail
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **Citations:** `apps/web/src/lib/clipboard.ts:1-8`, `apps/web/src/components/photo-viewer.tsx:263-267`, `apps/web/src/components/image-manager.tsx:176-181`
+- **Why it matters:** both share UIs awaited a boolean-returning helper and then unconditionally showed a success toast.
+- **Concrete failure scenario:** on an unsupported or denied clipboard surface, the UI claims the link was copied even though nothing reached the clipboard.
+- **Suggested fix:** add a fallback copy path and branch the toasts on the boolean result.
 
-**Files / regions:**
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:87-95`
-
-**Why this is a problem:**
-The route resolves aliases to the canonical topic slug, but the redirect target discards the current `searchParams`, so the canonical page no longer represents the request the user made.
-
-**Concrete failure scenario:**
-A shared/bookmarked alias URL with `?tags=portrait,travel` lands on the canonical topic without those filters, silently changing the visible gallery.
-
-**Suggested fix:**
-Preserve the current query string when redirecting to the canonical slug.
-
----
-
-### V8-02 — Batch tag success can leave the admin UI out of sync with the persisted tag set
-**Confidence:** High
-
-**Files / regions:**
-- `apps/web/src/components/image-manager.tsx:183-200`
-- `apps/web/src/components/image-manager.tsx:371-399`
-- `apps/web/src/app/actions/tags.ts:347-400`
-
-**Why this is a problem:**
-The server action can canonicalize, warn, or partially apply tag changes, but the current table keeps rendering stale local state until the operator manually reloads.
-
-**Concrete failure scenario:**
-A tag add/remove returns success with warnings, but the visible tag chips remain wrong because the client never refreshes from the server truth.
-
-**Suggested fix:**
-Refresh the route after successful tag mutations or return canonical persisted tags from the server and reconcile local state with them.
-
----
-
-### V8-03 — The default E2E runner still depends on externally seeded state
-**Confidence:** High
-
-**Files / regions:**
-- `apps/web/playwright.config.ts:27-58`
-- `apps/web/e2e/public.spec.ts:60-77`
-- `apps/web/e2e/admin.spec.ts:46-54`
-- `apps/web/scripts/seed-e2e.ts:22-28,183-186`
-
-**Why this is a problem:**
-`npm run test:e2e` assumes the seeded topic/group already exist, but the default local runner does not create them first.
-
-**Concrete failure scenario:**
-A fresh checkout runs Playwright against a valid app instance but fails because `/g/Abc234Def5` and `e2e-smoke` were never seeded.
-
-**Suggested fix:**
-Make the default local Playwright runner seed the E2E fixture data before starting the server.
-
-## Agent-failure note
-- The first spawned verifier lane failed with a context-window exhaustion error.
-- A retry lane was launched, then shut down after stalling, so this manual fallback note records the current verifier pass for provenance.
+### V9-02 — Public search does not match the topic names users actually see
+- **Severity:** MEDIUM
+- **Confidence:** Medium
+- **Citations:** `apps/web/src/lib/data.ts:650-726`, `apps/web/src/components/search.tsx:18-24,232-236`
+- **Why it matters:** the UI shows canonical topic labels, but the search backend only matched slug/title/description/tag text.
+- **Concrete failure scenario:** typing the visible topic label (for example the seeded `E2E Smoke`) returns nothing even though matching photos are present.
+- **Suggested fix:** include canonical topic labels and aliases in the search query and return the label for rendering.

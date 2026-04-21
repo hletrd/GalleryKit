@@ -1,16 +1,16 @@
 /**
  * Storage Backend Singleton
  *
- * Provides a singleton StorageBackend instance based on the
- * `storage_backend` admin setting. Re-initializes when the
- * setting changes.
+ * Provides a singleton StorageBackend instance for the experimental
+ * storage abstraction. The singleton can be switched in-process, but
+ * the production upload / processing / serving paths still use direct
+ * filesystem code and do not read from this module yet.
  *
- * NOTE: The storage backend is not yet integrated into the image processing
- * pipeline. Direct fs operations are still used for uploads and serving.
- * This module provides the abstraction layer that will be used once
- * integration is complete. The admin settings page allows switching backends,
- * but the switch only affects the singleton state — actual file I/O still
- * goes through process-image.ts and serve-upload.ts directly.
+ * NOTE: This storage backend is not yet wired into the live image pipeline.
+ * Direct fs operations are still used for uploads, processing, and public
+ * serving. Switching backends here only changes the singleton state for
+ * code paths that explicitly call `getStorage()`; it does not migrate or
+ * redirect the active gallery data path on its own.
  *
  * Usage (once integrated):
  *   import { getStorage } from '@/lib/storage';
@@ -110,8 +110,9 @@ function validateStorageCredentials(type: StorageBackendType): void {
 }
 
 /**
- * Switch the storage backend type. Called when admin changes the setting.
- * Disposes the old backend and creates a new one. Rolls back on failure.
+ * Switch the experimental storage backend type for callers that explicitly
+ * use this abstraction. Disposes the old backend and creates a new one.
+ * Rolls back on failure.
  */
 export async function switchStorageBackend(type: StorageBackendType): Promise<void> {
     const state = getGlobalState();
@@ -178,8 +179,7 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
 }
 
 /**
- * Get the current backend status (type and initialization state).
- * Useful for admin UI to display storage health.
+ * Get the current experimental-backend status (type and initialization state).
  */
 export function getStorageBackendStatus(): { type: StorageBackendType; initialized: boolean } {
     const state = getGlobalState();

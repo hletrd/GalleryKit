@@ -1,322 +1,266 @@
 # Security Review Report
 
-**Scope:** `apps/web` Next.js app, auth/session stack, admin DB tooling, upload/share/public data paths, deploy/container config, dependency tree, and secrets/history scans.
+**Scope:** Repo-wide review of `apps/web` auth/session logic, admin/public server actions, API routes, upload/download/restore flows, share-link generation/validation, DB/schema/runtime scripts, deploy/container/nginx config, and critical security tests. Reviewed files included every security-relevant file under:
+- `apps/web/src/app/actions/*.ts`
+- `apps/web/src/app/api/**/*.ts*`
+- `apps/web/src/app/uploads/**/*.ts`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- public/share route entrypoints under `apps/web/src/app/[locale]/(public)/**`
+- `apps/web/src/lib/*.ts` and `apps/web/src/lib/storage/*.ts`
+- `apps/web/src/db/*.ts`, `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`
+- `apps/web/scripts/*`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`
+- critical regression tests in `apps/web/src/__tests__/*`
+
 **Risk Level:** MEDIUM
 
-## Inventory Reviewed
-
-### Auth / Authz / Session
-- `apps/web/src/app/actions/auth.ts`
-- `apps/web/src/lib/session.ts`
-- `apps/web/src/lib/api-auth.ts`
-- `apps/web/src/proxy.ts`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/lib/auth-rate-limit.ts`
-- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
-- `apps/web/src/app/[locale]/admin/page.tsx`
-- `apps/web/scripts/check-api-auth.ts`
-
-### Admin DB / Backup / Restore
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/app/api/admin/db/download/route.ts`
-- `apps/web/src/lib/db-restore.ts`
-- `apps/web/src/lib/sql-restore-scan.ts`
-
-### Public / Share / Upload / Privacy
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/app/actions/sharing.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/serve-upload.ts`
-- `apps/web/src/lib/validation.ts`
-- `apps/web/src/lib/sanitize.ts`
-- `apps/web/src/lib/upload-paths.ts`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/process-topic-image.ts`
-
-### Admin mutation surfaces
-- `apps/web/src/app/actions/admin-users.ts`
-- `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/seo.ts`
-- `apps/web/src/app/actions/topics.ts`
-- `apps/web/src/app/actions/tags.ts`
-
-### Infra / headers / deploy / storage
-- `apps/web/src/db/index.ts`
-- `apps/web/src/db/schema.ts`
-- `apps/web/next.config.ts`
-- `apps/web/nginx/default.conf`
-- `apps/web/Dockerfile`
-- `apps/web/docker-compose.yml`
-- `apps/web/deploy.sh`
-- `scripts/deploy-remote.sh`
-- `apps/web/src/lib/constants.ts`
-- `apps/web/src/lib/image-url.ts`
-
-### Dependency / secret review
-- `apps/web/package.json`
-- `package-lock.json`
-- `npm audit --json` (prod + full tree)
-- grep scan for secrets / unsafe patterns
-- `git log --all -G '(API[_-]?KEY|SECRET|TOKEN|PASSWORD|PRIVATE KEY|AKIA|SESSION_SECRET|DB_PASSWORD|ADMIN_PASSWORD)'`
-
 ## Summary
-- Critical issues: 0
-- High issues: 0
-- Medium issues: 3
-- Low issues: 2
-- Confirmed issues: 4
-- Likely issues: 1
-- Risks needing manual validation: 1
+- Critical Issues: 0
+- High Issues: 0
+- Medium Issues: 3
+- Low Issues: 2
 
-No tracked hardcoded secrets were found in committed files or via the git-history regex sweep. Ignored local secret files exist in the working tree (`.env.deploy`, `apps/web/.env.local`) but are not tracked by git in the current repository state.
+## Inventory / coverage notes
+Examined, without sampling, the code paths that control:
+- **Auth/authz/session:** `src/app/actions/auth.ts`, `src/lib/session.ts`, `src/proxy.ts`, `src/lib/api-auth.ts`, `src/lib/rate-limit.ts`, `src/lib/auth-rate-limit.ts`, `src/app/actions/admin-users.ts`
+- **Uploads/downloads/path handling:** `src/app/actions/images.ts`, `src/lib/process-image.ts`, `src/lib/process-topic-image.ts`, `src/lib/serve-upload.ts`, `src/lib/upload-paths.ts`, `src/lib/validation.ts`, `src/app/api/admin/db/download/route.ts`, `src/app/uploads/[...path]/route.ts`, `src/app/[locale]/(public)/uploads/[...path]/route.ts`
+- **Backup/restore/maintenance:** `src/app/[locale]/admin/db-actions.ts`, `src/lib/sql-restore-scan.ts`, `src/lib/db-restore.ts`, `src/lib/restore-maintenance.ts`, `src/lib/backup-filename.ts`
+- **Public data/share surfaces:** `src/lib/data.ts`, `src/app/actions/public.ts`, `src/app/actions/sharing.ts`, `src/app/[locale]/(public)/s/[key]/page.tsx`, `src/app/[locale]/(public)/g/[key]/page.tsx`
+- **Config/runtime/deploy:** `src/db/index.ts`, `src/db/schema.ts`, `apps/web/package.json`, `Dockerfile`, `docker-compose.yml`, `deploy.sh`, `scripts/deploy-remote.sh`, `nginx/default.conf`, DB bootstrap/migration scripts
+- **Regression evidence:** reviewed tests covering sessions, backup download, upload serving, restore stdin handling, SQL restore scan, validation, upload tracker, and rate limiting.
 
----
+## Confirmed / Likely / Manual-validation findings
 
-## Confirmed Issues
-
-### 1) Production CSP still allows inline script/style execution, weakening XSS containment
+### 1. Cross-instance restore protection is incomplete because the maintenance gate is process-local
 **Severity:** MEDIUM  
-**Category:** OWASP A05 Security Misconfiguration / A03 Injection mitigation weakness  
-**Location:** `apps/web/next.config.ts:56-92`  
-**Exploitability:** Remote, usually chained with any stored/reflected/client-side injection bug  
-**Blast Radius:** Full admin or user session compromise if any XSS lands; CSP will not meaningfully contain inline payloads  
-**Confidence:** High
+**Category:** OWASP A04 Insecure Design / restore integrity  
+**Status:** **Confirmed**  
+**Confidence:** High  
+**Location:**
+- `apps/web/src/lib/restore-maintenance.ts:1-56`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:243-287`
+- representative gate checks in `apps/web/src/app/actions/auth.ts:71-74,262-265`, `apps/web/src/app/actions/images.ts:86-89,353-356,439-442,568-571`, `apps/web/src/app/actions/sharing.ts:65-66,157-158,267-268`
+
+**Exploitability:** Authenticated admin or any in-flight authenticated mutation in a multi-instance deployment  
+**Blast Radius:** Database restore can complete while other instances still accept writes, leaving restored DB state diverged from filesystem, sessions, tags, uploads, or admin changes.
 
 **Issue:**
-Production responses set:
-- `script-src 'self' 'unsafe-inline' https://www.googletagmanager.com`
-- `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net`
-
-This means CSP does not block inline script execution, so it provides limited protection against future markup/script injection bugs. The external `cdn.jsdelivr.net` style allowance also expands supply-chain trust unnecessarily.
+`restoreDatabase()` correctly acquires a DB advisory lock, but the mutation-blocking “maintenance mode” uses `globalThis` state. That state exists only inside the current Node process. During a restore on instance A, instance B will still report `active: false` and continue to allow uploads, password changes, tag/topic edits, share-link mutations, etc.
 
 **Concrete failure scenario:**
-If any future bug lets attacker-controlled HTML land in a page (for example via metadata, translations, admin-editable content, or a dependency regression), an inline payload or event-handler-based payload is far more likely to execute because CSP explicitly permits inline code.
+An admin starts a restore on instance A. While MySQL is replaying the dump, another admin request lands on instance B and uploads an image or changes a password. The restore succeeds, but the post-restore system is no longer the restored snapshot the admin intended to recover.
 
-**Suggested fix:**
-Move to nonce- or hash-based CSP and remove `unsafe-inline` in production. Self-host any CSS you need instead of allowing a broad CDN origin.
+**Remediation:**
+Move the maintenance flag into a cross-process coordination primitive already trusted by all instances (DB row / advisory-lock-backed check / shared store), and have mutation guards query that shared state instead of `globalThis`.
 
 ```ts
-// BAD
-"script-src 'self' 'unsafe-inline' https://www.googletagmanager.com"
-"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+// BAD: process-local only
+const restoreMaintenanceKey = Symbol.for('gallerykit.restoreMaintenance');
 
-// GOOD (example direction)
-const nonce = crypto.randomUUID();
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'nonce-${nonce}' https://www.googletagmanager.com`,
-  `style-src 'self' 'nonce-${nonce}'`,
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self' https://www.google-analytics.com",
-  "frame-ancestors 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "object-src 'none'",
-].join('; ');
+export function isRestoreMaintenanceActive() {
+  return getRestoreMaintenanceState().active;
+}
+
+// GOOD: cross-instance gate backed by DB/shared store
+export async function isRestoreMaintenanceActive(): Promise<boolean> {
+  const [row] = await db
+    .select({ value: adminSettings.value })
+    .from(adminSettings)
+    .where(eq(adminSettings.key, 'restore_maintenance'))
+    .limit(1);
+  return row?.value === 'true';
+}
+
+export async function beginRestoreMaintenance(tx: DbTx) {
+  await tx.insert(adminSettings)
+    .values({ key: 'restore_maintenance', value: 'true' })
+    .onDuplicateKeyUpdate({ set: { value: 'true' } });
+}
+
+export async function endRestoreMaintenance(tx: DbTx) {
+  await tx.delete(adminSettings).where(eq(adminSettings.key, 'restore_maintenance'));
+}
 ```
 
 ---
 
-### 2) Unauthenticated health endpoint exposes DB liveness and performs attacker-triggerable DB work
-**Severity:** LOW  
-**Category:** OWASP A05 Security Misconfiguration / information exposure  
-**Location:** `apps/web/src/app/api/health/route.ts:1-17`  
-**Exploitability:** Remote, unauthenticated  
-**Blast Radius:** Operational visibility leakage; low-cost repeated probes hit the DB  
-**Confidence:** High
+### 2. The SQL restore scanner can likely be bypassed across chunk boundaries with >64 KiB token padding
+**Severity:** MEDIUM  
+**Category:** OWASP A03 Injection / unsafe restore pipeline  
+**Status:** **Likely risk**  
+**Confidence:** Medium  
+**Location:**
+- `apps/web/src/lib/sql-restore-scan.ts:1-75`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:327-344`
+
+**Exploitability:** Authenticated admin session, stolen admin session, or malicious insider uploading a crafted dump  
+**Blast Radius:** Malicious SQL such as `CREATE TRIGGER`, `CREATE FUNCTION`, `SET GLOBAL`, or `INTO OUTFILE` can survive the pre-scan and execute during restore.
 
 **Issue:**
-`GET /api/health` is publicly reachable and directly executes `SELECT 1` against the database, returning `200 {status:'ok'}` or `503 {status:'degraded'}`.
+The restore safety scan uses regex over 1 MiB chunks and preserves only a 64 KiB trailing carry-over (`SQL_SCAN_TAIL_BYTES`). If a banned token sequence is deliberately split across a chunk boundary with more than 64 KiB of whitespace/comment padding, the combined scan window can miss the full statement even though MySQL will still parse it.
 
 **Concrete failure scenario:**
-An attacker can continuously probe this endpoint to:
-- monitor DB availability during an attack or outage,
-- cheaply confirm whether the backing DB is reachable,
-- generate steady DB load from the internet without authentication.
+A crafted dump places `CREATE` near the end of chunk N and `TRIGGER` more than 64 KiB into chunk N+1, with whitespace or comment padding between them. The scanner never sees the complete dangerous statement in one combined string, but `mysql` still executes it when the file is replayed.
 
-This is not catastrophic, but it unnecessarily exposes operational state.
-
-**Suggested fix:**
-Restrict health checks to an internal network, a shared secret, or a reverse-proxy allowlist.
+**Remediation:**
+Replace regex chunk scanning with statement-aware tokenization/parsing, or drastically tighten the restore model to an allowlist of statements. If regex scanning remains, keep an overlap large enough for worst-case whitespace/comments and parse MySQL conditional comments/token boundaries explicitly.
 
 ```ts
-// BAD
-export async function GET() {
-  await db.execute(sql`SELECT 1`);
-  return Response.json({ status: 'ok' });
+// BAD: regex over bounded carry-over
+let scanTail = '';
+for (const chunk of chunks) {
+  const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk, 64 * 1024);
+  if (containsDangerousSql(combined)) throw new Error('disallowed');
+  scanTail = nextTail;
 }
 
-// GOOD
-export async function GET(request: Request) {
-  const token = request.headers.get('x-health-token');
-  if (token !== process.env.HEALTHCHECK_TOKEN) {
-    return new Response('Unauthorized', { status: 401 });
+// GOOD: token/statement-aware scanning
+for await (const statement of parseMysqlStatements(createReadStream(tempPath))) {
+  if (!isAllowedRestoreStatement(statement)) {
+    throw new Error(`Disallowed SQL statement: ${statement.type}`);
   }
-
-  await db.execute(sql`SELECT 1`);
-  return Response.json({ status: 'ok' });
 }
 ```
 
 ---
 
-### 3) Vulnerable dev/build dependency chain present (`drizzle-kit` -> `esbuild` advisory)
-**Severity:** MEDIUM  
-**Category:** OWASP A06 Vulnerable and Outdated Components  
-**Location:** `apps/web/package.json:56-70` (`drizzle-kit`) plus `npm audit --json` output  
-**Exploitability:** Primarily local/dev/build-time; depends on developer using an exposed dev server or vulnerable tooling path  
-**Blast Radius:** Developer workstation / CI exposure rather than direct production runtime compromise  
-**Confidence:** High
-
-**Issue:**
-Full dependency audit reports a moderate advisory in the `drizzle-kit`/`@esbuild-kit`/`esbuild` chain. Reported issue:
-- `esbuild enables any website to send any requests to the development server and read the response` (`GHSA-67mh-4wv8-2f99`)
-
-Because `drizzle-kit` is a dev dependency, this is not a direct production-runtime issue, but it still matters for developer and CI environments.
-
-**Concrete failure scenario:**
-A developer running vulnerable tooling locally while browsing a malicious site could expose local dev/build endpoints or data, depending on how the tooling is used and network-bound.
-
-**Suggested fix:**
-Upgrade away from the vulnerable chain, or pin a safe version if a direct `drizzle-kit` upgrade path exists.
-
-```json
-// BAD
-"devDependencies": {
-  "drizzle-kit": "^0.31.10"
-}
-
-// GOOD (example direction; pick a version that clears the audit)
-"devDependencies": {
-  "drizzle-kit": "<patched-version>"
-}
-```
-
-Also re-run:
-- `npm audit --json`
-- any migration / schema-generation workflows
-
----
-
-### 4) Public share routes still accept short legacy keys
+### 3. Public share readers still accept short legacy keys, which are too weak if any such rows still exist
 **Severity:** MEDIUM  
 **Category:** OWASP A01 Broken Access Control / token entropy weakness  
+**Status:** **Likely risk requiring manual validation**  
+**Confidence:** High on code path, Medium on actual exposure  
 **Location:**
-- `apps/web/src/lib/data.ts:492-495`
-- `apps/web/src/lib/data.ts:534-540`
-- current generators are `10` chars only in `apps/web/src/app/actions/sharing.ts:17-18,109,214`
-**Exploitability:** Remote, unauthenticated, only if short legacy keys still exist in the database  
-**Blast Radius:** Unauthorized access to shared photos or groups that still use legacy low-entropy tokens  
-**Confidence:** Medium
+- `apps/web/src/app/actions/sharing.ts:17-18,109,214`
+- `apps/web/src/lib/data.ts:492-495,538-540`
+
+**Exploitability:** Remote, unauthenticated, if legacy 5- or 6-character keys remain in the database  
+**Blast Radius:** Unauthorized access to publicly shared photos or groups that still use old short tokens.
 
 **Issue:**
-New share keys are generated at length `10`, but public read paths still accept:
-- photo keys of length `5` or `10`
-- group keys of length `6` or `10`
+New share links are generated at 10 Base56 characters, but the public readers still accept image keys of length 5 or 10 and group keys of length 6 or 10. That preserves backward compatibility for a materially weaker key space.
 
-That preserves backward compatibility, but also preserves much weaker token spaces for any legacy rows that were never rotated.
+**Concrete attack scenario:**
+If the database still contains older 5-character photo keys or 6-character group keys, an attacker can online-enumerate the far smaller search space and discover valid shared resources without any admin compromise.
 
-**Concrete failure scenario:**
-If legacy 5-character photo share keys or 6-character group keys still exist, an unauthenticated attacker can brute-force or enumerate them far more cheaply than the 10-character scheme. That could expose private shared albums or images without admin access.
-
-**Suggested fix:**
-Either rotate all legacy keys to 10-character values and then reject short lengths, or gate legacy-key support behind a one-time migration flag.
+**Remediation:**
+Inventory and rotate legacy short keys, then remove short-length acceptance from public readers.
 
 ```ts
-// BAD
+// BAD: legacy weak-key compatibility in public readers
 if (!isBase56(trimmedKey, [5, 10])) return null;
 if (!isBase56(trimmedKey, [6, 10])) return null;
 
-// GOOD
+// GOOD: only accept strong keys after migration
 if (!isBase56(trimmedKey, 10)) return null;
 ```
 
-If legacy compatibility is temporarily required, add a migration to enumerate and rotate all short keys before removing support.
+**Manual validation:**
+Run a one-time production query to confirm whether short keys still exist:
 
----
+```sql
+SELECT COUNT(*) AS short_photo_keys
+FROM images
+WHERE share_key IS NOT NULL AND CHAR_LENGTH(share_key) < 10;
 
-## Risks Needing Manual Validation
-
-### 5) Proxy trust misconfiguration collapses all rate limits to `unknown`
-**Severity:** LOW  
-**Category:** OWASP A05 Security Misconfiguration  
-**Location:** `apps/web/src/lib/rate-limit.ts:59-82`; deployment expectation in `apps/web/docker-compose.yml:13-18`  
-**Exploitability:** Remote if production is behind a proxy but `TRUST_PROXY=true` is not set  
-**Blast Radius:** One actor can consume the shared `unknown` bucket and throttle login/search/share/upload actions for everyone  
-**Confidence:** High (behavior confirmed, deployment status needs validation)
-
-**Issue:**
-When `TRUST_PROXY` is not explicitly `true`, proxy headers are ignored and the app uses the literal key `unknown` for rate-limited actions.
-
-**Concrete failure scenario:**
-If production traffic really arrives through nginx/load balancers but `TRUST_PROXY` is missing, one remote client can burn the shared `unknown` bucket and cause cross-user throttling or admin lockout side effects.
-
-**Suggested fix:**
-Validate every deployed environment sets `TRUST_PROXY=true` only when the proxy chain is trusted and actually injects `X-Forwarded-For` / `X-Real-IP`.
-
-```ts
-// Current defensive behavior
-if (process.env.TRUST_PROXY === 'true') {
-  // trust forwarded headers
-}
-return 'unknown';
+SELECT COUNT(*) AS short_group_keys
+FROM shared_groups
+WHERE `key` IS NOT NULL AND CHAR_LENGTH(`key`) < 10;
 ```
 
-Operationally, add a startup check in production that warns or fails closed when proxy headers are present but `TRUST_PROXY` is absent.
+---
+
+### 4. The health endpoint is intentionally unauthenticated and reveals DB availability to the public internet
+**Severity:** LOW  
+**Category:** OWASP A05 Security Misconfiguration  
+**Status:** **Confirmed**  
+**Confidence:** High  
+**Location:**
+- `apps/web/src/app/api/health/route.ts:1-16`
+- `apps/web/Dockerfile:69-71`
+
+**Exploitability:** Remote, unauthenticated  
+**Blast Radius:** Recon only; exposes whether the app can currently reach the database.
+
+**Issue:**
+`/api/health` returns `200 {status:"ok"}` or `503 {status:"degraded"}` to anyone. That is useful for Docker health checks, but it also gives attackers a cheap external signal about backend state and outage windows.
+
+**Concrete failure scenario:**
+An attacker polls `/api/health` to identify deployment restarts, DB outages, or recovery windows, then times login brute-force or operational probing around degraded periods.
+
+**Remediation:**
+If public health visibility is unnecessary, restrict it to localhost/reverse proxy or require a shared header. If it must remain public, treat it as an accepted low-severity exposure.
+
+```ts
+// GOOD: internal/shared-secret health check
+export async function GET(request: Request) {
+  if (request.headers.get('x-health-token') !== process.env.HEALTHCHECK_TOKEN) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  // ...existing DB probe...
+}
+```
 
 ---
 
-## What I Checked and What Held Up
+### 5. `npm audit` reports a moderate dev-toolchain advisory through `drizzle-kit` → `esbuild`
+**Severity:** LOW  
+**Category:** Vulnerable and Outdated Components  
+**Status:** **Confirmed**  
+**Confidence:** High  
+**Location:**
+- `apps/web/package.json:56-70` (`drizzle-kit` devDependency)
+- `package-lock.json:1266-1287,1307-1547` (`@esbuild-kit/*`, `esbuild 0.18.20` resolution chain)
 
-### Secrets scan
-- No tracked hardcoded secrets found in committed files reviewed.
-- Git history regex scan did not surface committed secret material in tracked project files.
-- Ignored local secret files exist in the working tree (`.env.deploy`, `apps/web/.env.local`), but `git ls-files` confirms they are currently untracked.
+**Exploitability:** Developer-machine / local dev tooling context, not the production request path  
+**Blast Radius:** Primarily local development exposure if affected tooling is running.
 
-### Auth/authz
-- Admin route protection exists both at page/layout level and API-wrapper level.
-- `/api/admin/db/download` is wrapped with `withAdminAuth(...)`.
-- Session cookies are `HttpOnly`, `SameSite=Lax`, and conditionally `Secure`.
-- Session secrets correctly refuse DB fallback in production.
-- Session tokens are HMAC-signed and verified with `timingSafeEqual`.
-- Password hashing uses Argon2id.
-- Login and password-change flows include DB-backed + in-memory rate limiting.
+**Issue:**
+`npm audit --json` reports moderate vulnerabilities in the installed dev dependency chain (`drizzle-kit` → `@esbuild-kit/esm-loader` → `@esbuild-kit/core-utils` → `esbuild`). The advisory returned was `GHSA-67mh-4wv8-2f99` for esbuild’s dev-server behavior.
 
-### File/path handling
-- Uploaded derivative serving includes segment validation, realpath containment, symlink rejection, and type/extension checks.
-- Backup download route includes filename validation, symlink rejection, and realpath containment.
-- Restore flow streams to disk, caps size, and scans SQL for dangerous statements before invoking `mysql`.
+**Remediation:**
+Update `drizzle-kit`/transitives to a non-vulnerable resolution and re-run audit. Treat as lower priority than runtime-path issues because the production server path does not import this chain.
 
-### DB child-process handling
-- Backup/restore tooling correctly avoids leaking DB creds in argv by using `MYSQL_*` env vars instead of command-line password flags.
-- `HOME` is intentionally excluded from child-process env to avoid accidental `~/.my.cnf` injection.
+## Secrets scan
+- **Tracked-source result:** no committed live secrets found in current tracked source/config reviewed.
+- **History result:** targeted history review of `apps/web/.env.local.example` confirmed an **older weak default bootstrap password** existed historically (`ADMIN_PASSWORD=password`), but I did **not** confirm a current tracked real secret in source. Current HEAD examples use placeholders.
+- **Workspace note:** `.env.deploy` exists locally in the workspace, but `git ls-files` shows it is untracked/gitignored, so this is **not** a repository-tracked secret leak in the current state.
 
----
+## OWASP / control-by-control verdict
+- **A01 Broken Access Control:** generally solid on admin routes and server actions; notable remaining issue is legacy short share-key acceptance.
+- **A02 Cryptographic Failures:** session cookies are HMAC-signed with `timingSafeEqual`; Argon2id is used for passwords; production correctly refuses DB-backed session-secret fallback.
+- **A03 Injection:** app queries use Drizzle parameterization; main remaining concern is restore-pipeline SQL scanning, not normal CRUD queries.
+- **A04 Insecure Design:** multi-instance restore maintenance remains the main design flaw.
+- **A05 Security Misconfiguration:** public `/api/health` is a low-grade exposure; deploy docs/nginx headers are otherwise thoughtful.
+- **A06 Vulnerable Components:** dev-toolchain advisory remains open.
+- **A07 Identification/Auth Failures:** login/password flows are well-hardened with IP + account rate limiting, session invalidation, and secure cookie settings.
+- **A08 Software/Data Integrity Failures:** restore pipeline is partially hardened, but the scan model is still regex-based and therefore brittle.
+- **A09 Logging/Monitoring Failures:** audit logging is present on sensitive admin actions and backup downloads.
+- **A10 SSRF:** no confirmed SSRF sink found in live request paths reviewed; URL handling (`seo_og_image_url`, `IMAGE_BASE_URL`, S3/MinIO config) is validation-heavy and not used for attacker-triggered server-side fetches in the current request path.
 
-## Missed-Issues Sweep
+## Areas reviewed with no confirmed issue found
+- **Path traversal / symlink escape:** upload serving and backup download routes perform segment validation, containment checks, symlink checks, and `realpath` verification.
+- **File upload handling:** original uploads are stored outside the public web root, file size and pixel limits exist, and processed derivatives are served from allowlisted dirs/extensions only.
+- **Download handling:** backup filenames are strictly constrained and streamed with no-cache headers.
+- **Auth/session:** secure cookie flags, HMAC signing, expiry cleanup, and session invalidation on password change all look materially sound.
+- **XSS:** JSON-LD `dangerouslySetInnerHTML` uses `safeJsonLd()` to escape `<`; no unsafe HTML sink was found beyond that controlled pattern.
+- **DB transport security:** runtime DB pool and migration helper auto-enable TLS for non-local DB hosts unless explicitly disabled with `DB_SSL=false`.
 
-I did a final sweep across:
-- all route handlers under `src/app/api/**/route.ts(x)`
-- all server actions under `src/app/actions/**`
-- auth/session/rate-limit helpers
-- upload/share/privacy data paths
-- deploy/container config
-- secret regex scan
-- dependency audit
+## Final missed-issues sweep
+Performed final sweep across:
+- auth/session/proxy/rate-limit code
+- upload/download/path/restore/storage code
+- public share/search/public data surfaces
+- deploy/runtime/Docker/nginx configs
+- secrets regex scan, targeted git-history scan, and `npm audit --json`
+- dangerous sinks grep (`dangerouslySetInnerHTML`, `eval`, `fetch`, process-spawn/file I/O)
 
-I did **not** find:
-- confirmed SQL injection in application query code,
-- confirmed auth bypass in admin routes/actions,
-- confirmed path traversal in upload/download handlers,
-- confirmed committed plaintext secrets in tracked files,
-- confirmed public leakage of GPS/original filenames from the public data selectors.
+No additional confirmed repo-tracked secret, SSRF sink, or path traversal issue surfaced beyond the findings above.
 
 ## Security Checklist
 - [x] No tracked hardcoded secrets found in reviewed committed files
-- [x] Input validation reviewed across auth/admin/public/share/upload flows
-- [x] Injection prevention reviewed
-- [x] Authentication/authorization reviewed
-- [x] Dependency audit run
-
+- [x] Input validation reviewed across auth, topics, tags, uploads, backup download, and share flows
+- [x] Injection prevention reviewed for normal DB queries and restore pipeline
+- [x] Authentication/authorization reviewed for admin routes, server actions, and API routes
+- [x] Session handling and crypto reviewed
+- [x] File uploads/downloads and path traversal controls reviewed
+- [x] Dependency audit run (`npm audit --json`)
+- [x] Final missed-issues sweep completed
