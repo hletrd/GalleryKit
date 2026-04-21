@@ -69,3 +69,26 @@ export async function deleteOriginalUploadFile(filename: string) {
         fs.unlink(path.join(LEGACY_UPLOAD_DIR_ORIGINAL, filename)).catch(() => {}),
     ]);
 }
+
+export async function assertNoLegacyPublicOriginalUploads(options: { failInProduction?: boolean } = {}) {
+    let fileCount = 0;
+    try {
+        const entries = await fs.readdir(LEGACY_UPLOAD_DIR_ORIGINAL, { withFileTypes: true });
+        fileCount = entries.filter((entry) => entry.isFile()).length;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return;
+        }
+        throw error;
+    }
+    if (fileCount === 0) {
+        return;
+    }
+
+    const message = `Found ${fileCount} legacy original upload(s) in ${LEGACY_UPLOAD_DIR_ORIGINAL}. Move originals to ${UPLOAD_DIR_ORIGINAL} before serving traffic.`;
+    if (options.failInProduction && process.env.NODE_ENV === 'production') {
+        throw new Error(message);
+    }
+
+    console.warn(`[uploads] ${message}`);
+}

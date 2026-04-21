@@ -92,6 +92,18 @@ cd gallerykit
 npm install
 ```
 
+### Remote Deploy Helper
+
+To let local automation deploy without re-entering SSH details each run, keep the remote deploy command in a gitignored root `.env.deploy` file:
+
+```bash
+cp .env.deploy.example .env.deploy
+$EDITOR .env.deploy
+npm run deploy
+```
+
+The helper script reads `DEPLOY_CMD` from `.env.deploy` and executes it verbatim.
+
 ### Environment Setup
 
 ```bash
@@ -146,6 +158,8 @@ docker compose -f apps/web/docker-compose.yml up -d --build
 ```
 
 The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
+
+Legacy originals must not remain under `public/uploads/original/`. The startup path now fails closed in production if that legacy public-original directory still contains files.
 
 ## Tech Stack
 

@@ -40,7 +40,7 @@ test.describe('admin workflows (opt-in)', () => {
   test('admin upload workflow works on the dashboard', async ({ page }) => {
     await loginAsAdmin(page);
 
-    const uploadPath = path.resolve(process.cwd(), 'public/uploads/original/e2e-landscape.jpg');
+    const uploadPath = path.resolve(process.cwd(), 'e2e/fixtures/e2e-landscape.jpg');
     const jpegBuffer = await fs.readFile(uploadPath);
 
     await page.locator('#upload-topic').selectOption('e2e-smoke');

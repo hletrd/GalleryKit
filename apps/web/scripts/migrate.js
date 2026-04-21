@@ -74,6 +74,22 @@ function migrateLegacyOriginalUploads(appRoot) {
     }
 }
 
+function assertLegacyOriginalUploadsCleared(appRoot) {
+    if (process.env.NODE_ENV !== 'production') {
+        return;
+    }
+
+    const { legacyOriginalRoot } = resolveUploadRoots(appRoot);
+    if (!fs.existsSync(legacyOriginalRoot)) {
+        return;
+    }
+
+    const remainingFiles = fs.readdirSync(legacyOriginalRoot, { withFileTypes: true }).filter((entry) => entry.isFile());
+    if (remainingFiles.length > 0) {
+        throw new Error(`Refusing to start with ${remainingFiles.length} original upload(s) still under the public web root (${legacyOriginalRoot}).`);
+    }
+}
+
 function getRequiredEnv(name) {
     const value = process.env[name]?.trim();
     if (!value) {
@@ -495,6 +511,7 @@ async function seedAdmin(connection) {
 (async () => {
     const appRoot = resolveAppRoot();
     migrateLegacyOriginalUploads(appRoot);
+    assertLegacyOriginalUploadsCleared(appRoot);
     const migrationsFolder = path.join(appRoot, 'drizzle');
     const dbName = getRequiredEnv('DB_NAME');
     const latestMigration = getLatestMigration(migrationsFolder);

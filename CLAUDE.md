@@ -59,7 +59,7 @@ npm run db:seed               # Seed admin user
 npm run init                  # Full DB initialization
 
 # Linting
-npm run lint                  # ESLint check
+npm run lint --workspace=apps/web  # ESLint check
 
 # Docker Deployment
 docker compose -f apps/web/docker-compose.yml up -d --build
@@ -225,3 +225,14 @@ The repository has a formal test surface:
 5. Initialize DB: container runs migrations automatically
 6. Push schema indexes: `npm run db:push` (from apps/web/)
 7. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`
+
+## Remote Deploy Helper
+
+The repo-level deploy helper reads a gitignored root `.env.deploy` file and runs the exact `DEPLOY_CMD` from it:
+
+```bash
+cp .env.deploy.example .env.deploy
+npm run deploy
+```
+
+Keep real SSH keys, hostnames, and commands in `.env.deploy`; never commit that file.

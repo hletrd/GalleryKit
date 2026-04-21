@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import dotenv from 'dotenv';
 import { eq, inArray } from 'drizzle-orm';
 import { generateBase56 } from '../src/lib/base56';
+import { UPLOAD_ORIGINAL_ROOT, UPLOAD_ROOT } from '../src/lib/upload-paths';
 
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
@@ -47,9 +48,9 @@ const seedImages: SeedImage[] = [
   },
 ];
 
-const uploadRoot = path.join(process.cwd(), 'public', 'uploads');
+const uploadRoot = UPLOAD_ROOT;
 const dirs = {
-  original: path.join(uploadRoot, 'original'),
+  original: UPLOAD_ORIGINAL_ROOT,
   jpeg: path.join(uploadRoot, 'jpeg'),
   webp: path.join(uploadRoot, 'webp'),
   avif: path.join(uploadRoot, 'avif'),

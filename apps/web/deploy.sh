@@ -18,6 +18,12 @@ if [ ! -f apps/web/.env.local ]; then
     exit 1
 fi
 
+if [ ! -f apps/web/src/site-config.json ]; then
+    echo "Error: apps/web/src/site-config.json file not found!"
+    echo "Copy apps/web/src/site-config.example.json to apps/web/src/site-config.json and customize it before deploying."
+    exit 1
+fi
+
 echo "Building and Starting Containers..."
 
 # Build and start detached (docker-compose.yml references Dockerfile via relative paths from repo root)

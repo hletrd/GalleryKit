@@ -14,6 +14,7 @@ apps/web/data/
 test
 .omc
 .omx/
+.env.deploy
 .context/
 .agent/
 apps/web/test-results/
