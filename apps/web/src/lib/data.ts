@@ -38,6 +38,8 @@ function bufferGroupViewCount(groupId: number) {
 
 let isFlushing = false;
 
+const FLUSH_CHUNK_SIZE = 20; // Process view-count updates in chunks to limit concurrent DB promises
+
 async function flushGroupViewCounts() {
     if (isFlushing) return; // Prevent concurrent flush
     isFlushing = true;
@@ -46,24 +48,31 @@ async function flushGroupViewCounts() {
     viewCountBuffer.clear();
     let succeeded = 0;
     try {
-        await Promise.all(
-            [...batch].map(([groupId, count]) =>
-                db.update(sharedGroups)
-                    .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
-                    .where(eq(sharedGroups.id, groupId))
-                    .then((result) => { succeeded++; return result; })
-                    .catch(() => {
-                        // Re-buffer failed increment in one operation with capacity check.
-                        // Using a single Map.set instead of per-increment calls avoids O(n)
-                        // overhead when count is large (e.g., accumulated during DB outage).
-                        if (viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)) {
-                            console.warn(`[viewCount] Buffer at capacity, dropping re-buffered increment for group ${groupId}`);
-                            return;
-                        }
-                        viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
-                    })
-            )
-        );
+        // Process in chunks to avoid creating 1000+ concurrent promises when the
+        // buffer is at capacity. The connection pool (10) serializes execution
+        // anyway, so chunking reduces memory overhead without hurting throughput.
+        const entries = [...batch];
+        for (let i = 0; i < entries.length; i += FLUSH_CHUNK_SIZE) {
+            const chunk = entries.slice(i, i + FLUSH_CHUNK_SIZE);
+            await Promise.all(
+                chunk.map(([groupId, count]) =>
+                    db.update(sharedGroups)
+                        .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
+                        .where(eq(sharedGroups.id, groupId))
+                        .then((result) => { succeeded++; return result; })
+                        .catch(() => {
+                            // Re-buffer failed increment in one operation with capacity check.
+                            // Using a single Map.set instead of per-increment calls avoids O(n)
+                            // overhead when count is large (e.g., accumulated during DB outage).
+                            if (viewCountBuffer.size >= MAX_VIEW_COUNT_BUFFER_SIZE && !viewCountBuffer.has(groupId)) {
+                                console.warn(`[viewCount] Buffer at capacity, dropping re-buffered increment for group ${groupId}`);
+                                return;
+                            }
+                            viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
+                        })
+                )
+            );
+        }
     } finally {
         isFlushing = false;
         // Update backoff counter: reset on any success, increment on total failure

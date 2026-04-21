@@ -12,7 +12,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, loginRateLimit } from '@/lib/rate-limit';
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
@@ -107,6 +107,21 @@ export async function login(prevState: { error?: string } | null, formData: Form
         // DB unavailable — rely on in-memory Map
     }
 
+    // ── Account-scoped rate limit: throttle per-username, not just per-IP ──
+    // This prevents distributed brute-force attacks where each IP gets a fresh
+    // budget but all target the same account. The bucket key is prefixed with
+    // "acct:" to avoid collisions with IP-based buckets.
+    const normalizedUsername = username.trim().toLowerCase();
+    const accountRateLimitKey = `acct:${normalizedUsername}`;
+    try {
+        const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        if (accountLimit.limited) {
+            return { error: t('tooManyAttempts') };
+        }
+    } catch {
+        // DB unavailable — IP-based limit still applies
+    }
+
     // ── Increment rate limit BEFORE the expensive Argon2 verify (TOCTOU fix) ──
     // Without this, concurrent requests all pass the check before any of them
     // record the failed attempt, allowing burst brute-force attacks.
@@ -115,6 +130,8 @@ export async function login(prevState: { error?: string } | null, formData: Form
         limitData.lastAttempt = now;
         loginRateLimit.set(ip, limitData);
         await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+        // Also increment account-scoped bucket
+        await incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
     } catch (err) {
         console.debug('Failed to pre-increment login rate limit:', err);
     }
@@ -139,11 +156,17 @@ export async function login(prevState: { error?: string } | null, formData: Form
             return { error: t('invalidCredentials') };
         }
 
-        // Login succeeded — roll back the pre-incremented rate limit counter
+        // Login succeeded — roll back the pre-incremented rate limit counters
+        // (both IP-scoped and account-scoped)
         try {
             await clearSuccessfulLoginAttempts(ip);
         } catch (err) {
             console.error('Failed to reset login rate limit for IP:', ip, err);
+        }
+        try {
+            await resetRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
+        } catch (err) {
+            console.debug('Failed to reset account-scoped login rate limit:', err);
         }
         await logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
@@ -199,6 +222,11 @@ export async function login(prevState: { error?: string } | null, formData: Form
             await clearSuccessfulLoginAttempts(ip);
         } catch (rollbackErr) {
             console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
+        }
+        try {
+            await resetRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
+        } catch (rollbackErr) {
+            console.debug('Failed to roll back account-scoped login rate limit after unexpected error:', rollbackErr);
         }
         return { error: t('authFailed') };
     }
