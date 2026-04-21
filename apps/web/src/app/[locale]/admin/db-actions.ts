@@ -20,7 +20,7 @@ import { createBackupFilename } from "@/lib/backup-filename";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
 import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
-import { MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
+import { isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 
 function escapeCsvField(value: string): string {
     // Strip null bytes, tab, and other control characters (except \r\n which are handled below)
@@ -233,9 +233,10 @@ export async function dumpDatabase() {
     });
 }
 
-// Keep in sync with next.config.ts `serverActions.bodySizeLimit` — uploads above
-// that value are rejected by the Next.js framework before reaching this action,
-// so a larger value here would be misleading.
+// Restore intentionally uses a much smaller app-level cap than the generic
+// server-action transport budget. Keep the UI/docs explicit about the 250 MB
+// restore limit because Next.js may accept a larger request body before this
+// action rejects it.
 // DB advisory lock: prevents concurrent 250MB uploads filling /tmp.
 // GET_LOCK is released automatically on connection close (crash-safe).
 
@@ -370,14 +371,28 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         const readStream = createReadStream(tempPath);
         let settled = false;
 
-        // Register all event handlers BEFORE piping to prevent missed events
-        readStream.on('error', async (err) => {
+        const failRestore = async (error: string, logLabel: string, reason: unknown) => {
             if (settled) return;
             settled = true;
-            console.error('Failed to read restore file:', err);
-            restore.stdin.end();
+            console.error(logLabel, reason);
+            readStream.destroy();
+            restore.stdin.destroy();
+            restore.kill();
             await fs.unlink(tempPath).catch(() => {});
-            resolve({ success: false, error: t('failedToReadRestore') });
+            resolve({ success: false, error });
+        };
+
+        // Register all event handlers BEFORE piping to prevent missed events
+        readStream.on('error', async (err) => {
+            await failRestore(t('failedToReadRestore'), 'Failed to read restore file:', err);
+        });
+
+        restore.stdin.on('error', async (err: NodeJS.ErrnoException) => {
+            if (isIgnorableRestoreStdinError(err)) {
+                return;
+            }
+
+            await failRestore(t('restoreFailed'), 'mysql restore stdin error:', err);
         });
 
         restore.stderr.on('data', (data: Buffer) => {
@@ -405,11 +420,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         });
 
         restore.on('error', async (err: Error) => {
-            if (settled) return;
-            settled = true;
-            console.error('mysql restore spawn error:', err);
-            await fs.unlink(tempPath).catch(() => {});
-            resolve({ success: false, error: t('restoreFailed') });
+            await failRestore(t('restoreFailed'), 'mysql restore spawn error:', err);
         });
 
         // Start piping after all handlers are registered

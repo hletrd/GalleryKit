@@ -15,3 +15,12 @@ export function formatBinarySize(bytes: number): string {
 }
 
 export const MAX_RESTORE_SIZE_LABEL = formatBinarySize(MAX_RESTORE_SIZE_BYTES);
+
+export function isIgnorableRestoreStdinError(error: unknown): boolean {
+    if (!error || typeof error !== 'object' || !('code' in error)) {
+        return false;
+    }
+
+    const code = String((error as { code?: unknown }).code ?? '');
+    return code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED';
+}
