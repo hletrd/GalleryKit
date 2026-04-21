@@ -141,7 +141,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
             <div
                 ref={sheetRef}
                 role="dialog"
-                aria-modal="true"
+                aria-modal={sheetState === 'expanded' ? 'true' : undefined}
                 aria-label={t('viewer.bottomSheet')}
                 className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl shadow-2xl transition-transform duration-300 ease-out"
                 style={{

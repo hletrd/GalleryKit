@@ -527,15 +527,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             </CardContent>
                             <CardFooter>
                                 {downloadHref && (
-                                    <a
-                                        href={downloadHref}
-                                        download={`photo-${image.id}.${downloadExt}`}
-                                        className="w-full"
-                                    >
-                                        <Button className="w-full gap-2">
+                                    <Button asChild className="w-full gap-2">
+                                        <a
+                                            href={downloadHref}
+                                            download={`photo-${image.id}.${downloadExt}`}
+                                        >
                                             <Download className="h-4 w-4" /> {t('viewer.downloadOriginal')}
-                                        </Button>
-                                    </a>
+                                        </a>
+                                    </Button>
                                 )}
                             </CardFooter>
                         </Card>
