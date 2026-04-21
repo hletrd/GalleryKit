@@ -140,6 +140,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     const [currentTopic] = await db.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanCurrentSlug)).limit(1);
+    if (!currentTopic) {
+        return { error: t('topicNotFound') };
+    }
     const previousImageFilename = currentTopic?.image_filename ?? null;
 
     if (slug !== cleanCurrentSlug && await topicRouteSegmentExists(slug)) {
@@ -156,13 +159,14 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     try {
+        let affectedRows = 0;
 
         if (slug !== cleanCurrentSlug) {
             // Cascade slug change in a transaction: update references first (while old FK target exists), then rename the PK
             await db.transaction(async (tx) => {
                 await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
                 await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
-                await tx.update(topics)
+                const [updateResult] = await tx.update(topics)
                     .set({
                         label,
                         slug,
@@ -170,15 +174,24 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                         ...(imageFilename ? { image_filename: imageFilename } : {})
                     })
                     .where(eq(topics.slug, cleanCurrentSlug));
+                affectedRows = updateResult.affectedRows;
             });
         } else {
-            await db.update(topics)
+            const [updateResult] = await db.update(topics)
                 .set({
                     label,
                     order,
                     ...(imageFilename ? { image_filename: imageFilename } : {})
                 })
                 .where(eq(topics.slug, cleanCurrentSlug));
+            affectedRows = updateResult.affectedRows;
+        }
+
+        if (affectedRows === 0) {
+            if (imageFilename) {
+                await deleteTopicImage(imageFilename);
+            }
+            return { error: t('topicNotFound') };
         }
 
         if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
@@ -232,6 +245,9 @@ export async function deleteTopic(slug: string) {
             const [delResult] = await tx.delete(topics).where(eq(topics.slug, cleanSlug));
             deletedRows = delResult.affectedRows;
         });
+        if (deletedRows === 0) {
+            return { error: t('topicNotFound') };
+        }
         if (deletedImageFilename) {
             await deleteTopicImage(deletedImageFilename);
         }

@@ -437,18 +437,27 @@ export async function deleteImages(ids: number[]) {
         queueState.enqueued.delete(id);
     }
 
-    // Log audit event before the transaction — we already verified the images exist
-    // and have admin context. Logging here ensures the audit is recorded even if
-    // concurrent deletion causes the transaction to delete 0 rows (matches deleteImage pattern).
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', foundIds.join(','), undefined, { count: foundIds.length, requested: ids.length, notFound: notFoundCount }).catch(console.debug);
-
     // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
+    let deletedRows = 0;
     if (foundIds.length > 0) {
         await db.transaction(async (tx) => {
             await tx.delete(imageTags).where(inArray(imageTags.imageId, foundIds));
-            await tx.delete(images).where(inArray(images.id, foundIds));
+            const [deleteResult] = await tx.delete(images).where(inArray(images.id, foundIds));
+            deletedRows = deleteResult.affectedRows;
         });
+    }
+
+    const staleCount = Math.max(foundIds.length - deletedRows, 0);
+    const currentUser = await getCurrentUser();
+    if (deletedRows > 0) {
+        logAuditEvent(currentUser?.id ?? null, 'images_batch_delete', 'image', 'batch-delete', undefined, {
+            requestedIds: ids,
+            foundIds,
+            requestedCount: ids.length,
+            deletedCount: deletedRows,
+            staleCount,
+            notFoundCount,
+        }).catch(console.debug);
     }
 
     // Clean up files deterministically (no readdir) for all images concurrently
@@ -473,8 +482,8 @@ export async function deleteImages(ids: number[]) {
         }
     }));
 
-    const successCount = foundIds.length;
-    const errorCount = notFoundCount;
+    const successCount = deletedRows;
+    const errorCount = notFoundCount + staleCount;
 
     const affectedTopics = new Set(imageRecords.map(r => r.topic));
 
