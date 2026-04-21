@@ -235,4 +235,4 @@ cp .env.deploy.example .env.deploy
 npm run deploy
 ```
 
-Keep real SSH keys, hostnames, and optional `DEPLOY_CMD` overrides in `.env.deploy`; never commit that file.
+Keep real SSH keys, hostnames, and optional `DEPLOY_REMOTE_SCRIPT` / `DEPLOY_CMD` overrides in `.env.deploy`; never commit that file.

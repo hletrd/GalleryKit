@@ -379,7 +379,7 @@ export async function getImage(id: number) {
         return null;
     }
 
-    // Only return processed images (processed is true OR null/undefined for legacy)
+    // Only return explicitly processed images.
     const [image] = await db.select({
         ...publicSelectFields,
         blur_data_url: images.blur_data_url,

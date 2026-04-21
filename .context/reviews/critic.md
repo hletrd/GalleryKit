@@ -1,102 +1,96 @@
-# Cycle 2 ultradeep critic review
+# Cycle 3 critic review
 
 ## Inventory / review surface
 
-Broad inspection covered:
-- repo guidance and docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`
-- deploy/runtime: root `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`
-- app metadata + public surface: `apps/web/src/app/sitemap.ts`, `manifest.ts`, `robots.ts`, public pages under `apps/web/src/app/[locale]/(public)/...`
-- auth/admin/security: `proxy.ts`, `lib/session.ts`, `lib/api-auth.ts`, `lib/rate-limit.ts`, `app/actions/auth.ts`, `app/actions/admin-users.ts`, admin DB backup/download flows
-- data/image pipeline: `lib/data.ts`, `lib/process-image.ts`, `lib/image-queue.ts`, `lib/upload-paths.ts`, `lib/serve-upload.ts`, `app/actions/images.ts`
-- config + SEO: `lib/constants.ts`, `lib/data.ts`, `app/actions/seo.ts`, admin SEO client
-- checks/tests: `scripts/check-api-auth.ts`, unit tests, E2E specs
+I built an inventory first, then inspected the repo across these surfaces:
+- product/docs/config: `README.md`, `apps/web/README.md`, `CLAUDE.md`, root/workspace package files, deploy/config files
+- runtime/deploy: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/next.config.ts`, nginx config
+- public app shell + metadata: localized layouts/pages, `manifest.ts`, `robots.ts`, `sitemap.ts`, `global-error.tsx`
+- admin flows: topic/tag/settings/SEO/user/db actions and admin pages/components
+- data + processing: `data.ts`, `gallery-config*.ts`, `process-image.ts`, `process-topic-image.ts`, `image-queue.ts`, upload/serve helpers
+- auth/security: `session.ts`, `auth.ts`, `rate-limit.ts`, `api-auth.ts`, `proxy.ts`, `sql-restore-scan.ts`
+- tests: unit tests and E2E specs
 
-Verification run on 2026-04-22:
+## Verification baseline
+
+- `npm test --workspace=apps/web` ✅ (97 tests passed)
 - `npm run lint --workspace=apps/web` ✅
-- `npm test --workspace=apps/web` ✅ (96 tests)
 - `npm run build --workspace=apps/web` ✅
-
-No current automated failure surfaced; the findings below are mostly architecture/ops/product risks that existing checks do not catch.
-
----
-
-## Findings
-
-### 1) Pending image processing is only resumed opportunistically, not from a guaranteed startup hook
-- **Severity:** High
-- **Confidence:** High
-- **Category:** correctness / operational resilience
-- **Citations:** `apps/web/src/lib/image-queue.ts:287-343`, `apps/web/src/app/actions/images.ts:11-20`, `apps/web/src/instrumentation.ts:1-33`
-- **Why this matters:** the queue bootstrap that re-enqueues `processed = false` rows runs only as a side effect of importing `@/lib/image-queue`. In this repo, that import path is tied to image mutation code (`app/actions/images.ts`) and the shutdown path, not to an explicit startup path.
-- **Failure scenario:** the server restarts while images are mid-processing. Those rows stay in `processed = false`, but no one touches an image-mutation action after restart. Result: uploads remain stuck in the admin dashboard indefinitely until some later code path happens to import `image-queue`.
-- **Suggested fix:** move bootstrap into an explicit startup path (for example `instrumentation.register()`), keep it idempotent, and log/alert when pending jobs exist but bootstrap cannot start.
-
-### 2) SEO updates do not reliably propagate to the web manifest because the manifest is built as a static artifact
-- **Severity:** Medium
-- **Confidence:** High
-- **Category:** deploy/docs drift / product correctness
-- **Citations:** `apps/web/src/app/manifest.ts:1-28`, `apps/web/src/app/actions/seo.ts:120-124`, `apps/web/src/lib/revalidation.ts:55-56`
-- **Verification note:** `npm run build --workspace=apps/web` on 2026-04-22 emitted `○ /manifest.webmanifest`, confirming the manifest is prerendered static in the current build.
-- **Why this matters:** the SEO admin action claims to revalidate long-lived metadata surfaces, but the manifest route itself has no `dynamic`/`revalidate` policy and is emitted as static.
-- **Failure scenario:** an admin updates site title/nav title/description in the SEO screen; public HTML may refresh, but installed-PWA metadata and manifest consumers keep stale values until the next full rebuild/redeploy.
-- **Suggested fix:** either make `manifest.ts` explicitly dynamic/revalidated with the same invalidation story as the rest of SEO, or remove DB-backed fields from the manifest and document it as deploy-time config only.
-
-### 3) Production canonicals/OG base URLs still depend on a checked-in localhost config that the admin UI cannot correct
-- **Severity:** Medium
-- **Confidence:** High
-- **Category:** product risk / deploy footgun
-- **Citations:** `apps/web/src/site-config.json:1-11`, `apps/web/src/lib/constants.ts:11-14`, `apps/web/src/lib/data.ts:748-755`, `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:16-23`, `apps/web/deploy.sh:21-24`
-- **Why this matters:** the committed `site-config.json` defaults to `http://localhost:3000`, and canonical/OG URLs fall back to that value when `BASE_URL` is not set. The admin SEO screen lets operators edit title/description/author/OG image, but not the site URL.
-- **Failure scenario:** a production deploy forgets `BASE_URL` or ships the checked-in `site-config.json` unchanged. The app will happily serve canonicals, JSON-LD, sitemap links, and OG URLs pointing at localhost; the admin UI cannot repair this afterward.
-- **Suggested fix:** fail closed in production when `BASE_URL` or a non-local `site-config.url` is missing, and/or surface the canonical site URL as an explicitly validated deploy-time setting with health-check coverage.
-
-### 4) The sitemap silently drops images after 24,000 entries instead of splitting into multiple sitemap files
-- **Severity:** Medium
-- **Confidence:** High
-- **Category:** product / SEO scalability
-- **Citations:** `apps/web/src/app/sitemap.ts:14-23`, `apps/web/src/app/sitemap.ts:41-55`, `apps/web/src/lib/data.ts:725-735`
-- **Why this matters:** the current sitemap hard-caps image inclusion at 24k to stay under the 50k-URL limit after locale expansion, but there is no sitemap index or paging strategy.
-- **Failure scenario:** once the gallery exceeds the cap, newer or older photos (depending on ordering policy) simply disappear from the sitemap, reducing discoverability and making SEO quality degrade exactly when the gallery gets large.
-- **Suggested fix:** implement multi-sitemap generation (`generateSitemaps` / sitemap index) so the product scales past the first 24k images without silent SEO loss.
-
-### 5) The admin API auth “lint” is string-matching, so future insecure routes can pass CI accidentally
-- **Severity:** Medium
-- **Confidence:** High
-- **Category:** security / hidden assumption
-- **Citations:** `apps/web/scripts/check-api-auth.ts:1-31`, `apps/web/src/lib/api-auth.ts:1-16`, `apps/web/src/proxy.ts:47-57`
-- **Why this matters:** the repo relies on a custom CI check to enforce auth on `/api/admin/*`, but the script only checks whether the file text contains `withAdminAuth` or `isAdmin`. A comment, dead import, or unused helper call is enough to satisfy the check.
-- **Failure scenario:** a future `/api/admin/.../route.ts` forgets to wrap the handler, but includes an unused `isAdmin` import or a comment mentioning `withAdminAuth`; CI passes and the route ships unauthenticated.
-- **Suggested fix:** replace the string search with AST-based validation or a stricter convention (for example: every admin route must export `GET/POST/... = withAdminAuth(...)`, with the checker validating actual export structure).
+- Build still emits repeated production `TRUST_PROXY` warnings when unset; noted, but not counted below as a new finding by itself.
 
 ---
 
-## Cross-file / system-level concerns worth watching
+## Confirmed issues
 
-### A) The repo still contains a half-integrated storage-backend abstraction that is easy to over-trust
-- **Severity:** Low
+### 1) Restore upload ingress limit is materially larger than the action-level restore limit
+- **File / code region:**
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:224-227, 263-279`
+  - `apps/web/next.config.ts:96-100`
+  - `apps/web/src/lib/upload-limits.ts:1-22`
+- **Why it matters:** `restoreDatabase()` documents that its limit is kept in sync with the framework body-size gate, but it is not. The framework currently accepts server-action bodies up to `NEXT_UPLOAD_BODY_SIZE_LIMIT` (default 2 GiB), while the restore action rejects anything above 250 MiB only after the request has already reached the action.
+- **Failure scenario:** an admin uploads a 1–2 GiB SQL dump. Next.js accepts/parses the request because the global server-action limit is 2 GiB; only then does `runRestore()` return `fileTooLarge`. That means the app still pays the network, parsing, and temporary-file cost for a payload the feature claims not to support. The advisory lock also does not help here, because the oversized request has already crossed the ingress boundary before `GET_LOCK` is checked.
+- **Suggested fix:** split restore traffic off from the general upload server-action limit. Best options: move restore to a dedicated route with its own stricter body limit, or lower the effective restore ingress limit at the proxy/framework boundary and keep the app-level constant truly aligned. At minimum, fix the misleading comment so future changes do not assume the current protection exists.
 - **Confidence:** High
-- **Citations:** `apps/web/src/lib/storage/index.ts:1-19`, `apps/web/src/lib/process-image.ts:12-13`, `apps/web/src/lib/serve-upload.ts:1-7`, `CLAUDE.md:95-95`
-- **Concern:** the codebase includes S3/MinIO/local backend machinery, but the real write and serve paths still go straight to filesystem-specific modules. That mismatch is documented, but it is still a maintenance trap: the abstraction looks production-ready while the actual product is not.
-- **Suggested fix:** either remove/archive the unfinished abstraction until it is wired end-to-end, or add loud runtime/test guards that fail if anyone tries to expose backend switching prematurely.
 
-### B) The shared-group view counter is deliberately approximate and single-process
-- **Severity:** Low
+### 2) `updateTopic()` dropped the topic-label length guard that `createTopic()` and the UI still enforce
+- **File / code region:**
+  - `apps/web/src/app/actions/topics.ts:62-64` (create path has the guard)
+  - `apps/web/src/app/actions/topics.ts:117-145` (update path lacks the equivalent guard)
+  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:167-168, 245-246` (UI still advertises `maxLength={100}`)
+- **Why it matters:** the create and update paths no longer enforce the same contract. The UI and create action both imply “topic labels are capped at 100 characters,” but the update action will accept longer server-side payloads.
+- **Failure scenario:** a scripted/admin-crafted update submits a 150–255 character label. The edit form allows the request to reach the server, the update path accepts it, and the database now contains labels outside the product’s published limit. That creates inconsistent behavior between create vs. edit, and opens the door to layout and UX regressions that the rest of the codebase assumes the 100-character cap prevents.
+- **Suggested fix:** extract shared topic validation (label length, slug rules, reserved segments) and use it in both create and update paths. Add a regression test that proves create and update reject the same overlong label.
+- **Confidence:** High
+
+### 3) Topic image processing failures are silently downgraded to “success” in both create and edit flows
+- **File / code region:**
+  - `apps/web/src/app/actions/topics.ts:66-73`
+  - `apps/web/src/app/actions/topics.ts:152-158`
+  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:59-68, 74-84`
+- **Why it matters:** both server actions swallow `processTopicImage()` failures and proceed with the topic mutation. The client only checks `res.error`, so it shows a success toast and refreshes even when the category image failed to process.
+- **Failure scenario:** an admin uploads a corrupt or unsupported category image while creating/updating a topic. The topic create/update succeeds, the UI reports `categories.created` / `categories.updated`, but the avatar is missing or unchanged. From the operator’s perspective, the system lies about what succeeded.
+- **Suggested fix:** either make topic-image failure fatal for the whole mutation, or return a structured warning (for example `{ success: true, warning: ... }`) and surface it in `TopicManager` so the admin knows the text fields saved but the image did not.
+- **Confidence:** High
+
+### 4) The `image_sizes` setting has no operational guardrail on list length, so a single admin misconfiguration can multiply every future upload’s cost
+- **File / code region:**
+  - `apps/web/src/lib/gallery-config-shared.ts:48-52, 98-101`
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:128-136`
+  - `apps/web/src/lib/image-queue.ts:196-216`
+  - `apps/web/src/lib/process-image.ts:345-410`
+- **Why it matters:** validation only checks that each comma-separated value is a positive number ≤ 10000. It does not cap how many sizes may be configured, dedupe them, or warn about the derivative explosion this setting causes. The queue consumes that list directly for all future uploads, and `processImageFormats()` generates three full derivative sets across the entire list.
+- **Failure scenario:** an admin pastes a long list of widths (`320,480,640,768,960,...`) into the settings page. Every future upload now generates 3 × N resized derivative families plus base copies, dramatically increasing queue time, CPU, storage growth, and failure blast radius. The app has no inline warning, no server-side count cap, and no test coverage around this misconfiguration path.
+- **Suggested fix:** enforce a bounded, unique, sorted size list server-side (for example max 4–8 sizes), reject pathological configs, and reflect the constraint in the settings UI. If large/custom lists are intentionally supported, add an explicit warning showing the derivative multiplier before save.
+- **Confidence:** High
+
+---
+
+## Risks / carry-forward concerns
+
+### R1) `image_sizes` is still treated as a live runtime toggle even though existing derivatives are immutable build artifacts
+- **File / code region:**
+  - `apps/web/src/app/actions/settings.ts:35-86`
+  - `apps/web/src/lib/gallery-config.ts:68-72`
+  - `apps/web/src/app/[locale]/(public)/page.tsx:29-31, 47-53`
+  - `apps/web/src/components/photo-viewer.tsx:200-223`
+  - `apps/web/src/lib/image-queue.ts:196-216`
+- **Why it matters:** saving `image_sizes` revalidates the app immediately, and the public readers/metadata start requesting the new sizes immediately, but only future uploads are guaranteed to generate them. There is still no migration/backfill/compatibility story for the already-processed corpus.
+- **Failure scenario:** an operator changes `image_sizes` in production to a new set. Existing photos still only have the old derivatives on disk, while viewers, metadata, and OG surfaces begin requesting the new filenames. Result: broken thumbnails/OG images or partial 404s across older content.
+- **Suggested fix:** treat `image_sizes` as a migration-governed setting rather than a live toggle: either lock it after first production use, add a backfill job, or serve legacy-size fallbacks until regeneration completes.
+- **Confidence:** High
+
+### R2) Branding/config still has more than one live source of truth
+- **File / code region:**
+  - `apps/web/src/app/[locale]/layout.tsx:15-40`
+  - `apps/web/src/components/nav.tsx:5-10`
+  - `apps/web/src/app/global-error.tsx:45-52`
+- **Why it matters:** normal runtime metadata and nav branding now come from `getSeoSettings()`, but the fatal global error surface still renders from static `site-config.json`. That means the repo is still split between DB-backed branding and file-backed branding depending on code path.
+- **Failure scenario:** an admin rebrands the gallery in the SEO screen and sees the new name across normal pages, but any fatal app-level failure still shows the old brand string from `site-config.json`. This is not a security issue, but it is a product-trust and maintainability inconsistency.
+- **Suggested fix:** either unify the global error brand source with the runtime SEO accessor, or explicitly document that the fatal fallback shell is intentionally deploy-time/file-backed.
 - **Confidence:** Medium
-- **Citations:** `apps/web/src/lib/data.ts:9-37`, `apps/web/src/lib/data.ts:43-104`, `apps/web/src/instrumentation.ts:14-23`
-- **Concern:** view counts are buffered in memory, retried best-effort, and flushed on timer/shutdown. That is fine for a single long-lived node process, but it will lose counts on crashes and does not compose cleanly with multi-instance deployments.
-- **Suggested fix:** either document view counts as approximate/non-authoritative or move increments to a durable queue/direct SQL update when accuracy matters.
 
 ---
 
-## Missed-issues sweep / lower-signal items
+## Final missed-issues sweep
 
-These did not rise to top-tier findings, but I would keep them on the radar:
-- The privacy test suite is mostly documentary and does not actually assert that public query results omit sensitive fields at runtime (`apps/web/src/__tests__/privacy-fields.test.ts`).
-- The build emits repeated `TRUST_PROXY` production warnings during static generation; not a functional bug, but it is noisy and makes it easier to ignore real production warnings later.
-- Deploy helpers are intentionally simple (`scripts/deploy-remote.sh`, `apps/web/deploy.sh`): they execute mutable remote state with no health-gated rollback. Fine for personal ops, risky if this ever becomes team-operated.
-
----
-
-## Bottom line
-
-The repo is in decent shape from a lint/test/build perspective, but its biggest risks are **startup behavior**, **metadata/config freshness**, and **security/process assumptions that are enforced socially or by weak scripts rather than by the runtime itself**.
+I did one last targeted sweep over branding/config/runtime mismatches (`siteConfig` vs `getSeoSettings`), body-size/restore limits, topic mutation validation symmetry, and settings-driven image-size behavior. After that pass, I did **not** find additional higher-signal confirmed issues beyond the items above.

@@ -1,0 +1,44 @@
+{
+  "cycle": "3/100",
+  "registered_agents": [
+    "analyst",
+    "architect",
+    "build-fixer",
+    "code-reviewer",
+    "code-simplifier",
+    "critic",
+    "debugger",
+    "dependency-expert",
+    "designer",
+    "executor",
+    "explore",
+    "git-master",
+    "planner",
+    "researcher",
+    "security-reviewer",
+    "team-executor",
+    "test-engineer",
+    "verifier",
+    "vision",
+    "writer",
+    "product-marketer-reviewer",
+    "ui-ux-designer-reviewer"
+  ],
+  "selected_review_agents": [
+    "code-reviewer",
+    "security-reviewer",
+    "critic",
+    "verifier",
+    "test-engineer",
+    "architect",
+    "debugger",
+    "designer",
+    "researcher",
+    "dependency-expert"
+  ],
+  "skipped_unavailable_prompt_agents": [
+    "perf-reviewer",
+    "tracer",
+    "document-specialist"
+  ]
+}

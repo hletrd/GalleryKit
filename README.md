@@ -102,7 +102,7 @@ $EDITOR .env.deploy
 npm run deploy
 ```
 
-`npm run deploy` now derives the SSH deploy command from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, and `DEPLOY_PATH`. Keep `DEPLOY_CMD` only as an escape hatch when you need a fully custom command.
+`npm run deploy` now derives the SSH deploy command from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, and `DEPLOY_PATH`. Use `DEPLOY_REMOTE_SCRIPT` if you only need to change the remote entrypoint while keeping the derived SSH wrapper. Keep `DEPLOY_CMD` only as an escape hatch when you need a fully custom command.
 
 ### Environment Setup
 
