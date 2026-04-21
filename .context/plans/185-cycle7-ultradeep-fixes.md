@@ -58,4 +58,4 @@
 - [x] `npm test --workspace=apps/web`
 - [x] `npm run build`
 - [x] `npm run test:e2e --workspace=apps/web`
-- [ ] per-cycle deploy completed
+- [x] per-cycle deploy completed
