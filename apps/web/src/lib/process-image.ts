@@ -361,6 +361,10 @@ export async function processImageFormats(
     quality?: ImageQualitySettings, // Admin-configured quality overrides
     sizes: number[] = DEFAULT_OUTPUT_SIZES, // Admin-configured output sizes
 ) {
+    // Ensure sizes are sorted ascending so the last element is always the largest,
+    // which is used as the "base" filename for backward compatibility.
+    const sortedSizes = [...sizes].sort((a, b) => a - b);
+
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.
     const image = sharp(inputPath, { limitInputPixels: maxInputPixels });
     const qualityWebp = quality?.webp ?? 90;
@@ -376,7 +380,7 @@ export async function processImageFormats(
         const name = path.basename(baseFilename, ext);
         let lastRendered: { resizeWidth: number; filePath: string } | null = null;
 
-        for (const size of sizes) {
+        for (const size of sortedSizes) {
             // Don't upscale if original is smaller.
             const resizeWidth = baseWidth < size ? baseWidth : size;
 
@@ -403,7 +407,7 @@ export async function processImageFormats(
             // The largest configured size serves as the "base" filename to satisfy existing schema.
             // Use atomic rename via .tmp file to eliminate the window where the base
             // filename doesn't exist (prevents 404s during concurrent reads).
-            if (size === sizes[sizes.length - 1]) {
+            if (size === sortedSizes[sortedSizes.length - 1]) {
                 const basePath = path.join(dir, baseFilename);
                 const tmpPath = basePath + '.tmp';
                 try {
