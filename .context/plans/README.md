@@ -2,6 +2,7 @@
 
 ## Active Plans
 
+- 202 — Deferred Gate Warnings (Cycle 1) — TODO / deferred
 - 196 — Deferred Review Coverage (Cycle 12 Ultradeep) — TODO
 - 194 — Deferred Review Coverage (Cycle 11 Ultradeep) — TODO
 - 192 — Deferred Review Coverage (Cycle 10 Ultradeep) — TODO
@@ -15,6 +16,10 @@
 - 172 — Deferred Review Coverage (Cycle 3) — TODO
 - 175 — Deferred Review Coverage (Cycle 1 Ultradeep) — TODO
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
+
+## Completed Plans (Cycle 1 Review)
+
+- 201 — Cycle 1 Review Fixes — DONE
 
 ## Completed Plans (Cycle 12 Ultradeep)
 

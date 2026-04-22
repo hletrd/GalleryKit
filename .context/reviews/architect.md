@@ -1,27 +1,34 @@
-# Cycle 11 Architect Notes
+# Architect — Cycle 1 Review
 
-Finding count: 4
+> Provenance: requested subagent timed out after retry in this environment; this file is the leader's architect-angle synthesis from direct repo inspection.
 
-### A11-01 — Restore maintenance is still process-local
+## SUMMARY
+- The main architectural concern is inconsistent trust-boundary handling between helpers that interpret reverse-proxy headers.
+
+## INVENTORY
+- Trust boundary helpers: `src/lib/request-origin.ts`, `src/lib/rate-limit.ts`
+- Auth caller: `src/app/actions/auth.ts`
+- Verification pipeline: `playwright.config.ts`, `next.config.ts`
+
+## FINDINGS
+
+### ARC-01 — Forwarded-header trust is implemented as two different policies
 - **Severity:** HIGH
 - **Confidence:** HIGH
-- **Citations:** `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`
-- Shared DB restore coordination still fans out into process-local mutation guards.
+- **Status:** Confirmed
+- **Files:** `apps/web/src/lib/request-origin.ts:28-41`, `apps/web/src/lib/rate-limit.ts:58-75`
+- **Why it is a design risk:** The codebase has already encoded the correct "only trust proxy headers when configured" rule in one helper, but not in another helper used by auth. Security boundaries should not depend on duplicated, inconsistent trust logic.
+- **Failure scenario:** `TRUST_PROXY` is unset and rate limiting behaves safely, yet origin validation still trusts forwarded headers.
+- **Suggested fix:** Introduce a shared forwarded-header trust helper or align `request-origin.ts` to the existing policy.
 
-### A11-02 — Backup/restore only snapshots MySQL, not the filesystem-backed image corpus
-- **Severity:** HIGH
+### ARC-02 — E2E startup path diverges from production-shaped standalone deployment
+- **Severity:** LOW
 - **Confidence:** HIGH
-- **Citations:** `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/image-queue.ts`, `README.md`
-- DB-only restore can leave missing/orphaned files and stuck image rows.
+- **Status:** Confirmed
+- **Files:** `apps/web/playwright.config.ts:54-61`, `apps/web/next.config.ts:53`
+- **Why it is a design risk:** Verification should exercise the same artifact shape the app deploys.
+- **Failure scenario:** Standalone-only startup differences are missed until deployment.
+- **Suggested fix:** Run the built standalone server in the Playwright webServer hook.
 
-### A11-03 — Public search still scales via repeated wildcard scans
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Citations:** `apps/web/src/lib/data.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/app/actions/public.ts`
-- Search fan-out still depends on repeated `%term%` scans without a dedicated searchable projection.
-
-### A11-04 — Several correctness-sensitive counters remain process-local
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Citations:** `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/upload-tracker.ts`
-- View-count buffering and cumulative upload windows still assume a single Node process.
+## FINAL SWEEP
+- No broader layering rewrite is needed; these are targeted boundary-alignments.
