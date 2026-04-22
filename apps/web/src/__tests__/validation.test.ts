@@ -8,8 +8,8 @@ describe('isValidSlug', () => {
         expect(isValidSlug('topic123')).toBe(true);
     });
 
-    it('accepts uppercase letters', () => {
-        expect(isValidSlug('MyTopic')).toBe(true);
+    it('rejects uppercase letters', () => {
+        expect(isValidSlug('MyTopic')).toBe(false);
     });
 
     it('rejects empty string', () => {
