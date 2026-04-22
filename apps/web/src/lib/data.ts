@@ -178,8 +178,6 @@ const {
 
 const publicSelectFields = {
     ...publicSelectFieldCore,
-    original_format: sql<string | null>`NULL`,
-    original_file_size: sql<number | null>`NULL`,
 } as const;
 
 export const adminSelectFieldKeys = Object.freeze(
@@ -196,7 +194,7 @@ export const publicSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -256,7 +254,7 @@ export async function getImageCount(
     const conditions = [];
 
     if (topic !== undefined) {
-        if (!/^[a-z0-9_-]+$/i.test(topic) || topic.length > 100) return 0;
+        if (!/^[a-z0-9_-]+$/.test(topic) || topic.length > 100) return 0;
         conditions.push(eq(images.topic, topic));
     }
 
@@ -293,7 +291,7 @@ function buildTagFilterCondition(tagSlugs?: string[]) {
 function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnprocessed = false) {
     const conditions = [];
     if (topic !== undefined) {
-        if (!/^[a-z0-9_-]+$/i.test(topic) || topic.length > 100) return null;
+        if (!/^[a-z0-9_-]+$/.test(topic) || topic.length > 100) return null;
         conditions.push(eq(images.topic, topic));
     }
     if (!includeUnprocessed) {
@@ -612,7 +610,7 @@ export async function getSharedGroup(
 
 export async function getTopicBySlug(slug: string) {
     // Direct topic slugs are always ASCII-safe; aliases may contain CJK/emoji
-    if (/^[a-z0-9_-]+$/i.test(slug)) {
+    if (/^[a-z0-9_-]+$/.test(slug)) {
         const [directMatch] = await db
             .select({
                 slug: topics.slug,

@@ -8,6 +8,8 @@ const SENSITIVE_KEYS = [
     'filename_original',
     'user_filename',
     'processed',
+    'original_format',
+    'original_file_size',
 ] as const;
 
 describe('Privacy field separation', () => {
@@ -33,7 +35,5 @@ describe('Privacy field separation', () => {
         expect(publicSelectFieldKeys).toContain('id');
         expect(publicSelectFieldKeys).toContain('title');
         expect(publicSelectFieldKeys).toContain('filename_jpeg');
-        expect(publicSelectFieldKeys).toContain('original_format');
-        expect(publicSelectFieldKeys).toContain('original_file_size');
     });
 });
