@@ -175,21 +175,28 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
         ...sizes.map(size => `${name}_${size}${ext}`),
     ]);
 
-    try {
-        const dirHandle = await fs.opendir(dir);
+    // Scan the directory only when sizes are unknown — this catches leftover
+    // variants from a prior sizes config that no longer matches the current list.
+    // When sizes are provided, all variant filenames are deterministic
+    // ({name}_{size}{ext}) and are already in filesToDelete, so the scan
+    // would just waste I/O on large directories.
+    if (!sizes || sizes.length === 0) {
         try {
-            for await (const entry of dirHandle) {
-                if (!entry.isFile()) continue;
-                if (entry.name.startsWith(`${name}_`) && entry.name.endsWith(ext)) {
-                    filesToDelete.add(entry.name);
+            const dirHandle = await fs.opendir(dir);
+            try {
+                for await (const entry of dirHandle) {
+                    if (!entry.isFile()) continue;
+                    if (entry.name.startsWith(`${name}_`) && entry.name.endsWith(ext)) {
+                        filesToDelete.add(entry.name);
+                    }
                 }
+            } finally {
+                await dirHandle.close().catch(() => {});
             }
-        } finally {
-            await dirHandle.close().catch(() => {});
+        } catch {
+            // Best-effort cleanup — if the directory scan fails, fall back to the
+            // known configured-size candidates above.
         }
-    } catch {
-        // Best-effort cleanup — if the directory scan fails, fall back to the
-        // known configured-size candidates above.
     }
 
     await Promise.all(
