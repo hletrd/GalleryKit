@@ -132,14 +132,25 @@ function parseExifDateTime(value: unknown): string | null {
         }
     }
 
-    // Handle Date objects and numeric timestamps explicitly
+    // Handle Date objects and numeric timestamps explicitly.
+    // Run isValidExifDateTimeParts calendar validation (same as the string branch)
+    // to reject out-of-range dates like year 2101+ that would pass the NaN check
+    // but fail the 1900-2100 year range guard.
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return value.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+        const y = value.getUTCFullYear(), m = value.getUTCMonth() + 1, d = value.getUTCDate();
+        const h = value.getUTCHours(), mi = value.getUTCMinutes(), s = value.getUTCSeconds();
+        if (isValidExifDateTimeParts(y, m, d, h, mi, s)) {
+            return value.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+        }
     }
     if (typeof value === 'number' && !Number.isNaN(value)) {
         const date = new Date(value);
         if (!Number.isNaN(date.getTime())) {
-            return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+            const y = date.getUTCFullYear(), m = date.getUTCMonth() + 1, d = date.getUTCDate();
+            const h = date.getUTCHours(), mi = date.getUTCMinutes(), s = date.getUTCSeconds();
+            if (isValidExifDateTimeParts(y, m, d, h, mi, s)) {
+                return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+            }
         }
     }
 
