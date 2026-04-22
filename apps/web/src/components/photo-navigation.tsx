@@ -206,7 +206,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
 
             {/* Static navigation buttons (hover on desktop, always visible on mobile) */}
             {prevId && (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity z-10">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-10">
                     <Button
                         variant="secondary"
                         size="icon"
@@ -220,7 +220,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             )}
 
             {nextId && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity z-10">
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-10">
                     <Button
                         variant="secondary"
                         size="icon"

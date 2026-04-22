@@ -52,3 +52,19 @@ test('mobile photo info sheet opens from a real photo page', async ({ page }) =>
   const sheet = page.getByRole('dialog', { name: 'Photo Info' });
   await expect(sheet).toBeVisible();
 });
+
+test('desktop photo navigation becomes visible when keyboard focus reaches it', async ({ page }) => {
+  await page.setViewportSize(DESKTOP);
+  await openFirstPhoto(page);
+
+  const navButton = page.getByRole('button', { name: /Previous photo|Next photo/ }).first();
+  const navWrapper = navButton.locator('..');
+
+  await expect(navButton).toBeAttached();
+  await page.mouse.move(0, 0);
+  await expect.poll(async () => Number(await navWrapper.evaluate((el) => getComputedStyle(el).opacity))).toBe(0);
+
+  await navButton.focus();
+
+  await expect.poll(async () => Number(await navWrapper.evaluate((el) => getComputedStyle(el).opacity))).toBeGreaterThan(0.5);
+});
