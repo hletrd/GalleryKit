@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
+
+const originalTrustProxy = process.env.TRUST_PROXY;
 
 function makeHeaders(values: Record<string, string | undefined>) {
     return {
@@ -11,6 +13,14 @@ function makeHeaders(values: Record<string, string | undefined>) {
 }
 
 describe('hasTrustedSameOrigin', () => {
+    afterEach(() => {
+        if (originalTrustProxy === undefined) {
+            delete process.env.TRUST_PROXY;
+        } else {
+            process.env.TRUST_PROXY = originalTrustProxy;
+        }
+    });
+
     it('accepts same-origin Origin headers', () => {
         expect(hasTrustedSameOrigin(makeHeaders({
             host: 'gallery.atik.kr',
@@ -35,6 +45,8 @@ describe('hasTrustedSameOrigin', () => {
     });
 
     it('accepts same-origin requests when the forwarded host includes the default https port', () => {
+        process.env.TRUST_PROXY = 'true';
+
         expect(hasTrustedSameOrigin(makeHeaders({
             'x-forwarded-host': 'gallery.atik.kr:443',
             'x-forwarded-proto': 'https',
@@ -55,6 +67,28 @@ describe('hasTrustedSameOrigin', () => {
             'x-forwarded-proto': 'https',
             origin: 'https://evil.example',
         }))).toBe(false);
+    });
+
+    it('ignores spoofed forwarded headers when TRUST_PROXY is disabled', () => {
+        delete process.env.TRUST_PROXY;
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-host': 'evil.example',
+            'x-forwarded-proto': 'https',
+            origin: 'https://evil.example',
+        }))).toBe(false);
+    });
+
+    it('trusts forwarded headers when TRUST_PROXY is enabled', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'internal-proxy',
+            'x-forwarded-host': 'gallery.atik.kr:443',
+            'x-forwarded-proto': 'https',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe(true);
     });
 
     it('allows trusted requests without origin metadata as a compatibility fallback', () => {

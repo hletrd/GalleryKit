@@ -2,6 +2,10 @@ interface HeaderLookup {
     get(name: string): string | null | undefined;
 }
 
+function trustsProxyHeaders() {
+    return process.env.TRUST_PROXY === 'true';
+}
+
 function normalizeHeaderValue(value: string | null | undefined) {
     return value?.split(',')[0]?.trim() || '';
 }
@@ -26,12 +30,18 @@ function getProtocolFromCandidate(candidate: string | null | undefined) {
 }
 
 function getExpectedOrigin(requestHeaders: HeaderLookup) {
-    const protocol = normalizeHeaderValue(requestHeaders.get('x-forwarded-proto'))
+    const trustedForwardedProto = trustsProxyHeaders()
+        ? normalizeHeaderValue(requestHeaders.get('x-forwarded-proto'))
+        : '';
+    const protocol = trustedForwardedProto
         || getProtocolFromCandidate(requestHeaders.get('origin'))
         || getProtocolFromCandidate(requestHeaders.get('referer'))
         || 'http';
 
-    const rawHost = normalizeHeaderValue(requestHeaders.get('x-forwarded-host'))
+    const trustedForwardedHost = trustsProxyHeaders()
+        ? normalizeHeaderValue(requestHeaders.get('x-forwarded-host'))
+        : '';
+    const rawHost = trustedForwardedHost
         || normalizeHeaderValue(requestHeaders.get('host'));
     if (!rawHost) {
         return null;
