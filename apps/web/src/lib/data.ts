@@ -695,6 +695,13 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         .orderBy(desc(images.created_at), desc(images.id))
         .limit(effectiveLimit);
 
+    // Short-circuit: if the main query already filled the limit, skip
+    // the expensive tag and alias queries. This avoids 2 unnecessary DB
+    // round-trips on popular search terms that match in title/description/etc.
+    if (results.length >= effectiveLimit) {
+        return results;
+    }
+
     // Only search tags if main results are insufficient; limit to remaining slots.
     // Exclude IDs already found by the main query so tag-result slots aren't
     // wasted on duplicates (especially with small effectiveLimit values).
