@@ -21,7 +21,6 @@ const DANGEROUS_SQL_PATTERNS = [
     /\bCREATE\s+SERVER\b/i,
     /\bRENAME\s+TABLE\b/i,
     /\bCREATE\s+(OR\s+REPLACE\s+)?VIEW\b/i,
-    /\bCREATE\s+TABLE\b/i,
     /\bPREPARE\b/i,
     /\bEXECUTE\b/i,
     /\bDEALLOCATE\s+PREPARE\b/i,
