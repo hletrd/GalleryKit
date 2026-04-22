@@ -48,6 +48,11 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         return { error: maintenanceError };
     }
 
+    // Increase group_concat_max_len for this session to avoid silent
+    // truncation of tag lists. MySQL default is 1024 bytes — images with
+    // many tags would get truncated tag lists in CSV export.
+    await db.execute(sql`SET SESSION group_concat_max_len = 10000`);
+
     let results = await db
         .select({
             id: images.id,
