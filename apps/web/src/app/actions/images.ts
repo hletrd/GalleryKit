@@ -575,6 +575,10 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         const [existingImage] = await db.select({ topic: images.topic })
             .from(images).where(eq(images.id, id));
 
+        if (!existingImage) {
+            return { error: t('imageNotFound') };
+        }
+
         const [result] = await db.update(images)
             .set({
                 title: sanitizedTitle,
@@ -590,7 +594,7 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'image_update', 'image', String(id)).catch(console.debug);
 
-        const topicPath = existingImage?.topic ? `/${existingImage.topic}` : undefined;
+        const topicPath = existingImage.topic ? `/${existingImage.topic}` : undefined;
         revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/', ...(topicPath ? [topicPath] : []));
         return { success: true };
     } catch (e) {
