@@ -20,6 +20,21 @@ interface LightboxProps {
     imageSizes?: number[];
 }
 
+export function shouldAutoHideLightboxControls(hasHover: boolean, hasFinePointer: boolean) {
+    return hasHover && hasFinePointer;
+}
+
+function getLightboxAutoHidePreference() {
+    if (typeof window === 'undefined') {
+        return true;
+    }
+
+    return shouldAutoHideLightboxControls(
+        window.matchMedia('(hover: hover)').matches,
+        window.matchMedia('(pointer: fine)').matches
+    );
+}
+
 export function LightboxTrigger({ onClick }: { onClick: () => void }) {
     const { t } = useTranslation();
     return (
@@ -33,6 +48,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [shouldAutoHideControls, setShouldAutoHideControls] = useState(getLightboxAutoHidePreference);
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [shouldReduceMotion, setShouldReduceMotion] = useState(
         () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -48,8 +64,34 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         return () => mq.removeEventListener('change', handler);
     }, []);
 
+    useEffect(() => {
+        const hoverMq = window.matchMedia('(hover: hover)');
+        const pointerMq = window.matchMedia('(pointer: fine)');
+        const syncPreference = () => {
+            const nextShouldAutoHide = shouldAutoHideLightboxControls(hoverMq.matches, pointerMq.matches);
+            setShouldAutoHideControls(nextShouldAutoHide);
+            if (!nextShouldAutoHide) {
+                setControlsVisible(true);
+                if (hideTimer.current) {
+                    clearTimeout(hideTimer.current);
+                    hideTimer.current = null;
+                }
+            }
+        };
+
+        syncPreference();
+        hoverMq.addEventListener('change', syncPreference);
+        pointerMq.addEventListener('change', syncPreference);
+
+        return () => {
+            hoverMq.removeEventListener('change', syncPreference);
+            pointerMq.removeEventListener('change', syncPreference);
+        };
+    }, []);
+
     // Swipe navigation for mobile
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        setControlsVisible(true);
         touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: Date.now() };
     }, []);
 
@@ -68,18 +110,33 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
 
     const showControls = useCallback(() => {
         setControlsVisible(true);
+        if (!shouldAutoHideControls) {
+            if (hideTimer.current) {
+                clearTimeout(hideTimer.current);
+                hideTimer.current = null;
+            }
+            return;
+        }
         if (hideTimer.current) {
             clearTimeout(hideTimer.current);
         }
         hideTimer.current = setTimeout(() => {
             setControlsVisible(false);
         }, 3000);
-    }, []);
+    }, [shouldAutoHideControls]);
 
     // On mount, controls are already visible (initial state), so just arm the
     // auto-hide timer. Calling setControlsVisible here would trip the
     // react-hooks/set-state-in-effect rule for no practical gain.
     useEffect(() => {
+        if (!shouldAutoHideControls) {
+            if (hideTimer.current) {
+                clearTimeout(hideTimer.current);
+                hideTimer.current = null;
+            }
+            return;
+        }
+
         hideTimer.current = setTimeout(() => {
             setControlsVisible(false);
         }, 3000);
@@ -88,7 +145,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 clearTimeout(hideTimer.current);
             }
         };
-    }, []);
+    }, [shouldAutoHideControls]);
 
     useEffect(() => {
         const handleFullscreenChange = () => {
@@ -255,7 +312,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                         e.stopPropagation();
                         toggleFullscreen();
                     }}
-                    aria-label={isFullscreen ? t('viewer.fullscreen') : t('aria.openFullscreen')}
+                    aria-label={isFullscreen ? t('aria.exitFullscreen') : t('aria.openFullscreen')}
                 >
                     {isFullscreen ? (
                         <Minimize className="h-5 w-5" />

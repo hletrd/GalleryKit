@@ -448,6 +448,7 @@
     "expandMenu": "Expand menu",
     "collapseMenu": "Collapse menu",
     "openFullscreen": "Open fullscreen view",
+    "exitFullscreen": "Exit fullscreen view",
     "fullscreenUnavailable": "Fullscreen is not available",
     "lightbox": "Photo lightbox",
     "close": "Close",

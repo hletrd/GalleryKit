@@ -20,6 +20,20 @@ interface TagInputProps {
     className?: string;
 }
 
+export function normalizeTagInputValue(value: string) {
+    return value.trim().normalize('NFKC').toLocaleLowerCase();
+}
+
+export function hasSelectedTag(selectedTags: string[], candidate: string) {
+    const normalizedCandidate = normalizeTagInputValue(candidate);
+    return selectedTags.some((tag) => normalizeTagInputValue(tag) === normalizedCandidate);
+}
+
+export function resolveCanonicalTagName(availableTags: Tag[], candidate: string) {
+    const normalizedCandidate = normalizeTagInputValue(candidate);
+    return availableTags.find((tag) => normalizeTagInputValue(tag.name) === normalizedCandidate)?.name ?? candidate.trim();
+}
+
 export function TagInput({
     availableTags,
     selectedTags,
@@ -37,18 +51,21 @@ export function TagInput({
     const filteredTags = React.useMemo(() => {
         const lowerInput = inputValue.trim().toLowerCase();
         return availableTags
-            .filter(tag => !selectedTags.includes(tag.name)) // Exclude selected
+            .filter(tag => !hasSelectedTag(selectedTags, tag.name)) // Exclude selected
             .filter(tag => tag.name.toLowerCase().includes(lowerInput)); // Match input
     }, [availableTags, selectedTags, inputValue]);
 
     // Check if the current input exactly matches an existing tag (case-insensitive)
-    const exactMatch = filteredTags.find(
-        tag => tag.name.toLowerCase() === inputValue.trim().toLowerCase()
+    const exactMatch = availableTags.find(
+        tag => normalizeTagInputValue(tag.name) === normalizeTagInputValue(inputValue)
     );
 
     // Determine if we should show "Create new tag" option
     const cleanInputValue = inputValue.trim();
-    const showCreateOption = cleanInputValue.length > 0 && !cleanInputValue.includes(',') && !exactMatch && !selectedTags.includes(cleanInputValue);
+    const showCreateOption = cleanInputValue.length > 0
+        && !cleanInputValue.includes(',')
+        && !exactMatch
+        && !hasSelectedTag(selectedTags, cleanInputValue);
 
     const reset = () => {
         setInputValue('');
@@ -59,8 +76,9 @@ export function TagInput({
     const addTag = (tag: string) => {
         const clean = tag.trim();
         if (!clean || clean.includes(',')) return;
-        if (!selectedTags.includes(clean)) {
-            onTagsChange([...selectedTags, clean]);
+        const nextTag = resolveCanonicalTagName(availableTags, clean);
+        if (!hasSelectedTag(selectedTags, nextTag)) {
+            onTagsChange([...selectedTags, nextTag]);
         }
         reset();
         inputRef.current?.focus();
@@ -74,7 +92,7 @@ export function TagInput({
         if (e.key === 'Backspace' && inputValue === '' && selectedTags.length > 0) {
             e.preventDefault();
             removeTag(selectedTags[selectedTags.length - 1]);
-        } else if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
+        } else if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault();
             if (isOpen) {
                 // If dropdown is open, selecting from list takes priority
@@ -89,6 +107,8 @@ export function TagInput({
             } else if (inputValue) {
                  addTag(inputValue);
             }
+        } else if (e.key === 'Tab') {
+            setIsOpen(false);
         } else if (e.key === 'ArrowDown') {
             e.preventDefault();
             setIsOpen(true);
@@ -133,7 +153,6 @@ export function TagInput({
                             aria-label={t('aria.removeTag', { tag })}
                         >
                             <X className="h-3 w-3" />
-                            <span className="sr-only">Remove</span>
                         </button>
                     </Badge>
                 ))}
