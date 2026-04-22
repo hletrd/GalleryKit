@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
     headersMock,
+    getImagesLiteMock,
     searchImagesMock,
     getClientIpMock,
     checkRateLimitMock,
@@ -9,6 +10,7 @@ const {
     searchRateLimit,
 } = vi.hoisted(() => ({
     headersMock: vi.fn(),
+    getImagesLiteMock: vi.fn(),
     searchImagesMock: vi.fn(),
     getClientIpMock: vi.fn(),
     checkRateLimitMock: vi.fn(),
@@ -21,7 +23,7 @@ vi.mock('next/headers', () => ({
 }));
 
 vi.mock('@/lib/data', () => ({
-    getImagesLite: vi.fn(),
+    getImagesLite: getImagesLiteMock,
     searchImages: searchImagesMock,
 }));
 
@@ -38,11 +40,12 @@ vi.mock('@/lib/rate-limit', () => ({
     ),
 }));
 
-import { searchImagesAction } from '@/app/actions/public';
+import { loadMoreImages, searchImagesAction } from '@/app/actions/public';
 
 describe('searchImagesAction', () => {
     beforeEach(() => {
         headersMock.mockReset();
+        getImagesLiteMock.mockReset();
         searchImagesMock.mockReset();
         getClientIpMock.mockReset();
         checkRateLimitMock.mockReset();
@@ -55,7 +58,15 @@ describe('searchImagesAction', () => {
         getClientIpMock.mockReturnValue('203.0.113.42');
         incrementRateLimitMock.mockResolvedValue(undefined);
         checkRateLimitMock.mockResolvedValue({ limited: false, count: 1 });
+        getImagesLiteMock.mockResolvedValue([{ id: 1 }]);
         searchImagesMock.mockResolvedValue([{ id: 1 }]);
+    });
+
+    it('preserves unicode tag slugs when loading more images', async () => {
+        const result = await loadMoreImages('seoul', ['서울', ' portrait ', ''], 10, 20);
+
+        expect(result).toEqual([{ id: 1 }]);
+        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울', 'portrait'], 20, 10);
     });
 
     it('returns no results for queries that are too short after sanitization', async () => {

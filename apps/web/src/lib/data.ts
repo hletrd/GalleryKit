@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
 import { isRestoreMaintenanceActive } from './restore-maintenance';
+import { isValidTagSlug } from './validation';
 import siteConfig from '@/site-config.json';
 
 // Module-level buffer for debounced shared-group view count increments
@@ -277,7 +278,7 @@ export async function getImageCount(
 function buildTagFilterCondition(tagSlugs?: string[]) {
     const validTagSlugs = (tagSlugs || [])
         .map(s => s.trim())
-        .filter(s => s.length > 0 && /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
+        .filter(isValidTagSlug);
     if (validTagSlugs.length === 0) return null;
     const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
     return inArray(images.id, db

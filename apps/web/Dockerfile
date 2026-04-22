@@ -72,9 +72,10 @@ RUN mkdir -p apps/web/public/uploads /app/data/uploads/original apps/web/.next/c
 # Make entrypoint executable
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Health check — verifies the app is responsive and DB is reachable
+# Health check — liveness only. Keep DB-aware readiness on /api/health so a
+# transient DB outage does not restart an otherwise-live web process.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD node -e "fetch('http://localhost:3000/api/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
+    CMD node -e "fetch('http://localhost:3000/api/live').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
 
 # Expose port
 EXPOSE 3000

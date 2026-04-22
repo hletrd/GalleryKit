@@ -160,6 +160,7 @@ docker compose -f apps/web/docker-compose.yml up -d --build
 The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
 
 Legacy originals must not remain under `public/uploads/original/`. The startup path now fails closed in production if that legacy public-original directory still contains files.
+The container liveness probe now uses `/api/live`, while `/api/health` remains the DB-aware readiness signal for diagnostics and external monitoring.
 
 ## Tech Stack
 

@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 
 const cpuCount = os.cpus()?.length ?? 1;
 const maxConcurrency = Math.max(1, cpuCount - 1);
@@ -123,11 +124,9 @@ function parseExifDateTime(value: unknown): string | null {
         const match = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(value);
         if (match) {
             const [, year, month, day, hour, minute, second] = match;
-            // Validate ranges
             const y = Number(year), m = Number(month), d = Number(day);
             const h = Number(hour), mi = Number(minute), s = Number(second);
-            if (y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31
-                && h >= 0 && h <= 23 && mi >= 0 && mi <= 59 && s >= 0 && s <= 59) {
+            if (isValidExifDateTimeParts(y, m, d, h, mi, s)) {
                 return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
             }
         }

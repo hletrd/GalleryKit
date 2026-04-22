@@ -203,6 +203,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 GiB** for general requests and **250 MB** for `/admin/db` restore requests
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
+- Docker liveness should probe `/api/live`; `/api/health` is DB-aware readiness/diagnostics and can legitimately return `503` during DB outages or restore work
 
 ## Git Workflow (from AGENTS.md)
 

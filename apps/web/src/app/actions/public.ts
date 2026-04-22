@@ -3,7 +3,7 @@
 import { headers } from 'next/headers';
 import { getImagesLite, searchImages } from '@/lib/data';
 
-import { isValidSlug } from '@/lib/validation';
+import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, SEARCH_RATE_LIMIT_MAX_KEYS, checkRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 
@@ -17,7 +17,8 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     // Cap tag array and validate format to prevent complex query DoS
     const safeTags = (tagSlugs || [])
         .slice(0, 20)
-        .filter(s => /^[a-z0-9-]+$/i.test(s) && s.length <= 100);
+        .map((slug) => slug.trim())
+        .filter(isValidTagSlug);
     const images = await getImagesLite(topicSlug, safeTags, safeLimit, safeOffset);
     return images;
 }

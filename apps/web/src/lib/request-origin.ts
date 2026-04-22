@@ -22,7 +22,7 @@ function getExpectedOrigin(requestHeaders: HeaderLookup) {
         || getProtocolFromCandidate(requestHeaders.get('origin'))
         || getProtocolFromCandidate(requestHeaders.get('referer'))
         || 'http';
-    return `${protocol}://${host}`;
+    return toOrigin(`${protocol}://${host}`);
 }
 
 function toOrigin(candidate: string) {

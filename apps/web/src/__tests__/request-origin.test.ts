@@ -34,6 +34,21 @@ describe('hasTrustedSameOrigin', () => {
         }))).toBe(true);
     });
 
+    it('accepts same-origin requests when the forwarded host includes the default https port', () => {
+        expect(hasTrustedSameOrigin(makeHeaders({
+            'x-forwarded-host': 'gallery.atik.kr:443',
+            'x-forwarded-proto': 'https',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe(true);
+    });
+
+    it('accepts same-origin requests when the forwarded host includes the default http port', () => {
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'localhost:80',
+            origin: 'http://localhost',
+        }))).toBe(true);
+    });
+
     it('rejects cross-origin requests', () => {
         expect(hasTrustedSameOrigin(makeHeaders({
             host: 'gallery.atik.kr',
