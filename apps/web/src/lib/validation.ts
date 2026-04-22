@@ -6,9 +6,9 @@ const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
     'uploads',
 ]);
 
-// Validate slug format (alphanumeric, hyphens, underscores only)
+// Validate slug format (lowercase alphanumeric, hyphens, underscores only)
 export function isValidSlug(slug: string): boolean {
-    return /^[a-z0-9_-]+$/i.test(slug) && slug.length > 0 && slug.length <= 100;
+    return /^[a-z0-9_-]+$/.test(slug) && slug.length > 0 && slug.length <= 100;
 }
 
 export function isReservedTopicRouteSegment(segment: string): boolean {
