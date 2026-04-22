@@ -114,7 +114,7 @@ vi.mock('@/lib/restore-maintenance', () => ({
     getRestoreMaintenanceMessage: maintenanceMessageMock,
 }));
 
-import { createTopic, updateTopic } from '@/app/actions/topics';
+import { createTopic, deleteTopicAlias, updateTopic } from '@/app/actions/topics';
 
 describe('topic actions', () => {
     beforeEach(() => {
@@ -193,5 +193,12 @@ describe('topic actions', () => {
 
         await expect(updateTopic('old-topic', formData)).resolves.toEqual({ success: true });
         expect(steps).toEqual(['insert-topic', 'update-images', 'update-aliases', 'delete-topic']);
+    });
+
+    it('allows deleting legacy dotted aliases even though new ones are rejected', async () => {
+        deleteMock.mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
+
+        await expect(deleteTopicAlias('travel', 'tokyo.2026')).resolves.toEqual({ success: true });
+        expect(deleteMock).toHaveBeenCalledTimes(1);
     });
 });

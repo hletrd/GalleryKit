@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName } from '@/lib/validation';
+import { hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug } from '@/lib/validation';
 
 describe('isValidSlug', () => {
     it('accepts lowercase alphanumeric with hyphens and underscores', () => {
@@ -69,6 +69,10 @@ describe('isValidTopicAlias', () => {
         expect(isValidTopicAlias('a\\b')).toBe(false);
     });
 
+    it('rejects dots because locale middleware skips dotted pathnames', () => {
+        expect(isValidTopicAlias('tokyo.2026')).toBe(false);
+    });
+
     it('rejects whitespace', () => {
         expect(isValidTopicAlias('a b')).toBe(false);
     });
@@ -127,6 +131,19 @@ describe('isValidTagName', () => {
         expect(isValidTagName('tag"name')).toBe(false);
         expect(isValidTagName("tag'name")).toBe(false);
         expect(isValidTagName('tag&name')).toBe(false);
+    });
+});
+
+describe('isValidTagSlug', () => {
+    it('accepts ASCII and Unicode slugs used by tag storage', () => {
+        expect(isValidTagSlug('landscape-night')).toBe(true);
+        expect(isValidTagSlug('풍경')).toBe(true);
+    });
+
+    it('rejects empty and malformed tag slugs', () => {
+        expect(isValidTagSlug('')).toBe(false);
+        expect(isValidTagSlug('bad.slug')).toBe(false);
+        expect(isValidTagSlug('bad/tag')).toBe(false);
     });
 });
 

@@ -16,6 +16,7 @@ import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPa
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { hasTrustedSameOrigin } from '@/lib/request-origin';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -89,6 +90,9 @@ export async function login(prevState: { error?: string } | null, formData: Form
 
     // Rate Limiting — in-memory Map as fast cache, DB as source of truth
     const requestHeaders = await headers();
+    if (!hasTrustedSameOrigin(requestHeaders)) {
+        return { error: t('authFailed') };
+    }
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
 

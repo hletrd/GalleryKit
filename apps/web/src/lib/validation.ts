@@ -17,17 +17,22 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 
 // Allow CJK characters, emojis, and most symbols for aliases, but disallow:
 // - Slashes (path separators)
+// - Dots because locale middleware treats dotted pathnames as asset requests
 // - Backslashes (path separators/escapes)
 // - Question marks (query parameters)
 // - Hash/Pound (fragments)
 // - Whitespace (better UX for URLs, though encoded spaces theoretically work)
 export function isValidTopicAlias(alias: string): boolean {
-    return alias.length > 0 && alias.length <= 255 && /^[^/\\\s?\x00#<>"'&]+$/.test(alias);
+    return alias.length > 0 && alias.length <= 255 && /^[^./\\\s?\x00#<>"'&]+$/.test(alias);
 }
 
 export function isValidTagName(tagName: string): boolean {
     const trimmed = tagName.trim();
     return trimmed.length > 0 && trimmed.length <= 100 && !trimmed.includes(',') && !/[<>"'&\x00]/.test(trimmed);
+}
+
+export function isValidTagSlug(slug: string): boolean {
+    return /^[\p{Letter}\p{Number}_-]+$/u.test(slug) && slug.length > 0 && slug.length <= 100;
 }
 
 // Validate filename (no path traversal, only safe characters)

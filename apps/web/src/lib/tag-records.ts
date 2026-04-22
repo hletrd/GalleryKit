@@ -3,7 +3,13 @@ import { eq } from 'drizzle-orm';
 import { db, tags } from '@/db';
 
 export function getTagSlug(name: string) {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    return name
+        .normalize('NFKC')
+        .toLocaleLowerCase()
+        .replace(/[\s_]+/gu, '-')
+        .replace(/[^\p{Letter}\p{Number}-]+/gu, '')
+        .replace(/-{2,}/g, '-')
+        .replace(/(^-|-$)/g, '');
 }
 
 type TagReader = Pick<typeof db, 'select'>;

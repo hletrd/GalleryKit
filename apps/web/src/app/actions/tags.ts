@@ -6,7 +6,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/tag-records';
-import { isValidSlug, isValidTagName } from '@/lib/validation';
+import { isValidTagName, isValidTagSlug } from '@/lib/validation';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
 import { stripControlChars } from '@/lib/sanitize';
@@ -65,7 +65,7 @@ export async function updateTag(id: number, name: string) {
     }
     const slug = getTagSlug(trimmedName);
 
-    if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
+    if (!isValidTagSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
         const [result] = await db.update(tags)
@@ -140,7 +140,7 @@ export async function addTagToImage(imageId: number, tagName: string) {
     if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
     const slug = getTagSlug(cleanName);
-    if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
+    if (!isValidTagSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
         const [imageRecord] = await db.select({ topic: images.topic })
@@ -264,7 +264,7 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
     if (!isValidTagName(cleanName)) return { error: t('invalidTagName') };
 
     const slug = getTagSlug(cleanName);
-    if (!isValidSlug(slug)) return { error: t('invalidTagFormat') };
+    if (!isValidTagSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
         const resolvedTag = await ensureTagRecord(db, cleanName, slug);
@@ -362,7 +362,7 @@ export async function batchUpdateImageTags(
                     continue;
                 }
                 const slug = getTagSlug(cleanName);
-                if (!isValidSlug(slug)) continue;
+                if (!isValidTagSlug(slug)) continue;
                 const resolvedTag = await ensureTagRecord(tx, cleanName, slug);
                 if (resolvedTag.kind === 'collision') {
                     warnings.push(t('tagSlugCollision', { newName: cleanName, existingName: resolvedTag.existing.name }));

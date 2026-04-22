@@ -383,8 +383,9 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     if (cleanAlias !== alias) {
         return { error: t('invalidAlias') };
     }
-    // Permissive check to allow deleting legacy aliases
-    if (!cleanAlias || !isValidTopicAlias(cleanAlias)) {
+    // Permissive check to allow deleting legacy aliases that pre-date newer
+    // routing constraints (for example dotted aliases).
+    if (!cleanAlias || /[/\\\x00]/.test(cleanAlias)) {
         return { error: t('invalidAlias') };
     }
 
