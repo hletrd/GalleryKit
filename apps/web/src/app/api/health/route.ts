@@ -13,5 +13,8 @@ export async function GET() {
     }
 
     const status = dbOk ? 'ok' : 'degraded';
-    return Response.json({ status }, { status: dbOk ? 200 : 503 });
+    return Response.json({ status }, {
+        status: dbOk ? 200 : 503,
+        headers: { 'X-Content-Type-Options': 'nosniff' },
+    });
 }
