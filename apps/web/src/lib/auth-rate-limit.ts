@@ -1,4 +1,5 @@
 import {
+    decrementRateLimit,
     incrementRateLimit,
     LOGIN_WINDOW_MS,
     loginRateLimit,
@@ -30,6 +31,22 @@ export async function clearSuccessfulLoginAttempts(ip: string) {
     await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS);
 }
 
+/**
+ * Decrement (not delete) the login rate limit counter for rollback scenarios.
+ * On unexpected infrastructure errors, the user didn't fail auth — so the
+ * pre-incremented count should be rolled back. Using decrement instead of
+ * delete prevents concurrent rollbacks from losing counts (C1-07).
+ */
+export async function rollbackLoginRateLimit(ip: string) {
+    const entry = loginRateLimit.get(ip);
+    if (entry && entry.count > 1) {
+        entry.count -= 1;
+    } else if (entry) {
+        loginRateLimit.delete(ip);
+    }
+    await decrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+}
+
 // Separate in-memory Map for password change rate limiting.
 // Decoupled from loginRateLimit so that failed password changes don't
 // lock out login (and vice versa) via the in-memory fast-path cache.
@@ -49,6 +66,21 @@ export function getPasswordChangeRateLimitEntry(ip: string, now: number): RateLi
 export async function clearSuccessfulPasswordAttempts(ip: string) {
     passwordChangeRateLimit.delete(ip);
     await resetRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+}
+
+/**
+ * Decrement (not delete) the password change rate limit counter for rollback scenarios.
+ * Same rationale as rollbackLoginRateLimit — prevents concurrent rollbacks from
+ * losing counts (C1-07).
+ */
+export async function rollbackPasswordChangeRateLimit(ip: string) {
+    const entry = passwordChangeRateLimit.get(ip);
+    if (entry && entry.count > 1) {
+        entry.count -= 1;
+    } else if (entry) {
+        passwordChangeRateLimit.delete(ip);
+    }
+    await decrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
 }
 
 /** Prune expired entries and enforce hard cap on password change rate-limit Map. */

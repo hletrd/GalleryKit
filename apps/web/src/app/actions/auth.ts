@@ -11,8 +11,8 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, loginRateLimit, buildAccountRateLimitKey } from '@/lib/rate-limit';
-import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS } from '@/lib/auth-rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey } from '@/lib/rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackLoginRateLimit, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -225,13 +225,14 @@ export async function login(prevState: { error?: string } | null, formData: Form
         console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
         // Roll back pre-incremented rate limit on unexpected errors —
         // the user didn't fail authentication, the infrastructure did.
+        // Use decrement instead of delete so concurrent rollbacks don't lose counts (C1-07).
         try {
-            await clearSuccessfulLoginAttempts(ip);
+            await rollbackLoginRateLimit(ip);
         } catch (rollbackErr) {
             console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
         }
         try {
-            await resetRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
+            await decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
         } catch (rollbackErr) {
             console.debug('Failed to roll back account-scoped login rate limit after unexpected error:', rollbackErr);
         }
@@ -374,8 +375,9 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
         // Roll back pre-incremented rate limit on unexpected errors —
         // the user didn't fail authentication, the infrastructure did.
+        // Use decrement instead of delete so concurrent rollbacks don't lose counts (C1-07).
         try {
-            await clearSuccessfulPasswordAttempts(ip);
+            await rollbackPasswordChangeRateLimit(ip);
         } catch (rollbackErr) {
             console.debug('Failed to roll back password change rate limit after unexpected error:', rollbackErr);
         }
