@@ -1,15 +1,21 @@
-FROM node:24-slim AS base
+FROM node:24-slim AS build-base
 
-# Install runtime/build tooling needed by the web image
+# Install build tooling needed to compile native dependencies during npm ci.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM node:24-slim AS runner-base
+
+# Install only the runtime tools the production container needs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 
-FROM base AS deps
+FROM build-base AS deps
 WORKDIR /app
 
 # Copy package.json and lock file from monorepo root
@@ -19,13 +25,13 @@ COPY apps/web/package.json ./apps/web/
 # Install dependencies (including devDependencies for build)
 RUN npm ci --workspace=apps/web
 
-FROM base AS prod-deps
+FROM build-base AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 RUN npm ci --omit=dev --workspace=apps/web
 
-FROM base AS builder
+FROM build-base AS builder
 WORKDIR /app
 # Full node_modules for build step (includes devDependencies needed by next build)
 COPY --from=deps /app/node_modules ./node_modules
@@ -38,7 +44,7 @@ RUN if [ ! -f src/site-config.json ]; then cp src/site-config.example.json src/s
 # Build the app
 RUN npm run build
 
-FROM base AS runner
+FROM runner-base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
