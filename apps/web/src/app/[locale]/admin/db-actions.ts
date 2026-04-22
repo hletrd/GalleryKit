@@ -27,7 +27,7 @@ function escapeCsvField(value: string): string {
     // as defense-in-depth for legacy data stored before stripControlChars was added.
     // \x09 (tab) is included: tabs in CSV values can cause column misalignment
     // in strict parsers, even with double-quote wrapping (C9R2-F01).
-    value = value.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    value = value.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
     // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
     value = value.replace(/[\r\n]/g, ' ');
     // Prefix formula injection characters with a single quote
@@ -48,10 +48,10 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
         return { error: maintenanceError };
     }
 
-    // Increase group_concat_max_len for this session to avoid silent
-    // truncation of tag lists. MySQL default is 1024 bytes — images with
-    // many tags would get truncated tag lists in CSV export.
-    await db.execute(sql`SET SESSION group_concat_max_len = 10000`);
+    // group_concat_max_len is already set to 65535 on every pool connection
+    // via poolConnection.on('connection', ...) in db/index.ts — no per-session
+    // SET needed here (and a per-session SET would be unreliable in a pooled
+    // environment where the SET and the SELECT may use different connections).
 
     let results = await db
         .select({
