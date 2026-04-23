@@ -1,5 +1,11 @@
 const DANGEROUS_SQL_PATTERNS = [
     /\bGRANT\s/i,
+    // C5R-RPL-01: also block REVOKE and RENAME USER. Legitimate mysqldump
+    // output never contains these; a crafted dump restored into a shared
+    // MySQL instance with GRANT OPTION could otherwise downgrade another
+    // app's privileges or rename a co-hosted admin user. Defense-in-depth.
+    /\bREVOKE\s/i,
+    /\bRENAME\s+USER\b/i,
     /\bCREATE\s+USER\b/i,
     /\bALTER\s+USER\b/i,
     /\bSET\s+PASSWORD\b/i,
@@ -9,6 +15,12 @@ const DANGEROUS_SQL_PATTERNS = [
     // creates a sibling database (then USEs it before data writes) would
     // otherwise slip past the scanner. Blocking here is defence-in-depth.
     /\bCREATE\s+DATABASE\b/i,
+    // C5R-RPL-01: also block CALL proc_name(...). A crafted dump could
+    // invoke an already-installed stored procedure (e.g. a procedure
+    // defined with `SQL SECURITY DEFINER` by another tenant's setup)
+    // to execute actions beyond --one-database's scope. Legitimate
+    // mysqldump output never emits CALL. Defense-in-depth.
+    /\bCALL\s+\w+/i,
     /\bLOAD\s+DATA\b/i,
     /\bINTO\s+OUTFILE\b/i,
     /\bINTO\s+DUMPFILE\b/i,

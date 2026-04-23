@@ -31,6 +31,27 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql("INSERT INTO notes VALUES ('CREATE DATABASE tutorial');")).toBe(false);
     });
 
+    it('blocks CALL proc_name (C5R-RPL-01 defence-in-depth)', () => {
+        expect(containsDangerousSql('CALL cleanup_proc();')).toBe(true);
+        expect(containsDangerousSql('CALL dangerous.proc();')).toBe(true);
+        expect(containsDangerousSql('CALL  some_proc (1, 2);')).toBe(true);
+        // Benign fixtures — "CALL" word inside string data, not a statement
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('Please CALL me back');")).toBe(false);
+        // Normal mysqldump output never contains CALL; should pass unaffected
+        expect(containsDangerousSql('CREATE TABLE images (id INT);\nINSERT INTO images VALUES (1);')).toBe(false);
+    });
+
+    it('blocks REVOKE (C5R-RPL-01 defence-in-depth)', () => {
+        expect(containsDangerousSql("REVOKE ALL ON *.* FROM 'other'@'%';")).toBe(true);
+        expect(containsDangerousSql("REVOKE SELECT ON db.tbl FROM 'u'@'%';")).toBe(true);
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('Never REVOKE consent');")).toBe(false);
+    });
+
+    it('blocks RENAME USER (C5R-RPL-01 defence-in-depth)', () => {
+        expect(containsDangerousSql("RENAME USER 'foo'@'%' TO 'bar'@'%';")).toBe(true);
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('rename user manual');")).toBe(false);
+    });
+
     it('ignores dangerous-looking words inside benign data strings', () => {
         expect(containsDangerousSql("INSERT INTO notes VALUES ('Grant Morrison');")).toBe(false);
         expect(containsDangerousSql("INSERT INTO captions VALUES ('Prepare for landing');")).toBe(false);
