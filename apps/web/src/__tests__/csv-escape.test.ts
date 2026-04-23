@@ -1,65 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-// `db-actions.ts` is a `'use server'` module. Tests import the pure
-// helper directly; the surrounding server actions are mocked via module
-// replacement so their side effects don't fire during test collection.
-
-vi.mock('@/db', () => ({
-    db: { select: vi.fn(), update: vi.fn(), insert: vi.fn(), delete: vi.fn(), transaction: vi.fn() },
-    connection: { getConnection: vi.fn() },
-    images: {}, imageTags: {}, tags: {},
-}));
-
-vi.mock('next-intl/server', () => ({
-    getTranslations: vi.fn().mockResolvedValue((key: string) => key),
-}));
-
-vi.mock('@/app/actions', () => ({
-    isAdmin: vi.fn(),
-    getCurrentUser: vi.fn(),
-}));
-
-vi.mock('@/lib/audit', () => ({
-    logAuditEvent: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('@/lib/revalidation', () => ({
-    revalidateAllAppData: vi.fn(),
-}));
-
-vi.mock('@/lib/action-guards', () => ({
-    requireSameOriginAdmin: vi.fn().mockResolvedValue(null),
-}));
-
-vi.mock('@/lib/restore-maintenance', () => ({
-    beginRestoreMaintenance: vi.fn(), endRestoreMaintenance: vi.fn(),
-    getRestoreMaintenanceMessage: vi.fn().mockReturnValue(null),
-}));
-
-vi.mock('@/lib/data', () => ({
-    flushBufferedSharedGroupViewCounts: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('@/lib/image-queue', () => ({
-    quiesceImageProcessingQueueForRestore: vi.fn().mockResolvedValue(undefined),
-    resumeImageProcessingQueueAfterRestore: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('@/lib/backup-filename', () => ({
-    createBackupFilename: vi.fn().mockReturnValue('backup.sql'),
-}));
-
-vi.mock('@/lib/sql-restore-scan', () => ({
-    appendSqlScanChunk: vi.fn(),
-    containsDangerousSql: vi.fn(),
-}));
-
-vi.mock('@/lib/db-restore', () => ({
-    isIgnorableRestoreStdinError: vi.fn(),
-    MAX_RESTORE_SIZE_BYTES: 256 * 1024 * 1024,
-}));
-
-import { escapeCsvField } from '@/app/[locale]/admin/db-actions';
+import { escapeCsvField } from '@/lib/csv-escape';
 
 /**
  * C6R-RPL-06 / AGG6R-11 — dedicated unit tests for `escapeCsvField`.
