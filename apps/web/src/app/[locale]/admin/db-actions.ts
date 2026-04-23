@@ -276,7 +276,14 @@ export async function restoreDatabase(formData: FormData) {
             // lock stayed held by the pool connection after it went
             // back to the pool, blocking every subsequent restore
             // attempt until the connection was evicted.
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch(() => {});
+            // C8R-RPL-09 / AGG8R-03: surface catch via console.debug
+            // instead of silently swallowing so an operator can see
+            // when the release itself fails (connection kill, DB
+            // outage, etc.). Matches the sibling pattern at the outer
+            // finally below.
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
+                console.debug('RELEASE_LOCK (maintenance-begin early-return) failed:', err);
+            });
             return { success: false, error: t('restoreInProgress') };
         }
 
@@ -295,7 +302,12 @@ export async function restoreDatabase(formData: FormData) {
             await resumeImageProcessingQueueAfterRestore().catch((err) => {
                 console.error('Failed to resume image-processing queue after restore', err);
             });
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch(() => {});
+            // C8R-RPL-09 / AGG8R-03: log release failure at debug
+            // instead of silencing so the operator has a signal if
+            // the release round-trip errors.
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
+                console.debug('RELEASE_LOCK (restore finally) failed:', err);
+            });
         }
     } finally {
         conn.release();
