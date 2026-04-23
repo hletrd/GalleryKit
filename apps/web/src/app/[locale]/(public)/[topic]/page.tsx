@@ -1,4 +1,4 @@
-import { getImagesLite, getTags, getTopicBySlugCached, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
+import { getImagesLite, getTagsCached, getTopicBySlugCached, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
@@ -29,8 +29,10 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     description: t('notFoundDescription'),
   };
 
-  const allTags = await getTags(topicData.slug);
-  const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
+  const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
+  const tagSlugs = requestedTagSlugs.length > 0
+    ? filterExistingTagSlugs(requestedTagSlugs, await getTagsCached(topicData.slug))
+    : [];
 
   const title = tagSlugs.length > 0
     ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${topicData.label}`
@@ -108,7 +110,7 @@ export default async function TopicPage({
   }
 
   const seo = await getSeoSettings();
-  const allTags = await getTags(topic);
+  const allTags = await getTagsCached(topic);
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
   const PAGE_SIZE = 30;

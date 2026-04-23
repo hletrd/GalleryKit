@@ -2,7 +2,7 @@
 
 ## Active Plans
 
-- 204 — Deferred Performance Findings (Cycle 1) — TODO / deferred
+- 204 — Deferred Performance Findings (Carry-Forward) — TODO / deferred
 - 202 — Deferred Gate Warnings (Cycle 1) — TODO / deferred
 - 196 — Deferred Review Coverage (Cycle 12 Ultradeep) — TODO
 - 194 — Deferred Review Coverage (Cycle 11 Ultradeep) — TODO
@@ -74,6 +74,8 @@
 
 ## Completed Plans (Cycle 2)
 
+- 205 — Cycle 2 Performance Hot-Path Fixes — DONE / archived under `done/plan-205-cycle2-performance-hot-paths.md`
+- 199 — Cycle 2 Fresh Fixes — DONE / archived under `done/plan-199-cycle2-fresh-fixes.md`
 - 160 — Cycle 2 Settings Surface and Docs Alignment — DONE
 - 161 — Cycle 2 Rate-Limit, Backup, and Deployment Hardening — DONE
 - 162 — Cycle 2 Image Variant, Search, and SSR Consistency — DONE

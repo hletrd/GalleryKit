@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Playwright artifacts are generated on demand and may not exist.
+    "test-results/**",
+    "playwright-report/**",
   ]),
 ]);
 

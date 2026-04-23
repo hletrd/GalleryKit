@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildAccountRateLimitKey, getClientIp, normalizeIp, getRateLimitBucketStart, isRateLimitExceeded, shouldWarnMissingTrustProxy } from '@/lib/rate-limit';
+import {
+    buildAccountRateLimitKey,
+    getClientIp,
+    normalizeIp,
+    getRateLimitBucketStart,
+    isRateLimitExceeded,
+    pruneSearchRateLimit,
+    resetSearchRateLimitPruneStateForTests,
+    searchRateLimit,
+    shouldWarnMissingTrustProxy,
+} from '@/lib/rate-limit';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 
@@ -9,6 +19,9 @@ afterEach(() => {
     } else {
         process.env.TRUST_PROXY = originalTrustProxy;
     }
+
+    searchRateLimit.clear();
+    resetSearchRateLimitPruneStateForTests();
 });
 
 describe('normalizeIp', () => {
@@ -136,5 +149,35 @@ describe('buildAccountRateLimitKey', () => {
 
     it('returns distinct keys for different usernames', () => {
         expect(buildAccountRateLimitKey('alice')).not.toBe(buildAccountRateLimitKey('bob'));
+    });
+});
+
+describe('pruneSearchRateLimit', () => {
+    it('removes expired entries when forced', () => {
+        searchRateLimit.set('expired', { count: 1, resetAt: 99 });
+        searchRateLimit.set('active', { count: 1, resetAt: 200 });
+
+        expect(pruneSearchRateLimit(100, { force: true })).toBe(true);
+        expect([...searchRateLimit.keys()]).toEqual(['active']);
+    });
+
+    it('skips repeated full scans inside the throttle window when under the hard cap', () => {
+        searchRateLimit.set('active', { count: 1, resetAt: 5_000 });
+
+        expect(pruneSearchRateLimit(1_000, { force: true })).toBe(true);
+        expect(pruneSearchRateLimit(1_500)).toBe(false);
+        expect(searchRateLimit.has('active')).toBe(true);
+    });
+
+    it('still enforces the hard cap even inside the throttle window', () => {
+        for (let i = 0; i < 2_001; i++) {
+            searchRateLimit.set(`key-${i}`, { count: 1, resetAt: 10_000 });
+        }
+
+        expect(pruneSearchRateLimit(1_000, { force: true })).toBe(true);
+        searchRateLimit.set('overflow', { count: 1, resetAt: 10_000 });
+
+        expect(pruneSearchRateLimit(1_001)).toBe(true);
+        expect(searchRateLimit.size).toBeLessThanOrEqual(2_000);
     });
 });

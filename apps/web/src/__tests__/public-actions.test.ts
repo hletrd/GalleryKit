@@ -7,6 +7,7 @@ const {
     getClientIpMock,
     checkRateLimitMock,
     incrementRateLimitMock,
+    pruneSearchRateLimitMock,
     searchRateLimit,
 } = vi.hoisted(() => ({
     headersMock: vi.fn(),
@@ -15,6 +16,7 @@ const {
     getClientIpMock: vi.fn(),
     checkRateLimitMock: vi.fn(),
     incrementRateLimitMock: vi.fn(),
+    pruneSearchRateLimitMock: vi.fn(),
     searchRateLimit: new Map<string, { count: number; resetAt: number }>(),
 }));
 
@@ -35,6 +37,7 @@ vi.mock('@/lib/rate-limit', () => ({
     getClientIp: getClientIpMock,
     checkRateLimit: checkRateLimitMock,
     incrementRateLimit: incrementRateLimitMock,
+    pruneSearchRateLimit: pruneSearchRateLimitMock,
     isRateLimitExceeded: (count: number, maxRequests: number, includesCurrentRequest = false) => (
         includesCurrentRequest ? count > maxRequests : count >= maxRequests
     ),
@@ -58,6 +61,7 @@ describe('searchImagesAction', () => {
         getClientIpMock.mockReturnValue('203.0.113.42');
         incrementRateLimitMock.mockResolvedValue(undefined);
         checkRateLimitMock.mockResolvedValue({ limited: false, count: 1 });
+        pruneSearchRateLimitMock.mockReset();
         getImagesLiteMock.mockResolvedValue([{ id: 1 }]);
         searchImagesMock.mockResolvedValue([{ id: 1 }]);
     });

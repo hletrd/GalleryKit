@@ -24,6 +24,8 @@ const ACCOUNT_RATE_LIMIT_HASH_LENGTH = RATE_LIMIT_BUCKET_KEY_MAX_LENGTH - ACCOUN
 export const loginRateLimit = new Map<string, RateLimitEntry>();
 
 export const searchRateLimit = new Map<string, { count: number; resetAt: number }>();
+const SEARCH_RATE_LIMIT_PRUNE_INTERVAL_MS = 1000;
+let lastSearchRateLimitPruneAt = 0;
 let warnedMissingTrustProxy = false;
 
 export function normalizeIp(value: string | null): string | null {
@@ -114,6 +116,41 @@ export function pruneLoginRateLimit(now: number) {
             evicted++;
         }
     }
+}
+
+export function pruneSearchRateLimit(now: number, options?: { force?: boolean }) {
+    const shouldPrune =
+        options?.force
+        || searchRateLimit.size > SEARCH_RATE_LIMIT_MAX_KEYS
+        || now - lastSearchRateLimitPruneAt >= SEARCH_RATE_LIMIT_PRUNE_INTERVAL_MS;
+
+    if (!shouldPrune) {
+        return false;
+    }
+
+    lastSearchRateLimitPruneAt = now;
+
+    for (const [key, entry] of searchRateLimit) {
+        if (entry.resetAt <= now) {
+            searchRateLimit.delete(key);
+        }
+    }
+
+    if (searchRateLimit.size > SEARCH_RATE_LIMIT_MAX_KEYS) {
+        const excess = searchRateLimit.size - SEARCH_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of searchRateLimit.keys()) {
+            if (evicted >= excess) break;
+            searchRateLimit.delete(key);
+            evicted++;
+        }
+    }
+
+    return true;
+}
+
+export function resetSearchRateLimitPruneStateForTests() {
+    lastSearchRateLimitPruneAt = 0;
 }
 
 // ── MySQL-backed persistent rate limiting ──────────────────────────────

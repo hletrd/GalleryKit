@@ -1,4 +1,4 @@
-import { getImagesLite, getTags, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
+import { getImagesLite, getTagsCached, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
@@ -21,8 +21,38 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const t = await getTranslations('home');
   const seo = await getSeoSettings();
   const pageUrl = localizeUrl(seo.url, locale, '/');
-  const allTags = await getTags();
-  const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
+  const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
+  const tagSlugs = requestedTagSlugs.length > 0
+    ? filterExistingTagSlugs(requestedTagSlugs, await getTagsCached())
+    : [];
+
+  const title = tagSlugs.length > 0
+    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${seo.title}`
+    : seo.title;
+
+  const description = tagSlugs.length > 0
+    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: seo.title })
+    : seo.description;
+
+  if (seo.og_image_url) {
+    return {
+      title,
+      description,
+      openGraph: {
+        title,
+        description,
+        url: pageUrl,
+        siteName: seo.title,
+        images: [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }],
+        type: 'website',
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title,
+        description,
+      },
+    };
+  }
 
   const images = await getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0);
   const latestImage = images[0];
@@ -33,25 +63,15 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
     : false;
 
-  const title = tagSlugs.length > 0
-    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${seo.title}`
-    : seo.title;
-
-  const description = tagSlugs.length > 0
-    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: seo.title })
-    : seo.description;
-
   // Use custom OG image if configured, otherwise use latest photo
-  const ogImages = seo.og_image_url
-    ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
-    : latestImage
-      ? [{
-          url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
-          width: latestImage.width,
-          height: latestImage.height,
-          alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
-        }]
-      : [];
+  const ogImages = latestImage
+    ? [{
+        url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
+        width: latestImage.width,
+        height: latestImage.height,
+        alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
+      }]
+    : [];
 
   return {
     title: title,
@@ -80,7 +100,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const config = await getGalleryConfig();
 
   // Root always gets latest uploads (no topic)
-  const [allTags, allTopics] = await Promise.all([getTags(), getTopicsCached()]);
+  const [allTags, allTopics] = await Promise.all([getTagsCached(), getTopicsCached()]);
 
   // Parse and validate tag slugs
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);

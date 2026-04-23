@@ -226,7 +226,7 @@ export async function getTopicsWithAliases() {
     }));
 }
 
-export async function getTags(topic?: string) {
+async function _getTags(topic?: string) {
     const conditions = [eq(images.processed, true)];
     if (topic) {
         conditions.push(eq(images.topic, topic));
@@ -244,6 +244,10 @@ export async function getTags(topic?: string) {
     .where(and(...conditions))
     .groupBy(tags.id)
     .orderBy(desc(sql`count(${imageTags.imageId})`), asc(tags.name));
+}
+
+export async function getTags(topic?: string) {
+    return _getTags(topic);
 }
 
 export async function getImageCount(
@@ -786,6 +790,7 @@ export async function getImageIdsForSitemap(limit: number = 24000) {
 export const getImageCached = cache(getImage);
 export const getTopicBySlugCached = cache(getTopicBySlug);
 export const getTopicsCached = cache(getTopics);
+export const getTagsCached = cache(_getTags);
 export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
 export const getImageByShareKeyCached = cache(getImageByShareKey);
 export const getSharedGroupCached = cache(getSharedGroup);
