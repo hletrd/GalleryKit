@@ -1,9 +1,24 @@
 # Plan 229 - Cycle 13 Fixes
 
-**Status:** In Progress
+**Status:** Complete
 **Source review:** `.context/reviews/_aggregate-cycle13.md`
 **Created:** 2026-04-23
-**Completed:** TBD
+**Completed:** 2026-04-23
+
+## Mined commits (HEAD order at completion)
+- `0000000d467a229b3f89df9256b2d0368064e74b` — docs(plan): 📝 record cycle 13 reviews + plan — zero findings (convergence)
+
+## Deploy
+- `DEPLOY_MODE=per-cycle`, `DEPLOY_CMD=npm run deploy`
+- **Deploy status:** per-cycle-success — image rebuilt, container recreated, app serving HTTP 200 on `/api/live` and `/en` at `https://gallery.atik.kr`.
+
+## Gates (all green, pre-fix and post-deploy)
+- eslint: PASS (0 errors, 0 warnings)
+- vitest: 298/298 passed
+- next build (+ tsc): PASS (25 routes)
+- lint:api-auth: PASS
+- lint:action-origin: PASS (18 mutating actions)
+- playwright e2e: 19/19 passed
 
 ## Scope
 
@@ -28,16 +43,16 @@ No implementation work is required this cycle. The cycle exists to:
 
 ### Task 3: Commit review + plan artifacts, mine hash, push
 - **Action:** Single fine-grained commit for `.context/reviews/*cycle13*` + `_aggregate*.md` + this plan, mined per repo policy, signed, pushed.
-- **Status:** Pending.
+- **Status:** Complete — commit `0000000d467a229b3f89df9256b2d0368064e74b`.
 
 ### Task 4: Per-cycle deploy
 - **Command:** `npm run deploy`
 - **Acceptance:** deploy succeeds; if it fails, attempt one recovery and record the outcome.
-- **Status:** Pending.
+- **Status:** Complete — deploy succeeded, `/api/live` and `/en` return 200.
 
 ### Task 5: Record final cycle status
 - **Action:** Update this plan's status to `Complete`, append mined commit hashes + deploy outcome.
-- **Status:** Pending.
+- **Status:** Complete (this update).
 
 ## Deferred items
 
