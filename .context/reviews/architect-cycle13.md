@@ -1,18 +1,24 @@
-# Architect — Cycle 13
+# Architect - Cycle 13 (current run, 2026-04-23)
+
+Note: Earlier cycle-13 file `architect-cycle13-historical-2026-04-19.md` preserved for provenance; ARCH-13-01 / ARCH-13-02 were implemented in plan-122. ARCH-13-03 (publicSelectFields enforcement) was addressed by the `_SensitiveKeysInPublic` compile-time guard in data.ts.
+
+## Layering check
+
+- **Route → Server action → DB**: clean. Routes in `app/[locale]/...` import from `app/actions/*`. Server actions import from `lib/*` and `db/*`.
+- **`lib/` is fan-out**: no inter-lib cycles observed. `rate-limit.ts`, `auth-rate-limit.ts`, `session.ts`, `sanitize.ts`, `validation.ts`, `sql-restore-scan.ts` are leaf modules.
+- **Guards**: `action-guards.ts` depends on `request-origin.ts` only (leaf → leaf). `api-auth.ts` wraps route handlers.
+- **Build-time guards**: `check-action-origin` and `check-api-auth` scripts live in `scripts/` and do not couple to runtime code beyond source inspection.
+- **Config layering**: `gallery-config.ts` (server-only, DB-dependent) correctly delegates validators to `gallery-config-shared.ts` (pure, client-safe). The `validatedNumber` + `parseImageSizes` pattern now enforces defensive reads from DB.
+
+## Identified tensions (pre-existing, not new)
+
+1. Storage module abstraction (`@/lib/storage`) is not yet wired — deliberately documented in CLAUDE.md.
+2. Dual rate-limit layers (in-memory Map + DB-backed bucket) are documented and covered by tests.
 
 ## Findings
 
-### ARCH-13-01: `gallery-config.ts` duplicates parsing logic from `gallery-config-shared.ts` [MEDIUM] [HIGH confidence]
-- **File**: `apps/web/src/lib/gallery-config.ts` line 77 vs `apps/web/src/lib/gallery-config-shared.ts` lines 112-116
-- **Description**: The `image_sizes` parsing in `gallery-config.ts` line 77 (`getSetting(map, 'image_sizes').split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0)`) is a hand-rolled duplicate of `parseImageSizes()` in `gallery-config-shared.ts`. The shared version sorts the result and falls back to `DEFAULT_IMAGE_SIZES` on empty/invalid input, while the config module version does neither. This violates DRY and introduces the unsorted-sizes bug (CR-13-01, DBG-13-01). The same pattern applies to all numeric parsing in `_getGalleryConfig()` — each field uses bare `Number()` without the validators that already exist in `gallery-config-shared.ts`.
-- **Fix**: Import and use `parseImageSizes` for `imageSizes`. For other numeric fields, add validation against the existing `isValidSettingValue` validators with fallback to defaults.
+No new CRITICAL, HIGH, MEDIUM, or LOW findings.
 
-### ARCH-13-02: Config module has no invalid-value fallback defense [MEDIUM] [HIGH confidence]
-- **File**: `apps/web/src/lib/gallery-config.ts` lines 70-87
-- **Description**: The `_getGalleryConfig()` function reads from the DB and applies `Number()` / `=== 'true'` / `as` casts without any validation or fallback. The design assumes that `updateGallerySettings` is the only writer and validates on write. But the DB is a shared resource — manual SQL, migration scripts, or DB restore could write invalid values. The read path should defensively validate and fall back to defaults, just like `parseImageSizes` does. This is a "trust boundary" issue: the config module trusts the DB layer too much.
-- **Fix**: After parsing each field, validate against `isValidSettingValue` and fall back to the corresponding `DEFAULTS` entry if invalid.
+## Confidence: High
 
-### ARCH-13-03: `data.ts` `selectFields` / `publicSelectFields` alias is semantically misleading [LOW] [MEDIUM confidence]
-- **File**: `apps/web/src/lib/data.ts` lines 93-134
-- **Description**: `publicSelectFields` is defined as `const publicSelectFields = selectFields` (line 134). They are the same reference. The comment says "It MUST be used instead of raw `selectFields` in public queries" but since they're identical, there's no enforcement mechanism — a developer could use `selectFields` in a public query and nothing would catch it. The two names exist to make intent explicit in code review, but the type system doesn't enforce the distinction. This is a defense-in-depth gap.
-- **Fix**: Consider making `selectFields` private (not exported) and only exporting `publicSelectFields`. The admin-specific queries that need extra fields can import from a separate `adminSelectFields` that explicitly adds sensitive fields. This would make the privacy boundary enforceable at the module level.
+Architecture is clean; no refactor pressure.

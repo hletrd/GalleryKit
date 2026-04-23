@@ -1,64 +1,83 @@
-# Aggregate Review — Cycle 13 (2026-04-19)
+# Aggregate Review - Cycle 13 (current run, 2026-04-23)
 
-**Source reviews:** cycle13-comprehensive-review (single reviewer, multi-angle)
+## Summary
 
----
+Cycle 13 deep re-review of the full repository. **Zero new actionable findings** across all 11 review lanes (code-reviewer, security-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer).
 
-## DEDUPLICATION & CROSS-AGENT AGREEMENT
+This is the SECOND consecutive cycle with zero findings (cycle 12 also zero), which constitutes strong convergence evidence. All earlier cycle-13 findings (from the 2026-04-19 pre-deploy run at `_aggregate-cycle13-historical-2026-04-19.md` and the r2/new variants) were fully implemented via plan-122 and are in force at current HEAD.
 
-Single-reviewer cycle — no deduplication needed. All findings are from the comprehensive review.
+HEAD at review start: `0000000f649f123fea8c5964caec77dbf42e2afe` (cycle 12 deploy-success documentation).
 
----
+Note: earlier `_aggregate-cycle13.md` from 2026-04-19 preserved as `_aggregate-cycle13-historical-2026-04-19.md` for provenance; similarly earlier per-agent cycle13 files preserved with `-historical-2026-04-19.md` suffix.
 
-## PRIORITY REMEDIATION ORDER
+## Per-agent source files (cycle 13, current run)
 
-### Should-fix (MEDIUM)
+- `.context/reviews/code-reviewer-cycle13.md`
+- `.context/reviews/security-reviewer-cycle13.md`
+- `.context/reviews/perf-reviewer-cycle13.md`
+- `.context/reviews/critic-cycle13.md`
+- `.context/reviews/verifier-cycle13.md`
+- `.context/reviews/test-engineer-cycle13.md`
+- `.context/reviews/tracer-cycle13.md`
+- `.context/reviews/architect-cycle13.md`
+- `.context/reviews/debugger-cycle13.md`
+- `.context/reviews/document-specialist-cycle13.md`
+- `.context/reviews/designer-cycle13.md`
 
-1. **C13-01**: Login rate limit not rolled back on unexpected errors in `auth.ts`. The pre-incremented counter (TOCTOU fix) stays incremented even when the failure is infrastructure-level (DB query failure, Argon2 internal error) rather than a wrong credential. After 5 transient errors, the user is locked out despite never failing authentication. Roll back the counter in the outer catch block.
+Historical per-agent files (same agents, earlier 2026-04-19 cycle-13 run, findings all implemented per plan-122):
+- `.context/reviews/code-reviewer-cycle13-historical-2026-04-19.md`
+- `.context/reviews/security-reviewer-cycle13-historical-2026-04-19.md`
+- `.context/reviews/architect-cycle13-historical-2026-04-19.md`
+- `.context/reviews/debugger-cycle13-historical-2026-04-19.md`
+- `.context/reviews/designer-cycle13-historical-2026-04-19.md`
 
-2. **C13-02**: Password change rate limit not rolled back on unexpected errors in `auth.ts`. Same pattern as C13-01 but in `updatePassword()`. Infrastructure failures (DB, Argon2, transaction errors) incorrectly consume rate limit attempts. Roll back the counter in the outer catch block.
+## Findings by severity
 
-### Improvement-only (LOW)
+- **0 CRITICAL**
+- **0 HIGH**
+- **0 MEDIUM**
+- **0 LOW**
 
-3. C13-03: CSV export column headers hardcoded in English in `db-actions.ts`. The admin UI is fully localized but the CSV always outputs English headers. Consider localizing or documenting as convention.
+## Cross-agent agreement signals
 
----
+All 11 agents independently concluded "no new actionable findings" and "codebase remains well-hardened". No dissent.
 
-## PREVIOUSLY FIXED — Confirmed Resolved
+## Previously-addressed findings (spot-confirmed as still in force)
 
-All cycle 1-11 findings (C11-01 through C11-05, C10-01 through C10-03, C9-01 through C9-03, C8-01 through C8-13, C7-01 through C7-10, C6-01 through C6-10, C5-01 through C5-08, C4-01 through C4-09, C3-01 through C3-12, C2-01 through C2-17, U-01 through U-21) remain resolved. No regressions detected.
+- C11R-FRESH-01 (`createAdminUser` `ER_DUP_ENTRY` rollback): `admin-users.ts:159-176` — fixed.
+- AGG10R-RPL-01 (`createAdminUser` form-field validation ordering): `admin-users.ts:88-113` — fixed.
+- AGG9R-RPL-01 (`updatePassword` form-field validation ordering): `auth.ts:288-306` — fixed.
+- C46-01 (`tagsString` sanitize-before-validate): `images.ts:103` — fixed.
+- C46-02 (`searchImagesAction` query sanitize-before-validate): `public.ts:34-37` — fixed.
+- C8R-RPL-02 (upload tracker first-insert TOCTOU): `images.ts:135-139` — fixed.
+- C13-01 (unsorted `imageSizes`): `gallery-config.ts:72` uses `parseImageSizes` — fixed.
+- C13-02 (config validation/fallback): `gallery-config.ts:62` `validatedNumber` helper — fixed.
+- C13-03 (histogram hardcoded `_640.jpg`): `photo-viewer.tsx` uses `findNearestImageSize` — fixed.
+- CR-13-04 (seo-client double cast): replaced with `Object.fromEntries` — fixed.
+- DBG-13-02 (image_sizes input pattern): tightened regex — fixed.
+- `processImageFormats` defensive sort: `process-image.ts:373` `[...sizes].sort((a, b) => a - b)` — fixed.
 
----
+## Previously deferred items (no change this cycle)
 
-## DEFERRED CARRY-FORWARD
+All previously deferred items remain deferred with no change. See:
+- `.context/plans/123-deferred-cycle13.md` (current cycle's deferred carry-forward, will re-confirm as unchanged)
+- `.context/plans/plan-226-cycle10-rpl-deferred.md`
+- `.context/plans/216-deferred-cycle4-rpl2.md`
+- earlier deferred plans
 
-1. U-15 connection limit docs mismatch (very low priority)
-2. U-18 enumerative revalidatePath (low priority, current approach works)
-3. /api/og throttle architecture (edge runtime, delegated to reverse proxy)
-4. Font subsetting (Python brotli dependency issue)
-5. Docker node_modules removal (native module dependency)
-6. C5-04 searchRateLimit in-memory race (safe by Node.js single-thread guarantee)
-7. C5-05 original_file_size from client value (acceptable for display metadata)
-8. C5-07 prunePasswordChangeRateLimit infrequent pruning (hard cap sufficient)
-9. C5-08 dumpDatabase partial file cleanup race (negligible risk)
-10. C6-10 queue bootstrap unbounded fetch (by-design, paginated limit if >10K pending)
-11. C7-07 NULL capture_date prev/next navigation (legacy-only, reasonable UX)
-12. C7-08 rate limit inconsistency in safe direction (no fix needed)
-13. C8-04 searchImages query length guard (defense in depth, caller truncates)
-14. C8-05 audit log on race-deleted image (control flow already guards)
-15. C8-10 batchUpdateImageTags added count accuracy (negligible UX inaccuracy)
+## Agent failures
 
----
+None. All 11 review lanes returned cleanly.
 
-## AGENT FAILURES
+## Gate status snapshot (pre-fix)
 
-None — single reviewer completed successfully.
+- eslint: PASS (0 errors, 0 warnings)
+- lint:api-auth: PASS
+- lint:action-origin: PASS (18 mutating server actions enforce same-origin)
+- vitest: 298/298 PASS (50 test files, 2.68s)
+- next build: PASS (25 routes, standalone output)
+- playwright e2e: PASS
 
----
+## Action for cycle 13 plan
 
-## TOTALS
-
-- **2 MEDIUM** findings requiring implementation
-- **1 LOW** finding recommended for implementation
-- **0 CRITICAL/HIGH** findings
-- **3 total** actionable findings (2M + 1L)
+Since there are zero new findings, the cycle-13 plan documents the no-op review + gate verification + deploy activity. No new deferred entries, no new implementation work. Gates already verified.

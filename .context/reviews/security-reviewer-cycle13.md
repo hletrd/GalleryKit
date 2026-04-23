@@ -1,25 +1,37 @@
-# Security Reviewer — Cycle 13
+# Security Reviewer - Cycle 13 (current run, 2026-04-23)
+
+Note: Earlier cycle-13 file `security-reviewer-cycle13-historical-2026-04-19.md` is preserved for provenance; its findings (SEC-13-01 validated-fallback, SEC-13-02 storageBackend cast) were implemented in plan-122 C13-02.
+
+Scope: full-repo authentication, authorization, rate-limiting, path traversal, CSRF/same-origin, PII exposure, DB/SQL safety, file serving, argument injection, secret handling.
 
 ## Findings
 
-### SEC-13-01: `getGalleryConfig` does not validate parsed numeric settings [MEDIUM] [HIGH confidence]
-- **File**: `apps/web/src/lib/gallery-config.ts` lines 70-87
-- **Description**: `_getGalleryConfig()` reads settings from the DB and converts them with bare `Number()` calls without validation. While `isValidSettingValue` is called during writes in `updateGallerySettings`, the read path doesn't validate. If a DB row is corrupted or manually edited (e.g., `image_sizes` = "foo"), `Number('foo')` returns `NaN`, and `imageSizes` becomes `[NaN]` (since `.filter(n => Number.isFinite(n) && n > 0)` would catch this) or `queueConcurrency` becomes `NaN` which would break `PQueue`. The `parseImageSizes` function in `gallery-config-shared.ts` correctly falls back to defaults on invalid input, but `gallery-config.ts` doesn't use it.
-- **Failure scenario**: Admin manually edits `admin_settings` table setting `queue_concurrency` to "abc" — `PQueue({ concurrency: NaN })` behavior is undefined (likely defaults to Infinity, consuming all CPU).
-- **Fix**: Validate parsed config values against the same validators in `gallery-config-shared.ts`, falling back to defaults on invalid values.
+No new CRITICAL, HIGH, MEDIUM, or LOW findings.
 
-### SEC-13-02: `gallery-config.ts` `storageBackend` cast is unchecked [LOW] [MEDIUM confidence]
-- **File**: `apps/web/src/lib/gallery-config.ts` line 85
-- **Description**: `storageBackend: getSetting(map, 'storage_backend') as 'local' | 'minio' | 's3'` is an unchecked type assertion. If the DB value is corrupted to something else (e.g., "ftp"), the cast silently passes the invalid value downstream. `switchStorageBackend` has a `default` case that falls through to `LocalStorageBackend`, so it won't crash, but the admin UI would show the wrong backend status.
-- **Fix**: Validate against the allowed values `['local', 'minio', 's3']` and fall back to `'local'` if invalid.
+### Hot-path re-verification (unchanged since cycle 12)
 
-### SEC-13-03: SEO OG image URL allows `javascript:` protocol via race with validation [LOW] [LOW confidence]
-- **File**: `apps/web/src/app/actions/seo.ts` lines 88-97
-- **Description**: The URL validation checks `['http:', 'https:'].includes(url.protocol)`, which is correct. However, `new URL()` can be confused by some edge cases with userinfo (e.g., `http://evil.com@good.com`). This is extremely low risk since the URL is only used in `<meta property="og:image">` tags which browsers don't navigate to, and the value is set by an authenticated admin. The OG image URL is not rendered as an `<a href>` or `<img src>` in user-facing pages — it's only in the `<head>` metadata.
-- **Fix**: No immediate fix needed. The existing validation is sufficient for the threat model (admin-only input, metadata-only rendering).
+1. **Argon2id password hashing** (`apps/web/src/app/actions/auth.ts:136`, `apps/web/src/app/actions/admin-users.ts:136`). Dummy-hash branch equalizes user-exists vs missing timing.
+2. **HMAC-SHA256 session tokens** (`apps/web/src/lib/session.ts:82-145`) with constant-time `timingSafeEqual`; tokens hashed before DB storage.
+3. **`SESSION_SECRET` env enforcement in production** (`session.ts:30-36`): production throws rather than fall back to DB-stored secret.
+4. **IP + account-scoped login rate limiting** (`auth.ts:96-141`): pre-increment before Argon2 verify; account-scoped bucket keyed by SHA-256 of normalized username (prefix `acct:`).
+5. **Same-origin enforcement** on every mutating server action via `requireSameOriginAdmin()` (`action-guards.ts:37-44`) + `hasTrustedSameOrigin()` with default fail-closed semantics (C1R-01). Also enforced at build time via `lint:action-origin` (18 actions).
+6. **Path traversal defense layered**: `SAFE_SEGMENT` regex, `ALLOWED_UPLOAD_DIRS` whitelist, `resolvedPath.startsWith()` containment, `lstat()` symlink rejection.
+7. **Decompression-bomb mitigation** via Sharp `limitInputPixels`.
+8. **Bounded Map + LRU eviction** on every in-memory rate-limit Map.
+9. **CSV formula-injection defense** (`csv-escape.ts`): strips zero-width chars, prefixes `=`, `+`, `-`, `@`, `\t`, `\r`, collapses CRLF.
+10. **PII guards compile-time enforced** via `_privacyGuard`; GPS / `filename_original` / `user_filename` excluded from public selects.
+11. **SQL restore scanner** (`sql-restore-scan.ts`) blocks all dangerous DDL/DML including `GRANT`, `REVOKE`, `CREATE DATABASE`, `CALL`, prepared statements, etc.
+12. **MySQL advisory locks** scoped to DB server; `RELEASE_LOCK` catches are logged not swallowed.
+13. **Upload tracker TOCTOU** closed via pre-registration on first insert (C8R-RPL-02).
+14. **`mysqldump` / `mysql` spawn** uses arg arrays (no shell), minimal env, `MYSQL_PWD` via env not CLI flag, backup file mode `0o600`.
+15. **`dangerouslySetInnerHTML`** limited to JSON-LD script tags, all wrapped in `safeJsonLd()`.
 
-## Previously Deferred Items Still Present
+### Gate status
 
-- C32-04 / C30-08: Health endpoint DB disclosure
-- C29-05: `passwordChangeRateLimit` shares `LOGIN_RATE_LIMIT_MAX_KEYS` cap
-- CR-38-05: `db-actions.ts` env passthrough is overly broad
+- `lint:action-origin`: 18/18 mutating server actions enforce same-origin.
+- `lint:api-auth`: `/api/admin/db/download` properly guarded.
+- `vitest` privacy-fields test: asserts `adminSelectFieldKeys \ publicSelectFieldKeys == sensitive keys`.
+
+## Confidence: High
+
+No new security action items. Convergence holds across cycles 12 and 13.

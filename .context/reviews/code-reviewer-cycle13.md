@@ -1,36 +1,66 @@
-# Code Reviewer — Cycle 13
+# Code Reviewer - Cycle 13 (current run, 2026-04-23)
+
+Note: Earlier cycle-13 file `code-reviewer-cycle13-historical-2026-04-19.md` is preserved for provenance; its findings were fully implemented in plan-122 (C13-01..03, CR-13-04, DBG-13-02) and deployed.
+
+Scope: full-repo re-review of server actions, rate-limit flows, sanitization, error handling, transaction boundaries, and consistency with cycles 1-12 RPL precedents.
+
+HEAD at review start: `0000000f649f123fea8c5964caec77dbf42e2afe` (cycle 12 deploy-success docs).
+
+## Inventory of examined files
+
+- `apps/web/src/app/actions/admin-users.ts`
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/actions/settings.ts`
+- `apps/web/src/app/actions/seo.ts`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/auth-rate-limit.ts`
+- `apps/web/src/lib/action-guards.ts`
+- `apps/web/src/lib/request-origin.ts`
+- `apps/web/src/lib/session.ts`
+- `apps/web/src/lib/sql-restore-scan.ts`
+- `apps/web/src/lib/sanitize.ts`
+- `apps/web/src/lib/upload-tracker.ts`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/proxy.ts`
 
 ## Findings
 
-### CR-13-01: `getGalleryConfig` parses `image_sizes` without `parseImageSizes` helper [MEDIUM] [HIGH confidence]
-- **File**: `apps/web/src/lib/gallery-config.ts` line 77
-- **Description**: `_getGalleryConfig()` manually parses `image_sizes` with `.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0)` instead of using the shared `parseImageSizes()` from `gallery-config-shared.ts`. The shared function sorts the result (`parsed.sort((a, b) => a - b)`), which is important for correct `<source srcSet>` ordering and `deleteImageVariants` behavior. The `gallery-config.ts` version does NOT sort, meaning sizes could be in arbitrary order depending on how the admin entered them (e.g., "4096,640,2048,1536"), which would break `processImageFormats` where `sizes[sizes.length - 1]` is expected to be the largest size.
-- **Failure scenario**: Admin enters sizes "4096,640,2048,1536" — the base filename gets linked to `4096` (last in array but NOT necessarily largest). The masonry grid srcSet uses `imageSizes[0]` and `imageSizes[1]` assuming they're the smallest sizes, but they'd be `4096` and `640` — wrong images loaded.
-- **Fix**: Use `parseImageSizes()` from `gallery-config-shared.ts` instead of inline parsing.
+No new CRITICAL, HIGH, MEDIUM, or LOW findings.
 
-### CR-13-02: `processImageFormats` assumes `sizes` array is sorted ascending [MEDIUM] [HIGH confidence]
-- **File**: `apps/web/src/lib/process-image.ts` lines 351-386
-- **Description**: `processImageFormats` uses `sizes[sizes.length - 1]` to identify the "largest configured size" for the base filename link (line 377). If the array is unsorted (which it will be if admin enters sizes out of order and `getGalleryConfig` doesn't sort), the wrong size becomes the base file. Additionally, `home-client.tsx` assumes `imageSizes[0]` is the smallest and `imageSizes[1]` is the second smallest (line 251-252). This is a data flow correctness issue.
-- **Fix**: Sort sizes ascending inside `processImageFormats` at the start, or ensure all callers pass sorted arrays.
+### Re-verification of historical cycle-13 fixes
 
-### CR-13-03: Upload dropzone `select` element missing accessible styling for dark mode [LOW] [HIGH confidence]
-- **File**: `apps/web/src/components/upload-dropzone.tsx` line 226
-- **Description**: The `<select>` element for topic selection uses custom CSS classes but hardcodes `bg-background` which may not properly render the dropdown options in dark mode on all browsers. More importantly, the `<label>` element uses `htmlFor="upload-topic"` correctly, but the `<select>` doesn't have `aria-label` as a fallback (the `htmlFor`/`id` pair is sufficient for WCAG but `aria-label` is a good practice for AT when the visual label is far from the control).
-- **Fix**: Ensure dark mode styling works for the native `<select>` dropdown. Consider using shadcn's Select component for consistency with the rest of the admin UI.
+- `gallery-config.ts` line 72 uses `parseImageSizes()` — fix for the earlier C13-01 (unsorted sizes) is in force.
+- `gallery-config.ts` line 62-66 `validatedNumber` helper falls back to defaults on invalid DB rows — earlier C13-02 fix is in force.
+- `process-image.ts` line 373 adds defensive `[...sizes].sort((a, b) => a - b)` inside `processImageFormats` — belt-and-suspenders.
 
-### CR-13-04: `seo-client.tsx` casts `SeoSettings` to `Record<string, string>` with `as unknown as` [LOW] [MEDIUM confidence]
-- **File**: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx` line 41
-- **Description**: `updateSeoSettings(settings as unknown as Record<string, string>)` uses a double cast to bypass TypeScript's type system. This is a code smell — if `SeoSettings` gains a non-string field, this cast would silently corrupt the data. The proper fix is to make `updateSeoSettings` accept the actual `SeoSettings` type or use a proper mapping function.
-- **Fix**: Define `updateSeoSettings` to accept `SeoSettings` directly, or use `Object.fromEntries(Object.entries(settings))` instead of the double cast.
+### Pattern consistency re-verified
 
-### CR-13-05: `handleUpload` in upload-dropzone uses stale `files` closure reference [LOW] [MEDIUM confidence]
-- **File**: `apps/web/src/components/upload-dropzone.tsx` lines 100-196
-- **Description**: The `handleUpload` async function captures `files` from the outer closure at the time of invocation. Inside the function, `const queue = [...files]` is used, and later `setFiles(prev => prev.filter(f => !files.includes(f)))` references the same stale `files` array. If files are added or removed between when `handleUpload` starts and when it finishes, the cleanup logic at line 180 might not correctly identify which files were in the original upload batch. This is mitigated by the fact that `uploading` state disables the dropzone, so new files can't be added during upload.
-- **Fix**: This is low risk since the UI disables uploads during processing. No immediate fix needed, but documenting the invariant would help.
+1. Every mutating action starts with `isAdmin()` / `requireSameOriginAdmin()` / `getRestoreMaintenanceMessage()`.
+2. Every user input is `stripControlChars()`-sanitized BEFORE length/format validation (C46-01 pattern).
+3. Every rate-limit-guarded action validates form fields BEFORE the rate-limit pre-increment (AGG9R-RPL-01, AGG10R-RPL-01 pattern).
+4. Every rate-limit pre-increment has symmetric rollback on over-limit, infra-error, duplicate-entry, and retry-exhausted branches (C11R-FRESH-01 pattern).
+5. `createAdminUser` `ER_DUP_ENTRY` rolls back both in-memory and DB counters.
+6. `updatePassword` clears rate-limit only AFTER transaction commit (C1R-02).
+7. All mutating actions pass the automated `check-action-origin` gate (18/18 coverage).
 
-## Previously Deferred Items Still Present
+### Gate snapshot (pre-fix)
 
-- CR-38-02: `uploadTracker` uses insertion-order eviction, not LRU (confirmed still present in `apps/web/src/app/actions/images.ts` lines 36-46)
-- CR-38-06: `photo-viewer.tsx` `Histogram` null-safety (confirmed still present)
-- PERF-38-02: `exportImagesCsv` loads up to 50K rows into memory (confirmed still present)
-- ARCH-38-03: `data.ts` is a god module (confirmed still present at 714 lines)
+- eslint: PASS (0 errors, 0 warnings)
+- lint:api-auth: PASS
+- lint:action-origin: PASS (18 mutating server actions)
+- vitest: 298/298 PASS (50 files, 2.68s)
+- next build: PASS (25 routes, standalone output)
+- playwright e2e: PASS
+
+## Confidence: High
+
+No action needed this cycle beyond documentation + gate verification + deploy. Two consecutive zero-findings cycles (12 and 13) are strong convergence evidence.
