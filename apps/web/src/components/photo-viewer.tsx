@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardDescription, CardFooter } from "@/components/ui/card";
 import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
@@ -247,6 +247,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     return (
         <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
+            {/* Accessible H1 for heading-based SR navigation.
+                Keeping visually hidden because the viewer surfaces the title
+                in the toolbar/info sidebar already; the goal is to ensure
+                assistive tech has a single top-level heading per WCAG 1.3.1
+                and 2.4.6 (AGG3R-01 / C3R-RPL-01). */}
+            <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
                 {!isSharedView && (
                     <Button asChild variant="ghost" className="pl-0 gap-2">
@@ -381,9 +387,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     </div>
                                 )}
 
-                                <CardTitle className="mt-2 text-2xl break-words">
+                                {/* Semantic <h2> for the image title in the info
+                                    sidebar. `CardTitle` in shadcn v3 renders
+                                    `<div>` so we use an explicit heading here
+                                    so heading navigation works when the
+                                    sidebar is visible (C3R-RPL-01 / AGG3R-01). */}
+                                <h2 className="mt-2 text-2xl leading-none font-semibold break-words">
                                     {normalizedDisplayTitle}
-                                </CardTitle>
+                                </h2>
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
                             </CardHeader>
                             <CardContent>
