@@ -70,6 +70,107 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
     return found;
 }
 
+type CheckReport = {
+    passed: string[];
+    failed: string[];
+    skipped: string[];
+};
+
+/**
+ * C5R-RPL-03 — core scanner logic exposed as a pure function for unit tests
+ * (see `apps/web/src/__tests__/check-action-origin.test.ts`). Returns per-check
+ * outcomes instead of mutating global state so tests can assert exact sets.
+ *
+ * Accepts:
+ *   - `export async function doThing(...)` (existing behavior)
+ *   - `export const doThing = async (...) => {...}` (arrow expression)
+ *   - `export const doThing = async function (...) {...}` (function expression)
+ *
+ * Without the arrow/function-expression branch, a future refactor could
+ * silently drop `requireSameOriginAdmin()` and the lint would still return
+ * OK — the gate would lie. See aggregate finding AGG5R-01.
+ */
+export function checkActionSource(content: string, relative: string = 'input.ts'): CheckReport {
+    const report: CheckReport = { passed: [], failed: [], skipped: [] };
+    const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+    const lineOf = (node: ts.Node) =>
+        sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+
+    const evaluateBody = (owner: ts.Node, body: ts.Node | undefined, name: string) => {
+        if (hasExemptComment(owner, content)) {
+            report.skipped.push(`SKIP (exempt comment): ${relative}::${name}`);
+            return;
+        }
+
+        if (!shouldCheckFunction(name)) {
+            report.skipped.push(`SKIP (getter): ${relative}::${name}`);
+            return;
+        }
+
+        if (!body) {
+            report.failed.push(`MISSING BODY: ${relative}::${name}`);
+            return;
+        }
+
+        if (!functionCallsRequireSameOriginAdmin(body)) {
+            report.failed.push(
+                `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must call requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
+            );
+            return;
+        }
+
+        report.passed.push(`OK: ${relative}::${name}`);
+    };
+
+    for (const statement of sourceFile.statements) {
+        // Form 1: `export async function foo() {...}`
+        if (ts.isFunctionDeclaration(statement)) {
+            const modifiers = ts.getModifiers(statement);
+            const isExported = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+            const isAsync = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+            if (!isExported || !isAsync || !statement.name) continue;
+            evaluateBody(statement, statement.body, statement.name.text);
+            continue;
+        }
+
+        // Form 2: `export const foo = async (...) => {...}` or
+        //         `export const foo = async function (...) {...}`
+        if (!ts.isVariableStatement(statement)) continue;
+        const varModifiers = ts.getModifiers(statement);
+        const isExported = !!varModifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+        if (!isExported) continue;
+
+        for (const declaration of statement.declarationList.declarations) {
+            if (!ts.isIdentifier(declaration.name)) continue;
+            const init = declaration.initializer;
+            if (!init) continue;
+            // Arrow function: `async (...) => ...`
+            if (ts.isArrowFunction(init)) {
+                const funcModifiers = ts.getModifiers(init);
+                const isAsync = !!funcModifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+                if (!isAsync) continue;
+                const name = declaration.name.text;
+                // `init.body` is a concise-body expression OR a block; both are
+                // ts.Node and walkable by functionCallsRequireSameOriginAdmin.
+                evaluateBody(declaration, init.body, name);
+                continue;
+            }
+            // Function expression: `async function (...) {...}`
+            if (ts.isFunctionExpression(init)) {
+                const funcModifiers = ts.getModifiers(init);
+                const isAsync = !!funcModifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+                if (!isAsync) continue;
+                const name = declaration.name.text;
+                evaluateBody(declaration, init.body, name);
+                continue;
+            }
+        }
+    }
+
+    return report;
+}
+
 let failed = false;
 
 function checkActionFile(file: string) {
@@ -80,40 +181,13 @@ function checkActionFile(file: string) {
     }
     const content = fs.readFileSync(file, 'utf-8');
     const relative = path.relative(process.cwd(), file);
-    const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const report = checkActionSource(content, relative);
 
-    for (const statement of sourceFile.statements) {
-        if (!ts.isFunctionDeclaration(statement)) continue;
-        const modifiers = ts.getModifiers(statement);
-        const isExported = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
-        const isAsync = !!modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
-        if (!isExported || !isAsync || !statement.name) continue;
-
-        const name = statement.name.text;
-        if (!shouldCheckFunction(name)) {
-            console.log(`SKIP (getter): ${relative}::${name}`);
-            continue;
-        }
-
-        if (hasExemptComment(statement, content)) {
-            console.log(`SKIP (exempt comment): ${relative}::${name}`);
-            continue;
-        }
-
-        if (!statement.body) {
-            console.error(`MISSING BODY: ${relative}::${name}`);
-            failed = true;
-            continue;
-        }
-
-        if (!functionCallsRequireSameOriginAdmin(statement.body)) {
-            const line = sourceFile.getLineAndCharacterOfPosition(statement.getStart()).line + 1;
-            console.error(`MISSING requireSameOriginAdmin: ${relative}:${line} ${name} must call requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`);
-            failed = true;
-            continue;
-        }
-
-        console.log(`OK: ${relative}::${name}`);
+    for (const line of report.skipped) console.log(line);
+    for (const line of report.passed) console.log(line);
+    for (const line of report.failed) {
+        console.error(line);
+        failed = true;
     }
 }
 
