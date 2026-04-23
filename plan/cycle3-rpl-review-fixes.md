@@ -6,15 +6,15 @@
 
 ## Plan items
 
-| ID | Source | Severity | Plan | Owner | Status |
-|---|---|---|---|---|---|
-| C3R-RPL-01 | AGG3R-01 | MEDIUM | Add `<h1 class="sr-only">` to photo viewer; promote `CardTitle` (sidebar info) to `<h2>` so heading hierarchy is intact | (this cycle) | scheduled |
-| C3R-RPL-02 | AGG3R-02 | MEDIUM | Add `aria-label` to locale-switch button in `nav-client.tsx`; add `aria.switchLocale` translation in `en.json` and `ko.json` | (this cycle) | scheduled |
-| C3R-RPL-03 | AGG3R-03 | LOW | Bump tag-filter pill height to ≥24px (change `py-0.5` → `py-1` in `tag-filter.tsx`) | (this cycle) | scheduled |
-| C3R-RPL-04 | AGG3R-04 | LOW | Add visually-hidden `<h2>` between H1 and photo-card H3s on home gallery (`home-client.tsx`) | (this cycle) | scheduled |
-| C3R-RPL-05 | AGG3R-05 | LOW | Add `dir="ltr"` to `<html>` in `[locale]/layout.tsx` | (this cycle) | scheduled |
-| C3R-RPL-06 | AGG3R-07 | LOW | Convert DB-restore `window.confirm()` to styled `AlertDialog` matching other destructive flows | (this cycle) | scheduled |
-| C3R-RPL-07 | TE3-01 | LOW | Add Vitest/Playwright assertion that `/p/[id]` renders exactly one `<h1>` so AGG3R-01 doesn't regress | (this cycle) | scheduled |
+| ID | Source | Severity | Plan | Owner | Status | Commit |
+|---|---|---|---|---|---|---|
+| C3R-RPL-01 | AGG3R-01 | MEDIUM | Add `<h1 class="sr-only">` to photo viewer; promote `CardTitle` (sidebar info) to `<h2>` so heading hierarchy is intact | (this cycle) | ✅ done | `0000000bfa` |
+| C3R-RPL-02 | AGG3R-02 | MEDIUM | Add `aria-label` to locale-switch button in `nav-client.tsx`; add `aria.switchLocale` translation in `en.json` and `ko.json` | (this cycle) | ✅ done | `000000081` |
+| C3R-RPL-03 | AGG3R-03 | LOW | Bump tag-filter pill height to ≥24px (change `py-0.5` → `py-1` in `tag-filter.tsx`) | (this cycle) | ✅ done | `00000000e5` |
+| C3R-RPL-04 | AGG3R-04 | LOW | Add visually-hidden `<h2>` between H1 and photo-card H3s on home gallery (`home-client.tsx`) | (this cycle) | ✅ done | `00000005c` |
+| C3R-RPL-05 | AGG3R-05 | LOW | Add `dir="ltr"` to `<html>` in `[locale]/layout.tsx` | (this cycle) | ✅ done | `0000000d52` |
+| C3R-RPL-06 | AGG3R-07 | LOW | Convert DB-restore `window.confirm()` to styled `AlertDialog` matching other destructive flows | (this cycle) | ✅ not needed — already uses AlertDialog (review false positive; `grep window.confirm` returns empty) | n/a |
+| C3R-RPL-07 | TE3-01 | LOW | Add Vitest/Playwright assertion that `/p/[id]` renders exactly one `<h1>` so AGG3R-01 doesn't regress | (this cycle) | ✅ done | `00000006be` |
 
 ## Out-of-scope this cycle (deferred — see `cycle3-rpl-deferred.md`)
 
