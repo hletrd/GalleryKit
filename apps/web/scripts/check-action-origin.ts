@@ -1,12 +1,27 @@
 /**
- * CI check (C2R-02): verifies every mutating server action in
- * `apps/web/src/app/actions/*.ts` + `apps/web/src/app/[locale]/admin/db-actions.ts`
- * calls `requireSameOriginAdmin()` (defense-in-depth Origin/Referer check) or
- * carries an explicit opt-out comment `// @action-origin-exempt: <reason>`.
+ * CI check (C2R-02): verifies every mutating server action in the
+ * scanned files calls `requireSameOriginAdmin()` (defense-in-depth
+ * Origin/Referer check) or carries an explicit opt-out comment
+ * `// @action-origin-exempt: <reason>`.
  *
- * Exemptions are intentionally rare. Read-only getters (functions whose name
- * starts with `get`, and `login`/`logout`/`updatePassword` which have their own
- * `hasTrustedSameOrigin` invocations upstream) are automatically exempt.
+ * Scanned files (C5R-RPL-06 / AGG5R-05):
+ * - Auto-discovered via `apps/web/src/app/actions/*.ts`, EXCLUDING
+ *   `auth.ts` and `public.ts`. `auth.ts` owns its own `hasTrustedSameOrigin`
+ *   invocations directly at the call sites that the scanner cannot
+ *   generically detect; `public.ts` is the unauthenticated read-only
+ *   action surface (search + loadMoreImages) which intentionally skips
+ *   the origin check.
+ * - `apps/web/src/app/[locale]/admin/db-actions.ts` (hard-coded because
+ *   it lives outside the `actions/` directory).
+ *
+ * Glob-based discovery means new action files added to `actions/`
+ * are automatically covered — no manual allow-list edit required.
+ *
+ * Exemptions:
+ * - Read-only getters (function/variable name starts with `get[A-Z]`)
+ *   are automatically exempt — they don't mutate.
+ * - Each export can additionally opt-out with a leading JSDoc comment:
+ *     /** @action-origin-exempt: <reason> **\/
  *
  * Run with: npx tsx scripts/check-action-origin.ts
  */
@@ -16,28 +31,37 @@ import * as ts from 'typescript';
 
 const REPO_SRC = path.resolve(__dirname, '../src');
 
-const ACTION_FILES = [
-    path.join(REPO_SRC, 'app/actions/admin-users.ts'),
-    path.join(REPO_SRC, 'app/actions/images.ts'),
-    path.join(REPO_SRC, 'app/actions/seo.ts'),
-    path.join(REPO_SRC, 'app/actions/settings.ts'),
-    path.join(REPO_SRC, 'app/actions/sharing.ts'),
-    path.join(REPO_SRC, 'app/actions/tags.ts'),
-    path.join(REPO_SRC, 'app/actions/topics.ts'),
-    path.join(REPO_SRC, 'app/[locale]/admin/db-actions.ts'),
-];
+/**
+ * Files in `app/actions/` that intentionally bypass the generic scanner.
+ * Maintained here (not in the scanned set) to avoid false positives.
+ */
+const EXCLUDED_ACTION_FILENAMES = new Set(['auth.ts', 'public.ts']);
 
-// Exemptions:
-// - Read-only getters (name starts with `get`): exempt — they don't mutate.
-// - `auth.ts` functions: exempt — they own their own `hasTrustedSameOrigin`
-//   call via `login`/`updatePassword`. `logout` does not need the helper
-//   because it only invalidates the current session (idempotent).
-// - `public.ts`: exempt — these are unauthenticated server actions that
-//   explicitly do not enforce same-origin (they have their own rate-limit
-//   pathway via search + loadMoreImages).
-//
-// Each function can additionally opt-out with a leading JSDoc comment:
-//   /** @action-origin-exempt: <reason> */
+/**
+ * Discover every mutating-action file the scanner should check. Uses glob
+ * discovery over `app/actions/*.ts` so new files added to that directory
+ * are covered automatically (prior behavior used a hard-coded allow-list
+ * which silently skipped any file that wasn't explicitly added).
+ */
+function discoverActionFiles(): string[] {
+    const actionsDir = path.join(REPO_SRC, 'app/actions');
+    const found: string[] = [];
+    try {
+        for (const entry of fs.readdirSync(actionsDir, { withFileTypes: true })) {
+            if (!entry.isFile()) continue;
+            if (!entry.name.endsWith('.ts')) continue;
+            if (EXCLUDED_ACTION_FILENAMES.has(entry.name)) continue;
+            found.push(path.join(actionsDir, entry.name));
+        }
+    } catch (err) {
+        console.error(`Failed to discover action files under ${actionsDir}:`, err);
+        throw err;
+    }
+    // Also include the admin db-actions file which lives outside app/actions/.
+    found.push(path.join(REPO_SRC, 'app/[locale]/admin/db-actions.ts'));
+    return found.sort();
+}
+
 const AUTOMATIC_NAME_EXEMPTIONS = /^get[A-Z]/;
 
 function shouldCheckFunction(name: string): boolean {
@@ -195,7 +219,8 @@ function checkActionFile(file: string) {
 // without triggering the whole-repo scan at module load time.
 const isCliEntry = require.main === module || (typeof require === 'undefined' && import.meta?.url?.includes('check-action-origin'));
 if (isCliEntry) {
-    for (const file of ACTION_FILES) {
+    const actionFiles = discoverActionFiles();
+    for (const file of actionFiles) {
         checkActionFile(file);
     }
 
