@@ -7,19 +7,21 @@ import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
+import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
     isOpen: boolean;
     onClose: () => void;
     isAdmin?: boolean;
+    untitledFallbackTitle?: string;
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false, untitledFallbackTitle }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -116,11 +118,10 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
 
     if (!isOpen || !image) return null;
 
-    const displayTitle = image.title && image.title.trim() !== ''
-        ? image.title
-        : (image.tags && image.tags.length > 0
-            ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
-            : t('imageManager.untitled'));
+    const displayTitle = getPhotoDisplayTitle(
+        image,
+        untitledFallbackTitle ?? t('imageManager.untitled'),
+    );
 
     const formattedShutterSpeed = formatShutterSpeed(image.exposure_time);
     const formattedCaptureDate = formatStoredExifDate(image.capture_date, locale);

@@ -20,6 +20,10 @@
 - 175 — Deferred Review Coverage (Cycle 1 Ultradeep) — TODO
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
 
+## Completed Plans (Cycle 1 Review Follow-up)
+
+- 212 — Cycle 1 Photo/Share Performance and Title Consistency Fixes — DONE / archived under `done/plan-212-cycle1-photo-share-fixes.md`
+
 ## Completed Plans (Cycle 6 Review)
 
 - 211 — Cycle 6 Review Fixes — DONE / archived under `done/plan-211-cycle6-review-fixes.md`

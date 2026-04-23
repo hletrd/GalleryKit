@@ -10,6 +10,7 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
 const sharePageRobots = {
     index: false,
@@ -25,10 +26,13 @@ const sharePageRobots = {
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
-    const locale = await getLocale();
-    const t = await getTranslations('sharedGroup');
-    const seo = await getSeoSettings();
-    const group = await getSharedGroupCached(key, { incrementViewCount: false });
+    const [locale, t, seo, config, group] = await Promise.all([
+        getLocale(),
+        getTranslations('sharedGroup'),
+        getSeoSettings(),
+        getGalleryConfig(),
+        getSharedGroupCached(key, { incrementViewCount: false }),
+    ]);
     if (!group) return {
         title: t('notFoundTitle'),
         description: t('notFoundDescription'),
@@ -37,7 +41,6 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const pageUrl = localizeUrl(seo.url, locale, `/g/${key}`);
     const coverImage = group.images[0];
     // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
-    const config = await getGalleryConfig();
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
     // Use custom OG image if configured, otherwise use cover photo
@@ -83,17 +86,16 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string, locale: string }>, searchParams: Promise<{ photoId?: string }> }) {
     const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
-    const [group, seo] = await Promise.all([
+    const [group, seo, t, config] = await Promise.all([
         getSharedGroupCached(key),
         getSeoSettings(),
+        getTranslations('sharedGroup'),
+        getGalleryConfig(),
     ]);
 
     if (!group) {
         return notFound();
     }
-
-    const t = await getTranslations('sharedGroup');
-    const config = await getGalleryConfig();
     const gridImageSize = findGridCardImageSize(config.imageSizes);
 
     let photoId: number | null = null;
@@ -114,8 +116,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     }
 
     if (selectedImage) {
-        const isTitleFilename = selectedImage.title && /\.[a-z0-9]{3,4}$/i.test(selectedImage.title);
-        const displayTitle = selectedImage.title && !isTitleFilename ? selectedImage.title : t('photo');
+        const displayTitle = getPhotoDisplayTitle(selectedImage, t('photo'));
         const subtitle = selectedImage.description || t('viewCount', { count: group.images.length });
 
         return (
@@ -138,6 +139,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     imageSizes={config.imageSizes}
                     siteTitle={seo.title}
                     shareBaseUrl={seo.url}
+                    untitledFallbackTitle={t('photo')}
                 />
             </>
         );
@@ -153,8 +155,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             </div>
             <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
                 {group.images.map((image) => {
-                    const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
-                    const altText = image.title && !isTitleFilename ? image.title : t('photo');
+                    const altText = getPhotoDisplayTitle(image, t('photo'));
 
                     return (
                         <Link

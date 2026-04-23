@@ -20,8 +20,9 @@ import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
-import { imageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getPhotoDisplayTitle, getPhotoDocumentTitle } from '@/lib/photo-title';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -49,9 +50,10 @@ interface PhotoViewerProps {
     imageSizes?: number[];
     siteTitle?: string;
     shareBaseUrl?: string;
+    untitledFallbackTitle?: string;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -84,13 +86,22 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         };
     }, []);
 
+    const normalizedDisplayTitle = useMemo(() => (
+        image
+            ? getPhotoDisplayTitle(
+                image,
+                untitledFallbackTitle ?? t('imageManager.untitled'),
+            )
+            : null
+    ), [image, t, untitledFallbackTitle]);
+
     useEffect(() => {
-        if (image?.title) {
-            document.title = `${image.title} — ${siteTitle}`;
-        } else {
-            document.title = siteTitleRef.current;
-        }
-    }, [image?.id, image?.title, siteTitle]);
+        document.title = getPhotoDocumentTitle(
+            normalizedDisplayTitle,
+            siteTitle,
+            siteTitleRef.current,
+        );
+    }, [normalizedDisplayTitle, siteTitle]);
 
     const showInfo = isPinned || timerShowInfo;
     const photoViewerSizes = getPhotoViewerImageSizes(showInfo);
@@ -186,16 +197,21 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         };
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
+        const jpegFallbackTargetSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
+        const jpegSrc = sizedImageUrl('/uploads/jpeg', image.filename_jpeg, jpegFallbackTargetSize, imageSizes);
+        const jpegSrcSet = sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, imageSizes);
 
         if (!baseWebp || !baseAvif) {
             return (
                 <Image
-                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                    src={jpegSrc}
+                    sizes={photoViewerSizes}
                     alt={getAltText(image)}
                     width={image.width}
                     height={image.height}
                     className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
                     priority
+                    unoptimized
                 />
             );
         }
@@ -213,7 +229,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     sizes={photoViewerSizes}
                 />
                 <img
-                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                    src={jpegSrc}
+                    srcSet={jpegSrcSet}
+                    sizes={photoViewerSizes}
                     alt={getAltText(image)}
                     width={image.width}
                     height={image.height}
@@ -364,11 +382,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 )}
 
                                 <CardTitle className="mt-2 text-2xl break-words">
-                                    {image.title && image.title.trim() !== ''
-                                        ? image.title
-                                        : (image.tags && image.tags.length > 0
-                                            ? image.tags.map((tag: TagInfo) => `#${tag.name}`).join(' ')
-                                            : t('imageManager.untitled'))}
+                                    {normalizedDisplayTitle}
                                 </CardTitle>
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
                             </CardHeader>
@@ -563,6 +577,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 isOpen={showBottomSheet}
                 onClose={() => setShowBottomSheet(false)}
                 isAdmin={isAdmin}
+                untitledFallbackTitle={untitledFallbackTitle}
             />
         </div>
     );

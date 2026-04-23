@@ -39,3 +39,10 @@ export function sizedImageUrl(directory: string, filename: string, targetSize: n
     const normalizedDirectory = directory.replace(/\/+$/, '');
     return imageUrl(`${normalizedDirectory}/${sizedImageFilename(filename, targetSize, imageSizes)}`);
 }
+
+/** Build a responsive srcSet from the configured derivatives in the given directory. */
+export function sizedImageSrcSet(directory: string, filename: string, imageSizes: number[] = DEFAULT_IMAGE_SIZES): string {
+    return imageSizes
+        .map((size) => `${sizedImageUrl(directory, filename, size, imageSizes)} ${findNearestImageSize(imageSizes, size)}w`)
+        .join(', ');
+}

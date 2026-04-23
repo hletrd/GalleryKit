@@ -1,0 +1,32 @@
+{
+  "cycle": 1,
+  "timestamp": "2026-04-23T16:52:47+0900",
+  "available_registered_review_agents": [
+    "architect",
+    "api-reviewer",
+    "code-reviewer",
+    "critic",
+    "debugger",
+    "designer",
+    "performance-reviewer",
+    "quality-reviewer",
+    "security-reviewer",
+    "style-reviewer",
+    "test-engineer",
+    "verifier"
+  ],
+  "requested_but_not_registered": [
+    "document-specialist",
+    "perf-reviewer (closest registered role: performance-reviewer)",
+    "tracer"
+  ],
+  "ui_detected": true,
+  "ui_markers": [
+    "apps/web/src/app/**/*.tsx",
+    "apps/web/src/components/**/*.tsx",
+    "apps/web/public",
+    "apps/web/e2e/*.ts",
+    "apps/web/playwright.config.ts"
+  ],
+  "local_review_server": "http://127.0.0.1:3000"
+}

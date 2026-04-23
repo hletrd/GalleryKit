@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { imageUrl, sizedImageFilename, sizedImageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageFilename, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 
 describe('sizedImageFilename', () => {
     it('uses the nearest configured derivative size for the requested target', () => {
@@ -17,6 +17,18 @@ describe('sizedImageUrl', () => {
     it('builds a derivative URL inside the requested directory', () => {
         expect(sizedImageUrl('/uploads/jpeg', 'sample.jpg', 128, [640, 1536, 2048])).toBe(
             imageUrl('/uploads/jpeg/sample_640.jpg')
+        );
+    });
+});
+
+describe('sizedImageSrcSet', () => {
+    it('builds a srcSet from the configured derivative sizes', () => {
+        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', [640, 1536, 2048])).toBe(
+            [
+                `${imageUrl('/uploads/jpeg/sample_640.jpg')} 640w`,
+                `${imageUrl('/uploads/jpeg/sample_1536.jpg')} 1536w`,
+                `${imageUrl('/uploads/jpeg/sample_2048.jpg')} 2048w`,
+            ].join(', ')
         );
     });
 });

@@ -9,6 +9,7 @@ import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
+import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
 const sharePageRobots = {
     index: false,
@@ -30,10 +31,13 @@ function toIsoTimestamp(value: string | Date | null | undefined) {
 
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
-    const locale = await getLocale();
-    const t = await getTranslations('shared');
-    const seo = await getSeoSettings();
-    const image = await getImageByShareKeyCached(key);
+    const [locale, t, seo, config, image] = await Promise.all([
+        getLocale(),
+        getTranslations('shared'),
+        getSeoSettings(),
+        getGalleryConfig(),
+        getImageByShareKeyCached(key),
+    ]);
     if (!image) return {
         title: t('ogNotFoundTitle'),
         description: t('ogNotFoundDescription'),
@@ -43,7 +47,6 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     const title = image.title && !isTitleFilename ? image.title : t('ogTitle');
     const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
     // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
-    const config = await getGalleryConfig();
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
     // Use custom OG image if configured, otherwise use photo image
@@ -83,19 +86,19 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 
 export default async function SharedPhotoPage({ params }: { params: Promise<{ key: string }> }) {
     const { key } = await params;
-    const locale = await getLocale();
-    const t = await getTranslations('shared');
-    const image = await getImageByShareKeyCached(key);
+    const [locale, t, image, seo, config] = await Promise.all([
+        getLocale(),
+        getTranslations('shared'),
+        getImageByShareKeyCached(key),
+        getSeoSettings(),
+        getGalleryConfig(),
+    ]);
 
     if (!image) {
         return notFound();
     }
 
-    const seo = await getSeoSettings();
-    const config = await getGalleryConfig();
-
-    const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
-    const displayTitle = image.title && !isTitleFilename ? image.title : t('sharedPhoto');
+    const displayTitle = getPhotoDisplayTitle(image, t('sharedPhoto'));
     const subtitle = image.description || `${seo.nav_title || seo.title} · ${t('sharedPhoto')}`;
 
     return (
@@ -119,6 +122,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 imageSizes={config.imageSizes}
                 siteTitle={seo.title}
                 shareBaseUrl={seo.url}
+                untitledFallbackTitle={t('sharedPhoto')}
             />
         </>
     );

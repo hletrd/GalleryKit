@@ -11,6 +11,7 @@ import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
+import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
@@ -22,23 +23,25 @@ export const revalidate = 604800;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [locale, t, seo] = await Promise.all([
-    getLocale(),
-    getTranslations('photo'),
-    getSeoSettings(),
-  ]);
-
     // Validate that id is a purely numeric positive integer before parseInt
     // (matches the default export's validation pattern)
     if (!/^\d+$/.test(id)) {
+        const t = await getTranslations('photo');
         return { title: t('notFoundTitle') };
     }
     const imageId = parseInt(id, 10);
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
+        const t = await getTranslations('photo');
         return { title: t('notFoundTitle') };
     }
 
-    const image = await getImageCached(imageId);
+    const [locale, t, seo, config, image] = await Promise.all([
+        getLocale(),
+        getTranslations('photo'),
+        getSeoSettings(),
+        getGalleryConfig(),
+        getImageCached(imageId),
+    ]);
 
     if (!image) {
         return {
@@ -46,26 +49,20 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         };
     }
 
-    // Safe title generation logic
-    const hasTags = image.tags && image.tags.length > 0;
-    const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
-
-    let displayTitle = t('untitled');
+    const displayTitle = getPhotoDisplayTitle(
+        image,
+        t('titleWithId', { id: image.id }),
+        { preferTags: true, formatTitleAsTags: true },
+    );
     let keywords: string[] = [];
 
-    if (hasTags) {
-        displayTitle = image.tags.map((t: TagInfo) => `#${t.name}`).join(' ');
+    if (image.tags && image.tags.length > 0) {
         keywords = image.tags.map((t: TagInfo) => t.name);
-    } else if (image.title && !isTitleFilename) {
-        displayTitle = image.title.split(/\s+/).map((word: string) => `#${word}`).join(' ');
-    } else {
-        displayTitle = t('titleWithId', { id: image.id });
     }
 
     if (image.topic) keywords.push(image.topic);
 
     // Use configured image sizes for OG image URLs (avoids 404s if admin changes image_sizes)
-    const config = await getGalleryConfig();
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
     const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`;
     const ogImageUrl = absoluteImageUrl(imageUrl, seo.url);
@@ -109,11 +106,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function PhotoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [locale, t] = await Promise.all([
-    getLocale(),
-    getTranslations('photo'),
-  ]);
-
     // Validate that id is a purely numeric positive integer
     if (!/^\d+$/.test(id)) {
         return notFound();
@@ -123,25 +115,23 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         return notFound();
     }
 
-    const image = await getImageCached(imageId);
-
-    if (!image) return notFound();
-
-    const [seo, config, isAdminUser] = await Promise.all([
+    const [locale, t, image, seo, config, isAdminUser] = await Promise.all([
+        getLocale(),
+        getTranslations('photo'),
+        getImageCached(imageId),
         getSeoSettings(),
         getGalleryConfig(),
         isAdmin(),
     ]);
 
-    // Replicate title logic for JSON-LD
-    const hasTags = image.tags && image.tags.length > 0;
-    const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
+    if (!image) return notFound();
 
-    const displayTitle = hasTags
-        ? image.tags.map((t: TagInfo) => `#${t.name}`).join(' ')
-        : (image.title && !isTitleFilename
-            ? image.title.split(/\s+/).map((word: string) => `#${word}`).join(' ')
-            : t('untitled'));
+    // Replicate title logic for JSON-LD
+    const displayTitle = getPhotoDisplayTitle(
+        image,
+        t('titleWithId', { id: image.id }),
+        { preferTags: true, formatTitleAsTags: true },
+    );
 
     const keywords = image.tags?.map((t: TagInfo) => t.name) || [];
     if (image.topic) keywords.push(image.topic);
@@ -235,6 +225,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 imageSizes={config.imageSizes}
                 siteTitle={seo.title}
                 shareBaseUrl={seo.url}
+                untitledFallbackTitle={t('titleWithId', { id: image.id })}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (
