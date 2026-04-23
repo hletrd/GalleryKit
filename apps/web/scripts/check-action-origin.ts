@@ -10,18 +10,20 @@
  * Origin/Referer check) or carries an explicit opt-out comment
  * `// @action-origin-exempt: <reason>`.
  *
- * Scanned files (C5R-RPL-06 / AGG5R-05):
- * - Auto-discovered via `apps/web/src/app/actions/*.ts`, EXCLUDING
- *   `auth.ts` and `public.ts`. `auth.ts` owns its own `hasTrustedSameOrigin`
- *   invocations directly at the call sites that the scanner cannot
- *   generically detect; `public.ts` is the unauthenticated read-only
- *   action surface (search + loadMoreImages) which intentionally skips
- *   the origin check.
+ * Scanned files (C5R-RPL-06 / AGG5R-05 + C6R-RPL-02 / AGG6R-01):
+ * - Auto-discovered RECURSIVELY via app/actions/ (all .ts descendants),
+ *   EXCLUDING `auth.ts` and `public.ts`. `auth.ts` owns its own
+ *   `hasTrustedSameOrigin` invocations directly at the call sites that
+ *   the scanner cannot generically detect; `public.ts` is the
+ *   unauthenticated read-only action surface (search + loadMoreImages)
+ *   which intentionally skips the origin check.
  * - `apps/web/src/app/[locale]/admin/db-actions.ts` (hard-coded because
  *   it lives outside the `actions/` directory).
  *
- * Glob-based discovery means new action files added to `actions/`
- * are automatically covered — no manual allow-list edit required.
+ * Glob-based recursive discovery means new action files added to
+ * `actions/` (including nested subdirectories like
+ * `actions/admin/foo.ts`) are automatically covered — no manual
+ * allow-list edit required.
  *
  * Exemptions:
  * - Read-only getters (function/variable name starts with `get[A-Z]`)
@@ -44,21 +46,44 @@ const REPO_SRC = path.resolve(__dirname, '../src');
 const EXCLUDED_ACTION_FILENAMES = new Set(['auth.ts', 'public.ts']);
 
 /**
- * Discover every mutating-action file the scanner should check. Uses glob
- * discovery over `app/actions/*.ts` so new files added to that directory
- * are covered automatically (prior behavior used a hard-coded allow-list
- * which silently skipped any file that wasn't explicitly added).
+ * Recursively walk a directory collecting all `.ts` files, excluding
+ * filenames in `EXCLUDED_ACTION_FILENAMES`. Throws if the root cannot be
+ * read — failing loudly is correct because a missing root indicates a
+ * repository layout change that breaks the security lint gate.
  */
-function discoverActionFiles(): string[] {
-    const actionsDir = path.join(REPO_SRC, 'app/actions');
-    const found: string[] = [];
-    try {
-        for (const entry of fs.readdirSync(actionsDir, { withFileTypes: true })) {
+export function walkForTsFiles(root: string): string[] {
+    const out: string[] = [];
+    const stack: string[] = [root];
+    while (stack.length > 0) {
+        const dir = stack.pop() as string;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                stack.push(full);
+                continue;
+            }
             if (!entry.isFile()) continue;
             if (!entry.name.endsWith('.ts')) continue;
             if (EXCLUDED_ACTION_FILENAMES.has(entry.name)) continue;
-            found.push(path.join(actionsDir, entry.name));
+            out.push(full);
         }
+    }
+    return out;
+}
+
+/**
+ * Discover every mutating-action file the scanner should check. Uses
+ * RECURSIVE discovery over app/actions/ (all `.ts` descendants) so
+ * new files added anywhere beneath `actions/` — including nested
+ * subdirectories — are covered automatically. Prior behavior was a
+ * single-level readdir which would silently miss files in
+ * subdirectories (C6R-RPL-02 / AGG6R-01).
+ */
+function discoverActionFiles(): string[] {
+    const actionsDir = path.join(REPO_SRC, 'app/actions');
+    let found: string[];
+    try {
+        found = walkForTsFiles(actionsDir);
     } catch (err) {
         console.error(`Failed to discover action files under ${actionsDir}:`, err);
         throw err;

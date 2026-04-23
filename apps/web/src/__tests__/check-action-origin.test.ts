@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
-import { checkActionSource } from '../../scripts/check-action-origin';
+import { checkActionSource, walkForTsFiles } from '../../scripts/check-action-origin';
 
 /**
  * C5R-RPL-04 / AGG5R-06 — fixture-based coverage for the
@@ -145,6 +148,55 @@ describe('checkActionSource — function-expression exports', () => {
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
+    });
+});
+
+describe('walkForTsFiles — recursive action discovery (C6R-RPL-02 / AGG6R-01)', () => {
+    let tempRoot: string;
+
+    beforeEach(() => {
+        tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'action-origin-walk-'));
+    });
+
+    afterEach(() => {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    });
+
+    it('discovers .ts files in nested subdirectories', () => {
+        fs.writeFileSync(path.join(tempRoot, 'top.ts'), '// top');
+        fs.mkdirSync(path.join(tempRoot, 'sub'));
+        fs.writeFileSync(path.join(tempRoot, 'sub', 'nested.ts'), '// nested');
+        fs.mkdirSync(path.join(tempRoot, 'sub', 'deep'));
+        fs.writeFileSync(path.join(tempRoot, 'sub', 'deep', 'deeper.ts'), '// deeper');
+
+        const found = walkForTsFiles(tempRoot).map((p) => path.relative(tempRoot, p)).sort();
+        expect(found).toEqual([
+            path.join('sub', 'deep', 'deeper.ts'),
+            path.join('sub', 'nested.ts'),
+            'top.ts',
+        ]);
+    });
+
+    it('skips non-.ts files', () => {
+        fs.writeFileSync(path.join(tempRoot, 'keep.ts'), '// keep');
+        fs.writeFileSync(path.join(tempRoot, 'skip.md'), '# skip');
+        fs.writeFileSync(path.join(tempRoot, 'skip.js'), '// skip');
+
+        const found = walkForTsFiles(tempRoot).map((p) => path.relative(tempRoot, p));
+        expect(found).toEqual(['keep.ts']);
+    });
+
+    it('excludes auth.ts and public.ts at any depth', () => {
+        fs.writeFileSync(path.join(tempRoot, 'auth.ts'), '// top auth');
+        fs.writeFileSync(path.join(tempRoot, 'public.ts'), '// top public');
+        fs.mkdirSync(path.join(tempRoot, 'sub'));
+        fs.writeFileSync(path.join(tempRoot, 'sub', 'auth.ts'), '// nested auth');
+        fs.writeFileSync(path.join(tempRoot, 'sub', 'keep.ts'), '// keep');
+
+        const found = walkForTsFiles(tempRoot).map((p) => path.relative(tempRoot, p));
+        expect(found).toContain(path.join('sub', 'keep.ts'));
+        expect(found.find((p) => p.endsWith('auth.ts'))).toBeUndefined();
+        expect(found.find((p) => p.endsWith('public.ts'))).toBeUndefined();
     });
 });
 
