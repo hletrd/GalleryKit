@@ -138,7 +138,7 @@ After implementing each commit:
 - [x] C4R-RPL2-04 (actions barrel settings) — commit `0000000ca9d8df1791bc477e45753082706c87fa`
 - [x] C4R-RPL2-05 (SQL scanner CREATE DATABASE) — commit `0000000ecdf5e61f264b71aa9277567fa193a239`
 - [x] Gates green — eslint clean; lint:api-auth OK; lint:action-origin OK; vitest 232/232; next build OK; Playwright 17/17
-- [ ] Deploy complete
+- [x] Deploy complete — `npm run deploy` succeeded; `gallerykit-web` container recreated and running
 
 ## Lessons learned
 
