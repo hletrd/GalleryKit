@@ -24,9 +24,14 @@ const poolConnection = mysql.createPool({
     ...sslConfig,
 });
 
-// Increase GROUP_CONCAT max length from default 1024 to prevent silent truncation of tag lists
+// Increase GROUP_CONCAT max length from default 1024 to prevent silent truncation of tag lists.
+// Attach a .catch() handler so a transient failure is logged instead of producing an
+// unhandled promise rejection (Node 24 strict) AND silently reverting the pooled
+// connection to the default 1024-byte limit, which would truncate GROUP_CONCAT output
+// in CSV exports and SEO settings (C4R-RPL2-01 — aggregated finding AGG4R2-01).
 poolConnection.on('connection', (connection) => {
-    connection.query('SET group_concat_max_len = 65535');
+    connection.query('SET group_concat_max_len = 65535')
+        .catch((err) => console.error('[db] Failed to set group_concat_max_len on pooled connection:', err));
 });
 
 export const connection = poolConnection;
