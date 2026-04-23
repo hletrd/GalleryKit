@@ -269,6 +269,14 @@ export async function restoreDatabase(formData: FormData) {
         }
 
         if (!beginRestoreMaintenance()) {
+            // C7R-RPL-02 / AGG7R-02: explicitly RELEASE_LOCK on this
+            // early-return path. The original code skipped the inner
+            // try/finally whose RELEASE_LOCK statement is the only one
+            // in the outer flow — without this release, the advisory
+            // lock stayed held by the pool connection after it went
+            // back to the pool, blocking every subsequent restore
+            // attempt until the connection was evicted.
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch(() => {});
             return { success: false, error: t('restoreInProgress') };
         }
 
