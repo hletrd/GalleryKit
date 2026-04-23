@@ -37,7 +37,7 @@
 
 ## Rollout
 
-- Per-cycle deploy (`npm run deploy`) after all gates green and all commits pushed.
+- Per-cycle deploy (`npm run deploy`) after all gates green and all commits pushed. **Status: deployed 2026-04-23, `/api/live` = 200, production verified for all 5 shipped fixes (heading tree, aria-label on locale switch, pill height, H2 insertion, `dir="ltr"`).**
 
 ## Commit cadence
 
