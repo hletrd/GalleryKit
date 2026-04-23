@@ -18,11 +18,20 @@ export const revalidate = 3600;
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ topic: string }>, searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
-  const [locale, t, seo, topicData] = await Promise.all([
+  const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
+  const topicDataPromise = getTopicBySlugCached(topic);
+  const topicTagsPromise = requestedTagSlugs.length > 0
+    ? topicDataPromise.then((resolvedTopic) => (
+        resolvedTopic ? getTagsCached(resolvedTopic.slug) : []
+      ))
+    : Promise.resolve([]);
+
+  const [locale, t, seo, topicData, allTags] = await Promise.all([
     getLocale(),
     getTranslations('topic'),
     getSeoSettings(),
-    getTopicBySlugCached(topic),
+    topicDataPromise,
+    topicTagsPromise,
   ]);
 
   if (!topicData) return {
@@ -30,9 +39,8 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     description: t('notFoundDescription'),
   };
 
-  const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
   const tagSlugs = requestedTagSlugs.length > 0
-    ? filterExistingTagSlugs(requestedTagSlugs, await getTagsCached(topicData.slug))
+    ? filterExistingTagSlugs(requestedTagSlugs, allTags)
     : [];
 
   const title = tagSlugs.length > 0

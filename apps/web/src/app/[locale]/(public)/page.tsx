@@ -17,15 +17,20 @@ export const revalidate = 3600;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { tags: tagsParam } = await searchParams;
-  const [locale, t, seo] = await Promise.all([
+  const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
+  const allTagsPromise = requestedTagSlugs.length > 0
+    ? getTagsCached()
+    : Promise.resolve([]);
+
+  const [locale, t, seo, allTags] = await Promise.all([
     getLocale(),
     getTranslations('home'),
     getSeoSettings(),
+    allTagsPromise,
   ]);
   const pageUrl = localizeUrl(seo.url, locale, '/');
-  const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
   const tagSlugs = requestedTagSlugs.length > 0
-    ? filterExistingTagSlugs(requestedTagSlugs, await getTagsCached())
+    ? filterExistingTagSlugs(requestedTagSlugs, allTags)
     : [];
 
   const title = tagSlugs.length > 0
