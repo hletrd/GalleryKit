@@ -213,16 +213,16 @@ See `plan/plan-220-cycle6-rpl-deferred.md` for the full list.
 
 | Step | Status | Commit |
 |---|---|---|
-| 1. SECURITY-CRITICAL banner (AGG6R-09) | [ ] pending | |
-| 2. Scanner subdir recursion (AGG6R-01) | [ ] pending | |
-| 3. DB rate-limit rollback symmetry (AGG6R-02) | [ ] pending | |
-| 4. cleanOrphanedTmpFiles log-after-unlink (AGG6R-03) | [ ] pending | |
-| 5. Drop redundant revalidate (AGG6R-10) | [ ] pending | |
-| 6. CSV escape CRLF collapse (AGG6R-11) | [ ] pending | |
-| 7. Privacy guard whitelist test (AGG6R-07) | [ ] pending | |
-| 8. E2E origin-guard (AGG6R-04) | [ ] pending | |
-| 9. README.md TRUST_PROXY (AGG6R-05) | [ ] pending | |
-| 10. CLAUDE.md advisory locks (AGG6R-06) | [ ] pending | |
-| 11. Gate run | [ ] pending | |
-| 12. Deploy | [ ] pending | |
-| 13. Plan completion | [ ] pending | |
+| 1. SECURITY-CRITICAL banner (AGG6R-09) | [x] completed | `00000001a66f63a` `docs(lint): 🔒 add SECURITY-CRITICAL banner to action-origin / api-auth scanners (C6R-RPL-01)` |
+| 2. Scanner subdir recursion (AGG6R-01) | [x] completed | `00000006ca59bc7` `fix(lint): 🛡️ recurse into action subdirectories in check-action-origin (C6R-RPL-02)` |
+| 3. DB rate-limit rollback symmetry (AGG6R-02) | [x] completed | `0000000233131710` `fix(rate-limit): 🛡️ symmetric DB counter rollback on over-limit and FK error paths (C6R-RPL-03)` |
+| 4. cleanOrphanedTmpFiles log-after-unlink (AGG6R-03) | [x] completed | `0000000dc924f54` `fix(queue): 📝 log cleanOrphanedTmpFiles results after unlink (C6R-RPL-04)` |
+| 5. Drop redundant revalidate (AGG6R-10) | [x] completed | `0000000e61a9216` `perf(actions): 🩹 drop redundant admin-dashboard revalidate after revalidateAllAppData (C6R-RPL-05)` |
+| 6. CSV escape CRLF collapse (AGG6R-11) | [x] completed | `0000000a9cbda51` + `00000004609e6f8` (extract to lib/csv-escape for test-isolation) |
+| 7. Privacy guard whitelist test (AGG6R-07) | [x] completed | `0000000b1a309e8` `test(privacy): ✅ assert adminSelectFieldKeys \ publicSelectFieldKeys == sensitive keys (C6R-RPL-07)` |
+| 8. E2E origin-guard (AGG6R-04) | [x] completed | `000000003788c64` `test(e2e): ✅ assert admin API rejects requests with spoofed Origin header (C6R-RPL-08)` |
+| 9. README.md TRUST_PROXY (AGG6R-05) | [x] completed | `000000038d2338f` `docs(readme): 📝 document TRUST_PROXY requirement for proxied deployments (C6R-RPL-09)` |
+| 10. CLAUDE.md advisory locks (AGG6R-06) | [x] completed | `0000000e94fa41c` `docs(claude): 📝 document advisory locks in race-condition protections (C6R-RPL-10)` |
+| 11. Gate run | [x] completed | eslint clean, next build (tsc) clean, vitest 48 files / 271 tests pass, Playwright 19/19 pass (incl. new origin-guard spec), lint:api-auth + lint:action-origin pass |
+| 12. Deploy | [x] per-cycle-success | `npm run deploy` landed; container gallerykit-web recreated and started; app at http://localhost:3000 |
+| 13. Plan completion | [x] completed | plan retained in `plan/` for cycle record; archive to `plan/done/` at next archive sweep |
