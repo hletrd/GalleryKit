@@ -14,12 +14,87 @@ interface HistogramData {
     l: number[];
 }
 
+interface HistogramWorkerPayload {
+    imageData: ArrayBuffer;
+    width: number;
+    height: number;
+}
+
+interface HistogramWorkerResponse {
+    requestId?: number;
+    histogram?: HistogramData;
+    r?: number[];
+    g?: number[];
+    b?: number[];
+    l?: number[];
+}
+
+interface HistogramWorkerLike {
+    addEventListener(type: 'message', listener: (event: MessageEvent<HistogramWorkerResponse>) => void): void;
+    removeEventListener(type: 'message', listener: (event: MessageEvent<HistogramWorkerResponse>) => void): void;
+    postMessage(message: { requestId: number } & HistogramWorkerPayload, transfer: Transferable[]): void;
+}
+
 interface HistogramProps {
     imageUrl: string;
     className?: string;
 }
 
 const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
+let nextHistogramRequestId = 0;
+
+function toHistogramData(eventData: HistogramWorkerResponse): HistogramData {
+    if (eventData.histogram) {
+        return eventData.histogram;
+    }
+
+    return {
+        r: eventData.r ?? new Array(256).fill(0),
+        g: eventData.g ?? new Array(256).fill(0),
+        b: eventData.b ?? new Array(256).fill(0),
+        l: eventData.l ?? new Array(256).fill(0),
+    };
+}
+
+export function requestHistogramFromWorker(
+    worker: HistogramWorkerLike,
+    payload: HistogramWorkerPayload,
+    signal?: AbortSignal,
+): Promise<HistogramData> {
+    const requestId = ++nextHistogramRequestId;
+
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            worker.removeEventListener('message', handleMessage);
+            signal?.removeEventListener('abort', handleAbort);
+        };
+
+        const handleMessage = (e: MessageEvent<HistogramWorkerResponse>) => {
+            if (e.data?.requestId !== requestId) {
+                return;
+            }
+
+            cleanup();
+            resolve(toHistogramData(e.data));
+        };
+
+        const handleAbort = () => {
+            cleanup();
+            reject(new DOMException('Histogram request aborted', 'AbortError'));
+        };
+
+        worker.addEventListener('message', handleMessage);
+        if (signal) {
+            if (signal.aborted) {
+                handleAbort();
+                return;
+            }
+            signal.addEventListener('abort', handleAbort, { once: true });
+        }
+
+        worker.postMessage({ requestId, ...payload }, [payload.imageData]);
+    });
+}
 
 /**
  * Extract pixel data from an image on the main thread (canvas required),
@@ -28,6 +103,7 @@ const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
 function computeHistogramAsync(
     imageEl: HTMLImageElement,
     worker: Worker,
+    signal?: AbortSignal,
 ): Promise<HistogramData> {
     const canvas = document.createElement('canvas');
     const maxDim = 256;
@@ -48,19 +124,11 @@ function computeHistogramAsync(
     ctx.drawImage(imageEl, 0, 0, w, h);
     const imageData = ctx.getImageData(0, 0, w, h);
 
-    return new Promise((resolve) => {
-        const handler = (e: MessageEvent) => {
-            worker.removeEventListener('message', handler);
-            resolve(e.data as HistogramData);
-        };
-        worker.addEventListener('message', handler);
-        // Transfer the underlying ArrayBuffer so it is zero-copy
-        const buffer = imageData.data.buffer;
-        worker.postMessage(
-            { imageData: buffer, width: w, height: h },
-            [buffer],
-        );
-    });
+    return requestHistogramFromWorker(worker, {
+        imageData: imageData.data.buffer,
+        width: w,
+        height: h,
+    }, signal);
 }
 
 function drawHistogram(
@@ -166,6 +234,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
     useEffect(() => {
         if (!imageUrl) return;
         let aborted = false;
+        const abortController = new AbortController();
 
         const img = new Image();
         img.crossOrigin = 'anonymous';
@@ -176,7 +245,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                 setHistogramState({ imageUrl, data: null });
                 return;
             }
-            computeHistogramAsync(img, worker)
+            computeHistogramAsync(img, worker, abortController.signal)
                 .then((data) => {
                     if (!aborted) {
                         setHistogramState({ imageUrl, data });
@@ -184,7 +253,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
                 })
                 .catch(() => {
                     // Canvas tainted or worker error — silently fail
-                    if (!aborted) {
+                    if (!aborted && !abortController.signal.aborted) {
                         setHistogramState({ imageUrl, data: null });
                     }
                 });
@@ -196,6 +265,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
         img.src = imageUrl;
         return () => {
             aborted = true;
+            abortController.abort();
             img.onload = null;
             img.onerror = null;
             img.src = '';

@@ -2,7 +2,7 @@
 // Receives raw ImageData pixel buffer and computes RGB + luminance histograms
 // off the main thread.
 self.onmessage = function (e) {
-    const { imageData, width, height } = e.data;
+    const { requestId, imageData, width, height } = e.data;
     const data = new Uint8ClampedArray(imageData);
 
     const r = new Array(256).fill(0);
@@ -22,5 +22,5 @@ self.onmessage = function (e) {
         l[lum]++;
     }
 
-    self.postMessage({ r, g, b, l });
+    self.postMessage({ requestId, histogram: { r, g, b, l } });
 };

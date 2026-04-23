@@ -1,9 +1,12 @@
+import { LOCALES } from '@/lib/constants';
+
 const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
     'admin',
     'g',
     'p',
     's',
     'uploads',
+    ...LOCALES,
 ]);
 
 // Validate slug format (lowercase alphanumeric, hyphens, underscores only)

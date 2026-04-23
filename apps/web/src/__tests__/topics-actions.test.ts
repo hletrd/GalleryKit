@@ -114,7 +114,7 @@ vi.mock('@/lib/restore-maintenance', () => ({
     getRestoreMaintenanceMessage: maintenanceMessageMock,
 }));
 
-import { createTopic, deleteTopicAlias, updateTopic } from '@/app/actions/topics';
+import { createTopic, createTopicAlias, deleteTopicAlias, updateTopic } from '@/app/actions/topics';
 
 describe('topic actions', () => {
     beforeEach(() => {
@@ -147,6 +147,17 @@ describe('topic actions', () => {
 
         await expect(createTopic(formData)).resolves.toEqual({ error: 'slugConflictsWithRoute' });
         expect(processTopicImageMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects createTopic when the slug matches a reserved locale segment', async () => {
+        const formData = new FormData();
+        formData.set('label', 'English');
+        formData.set('slug', 'en');
+        formData.set('order', '0');
+
+        await expect(createTopic(formData)).resolves.toEqual({ error: 'reservedRouteSegment' });
+        expect(selectMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });
 
@@ -200,5 +211,11 @@ describe('topic actions', () => {
 
         await expect(deleteTopicAlias('travel', 'tokyo.2026')).resolves.toEqual({ success: true });
         expect(deleteMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects createTopicAlias when the alias matches a reserved locale segment', async () => {
+        await expect(createTopicAlias('travel', 'ko')).resolves.toEqual({ error: 'reservedRouteSegment' });
+        expect(selectMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
     });
 });

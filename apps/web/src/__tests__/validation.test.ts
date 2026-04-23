@@ -100,6 +100,8 @@ describe('isReservedTopicRouteSegment', () => {
         expect(isReservedTopicRouteSegment('admin')).toBe(true);
         expect(isReservedTopicRouteSegment('P')).toBe(true);
         expect(isReservedTopicRouteSegment('uploads')).toBe(true);
+        expect(isReservedTopicRouteSegment('en')).toBe(true);
+        expect(isReservedTopicRouteSegment('KO')).toBe(true);
     });
 
     it('allows normal topic names', () => {
