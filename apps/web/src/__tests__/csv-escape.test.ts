@@ -58,4 +58,41 @@ describe('escapeCsvField', () => {
     it('handles empty strings', () => {
         expect(escapeCsvField('')).toBe('""');
     });
+
+    // C7R-RPL-01 / AGG7R-01 — leading-whitespace-before-formula bypass.
+    // Before the fix, `\r\n=...` collapsed to ` =...` (leading space)
+    // and the formula-start regex did not fire, so spreadsheet apps
+    // could execute the formula after trimming leading whitespace.
+    it('prefixes formula-injection when collapsed CRLF leaves leading space', () => {
+        // Input has leading CRLF followed by formula char; after collapse
+        // the value starts with a space, which previously escaped the
+        // formula guard.
+        expect(escapeCsvField('\r\n=HYPERLINK("evil")'))
+            .toBe('"\' =HYPERLINK(""evil"")"');
+        expect(escapeCsvField('\n=1+2'))
+            .toBe('"\' =1+2"');
+    });
+
+    it('prefixes formula-injection when input begins with legacy whitespace', () => {
+        // Direct whitespace-prefixed inputs (no CRLF) must also be
+        // guarded — defense-in-depth regardless of collapse order.
+        expect(escapeCsvField(' =SUM(A1)')).toBe('"\' =SUM(A1)"');
+        expect(escapeCsvField('  +cmd')).toBe('"\'  +cmd"');
+    });
+
+    it('does not prefix benign leading whitespace without a formula char', () => {
+        expect(escapeCsvField(' hello')).toBe('" hello"');
+        expect(escapeCsvField('  normal text')).toBe('"  normal text"');
+    });
+
+    // C7R-RPL-11 / AGG7R-05 — Unicode bidi overrides stripped to
+    // prevent Trojan-Source-style reordering in spreadsheet apps.
+    it('strips Unicode bidi override & isolate characters', () => {
+        // U+202E (RLO) — right-to-left override
+        expect(escapeCsvField('ab‮cd')).toBe('"abcd"');
+        // U+202D (LRO) — left-to-right override
+        expect(escapeCsvField('a‭b')).toBe('"ab"');
+        // U+2066 (LRI) — left-to-right isolate
+        expect(escapeCsvField('a⁦b⁩c')).toBe('"abc"');
+    });
 });
