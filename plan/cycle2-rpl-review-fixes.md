@@ -21,7 +21,7 @@ Source aggregate: `.context/reviews/_aggregate-cycle2-rpl.md`.
   1. Add `unstable_rethrow(e);` as the first line of the outer `catch (e)` at the existing line ~382 in `auth.ts`.
   2. No other code change required — the rollback path already runs after the rethrow would propagate, so framework signals now propagate cleanly while real errors still hit the rollback.
   3. Add a regression test in `apps/web/src/__tests__/` that asserts the `updatePassword` function file source contains the `unstable_rethrow` pattern (static check, avoids complex mocking of Next.js internals).
-- **Progress:** [ ] to implement.
+- **Progress:** [x] implemented, commit d378a46 → mined to 00000002c67c6495f09ac5a42d10a14258a9276c. Regression test `apps/web/src/__tests__/auth-rethrow.test.ts` covers the import + outer-catch placement + updatePassword-specific check.
 
 ### C2R-02 — Factor `requireSameOriginAdmin` helper + apply to every mutating server action + add `lint:action-origin` gate
 - **Source findings:** AGG2R-02 (CR2R-02, SEC2R-01, CRIT2R-01, ARCH2R-01, Trace 1, TE2R-01). Closes the multi-cycle-deferred D1-02.
@@ -46,7 +46,7 @@ Source aggregate: `.context/reviews/_aggregate-cycle2-rpl.md`.
   3. Add unit test for the helper + a test that mocks `headers()` to return a cross-origin `Origin` header and asserts each action returns the unauthorized error.
   4. Write `apps/web/scripts/check-action-origin.ts` that AST-scans `apps/web/src/app/actions/*.ts` + `apps/web/src/app/[locale]/admin/db-actions.ts` for exported async functions and verifies each either: (a) calls `requireSameOriginAdmin(`, OR (b) has an `// @action-origin-exempt: <reason>` comment. Read-only getters (`getAdminUsers`, `getAdminTags`, `getGallerySettingsAdmin`, `getSeoSettingsAdmin`) remain exempt via the comment; `exportImagesCsv` + `dumpDatabase` should enforce the check. Add as `npm run lint:action-origin --workspace=apps/web`.
   5. Pair the gate change with a note in `CLAUDE.md` "Key Files & Patterns" referencing the new helper.
-- **Progress:** [ ] to implement.
+- **Progress:** [x] implemented, commit c639dd2 → mined to 0000000c5460daf5ed603a466c6c3366e57d27e8. Helper returns `string | null` (not `{error: string} | null`) so caller return-type inference does not shift in TS 6; each caller builds its own error shape. `lint:action-origin` verifies all 23 mutating server actions enforce the check; 4 read-only getters automatically skipped. Existing action-unit tests mock `@/lib/action-guards`. CLAUDE.md note deferred to a follow-up docs pass (not a correctness/security concern).
 
 ### C2R-03 — Use named column alias `AS acquired` in `restoreDatabase` GET_LOCK query
 - **Source findings:** AGG2R-03 (DBG2R-02).
@@ -58,7 +58,7 @@ Source aggregate: `.context/reviews/_aggregate-cycle2-rpl.md`.
   2. Replace `Object.values(lockRow)[0]` with `lockRow.acquired`.
   3. Update the TypeScript row type to `(RowDataPacket & { acquired: number | bigint | null })[]`.
   4. Verify the value-comparison still handles both `1` and `BigInt(1)` (mysql2 returns bigint for GET_LOCK under some driver versions).
-- **Progress:** [ ] to implement.
+- **Progress:** [x] implemented, commit c639dd2 → mined to 0000000c5460daf5ed603a466c6c3366e57d27e8. The comparison retains the `acquired !== 1 && acquired !== BigInt(1)` check to preserve bigint compatibility.
 
 ## Deferred items
 
