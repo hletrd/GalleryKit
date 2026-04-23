@@ -1,16 +1,15 @@
 /**
  * Storage Backend Singleton
  *
- * Provides a singleton StorageBackend instance for the experimental
- * storage abstraction. The singleton can be switched in-process, but
- * the production upload / processing / serving paths still use direct
- * filesystem code and do not read from this module yet.
+ * Provides a singleton StorageBackend instance for the local-only
+ * storage abstraction. The production upload / processing / serving
+ * paths still use direct filesystem code and do not read from this
+ * module yet.
  *
  * NOTE: This storage backend is not yet wired into the live image pipeline.
  * Direct fs operations are still used for uploads, processing, and public
- * serving. Switching backends here only changes the singleton state for
- * code paths that explicitly call `getStorage()`; it does not migrate or
- * redirect the active gallery data path on its own.
+ * serving. The singleton exists only for explicit callers and currently
+ * supports the local filesystem backend.
  *
  * Usage (once integrated):
  *   import { getStorage } from '@/lib/storage';
@@ -23,7 +22,7 @@ import { LocalStorageBackend } from './local';
 
 const storageKey = Symbol.for('gallerykit.storageBackend');
 
-type StorageBackendType = 'local' | 'minio' | 's3';
+type StorageBackendType = 'local';
 
 interface StorageState {
     backend: StorageBackend;
@@ -79,37 +78,6 @@ export function getStorageSync(): StorageBackend {
 }
 
 /**
- * Validate that required environment variables are set for the given backend type.
- * Throws an error with a descriptive message if credentials are missing.
- */
-function validateStorageCredentials(type: StorageBackendType): void {
-    if (type === 's3') {
-        const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim();
-        const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim();
-        if (!accessKeyId || !secretAccessKey) {
-            throw new Error(
-                'S3 credentials not configured. Set S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY environment variables.',
-            );
-        }
-    } else if (type === 'minio') {
-        const endpoint = process.env.MINIO_ENDPOINT?.trim() || process.env.S3_ENDPOINT?.trim();
-        const accessKeyId = process.env.MINIO_ACCESS_KEY_ID?.trim() || process.env.S3_ACCESS_KEY_ID?.trim();
-        const secretAccessKey = process.env.MINIO_SECRET_ACCESS_KEY?.trim() || process.env.S3_SECRET_ACCESS_KEY?.trim();
-        if (!endpoint) {
-            throw new Error(
-                'MinIO endpoint not configured. Set MINIO_ENDPOINT (or S3_ENDPOINT) environment variable.',
-            );
-        }
-        if (!accessKeyId || !secretAccessKey) {
-            throw new Error(
-                'MinIO credentials not configured. Set MINIO_ACCESS_KEY_ID and MINIO_SECRET_ACCESS_KEY (or S3_* equivalents) environment variables.',
-            );
-        }
-    }
-    // 'local' requires no credentials
-}
-
-/**
  * Switch the experimental storage backend type for callers that explicitly
  * use this abstraction. Disposes the old backend and creates a new one.
  * Rolls back on failure.
@@ -121,9 +89,6 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
         return; // No change needed
     }
 
-    // Validate credentials before attempting the switch
-    validateStorageCredentials(type);
-
     // Save old backend for rollback on failure
     const oldBackend = state.backend;
     const oldType = state.type;
@@ -131,26 +96,10 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
 
     // NOTE: Do NOT dispose the old backend until the new one is confirmed working.
     // If we dispose first and the new backend fails to init, the rollback would
-    // restore a destroyed backend (e.g., S3Client.destroy() has been called),
-    // causing all subsequent storage operations to fail until server restart.
+    // restore a destroyed backend and all subsequent storage operations would fail
+    // until server restart.
 
-    let newBackend: StorageBackend;
-    switch (type) {
-        case 'minio': {
-            const { MinIOStorageBackend } = await import('./minio');
-            newBackend = new MinIOStorageBackend();
-            break;
-        }
-        case 's3': {
-            const { S3StorageBackend } = await import('./s3');
-            newBackend = new S3StorageBackend(undefined, 's3');
-            break;
-        }
-        case 'local':
-        default:
-            newBackend = new LocalStorageBackend();
-            break;
-    }
+    const newBackend: StorageBackend = new LocalStorageBackend();
 
     state.backend = newBackend;
     state.type = type;
