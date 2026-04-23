@@ -2,7 +2,6 @@
 
 ## Active Plans
 
-- 211 — Cycle 6 Review Fixes — TODO
 - 210 — Deferred Gate Warnings (Cycle 5) — TODO / deferred
 - 207 — Deferred Review Findings (Cycle 3) — TODO / deferred
 - 204 — Deferred Performance Findings (Carry-Forward) — TODO / deferred
@@ -20,6 +19,10 @@
 - 172 — Deferred Review Coverage (Cycle 3) — TODO
 - 175 — Deferred Review Coverage (Cycle 1 Ultradeep) — TODO
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
+
+## Completed Plans (Cycle 6 Review)
+
+- 211 — Cycle 6 Review Fixes — DONE / archived under `done/plan-211-cycle6-review-fixes.md`
 
 ## Completed Plans (Cycle 5 Review)
 
