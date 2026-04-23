@@ -6,8 +6,10 @@ import { getImagesLite, searchImages } from '@/lib/data';
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit } from '@/lib/rate-limit';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
+    if (isRestoreMaintenanceActive()) return [];
     // Validate slug format before passing to data layer (defense in depth)
     if (topicSlug && (!isValidSlug(topicSlug))) return [];
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
@@ -25,6 +27,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
 
 export async function searchImagesAction(query: string) {
     if (!query || typeof query !== 'string') return [];
+    if (isRestoreMaintenanceActive()) return [];
     // Sanitize before validation so length checks operate on the same value
     // that will be stored (matches uploadImages/settings.ts pattern, see C46-02).
     const sanitizedQuery = stripControlChars(query.trim()) ?? '';

@@ -8,6 +8,7 @@ const {
     checkRateLimitMock,
     incrementRateLimitMock,
     pruneSearchRateLimitMock,
+    isRestoreMaintenanceActiveMock,
     searchRateLimit,
 } = vi.hoisted(() => ({
     headersMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
     checkRateLimitMock: vi.fn(),
     incrementRateLimitMock: vi.fn(),
     pruneSearchRateLimitMock: vi.fn(),
+    isRestoreMaintenanceActiveMock: vi.fn(),
     searchRateLimit: new Map<string, { count: number; resetAt: number }>(),
 }));
 
@@ -27,6 +29,10 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/data', () => ({
     getImagesLite: getImagesLiteMock,
     searchImages: searchImagesMock,
+}));
+
+vi.mock('@/lib/restore-maintenance', () => ({
+    isRestoreMaintenanceActive: isRestoreMaintenanceActiveMock,
 }));
 
 vi.mock('@/lib/rate-limit', () => ({
@@ -62,6 +68,8 @@ describe('searchImagesAction', () => {
         incrementRateLimitMock.mockResolvedValue(undefined);
         checkRateLimitMock.mockResolvedValue({ limited: false, count: 1 });
         pruneSearchRateLimitMock.mockReset();
+        isRestoreMaintenanceActiveMock.mockReset();
+        isRestoreMaintenanceActiveMock.mockReturnValue(false);
         getImagesLiteMock.mockResolvedValue([{ id: 1 }]);
         searchImagesMock.mockResolvedValue([{ id: 1 }]);
     });
@@ -75,6 +83,27 @@ describe('searchImagesAction', () => {
 
     it('returns no results for queries that are too short after sanitization', async () => {
         await expect(searchImagesAction('\u0000 ')).resolves.toEqual([]);
+        expect(searchImagesMock).not.toHaveBeenCalled();
+        expect(searchRateLimit.size).toBe(0);
+    });
+
+    it('short-circuits loadMoreImages during restore maintenance', async () => {
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        await expect(loadMoreImages('seoul', ['서울'], 10, 20)).resolves.toEqual([]);
+
+        expect(getImagesLiteMock).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits searchImagesAction during restore maintenance before rate-limit or DB work', async () => {
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        await expect(searchImagesAction('landscape')).resolves.toEqual([]);
+
+        expect(headersMock).not.toHaveBeenCalled();
+        expect(getClientIpMock).not.toHaveBeenCalled();
+        expect(incrementRateLimitMock).not.toHaveBeenCalled();
+        expect(checkRateLimitMock).not.toHaveBeenCalled();
         expect(searchImagesMock).not.toHaveBeenCalled();
         expect(searchRateLimit.size).toBe(0);
     });
