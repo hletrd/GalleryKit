@@ -1,0 +1,28 @@
+{
+  "cycle": 5,
+  "timestamp": "2026-04-23T09:25:21Z",
+  "available_registered_review_agents": [
+    "architect",
+    "code-reviewer",
+    "critic",
+    "debugger",
+    "designer",
+    "security-reviewer",
+    "test-engineer",
+    "verifier"
+  ],
+  "requested_but_not_registered": [
+    "perf-reviewer",
+    "performance-reviewer",
+    "document-specialist",
+    "tracer"
+  ],
+  "ui_detected": true,
+  "ui_markers": [
+    "apps/web/src/app/**/*.tsx",
+    "apps/web/src/components/**/*.tsx",
+    "apps/web/playwright.config.ts",
+    "apps/web/src/app/[locale]/globals.css"
+  ],
+  "custom_reviewer_agents": []
+}
