@@ -274,6 +274,37 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     if (!hasTrustedSameOrigin(requestHeaders)) {
         return { error: t('unauthorized') };
     }
+
+    // C9R-RPL-01 / AGG9R-RPL-01: validate form-field shape BEFORE the
+    // rate-limit pre-increment. Matches the `login` ordering above —
+    // legitimate admin typos (empty field / mismatch / length bounds)
+    // must not consume a password_change attempt, since no Argon2
+    // verify will ever run for them. Without this ordering, ten
+    // typo'd confirm-password submissions lock the admin out for
+    // 15 minutes purely from client-side mistakes.
+    //
+    // Sanitize before validation so length checks operate on the same
+    // value that will be hashed (matches createAdminUser pattern, see C8-01).
+    const currentPassword = stripControlChars(formData.get('currentPassword')?.toString() ?? '') ?? '';
+    const newPassword = stripControlChars(formData.get('newPassword')?.toString() ?? '') ?? '';
+    const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        return { error: t('allFieldsRequired') };
+    }
+
+    if (newPassword !== confirmPassword) {
+        return { error: t('passwordsDoNotMatch') };
+    }
+
+    if (newPassword.length < 12) {
+        return { error: t('passwordTooShort') };
+    }
+
+    if (newPassword.length > 1024) {
+        return { error: t('passwordTooLong') };
+    }
+
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
     prunePasswordChangeRateLimit(now);
@@ -301,28 +332,6 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         await incrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
     } catch (err) {
         console.debug('Failed to pre-increment password change rate limit:', err);
-    }
-
-    // Sanitize before validation so length checks operate on the same value
-    // that will be hashed (matches createAdminUser pattern, see C8-01).
-    const currentPassword = stripControlChars(formData.get('currentPassword')?.toString() ?? '') ?? '';
-    const newPassword = stripControlChars(formData.get('newPassword')?.toString() ?? '') ?? '';
-    const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
-
-    if (!currentPassword || !newPassword || !confirmPassword) {
-        return { error: t('allFieldsRequired') };
-    }
-
-    if (newPassword !== confirmPassword) {
-        return { error: t('passwordsDoNotMatch') };
-    }
-
-    if (newPassword.length < 12) {
-        return { error: t('passwordTooShort') };
-    }
-
-    if (newPassword.length > 1024) {
-        return { error: t('passwordTooLong') };
     }
 
     try {
