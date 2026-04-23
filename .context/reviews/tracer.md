@@ -1,23 +1,32 @@
-# Tracer Review — Cycle 5 (leader fallback; dedicated tracer role unavailable in current tool catalog)
+# Tracer Review — Cycle 6 (2026-04-23)
 
 ## Scope and inventory covered
-Traced the public request path from route entry to DB helpers.
+Traced hot public request paths from route entrypoints through data helpers and client pagination behavior.
 
 ## Findings summary
-- Confirmed Issues: 1
+- Confirmed Issues: 2
 - Likely Issues: 0
 - Risks Requiring Manual Validation: 0
 
 ## Confirmed Issues
 
-### TRACE5-01 — Public first-page requests still converge on the same filter twice: once for rows, once for count
+### TRACE6-01 — Public route request chains still serialize unrelated reads before the first renderable result exists
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`, `apps/web/src/lib/data.ts:253-276`
-- **Why it is a problem:** The request path fans into `getImagesLite(...)` and `getImageCount(...)` with identical filters instead of deriving both answers from one causal chain.
-- **Concrete failure scenario:** Each render performs duplicated filter/subquery work before responding.
-- **Suggested fix:** Use one paginated helper that returns rows, count, and `hasMore` together.
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:95-110`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:90-125`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:104-123`, `apps/web/src/app/[locale]/layout.tsx:55-64`
+- **Why it is a problem:** The causal chain is `route -> SEO/config/tags/topics/auth/messages` in series even when those branches do not depend on each other.
+- **Concrete failure scenario:** Public requests wait on avoidable upstream latency accumulation before streaming.
+- **Suggested fix:** Rewire the causal graph so independent branches run in parallel.
+
+### TRACE6-02 — The infinite-scroll stop condition depends on a speculative empty request
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Status:** Confirmed
+- **Files:** `apps/web/src/app/actions/public.ts:11-25`, `apps/web/src/components/load-more.tsx:29-43`
+- **Why it is a problem:** The traced flow is `sentinel -> loadMoreImages(limit rows) -> client infers hasMore`; that flow cannot distinguish “terminal exact multiple” from “more rows remain.”
+- **Concrete failure scenario:** A final empty round-trip is required to terminate scrolling.
+- **Suggested fix:** Return `hasMore` from the server action via overfetch or paginated helper reuse.
 
 ## Final sweep
-The duplicate first-page query path is still the clearest current causal hotspot.
+No stronger causal hotspot was confirmed on the current checkout.

@@ -1,7 +1,7 @@
-# Critic Review — Cycle 5 (current checkout)
+# Critic Review — Cycle 6 (2026-04-23)
 
 ## Scope and inventory covered
-Re-reviewed the public render stack, data helpers, and topic admin flows after the latest cycle-4 fixes.
+Reviewed the full web application with extra skepticism around public-route hot paths, pagination contracts, and cross-file performance interactions.
 
 ## Findings summary
 - Confirmed Issues: 2
@@ -10,23 +10,23 @@ Re-reviewed the public render stack, data helpers, and topic admin flows after t
 
 ## Confirmed Issues
 
-### CRT5-01 — The hottest public routes still pay for duplicated filtered reads before render
+### CRT6-01 — The hottest public pages still spend time waiting on unrelated reads that could run together
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`, `apps/web/src/lib/data.ts:253-276`
-- **Why it is a problem:** The repo already applies request-scoped caching elsewhere, but first-page public rendering still performs two separate filtered DB reads to learn data that can be derived from one query.
-- **Concrete failure scenario:** Public traffic spends extra DB budget before anything user-visible changes.
-- **Suggested fix:** Fold first-page count into the page query and derive `hasMore` from the same result set.
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:95-110`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:90-125`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:104-123`, `apps/web/src/app/[locale]/layout.tsx:55-64`
+- **Why it is a problem:** The code is correct, but it still carries unnecessary sequencing on the most visible request path.
+- **Concrete failure scenario:** Under crawler bursts or slower DB latency, the app burns TTFB budget before user-visible work starts.
+- **Suggested fix:** Batch independent reads with `Promise.all` in the route entrypoints.
 
-### CRT5-02 — Topic form validation still misattributes malformed label input to the slug field
+### CRT6-02 — Infinite scroll still needs an empty probe request to discover that some result sets are exhausted
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/actions/topics.ts:43-48`, `apps/web/src/app/actions/topics.ts:130-135`
-- **Why it is a problem:** The defensive validation is correct, but the error mapping is misleading.
-- **Concrete failure scenario:** Admins fix the wrong field after a rejection.
-- **Suggested fix:** Return a label-specific translation key.
+- **Files:** `apps/web/src/app/actions/public.ts:11-25`, `apps/web/src/components/load-more.tsx:29-43`
+- **Why it is a problem:** The stop condition is inferred from payload size instead of being returned explicitly.
+- **Concrete failure scenario:** Exact-multiple result sets show a final meaningless loading pass and hit the server one extra time.
+- **Suggested fix:** Make the server action return `hasMore` explicitly.
 
 ## Final sweep
-No broader rewrite is warranted; these are small, high-signal follow-ups on current HEAD.
+Older stale review findings were rechecked and intentionally dropped because current HEAD no longer reproduces them.

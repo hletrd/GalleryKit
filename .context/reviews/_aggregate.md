@@ -1,7 +1,12 @@
-# Aggregate Review — Cycle 5 (2026-04-23)
+# Aggregate Review — Cycle 6 (2026-04-23)
 
 ## REVIEWER MANIFEST
-Reviewed current HEAD after cycle-4 commits. Fresh per-agent files for this cycle:
+Enumerated available reviewer lanes for this environment before fan-out:
+- Native registered roles used directly: `code-reviewer`, `security-reviewer`, `critic`, `verifier`, `test-engineer`, `architect`, `debugger`, `designer`
+- Requested-but-unregistered lanes covered by leader fallback files for provenance: `perf-reviewer`, `tracer`, `document-specialist`
+- Repository contains UI, so the `designer` lane was included.
+
+Per-agent review files for this cycle:
 - `code-reviewer.md`
 - `perf-reviewer.md`
 - `security-reviewer.md`
@@ -16,36 +21,35 @@ Reviewed current HEAD after cycle-4 commits. Fresh per-agent files for this cycl
 
 ## DEDUPED FINDINGS
 
-### AGG5-01 — Public first-page render duplicates expensive filtered DB work
+### AGG6-01 — Public SSR routes still serialize independent reads, inflating TTFB on hot pages
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Signal:** flagged by `code-reviewer`, `perf-reviewer`, `critic`, `verifier`, `tracer`, `architect`
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`, `apps/web/src/lib/data.ts:253-276`
-- **Problem:** Both public page entrypoints fetch the first image page and then immediately run a second exact `count(*)` query for the same filter set. That duplicates row-filtering work on the hottest unauthenticated routes.
-- **Failure scenario:** Large galleries or tag-filtered traffic pay two expensive queries before rendering, which raises latency and DB load under crawl bursts.
-- **Suggested fix:** Replace the split `getImagesLite` + `getImageCount` first-page path with a single paginated helper that returns rows, total count, and `hasMore` together.
+- **Signal:** flagged by `code-reviewer`, `perf-reviewer`, `critic`, `verifier`, `tracer`, `architect`, `debugger`
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:95-110`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:90-125`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:104-123`, `apps/web/src/app/[locale]/layout.tsx:55-64`
+- **Problem:** Multiple entrypoints still await unrelated reads (SEO settings, gallery config, tags/topics, messages, auth state) in serial chains.
+- **Failure scenario:** Cold or cache-missed public requests accumulate avoidable DB/session latency before the first byte can stream.
+- **Suggested fix:** Parallelize independent reads with explicit `Promise.all` groupings and keep only true dependencies sequential.
 
-### AGG5-02 — Topic label sanitization reports the wrong field-level error
+### AGG6-02 — Infinite scroll does one redundant terminal fetch when the final page size equals the requested limit
 - **Severity:** LOW
 - **Confidence:** HIGH
-- **Signal:** flagged by `code-reviewer`, `critic`, `verifier`, `debugger`, `test-engineer`
-- **Files:** `apps/web/src/app/actions/topics.ts:43-48`, `apps/web/src/app/actions/topics.ts:130-135`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`
-- **Problem:** The defensive control-character guard for topic labels returns `invalidSlug` instead of a label-specific error.
-- **Failure scenario:** Admins are told to correct the slug even though the malformed input was the label.
-- **Suggested fix:** Add `invalidLabel` translations and use them for label mismatch paths in topic create/update.
+- **Signal:** flagged by `code-reviewer`, `perf-reviewer`, `critic`, `verifier`, `tracer`, `architect`, `debugger`, `designer`, `test-engineer`
+- **Files:** `apps/web/src/app/actions/public.ts:11-25`, `apps/web/src/components/load-more.tsx:29-43`, `apps/web/src/__tests__/public-actions.test.ts`
+- **Problem:** The client only infers exhaustion from `newImages.length < limit`, so exact-multiple result sets require one final empty probe request.
+- **Failure scenario:** Users see an unnecessary last loading pass and the server does one more DB-backed action call per exact-multiple gallery session.
+- **Suggested fix:** Return `{ images, hasMore }` from the server action via overfetch or paginated helper reuse, and add regression coverage.
 
 ## AGENT FAILURES
-- `perf-reviewer`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a `performance-reviewer`/`perf-reviewer` role. This cycle used a leader fallback review written to `perf-reviewer.md`.
-- `tracer`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a `tracer` role. This cycle used a leader fallback review written to `tracer.md`.
-- `document-specialist`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a `document-specialist` role. This cycle used a leader fallback review written to `document-specialist.md`.
-- Additional native subagent fan-out was constrained by the current agent thread limit (`max 6`), so remaining cycle-5 review files were refreshed via leader fallback to avoid carrying stale pre-cycle-4 findings forward.
+- `perf-reviewer`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a dedicated `perf-reviewer`/`performance-reviewer` role. Covered via a leader-authored fallback file.
+- `tracer`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a dedicated `tracer` role. Covered via a leader-authored fallback file.
+- `document-specialist`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a dedicated `document-specialist` role. Covered via a leader-authored fallback file.
+- Additional direct subagent fan-out was constrained by the current thread cap. The cycle retried spawning after the initial tool-contract failure; remaining unavailable lanes were recorded here and refreshed through current-cycle fallback review files instead of silently dropping them.
 
 ## EXCLUDED PRIOR FINDINGS
-The following older findings were rechecked and are no longer current in HEAD, so they were intentionally not carried forward:
-- locale codes reserved for topic routes
-- histogram worker request correlation
-- restore-mode public-read gap
-- duplicate uncached tag aggregation in public metadata/page render
+Rechecked prior-cycle claims and intentionally excluded them because current HEAD no longer reproduces them:
+- split first-page count query on public routes
+- topic label `invalidSlug` misreporting
+- missing `invalidLabel` translations/tests
 
 ## NEW FINDING COUNT
 2

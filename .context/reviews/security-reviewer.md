@@ -1,7 +1,7 @@
-# Security Review — Cycle 5 (current checkout)
+# Security Review — Cycle 6 (2026-04-23)
 
 ## Scope and inventory covered
-Reviewed auth/session, upload/serve, restore, docs/examples, and public/private data boundaries across the current repository state.
+Reviewed auth/session, upload/serve, restore, public/private boundaries, configs, and docs across current HEAD.
 
 ## Findings summary
 - Confirmed Issues: 0
@@ -12,4 +12,4 @@ Reviewed auth/session, upload/serve, restore, docs/examples, and public/private 
 No fresh security issue was confirmed in the current checkout.
 
 ## Final sweep
-Recent restore-window hardening and existing privacy-field separation remain intact in HEAD.
+Current security hardening for restore windows, privacy fields, rate limiting, and upload path validation remains intact.

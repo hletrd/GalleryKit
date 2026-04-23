@@ -1,7 +1,7 @@
-# Document Specialist Review — Cycle 5 (leader fallback; dedicated document-specialist role unavailable in current tool catalog)
+# Document Specialist Review — Cycle 6 (2026-04-23)
 
 ## Scope and inventory covered
-Compared current docs (`README.md`, `CLAUDE.md`, `AGENTS.md`) against the latest code changes reviewed this cycle.
+Compared `README.md`, `CLAUDE.md`, `apps/web/README.md`, and plan metadata against the current codebase.
 
 ## Findings summary
 - Confirmed Issues: 0
@@ -12,4 +12,4 @@ Compared current docs (`README.md`, `CLAUDE.md`, `AGENTS.md`) against the latest
 No fresh documentation/code mismatch was confirmed for the current checkout.
 
 ## Final sweep
-Docs already describe the recent restore and secret-handling behavior accurately enough for this cycle.
+The docs no longer exhibit the older stale findings that previous cycles carried.
