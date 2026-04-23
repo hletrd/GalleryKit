@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
+import type { PoolConnection as CallbackPoolConnection } from "mysql2";
 import * as schema from "./schema";
 
 // Enable TLS for non-localhost DB connections to protect credentials in transit.
@@ -26,21 +27,28 @@ const poolConnection = mysql.createPool({
 
 // Increase GROUP_CONCAT max length from default 1024 to prevent silent truncation of tag lists.
 // IMPORTANT: the `connection` event listener in mysql2 receives the base
-// callback-style Connection even when the pool was created via mysql2/promise.
-// Calling `.query(...)` on that object fires a callback-style query whose
-// return value is NOT a Promise — chaining `.catch` on it crashes
-// (https://github.com/sidorares/node-mysql2 — "con.promise().query()" hint).
-// Use the `(err, results)` callback form so a transient failure is logged
-// instead of producing an unhandled promise rejection AND silently reverting
-// the pooled connection to the default 1024-byte limit, which would truncate
-// GROUP_CONCAT output in CSV exports and SEO settings.
+// callback-style Connection even when the pool was created via mysql2/promise
+// (see https://github.com/sidorares/node-mysql2 — the "try con.promise().query()"
+// runtime guard fires when chaining `.catch`). Call `.promise()` to obtain a
+// PromiseConnection whose `.query(...)` returns a Promise so the `.catch()`
+// handler logs transient failures via `console.error` instead of:
+//   (a) producing an unhandled promise rejection under Node 24 strict, AND
+//   (b) silently reverting the pooled connection to the default 1024-byte
+//       limit, which would truncate GROUP_CONCAT output in CSV exports and
+//       SEO settings.
 // C4R-RPL2-01 (aggregated finding AGG4R2-01).
+//
+// Type note: mysql2/promise declares the 'connection' event arg as its own
+// promise-based PoolConnection (which lacks `.promise()` in types). At
+// runtime the listener receives the base callback-style PoolConnection from
+// the mysql2 (non-promise) module, which does expose `.promise()`. Cast
+// through `CallbackPoolConnection` so the cast is explicit and documented.
 poolConnection.on('connection', (connection) => {
-    connection.query('SET group_concat_max_len = 65535', (err: unknown) => {
-        if (err) {
+    const callbackConnection = connection as unknown as CallbackPoolConnection;
+    callbackConnection.promise().query('SET group_concat_max_len = 65535')
+        .catch((err: unknown) => {
             console.error('[db] Failed to set group_concat_max_len on pooled connection:', err);
-        }
-    });
+        });
 });
 
 export const connection = poolConnection;
