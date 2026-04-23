@@ -328,6 +328,7 @@
     "failedToDeleteImages": "이미지 삭제에 실패했습니다.",
     "failedToUpdateTopic": "카테고리 수정에 실패했습니다.",
     "invalidSlug": "잘못된 슬러그입니다",
+    "invalidLabel": "잘못된 이름입니다",
     "cannotDeleteCategoryWithImages": "이미지가 포함된 카테고리는 삭제할 수 없습니다. 이미지를 먼저 삭제하세요.",
     "failedToDeleteTopic": "카테고리 삭제에 실패했습니다.",
     "invalidTopicSlug": "잘못된 카테고리 슬러그입니다",

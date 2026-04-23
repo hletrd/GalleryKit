@@ -1,4 +1,4 @@
-import { getImagesLite, getTagsCached, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
+import { getImagesLite, getImagesLitePage, getTagsCached, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
@@ -107,11 +107,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
 
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;
-  const [images, totalCount] = await Promise.all([
-    getImagesLite(undefined, filterTags, PAGE_SIZE, 0),
-    getImageCount(undefined, filterTags),
-  ]);
-  const hasMore = totalCount > PAGE_SIZE;
+  const { images, totalCount, hasMore } = await getImagesLitePage(undefined, filterTags, PAGE_SIZE, 0);
 
   const websiteLd = {
     '@context': 'https://schema.org',

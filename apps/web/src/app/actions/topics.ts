@@ -44,7 +44,7 @@ export async function createTopic(formData: FormData) {
     const rawSlug = formData.get('slug')?.toString() ?? '';
     const label = stripControlChars(rawLabel) ?? '';
     const slug = stripControlChars(rawSlug) ?? '';
-    if (label !== rawLabel) return { error: t('invalidSlug') };
+    if (label !== rawLabel) return { error: t('invalidLabel') };
     if (slug !== rawSlug) return { error: t('invalidSlug') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
@@ -131,7 +131,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const rawSlug = formData.get('slug')?.toString() ?? '';
     const label = stripControlChars(rawLabel) ?? '';
     const slug = stripControlChars(rawSlug) ?? '';
-    if (label !== rawLabel) return { error: t('invalidSlug') };
+    if (label !== rawLabel) return { error: t('invalidLabel') };
     if (slug !== rawSlug) return { error: t('invalidSlug') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();

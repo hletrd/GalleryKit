@@ -334,6 +334,63 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
     return query.limit(effectiveLimit).offset(offset);
 }
 
+export function normalizePaginatedRows<T extends { total_count: number | null }>(
+    rows: T[],
+    pageSize: number,
+): {
+    rows: Omit<T, 'total_count'>[];
+    totalCount: number;
+    hasMore: boolean;
+} {
+    const normalizedPageSize = Math.max(0, pageSize);
+    const visibleRows = rows.slice(0, normalizedPageSize).map((row) => {
+        const { total_count, ...visibleRow } = row;
+        void total_count;
+        return visibleRow as Omit<T, 'total_count'>;
+    });
+
+    return {
+        rows: visibleRows,
+        totalCount: Number(rows[0]?.total_count ?? 0),
+        hasMore: rows.length > normalizedPageSize,
+    };
+}
+
+export async function getImagesLitePage(
+    topic?: string,
+    tagSlugs?: string[],
+    pageSize: number = 30,
+    offset: number = 0,
+    includeUnprocessed: boolean = false,
+) {
+    const conditions = buildImageConditions(topic, tagSlugs, includeUnprocessed);
+    if (conditions === null) {
+        return { images: [], totalCount: 0, hasMore: false };
+    }
+
+    const normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
+    const baseQuery = db.select({
+        ...publicSelectFields,
+        tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
+        total_count: sql<number>`COUNT(*) OVER()`,
+    })
+        .from(images)
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
+
+    const query = conditions.length > 0
+        ? baseQuery.where(and(...conditions))
+        : baseQuery;
+
+    const rows = await query.limit(normalizedPageSize + 1).offset(offset);
+    const { rows: pageRows, totalCount, hasMore } = normalizePaginatedRows(rows, normalizedPageSize);
+
+    return {
+        images: pageRows,
+        totalCount,
+        hasMore,
+    };
+}
+
 /**
  * Full image listing with tag names via GROUP_CONCAT.
  * Use when tag_names need to be displayed (e.g., admin dashboard).
