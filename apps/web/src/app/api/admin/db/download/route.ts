@@ -8,8 +8,25 @@ import { isValidBackupFilename } from '@/lib/backup-filename';
 import { getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
+import { hasTrustedSameOrigin } from '@/lib/request-origin';
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
+    const requestHeaders = {
+        get(name: string) {
+            const normalized = name.toLowerCase();
+            if (normalized === 'host') {
+                return request.headers.get(name) ?? request.nextUrl.host;
+            }
+            if (normalized === 'x-forwarded-proto') {
+                return request.headers.get(name) ?? request.nextUrl.protocol.replace(/:$/, '');
+            }
+            return request.headers.get(name);
+        },
+    };
+
+    if (!hasTrustedSameOrigin(requestHeaders)) {
+        return new NextResponse('Unauthorized', { status: 403 });
+    }
 
     const file = request.nextUrl.searchParams.get('file');
     if (!file || !isValidBackupFilename(file)) {

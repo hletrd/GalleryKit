@@ -94,6 +94,22 @@ describe('backup download route', () => {
         });
     });
 
+    it('rejects cross-origin download attempts before reading the file', async () => {
+        const filePath = path.join(tempCwd, 'data', 'backups', VALID_BACKUP_FILE);
+        await fsp.writeFile(filePath, 'backup-data');
+
+        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
+            headers: {
+                host: 'localhost',
+                origin: 'https://evil.example',
+            },
+        }));
+
+        expect(response.status).toBe(403);
+        expect(await response.text()).toBe('Unauthorized');
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
+
     it('returns a 500 for unexpected filesystem failures instead of masking them as 404', async () => {
         const backupsDir = path.join(tempCwd, 'data', 'backups');
         const filePath = path.join(backupsDir, VALID_BACKUP_FILE);

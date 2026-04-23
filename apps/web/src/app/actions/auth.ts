@@ -271,6 +271,9 @@ export async function updatePassword(prevState: { error?: string; success?: bool
 
     // Rate limit password change attempts (separate map from login)
     const requestHeaders = await headers();
+    if (!hasTrustedSameOrigin(requestHeaders)) {
+        return { error: t('unauthorized') };
+    }
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
     prunePasswordChangeRateLimit(now);
