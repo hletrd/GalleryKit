@@ -1,4 +1,4 @@
-FROM node:24-slim AS build-base
+FROM node:25-slim AS build-base
 
 # Install build tooling needed to compile native dependencies during npm ci.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-FROM node:24-slim AS runner-base
+FROM node:25-slim AS runner-base
 
 # Install only the runtime tools the production container needs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
