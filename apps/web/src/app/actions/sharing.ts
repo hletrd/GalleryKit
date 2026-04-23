@@ -173,10 +173,15 @@ export async function createPhotoShareLink(imageId: number) {
                 retries++;
                 continue;
             }
-            // Non-retryable error — fail immediately
+            // Non-retryable error — roll back both rate-limit counters
+            // so the admin isn't charged for an infrastructure failure
+            // (C7R-RPL-03 / AGG7R-03).
+            await rollbackShareRateLimitFull(ip, 'share_photo');
             return { error: t('failedToGenerateKey') };
         }
     }
+    // Exhausted retries — roll back both counters for the same reason.
+    await rollbackShareRateLimitFull(ip, 'share_photo');
     return { error: t('failedToGenerateKey') };
 }
 
@@ -287,10 +292,15 @@ export async function createGroupShareLink(imageIds: number[]) {
                 await rollbackShareRateLimitFull(ip, 'share_group');
                 return { error: t('imagesNotFound') };
             }
-            // Non-retryable error — fail immediately
+            // Non-retryable error — roll back both rate-limit counters
+            // so the admin isn't charged for an infrastructure failure
+            // (C7R-RPL-03 / AGG7R-03).
+            await rollbackShareRateLimitFull(ip, 'share_group');
             return { error: t('failedToCreateGroup') };
         }
     }
+    // Exhausted retries — roll back both counters for the same reason.
+    await rollbackShareRateLimitFull(ip, 'share_group');
     return { error: t('failedToCreateGroup') };
 }
 
