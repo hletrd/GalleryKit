@@ -14,7 +14,7 @@ interface LoadMoreProps {
     initialOffset: number;
     hasMore: boolean;
     limit?: number;
-    onLoadMore: (images: LoadMoreResult) => void;
+    onLoadMore: (images: LoadMoreResult['images']) => void;
 }
 
 export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
@@ -32,14 +32,12 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         setLoading(true);
         const version = queryVersionRef.current;
         try {
-            const newImages = await loadMoreImages(topicSlug, tagSlugs, offset, limit);
+            const page = await loadMoreImages(topicSlug, tagSlugs, offset, limit);
             if (version !== queryVersionRef.current) return;
-            if (newImages.length < limit) {
-                setHasMore(false);
-            }
-            if (newImages.length > 0) {
-                onLoadMore(newImages);
-                setOffset(prev => prev + newImages.length);
+            setHasMore(page.hasMore);
+            if (page.images.length > 0) {
+                onLoadMore(page.images);
+                setOffset(prev => prev + page.images.length);
             }
         } catch (error) {
             console.error('Failed to load more images:', error);

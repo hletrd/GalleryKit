@@ -9,20 +9,23 @@ import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, ch
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
-    if (isRestoreMaintenanceActive()) return [];
+    if (isRestoreMaintenanceActive()) return { images: [], hasMore: false };
     // Validate slug format before passing to data layer (defense in depth)
-    if (topicSlug && (!isValidSlug(topicSlug))) return [];
+    if (topicSlug && (!isValidSlug(topicSlug))) return { images: [], hasMore: false };
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
     const safeOffset = Math.max(Math.floor(Number(offset)) || 0, 0);
     // Cap maximum offset to prevent deep pagination DoS
-    if (safeOffset > 10000) return [];
+    if (safeOffset > 10000) return { images: [], hasMore: false };
     // Cap tag array and validate format to prevent complex query DoS
     const safeTags = (tagSlugs || [])
         .slice(0, 20)
         .map((slug) => slug.trim())
         .filter(isValidTagSlug);
-    const images = await getImagesLite(topicSlug, safeTags, safeLimit, safeOffset);
-    return images;
+    const rows = await getImagesLite(topicSlug, safeTags, safeLimit + 1, safeOffset);
+    return {
+        images: rows.slice(0, safeLimit),
+        hasMore: rows.length > safeLimit,
+    };
 }
 
 export async function searchImagesAction(query: string) {

@@ -77,8 +77,8 @@ describe('searchImagesAction', () => {
     it('preserves unicode tag slugs when loading more images', async () => {
         const result = await loadMoreImages('seoul', ['서울', ' portrait ', ''], 10, 20);
 
-        expect(result).toEqual([{ id: 1 }]);
-        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울', 'portrait'], 20, 10);
+        expect(result).toEqual({ images: [{ id: 1 }], hasMore: false });
+        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울', 'portrait'], 21, 10);
     });
 
     it('returns no results for queries that are too short after sanitization', async () => {
@@ -90,9 +90,20 @@ describe('searchImagesAction', () => {
     it('short-circuits loadMoreImages during restore maintenance', async () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(true);
 
-        await expect(loadMoreImages('seoul', ['서울'], 10, 20)).resolves.toEqual([]);
+        await expect(loadMoreImages('seoul', ['서울'], 10, 20)).resolves.toEqual({ images: [], hasMore: false });
 
         expect(getImagesLiteMock).not.toHaveBeenCalled();
+    });
+
+    it('reports hasMore=false without requiring an empty terminal probe request', async () => {
+        getImagesLiteMock.mockResolvedValue([{ id: 41 }, { id: 42 }]);
+
+        await expect(loadMoreImages('seoul', ['서울'], 40, 2)).resolves.toEqual({
+            images: [{ id: 41 }, { id: 42 }],
+            hasMore: false,
+        });
+
+        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울'], 3, 40);
     });
 
     it('short-circuits searchImagesAction during restore maintenance before rate-limit or DB work', async () => {
