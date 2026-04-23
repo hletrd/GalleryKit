@@ -1,46 +1,32 @@
-# Test Engineer Review — leader fallback after test-engineer agent retry failure (current checkout only)
+# Test Engineer Review — Cycle 5 (current checkout)
 
 ## Scope and inventory covered
-Reviewed the current test surface against current code risk:
-- topic validation/actions: `apps/web/src/lib/validation.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/__tests__/validation.test.ts`, `apps/web/src/__tests__/topics-actions.test.ts`
-- histogram/photo viewer: `apps/web/src/components/histogram.tsx`, `apps/web/src/components/photo-viewer.tsx`
-- restore maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`
+Compared the current risk surface with existing unit/e2e coverage around public pagination and topic actions.
 
 ## Findings summary
 - Confirmed Issues: 2
 - Likely Issues: 0
-- Risks Requiring Manual Validation: 1
+- Risks Requiring Manual Validation: 0
 
 ## Confirmed Issues
 
-### TE3-01 — No regression test covers locale-reserved topic slugs/aliases
+### TE5-01 — No regression test protects a combined first-page pagination/count helper on public routes
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/__tests__/validation.test.ts:98-107`, `apps/web/src/__tests__/topics-actions.test.ts:138-148`, `apps/web/src/app/actions/topics.ts:51-65`, `apps/web/src/app/actions/topics.ts:328-336`
-- **Why it is a problem:** Current tests cover hardcoded reserved segments and alias-route conflicts, but they do not lock the router-reserved locale codes (`en`, `ko`). That lets the current validation gap regress silently.
-- **Concrete failure scenario:** Locale codes remain accepted for topic slugs and aliases because no test asserts they must be rejected.
-- **Suggested fix:** Add unit coverage for `isReservedTopicRouteSegment('en'/'ko')` and action-level coverage that `createTopic()` / `createTopicAlias()` reject locale-coded routes.
+- **Files:** `apps/web/src/lib/data.ts`, public page entrypoints, `apps/web/src/__tests__/` (no coverage for page-result extraction)
+- **Why it is a problem:** The current performance issue is easy to fix incorrectly unless the page-result derivation is locked by a focused unit test.
+- **Concrete failure scenario:** A future optimization drops the extra row or misreports `totalCount`/`hasMore`, and the suite stays green.
+- **Suggested fix:** Add a unit test for the new page-result normalization helper.
 
-### TE3-02 — No regression test covers overlapping histogram worker requests
-- **Severity:** MEDIUM
+### TE5-02 — No test asserts malformed topic labels map to a label-specific error
+- **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/components/histogram.tsx`, `apps/web/src/__tests__/` (no histogram coverage present)
-- **Why it is a problem:** The shared-worker request-correlation bug is easy to reintroduce because nothing in the test suite simulates fast image switching with two worker responses arriving out of order.
-- **Concrete failure scenario:** A future refactor preserves the broken shared-worker behavior and the suite stays green because no test asserts the histogram remains tied to the active image URL.
-- **Suggested fix:** Add a focused component/unit test that mocks `Worker` and verifies only the matching request ID updates histogram state.
-
-## Risks Requiring Manual Validation
-
-### TE3-03 — Restore-under-traffic behavior is not covered by automated staging-like tests
-- **Severity:** LOW
-- **Confidence:** MEDIUM
-- **Status:** Risk requiring manual validation
-- **Files:** `apps/web/src/app/[locale]/admin/db-actions.ts`, public routes/actions, current e2e suite under `apps/web/e2e/**`
-- **Why it is a problem:** The existing unit/e2e suite does not simulate a restore running while public traffic continues.
-- **Concrete failure scenario:** Restore appears safe in unit tests, but production users still see partial pages or 500s during a real restore window.
-- **Suggested fix:** Add a staging runbook/manual validation step; full deterministic automation likely needs integration infrastructure beyond the current unit surface.
+- **Files:** `apps/web/src/app/actions/topics.ts:43-48`, `apps/web/src/app/actions/topics.ts:130-135`, `apps/web/src/__tests__/topics-actions.test.ts`
+- **Why it is a problem:** The current suite covers reserved slugs/aliases but not mislabeled topic-form errors.
+- **Concrete failure scenario:** The wrong error key persists or regresses without a failing test.
+- **Suggested fix:** Add action tests that malformed labels return `invalidLabel` while malformed slugs still return `invalidSlug`.
 
 ## Final sweep
-- Current suite already covers many prior cycle issues; this report only carries current test gaps.
+No new flaky e2e issue was confirmed in current HEAD.

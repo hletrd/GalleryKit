@@ -1,15 +1,23 @@
-# Debugger — Cycle 2 Review (2026-04-23)
+# Debugger Review — Cycle 5 (current checkout)
 
-## SUMMARY
-- No fresh latent correctness bug was confirmed.
-- The strongest current issue is avoidable hot-path work rather than an error-producing failure mode.
+## Scope and inventory covered
+Rechecked previously suspicious public and topic flows after the latest fixes.
 
-## INVENTORY
-- Rechecked prior bugfix surfaces: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`
-- Current public hot paths: `apps/web/src/lib/data.ts`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+## Findings summary
+- Confirmed Issues: 1
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 0
 
-## FINDINGS
-- No new debugger-specific latent bug findings confirmed this cycle.
+## Confirmed Issues
 
-## FINAL SWEEP
-- The most suspicious flows from older cycles were rechecked and appear fixed. I would spend this cycle on the public-route performance cleanup and the small regression tests that protect it.
+### DBG5-01 — Topic label validation rejects correctly but reports the wrong field, making failure diagnosis harder
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Status:** Confirmed
+- **Files:** `apps/web/src/app/actions/topics.ts:43-48`, `apps/web/src/app/actions/topics.ts:130-135`
+- **Why it is a problem:** The bug is not acceptance of bad input; it is misleading diagnosis when the guard fires.
+- **Concrete failure scenario:** An admin debugs the slug field even though the rejected input was the label.
+- **Suggested fix:** Add and use `invalidLabel` for the label mismatch path.
+
+## Final sweep
+No fresh latent race or state-consistency bug was confirmed beyond this UX-facing validation mismatch.

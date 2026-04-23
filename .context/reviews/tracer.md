@@ -1,22 +1,23 @@
-# Tracer — Cycle 2 Review (2026-04-23)
+# Tracer Review — Cycle 5 (leader fallback; dedicated tracer role unavailable in current tool catalog)
 
-## SUMMARY
-- The current high-signal causal trace is repeated tag aggregation along the public request path.
+## Scope and inventory covered
+Traced the public request path from route entry to DB helpers.
 
-## INVENTORY
-- Route entry points: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- Shared query helper: `apps/web/src/lib/data.ts`
+## Findings summary
+- Confirmed Issues: 1
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 0
 
-## FINDINGS
+## Confirmed Issues
 
-### TRACE2-01 — Public request flow repeatedly converges on `getTags()` for identical inputs
+### TRACE5-01 — Public first-page requests still converge on the same filter twice: once for rows, once for count
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:24-25,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:32-33,111-122`, `apps/web/src/lib/data.ts:229-246`
-- **Why it is a problem:** The metadata pass and page pass both walk into the same grouped tag query with no request-scoped dedupe.
-- **Concrete failure scenario:** One route request triggers the same aggregate twice before any user-visible data changes.
-- **Suggested fix:** Cache the helper per request and skip it entirely when the metadata branch has no tag-filter work to do.
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`, `apps/web/src/lib/data.ts:253-276`
+- **Why it is a problem:** The request path fans into `getImagesLite(...)` and `getImageCount(...)` with identical filters instead of deriving both answers from one causal chain.
+- **Concrete failure scenario:** Each render performs duplicated filter/subquery work before responding.
+- **Suggested fix:** Use one paginated helper that returns rows, count, and `hasMore` together.
 
-## FINAL SWEEP
-- No alternate causal path produced a stronger current issue than this duplicate-query flow.
+## Final sweep
+The duplicate first-page query path is still the clearest current causal hotspot.

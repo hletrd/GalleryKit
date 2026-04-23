@@ -1,67 +1,51 @@
-# Cycle 4 Aggregate Review
+# Aggregate Review — Cycle 5 (2026-04-23)
 
-## Scope
-Merged and deduped the available cycle-4 review outputs plus a leader verification pass against the current checkout.
+## REVIEWER MANIFEST
+Reviewed current HEAD after cycle-4 commits. Fresh per-agent files for this cycle:
+- `code-reviewer.md`
+- `perf-reviewer.md`
+- `security-reviewer.md`
+- `critic.md`
+- `verifier.md`
+- `test-engineer.md`
+- `tracer.md`
+- `architect.md`
+- `debugger.md`
+- `document-specialist.md`
+- `designer.md`
 
-Inputs used:
-- `.context/reviews/code-reviewer.md`
-- `.context/reviews/security-reviewer.md`
-- manual source verification against current files
-- `.context/reviews/available-agents-cycle4.txt`
+## DEDUPED FINDINGS
 
-## MERGED FINDINGS
+### AGG5-01 — Public first-page render duplicates expensive filtered DB work
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Signal:** flagged by `code-reviewer`, `perf-reviewer`, `critic`, `verifier`, `tracer`, `architect`
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`, `apps/web/src/lib/data.ts:253-276`
+- **Problem:** Both public page entrypoints fetch the first image page and then immediately run a second exact `count(*)` query for the same filter set. That duplicates row-filtering work on the hottest unauthenticated routes.
+- **Failure scenario:** Large galleries or tag-filtered traffic pay two expensive queries before rendering, which raises latency and DB load under crawl bursts.
+- **Suggested fix:** Replace the split `getImagesLite` + `getImageCount` first-page path with a single paginated helper that returns rows, total count, and `hasMore` together.
 
-### F1 — Public read surfaces stay live during restore maintenance, causing inconsistent UX and avoidable load
-- **Severity:** Medium
-- **Confidence:** High
-- **Signal:** code-reviewer + leader verification
-- **Category:** correctness / performance / operational safety
-- **Files / regions:**
-  - `apps/web/src/lib/restore-maintenance.ts:1-38`
-  - `apps/web/src/app/actions/public.ts:1-76`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:244-286`
-- **Problem:** `restoreDatabase()` explicitly enters restore maintenance and quiesces buffered writes / image processing, but public server actions (`loadMoreImages`, `searchImagesAction`) continue to hit the DB. That keeps expensive pagination/search reads alive during restore and can surface partial data or transient DB failures to end users.
-- **Failure scenario:** An admin starts a restore; while DDL/DML is replaying, visitors keep scrolling or searching. The app continues issuing gallery/search reads against a half-restored DB, increasing load and returning empty/partial/inconsistent responses.
-- **Suggested fix:** Short-circuit public server actions during restore maintenance before any DB/rate-limit work. Add regression coverage proving both actions return empty results when maintenance is active.
-
-### F2 — `/api/health` does not honor restore maintenance, contradicting repo docs and keeping readiness green during restore
-- **Severity:** Medium
-- **Confidence:** High
-- **Signal:** leader verification against docs + source
-- **Category:** correctness / ops / performance
-- **Files / regions:**
-  - `apps/web/src/app/api/health/route.ts:1-18`
-  - `apps/web/src/lib/restore-maintenance.ts:1-38`
-  - `CLAUDE.md:177-180` (readiness/docs contract)
-- **Problem:** Repo docs state `/api/health` is DB-aware readiness/diagnostics and can legitimately return `503` during DB outages **or restore work**, but the route currently only checks DB reachability. If the DB is reachable during restore maintenance, readiness incorrectly stays green.
-- **Failure scenario:** A restore is in progress but DB connectivity remains up. Probes keep receiving `200 {status:"ok"}` from `/api/health`, so upstream orchestration continues routing traffic to an intentionally degraded instance.
-- **Suggested fix:** Make `/api/health` return `503` with a restore-specific status when `isRestoreMaintenanceActive()` is true. Add regression coverage.
-
-## INVALIDATED / NON-ACTIONABLE REVIEW CLAIMS
-
-These were raised by individual reviewers but do **not** survive current-source verification:
-
-1. **Reserved locale slug/alias bug** from `code-reviewer.md` — invalidated by current source. `apps/web/src/lib/validation.ts:1-9` already includes `...LOCALES` in `RESERVED_TOPIC_ROUTE_SEGMENTS`.
-2. **Histogram worker request mix-up** from `code-reviewer.md` — invalidated by current source and tests. `apps/web/src/components/histogram.tsx:18-81`, `apps/web/public/histogram-worker.js:1-22`, and `apps/web/src/__tests__/histogram.test.ts:1-53` already use/request `requestId` correlation.
-3. **AWS S3 SDK vulnerable dependency finding** from `security-reviewer.md` — invalid for the current production manifest. `apps/web/package.json` has no `@aws-sdk/client-s3` or `@aws-sdk/s3-request-presigner` dependency.
-4. **Password-change CSRF origin-check gap** from `security-reviewer.md` — invalidated by current source. `apps/web/src/app/actions/auth.ts:272-285` already checks `hasTrustedSameOrigin(requestHeaders)`.
-5. **Weak example secret in current tree** from `security-reviewer.md` — current tree already uses placeholders and explicit compromised-history rotation guidance in `apps/web/.env.local.example:15-23` and `README.md:66-76`.
+### AGG5-02 — Topic label sanitization reports the wrong field-level error
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Signal:** flagged by `code-reviewer`, `critic`, `verifier`, `debugger`, `test-engineer`
+- **Files:** `apps/web/src/app/actions/topics.ts:43-48`, `apps/web/src/app/actions/topics.ts:130-135`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`
+- **Problem:** The defensive control-character guard for topic labels returns `invalidSlug` instead of a label-specific error.
+- **Failure scenario:** Admins are told to correct the slug even though the malformed input was the label.
+- **Suggested fix:** Add `invalidLabel` translations and use them for label mismatch paths in topic create/update.
 
 ## AGENT FAILURES
+- `perf-reviewer`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a `performance-reviewer`/`perf-reviewer` role. This cycle used a leader fallback review written to `perf-reviewer.md`.
+- `tracer`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a `tracer` role. This cycle used a leader fallback review written to `tracer.md`.
+- `document-specialist`: requested explicitly by the prompt, but the current `spawn_agent` catalog does not expose a `document-specialist` role. This cycle used a leader fallback review written to `document-specialist.md`.
+- Additional native subagent fan-out was constrained by the current agent thread limit (`max 6`), so remaining cycle-5 review files were refreshed via leader fallback to avoid carrying stale pre-cycle-4 findings forward.
 
-The orchestrator requested these registered reviewer agents, but the Agent tool failed twice due the platform thread limit (`collab spawn failed: agent thread limit reached (max 6)`), so no per-agent report could be collected this cycle:
-- `critic`
-- `verifier`
-- `test-engineer`
-- `architect`
-- `debugger`
-- `designer`
+## EXCLUDED PRIOR FINDINGS
+The following older findings were rechecked and are no longer current in HEAD, so they were intentionally not carried forward:
+- locale codes reserved for topic routes
+- histogram worker request correlation
+- restore-mode public-read gap
+- duplicate uncached tag aggregation in public metadata/page render
 
-Requested but not registered in this environment:
-- `perf-reviewer`
-- `tracer`
-- `document-specialist`
-
-## DEDUPE NOTES
-- The only surviving cross-source finding is the restore-maintenance read/readiness gap.
-- Several reviewer claims were stale relative to the current checkout and were filtered out above.
+## NEW FINDING COUNT
+2

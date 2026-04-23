@@ -1,15 +1,15 @@
-# Document Specialist — Cycle 2 Review (2026-04-23)
+# Document Specialist Review — Cycle 5 (leader fallback; dedicated document-specialist role unavailable in current tool catalog)
 
-## SUMMARY
-- No new documentation-code mismatches were confirmed.
-- This file exists because the requested dedicated document-specialist agent role is not currently spawnable in the tool role catalog; a manual document pass was used instead.
+## Scope and inventory covered
+Compared current docs (`README.md`, `CLAUDE.md`, `AGENTS.md`) against the latest code changes reviewed this cycle.
 
-## INVENTORY
-- `README.md`, `CLAUDE.md`, `AGENTS.md`
-- Rechecked code: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`
+## Findings summary
+- Confirmed Issues: 0
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 0
 
-## FINDINGS
-- No fresh documentation mismatch confirmed this cycle.
+## Findings
+No fresh documentation/code mismatch was confirmed for the current checkout.
 
-## FINAL SWEEP
-- Current docs remain directionally accurate; the cycle's actionable work is performance tuning and regression coverage.
+## Final sweep
+Docs already describe the recent restore and secret-handling behavior accurately enough for this cycle.

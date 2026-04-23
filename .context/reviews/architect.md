@@ -1,22 +1,23 @@
-# Architect — Cycle 2 Review (2026-04-23)
+# Architect Review — Cycle 5 (current checkout)
 
-## SUMMARY
-- The current architectural smell is inconsistent request-scoped caching in the public read path.
+## Scope and inventory covered
+Reviewed architectural seams around public read helpers and topic-action validation.
 
-## INVENTORY
-- Shared read helpers: `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config.ts`
-- Public consumers: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+## Findings summary
+- Confirmed Issues: 1
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 0
 
-## FINDINGS
+## Confirmed Issues
 
-### ARCH2-01 — Tag aggregation lacks the request-scoped caching already used by adjacent hot-path helpers
+### ARCH5-01 — Public route composition still lacks a single pagination seam for rows + count
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/lib/data.ts:786-832`, `apps/web/src/app/[locale]/(public)/page.tsx:22-31,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:23-33,110-122`
-- **Why it is a problem:** The repo deliberately wraps repeated SSR reads in `cache()` (`getTopicBySlugCached`, `getTopicsCached`, `getSeoSettings`, `getGalleryConfig`), but `getTags()` is still a raw query even though the route stack reuses it.
-- **Concrete failure scenario:** Public route metadata and body rendering repeatedly compute the same grouped tag aggregates within one request lifecycle while neighboring helpers are already deduped.
-- **Suggested fix:** Add `getTagsCached(topic?)`, switch the public route stack to it, and keep the raw helper for truly uncached callers if needed.
+- **Files:** `apps/web/src/lib/data.ts:253-276`, `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`
+- **Why it is a problem:** The current architecture exposes count and row fetching as separate calls even though the hottest consumers always need both for the same filter set.
+- **Concrete failure scenario:** Public route implementations keep duplicating the same query planning and DB work.
+- **Suggested fix:** Add a dedicated paginated public-image helper that returns `images`, `totalCount`, and `hasMore` together.
 
-## FINAL SWEEP
-- No broader layering rewrite is warranted. A small, consistent request-cache seam is the right architectural fix.
+## Final sweep
+No larger boundary change is needed; a small data-layer seam is enough.

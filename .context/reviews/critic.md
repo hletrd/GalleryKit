@@ -1,32 +1,32 @@
-# Critic — Cycle 2 Review (2026-04-23)
+# Critic Review — Cycle 5 (current checkout)
 
-## SUMMARY
-- The most credible current risks are performance regressions hidden in the public metadata/render stack, not correctness or security failures.
+## Scope and inventory covered
+Re-reviewed the public render stack, data helpers, and topic admin flows after the latest cycle-4 fixes.
 
-## INVENTORY
-- Public route metadata and page composition: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- Shared data helpers: `apps/web/src/lib/data.ts`
-- Public search hot path: `apps/web/src/app/actions/public.ts`, `apps/web/src/components/search.tsx`
+## Findings summary
+- Confirmed Issues: 2
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 0
 
-## FINDINGS
+## Confirmed Issues
 
-### CRI2-01 — Tag aggregation is still treated as cheap even though the public route stack executes it redundantly
+### CRT5-01 — The hottest public routes still pay for duplicated filtered reads before render
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/app/[locale]/(public)/page.tsx:24-25,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:32-33,111-122`
-- **Why it is a problem:** The repo already caches other SSR hot-path reads (`getTopicsCached`, `getSeoSettings`, `getGalleryConfig`), but tag aggregation remains uncached and duplicated across metadata + page rendering.
-- **Concrete failure scenario:** Under crawler traffic or repeated cache misses, grouped tag queries become recurring overhead on the busiest public routes.
-- **Suggested fix:** Add a cached tag helper and avoid running tag validation when no `tags` query parameter exists.
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:108-114`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-123`, `apps/web/src/lib/data.ts:253-276`
+- **Why it is a problem:** The repo already applies request-scoped caching elsewhere, but first-page public rendering still performs two separate filtered DB reads to learn data that can be derived from one query.
+- **Concrete failure scenario:** Public traffic spends extra DB budget before anything user-visible changes.
+- **Suggested fix:** Fold first-page count into the page query and derive `hasMore` from the same result set.
 
-### CRI2-02 — The homepage metadata path still does fallback work after the admin has explicitly configured a custom OG asset
+### CRT5-02 — Topic form validation still misattributes malformed label input to the slug field
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:22-31,44-54`
-- **Why it is a problem:** The code asks the database for a latest image and reads gallery config even when the branch that uses those values is dead because `seo.og_image_url` is set.
-- **Concrete failure scenario:** The app keeps paying a needless hot-path query for every metadata render on branded deployments that always use a fixed OG image.
-- **Suggested fix:** Return early from the custom-OG branch.
+- **Files:** `apps/web/src/app/actions/topics.ts:43-48`, `apps/web/src/app/actions/topics.ts:130-135`
+- **Why it is a problem:** The defensive validation is correct, but the error mapping is misleading.
+- **Concrete failure scenario:** Admins fix the wrong field after a rejection.
+- **Suggested fix:** Return a label-specific translation key.
 
-## FINAL SWEEP
-- I revisited older review artifacts only to verify staleness. The strong signal in the current codebase is performance debt in metadata/render composition rather than a hidden correctness bug.
+## Final sweep
+No broader rewrite is warranted; these are small, high-signal follow-ups on current HEAD.
