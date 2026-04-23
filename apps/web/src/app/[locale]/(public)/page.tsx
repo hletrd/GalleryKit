@@ -17,9 +17,11 @@ export const revalidate = 3600;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { tags: tagsParam } = await searchParams;
-  const locale = await getLocale();
-  const t = await getTranslations('home');
-  const seo = await getSeoSettings();
+  const [locale, t, seo] = await Promise.all([
+    getLocale(),
+    getTranslations('home'),
+    getSeoSettings(),
+  ]);
   const pageUrl = localizeUrl(seo.url, locale, '/');
   const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
   const tagSlugs = requestedTagSlugs.length > 0
@@ -54,10 +56,12 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     };
   }
 
-  const images = await getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0);
+  const [images, config] = await Promise.all([
+    getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0),
+    getGalleryConfig(),
+  ]);
   const latestImage = images[0];
   // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
-  const config = await getGalleryConfig();
   const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
   const isLatestTitleFilename = latestImage?.title
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
@@ -94,13 +98,14 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ tags?: string }> }) {
   const { tags: tagsParam } = await searchParams;
-  const locale = await getLocale();
-  const seo = await getSeoSettings();
+  const [locale, seo, config, allTags, allTopics] = await Promise.all([
+    getLocale(),
+    getSeoSettings(),
+    getGalleryConfig(),
+    getTagsCached(),
+    getTopicsCached(),
+  ]);
   const baseUrl = seo.url;
-  const config = await getGalleryConfig();
-
-  // Root always gets latest uploads (no topic)
-  const [allTags, allTopics] = await Promise.all([getTagsCached(), getTopicsCached()]);
 
   // Parse and validate tag slugs
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);

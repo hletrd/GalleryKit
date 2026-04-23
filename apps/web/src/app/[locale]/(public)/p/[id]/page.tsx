@@ -21,10 +21,12 @@ const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
 export const revalidate = 604800;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-    const { id } = await params;
-    const locale = await getLocale();
-    const t = await getTranslations('photo');
-    const seo = await getSeoSettings();
+  const { id } = await params;
+  const [locale, t, seo] = await Promise.all([
+    getLocale(),
+    getTranslations('photo'),
+    getSeoSettings(),
+  ]);
 
     // Validate that id is a purely numeric positive integer before parseInt
     // (matches the default export's validation pattern)
@@ -106,9 +108,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 export default async function PhotoPage({ params }: { params: Promise<{ id: string }> }) {
-    const { id } = await params;
-    const locale = await getLocale();
-    const t = await getTranslations('photo');
+  const { id } = await params;
+  const [locale, t] = await Promise.all([
+    getLocale(),
+    getTranslations('photo'),
+  ]);
 
     // Validate that id is a purely numeric positive integer
     if (!/^\d+$/.test(id)) {
@@ -123,8 +127,11 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
 
     if (!image) return notFound();
 
-    const seo = await getSeoSettings();
-    const config = await getGalleryConfig();
+    const [seo, config, isAdminUser] = await Promise.all([
+        getSeoSettings(),
+        getGalleryConfig(),
+        isAdmin(),
+    ]);
 
     // Replicate title logic for JSON-LD
     const hasTags = image.tags && image.tags.length > 0;
@@ -202,8 +209,6 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             },
         ].filter(Boolean),
     };
-
-    const isAdminUser = await isAdmin();
 
     return (
         <>

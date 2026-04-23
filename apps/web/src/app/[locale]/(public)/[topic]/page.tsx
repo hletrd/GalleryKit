@@ -18,11 +18,12 @@ export const revalidate = 3600;
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ topic: string }>, searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
-  const locale = await getLocale();
-  const t = await getTranslations('topic');
-  const seo = await getSeoSettings();
-
-  const topicData = await getTopicBySlugCached(topic);
+  const [locale, t, seo, topicData] = await Promise.all([
+    getLocale(),
+    getTranslations('topic'),
+    getSeoSettings(),
+    getTopicBySlugCached(topic),
+  ]);
 
   if (!topicData) return {
     title: t('notFoundTitle'),
@@ -92,9 +93,10 @@ export default async function TopicPage({
 }) {
   const { topic } = await params;
   const { tags: tagsParam } = await searchParams;
-  const locale = await getLocale();
-
-  const topicData = await getTopicBySlugCached(topic);
+  const [locale, topicData] = await Promise.all([
+    getLocale(),
+    getTopicBySlugCached(topic),
+  ]);
   if (!topicData) {
     return notFound();
   }
@@ -109,20 +111,20 @@ export default async function TopicPage({
       redirect(redirectSearch.size > 0 ? `${destination}?${redirectSearch.toString()}` : destination);
   }
 
-  const seo = await getSeoSettings();
-  const allTags = await getTagsCached(topic);
+  const [seo, config, allTags, allTopics] = await Promise.all([
+    getSeoSettings(),
+    getGalleryConfig(),
+    getTagsCached(topicData.slug),
+    getTopicsCached(),
+  ]);
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
 
   const PAGE_SIZE = 30;
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;
-  const [{ images, totalCount, hasMore }, allTopics] = await Promise.all([
-    getImagesLitePage(topic, filterTags, PAGE_SIZE, 0),
-    getTopicsCached(),
-  ]);
+  const { images, totalCount, hasMore } = await getImagesLitePage(topicData.slug, filterTags, PAGE_SIZE, 0);
   const tags = allTags.filter(t => t.count > 1);
 
   const baseUrl = seo.url;
-  const config = await getGalleryConfig();
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',

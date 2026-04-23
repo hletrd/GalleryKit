@@ -70,8 +70,10 @@ export default async function RootLayout({
     return notFound();
   }
 
-  const seo = await getSeoSettings();
-  const messages = await getMessages();
+  const [seo, messages] = await Promise.all([
+    getSeoSettings(),
+    getMessages(),
+  ]);
 
   return (
     <html
