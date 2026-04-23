@@ -78,6 +78,10 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
+      // Explicit `dir` improves SR speech-flow heuristics and future-proofs for
+      // RTL locales. Currently only LTR locales are shipped (C3R-RPL-05 /
+      // AGG3R-05).
+      dir="ltr"
       suppressHydrationWarning
       data-gallery-title={seo.title}
       data-gallery-nav-title={seo.nav_title || seo.title}
