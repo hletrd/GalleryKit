@@ -132,10 +132,33 @@ After implementing each commit:
 
 ## Progress tracking
 
-- [x] C4R-RPL2-01 (db pool handler `.catch`) — commit `0000000e73557ac8d340e070e975481b8fd2dfc5`
+- [x] C4R-RPL2-01 (db pool handler `.catch`) — initial `0000000e73557ac8d340e070e975481b8fd2dfc5` + hotfixes `00000005bae44d89cdddcef4ed6f221d2e7d981d` (seed-breaking bug) and `0000000f676913916f6f11025826aec327c390d2` (type-safe `.promise()` cast)
 - [x] C4R-RPL2-02 (safeJsonLd U+2028/U+2029) — commit `00000003f2e40f8ef5d51f7e8889623511a36ac6`
 - [x] C4R-RPL2-03 (JSON-LD breadcrumb label) — commit `00000003ac5a77fd7167118f9ea265d4cacfcb1b`
 - [x] C4R-RPL2-04 (actions barrel settings) — commit `0000000ca9d8df1791bc477e45753082706c87fa`
 - [x] C4R-RPL2-05 (SQL scanner CREATE DATABASE) — commit `0000000ecdf5e61f264b71aa9277567fa193a239`
-- [ ] Gates green (in progress)
+- [x] Gates green — eslint clean; lint:api-auth OK; lint:action-origin OK; vitest 232/232; next build OK; Playwright 17/17
 - [ ] Deploy complete
+
+## Lessons learned
+
+The initial C4R-RPL2-01 commit `0000000e73...` broke the E2E seed
+because mysql2's `'connection'` event hands out the **callback-style**
+Connection even when the pool was created via `mysql2/promise`.
+Chaining `.catch` on a callback-style `.query(...)` (which returns
+`undefined`) triggered the mysql2 runtime guard. Two follow-up commits
+iterated to the correct fix:
+
+1. `00000005b` — switched to callback form `(err) => {...}`. Unblocked
+   the seed but failed `next build` type-check because the type of
+   `.query(...)` on `mysql2/promise`'s `PoolConnection` only exposes
+   the Promise overload.
+2. `0000000f6` — cast the runtime connection through
+   `mysql2.PoolConnection` (callback-style type) to access `.promise()`,
+   then call `.query()` on the returned PromiseConnection so `.catch()`
+   is both type-safe AND actually chained on a real Promise.
+
+Take-away for future cycles: when touching mysql2 pool event listeners,
+remember that the event-arg types from `mysql2/promise` are misleading
+— the runtime value is the base callback-style Connection, and you
+need `.promise()` to adapt.
