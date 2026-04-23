@@ -5,7 +5,7 @@ import { getImagesLite, searchImages } from '@/lib/data';
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit } from '@/lib/rate-limit';
+import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit } from '@/lib/rate-limit';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
@@ -73,16 +73,19 @@ export async function searchImagesAction(query: string) {
     try {
         const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
         if (isRateLimitExceeded(dbLimit.count, SEARCH_MAX_REQUESTS, true)) {
-            // Roll back the pre-incremented in-memory counter to stay consistent
-            // with DB source of truth. Without this, the in-memory counter
-            // stays overcounted while DB is undercounted, causing premature
-            // rate limiting for the remainder of the window.
+            // C6R-RPL-03 / AGG6R-02: symmetric rollback of BOTH counters.
+            // Prior code only rolled back the in-memory counter, leaving the
+            // DB counter inflated by 1 per over-limit event. Over the 60s
+            // window, legitimate burst users paid an extra counted attempt.
             const currentEntry = searchRateLimit.get(ip);
             if (currentEntry && currentEntry.count > 1) {
                 currentEntry.count--;
             } else {
                 searchRateLimit.delete(ip);
             }
+            await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch((err) => {
+                console.debug('Failed to roll back search DB rate limit after over-limit:', err);
+            });
             return [];
         }
     } catch {

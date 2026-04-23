@@ -7,6 +7,7 @@ const {
     getClientIpMock,
     checkRateLimitMock,
     incrementRateLimitMock,
+    decrementRateLimitMock,
     pruneSearchRateLimitMock,
     isRestoreMaintenanceActiveMock,
     searchRateLimit,
@@ -17,6 +18,7 @@ const {
     getClientIpMock: vi.fn(),
     checkRateLimitMock: vi.fn(),
     incrementRateLimitMock: vi.fn(),
+    decrementRateLimitMock: vi.fn(),
     pruneSearchRateLimitMock: vi.fn(),
     isRestoreMaintenanceActiveMock: vi.fn(),
     searchRateLimit: new Map<string, { count: number; resetAt: number }>(),
@@ -43,6 +45,7 @@ vi.mock('@/lib/rate-limit', () => ({
     getClientIp: getClientIpMock,
     checkRateLimit: checkRateLimitMock,
     incrementRateLimit: incrementRateLimitMock,
+    decrementRateLimit: decrementRateLimitMock,
     pruneSearchRateLimit: pruneSearchRateLimitMock,
     isRateLimitExceeded: (count: number, maxRequests: number, includesCurrentRequest = false) => (
         includesCurrentRequest ? count > maxRequests : count >= maxRequests
@@ -59,6 +62,8 @@ describe('searchImagesAction', () => {
         getClientIpMock.mockReset();
         checkRateLimitMock.mockReset();
         incrementRateLimitMock.mockReset();
+        decrementRateLimitMock.mockReset();
+        decrementRateLimitMock.mockResolvedValue(undefined);
         searchRateLimit.clear();
 
         headersMock.mockResolvedValue({
@@ -127,6 +132,18 @@ describe('searchImagesAction', () => {
         expect(result).toEqual([]);
         expect(searchImagesMock).not.toHaveBeenCalled();
         expect(searchRateLimit.has('203.0.113.42')).toBe(false);
+    });
+
+    it('rolls back BOTH in-memory AND DB counters on over-limit (C6R-RPL-03 / AGG6R-02)', async () => {
+        checkRateLimitMock.mockResolvedValue({ limited: true, count: 31 });
+
+        await searchImagesAction('landscape');
+
+        // Symmetric rollback: in-memory was cleared (asserted above) AND
+        // the DB decrement was invoked to undo the pre-increment at line
+        // 65 of public.ts. Without this, the DB counter drifts ahead of
+        // in-memory, causing premature rate-limiting later in the window.
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'search', 60_000);
     });
 
     it('falls back to the in-memory limiter when the DB increment fails', async () => {

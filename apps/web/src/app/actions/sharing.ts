@@ -5,7 +5,7 @@ import { db, images, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 import { headers } from 'next/headers';
-import { getClientIp, checkRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -76,6 +76,19 @@ function rollbackShareRateLimit(ip: string, scope: ShareRateLimitScope) {
     shareRateLimit.delete(key);
 }
 
+/**
+ * C6R-RPL-03 / AGG6R-02 — symmetric rollback of BOTH in-memory and DB
+ * counters. Used on over-limit branches and FK-violation recovery paths
+ * where the DB counter was pre-incremented but the action did not
+ * ultimately execute.
+ */
+async function rollbackShareRateLimitFull(ip: string, scope: ShareRateLimitScope) {
+    rollbackShareRateLimit(ip, scope);
+    await decrementRateLimit(ip, scope, SHARE_RATE_LIMIT_WINDOW_MS).catch((err) => {
+        console.debug(`Failed to roll back DB share rate limit for scope ${scope}:`, err);
+    });
+}
+
 export async function createPhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
@@ -110,7 +123,9 @@ export async function createPhotoShareLink(imageId: number) {
         await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
         if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
-            rollbackShareRateLimit(ip, 'share_photo');
+            // C6R-RPL-03: roll back BOTH counters so the DB counter doesn't
+            // drift ahead of the in-memory counter over the window.
+            await rollbackShareRateLimitFull(ip, 'share_photo');
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -214,7 +229,8 @@ export async function createGroupShareLink(imageIds: number[]) {
         await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
         if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
-            rollbackShareRateLimit(ip, 'share_group');
+            // C6R-RPL-03: roll back BOTH counters.
+            await rollbackShareRateLimitFull(ip, 'share_group');
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -264,6 +280,11 @@ export async function createGroupShareLink(imageIds: number[]) {
                 continue;
             }
             if (hasMySQLErrorCode(e, 'ER_NO_REFERENCED_ROW_2')) {
+                // C6R-RPL-03: FK violation means the action did NOT execute;
+                // roll back the DB rate-limit counter so the admin isn't
+                // penalized for a deleted image. In-memory counter rolled
+                // back symmetrically.
+                await rollbackShareRateLimitFull(ip, 'share_group');
                 return { error: t('imagesNotFound') };
             }
             // Non-retryable error — fail immediately
