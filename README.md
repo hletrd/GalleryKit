@@ -116,7 +116,7 @@ Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap s
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=your_user
-DB_PASSWORD=your_password
+DB_PASSWORD=<change-me>
 DB_NAME=gallery
 ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<openssl rand -hex 32>
@@ -126,6 +126,10 @@ BASE_URL=http://localhost:3000
 # UPLOAD_MAX_TOTAL_BYTES=2147483648
 # TRUST_PROXY=true
 ```
+
+If you ever seeded an environment from older checked-in examples, rotate both
+`SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical
+git values must be treated as compromised and must not be reused.
 
 If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config now caps general requests at **2 GiB** and `/admin/db` restore requests at **250 MB** to match the app-side limits; keep those layers aligned if you customize either side.

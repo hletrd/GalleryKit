@@ -1,22 +1,46 @@
-# Test Engineer — Cycle 2 Review (2026-04-23)
+# Test Engineer Review — leader fallback after test-engineer agent retry failure (current checkout only)
 
-## SUMMARY
-- Found 1 current regression-coverage gap tied to the public-route performance fixes.
+## Scope and inventory covered
+Reviewed the current test surface against current code risk:
+- topic validation/actions: `apps/web/src/lib/validation.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/__tests__/validation.test.ts`, `apps/web/src/__tests__/topics-actions.test.ts`
+- histogram/photo viewer: `apps/web/src/components/histogram.tsx`, `apps/web/src/components/photo-viewer.tsx`
+- restore maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`
 
-## INVENTORY
-- Existing test surface: `apps/web/src/__tests__/`, `apps/web/e2e/`
-- Current code under review: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/rate-limit.ts`
+## Findings summary
+- Confirmed Issues: 2
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 1
 
-## FINDINGS
+## Confirmed Issues
 
-### TE2-01 — No regression test locks the public metadata short-circuit and search-prune hot-path behavior
+### TE3-01 — No regression test covers locale-reserved topic slugs/aliases
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:18-31`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:18-33`, `apps/web/src/app/actions/public.ts:33-49`, `apps/web/src/__tests__/rate-limit.test.ts`
-- **Why it is a problem:** The current performance opportunities are small enough to regress silently. There is no focused test ensuring future refactors do not reintroduce unconditional metadata tag queries or per-request full-map search pruning.
-- **Concrete failure scenario:** A future cleanup reintroduces unconditional tag lookups or hot-path O(n) pruning and the gate suite stays green because there is no targeted assertion around those helpers.
-- **Suggested fix:** Add small unit tests around the extracted/public helper logic and the search-prune helper in `rate-limit.test.ts`.
+- **Files:** `apps/web/src/__tests__/validation.test.ts:98-107`, `apps/web/src/__tests__/topics-actions.test.ts:138-148`, `apps/web/src/app/actions/topics.ts:51-65`, `apps/web/src/app/actions/topics.ts:328-336`
+- **Why it is a problem:** Current tests cover hardcoded reserved segments and alias-route conflicts, but they do not lock the router-reserved locale codes (`en`, `ko`). That lets the current validation gap regress silently.
+- **Concrete failure scenario:** Locale codes remain accepted for topic slugs and aliases because no test asserts they must be rejected.
+- **Suggested fix:** Add unit coverage for `isReservedTopicRouteSegment('en'/'ko')` and action-level coverage that `createTopic()` / `createTopicAlias()` reject locale-coded routes.
 
-## FINAL SWEEP
-- I did not confirm a flaky test or broken assertion in the current suite; the missing coverage is around the performance behavior being planned this cycle.
+### TE3-02 — No regression test covers overlapping histogram worker requests
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Status:** Confirmed
+- **Files:** `apps/web/src/components/histogram.tsx`, `apps/web/src/__tests__/` (no histogram coverage present)
+- **Why it is a problem:** The shared-worker request-correlation bug is easy to reintroduce because nothing in the test suite simulates fast image switching with two worker responses arriving out of order.
+- **Concrete failure scenario:** A future refactor preserves the broken shared-worker behavior and the suite stays green because no test asserts the histogram remains tied to the active image URL.
+- **Suggested fix:** Add a focused component/unit test that mocks `Worker` and verifies only the matching request ID updates histogram state.
+
+## Risks Requiring Manual Validation
+
+### TE3-03 — Restore-under-traffic behavior is not covered by automated staging-like tests
+- **Severity:** LOW
+- **Confidence:** MEDIUM
+- **Status:** Risk requiring manual validation
+- **Files:** `apps/web/src/app/[locale]/admin/db-actions.ts`, public routes/actions, current e2e suite under `apps/web/e2e/**`
+- **Why it is a problem:** The existing unit/e2e suite does not simulate a restore running while public traffic continues.
+- **Concrete failure scenario:** Restore appears safe in unit tests, but production users still see partial pages or 500s during a real restore window.
+- **Suggested fix:** Add a staging runbook/manual validation step; full deterministic automation likely needs integration infrastructure beyond the current unit surface.
+
+## Final sweep
+- Current suite already covers many prior cycle issues; this report only carries current test gaps.

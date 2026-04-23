@@ -1,42 +1,42 @@
-# Perf Reviewer — Cycle 2 Review (2026-04-23)
+# Performance Review — leader fallback because perf-reviewer agent could not be spawned (thread limit)
 
-## SUMMARY
-- Confirmed 3 current performance findings.
-- Two are small, high-confidence wins suitable for this cycle; one is a small hot-path CPU cleanup with direct test coverage.
+## Scope and inventory covered
+Reviewed current hot paths across public rendering, interactive photo viewing, and dependency/runtime setup:
+- public list/data layer: `apps/web/src/lib/data.ts`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`, `apps/web/src/app/actions/public.ts`
+- interactive viewer: `apps/web/src/components/histogram.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- dependency/runtime/config: `apps/web/package.json`, `package-lock.json`
 
-## INVENTORY
-- Shared data helpers: `apps/web/src/lib/data.ts`
-- Public metadata/page stack: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- Public search path: `apps/web/src/app/actions/public.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/lib/rate-limit.ts`
+## Findings summary
+- Confirmed Issues: 2
+- Likely Issues: 0
+- Risks Requiring Manual Validation: 1
 
-## FINDINGS
+## Confirmed Issues
 
-### PERF2-01 — Public metadata and page renders duplicate grouped tag queries, and metadata does them even with no tag filter
+### PERF3-01 — Histogram worker requests are not correlated, causing wasted work and wrong UI during fast photo navigation
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/app/[locale]/(public)/page.tsx:24-25,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:32-33,111-122`
-- **Why it is a problem:** `getTags()` performs a grouped aggregate on hot public routes, but current route composition re-runs it in metadata and body rendering and does not skip it on the common no-tag path.
-- **Concrete failure scenario:** Anonymous route traffic and crawlers repeatedly trigger the same tag aggregation, raising DB work for no visible benefit.
-- **Suggested fix:** Add `getTagsCached(topic?)` and skip metadata tag resolution when `tags` is absent.
+- **Files:** `apps/web/src/components/histogram.tsx:21-58`, `apps/web/src/components/photo-viewer.tsx:50-140`
+- **Why it is a problem:** Multiple in-flight histogram requests share one worker and every pending promise listens for the next worker `message`. On rapid navigation, stale requests can resolve newer promises, producing incorrect histograms and wasted canvas/worker work.
+- **Concrete failure scenario:** The user arrows through photos quickly; the second photo's histogram briefly or persistently shows the first photo's values while an extra unused worker computation also runs.
+- **Suggested fix:** Correlate requests with IDs and ignore stale responses.
 
-### PERF2-02 — Home metadata still issues fallback image/config lookups when a custom OG image makes them dead work
-- **Severity:** LOW
-- **Confidence:** HIGH
-- **Status:** Confirmed
-- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:22-31,44-54`
-- **Why it is a problem:** The route fetches the latest image and gallery config before checking whether `seo.og_image_url` is already present.
-- **Concrete failure scenario:** Branded deployments that always use a fixed OG image still pay an avoidable DB query and config read on every metadata render.
-- **Suggested fix:** Return early for the custom-OG branch.
-
-### PERF2-03 — `searchImagesAction` does full-map in-memory pruning on every request in an already expensive public hot path
-- **Severity:** LOW
+### PERF3-02 — Public gallery routes still execute exact `count(*)` queries on every request, including tag-filtered views
+- **Severity:** MEDIUM
 - **Confidence:** MEDIUM
 - **Status:** Confirmed
-- **Files:** `apps/web/src/app/actions/public.ts:33-49`, `apps/web/src/components/search.tsx:67-81`, `apps/web/src/lib/rate-limit.ts:19-25`
-- **Why it is a problem:** Search is debounced but still user-typing-driven; each request scans up to the entire `searchRateLimit` map before doing the DB-backed search/rate-limit work.
-- **Concrete failure scenario:** Concurrent users typing quickly create repeated O(n) JS work on top of the existing wildcard-search cost.
-- **Suggested fix:** Extract search-map pruning into a throttled helper so the full scan does not happen on every request, while preserving the cap and expiry semantics.
+- **Files:** `apps/web/src/lib/data.ts:247-269`, `apps/web/src/app/[locale]/(public)/page.tsx:108-113`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:118-123`
+- **Why it is a problem:** The public home/topic routes pair the listing query with a second exact-count query on every request. That scales linearly with table/filter cost and becomes the dominant extra DB work on unauthenticated hot paths.
+- **Concrete failure scenario:** On a large gallery, each public request performs both the listing query and an exact filtered count just to drive `hasMore` and the header count, increasing latency and DB load under crawler or burst traffic.
+- **Suggested fix:** Move to a cheaper `PAGE_SIZE + 1` strategy for `hasMore`, and defer or cache exact counts separately if the UI still needs them.
 
-## FINAL SWEEP
-- I excluded older stale performance findings that the current code already fixed (`getTopicsCached`, photo viewer `sizes`, earlier route hardening).
+## Risks Requiring Manual Validation
+
+### PERF3-03 — Restore mode may expose expensive/read-failure churn under concurrent public traffic
+- **Severity:** LOW
+- **Confidence:** MEDIUM
+- **Status:** Risk requiring manual validation
+- **Files:** `apps/web/src/app/[locale]/admin/db-actions.ts`, public read paths under `apps/web/src/lib/data.ts`
+- **Why it is a problem:** If public readers continue during restore, repeated read failures or partial scans can create both user-visible inconsistency and avoidable load during maintenance.
+- **Suggested fix:** Validate on staging and either gate readers or document/monitor the degraded-read path.

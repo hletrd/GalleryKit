@@ -2,6 +2,7 @@
 
 ## Active Plans
 
+- 207 — Deferred Review Findings (Cycle 3) — TODO / deferred
 - 204 — Deferred Performance Findings (Carry-Forward) — TODO / deferred
 - 202 — Deferred Gate Warnings (Cycle 1) — TODO / deferred
 - 196 — Deferred Review Coverage (Cycle 12 Ultradeep) — TODO
@@ -71,6 +72,11 @@
 
 - 165 — Cycle 1 Metadata, Cache, and Import-Coupling Fixes — DONE
 - 166 — Cycle 1 Admin, Upload, Test, UX, and Docs Hardening — DONE
+
+## Completed Plans (Cycle 3)
+
+- 206 — Cycle 3 Review Fixes — DONE / archived under `done/plan-206-cycle3-review-fixes.md`
+- 200 — Cycle 3 Fresh Fixes — DONE / archived under `done/plan-200-cycle3-fresh-fixes.md`
 
 ## Completed Plans (Cycle 2)
 

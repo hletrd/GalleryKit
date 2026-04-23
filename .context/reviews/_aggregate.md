@@ -1,74 +1,131 @@
-# Aggregate Review — Cycle 2 (2026-04-23)
+# Aggregate Review — Cycle 3 (2026-04-23)
 
-**Scope:** Current repository state in `/Users/hletrd/flash-shared/gallery`
-
-## REVIEWER INVENTORY / FAN-OUT STATUS
-
-Requested reviewer lanes for this cycle:
-- `code-reviewer` — completed
-- `perf-reviewer` — completed (manual fallback; no spawnable perf-reviewer role in current tool role catalog)
-- `security-reviewer` — completed
-- `critic` — completed
-- `verifier` — completed
-- `test-engineer` — completed
-- `tracer` — completed (manual fallback; historical reviewer exists in repo artifacts but not as a current spawnable role)
-- `architect` — completed
-- `debugger` — completed
-- `document-specialist` — completed (manual fallback via `researcher`/document pass; no current spawnable exact role)
-- `designer` — partial/incomplete evidence only
-- `researcher` / document-specialist analog — completed
-
-## DEDUPED FINDINGS
-
-### AGG2-01 — Public metadata/page rendering duplicates grouped tag queries and metadata does them even without tag filters
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Flagged by:** `code-reviewer`, `perf-reviewer`, `critic`, `architect`, `tracer`, `verifier`
-- **Primary citations:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/app/[locale]/(public)/page.tsx:24-25,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:32-33,111-122`
-- **Why it is a problem:** `getTags()` is a grouped aggregate over `tags`/`imageTags`/`images`, but the public route stack runs it redundantly. The metadata layer also executes it on the common no-tag path where it cannot affect output.
-- **Concrete failure scenario:** Crawlers and cold visitors repeatedly trigger the same tag aggregation twice on `/` and topic routes, increasing DB load on hot unauthenticated traffic.
-- **Suggested fix:** Add a request-scoped `getTagsCached(topic?)` helper and skip metadata tag resolution when `tags` is absent.
-
-### AGG2-02 — Home metadata still fetches fallback image/config data when a custom OG image is configured
-- **Severity:** LOW
-- **Confidence:** HIGH
-- **Flagged by:** `code-reviewer`, `perf-reviewer`, `critic`
-- **Primary citations:** `apps/web/src/app/[locale]/(public)/page.tsx:22-31,44-54`
-- **Why it is a problem:** The route loads `getImagesLite(..., 1, 0)` and `getGalleryConfig()` before checking whether `seo.og_image_url` already determines the output.
-- **Concrete failure scenario:** Branded deployments that always use a fixed OG asset still pay unnecessary DB/config work for every metadata render.
-- **Suggested fix:** Return early from the custom-OG branch before fetching fallback data.
-
-### AGG2-03 — Search rate-limit pruning performs full-map O(n) work on every debounced public search request
-- **Severity:** LOW
-- **Confidence:** MEDIUM
-- **Flagged by:** `perf-reviewer`, `test-engineer`
-- **Primary citations:** `apps/web/src/app/actions/public.ts:33-49`, `apps/web/src/components/search.tsx:67-81`, `apps/web/src/lib/rate-limit.ts:19-25`
-- **Why it is a problem:** Search requests already hit a wildcard-search path; adding full-map prune work on every request wastes CPU in the same hot path.
-- **Concrete failure scenario:** A few concurrent users typing quickly produce repeated in-memory O(n) scans in addition to the DB work.
-- **Suggested fix:** Extract throttled search-map pruning so expiry/cap semantics are preserved without rescanning the map on every request.
-
-### AGG2-04 — Missing regression coverage for the public metadata/search performance helpers
-- **Severity:** LOW
-- **Confidence:** HIGH
-- **Flagged by:** `test-engineer`
-- **Primary citations:** `apps/web/src/app/[locale]/(public)/page.tsx:18-31`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:18-33`, `apps/web/src/app/actions/public.ts:33-49`, `apps/web/src/__tests__/rate-limit.test.ts`
-- **Why it is a problem:** The planned optimizations are small enough to regress silently unless tests lock them in.
-- **Concrete failure scenario:** A future refactor reintroduces unconditional tag queries or per-request full-map pruning and the test suite does not notice.
-- **Suggested fix:** Add focused tests around the extracted helper logic and search-prune helper.
-
-## NOT CARRIED FORWARD (STALE / ALREADY FIXED)
-- `apps/web/src/lib/request-origin.ts` default-port origin mismatch — fixed in current source.
-- `apps/web/src/lib/sql-restore-scan.ts` blocking `CREATE TABLE` from standard mysqldump restores — fixed in current source.
-- Missing `X-Content-Type-Options: nosniff` on `/api/health` and `/api/live` — fixed in current source.
-- Earlier `getTopicsCached` and photo-viewer `sizes` performance issues — fixed in current source.
+## Agent inventory and execution status
+Attempted review lanes this cycle:
+- Completed subagents: `code-reviewer`, `security-reviewer`
+- Leader fallback reviews written after subagent retries stalled or were blocked: `verifier`, `test-engineer`, `perf-reviewer`
+- Spawn failures after retry due agent-thread limits: `critic`, `architect`, `debugger`, `tracer`, `document-specialist`, `designer`, `dependency-expert`
 
 ## AGENT FAILURES
-- Initial full-batch spawn hit the environment's agent thread ceiling (`max 6`) before all requested reviewer lanes could launch.
-- A retry for the first three spawned lanes (`code-reviewer`, `security-reviewer`, `critic`) produced no completed status within the cycle's waiting window despite an interrupt-to-tighten-scope nudge, so manual fallback reviews were written to preserve provenance and keep the loop moving.
-- Exact requested reviewer roles `perf-reviewer`, `tracer`, and `document-specialist` are present in historical repo artifacts but are not available as exact spawnable roles in the current tool role catalog, so equivalent manual fallback passes were recorded.
-- The `designer` lane could not be completed to the requested live-browser evidence standard because the dedicated reviewer thread could not be launched after the environment-enforced limit was reached.
+The following lanes were requested, retried once when possible, and still could not complete because the session hit the subagent thread cap (`max 6`) or the lane stalled without updating its file:
+- `critic` — spawn failed twice because of thread limit
+- `architect` — spawn failed twice because of thread limit
+- `debugger` — spawn failed on retry because of thread limit
+- `tracer` — spawn failed on retry because of thread limit
+- `document-specialist` — spawn failed on retry because of thread limit
+- `designer` — spawn failed on retry because of thread limit
+- `dependency-expert` — spawn failed on retry because of thread limit
+- `verifier` — two spawned attempts stalled on stale prior-cycle output; leader produced fallback review for this cycle
+- `test-engineer` — two spawned attempts stalled on stale prior-cycle output; leader produced fallback review for this cycle
+- `perf-reviewer` — could not be spawned because of thread limit; leader produced fallback review for this cycle
 
-## TOTALS
-- **4** deduped actionable findings
-- **0** fresh security findings
-- **0** fresh high-severity correctness regressions
+## Dedupe / cross-agent agreement notes
+- **High-signal, multi-lane agreement:** locale-reserved topic route gap (`code-reviewer`, `verifier`, `test-engineer`), histogram worker correlation bug (`code-reviewer`, `verifier`, `perf-reviewer`, `test-engineer`), restore-under-traffic ambiguity (`code-reviewer`, `verifier`, `perf-reviewer`, `test-engineer`), weak/example secret hygiene (`security-reviewer`), AWS SDK vulnerability (`security-reviewer`).
+- Where a test-gap finding mapped directly to a confirmed code issue, the aggregate keeps one implementation item and explicitly requires regression coverage.
+
+## Merged findings
+
+### AGG3-01 — Topic and alias validation still permit locale-reserved route segments
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Signal:** Multi-agent agreement (`code-reviewer`, `verifier`, `test-engineer`)
+- **Citations:** `apps/web/src/lib/validation.ts:1-16`, `apps/web/src/app/actions/topics.ts:51-65`, `apps/web/src/app/actions/topics.ts:328-336`, `apps/web/src/__tests__/validation.test.ts:98-107`, `apps/web/src/__tests__/topics-actions.test.ts:138-148`
+- **Why it is a problem:** The router reserves `/{locale}` for `en` and `ko`, but topic/alias validation only blocks hardcoded segments like `admin`, `g`, `p`, `s`, `uploads`.
+- **Concrete failure scenario:** Admin creates topic slug or alias `en`; creation succeeds, but the route is shadowed by the locale segment and is unreachable.
+- **Suggested fix:** Reserve locale codes via `LOCALES` for both slugs and aliases, and add regression tests.
+- **Disposition:** IMPLEMENT
+
+### AGG3-02 — Histogram worker replies are not request-correlated, so rapid navigation can render the wrong histogram
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Signal:** Multi-agent agreement (`code-reviewer`, `verifier`, `perf-reviewer`, `test-engineer`)
+- **Citations:** `apps/web/src/components/histogram.tsx:21-58`, `apps/web/src/components/photo-viewer.tsx:50-140`
+- **Why it is a problem:** Every pending histogram promise listens for the next worker `message`. When multiple requests overlap, a stale response can resolve the wrong pending request.
+- **Concrete failure scenario:** User flips quickly between photos; the second photo shows the first photo’s histogram, and the real second response is dropped or wasted.
+- **Suggested fix:** Add request IDs/pending map to the shared worker protocol and add regression coverage for overlapping requests.
+- **Disposition:** IMPLEMENT
+
+### AGG3-03 — Example configuration still normalizes weak secret hygiene and does not warn operators to rotate historically exposed bootstrap secrets
+- **Severity:** HIGH
+- **Confidence:** HIGH
+- **Signal:** Security-reviewer
+- **Citations:** `apps/web/.env.local.example:1-25`, `CLAUDE.md:72-79`, historical git revision noted in `.context/reviews/security-reviewer.md`
+- **Why it is a problem:** Current examples still use `DB_PASSWORD=password`, and the repo needs an explicit warning that any environment seeded from older examples must rotate `SESSION_SECRET`/bootstrap credentials because the earlier committed values are permanently compromised.
+- **Concrete failure scenario:** An operator copies the example verbatim or reuses an older secret from history, making admin/database compromise materially easier.
+- **Suggested fix:** Replace weak live-looking defaults with non-usable placeholders and document mandatory rotation of older example secrets.
+- **Disposition:** IMPLEMENT
+
+### AGG3-04 — Production dependency tree ships a known-vulnerable AWS SDK XML-builder chain
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Signal:** Security-reviewer
+- **Citations:** `apps/web/package.json:22-24`, `package-lock.json`, `npm audit --omit=dev --json`
+- **Why it is a problem:** The direct S3 packages pull in the advisory chain rooted in `fast-xml-parser` / `@aws-sdk/xml-builder`.
+- **Concrete failure scenario:** When S3/MinIO paths are enabled, specially crafted values can exercise the vulnerable XML builder path; regardless of exploitability, shipping known-vulnerable prod packages is a security release risk.
+- **Suggested fix:** Move the direct AWS SDK deps to the audit-recommended non-vulnerable version and refresh the lockfile.
+- **Disposition:** IMPLEMENT
+
+### AGG3-05 — Public gallery routes still pay exact `count(*)` cost on every request
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Signal:** Perf-reviewer
+- **Citations:** `apps/web/src/lib/data.ts:247-269`, `apps/web/src/app/[locale]/(public)/page.tsx:108-113`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:118-123`
+- **Why it is a problem:** Hot unauthenticated routes do both the listing query and an exact filtered count, increasing DB work on every page load.
+- **Concrete failure scenario:** Large galleries or crawler bursts spend extra time on full counts just to drive `hasMore` and header counts.
+- **Suggested fix:** Move to `PAGE_SIZE + 1` for `hasMore` and scope a separate/cached exact-count strategy if the UI still needs totals.
+- **Disposition:** DEFER (architectural/public-contract performance change)
+
+### AGG3-06 — Restore mode behavior for concurrent public readers is still operationally ambiguous
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Signal:** Multi-agent agreement (`code-reviewer`, `verifier`, `perf-reviewer`, `test-engineer`)
+- **Citations:** `apps/web/src/app/[locale]/admin/db-actions.ts:248-289`, `apps/web/src/lib/restore-maintenance.ts:1-26`, public reads under `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/public.ts`
+- **Why it is a problem:** Writes are blocked during restore, but public reads do not obviously return a maintenance mode. The intended behavior under live traffic is not proven.
+- **Concrete failure scenario:** During restore, visitors can hit partial data, transient SQL errors, or stale cache artifacts.
+- **Suggested fix:** Either gate public reads during restore or stage-validate/document the degraded-read contract.
+- **Disposition:** DEFER (needs operational/product decision + staging validation)
+
+### AGG3-07 — Production CSP still allows `unsafe-inline`, weakening XSS containment
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Signal:** Security-reviewer
+- **Citations:** `apps/web/next.config.ts:50-71`
+- **Why it is a problem:** Inline script/style execution remains broadly allowed in production, so CSP would not materially contain many future injection bugs.
+- **Concrete failure scenario:** A future HTML/script injection in an admin-editable surface executes inline payloads despite CSP.
+- **Suggested fix:** Move to nonce/hash-based CSP and remove `unsafe-inline` where feasible.
+- **Disposition:** DEFER (broader CSP rollout likely needs framework/analytics coordination)
+
+### AGG3-08 — `/api/health` publicly exposes DB-readiness state
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Signal:** Security-reviewer
+- **Citations:** `apps/web/src/app/api/health/route.ts:1-18`, `README.md:163`, `CLAUDE.md:206`
+- **Why it is a problem:** Anyone can poll the endpoint and learn whether the DB is currently degraded, under restore, or healthy.
+- **Concrete failure scenario:** Attackers time nuisance traffic or credential attacks around restore/outage windows using the endpoint as an oracle.
+- **Suggested fix:** Keep `/api/live` public and restrict `/api/health` to trusted monitors if external monitoring does not require public access.
+- **Disposition:** DEFER (deployment contract decision)
+
+### AGG3-09 — Explicit same-origin / CSRF enforcement is inconsistent across authenticated mutation/download surfaces
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Signal:** Security-reviewer
+- **Citations:** `apps/web/src/app/actions/auth.ts:91-95`, `apps/web/src/app/actions/auth.ts:272-290`, `apps/web/src/app/api/admin/db/download/route.ts:12-62`
+- **Why it is a problem:** The repo explicitly validates same-origin for login, but not uniformly for other authenticated mutations or the backup download route.
+- **Concrete failure scenario:** Depending on framework/browser behavior, an admin browser could be induced to perform unwanted authenticated actions or downloads.
+- **Suggested fix:** Apply consistent same-origin/CSRF protections across all authenticated mutations and sensitive downloads.
+- **Disposition:** DEFER (needs broader auth-surface audit and compatibility review)
+
+### AGG3-10 — Proxy misconfiguration can collapse rate limiting to the shared `unknown` bucket
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Signal:** Security-reviewer
+- **Citations:** `apps/web/src/lib/rate-limit.ts:61-86`, `apps/web/.env.local.example:29-34`, `README.md:127-132`
+- **Why it is a problem:** Without `TRUST_PROXY=true`, all proxied traffic can share one rate-limit identity.
+- **Concrete failure scenario:** One client exhausts login/search/share buckets for everyone behind the reverse proxy.
+- **Suggested fix:** Consider failing closed in production when proxy headers are present but `TRUST_PROXY` is unset, or otherwise keep the existing documentation and staging validation.
+- **Disposition:** DEFER (deployment-policy decision)
+
+## Finding count
+- Total merged findings this cycle: **10**
+- Implement now: **4**
+- Deferred/manual with explicit follow-up criteria needed: **6**

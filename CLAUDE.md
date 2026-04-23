@@ -73,11 +73,15 @@ Create `apps/web/.env.local` from `apps/web/.env.local.example`:
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=gallery
-DB_PASSWORD=password
+DB_PASSWORD=<change-me>
 DB_NAME=gallery
 ADMIN_PASSWORD=<strong-16+-char-secret-or-argon2-hash>
 SESSION_SECRET=<random-64-char-hex>
 ```
+
+If you ever seeded an environment from older checked-in examples, rotate both
+`SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical
+git values must be treated as compromised and must not be reused.
 
 ## Key Files & Patterns
 
