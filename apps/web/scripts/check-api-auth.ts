@@ -35,8 +35,6 @@ function findRouteFiles(dir: string): string[] {
     return results;
 }
 
-let failed = false;
-const routeFiles = findRouteFiles(API_ADMIN_DIR);
 const HTTP_METHOD_EXPORTS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
@@ -67,19 +65,29 @@ function variableUsesWithAdminAuth(initializer: ts.Expression | undefined): bool
     return ts.isIdentifier(callee) && callee.text === 'withAdminAuth';
 }
 
-function checkRouteFile(file: string) {
-    const content = fs.readFileSync(file, 'utf-8');
-    const relative = path.relative(process.cwd(), file);
-    // C5R-RPL-02: ts.ScriptKind must match the extension so JSX / module
-    // variant files parse correctly.
+type RouteCheckReport = {
+    passed: string[];
+    failed: string[];
+};
+
+/**
+ * C5R-RPL-02 / AGG5R-06 — core scanner logic exposed as a pure function for
+ * unit tests (see `apps/web/src/__tests__/check-api-auth.test.ts`). Returns a
+ * per-file outcome report instead of mutating global state so tests can
+ * assert exact outcomes.
+ */
+export function checkRouteSource(content: string, relative: string = 'route.ts'): RouteCheckReport {
+    const report: RouteCheckReport = { passed: [], failed: [] };
+    // ts.ScriptKind must match the extension so JSX / module variants parse.
     let scriptKind: ts.ScriptKind = ts.ScriptKind.TS;
-    if (file.endsWith('.tsx')) {
+    if (relative.endsWith('.tsx')) {
         scriptKind = ts.ScriptKind.TSX;
-    } else if (file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs')) {
+    } else if (relative.endsWith('.js') || relative.endsWith('.mjs') || relative.endsWith('.cjs')) {
         scriptKind = ts.ScriptKind.JS;
     }
-    const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, scriptKind);
+    const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     let sawHandlerExport = false;
+    let fileHadFailure = false;
 
     for (const statement of sourceFile.statements) {
         const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
@@ -94,8 +102,8 @@ function checkRouteFile(file: string) {
 
                 sawHandlerExport = true;
                 if (!variableUsesWithAdminAuth(declaration.initializer)) {
-                    console.error(`MISSING AUTH: ${relative}:${getLineNumber(sourceFile, declaration)} must export ${declaration.name.text} = withAdminAuth(...)`);
-                    failed = true;
+                    report.failed.push(`MISSING AUTH: ${relative}:${getLineNumber(sourceFile, declaration)} must export ${declaration.name.text} = withAdminAuth(...)`);
+                    fileHadFailure = true;
                 }
             }
             continue;
@@ -103,27 +111,49 @@ function checkRouteFile(file: string) {
 
         if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name && HTTP_METHOD_EXPORTS.has(statement.name.text)) {
             sawHandlerExport = true;
-            console.error(`MISSING AUTH: ${relative}:${getLineNumber(sourceFile, statement)} must export ${statement.name.text} via withAdminAuth(...)`);
-            failed = true;
+            report.failed.push(`MISSING AUTH: ${relative}:${getLineNumber(sourceFile, statement)} must export ${statement.name.text} via withAdminAuth(...)`);
+            fileHadFailure = true;
         }
     }
 
     if (!sawHandlerExport) {
-        console.error(`MISSING AUTH: ${relative} does not export any HTTP handlers`);
-        failed = true;
-        return;
+        report.failed.push(`MISSING AUTH: ${relative} does not export any HTTP handlers`);
+        return report;
     }
 
-    console.log(`OK: ${relative}`);
+    if (!fileHadFailure) {
+        report.passed.push(`OK: ${relative}`);
+    }
+
+    return report;
 }
 
-if (routeFiles.length === 0) {
-    console.log('No admin API route files found — skipping check.');
-    process.exit(0);
+function checkRouteFile(file: string): boolean {
+    const content = fs.readFileSync(file, 'utf-8');
+    const relative = path.relative(process.cwd(), file);
+    const report = checkRouteSource(content, relative);
+
+    for (const line of report.passed) console.log(line);
+    for (const line of report.failed) console.error(line);
+    return report.failed.length > 0;
 }
 
-for (const file of routeFiles) {
-    checkRouteFile(file);
-}
+// CLI entrypoint — only runs when this file is executed directly via tsx.
+// Guarded so the unit test can import checkRouteSource without side effects.
+const isCliEntry = require.main === module || (typeof require === 'undefined' && import.meta?.url?.includes('check-api-auth'));
+if (isCliEntry) {
+    const routeFiles = findRouteFiles(API_ADMIN_DIR);
+    if (routeFiles.length === 0) {
+        console.log('No admin API route files found — skipping check.');
+        process.exit(0);
+    }
 
-process.exit(failed ? 1 : 0);
+    let failed = false;
+    for (const file of routeFiles) {
+        if (checkRouteFile(file)) {
+            failed = true;
+        }
+    }
+
+    process.exit(failed ? 1 : 0);
+}
