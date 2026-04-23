@@ -12,14 +12,17 @@ Two findings (AGG7R-01 CSV bypass, AGG7R-02 restore lock leak) are
 security/correctness items and are therefore being IMPLEMENTED in
 plan-221, NOT deferred.
 
-## Deferred findings (preserving original severity/confidence)
+## Implemented this cycle (for provenance — see plan-221)
 
 ### AGG7R-05 — Unicode bidi override strip in CSV export
 - **Severity:** LOW
 - **Confidence:** MEDIUM
-- **File:** `apps/web/src/lib/csv-escape.ts:16`
-- **Reason for deferral:** being IMPLEMENTED as T7R-11 in plan-221.
-- **Status:** NOT deferred (see plan-221).
+- **File:** `apps/web/src/lib/csv-escape.ts`
+- **Status:** IMPLEMENTED as T7R-11 in plan-221. Listed here for
+  provenance; the canonical record is plan-221. Do NOT treat as
+  deferred. (C8R-RPL-08 / AGG8R-18 reorganization.)
+
+## Deferred findings (preserving original severity/confidence)
 
 ### AGG7R-06 — `X-Real-IP` nginx-doc hardening
 - **Severity:** LOW
