@@ -25,6 +25,12 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql("CREATE USER 'x'@'%' IDENTIFIED BY 'pw';")).toBe(true);
     });
 
+    it('blocks CREATE DATABASE (C4R-RPL2-05 defence-in-depth)', () => {
+        expect(containsDangerousSql('CREATE DATABASE other;')).toBe(true);
+        expect(containsDangerousSql('CREATE  DATABASE  IF NOT EXISTS other;')).toBe(true);
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('CREATE DATABASE tutorial');")).toBe(false);
+    });
+
     it('ignores dangerous-looking words inside benign data strings', () => {
         expect(containsDangerousSql("INSERT INTO notes VALUES ('Grant Morrison');")).toBe(false);
         expect(containsDangerousSql("INSERT INTO captions VALUES ('Prepare for landing');")).toBe(false);

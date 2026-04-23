@@ -4,6 +4,11 @@ const DANGEROUS_SQL_PATTERNS = [
     /\bALTER\s+USER\b/i,
     /\bSET\s+PASSWORD\b/i,
     /\bDROP\s+DATABASE\b/i,
+    // C4R-RPL2-05: also block CREATE DATABASE. `--one-database` filters out
+    // writes that target a different schema, but a malformed dump that
+    // creates a sibling database (then USEs it before data writes) would
+    // otherwise slip past the scanner. Blocking here is defence-in-depth.
+    /\bCREATE\s+DATABASE\b/i,
     /\bLOAD\s+DATA\b/i,
     /\bINTO\s+OUTFILE\b/i,
     /\bINTO\s+DUMPFILE\b/i,
