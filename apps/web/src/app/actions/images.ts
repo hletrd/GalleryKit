@@ -126,7 +126,17 @@ export async function uploadImages(formData: FormData) {
     const now = Date.now();
     // Prune stale entries unconditionally to prevent unbounded memory growth
     pruneUploadTracker();
-    const tracker = uploadTracker.get(uploadIp) || { count: 0, bytes: 0, windowStart: now };
+    // C8R-RPL-02 / AGG8R-02: close the first-insert TOCTOU. Without an
+    // explicit `set()` BEFORE any subsequent `await`, two concurrent
+    // requests from a cold IP each create their own literal and both
+    // pass the cumulative-limit check below. Registering the entry on
+    // the Map up-front makes subsequent mutations share the same object
+    // reference across concurrent invocations.
+    let tracker = uploadTracker.get(uploadIp);
+    if (!tracker) {
+        tracker = { count: 0, bytes: 0, windowStart: now };
+        uploadTracker.set(uploadIp, tracker);
+    }
     if (now - tracker.windowStart > UPLOAD_TRACKING_WINDOW_MS) {
         tracker.count = 0;
         tracker.bytes = 0;
