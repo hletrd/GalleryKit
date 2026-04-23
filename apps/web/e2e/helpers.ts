@@ -11,8 +11,12 @@ const DEFAULT_BASE_URL = (() => {
   url.port = process.env.E2E_PORT || '3100';
   return url.toString().replace(/\/$/, '');
 })();
-export const adminE2EEnabled = process.env.E2E_ADMIN_ENABLED === 'true';
 const ARGON2_HASH_PREFIX = /^\$argon2/i;
+
+function isLocalOrigin(origin: string) {
+  const hostname = new URL(origin).hostname;
+  return hostname === '127.0.0.1' || hostname === 'localhost';
+}
 
 function getOriginForCookies(page: Page) {
   const currentUrl = page.url();
@@ -20,10 +24,24 @@ function getOriginForCookies(page: Page) {
   return new URL(baseUrl).origin;
 }
 
-function isLocalOrigin(origin: string) {
-  const hostname = new URL(origin).hostname;
-  return hostname === '127.0.0.1' || hostname === 'localhost';
+// C1R-07: auto-enable the admin E2E describe when the local test
+// environment has known-safe plaintext credentials (so `npm run test:e2e`
+// exercises admin flows by default). Explicit opt-out via
+// E2E_ADMIN_ENABLED=false still works; remote admin E2E remains opt-in
+// only via E2E_ALLOW_REMOTE_ADMIN.
+const adminExplicitFlag = process.env.E2E_ADMIN_ENABLED?.toLowerCase();
+function adminAutoEnable(): boolean {
+    if (adminExplicitFlag === 'true') return true;
+    if (adminExplicitFlag === 'false') return false;
+    if (process.env.NODE_ENV === 'production') return false;
+    if (!isLocalOrigin(DEFAULT_BASE_URL)) return false;
+    const explicitE2EPassword = process.env.E2E_ADMIN_PASSWORD?.trim();
+    if (explicitE2EPassword) return true;
+    const adminPassword = process.env.ADMIN_PASSWORD?.trim();
+    if (adminPassword && !ARGON2_HASH_PREFIX.test(adminPassword)) return true;
+    return false;
 }
+export const adminE2EEnabled = adminAutoEnable();
 
 function resolveAdminE2EPassword(origin: string) {
   const explicitE2EPassword = process.env.E2E_ADMIN_PASSWORD?.trim();

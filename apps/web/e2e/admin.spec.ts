@@ -37,6 +37,27 @@ test.describe('admin workflows (opt-in)', () => {
     await expect(page.locator('input[type="file"]')).toBeVisible();
   });
 
+  test('admin settings GPS toggle reflects in the hydrated UI (C1R-07)', async ({ page }) => {
+    await loginAsAdmin(page);
+
+    await page.locator('a[href$="/admin/settings"]').first().click();
+    await expect(page).toHaveURL(/\/admin\/settings/);
+
+    const gpsToggle = page.locator('#strip-gps');
+    await expect(gpsToggle).toBeVisible();
+
+    const initialState = await gpsToggle.getAttribute('data-state');
+    // Flip the toggle; the switch updates its data-state synchronously after click.
+    await gpsToggle.click();
+    const flippedState = await gpsToggle.getAttribute('data-state');
+    expect(flippedState).not.toBe(initialState);
+
+    // Flip it back so we don't leave the seeded environment mutated.
+    await gpsToggle.click();
+    const restoredState = await gpsToggle.getAttribute('data-state');
+    expect(restoredState).toBe(initialState);
+  });
+
   test('admin upload workflow works on the dashboard', async ({ page }) => {
     await loginAsAdmin(page);
 
