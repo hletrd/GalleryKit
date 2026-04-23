@@ -26,9 +26,20 @@ async function cleanOrphanedTmpFiles(): Promise<void> {
         try {
             const entries = await fs.readdir(dir);
             const tmpFiles = entries.filter(f => f.endsWith('.tmp'));
-            if (tmpFiles.length > 0) {
-                console.info(`[Cleanup] Removing ${tmpFiles.length} orphaned .tmp files from ${dir}`);
-                await Promise.all(tmpFiles.map(f => fs.unlink(path.join(dir, f)).catch(() => {})));
+            if (tmpFiles.length === 0) continue;
+            // C6R-RPL-04 / AGG6R-03: log AFTER unlink so the count reflects
+            // files actually removed (not files merely discovered). Prior
+            // behavior claimed "Removing N" before any unlink ran, which
+            // misrepresents the operation if unlinks quietly fail.
+            const settled = await Promise.allSettled(
+                tmpFiles.map(f => fs.unlink(path.join(dir, f))),
+            );
+            const removed = settled.filter(r => r.status === 'fulfilled').length;
+            const failures = settled.length - removed;
+            if (failures > 0) {
+                console.warn(`[Cleanup] Removed ${removed}/${settled.length} orphaned .tmp files from ${dir} (${failures} unlink errors)`);
+            } else {
+                console.info(`[Cleanup] Removed ${removed} orphaned .tmp files from ${dir}`);
             }
         } catch {
             // Directory may not exist yet — skip
