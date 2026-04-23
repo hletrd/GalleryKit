@@ -17,6 +17,6 @@ Purpose: capture every raw review finding that is **not** being implemented this
 - **Original review sources:** code-reviewer, critic, verifier, architect, debugger, perf-reviewer, tracer
 - **Original citation:** `apps/web/src/app/[locale]/(public)/page.tsx:95-110`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:90-125`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:104-123`, `apps/web/src/app/[locale]/layout.tsx:55-64`
 - **Original severity / confidence:** MEDIUM / HIGH
-- **Disposition:** Deferred as partially invalidated; narrowed actionable work is captured in `plan/cycle2-review-fixes.md` as `C2R2-01`.
+- **Disposition:** Deferred as partially invalidated; narrowed actionable work is completed in `plan/done/cycle2-review-fixes.md` as `C2R2-01`.
 - **Reason for deferral:** The cited route bodies already use `Promise.all(...)` for their main public-page read groups. The remaining real issue is the narrower metadata tag-lookup overlap, not the broader claim as written.
 - **Exit criterion to reopen:** Re-open only if profiling or new code evidence identifies another specific serialized read chain beyond `C2R2-01`.
