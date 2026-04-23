@@ -5,7 +5,7 @@ Reviewed raw reviewer outputs: `.context/reviews/{code-reviewer,security-reviewe
 
 ## Status
 - [x] C2R2-01 Overlap metadata tag lookups with the other public-page metadata reads.
-- [ ] C2R2-02 Remove unnecessary Edge runtime from static icon routes and verify `next build` no longer emits the icon static-generation warning.
+- [x] C2R2-02 Remove unnecessary Edge runtime from static icon routes and verify `next build` no longer emits the icon static-generation warning.
 - [ ] Re-run full repo gates after the fixes.
 
 ## Implementation tasks
@@ -31,3 +31,4 @@ Reviewed raw reviewer outputs: `.context/reviews/{code-reviewer,security-reviewe
   2. Keep the current icon visuals and response sizes unchanged.
   3. Verify `npm run build --workspaces` stops emitting the `Using edge runtime on a page currently disables static generation for that page` warning for these icon routes.
 - **Verification:** production build output + full repo gates.
+- **Progress note:** `npm run build --workspaces` now reports `○ /apple-icon` and `○ /icon`, confirming the icon routes are statically generated. The remaining generic edge-runtime warning is still emitted because `/api/og` intentionally stays on the edge runtime.
