@@ -47,12 +47,18 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
         }
     };
 
+    // Interactive pills need WCAG 2.5.8 AA minimum target size (24x24).
+    // The base Badge variant uses `px-2 py-0.5` which renders ~22px tall;
+    // bump vertical padding so the tappable region clears the minimum.
+    // (AGG3R-03 / C3R-RPL-03)
+    const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[24px] py-1";
+
     return (
         <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
             <Badge
                 asChild
                 variant={currentTags.length === 0 ? "default" : "outline"}
-                className={cn("cursor-pointer hover:bg-primary/90", currentTags.length === 0 && "bg-primary text-primary-foreground")}
+                className={cn(interactivePillClass, currentTags.length === 0 && "bg-primary text-primary-foreground")}
             >
                 <button
                     type="button"
@@ -69,7 +75,8 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                     asChild
                     variant={currentTags.includes(tag.slug) ? "default" : "outline"}
                     className={cn(
-                        "cursor-pointer hover:bg-primary/90 flex gap-1",
+                        interactivePillClass,
+                        "flex gap-1",
                         currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
                     )}
                 >
