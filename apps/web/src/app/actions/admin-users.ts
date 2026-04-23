@@ -75,6 +75,34 @@ export async function createAdminUser(formData: FormData) {
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
+    // AGG10R-RPL-01: validate form-field shape BEFORE the rate-limit
+    // pre-increment, mirroring the AGG9R-RPL-01 fix applied to
+    // `updatePassword` and the existing `login` ordering. Legitimate
+    // authenticated-admin typos (empty field / regex mismatch / length
+    // bounds / password mismatch) must not consume a rate-limit attempt
+    // because no Argon2 hash will ever run for them. Without this ordering,
+    // ten typo'd submissions burn the hour-long user_create budget.
+    //
+    // Sanitize before validation so length checks operate on the same value
+    // that will be hashed (matches uploadImages tagsString pattern, see C46-01).
+    // C0 controls in passwords are almost always accidental paste artifacts.
+    const rawUsername = formData.get('username')?.toString() ?? '';
+    const username = stripControlChars(rawUsername) ?? '';
+    const password = stripControlChars(formData.get('password')?.toString() ?? '') ?? '';
+    const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
+
+    // Reject malformed input: if sanitization changes the value, the input
+    // contained control characters and must not silently proceed (defense in
+    // depth — matches updateTopic/deleteTopic pattern, see C7R2-05).
+    if (username !== rawUsername) return { error: t('invalidUsernameFormat') };
+
+    if (!username || username.length < 3) return { error: t('usernameTooShort') };
+    if (username.length > 64) return { error: t('usernameTooLong') };
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };
+    if (!password || password.length < 12) return { error: t('passwordTooShortCreate') };
+    if (password.length > 1024) return { error: t('passwordTooLongCreate') };
+    if (password !== confirmPassword) return { error: t('passwordsDoNotMatch') };
+
     // Rate limit admin user creation to prevent brute-force / CPU DoS.
     // Uses the same pre-increment pattern as login (A-01 fix) to prevent
     // TOCTOU between check and increment across concurrent requests.
@@ -103,26 +131,6 @@ export async function createAdminUser(formData: FormData) {
     } catch {
         // DB unavailable — rely on in-memory Map (already incremented above)
     }
-
-    const rawUsername = formData.get('username')?.toString() ?? '';
-    const username = stripControlChars(rawUsername) ?? '';
-    // Sanitize before validation so length checks operate on the same value
-    // that will be hashed (matches uploadImages tagsString pattern, see C46-01).
-    // C0 controls in passwords are almost always accidental paste artifacts.
-    const password = stripControlChars(formData.get('password')?.toString() ?? '') ?? '';
-    const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
-
-    // Reject malformed input: if sanitization changes the value, the input
-    // contained control characters and must not silently proceed (defense in
-    // depth — matches updateTopic/deleteTopic pattern, see C7R2-05).
-    if (username !== rawUsername) return { error: t('invalidUsernameFormat') };
-
-    if (!username || username.length < 3) return { error: t('usernameTooShort') };
-    if (username.length > 64) return { error: t('usernameTooLong') };
-    if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };
-    if (!password || password.length < 12) return { error: t('passwordTooShortCreate') };
-    if (password.length > 1024) return { error: t('passwordTooLongCreate') };
-    if (password !== confirmPassword) return { error: t('passwordsDoNotMatch') };
 
     try {
         const hash = await argon2.hash(password, { type: argon2.argon2id });
