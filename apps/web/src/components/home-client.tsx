@@ -206,6 +206,11 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                 </Suspense>
             </div>
 
+            {/* Visually-hidden heading so screen-reader users get an
+                intermediate H2 between the page H1 and per-card H3 titles.
+                Prevents the heading-level skip flagged by WCAG 1.3.1 / 2.4.6
+                (AGG3R-04 / C3R-RPL-04). */}
+            <h2 className="sr-only">{t('home.photosHeading')}</h2>
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
                 {orderedImages.map((image, index) => {
                     const altText = (image.description && image.description.trim())
