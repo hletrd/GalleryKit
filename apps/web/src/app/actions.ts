@@ -24,3 +24,7 @@ export { loadMoreImages, searchImagesAction } from './actions/public';
 
 // SEO
 export { getSeoSettingsAdmin, updateSeoSettings } from './actions/seo';
+
+// Settings (C4R-RPL2-04: keep the barrel complete so `@/app/actions`
+// imports reflect the full server-action surface)
+export { getGallerySettingsAdmin, updateGallerySettings } from './actions/settings';
