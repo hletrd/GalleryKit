@@ -67,7 +67,10 @@ export function hasTrustedSameOriginWithOptions(
     requestHeaders: HeaderLookup,
     options: { allowMissingSource?: boolean } = {}
 ) {
-    const { allowMissingSource = true } = options;
+    // Fail closed by default (C1R-01): require an explicit `Origin` or `Referer`
+    // match. Callers that intentionally need the legacy loose contract must
+    // opt in via `allowMissingSource: true`.
+    const { allowMissingSource = false } = options;
     const expectedOrigin = getExpectedOrigin(requestHeaders);
     if (!expectedOrigin) {
         return false;

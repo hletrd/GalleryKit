@@ -91,11 +91,18 @@ describe('hasTrustedSameOrigin', () => {
         }))).toBe(true);
     });
 
-    it('allows trusted requests without origin metadata as a compatibility fallback', () => {
+    it('fails closed by default when origin metadata is missing (C1R-01)', () => {
         expect(hasTrustedSameOrigin(makeHeaders({
             host: 'gallery.atik.kr',
             'x-forwarded-proto': 'https',
-        }))).toBe(true);
+        }))).toBe(false);
+    });
+
+    it('retains the explicit loose opt-in via hasTrustedSameOriginWithOptions({ allowMissingSource: true })', () => {
+        expect(hasTrustedSameOriginWithOptions(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-proto': 'https',
+        }), { allowMissingSource: true })).toBe(true);
     });
 
     it('can require explicit provenance for sensitive routes', () => {
