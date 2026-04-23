@@ -1,32 +1,32 @@
-# Critic — Cycle 1 Review
+# Critic — Cycle 2 Review (2026-04-23)
 
 ## SUMMARY
-- The codebase is in solid shape overall. The strongest remaining critique is that performance policy is inconsistent across hot public rendering paths.
+- The most credible current risks are performance regressions hidden in the public metadata/render stack, not correctness or security failures.
 
 ## INVENTORY
-- Request-scoped data helpers: `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config.ts`
-- Public route composition: `apps/web/src/components/nav.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- Search and pagination hot paths: `apps/web/src/lib/data.ts`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/search.tsx`
+- Public route metadata and page composition: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- Shared data helpers: `apps/web/src/lib/data.ts`
+- Public search hot path: `apps/web/src/app/actions/public.ts`, `apps/web/src/components/search.tsx`
 
 ## FINDINGS
 
-### CRT-01 — Public-route data-fetching discipline is inconsistent on the most visited surfaces
+### CRI2-01 — Tag aggregation is still treated as cheap even though the public route stack executes it redundantly
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:202-204, 786-790`, `apps/web/src/components/nav.tsx:2-8`, `apps/web/src/app/[locale]/(public)/page.tsx:82-84`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-120`
-- **Why fragile:** The repo already relies on request-scoped `cache()` for several hot helpers, but topic navigation still uses an uncached helper even when layout and page need the same data in the same request.
-- **Failure scenario:** The most-trafficked pages pay duplicate reads for low-value shared data during cache misses or crawler traffic.
-- **Suggested fix:** Align `getTopics()` with the repo's existing cached-helper pattern on shared public render paths.
+- **Files:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/app/[locale]/(public)/page.tsx:24-25,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:32-33,111-122`
+- **Why it is a problem:** The repo already caches other SSR hot-path reads (`getTopicsCached`, `getSeoSettings`, `getGalleryConfig`), but tag aggregation remains uncached and duplicated across metadata + page rendering.
+- **Concrete failure scenario:** Under crawler traffic or repeated cache misses, grouped tag queries become recurring overhead on the busiest public routes.
+- **Suggested fix:** Add a cached tag helper and avoid running tag validation when no `tags` query parameter exists.
 
-### CRT-02 — Search and offset pagination will age poorly before they fail loudly
+### CRI2-02 — The homepage metadata path still does fallback work after the admin has explicitly configured a custom OG asset
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:314-330, 664-770`, `apps/web/src/app/actions/public.ts:26-100`, `apps/web/src/components/load-more.tsx:29-43`, `apps/web/src/components/search.tsx:40-80`
-- **Why fragile:** These paths are correct today, but they scale by doing more discard/scan work as traffic and dataset size increase.
-- **Failure scenario:** The app remains functionally correct while gradually becoming more expensive to operate under larger libraries.
-- **Suggested fix:** Treat cursor pagination and a more indexed search strategy as deferred architectural work rather than waiting for production pressure to force it.
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:22-31,44-54`
+- **Why it is a problem:** The code asks the database for a latest image and reads gallery config even when the branch that uses those values is dead because `seo.og_image_url` is set.
+- **Concrete failure scenario:** The app keeps paying a needless hot-path query for every metadata render on branded deployments that always use a fixed OG image.
+- **Suggested fix:** Return early from the custom-OG branch.
 
 ## FINAL SWEEP
-- No broader rewrite is justified this cycle; the main critique is targeted and performance-focused.
+- I revisited older review artifacts only to verify staleness. The strong signal in the current codebase is performance debt in metadata/render composition rather than a hidden correctness bug.

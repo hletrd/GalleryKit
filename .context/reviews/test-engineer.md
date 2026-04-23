@@ -1,16 +1,22 @@
-# Test Engineer — Cycle 1 Review
+# Test Engineer — Cycle 2 Review (2026-04-23)
 
 ## SUMMARY
-- Existing coverage is strong for the code paths inspected.
-- No current blocking regression gap was confirmed before the new performance fixes land.
+- Found 1 current regression-coverage gap tied to the public-route performance fixes.
 
 ## INVENTORY
-- Unit tests: `apps/web/src/__tests__/**`
-- E2E surface: `apps/web/e2e/**`, `apps/web/playwright.config.ts`
-- Performance-sensitive code likely to change this cycle: `apps/web/src/lib/data.ts`, `apps/web/src/components/photo-viewer.tsx`
+- Existing test surface: `apps/web/src/__tests__/`, `apps/web/e2e/`
+- Current code under review: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/rate-limit.ts`
 
 ## FINDINGS
-- None confirmed pre-fix.
+
+### TE2-01 — No regression test locks the public metadata short-circuit and search-prune hot-path behavior
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Status:** Confirmed
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:18-31`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:18-33`, `apps/web/src/app/actions/public.ts:33-49`, `apps/web/src/__tests__/rate-limit.test.ts`
+- **Why it is a problem:** The current performance opportunities are small enough to regress silently. There is no focused test ensuring future refactors do not reintroduce unconditional metadata tag queries or per-request full-map search pruning.
+- **Concrete failure scenario:** A future cleanup reintroduces unconditional tag lookups or hot-path O(n) pruning and the gate suite stays green because there is no targeted assertion around those helpers.
+- **Suggested fix:** Add small unit tests around the extracted/public helper logic and the search-prune helper in `rate-limit.test.ts`.
 
 ## FINAL SWEEP
-- Recommendation only: when implementing a viewer `sizes` helper, add a focused unit test because the behavior is deterministic and easy to lock down.
+- I did not confirm a flaky test or broken assertion in the current suite; the missing coverage is around the performance behavior being planned this cycle.

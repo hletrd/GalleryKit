@@ -1,16 +1,15 @@
-# Document Specialist — Cycle 1 Review
+# Document Specialist — Cycle 2 Review (2026-04-23)
 
 ## SUMMARY
-- No new confirmed documentation/code mismatches were found in the current checkout.
-- Earlier storage-backend mismatch reports are stale: the current comments explicitly mark the storage abstraction as experimental and not wired into the live pipeline.
+- No new documentation-code mismatches were confirmed.
+- This file exists because the requested dedicated document-specialist agent role is not currently spawnable in the tool role catalog; a manual document pass was used instead.
 
 ## INVENTORY
-- Root docs: `README.md`, `CLAUDE.md`, `AGENTS.md`
-- App docs/examples: `apps/web/README.md`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`
-- Source verification points: `apps/web/src/lib/storage/index.ts`, `apps/web/src/lib/storage/types.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/gallery-config-shared.ts`
+- `README.md`, `CLAUDE.md`, `AGENTS.md`
+- Rechecked code: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`
 
 ## FINDINGS
-- None confirmed this cycle.
+- No fresh documentation mismatch confirmed this cycle.
 
 ## FINAL SWEEP
-- Re-checked the previously suspicious storage/docs area and found the current wording aligned with the local-filesystem-only reality described in `CLAUDE.md`.
+- Current docs remain directionally accurate; the cycle's actionable work is performance tuning and regression coverage.

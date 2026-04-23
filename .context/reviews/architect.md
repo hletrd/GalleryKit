@@ -1,23 +1,22 @@
-# Architect — Cycle 1 Review
+# Architect — Cycle 2 Review (2026-04-23)
 
 ## SUMMARY
-- The main architectural risk is uneven application of request-scoped caching conventions across hot public routes.
+- The current architectural smell is inconsistent request-scoped caching in the public read path.
 
 ## INVENTORY
-- Cached helper patterns: `apps/web/src/lib/data.ts:786-790`, `apps/web/src/lib/gallery-config.ts:87-88`
-- Uncached topic helper: `apps/web/src/lib/data.ts:202-204`
-- Public route composition: `apps/web/src/components/nav.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- Shared read helpers: `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config.ts`
+- Public consumers: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
 
 ## FINDINGS
 
-### ARC-01 — Shared public-route topic data is fetched through an uncached helper despite existing request-scope cache patterns elsewhere
+### ARCH2-01 — Tag aggregation lacks the request-scoped caching already used by adjacent hot-path helpers
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:202-204, 786-790`, `apps/web/src/components/nav.tsx:2-8`, `apps/web/src/app/[locale]/(public)/page.tsx:82-84`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-120`
-- **Why it is a design risk:** The codebase already treats repeated SSR fetches as something worth deduping, but one of the hottest shared datasets (`topics`) still bypasses that convention on public pages.
-- **Failure scenario:** Layout and page bodies independently hit the same topics query during cache misses, leaving the public render path more expensive than the architecture intends.
-- **Suggested fix:** Export a cached topic helper and standardize public-route consumers on it.
+- **Files:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/lib/data.ts:786-832`, `apps/web/src/app/[locale]/(public)/page.tsx:22-31,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:23-33,110-122`
+- **Why it is a problem:** The repo deliberately wraps repeated SSR reads in `cache()` (`getTopicBySlugCached`, `getTopicsCached`, `getSeoSettings`, `getGalleryConfig`), but `getTags()` is still a raw query even though the route stack reuses it.
+- **Concrete failure scenario:** Public route metadata and body rendering repeatedly compute the same grouped tag aggregates within one request lifecycle while neighboring helpers are already deduped.
+- **Suggested fix:** Add `getTagsCached(topic?)`, switch the public route stack to it, and keep the raw helper for truly uncached callers if needed.
 
 ## FINAL SWEEP
-- No broader layering change is needed; this is a local consistency fix.
+- No broader layering rewrite is warranted. A small, consistent request-cache seam is the right architectural fix.

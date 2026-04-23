@@ -1,52 +1,42 @@
-# Performance Review — Cycle 1
+# Perf Reviewer — Cycle 2 Review (2026-04-23)
 
 ## SUMMARY
-- Confirmed 4 current performance findings.
-- Two are small, high-confidence wins suitable for this cycle; two are larger architectural follow-ups that should be deferred with explicit exit criteria.
+- Confirmed 3 current performance findings.
+- Two are small, high-confidence wins suitable for this cycle; one is a small hot-path CPU cleanup with direct test coverage.
 
 ## INVENTORY
-- Public rendering/data helpers: `apps/web/src/lib/data.ts`, `apps/web/src/components/nav.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- Photo viewer rendering: `apps/web/src/components/photo-viewer.tsx`
-- Search path: `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/components/search.tsx`
-- Pagination path: `apps/web/src/lib/data.ts`, `apps/web/src/components/load-more.tsx`
+- Shared data helpers: `apps/web/src/lib/data.ts`
+- Public metadata/page stack: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- Public search path: `apps/web/src/app/actions/public.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/lib/rate-limit.ts`
 
 ## FINDINGS
 
-### PERF-01 — Shared public-route topic data is not request-cached
+### PERF2-01 — Public metadata and page renders duplicate grouped tag queries, and metadata does them even with no tag filter
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:202-204, 786-790`, `apps/web/src/components/nav.tsx:2-8`, `apps/web/src/app/[locale]/(public)/page.tsx:82-84`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-120`
-- **Why it is a problem:** `Nav` and the page body independently fetch topics on the same public request even though the repo already uses `cache()` for other hot SSR helpers.
-- **Concrete failure scenario:** Cache misses or crawler traffic cause avoidable duplicate `topics` queries on the highest-traffic public routes.
-- **Suggested fix:** Add a cached `getTopicsCached` export and switch shared public render paths to it.
+- **Files:** `apps/web/src/lib/data.ts:229-246`, `apps/web/src/app/[locale]/(public)/page.tsx:24-25,83-86`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:32-33,111-122`
+- **Why it is a problem:** `getTags()` performs a grouped aggregate on hot public routes, but current route composition re-runs it in metadata and body rendering and does not skip it on the common no-tag path.
+- **Concrete failure scenario:** Anonymous route traffic and crawlers repeatedly trigger the same tag aggregation, raising DB work for no visible benefit.
+- **Suggested fix:** Add `getTagsCached(topic?)` and skip metadata tag resolution when `tags` is absent.
 
-### PERF-02 — Photo viewer overstates image display width when the desktop info panel is open
+### PERF2-02 — Home metadata still issues fallback image/config lookups when a custom OG image makes them dead work
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/components/photo-viewer.tsx:202-223`
-- **Why it is a problem:** Both `<source>` tags advertise `100vw`, so the browser picks larger AVIF/WebP derivatives than the actual image pane needs on desktop.
-- **Concrete failure scenario:** Desktop viewers with the sidebar open pay extra bytes and decode time for images that render substantially narrower than the full viewport.
-- **Suggested fix:** Use a sidebar-aware `sizes` string and regression-test the helper that computes it.
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:22-31,44-54`
+- **Why it is a problem:** The route fetches the latest image and gallery config before checking whether `seo.og_image_url` is already present.
+- **Concrete failure scenario:** Branded deployments that always use a fixed OG image still pay an avoidable DB query and config read on every metadata render.
+- **Suggested fix:** Return early for the custom-OG branch.
 
-### PERF-03 — Infinite-scroll listings still scale with `OFFSET` discard work
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
+### PERF2-03 — `searchImagesAction` does full-map in-memory pruning on every request in an already expensive public hot path
+- **Severity:** LOW
+- **Confidence:** MEDIUM
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:314-330, 337-377`, `apps/web/src/components/load-more.tsx:29-43`, `apps/web/src/app/actions/public.ts:10-23`
-- **Why it is a problem:** Later pages get progressively more expensive because MySQL must walk and discard all prior rows before returning the next slice.
-- **Concrete failure scenario:** Large galleries feel increasingly slower the farther a user scrolls, and DB CPU rises under concurrent browsing.
-- **Suggested fix:** Migrate the public/admin listing path to cursor/seek pagination using the existing sort tuple.
-
-### PERF-04 — Search still performs broad wildcard scans and up to three DB queries per debounced request
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Status:** Confirmed
-- **Files:** `apps/web/src/lib/data.ts:664-770`, `apps/web/src/app/actions/public.ts:26-100`, `apps/web/src/components/search.tsx:40-80`
-- **Why it is a problem:** `%term%` scans across multiple columns are not index-friendly, and the client only discards stale responses after the server has already done the work.
-- **Concrete failure scenario:** A few users typing quickly into search create repeated broad scans on hot public traffic, even when most intermediate responses are thrown away client-side.
-- **Suggested fix:** Plan an indexed search path (FULLTEXT or another more selective strategy) and stronger request coalescing/cancellation.
+- **Files:** `apps/web/src/app/actions/public.ts:33-49`, `apps/web/src/components/search.tsx:67-81`, `apps/web/src/lib/rate-limit.ts:19-25`
+- **Why it is a problem:** Search is debounced but still user-typing-driven; each request scans up to the entire `searchRateLimit` map before doing the DB-backed search/rate-limit work.
+- **Concrete failure scenario:** Concurrent users typing quickly create repeated O(n) JS work on top of the existing wildcard-search cost.
+- **Suggested fix:** Extract search-map pruning into a throttled helper so the full scan does not happen on every request, while preserving the cap and expiry semantics.
 
 ## FINAL SWEEP
-- I re-checked earlier stale performance artifacts (thumbnail consumers, standalone E2E startup) and excluded them because the current code already fixed those issues.
+- I excluded older stale performance findings that the current code already fixed (`getTopicsCached`, photo viewer `sizes`, earlier route hardening).

@@ -1,16 +1,23 @@
-# Verifier — Cycle 1 Review
+# Verifier — Cycle 2 Review (2026-04-23)
 
 ## SUMMARY
-- Current behavior matches the most important security/correctness expectations in the checked paths.
-- The remaining evidence-backed issues are performance inefficiencies, not correctness failures.
+- Current code matches the most important security/correctness expectations in the rechecked paths.
+- The remaining evidence-backed issues are performance inefficiencies and missing regression coverage for them.
 
 ## INVENTORY
-- Gate evidence: `npm run lint --workspace=apps/web`, `npm run lint:api-auth --workspace=apps/web`
-- Current hot paths: `apps/web/src/lib/data.ts`, `apps/web/src/components/nav.tsx`, `apps/web/src/components/photo-viewer.tsx`
-- Regression surfaces previously reported in older reviews: `apps/web/src/lib/request-origin.ts`, `apps/web/src/components/photo-navigation.tsx`, `apps/web/playwright.config.ts`
+- Rechecked stale findings: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`
+- Current performance claims versus implementation: `apps/web/src/lib/data.ts`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
 
 ## FINDINGS
-- No new verifier-specific correctness mismatches confirmed this cycle.
+
+### VER2-01 — Public metadata still performs unnecessary DB work on the default no-tag path
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Status:** Confirmed
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:18-31`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:18-33`
+- **Why it is a problem:** The public metadata code validates tag filters even when no `tags` parameter exists, so it issues extra DB reads that do not change the output.
+- **Concrete failure scenario:** Ordinary home/topic requests with no tag filter still pay a grouped tag query before rendering metadata.
+- **Suggested fix:** Guard the tag-validation path behind a real `tags` search param, and reuse a cached helper when the param is present.
 
 ## FINAL SWEEP
-- I explicitly re-checked the stale cycle-1 findings against the current checkout: forwarded-header trust, keyboard photo-nav visibility, and standalone Playwright startup are already implemented correctly and were not carried forward.
+- Verified that the previously reported cycle-2 correctness bugs are already fixed in source and should not be re-planned.
