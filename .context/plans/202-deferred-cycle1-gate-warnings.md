@@ -16,5 +16,5 @@
 - **Confidence:** Medium
 - **Citation:** `apps/web/playwright.config.ts:56`
 - **Observed warning:** `The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.`
-- **Reason for deferral:** The warning originates from the surrounding Playwright/Node process environment rather than a correctness problem in the app. This cycle already removed the actionable standalone-start warning and unsets `NO_COLOR` for the repo-controlled webServer command, but the runner still injects the conflict for some child processes.
+- **Reason for deferral:** The warning originates from the surrounding Playwright/Node process environment rather than a correctness problem in the app. This cycle already removed the actionable standalone-start warning and now unsets both `NO_COLOR` and `FORCE_COLOR` for the repo-controlled webServer command, but the runner still injects the conflict for some child processes.
 - **Exit criterion:** Revisit if CI starts treating the warning as a failure or if Playwright exposes a stable repo-local way to suppress the injected env conflict.

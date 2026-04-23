@@ -1,43 +1,32 @@
 # Critic — Cycle 1 Review
 
-> Provenance: requested subagent timed out twice in this environment; this file is the leader's critic-angle synthesis from direct repo inspection.
-
 ## SUMMARY
-- The codebase is generally disciplined, but three small inconsistencies still weaken trust in the edges: proxy trust policy, keyboard affordance, and E2E startup fidelity.
+- The codebase is in solid shape overall. The strongest remaining critique is that performance policy is inconsistent across hot public rendering paths.
 
 ## INVENTORY
-- Cross-cutting trust logic: `src/lib/request-origin.ts`, `src/lib/rate-limit.ts`
-- Photo-viewer interaction shell: `src/components/photo-navigation.tsx`
-- Verification pipeline: `playwright.config.ts`, `next.config.ts`, current E2E output
+- Request-scoped data helpers: `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config.ts`
+- Public route composition: `apps/web/src/components/nav.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- Search and pagination hot paths: `apps/web/src/lib/data.ts`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/search.tsx`
 
 ## FINDINGS
 
-### CRT-01 — Proxy trust policy is inconsistent across security-sensitive helpers
-- **Severity:** HIGH
-- **Confidence:** HIGH
-- **Status:** Confirmed
-- **Files:** `apps/web/src/lib/request-origin.ts:28-41`, `apps/web/src/lib/rate-limit.ts:58-75`
-- **Why fragile:** One helper (`getClientIp`) correctly distrusts forwarded headers unless `TRUST_PROXY=true`; another (`getExpectedOrigin`) silently trusts them. That kind of split-brain trust model is exactly how future regressions slip in.
-- **Failure scenario:** Operators think `TRUST_PROXY=false` globally disables forwarded-header trust, but login origin validation still depends on them.
-- **Suggested fix:** Centralize the trust decision or at least mirror the same `TRUST_PROXY` gate in `request-origin.ts`.
-
-### CRT-02 — Photo navigation assumes hover is the primary discoverability path even on desktop keyboards
+### CRT-01 — Public-route data-fetching discipline is inconsistent on the most visited surfaces
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/components/photo-navigation.tsx:208-233`
-- **Why fragile:** The interaction model is polished for pointer users but incomplete for keyboard-only flows.
-- **Failure scenario:** The feature technically works, yet keyboard users perceive the viewer as having missing navigation because focus does not reveal the controls.
-- **Suggested fix:** Couple visibility to `group-focus-within` as well as hover.
+- **Files:** `apps/web/src/lib/data.ts:202-204, 786-790`, `apps/web/src/components/nav.tsx:2-8`, `apps/web/src/app/[locale]/(public)/page.tsx:82-84`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-120`
+- **Why fragile:** The repo already relies on request-scoped `cache()` for several hot helpers, but topic navigation still uses an uncached helper even when layout and page need the same data in the same request.
+- **Failure scenario:** The most-trafficked pages pay duplicate reads for low-value shared data during cache misses or crawler traffic.
+- **Suggested fix:** Align `getTopics()` with the repo's existing cached-helper pattern on shared public render paths.
 
-### CRT-03 — The E2E harness is not using the deployment-shaped startup path it claims to validate
+### CRT-02 — Search and offset pagination will age poorly before they fail loudly
 - **Severity:** LOW
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/playwright.config.ts:54-61`, `apps/web/next.config.ts:53`
-- **Why fragile:** A warning-only mismatch today becomes a broken gate tomorrow.
-- **Failure scenario:** A Next.js update hardens standalone startup expectations; CI fails even though app behavior did not regress.
-- **Suggested fix:** Launch the standalone server artifact directly.
+- **Files:** `apps/web/src/lib/data.ts:314-330, 664-770`, `apps/web/src/app/actions/public.ts:26-100`, `apps/web/src/components/load-more.tsx:29-43`, `apps/web/src/components/search.tsx:40-80`
+- **Why fragile:** These paths are correct today, but they scale by doing more discard/scan work as traffic and dataset size increase.
+- **Failure scenario:** The app remains functionally correct while gradually becoming more expensive to operate under larger libraries.
+- **Suggested fix:** Treat cursor pagination and a more indexed search strategy as deferred architectural work rather than waiting for production pressure to force it.
 
 ## FINAL SWEEP
-- No additional high-signal issues emerged after a second pass over auth, viewer navigation, and E2E startup.
+- No broader rewrite is justified this cycle; the main critique is targeted and performance-focused.

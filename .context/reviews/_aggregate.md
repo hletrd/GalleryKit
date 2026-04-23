@@ -1,69 +1,70 @@
 # Aggregate Review — Cycle 1
 
-## AVAILABLE AGENTS
-- Requested/available in this environment: `code-reviewer`, `security-reviewer`, `critic`, `verifier`, `test-engineer`, `architect`, `debugger`, `designer`
-- Requested but unavailable in this environment: `perf-reviewer`, `tracer`, `document-specialist`
+## Summary
+- Reviewed per-agent outputs across code quality, performance, security, architecture, testing, UX, docs, tracing, and verification.
+- **New findings this cycle:** 4
+- **Implement this cycle:** 2 small/high-confidence performance fixes
+- **Defer with explicit exit criteria:** 2 larger architectural performance items
 
-## UNIQUE FINDINGS
+## Cross-agent signal map
+- **AGG-01** was independently flagged by **code-reviewer, perf-reviewer, critic, and architect**.
+- **AGG-02** was independently flagged by **code-reviewer and perf-reviewer**.
+- **AGG-03** and **AGG-04** were primarily surfaced by **perf-reviewer**, with critic support for the general scalability concern.
 
-| ID | Title | Severity | Confidence | Cross-agent agreement | Files |
-| --- | --- | --- | --- | --- | --- |
-| AGG-01 | Forwarded-header trust bypasses login same-origin validation when `TRUST_PROXY` is off | HIGH | HIGH | code-reviewer, security-reviewer, critic, verifier, architect, debugger | `apps/web/src/lib/request-origin.ts:28-41`, `apps/web/src/app/actions/auth.ts:92-95`, `apps/web/src/lib/rate-limit.ts:58-75` |
-| AGG-02 | Desktop photo-nav buttons remain visually hidden for keyboard users | MEDIUM | HIGH | code-reviewer, critic, verifier, debugger, designer | `apps/web/src/components/photo-navigation.tsx:208-233` |
-| AGG-03 | Playwright E2E starts the app with `next start` despite standalone output | LOW | HIGH | code-reviewer, critic, verifier, test-engineer, architect, debugger | `apps/web/playwright.config.ts:54-61`, `apps/web/next.config.ts:53` |
-| AGG-04 | Missing regression test for spoofed forwarded headers | MEDIUM | HIGH | security-reviewer, test-engineer | `apps/web/src/__tests__/request-origin.test.ts:1-58` |
-| AGG-05 | No automated coverage for keyboard-only reveal of photo-nav controls | LOW | MEDIUM | test-engineer | `apps/web/src/components/photo-navigation.tsx:208-233`, `apps/web/e2e/*` |
+## Deduped findings
 
-### AGG-01 — Forwarded-header trust bypasses login same-origin validation when `TRUST_PROXY` is off
-- **Severity:** HIGH
-- **Confidence:** HIGH
-- **Type:** Confirmed correctness/security bug
-- **Why it matters:** `hasTrustedSameOrigin()` currently trusts `x-forwarded-host` and `x-forwarded-proto` unconditionally, while the repo's IP/rate-limit path only trusts forwarded headers when `TRUST_PROXY === 'true'`. That inconsistency creates a bypass in the auth-side origin check.
-- **Concrete failure scenario:** A malicious client sends `Origin: https://evil.example` alongside forged `X-Forwarded-Host: evil.example` and `X-Forwarded-Proto: https`; `hasTrustedSameOrigin()` accepts the request even though the true host is different.
-- **Suggested fix:** Gate forwarded-header trust on `TRUST_PROXY === 'true'` and add negative tests for spoofed forwarded headers.
-
-### AGG-02 — Desktop photo-nav buttons remain visually hidden for keyboard users
+### AGG-01 — Shared public-route topic data is not request-cached
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Type:** Confirmed accessibility/UX bug
-- **Why it matters:** The button wrappers only reveal on desktop hover, not focus. Keyboard users can land on a control whose button chrome is still transparent.
-- **Concrete failure scenario:** A desktop user tabs through the photo viewer and cannot visually locate the prev/next controls when focus reaches them.
-- **Suggested fix:** Add `group-focus-within` (or equivalent focus-driven visibility) to the wrappers and cover it with a regression test if practical.
+- **Source agents:** code-reviewer, perf-reviewer, critic, architect
+- **Citations:** `apps/web/src/lib/data.ts:202-204, 786-790`, `apps/web/src/components/nav.tsx:2-8`, `apps/web/src/app/[locale]/(public)/page.tsx:82-84`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-120`
+- **Why it matters:** The public layout/nav and page bodies fetch the same topics dataset through an uncached helper on the highest-traffic routes, despite the repo already using `cache()` for similar SSR dedupe cases.
+- **Concrete failure scenario:** Cache misses or crawler traffic cause avoidable duplicate topic queries during a single public request.
+- **Suggested fix:** Add `getTopicsCached` and switch shared public render paths to it.
+- **Disposition:** Implement this cycle.
 
-### AGG-03 — Playwright E2E starts the app with `next start` despite standalone output
+### AGG-02 — Photo viewer overstates image display width when the desktop info panel is open
 - **Severity:** LOW
 - **Confidence:** HIGH
-- **Type:** Confirmed tooling/runtime mismatch
-- **Why it matters:** Current E2E output already warns that `next start` is unsupported with `output: 'standalone'`. The tests pass today but validate a noisier, less deployment-faithful path.
-- **Concrete failure scenario:** A future Next.js update hard-errors this combination, breaking the E2E gate before behavior is exercised.
-- **Suggested fix:** Launch `.next/standalone/server.js` with explicit `PORT` / `HOSTNAME` instead.
+- **Source agents:** code-reviewer, perf-reviewer
+- **Citations:** `apps/web/src/components/photo-viewer.tsx:202-223`
+- **Why it matters:** The browser is told to assume full-viewport image width even when the desktop sidebar narrows the actual image pane.
+- **Concrete failure scenario:** Desktop viewers download a larger AVIF/WebP derivative than needed, increasing bandwidth and decode work.
+- **Suggested fix:** Use a sidebar-aware `sizes` string and regression-test the helper that computes it.
+- **Disposition:** Implement this cycle.
 
-### AGG-04 — Missing regression test for spoofed forwarded headers
+### AGG-03 — Infinite-scroll listings still scale with `OFFSET` discard work
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Type:** Confirmed test gap
-- **Why it matters:** Existing request-origin tests cover normal forwarded-port normalization, but not attacker-controlled forwarded headers when proxy trust is disabled.
-- **Suggested fix:** Add explicit tests for both untrusted and trusted proxy modes.
+- **Source agents:** perf-reviewer
+- **Citations:** `apps/web/src/lib/data.ts:314-330, 337-377`, `apps/web/src/components/load-more.tsx:29-43`, `apps/web/src/app/actions/public.ts:10-23`
+- **Why it matters:** Later pages become progressively more expensive because MySQL must walk and discard prior rows before returning the next slice.
+- **Concrete failure scenario:** Large galleries get slower the farther a visitor scrolls, increasing DB CPU under concurrent browsing.
+- **Suggested fix:** Replace offset pagination with cursor/seek pagination using the existing sort tuple.
+- **Disposition:** Defer this cycle; requires API/UI contract changes.
 
-### AGG-05 — No automated coverage for keyboard-only reveal of photo-nav controls
-- **Severity:** LOW
-- **Confidence:** MEDIUM
-- **Type:** Likely test gap
-- **Why it matters:** The accessibility bug in AGG-02 could regress silently because current E2E coverage does not assert keyboard reveal/discoverability for photo navigation.
-- **Suggested fix:** Add a focused UI regression test after fixing AGG-02.
+### AGG-04 — Search still performs broad wildcard scans and up to three DB queries per debounced request
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Source agents:** perf-reviewer, critic
+- **Citations:** `apps/web/src/lib/data.ts:664-770`, `apps/web/src/app/actions/public.ts:26-100`, `apps/web/src/components/search.tsx:40-80`
+- **Why it matters:** The client discards stale responses only after the server has already executed repeated `%term%` scans across several columns.
+- **Concrete failure scenario:** A few users typing quickly into search create repeated broad scans on hot public traffic.
+- **Suggested fix:** Plan an indexed search strategy plus stronger request coalescing/cancellation.
+- **Disposition:** Defer this cycle; larger architectural/data-model work.
 
-## AGENT FAILURES
-- `code-reviewer`: initial run hung; retry hung; agent shut down by leader.
-- `security-reviewer`: initial run hung; retry hung; agent shut down by leader.
-- `critic`: initial run hung; retry hung; agent shut down by leader.
-- `verifier`: initial run hung; retry hung; agent shut down by leader.
-- `test-engineer`: initial run hung; retry hung; agent shut down by leader.
-- `architect`: initial spawn hit thread limit; retry hung; agent shut down by leader.
-- `debugger`: initial spawn hit thread limit; retry hung; agent shut down by leader.
-- `designer`: initial spawn hit thread limit; retry hung; agent shut down by leader.
+## No-new-finding agents
+- security-reviewer
+- verifier
+- test-engineer
+- debugger
+- designer
+- document-specialist
+- tracer
 
-## DEDUPING NOTES
-- AGG-01 had the strongest multi-agent agreement and is the clear top priority.
-- AGG-02 is lower severity than AGG-01 but still concrete and user-visible.
-- AGG-03 is low severity but easy to fix and already produces warning noise in the gate.
-- AGG-04 and AGG-05 are test gaps attached to AGG-01 and AGG-02 respectively; they should be implemented alongside those fixes, not deferred silently.
+## Agent failures
+- `document-specialist`: initial run hung; retry also failed to return before timeout and was closed. The review surface was reconciled manually by the leader and written to `./.context/reviews/document-specialist.md`.
+- `tracer`: initial run hung; retry also failed to return before timeout and was closed. The traced flows were reconciled manually by the leader and written to `./.context/reviews/tracer.md`.
+
+## Notes
+- Earlier cycle-1 findings around forwarded-header trust, keyboard-only photo-nav visibility, and Playwright standalone startup were verified as already fixed in the current checkout and were intentionally excluded from this cycle's aggregate.

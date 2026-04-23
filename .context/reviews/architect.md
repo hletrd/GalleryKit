@@ -1,34 +1,23 @@
 # Architect — Cycle 1 Review
 
-> Provenance: requested subagent timed out after retry in this environment; this file is the leader's architect-angle synthesis from direct repo inspection.
-
 ## SUMMARY
-- The main architectural concern is inconsistent trust-boundary handling between helpers that interpret reverse-proxy headers.
+- The main architectural risk is uneven application of request-scoped caching conventions across hot public routes.
 
 ## INVENTORY
-- Trust boundary helpers: `src/lib/request-origin.ts`, `src/lib/rate-limit.ts`
-- Auth caller: `src/app/actions/auth.ts`
-- Verification pipeline: `playwright.config.ts`, `next.config.ts`
+- Cached helper patterns: `apps/web/src/lib/data.ts:786-790`, `apps/web/src/lib/gallery-config.ts:87-88`
+- Uncached topic helper: `apps/web/src/lib/data.ts:202-204`
+- Public route composition: `apps/web/src/components/nav.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
 
 ## FINDINGS
 
-### ARC-01 — Forwarded-header trust is implemented as two different policies
-- **Severity:** HIGH
+### ARC-01 — Shared public-route topic data is fetched through an uncached helper despite existing request-scope cache patterns elsewhere
+- **Severity:** MEDIUM
 - **Confidence:** HIGH
 - **Status:** Confirmed
-- **Files:** `apps/web/src/lib/request-origin.ts:28-41`, `apps/web/src/lib/rate-limit.ts:58-75`
-- **Why it is a design risk:** The codebase has already encoded the correct "only trust proxy headers when configured" rule in one helper, but not in another helper used by auth. Security boundaries should not depend on duplicated, inconsistent trust logic.
-- **Failure scenario:** `TRUST_PROXY` is unset and rate limiting behaves safely, yet origin validation still trusts forwarded headers.
-- **Suggested fix:** Introduce a shared forwarded-header trust helper or align `request-origin.ts` to the existing policy.
-
-### ARC-02 — E2E startup path diverges from production-shaped standalone deployment
-- **Severity:** LOW
-- **Confidence:** HIGH
-- **Status:** Confirmed
-- **Files:** `apps/web/playwright.config.ts:54-61`, `apps/web/next.config.ts:53`
-- **Why it is a design risk:** Verification should exercise the same artifact shape the app deploys.
-- **Failure scenario:** Standalone-only startup differences are missed until deployment.
-- **Suggested fix:** Run the built standalone server in the Playwright webServer hook.
+- **Files:** `apps/web/src/lib/data.ts:202-204, 786-790`, `apps/web/src/components/nav.tsx:2-8`, `apps/web/src/app/[locale]/(public)/page.tsx:82-84`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:116-120`
+- **Why it is a design risk:** The codebase already treats repeated SSR fetches as something worth deduping, but one of the hottest shared datasets (`topics`) still bypasses that convention on public pages.
+- **Failure scenario:** Layout and page bodies independently hit the same topics query during cache misses, leaving the public render path more expensive than the architecture intends.
+- **Suggested fix:** Export a cached topic helper and standardize public-route consumers on it.
 
 ## FINAL SWEEP
-- No broader layering rewrite is needed; these are targeted boundary-alignments.
+- No broader layering change is needed; this is a local consistency fix.
