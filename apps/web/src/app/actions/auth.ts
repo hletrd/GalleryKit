@@ -339,13 +339,6 @@ export async function updatePassword(prevState: { error?: string; success?: bool
             return { error: t('incorrectPassword') };
         }
 
-        // Password correct — roll back the pre-incremented rate limit counter
-        try {
-            await clearSuccessfulPasswordAttempts(ip);
-        } catch (err) {
-            console.error('Failed to reset password change rate limit for IP:', ip, err);
-        }
-
         const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
 
         // Invalidate all sessions except the current one — fetch before the
@@ -369,6 +362,18 @@ export async function updatePassword(prevState: { error?: string; success?: bool
                 await tx.delete(sessions).where(eq(sessions.userId, currentUser.id));
             }
         });
+
+        // Only clear the rate-limit bucket AFTER the password/session
+        // transaction has committed successfully (C1R-02). If we cleared
+        // before the transaction and the transaction then failed, prior
+        // accumulated failed-attempt pressure in the same window would be
+        // irrecoverably lost — the catch-branch rollback only decrements
+        // once.
+        try {
+            await clearSuccessfulPasswordAttempts(ip);
+        } catch (err) {
+            console.error('Failed to reset password change rate limit for IP:', ip, err);
+        }
 
         logAuditEvent(currentUser.id, 'password_change', 'user', String(currentUser.id)).catch(console.debug);
 
