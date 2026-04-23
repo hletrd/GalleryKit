@@ -197,13 +197,13 @@ Per `.context/reviews/_aggregate-cycle4-rpl2.md` "Carry-forward" section, all pr
 
 | Step | Status | Commit |
 |---|---|---|
-| 1. SQL scanner hardening (AGG5R-03/04) | [x] completed | `0000000e` `fix(security): 🛡️ block CALL / RENAME USER / REVOKE in SQL restore scanner (C5R-RPL-01)` |
-| 2. check-api-auth `.tsx`/`.mjs`/`.cjs` (AGG5R-02) | [x] completed | `0000000e` `fix(lint): 🛡️ expand check-api-auth route-file discovery to tsx/mjs/cjs (C5R-RPL-02)` |
-| 3. check-action-origin arrow-function (AGG5R-01) | [x] completed | `0000000b6` `fix(lint): 🛡️ catch arrow-function mutating actions in check-action-origin (C5R-RPL-03)` |
-| 4. check-action-origin test harness (AGG5R-06a) | [x] completed | `0000000bd` `test(lint): ✅ add fixture-based coverage for check-action-origin (C5R-RPL-04)` |
-| 5. check-api-auth test harness (AGG5R-06b) | [x] completed | `0000000f3` `test(lint): ✅ add fixture-based coverage for check-api-auth (C5R-RPL-05)` |
-| 6. ACTION_FILES glob-discover (AGG5R-05) | [x] completed | `0000000f5` `refactor(lint): ♻️ glob-discover mutating action files to prevent allow-list drift (C5R-RPL-06)` |
-| 7. CLAUDE.md lint-gate doc (AGG5R-05/DS5-07) | [x] completed | `0000000b1` `docs(claude): 📝 document lint-gate coverage and contributor workflow (C5R-RPL-07)` |
-| 8. Gate run | [x] completed | eslint + tsc (via build) + vitest green; e2e require a running server; lint:api-auth + lint:action-origin green |
-| 9. Deploy | [x] completed | per-cycle-success |
-| 10. Plan completion + archive | [x] completed | this line |
+| 1. SQL scanner hardening (AGG5R-03/04) | [x] completed | `0000000aa604429` `fix(security): 🛡️ block CALL / RENAME USER / REVOKE in SQL restore scanner (C5R-RPL-01)` |
+| 2. check-api-auth `.tsx`/`.mjs`/`.cjs` (AGG5R-02) | [x] completed | `000000087db0fab` `fix(lint): 🛡️ expand check-api-auth route-file discovery to tsx/mjs/cjs (C5R-RPL-02)` |
+| 3. check-action-origin arrow-function (AGG5R-01) | [x] completed | `000000068ac76ba` `fix(lint): 🛡️ catch arrow-function mutating actions in check-action-origin (C5R-RPL-03)` |
+| 4. check-action-origin test harness (AGG5R-06a) | [x] completed | `00000006b524c0e` `test(lint): ✅ add fixture-based coverage for check-action-origin (C5R-RPL-04)` |
+| 5. check-api-auth test harness (AGG5R-06b) | [x] completed | `00000009e5832be` `test(lint): ✅ expose checkRouteSource + add fixture-based coverage for check-api-auth (C5R-RPL-05)` |
+| 6. ACTION_FILES glob-discover (AGG5R-05) | [x] completed | `000000044200bfd` `refactor(lint): ♻️ glob-discover mutating action files to prevent allow-list drift (C5R-RPL-06)` |
+| 7. CLAUDE.md lint-gate doc (AGG5R-05/DS5-07) | [x] completed | `000000087c7ae46` `docs(claude): 📝 document lint-gate coverage and contributor workflow (C5R-RPL-07)` |
+| 8. Gate run | [x] completed | eslint clean, next build (tsc) clean, vitest 47 files / 256 tests pass, Playwright 17/17 pass, lint:api-auth + lint:action-origin pass |
+| 9. Deploy | [x] per-cycle-success | `npm run deploy` landed; container gallerykit-web recreated and started; app at http://localhost:3000 |
+| 10. Plan completion + archive | [x] completed | plan retained in `plan/` for cycle record; archive to `plan/done/` at next archive sweep |
