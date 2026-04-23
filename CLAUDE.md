@@ -222,6 +222,23 @@ The repository has a formal test surface:
 - `npm run test:e2e --workspace=apps/web` — Playwright end-to-end tests in `apps/web/e2e/`
 - `npm run lint --workspace=apps/web` — ESLint
 
+## Lint Gates (security-critical)
+
+Three lint scripts enforce architectural invariants; all are blocking in CI.
+
+- `npm run lint:api-auth --workspace=apps/web`
+  - Scans every `apps/web/src/app/api/admin/**/route.{ts,tsx,js,mjs,cjs}` file.
+  - Requires each HTTP-method export (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) to wrap `withAdminAuth(...)`. Function-declaration handlers are rejected — use the variable-export form so the wrapper is explicit.
+  - Fixture-based coverage lives at `apps/web/src/__tests__/check-api-auth.test.ts`.
+- `npm run lint:action-origin --workspace=apps/web`
+  - Scans `apps/web/src/app/actions/*.ts` (auto-discovered via glob, excluding `auth.ts` and `public.ts`) plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
+  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to call `requireSameOriginAdmin()`.
+  - Auto-exempts read-only getters (name matches `^get[A-Z]`) and exports carrying a `/** @action-origin-exempt: <reason> */` leading comment.
+  - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
+- `npm run lint --workspace=apps/web` — standard ESLint.
+
+**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must call `requireSameOriginAdmin()` (or carry an explicit exempt comment). `auth.ts` and `public.ts` are intentionally excluded by name because they own their own same-origin/unauthenticated-surface handling.
+
 ## Deployment Checklist
 
 1. Configure `.env.local` with production MySQL credentials
