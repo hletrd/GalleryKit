@@ -188,7 +188,10 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             image.topic && {
                 '@type': 'ListItem',
                 position: 2,
-                name: image.topic,
+                // C4R-RPL2-03: prefer the human-facing topic label over the
+                // url-slug so search engines show "Family Vacation 2024"
+                // rather than "family-vacation-2024" in the breadcrumb.
+                name: image.topic_label || image.topic,
                 item: localizeUrl(seo.url, locale, `/${image.topic}`),
             },
             {
