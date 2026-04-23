@@ -327,12 +327,20 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     // Validate file header
     const headerBuf = Buffer.alloc(256);
     const fd = await fs.open(tempPath, 'r');
+    let headerBytesRead = 0;
     try {
-        await fd.read(headerBuf, 0, 256, 0);
+        // C7R-RPL-04 / AGG7R-04: capture bytesRead so files shorter
+        // than 256 bytes don't see trailing zeros in the decoded
+        // string. Buffer.alloc zeroes memory so the exploit surface
+        // is minimal, but decoding only the bytes actually read is
+        // the correct behavior and survives any future buffer-pool
+        // changes in Node.
+        const { bytesRead } = await fd.read(headerBuf, 0, 256, 0);
+        headerBytesRead = bytesRead;
     } finally {
         await fd.close();
     }
-    const headerBytes = headerBuf.toString('utf8');
+    const headerBytes = headerBuf.subarray(0, headerBytesRead).toString('utf8');
     const validHeader = /^(--)|(CREATE\s)|(INSERT\s)|(DROP\s)|(SET\s)|(\/\*!)/.test(headerBytes.trimStart());
     if (!validHeader) {
         await fs.unlink(tempPath).catch(() => {});
@@ -347,8 +355,13 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
             const readSize = Math.min(CHUNK_SIZE, fileSize - off);
             const chunkBuf = Buffer.alloc(readSize);
-            await scanFd.read(chunkBuf, 0, readSize, off);
-            const chunk = chunkBuf.toString('utf8');
+            // C7R-RPL-04 / AGG7R-04: capture bytesRead and decode only
+            // the actually-read prefix. Short reads are rare but legal
+            // and the current Buffer.alloc zero-fill would otherwise
+            // pad the decoded chunk with NULL characters.
+            const { bytesRead } = await scanFd.read(chunkBuf, 0, readSize, off);
+            if (bytesRead === 0) break;
+            const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
             const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk);
             if (containsDangerousSql(combined)) {
                 // Don't close scanFd here — the finally block handles it
