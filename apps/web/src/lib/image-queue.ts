@@ -45,8 +45,20 @@ async function cleanOrphanedTmpFiles(): Promise<void> {
             } else {
                 console.debug(`[Cleanup] Removed ${removed} orphaned .tmp files from ${dir}`);
             }
-        } catch {
-            // Directory may not exist yet — skip
+        } catch (err) {
+            // C8R-RPL-04 / AGG8R-08: narrow the catch. ENOENT is
+            // expected at bootstrap before the upload dirs exist;
+            // anything else (EACCES, EIO, EMFILE, ...) signals a
+            // misconfiguration or runtime fault that an operator
+            // needs to see in the logs. The prior broad `catch {}`
+            // silenced all of these.
+            const code = err && typeof err === 'object' && 'code' in err
+                ? (err as { code?: unknown }).code
+                : null;
+            if (code === 'ENOENT') {
+                return;
+            }
+            console.warn(`[Cleanup] Failed to scan ${dir} for orphaned .tmp files:`, err);
         }
     }));
 }
