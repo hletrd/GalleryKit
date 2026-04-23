@@ -19,6 +19,10 @@
 - 175 — Deferred Review Coverage (Cycle 1 Ultradeep) — TODO
 - 177 — Deferred Review Coverage (Cycle 2 Ultradeep) — TODO
 
+## Completed Plans (Cycle 4 Review)
+
+- 208 — Cycle 4 Restore Maintenance Readiness and Public-Read Guarding — DONE / archived under `done/plan-208-cycle4-restore-maintenance.md`
+
 ## Completed Plans (Cycle 1 Review)
 
 - 203 — Cycle 1 Performance Fixes — DONE
