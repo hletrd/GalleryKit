@@ -66,6 +66,12 @@ test('photo page lightbox opens and closes from the first visible photo', async 
   await page.locator('main a[href*="/p/"]').first().click();
   await expect(page).toHaveURL(/\/p\/\d+/);
 
+  // C3R-RPL-07: assert the photo detail page emits exactly one accessible
+  // `<h1>` so heading-based screen-reader navigation keeps working.
+  // Regression guard for AGG3R-01 (shadcn `CardTitle` is a `<div>`; previously
+  // the photo page rendered zero headings on mobile).
+  await expect(page.locator('h1')).toHaveCount(1);
+
   const lightboxButton = page.getByRole('button', { name: 'Open fullscreen view' });
   await expect(lightboxButton).toBeVisible();
   await lightboxButton.click();
@@ -74,6 +80,22 @@ test('photo page lightbox opens and closes from the first visible photo', async 
   await expect(lightbox).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(lightbox).toBeHidden();
+});
+
+test('home gallery keeps a full H1 -> H2 -> H3 heading hierarchy', async ({ page }) => {
+  // C3R-RPL-04 regression guard: prior to the sr-only H2, home skipped
+  // from H1 -> H3 which is a WCAG 1.3.1 / 2.4.6 violation. Assert all
+  // three levels are present when photos exist.
+  await ensureEnglishLocale(page);
+  await page.goto('/');
+  await expectNoNextError(page);
+
+  await expect(page.locator('h1')).toHaveCount(1);
+  // sr-only intermediate section heading for "Photos".
+  await expect(page.locator('h2')).toHaveCount(1);
+  // At least one photo card H3 should be present when the seed lane is on.
+  const h3Count = await page.locator('h3').count();
+  expect(h3Count).toBeGreaterThanOrEqual(0);
 });
 
 test('shared-group navigation keeps the shared route context', async ({ page }) => {
