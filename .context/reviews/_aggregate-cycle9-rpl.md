@@ -164,3 +164,9 @@ None.
   after commit.
 - AGG9R-RPL-03: WITHDRAWN (CLAUDE.md line 146 was already accurate; reviewers
   were quoting paraphrased text that does not exist in the file).
+
+## Deploy status
+
+- `DEPLOY_CMD = npm run deploy` — SUCCESS. Container `gallerykit-web` recreated
+  and running. App serving at http://localhost:3000.
+- Cycle 9 rpl reviews + plans committed in `00000000a0933178542d6a962800a038f9a5307c`.
