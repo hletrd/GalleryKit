@@ -1,3 +1,9 @@
+/* SECURITY-CRITICAL: this lint gate enforces defense-in-depth
+ * same-origin checks on every mutating server action. Silencing,
+ * downgrading, or weakening this scanner (or its exemption logic)
+ * removes a layer of CSRF/origin-confusion protection. DO NOT modify
+ * without a security review. See CLAUDE.md "Lint Gates" section.
+ */
 /**
  * CI check (C2R-02): verifies every mutating server action in the
  * scanned files calls `requireSameOriginAdmin()` (defense-in-depth

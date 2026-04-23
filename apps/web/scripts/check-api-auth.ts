@@ -1,3 +1,10 @@
+/* SECURITY-CRITICAL: this lint gate enforces that every admin API
+ * route wraps its HTTP handler exports with `withAdminAuth(...)`.
+ * Silencing, downgrading, or relaxing this scanner would allow an
+ * unauthenticated HTTP handler to land in `/api/admin/**` and
+ * silently bypass the admin session gate. DO NOT modify without a
+ * security review. See CLAUDE.md "Lint Gates" section.
+ */
 /**
  * CI check: verifies all /api/admin/ route files export HTTP handlers wrapped
  * directly with withAdminAuth(...).
