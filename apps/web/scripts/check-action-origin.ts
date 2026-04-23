@@ -191,15 +191,20 @@ function checkActionFile(file: string) {
     }
 }
 
-for (const file of ACTION_FILES) {
-    checkActionFile(file);
-}
+// CLI entrypoint — guarded so the unit test can import checkActionSource
+// without triggering the whole-repo scan at module load time.
+const isCliEntry = require.main === module || (typeof require === 'undefined' && import.meta?.url?.includes('check-action-origin'));
+if (isCliEntry) {
+    for (const file of ACTION_FILES) {
+        checkActionFile(file);
+    }
 
-if (failed) {
-    console.error('\nOne or more mutating server actions are missing the same-origin provenance check.');
-    console.error('Fix by calling `requireSameOriginAdmin()` or documenting an explicit exemption.');
-    process.exit(1);
-}
+    if (failed) {
+        console.error('\nOne or more mutating server actions are missing the same-origin provenance check.');
+        console.error('Fix by calling `requireSameOriginAdmin()` or documenting an explicit exemption.');
+        process.exit(1);
+    }
 
-console.log('\nAll mutating server actions enforce same-origin provenance.');
-process.exit(0);
+    console.log('\nAll mutating server actions enforce same-origin provenance.');
+    process.exit(0);
+}
