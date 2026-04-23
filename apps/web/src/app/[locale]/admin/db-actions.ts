@@ -24,14 +24,16 @@ import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterR
 import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 
-function escapeCsvField(value: string): string {
+export function escapeCsvField(value: string): string {
     // Strip null bytes, tab, and other control characters (except \r\n which are handled below)
     // as defense-in-depth for legacy data stored before stripControlChars was added.
     // \x09 (tab) is included: tabs in CSV values can cause column misalignment
     // in strict parsers, even with double-quote wrapping (C9R2-F01).
     value = value.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
-    // Strip carriage returns and newlines to prevent CSV injection via embedded line breaks
-    value = value.replace(/[\r\n]/g, ' ');
+    // Collapse consecutive CRLF/LF/CR runs into a single space (C6R-RPL-06 /
+    // AGG6R-11). Prior behavior replaced each \r and \n individually, turning
+    // a literal CRLF into two consecutive spaces in the exported cell.
+    value = value.replace(/[\r\n]+/g, ' ');
     // Prefix formula injection characters with a single quote
     if (value.match(/^[=+\-@\t]/)) {
         value = "'" + value;
