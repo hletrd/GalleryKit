@@ -203,7 +203,8 @@
     "noResultsHint": "필터를 줄여 보세요",
     "backToTop": "맨 위로",
     "browsePhotosWithTag": "{site}에서 {tags} 사진 찾아보기",
-    "latestPhoto": "최신 사진"
+    "latestPhoto": "최신 사진",
+    "photosHeading": "사진"
   },
   "login": {
     "title": "관리자 로그인",
@@ -475,7 +476,8 @@
     "editItem": "편집",
     "deleteItem": "삭제",
     "deleteUser": "사용자 {username} 삭제",
-    "goBack": "뒤로"
+    "goBack": "뒤로",
+    "switchLocale": "언어를 {language}(으)로 전환"
   },
   "common": {
     "untitled": "제목 없음",

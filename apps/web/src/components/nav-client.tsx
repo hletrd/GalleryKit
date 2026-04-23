@@ -149,6 +149,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                     <button
                         onClick={handleLocaleSwitch}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
+                        aria-label={t('aria.switchLocale', { language: otherLocale === 'ko' ? '한국어' : 'English' })}
                     >
                         {otherLocale.toUpperCase()}
                     </button>

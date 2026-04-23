@@ -203,7 +203,8 @@
     "noResultsHint": "Try fewer filters",
     "backToTop": "Back to top",
     "browsePhotosWithTag": "Browse {tags} photos on {site}",
-    "latestPhoto": "Latest Photo"
+    "latestPhoto": "Latest Photo",
+    "photosHeading": "Photos"
   },
   "login": {
     "title": "Admin",
@@ -475,7 +476,8 @@
     "editItem": "Edit",
     "deleteItem": "Delete",
     "deleteUser": "Delete user {username}",
-    "goBack": "Go back"
+    "goBack": "Go back",
+    "switchLocale": "Switch language to {language}"
   },
   "common": {
     "untitled": "Untitled",
