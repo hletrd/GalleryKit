@@ -95,4 +95,38 @@ describe('escapeCsvField', () => {
         // U+2066 (LRI) — left-to-right isolate
         expect(escapeCsvField('a⁦b⁩c')).toBe('"abc"');
     });
+
+    // C8R-RPL-01 / AGG8R-01 — zero-width / invisible format chars
+    // must be stripped so they cannot bypass the formula-prefix guard.
+    // JS regex `\s` does NOT match U+200B, so `​=...` would
+    // previously escape the leading-whitespace tolerance.
+    it('strips U+200B (ZWSP) and prefixes formula when adjacent', () => {
+        expect(escapeCsvField('​=HYPERLINK("evil")')).toBe(
+            '"\'=HYPERLINK(""evil"")"',
+        );
+    });
+
+    it('strips U+FEFF (BOM) and prefixes formula when adjacent', () => {
+        expect(escapeCsvField('﻿=SUM(A1)')).toBe('"\'=SUM(A1)"');
+    });
+
+    it('strips U+2060 (word joiner) and prefixes formula when adjacent', () => {
+        expect(escapeCsvField('⁠=cmd')).toBe('"\'=cmd"');
+    });
+
+    it('strips U+200C / U+200D / U+200E / U+200F (ZWNJ/ZWJ/LRM/RLM)', () => {
+        expect(escapeCsvField('a‌b')).toBe('"ab"');
+        expect(escapeCsvField('a‍b')).toBe('"ab"');
+        expect(escapeCsvField('a‎b')).toBe('"ab"');
+        expect(escapeCsvField('a‏b')).toBe('"ab"');
+    });
+
+    it('strips U+180E (Mongolian vowel separator)', () => {
+        expect(escapeCsvField('a᠎b')).toBe('"ab"');
+    });
+
+    it('strips benign zero-width chars without prefixing when no formula follows', () => {
+        // ZWNJ between words — stripped, no formula prefix.
+        expect(escapeCsvField('hello‌world')).toBe('"helloworld"');
+    });
 });
