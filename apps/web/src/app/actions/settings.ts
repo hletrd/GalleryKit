@@ -121,7 +121,10 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         // Revalidate the full app tree so stale cached photo/share pages do not linger.
         revalidateAllAppData();
 
-        return { success: true as const };
+        // C1R-04: return the normalized values (including the canonicalized
+        // image_sizes string) so the admin settings client can rehydrate from
+        // what was actually persisted.
+        return { success: true as const, settings: sanitizedSettings };
     } catch (err) {
         console.error('Failed to update gallery settings', err);
         return { error: t('failedToUpdateGallerySettings') };

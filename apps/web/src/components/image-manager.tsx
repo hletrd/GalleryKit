@@ -230,7 +230,15 @@ export function ImageManager({
             const res = await updateImageMetadata(editingImage.id, editTitle, editDescription);
             if (res.success) {
                 toast.success(t('imageManager.updateSuccess'));
-                setImages(prev => prev.map(img => img.id === editingImage.id ? { ...img, title: editTitle, description: editDescription } : img));
+                // C1R-04: rehydrate from the sanitized values returned by the
+                // server so the UI reflects what was actually persisted. The
+                // server trims and strips control characters, so the raw
+                // editTitle/editDescription can diverge from the stored row.
+                const persistedTitle = res.title ?? null;
+                const persistedDescription = res.description ?? null;
+                setImages(prev => prev.map(img => img.id === editingImage.id
+                    ? { ...img, title: persistedTitle, description: persistedDescription }
+                    : img));
                 setEditingImage(null);
             } else {
                 toast.error(res.error || t('imageManager.updateFailed'));

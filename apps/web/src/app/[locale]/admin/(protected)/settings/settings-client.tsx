@@ -50,7 +50,11 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                 }
                 const result = await updateGallerySettings(changed);
                 if (result.success) {
-                    const nextSettings = { ...settings, ...changed };
+                    // C1R-04: rehydrate from the server-returned normalized
+                    // values (including the canonicalized image_sizes string)
+                    // so the UI matches what was actually persisted.
+                    const persisted = (result.settings ?? changed) as Record<string, string>;
+                    const nextSettings = { ...settings, ...persisted };
                     setSettings(nextSettings);
                     initialRef.current = nextSettings;
                     toast.success(t('settings.saveSuccess'));

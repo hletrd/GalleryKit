@@ -49,7 +49,16 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                 }
                 const result = await updateSeoSettings(changed);
                 if (result.success) {
-                    initialRef.current = { ...settings };
+                    // C1R-04: rehydrate from the sanitized values returned by
+                    // the server so trailing whitespace / control chars do
+                    // not linger in the UI until the next refresh.
+                    const persisted = (result.settings ?? {}) as Partial<Record<keyof SeoSettings, string>>;
+                    const nextSettings: SeoSettings = {
+                        ...settings,
+                        ...persisted,
+                    };
+                    setSettings(nextSettings);
+                    initialRef.current = { ...nextSettings };
                     toast.success(t('seo.saveSuccess'));
                 } else {
                     toast.error(result.error || t('seo.saveFailed'));

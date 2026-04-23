@@ -125,7 +125,9 @@ export async function updateSeoSettings(settings: Record<string, string>) {
         revalidateAllAppData();
         revalidateLocalizedPaths('/admin/seo', '/admin/dashboard');
 
-        return { success: true as const };
+        // C1R-04: surface the sanitized values so the client can rehydrate
+        // from what was actually persisted rather than its pre-submit state.
+        return { success: true as const, settings: sanitizedSettings };
     } catch (err) {
         console.error('Failed to update SEO settings', err);
         return { error: t('failedToUpdateSeoSettings') };

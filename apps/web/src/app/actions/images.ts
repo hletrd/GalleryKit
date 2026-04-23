@@ -596,7 +596,11 @@ export async function updateImageMetadata(id: number, title: string | null, desc
 
         const topicPath = existingImage.topic ? `/${existingImage.topic}` : undefined;
         revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/', ...(topicPath ? [topicPath] : []));
-        return { success: true };
+        // C1R-04: return the sanitized/normalized values so the admin UI can
+        // rehydrate local state from what was actually persisted instead of
+        // the pre-submit raw input. Without this, trailing whitespace or
+        // control characters briefly linger in the UI until the next refresh.
+        return { success: true as const, title: sanitizedTitle, description: sanitizedDescription };
     } catch (e) {
         console.error("Failed to update image metadata", e);
         return { error: t('failedToUpdateImage') };
