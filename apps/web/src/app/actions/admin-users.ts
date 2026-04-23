@@ -14,6 +14,7 @@ import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, checkRateLimit, incrementRateLimit, isRateLimitExceeded, resetRateLimit } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -68,6 +69,9 @@ export async function getAdminUsers() {
 export async function createAdminUser(formData: FormData) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
@@ -165,6 +169,9 @@ export async function deleteAdminUser(id: number) {
     const t = await getTranslations('serverActions');
     const currentUser = await getCurrentUser();
     if (!currentUser) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 

@@ -20,6 +20,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
 import { cleanupOriginalIfRestoreMaintenanceBegan, getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { settleUploadTrackerClaim, type UploadTrackerEntry } from '@/lib/upload-tracker';
+import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { headers } from 'next/headers';
 
 type ImageCleanupFailure = {
@@ -84,6 +85,9 @@ export async function uploadImages(formData: FormData) {
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
@@ -333,6 +337,9 @@ export async function deleteImage(id: number) {
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
@@ -419,6 +426,9 @@ export async function deleteImages(ids: number[]) {
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
@@ -548,6 +558,9 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };

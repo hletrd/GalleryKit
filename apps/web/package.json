@@ -17,7 +17,8 @@
     "init": "tsx scripts/init-db.ts",
     "test:e2e": "npx playwright test",
     "e2e:seed": "tsx scripts/seed-e2e.ts",
-    "lint:api-auth": "tsx scripts/check-api-auth.ts"
+    "lint:api-auth": "tsx scripts/check-api-auth.ts",
+    "lint:action-origin": "tsx scripts/check-action-origin.ts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",

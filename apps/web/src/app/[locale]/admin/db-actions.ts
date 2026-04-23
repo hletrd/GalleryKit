@@ -1,6 +1,7 @@
 'use server';
 
 import { db, connection } from "@/db";
+import type { RowDataPacket } from "mysql2/promise";
 import { images, imageTags, tags } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { spawn } from "child_process";
@@ -17,6 +18,7 @@ import { getTranslations } from 'next-intl/server';
 import { revalidateAllAppData } from "@/lib/revalidation";
 import { appendSqlScanChunk, containsDangerousSql } from "@/lib/sql-restore-scan";
 import { createBackupFilename } from "@/lib/backup-filename";
+import { requireSameOriginAdmin } from "@/lib/action-guards";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
 import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
@@ -43,6 +45,9 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating/exporting server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
@@ -109,6 +114,9 @@ export async function dumpDatabase() {
     if (!(await isAdmin())) {
         return { success: false as const, error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { success: false as const, error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { success: false as const, error: maintenanceError };
@@ -250,6 +258,9 @@ export async function restoreDatabase(formData: FormData) {
     if (!(await isAdmin())) {
         return { success: false, error: t('unauthorized') };
     }
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { success: false, error: originError };
 
     // Use a dedicated connection from the pool so GET_LOCK and RELEASE_LOCK
     // execute on the same session. Advisory locks are session-scoped —
@@ -257,11 +268,13 @@ export async function restoreDatabase(formData: FormData) {
     // different connections, making the lock unreliable.
     const conn = await connection.getConnection();
     try {
-        const [lockRows] = await conn.query(
-            "SELECT GET_LOCK('gallerykit_db_restore', 0) AS `GET_LOCK(name, timeout)`"
-        ) as [Record<string, unknown>[], unknown];
-        const lockRow = lockRows[0];
-        const acquired = Object.values(lockRow)[0];
+        // C2R-03: name the column via `AS acquired` and read it by name
+        // instead of relying on `Object.values(lockRow)[0]` iteration order.
+        // Matches the admin-user delete pattern at admin-users.ts:186-189.
+        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+            "SELECT GET_LOCK('gallerykit_db_restore', 0) AS acquired"
+        );
+        const acquired = lockRows[0]?.acquired;
         if (acquired !== 1 && acquired !== BigInt(1)) {
             return { success: false, error: t('restoreInProgress') };
         }

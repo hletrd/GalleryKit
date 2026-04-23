@@ -12,6 +12,7 @@ import { stripControlChars } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import type { SeoSettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 // Validation constraints
 const MAX_TITLE_LENGTH = 200;
@@ -51,6 +52,9 @@ export async function getSeoSettingsAdmin() {
 export async function updateSeoSettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 

@@ -11,6 +11,7 @@ import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidati
 import { logAuditEvent } from '@/lib/audit';
 import { stripControlChars } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 // Tag Management
 
@@ -40,6 +41,9 @@ export async function getAdminTags() {
 export async function updateTag(id: number, name: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
@@ -89,6 +93,9 @@ export async function updateTag(id: number, name: string) {
 export async function deleteTag(id: number) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
@@ -125,6 +132,9 @@ export async function deleteTag(id: number) {
 export async function addTagToImage(imageId: number, tagName: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
@@ -185,6 +195,9 @@ export async function addTagToImage(imageId: number, tagName: string) {
 export async function removeTagFromImage(imageId: number, tagName: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
@@ -239,6 +252,9 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
 export async function batchAddTags(imageIds: number[], tagName: string) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
 
@@ -322,6 +338,9 @@ export async function batchUpdateImageTags(
 ): Promise<{ success: boolean; added: number; removed: number; warnings: string[] }> {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { success: false, added: 0, removed: 0, warnings: [t('unauthorized')] };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { success: false, added: 0, removed: 0, warnings: [originError] };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { success: false, added: 0, removed: 0, warnings: [maintenanceError] };
 

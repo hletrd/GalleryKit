@@ -84,6 +84,12 @@ vi.mock('@/lib/restore-maintenance', () => ({
     getRestoreMaintenanceMessage: maintenanceMessageMock,
 }));
 
+// C2R-02: mock the same-origin guard so admin-user unit tests don't need a
+// live request scope. Production callers still enforce the check.
+vi.mock('@/lib/action-guards', () => ({
+    requireSameOriginAdmin: vi.fn(async () => null),
+}));
+
 import { createAdminUser } from '@/app/actions/admin-users';
 
 describe('createAdminUser', () => {

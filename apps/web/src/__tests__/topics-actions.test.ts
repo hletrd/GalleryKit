@@ -123,6 +123,12 @@ vi.mock('@/lib/restore-maintenance', () => ({
     getRestoreMaintenanceMessage: maintenanceMessageMock,
 }));
 
+// C2R-02: mock the same-origin guard so topic-action unit tests don't need a
+// live request scope. Production callers still enforce the check.
+vi.mock('@/lib/action-guards', () => ({
+    requireSameOriginAdmin: vi.fn(async () => null),
+}));
+
 import { createTopic, createTopicAlias, deleteTopicAlias, updateTopic } from '@/app/actions/topics';
 
 describe('topic actions', () => {

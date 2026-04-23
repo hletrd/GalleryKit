@@ -11,6 +11,7 @@ import { stripControlChars } from '@/lib/sanitize';
 import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 export async function getGallerySettingsAdmin() {
     const t = await getTranslations('serverActions');
@@ -36,6 +37,9 @@ export async function getGallerySettingsAdmin() {
 export async function updateGallerySettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) return { error: maintenanceError };
     const defaults = getSettingDefaults();
