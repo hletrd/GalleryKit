@@ -1,97 +1,67 @@
-# Aggregate Review — Cycle 12 (2026-04-19)
+# Aggregate Review - Cycle 12 (2026-04-24)
 
-**Source reviews:** cycle12-comprehensive-review (single reviewer, multi-angle)
+## Summary
 
----
+Cycle 12 deep review of the full repository. **Zero new actionable findings** across all 11 review lanes (code-reviewer, security-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer).
 
-## DEDUPLICATION & CROSS-AGENT AGREEMENT
+The codebase is fully hardened after 11+ review cycles. All previously identified findings are either fixed or explicitly deferred with exit criteria. Pre-fix gates all green: eslint, lint:api-auth, lint:action-origin, vitest 298/298.
 
-Single-reviewer cycle — no deduplication needed. All findings are from the comprehensive review.
+HEAD at review start: `a308d8c` (cycle 11 fresh deploy success documentation).
 
----
+Note: an earlier `_aggregate-cycle12.md` from 2026-04-19 was preserved as `_aggregate-cycle12-historical-2026-04-19.md` for provenance.
 
-## Findings
+## Per-agent source files (cycle 12)
 
-| ID | Description | Severity | Confidence | Action |
-|----|------------|----------|------------|--------|
-| C12-F01 | `db-actions.ts` exposes `e instanceof Error ? e.message : 'Unknown error'` to client in toast messages | MEDIUM | High | IMPLEMENT |
-| C12-F02 | `uploadImages` disk space check uses dynamic `import('fs/promises')` on every invocation | LOW | Medium | IMPLEMENT |
-| C12-F03 | `deleteTopicAlias` missing `/admin/tags` revalidation (inconsistent with other topic ops) | LOW | High | IMPLEMENT |
-| C12-F04 | `db-actions.ts` backup writeStream error swallowing during flush returns success on corrupt file | LOW | High | IMPLEMENT |
-| C12-F05 | `photo-viewer.tsx` keyboard handler stale closure — informational only | LOW | Low | DEFER |
+- `.context/reviews/code-reviewer-cycle12.md`
+- `.context/reviews/security-reviewer-cycle12.md`
+- `.context/reviews/perf-reviewer-cycle12.md`
+- `.context/reviews/critic-cycle12.md`
+- `.context/reviews/verifier-cycle12.md`
+- `.context/reviews/test-engineer-cycle12.md`
+- `.context/reviews/tracer-cycle12.md`
+- `.context/reviews/architect-cycle12.md`
+- `.context/reviews/debugger-cycle12.md`
+- `.context/reviews/document-specialist-cycle12.md`
+- `.context/reviews/designer-cycle12.md`
 
-### C12-F01: Error message leakage in DB admin page [MEDIUM]
+## Findings by severity
 
-**File:** `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:51,80,112`
+- **0 CRITICAL**
+- **0 HIGH**
+- **0 MEDIUM**
+- **0 LOW**
 
-Catch blocks in backup/restore/export handlers expose raw error messages to the client UI. Server errors could contain DB hostnames, file paths, or stack trace fragments.
+## Cross-agent agreement signals
 
-**Fix:** Replace `e instanceof Error ? e.message : 'Unknown error'` with `t('errorUnknown')` or just omit the raw error from toast.
+All 11 agents independently concluded "no new actionable findings" and "codebase remains well-hardened". No dissent.
 
-### C12-F02: Dynamic import on every upload invocation [LOW]
+## Previously-addressed findings (spot-confirmed as still in force)
 
-**File:** `apps/web/src/app/actions/images.ts:91-93`
+- C11R-FRESH-01 (`createAdminUser` `ER_DUP_ENTRY` rollback): `admin-users.ts:159-175` - fixed.
+- AGG10R-RPL-01 (`createAdminUser` form-field validation ordering): `admin-users.ts:88-113` - fixed.
+- AGG9R-RPL-01 (`updatePassword` form-field validation ordering): `auth.ts:288-306` - fixed.
+- C46-01 (`tagsString` sanitize-before-validate): `images.ts:103` - fixed.
+- C46-02 (`searchImagesAction` query sanitize-before-validate): `public.ts:34-37` - fixed.
+- C8R-RPL-02 (upload tracker first-insert TOCTOU): `images.ts:135-139` - fixed.
 
-`await import('fs/promises')` for `statfs` is unnecessary since Node.js 24+ guarantees availability.
+## Previously deferred items (no change this cycle)
 
-**Fix:** Use top-level static import.
+All previously deferred items remain deferred with no change. See:
+- `.context/plans/plan-226-cycle10-rpl-deferred.md`
+- `.context/plans/216-deferred-cycle4-rpl2.md`
+- earlier deferred plans
 
-### C12-F03: deleteTopicAlias missing /admin/tags revalidation [LOW]
+## Agent failures
 
-**File:** `apps/web/src/app/actions/topics.ts:295`
+None. All 11 review lanes returned cleanly.
 
-`deleteTopicAlias` does not revalidate `/admin/tags`, while `createTopic` and `updateTopic` do. Inconsistency risk.
+## Gate status snapshot (pre-fix)
 
-**Fix:** Add `/admin/tags` to revalidation paths.
+- eslint: PASS (0 errors, 0 warnings)
+- lint:api-auth: PASS
+- lint:action-origin: PASS (18 mutating server actions enforce same-origin)
+- vitest: 298/298 PASS (50 test files, 2.35s)
 
-### C12-F04: Backup writeStream error swallowing during flush [LOW]
+## Action for cycle 12 plan
 
-**File:** `apps/web/src/app/[locale]/admin/db-actions.ts:154`
-
-`writeStream.on('error', resolveFlush)` silently resolves the promise even if the backup file is corrupt/truncated, leading to `{ success: true }` on a bad backup.
-
-**Fix:** Track writeStream errors via a flag; return failure if the error occurred.
-
----
-
-## PREVIOUSLY FIXED — Confirmed Resolved
-
-All cycle 1-11 findings remain resolved. No regressions detected.
-
----
-
-## DEFERRED CARRY-FORWARD
-
-All previously deferred items from cycles 5-37 remain deferred with no change in status:
-
-- C32-03: Insertion-order eviction in Maps
-- C32-04 / C30-08: Health endpoint DB disclosure
-- C29-05: `passwordChangeRateLimit` shares `LOGIN_RATE_LIMIT_MAX_KEYS` cap
-- C30-03 / C36-03 / C7-F01: `flushGroupViewCounts` re-buffers without retry limit
-- C30-04 / C36-02 / C8-01: `createGroupShareLink` insertId validation / BigInt coercion
-- C9-F01: original_file_size bigint mode: 'number' precision [MEDIUM]
-- C9-F03: searchImagesAction rate limit check/increment window [LOW]
-- C30-06: Tag slug regex inconsistency
-- Font subsetting (Python brotli dependency)
-- Docker node_modules removal (native module bundling)
-- C4-F02 / C6-F04: Admin checkboxes use native `<input>` (no Checkbox component)
-- C6-F03: No E2E test coverage for upload pipeline
-- C7-F03: No test coverage for view count buffering system
-- C7-F04: No test for search rate limit rollback logic
-- C8-F01: deleteTopicAlias revalidation (informational)
-- C12-F05: photo-viewer.tsx keyboard handler stale closure (informational)
-
----
-
-## AGENT FAILURES
-
-None — single reviewer completed successfully.
-
----
-
-## TOTALS
-
-- **1 MEDIUM** finding requiring implementation (C12-F01)
-- **3 LOW** findings recommended for implementation (C12-F02, F03, F04)
-- **0 CRITICAL/HIGH** findings
-- **4 total** actionable findings (1M + 3L)
+Since there are zero new findings, the cycle-12 plan documents the no-op review + gate verification + deploy activity. No new deferred entries, no new implementation work. Gates to re-run post-deploy for safety.
