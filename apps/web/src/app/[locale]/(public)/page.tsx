@@ -1,4 +1,4 @@
-import { getImagesLite, getTags, getImageCount, getTopics, getSeoSettings } from '@/lib/data';
+import { getImagesLite, getTags, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
@@ -80,7 +80,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const config = await getGalleryConfig();
 
   // Root always gets latest uploads (no topic)
-  const [allTags, allTopics] = await Promise.all([getTags(), getTopics()]);
+  const [allTags, allTopics] = await Promise.all([getTags(), getTopicsCached()]);
 
   // Parse and validate tag slugs
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);

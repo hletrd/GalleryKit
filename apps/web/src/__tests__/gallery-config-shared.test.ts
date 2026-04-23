@@ -5,6 +5,7 @@ import {
     DEFAULT_IMAGE_SIZES,
     MAX_IMAGE_SIZE_COUNT,
     findGridCardImageSize,
+    getPhotoViewerImageSizes,
     isValidSettingValue,
     normalizeConfiguredImageSizes,
     parseImageSizes,
@@ -40,6 +41,16 @@ describe('findGridCardImageSize', () => {
 
     it('falls back to the smallest configured size when no close thumbnail exists', () => {
         expect(findGridCardImageSize([1800, 2400, 3200])).toBe(1800);
+    });
+});
+
+describe('getPhotoViewerImageSizes', () => {
+    it('uses the full viewport when the desktop info panel is closed', () => {
+        expect(getPhotoViewerImageSizes(false)).toBe('100vw');
+    });
+
+    it('subtracts the desktop info panel from the viewport hint when open', () => {
+        expect(getPhotoViewerImageSizes(true)).toBe('(min-width: 1024px) calc(100vw - 414px), 100vw');
     });
 });
 

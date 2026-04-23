@@ -785,6 +785,7 @@ export async function getImageIdsForSitemap(limit: number = 24000) {
 
 export const getImageCached = cache(getImage);
 export const getTopicBySlugCached = cache(getTopicBySlug);
+export const getTopicsCached = cache(getTopics);
 export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
 export const getImageByShareKeyCached = cache(getImageByShareKey);
 export const getSharedGroupCached = cache(getSharedGroup);

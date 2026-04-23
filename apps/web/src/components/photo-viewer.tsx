@@ -34,7 +34,7 @@ export function isEditableTarget(e: KeyboardEvent): boolean {
 
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';
-import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize, getPhotoViewerImageSizes } from '@/lib/gallery-config-shared';
 
 interface PhotoViewerProps {
     images: ImageDetail[];
@@ -93,6 +93,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     }, [image?.id, image?.title, siteTitle]);
 
     const showInfo = isPinned || timerShowInfo;
+    const photoViewerSizes = getPhotoViewerImageSizes(showInfo);
     const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
@@ -204,12 +205,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 <source
                     type="image/avif"
                     srcSet={imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
-                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
+                    sizes={photoViewerSizes}
                 />
                 <source
                     type="image/webp"
                     srcSet={imageSizes.map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
-                    sizes="(max-width: 640px) 100vw, (max-width: 1536px) 100vw, (max-width: 2048px) 100vw, 100vw"
+                    sizes={photoViewerSizes}
                 />
                 <img
                     src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
@@ -222,7 +223,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 />
             </picture>
         );
-    }, [image, t, imageSizes]);
+    }, [image, photoViewerSizes, t, imageSizes]);
 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 

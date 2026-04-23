@@ -74,6 +74,9 @@ export const DEFAULT_IMAGE_SIZES = [640, 1536, 2048, 4096];
 /** Default OG image target size — used for social media previews. */
 export const DEFAULT_OG_TARGET_SIZE = 1536;
 export const DEFAULT_GRID_CARD_TARGET_SIZE = DEFAULT_IMAGE_SIZES[0];
+export const PHOTO_VIEWER_SIDEBAR_WIDTH_PX = 350;
+export const PHOTO_VIEWER_INFO_GAP_PX = 32;
+export const PHOTO_VIEWER_LAYOUT_CHROME_PX = 32;
 
 /**
  * Canonicalize an admin-provided image_sizes string into a sorted, deduped list.
@@ -122,6 +125,20 @@ export function findNearestImageSize(sizes: number[], targetSize: number): numbe
 /** Pick a thumbnail/grid derivative from the configured size list. */
 export function findGridCardImageSize(sizes: number[]): number {
     return findNearestImageSize(sizes, DEFAULT_GRID_CARD_TARGET_SIZE);
+}
+
+/**
+ * Responsive sizes hint for the photo viewer.
+ * When the desktop info panel is open, subtract the sidebar, grid gap,
+ * and a small layout-chrome allowance so browsers pick a closer derivative.
+ */
+export function getPhotoViewerImageSizes(showDesktopInfoPanel: boolean): string {
+    if (!showDesktopInfoPanel) {
+        return '100vw';
+    }
+
+    const reservedWidth = PHOTO_VIEWER_SIDEBAR_WIDTH_PX + PHOTO_VIEWER_INFO_GAP_PX + PHOTO_VIEWER_LAYOUT_CHROME_PX;
+    return `(min-width: 1024px) calc(100vw - ${reservedWidth}px), 100vw`;
 }
 
 /**

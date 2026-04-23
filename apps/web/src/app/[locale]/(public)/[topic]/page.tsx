@@ -1,4 +1,4 @@
-import { getImagesLite, getTags, getTopicBySlugCached, getImageCount, getTopics, getSeoSettings } from '@/lib/data';
+import { getImagesLite, getTags, getTopicBySlugCached, getImageCount, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
@@ -116,7 +116,7 @@ export default async function TopicPage({
   const [images, totalCount, allTopics] = await Promise.all([
     getImagesLite(topic, filterTags, PAGE_SIZE, 0),
     getImageCount(topic, filterTags),
-    getTopics(),
+    getTopicsCached(),
   ]);
   const hasMore = totalCount > PAGE_SIZE;
   const tags = allTags.filter(t => t.count > 1);
