@@ -188,6 +188,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **Session secret init**: `INSERT IGNORE` + re-fetch pattern for multi-process safety
 - **Concurrent DB restore prevention**: MySQL advisory lock `gallerykit_db_restore` acquired on a dedicated pool connection for the entire restore window. Concurrent restore requests fail fast with `restoreInProgress` instead of racing the 250 MB upload path. The lock is released automatically on connection close, so a crashed restore never wedges the next attempt
 - **Per-image-processing claim**: MySQL advisory lock `gallerykit:image-processing:{jobId}` acquired before processing so two queue workers (e.g. across a restart boundary or a multi-process deployment) cannot both convert the same upload. Paired with a `WHERE processed = false` conditional UPDATE so the losing worker detects the already-processed state and cleans up its leftover variant files
+- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, topic renames, admin-user deletes, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
 
 ## Performance Optimizations
 
