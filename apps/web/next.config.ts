@@ -4,7 +4,7 @@ import { NEXT_UPLOAD_BODY_SIZE_LIMIT } from './src/lib/upload-limits';
 
 const withNextIntl = createNextIntlPlugin();
 
-function parseImageBaseUrl(rawValue: string | undefined): URL | null {
+export function parseImageBaseUrl(rawValue: string | undefined, environment: string = process.env.NODE_ENV || 'development'): URL | null {
   if (!rawValue) {
     return null;
   }
@@ -18,6 +18,10 @@ function parseImageBaseUrl(rawValue: string | undefined): URL | null {
 
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new Error('IMAGE_BASE_URL must use http or https');
+  }
+
+  if (environment === 'production' && parsed.protocol !== 'https:') {
+    throw new Error('IMAGE_BASE_URL must use https in production');
   }
 
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {

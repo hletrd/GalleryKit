@@ -8,7 +8,7 @@ import { isValidBackupFilename } from '@/lib/backup-filename';
 import { getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
-import { hasTrustedSameOrigin } from '@/lib/request-origin';
+import { hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
     const requestHeaders = {
@@ -24,7 +24,7 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         },
     };
 
-    if (!hasTrustedSameOrigin(requestHeaders)) {
+    if (!hasTrustedSameOriginWithOptions(requestHeaders, { allowMissingSource: false })) {
         return new NextResponse('Unauthorized', { status: 403 });
     }
 

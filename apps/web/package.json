@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "prebuild": "test -f src/site-config.json || cp src/site-config.example.json src/site-config.json",
+    "prebuild": "node scripts/ensure-site-config.mjs",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
@@ -57,7 +57,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.27",
-    "drizzle-kit": "^0.31.10",
+    "drizzle-kit": "1.0.0-beta.9-e89174b",
     "eslint": "^9",
     "eslint-config-next": "^16.2.3",
     "postcss": "^8.5.9",

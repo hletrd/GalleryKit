@@ -434,7 +434,7 @@
     "seoAuthorTooLong": "작성자 이름이 너무 깁니다 (최대 200자)",
     "seoLocaleTooLong": "로케일이 너무 깁니다 (최대 10자)",
     "seoOgImageUrlTooLong": "OG 이미지 URL이 너무 깁니다 (최대 500자)",
-    "seoOgImageUrlInvalid": "OG 이미지 URL은 유효한 http:// 또는 https:// URL이어야 합니다",
+    "seoOgImageUrlInvalid": "OG 이미지 URL은 상대 경로이거나 동일 출처의 http(s) URL이어야 합니다",
     "failedToUpdateSeoSettings": "SEO 설정 저장에 실패했습니다",
     "failedToFetchGallerySettings": "갤러리 설정을 불러오지 못했습니다",
     "invalidSettingKey": "잘못된 설정 키입니다",

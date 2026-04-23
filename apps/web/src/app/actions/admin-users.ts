@@ -106,6 +106,7 @@ export async function createAdminUser(formData: FormData) {
     // that will be hashed (matches uploadImages tagsString pattern, see C46-01).
     // C0 controls in passwords are almost always accidental paste artifacts.
     const password = stripControlChars(formData.get('password')?.toString() ?? '') ?? '';
+    const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed (defense in
@@ -117,6 +118,7 @@ export async function createAdminUser(formData: FormData) {
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };
     if (!password || password.length < 12) return { error: t('passwordTooShortCreate') };
     if (password.length > 1024) return { error: t('passwordTooLongCreate') };
+    if (password !== confirmPassword) return { error: t('passwordsDoNotMatch') };
 
     try {
         const hash = await argon2.hash(password, { type: argon2.argon2id });

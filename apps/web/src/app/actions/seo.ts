@@ -7,6 +7,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
+import { validateSeoOgImageUrl } from '@/lib/seo-og-url';
 import { stripControlChars } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import type { SeoSettingKey } from '@/lib/gallery-config-shared';
@@ -95,32 +96,8 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // to prevent admins from setting tracker/malicious external URLs
     // in every public page's <meta og:image> tag.
     if (sanitizedSettings.seo_og_image_url && sanitizedSettings.seo_og_image_url.trim()) {
-        const trimmedUrl = sanitizedSettings.seo_og_image_url.trim();
-        // Allow relative paths (e.g., /uploads/og-image.jpg)
-        if (trimmedUrl.startsWith('/')) {
-            // Valid relative path — no further origin check needed
-        } else {
-            try {
-                const url = new URL(trimmedUrl);
-                if (!['http:', 'https:'].includes(url.protocol)) {
-                    return { error: t('seoOgImageUrlInvalid') };
-                }
-                // Verify the URL origin matches the configured site origin
-                const baseUrl = process.env.BASE_URL?.trim();
-                if (baseUrl) {
-                    try {
-                        const siteOrigin = new URL(baseUrl).origin;
-                        if (url.origin !== siteOrigin) {
-                            return { error: t('seoOgImageUrlInvalid') };
-                        }
-                    } catch {
-                        // BASE_URL is invalid — allow the OG URL through (no origin to enforce)
-                    }
-                }
-                // If BASE_URL is not set, allow any https/http URL (dev/fallback)
-            } catch {
-                return { error: t('seoOgImageUrlInvalid') };
-            }
+        if (!validateSeoOgImageUrl(sanitizedSettings.seo_og_image_url)) {
+            return { error: t('seoOgImageUrlInvalid') };
         }
     }
 

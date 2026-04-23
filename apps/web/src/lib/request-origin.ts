@@ -60,6 +60,14 @@ function toOrigin(candidate: string) {
 }
 
 export function hasTrustedSameOrigin(requestHeaders: HeaderLookup) {
+    return hasTrustedSameOriginWithOptions(requestHeaders);
+}
+
+export function hasTrustedSameOriginWithOptions(
+    requestHeaders: HeaderLookup,
+    options: { allowMissingSource?: boolean } = {}
+) {
+    const { allowMissingSource = true } = options;
     const expectedOrigin = getExpectedOrigin(requestHeaders);
     if (!expectedOrigin) {
         return false;
@@ -75,5 +83,5 @@ export function hasTrustedSameOrigin(requestHeaders: HeaderLookup) {
         return toOrigin(referer) === expectedOrigin;
     }
 
-    return true;
+    return allowMissingSource;
 }

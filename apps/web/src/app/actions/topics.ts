@@ -1,6 +1,8 @@
 'use server';
 
-import { db, images, topics, topicAliases } from '@/db';
+import type { RowDataPacket } from 'mysql2/promise';
+
+import { connection, db, images, topics, topicAliases } from '@/db';
 import { eq, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
@@ -29,6 +31,28 @@ async function topicRouteSegmentExists(segment: string): Promise<boolean> {
         .limit(1);
 
     return !!aliasMatch;
+}
+
+async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<T> {
+    const conn = await connection.getConnection();
+    let lockAcquired = false;
+
+    try {
+        const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
+            "SELECT GET_LOCK('gallerykit_topic_route_segments', 5) AS acquired"
+        );
+        lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
+        if (!lockAcquired) {
+            throw new Error('TOPIC_ROUTE_LOCK_TIMEOUT');
+        }
+
+        return await action();
+    } finally {
+        if (lockAcquired) {
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_topic_route_segments')").catch(() => {});
+        }
+        conn.release();
+    }
 }
 
 export async function createTopic(formData: FormData) {
@@ -61,10 +85,6 @@ export async function createTopic(formData: FormData) {
     if (isReservedTopicRouteSegment(slug)) {
         return { error: t('reservedRouteSegment') };
     }
-    if (await topicRouteSegmentExists(slug)) {
-        return { error: t('slugConflictsWithRoute') };
-    }
-
     if (label.length > 100) {
         return { error: t('labelTooLong') };
     }
@@ -80,24 +100,33 @@ export async function createTopic(formData: FormData) {
          }
     }
 
-    // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
     try {
-        await db.insert(topics).values({
-            label,
-            slug,
-            order,
-            image_filename: imageFilename,
+        return await withTopicRouteMutationLock(async () => {
+            if (await topicRouteSegmentExists(slug)) {
+                return { error: t('slugConflictsWithRoute') };
+            }
+
+            // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
+            await db.insert(topics).values({
+                label,
+                slug,
+                order,
+                image_filename: imageFilename,
+            });
+
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'topic_create', 'topic', slug).catch(console.debug);
+
+            revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/');
+            revalidateAllAppData();
+            return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
         });
-
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'topic_create', 'topic', slug).catch(console.debug);
-
-        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/');
-        revalidateAllAppData();
-        return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
     } catch (e: unknown) {
         if (imageFilename) {
             await deleteTopicImage(imageFilename);
+        }
+        if (e instanceof Error && e.message === 'TOPIC_ROUTE_LOCK_TIMEOUT') {
+            return { error: t('failedToCreateTopic') };
         }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
             return { error: t('slugOrAliasExists') };
@@ -158,10 +187,6 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
     const previousImageFilename = currentTopic?.image_filename ?? null;
 
-    if (slug !== cleanCurrentSlug && await topicRouteSegmentExists(slug)) {
-        return { error: t('slugConflictsWithRoute') };
-    }
-
     let imageFilename = undefined;
     let imageWarning: string | undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
@@ -176,41 +201,47 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     try {
         let affectedRows = 0;
 
-        if (slug !== cleanCurrentSlug) {
-            const nextImageFilename = imageFilename ?? previousImageFilename ?? null;
-            await db.transaction(async (tx) => {
-                const [existingTopic] = await tx.select({ slug: topics.slug })
-                    .from(topics)
-                    .where(eq(topics.slug, cleanCurrentSlug))
-                    .limit(1);
+        await withTopicRouteMutationLock(async () => {
+            if (slug !== cleanCurrentSlug && await topicRouteSegmentExists(slug)) {
+                throw new Error('SLUG_CONFLICTS_WITH_ROUTE');
+            }
 
-                if (!existingTopic) {
-                    throw new Error('TOPIC_NOT_FOUND');
-                }
+            if (slug !== cleanCurrentSlug) {
+                const nextImageFilename = imageFilename ?? previousImageFilename ?? null;
+                await db.transaction(async (tx) => {
+                    const [existingTopic] = await tx.select({ slug: topics.slug })
+                        .from(topics)
+                        .where(eq(topics.slug, cleanCurrentSlug))
+                        .limit(1);
 
-                await tx.insert(topics).values({
-                    label,
-                    slug,
-                    order,
-                    image_filename: nextImageFilename,
+                    if (!existingTopic) {
+                        throw new Error('TOPIC_NOT_FOUND');
+                    }
+
+                    await tx.insert(topics).values({
+                        label,
+                        slug,
+                        order,
+                        image_filename: nextImageFilename,
+                    });
+                    await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
+                    await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
+
+                    const [deleteResult] = await tx.delete(topics)
+                        .where(eq(topics.slug, cleanCurrentSlug));
+                    affectedRows = deleteResult.affectedRows;
                 });
-                await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
-                await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
-
-                const [deleteResult] = await tx.delete(topics)
+            } else {
+                const [updateResult] = await db.update(topics)
+                    .set({
+                        label,
+                        order,
+                        ...(imageFilename ? { image_filename: imageFilename } : {})
+                    })
                     .where(eq(topics.slug, cleanCurrentSlug));
-                affectedRows = deleteResult.affectedRows;
-            });
-        } else {
-            const [updateResult] = await db.update(topics)
-                .set({
-                    label,
-                    order,
-                    ...(imageFilename ? { image_filename: imageFilename } : {})
-                })
-                .where(eq(topics.slug, cleanCurrentSlug));
-            affectedRows = updateResult.affectedRows;
-        }
+                affectedRows = updateResult.affectedRows;
+            }
+        });
 
         if (affectedRows === 0) {
             if (imageFilename) {
@@ -236,6 +267,12 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
          }
          if (e instanceof Error && e.message === 'TOPIC_NOT_FOUND') {
              return { error: t('topicNotFound') };
+         }
+         if (e instanceof Error && e.message === 'SLUG_CONFLICTS_WITH_ROUTE') {
+             return { error: t('slugConflictsWithRoute') };
+         }
+         if (e instanceof Error && e.message === 'TOPIC_ROUTE_LOCK_TIMEOUT') {
+             return { error: t('failedToUpdateTopic') };
          }
          if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
              return { error: t('slugAlreadyExists') };
@@ -332,24 +369,29 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     if (isReservedTopicRouteSegment(cleanAlias)) {
         return { error: t('reservedRouteSegment') };
     }
-    if (await topicRouteSegmentExists(cleanAlias)) {
-        return { error: t('slugConflictsWithRoute') };
-    }
-
-    // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
     try {
-        await db.insert(topicAliases).values({
-            alias: cleanAlias,
-            topicSlug: cleanTopicSlug
+        return await withTopicRouteMutationLock(async () => {
+            if (await topicRouteSegmentExists(cleanAlias)) {
+                return { error: t('slugConflictsWithRoute') };
+            }
+
+            // US-007: Insert directly and catch ER_DUP_ENTRY to avoid TOCTOU race
+            await db.insert(topicAliases).values({
+                alias: cleanAlias,
+                topicSlug: cleanTopicSlug
+            });
+
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
+
+            revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
+            revalidateAllAppData();
+            return { success: true };
         });
-
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
-
-        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
-        revalidateAllAppData();
-        return { success: true };
     } catch (e: unknown) {
+        if (e instanceof Error && e.message === 'TOPIC_ROUTE_LOCK_TIMEOUT') {
+            return { error: t('failedToCreateTopic') };
+        }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
             return { error: t('aliasAlreadyExists') };
         }

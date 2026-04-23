@@ -4,6 +4,9 @@
     "workspaces": [
         "apps/*"
     ],
+    "overrides": {
+        "esbuild": "^0.25.4"
+    },
     "scripts": {
         "dev": "npm run dev --workspace=apps/web",
         "build": "npm run build --workspaces",

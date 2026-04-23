@@ -6,6 +6,9 @@ const {
     updateMock,
     deleteMock,
     transactionMock,
+    getConnectionMock,
+    lockQueryMock,
+    releaseLockQueryMock,
     isAdminMock,
     getCurrentUserMock,
     getTranslationsMock,
@@ -21,6 +24,9 @@ const {
     updateMock: vi.fn(),
     deleteMock: vi.fn(),
     transactionMock: vi.fn(),
+    getConnectionMock: vi.fn(),
+    lockQueryMock: vi.fn(),
+    releaseLockQueryMock: vi.fn(),
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
     getTranslationsMock: vi.fn(),
@@ -74,6 +80,9 @@ vi.mock('@/db', () => ({
         delete: deleteMock,
         transaction: transactionMock,
     },
+    connection: {
+        getConnection: getConnectionMock,
+    },
     topics: {
         slug: 'topics.slug',
         image_filename: 'topics.image_filename',
@@ -123,6 +132,9 @@ describe('topic actions', () => {
         updateMock.mockReset();
         deleteMock.mockReset();
         transactionMock.mockReset();
+        getConnectionMock.mockReset();
+        lockQueryMock.mockReset();
+        releaseLockQueryMock.mockReset();
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 1 });
         getTranslationsMock.mockResolvedValue((key: string) => key);
@@ -133,6 +145,29 @@ describe('topic actions', () => {
         logAuditEventMock.mockReset();
         logAuditEventMock.mockResolvedValue(undefined);
         maintenanceMessageMock.mockReturnValue(null);
+        const queryMock = vi.fn(async (sql: string) => {
+            if (sql.includes('GET_LOCK')) {
+                return [[{ acquired: 1 }]];
+            }
+            if (sql.includes('RELEASE_LOCK')) {
+                return [[{ released: 1 }]];
+            }
+            return [[]];
+        });
+        lockQueryMock.mockImplementation(queryMock);
+        releaseLockQueryMock.mockImplementation(queryMock);
+        getConnectionMock.mockResolvedValue({
+            query: vi.fn(async (sql: string) => {
+                if (sql.includes('GET_LOCK')) {
+                    return lockQueryMock(sql);
+                }
+                if (sql.includes('RELEASE_LOCK')) {
+                    return releaseLockQueryMock(sql);
+                }
+                return [[]];
+            }),
+            release: vi.fn(),
+        });
     });
 
     it('rejects createTopic when the requested slug already exists as an alias route', async () => {
@@ -148,6 +183,7 @@ describe('topic actions', () => {
         await expect(createTopic(formData)).resolves.toEqual({ error: 'slugConflictsWithRoute' });
         expect(processTopicImageMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
+        expect(lockQueryMock).toHaveBeenCalled();
     });
 
     it('rejects createTopic with invalidLabel when the label contains control characters', async () => {
@@ -222,6 +258,18 @@ describe('topic actions', () => {
 
         await expect(deleteTopicAlias('travel', 'tokyo.2026')).resolves.toEqual({ success: true });
         expect(deleteMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('serializes alias creation behind the shared route lock before inserting', async () => {
+        selectMock
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([]));
+        insertMock.mockReturnValueOnce(makeWriteChain([{ insertId: 1 }]));
+
+        await expect(createTopicAlias('travel', 'night')).resolves.toEqual({ success: true });
+        expect(lockQueryMock).toHaveBeenCalled();
+        expect(insertMock).toHaveBeenCalledTimes(1);
+        expect(releaseLockQueryMock).toHaveBeenCalled();
     });
 
     it('rejects updateTopic with invalidLabel when the label contains control characters', async () => {

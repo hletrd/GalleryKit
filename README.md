@@ -131,7 +131,7 @@ If you ever seeded an environment from older checked-in examples, rotate both
 `SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical
 git values must be treated as compromised and must not be reused.
 
-If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP.
+If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config now caps general requests at **2 GiB** and `/admin/db` restore requests at **250 MB** to match the app-side limits; keep those layers aligned if you customize either side.
 The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. Keep those protections if you adapt the compose file.
 For bootstrap auth, prefer a generated secret or a precomputed Argon2 hash; do not deploy with placeholder passwords such as `password`.
@@ -154,7 +154,7 @@ npm run build
 
 1. Configure `apps/web/.env.local`
 2. Ensure you are on a Linux host that supports `network_mode: host`, or adapt `apps/web/docker-compose.yml` for your container network.
-3. Provide a real `apps/web/src/site-config.json` on the host before starting the compose stack; the checked-in example file is only a template.
+3. Provide a real `apps/web/src/site-config.json` on the host before starting the compose stack; production/deploy builds now fail fast when that file is missing instead of silently copying the example template.
 4. Run:
 
 ```bash

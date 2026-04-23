@@ -13,6 +13,18 @@ import { Progress } from "@/components/ui/progress";
 import { useTranslation } from "@/components/i18n-provider";
 import { TagInput } from "@/components/tag-input";
 
+export interface PendingUploadItem {
+    id: string;
+    file: File;
+}
+
+export function createPendingUploadItems(
+    acceptedFiles: File[],
+    createId: () => string = () => crypto.randomUUID()
+): PendingUploadItem[] {
+    return acceptedFiles.map((file) => ({ id: createId(), file }));
+}
+
 export function UploadDropzone({ topics, availableTags }: { topics: { slug: string, label: string }[], availableTags: { id: number, name: string, slug: string }[] }) {
     const router = useRouter();
     const [uploading, setUploading] = useState(false);
@@ -20,7 +32,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const [completedCount, setCompletedCount] = useState(0);
     const [topic, setTopic] = useState<string>(topics[0]?.slug || '');
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
-    const [files, setFiles] = useState<File[]>([]);
+    const [files, setFiles] = useState<PendingUploadItem[]>([]);
     const [perFileTags, setPerFileTags] = useState<Record<string, string[]>>({});
     const { t } = useTranslation();
 
@@ -36,16 +48,13 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         perFileTagsRef.current = perFileTags;
     }, [perFileTags]);
 
-    // Helper to generate a unique ID for a file instance
-    const getFileId = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
-
     // Incremental object URL management — only creates/revoke URLs for
     // added/removed files instead of recreating all URLs on every change.
     const previewUrlsRef = useRef<Map<string, string>>(new Map());
     const [previewVersion, setPreviewVersion] = useState(0);
 
     useEffect(() => {
-        const currentIds = new Set(files.map(f => getFileId(f)));
+        const currentIds = new Set(files.map(({ id }) => id));
         let changed = false;
 
         // Revoke URLs for removed files
@@ -58,8 +67,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         }
 
         // Create URLs for new files
-        for (const file of files) {
-            const id = getFileId(file);
+        for (const { id, file } of files) {
             if (!previewUrlsRef.current.has(id)) {
                 previewUrlsRef.current.set(id, URL.createObjectURL(file));
                 changed = true;
@@ -85,7 +93,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const previewUrls = previewVersion >= 0 ? previewUrlsRef.current : previewUrlsRef.current;
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
-        setFiles(prev => [...prev, ...acceptedFiles]);
+        setFiles(prev => [...prev, ...createPendingUploadItems(acceptedFiles)]);
     }, []);
 
     const acceptedImageTypes = useMemo(() => ({
@@ -112,8 +120,8 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         const totalFiles = files.length;
         let completedSoFar = 0;
 
-        const uploadFile = async (file: File) => {
-            const fileId = getFileId(file);
+        const uploadFile = async ({ id, file }: PendingUploadItem) => {
+            const fileId = id;
 
             const formData = new FormData();
             formData.append('files', file);
@@ -153,8 +161,8 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         const queue = [...files];
         const inFlight = new Set<Promise<void>>();
 
-        for (const file of queue) {
-            const promise: Promise<void> = uploadFile(file).finally(() => inFlight.delete(promise));
+        for (const item of queue) {
+            const promise: Promise<void> = uploadFile(item).finally(() => inFlight.delete(promise));
             inFlight.add(promise);
 
             if (inFlight.size >= UPLOAD_CONCURRENCY) {
@@ -177,7 +185,8 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         if (failedFiles.length === 0) {
             toast.success(t('upload.success', { count: successCount }));
             // Remove uploaded files from the list, keeping any new ones that might have been added
-            setFiles(prev => prev.filter(f => !files.includes(f)));
+            const uploadedIds = new Set(files.map(({ id }) => id));
+            setFiles(prev => prev.filter(({ id }) => !uploadedIds.has(id)));
             setSelectedTags([]);
             setPerFileTags({});
             router.refresh();
@@ -185,7 +194,8 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
             toast.warning(t('upload.partialSuccess', { count: successCount, failed: failedFiles.length }));
             // Keep failed files and any new files
             const failedSet = new Set(failedFiles);
-            setFiles(prev => prev.filter(f => failedSet.has(f) || !files.includes(f)));
+            const attemptedIds = new Set(files.map(({ id }) => id));
+            setFiles(prev => prev.filter((item) => failedSet.has(item.file) || !attemptedIds.has(item.id)));
             setProgress(0);
         }
         } catch {
@@ -203,7 +213,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         // Cleanup perFileTags? Optional, but good practice
         // We can't easily clean up strictly by index if we remove from middle,
         // but using ID handles it.
-        const id = getFileId(fileToRemove);
+        const id = fileToRemove.id;
         const newTags = { ...perFileTags };
         delete newTags[id];
         setPerFileTags(newTags);
@@ -278,8 +288,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            {files.map((file, i) => {
-                                const fileId = getFileId(file);
+                            {files.map(({ id: fileId, file }, i) => {
                                 const localTags = perFileTags[fileId] || [];
                                 const previewUrl = previewUrls.get(fileId) || '';
 
@@ -338,7 +347,6 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                                                     availableTags={availableTags}
                                                     selectedTags={localTags}
                                                     onTagsChange={(newTags) => {
-                                                        const fileId = getFileId(file);
                                                         setPerFileTags(prev => ({
                                                             ...prev,
                                                             [fileId]: newTags

@@ -63,7 +63,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 toast.error(res.error);
             } else {
                 toast.success(t('categories.created'));
-                if (res?.warning) {
+                if (res && 'warning' in res && res.warning) {
                     toast.warning(res.warning);
                 }
                 setIsCreateOpen(false);
@@ -82,7 +82,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 toast.error(res.error);
             } else {
                 toast.success(t('categories.updated'));
-                if (res?.warning) {
+                if (res && 'warning' in res && res.warning) {
                     toast.warning(res.warning);
                 }
                 setEditingTopic(null);

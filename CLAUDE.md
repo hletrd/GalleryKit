@@ -226,7 +226,7 @@ The repository has a formal test surface:
 
 1. Configure `.env.local` with production MySQL credentials
 2. Generate a unique `SESSION_SECRET`: `openssl rand -hex 32`
-3. Copy `site-config.example.json` to `site-config.json`
+3. Copy `site-config.example.json` to `site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing
 4. Run `docker compose -f apps/web/docker-compose.yml up -d --build`
 5. Initialize DB: container runs migrations automatically
 6. Push schema indexes: `npm run db:push` (from apps/web/)

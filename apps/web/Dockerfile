@@ -38,8 +38,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 WORKDIR /app/apps/web
-# Use real site-config.json if present in build context, otherwise fall back to example
-RUN if [ ! -f src/site-config.json ]; then cp src/site-config.example.json src/site-config.json; fi
+RUN node scripts/ensure-site-config.mjs
 
 # Build the app
 RUN npm run build

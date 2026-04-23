@@ -434,7 +434,7 @@
     "seoAuthorTooLong": "Author name is too long (max 200 characters)",
     "seoLocaleTooLong": "Locale is too long (max 10 characters)",
     "seoOgImageUrlTooLong": "OG image URL is too long (max 500 characters)",
-    "seoOgImageUrlInvalid": "OG image URL must be a valid http:// or https:// URL",
+    "seoOgImageUrlInvalid": "OG image URL must be a relative path or a same-origin http(s) URL",
     "failedToUpdateSeoSettings": "Failed to update SEO settings",
     "failedToFetchGallerySettings": "Failed to fetch gallery settings",
     "invalidSettingKey": "Invalid setting key",

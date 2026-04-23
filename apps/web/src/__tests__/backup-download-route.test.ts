@@ -72,7 +72,14 @@ describe('backup download route', () => {
     it('rejects unauthenticated requests before touching the filesystem', async () => {
         isAdminMock.mockResolvedValue(false);
 
-        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`));
+        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
+            headers: {
+                host: 'localhost',
+                origin: 'http://localhost',
+                referer: 'http://localhost/admin/db',
+                'x-forwarded-proto': 'http',
+            },
+        }));
 
         expect(response.status).toBe(401);
         await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' });
@@ -83,7 +90,14 @@ describe('backup download route', () => {
         const filePath = path.join(tempCwd, 'data', 'backups', VALID_BACKUP_FILE);
         await fsp.writeFile(filePath, 'backup-data');
 
-        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`));
+        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
+            headers: {
+                host: 'localhost',
+                origin: 'http://localhost',
+                referer: 'http://localhost/admin/db',
+                'x-forwarded-proto': 'http',
+            },
+        }));
 
         expect(response.status).toBe(200);
         expect(response.headers.get('Content-Type')).toBe('application/sql');
@@ -110,6 +124,17 @@ describe('backup download route', () => {
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });
 
+    it('rejects download attempts without same-origin provenance headers', async () => {
+        const filePath = path.join(tempCwd, 'data', 'backups', VALID_BACKUP_FILE);
+        await fsp.writeFile(filePath, 'backup-data');
+
+        const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`));
+
+        expect(response.status).toBe(403);
+        expect(await response.text()).toBe('Unauthorized');
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
+
     it('returns a 500 for unexpected filesystem failures instead of masking them as 404', async () => {
         const backupsDir = path.join(tempCwd, 'data', 'backups');
         const filePath = path.join(backupsDir, VALID_BACKUP_FILE);
@@ -117,7 +142,12 @@ describe('backup download route', () => {
         await fsp.chmod(backupsDir, 0o000);
 
         try {
-            const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`));
+            const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`, {
+                headers: {
+                    host: 'localhost',
+                    referer: 'http://localhost/admin/db',
+                },
+            }));
 
             expect(response.status).toBe(500);
             expect(await response.text()).toBe('Internal Server Error');

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hasTrustedSameOrigin } from '@/lib/request-origin';
+import { hasTrustedSameOrigin, hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 
@@ -96,5 +96,12 @@ describe('hasTrustedSameOrigin', () => {
             host: 'gallery.atik.kr',
             'x-forwarded-proto': 'https',
         }))).toBe(true);
+    });
+
+    it('can require explicit provenance for sensitive routes', () => {
+        expect(hasTrustedSameOriginWithOptions(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-proto': 'https',
+        }), { allowMissingSource: false })).toBe(false);
     });
 });
