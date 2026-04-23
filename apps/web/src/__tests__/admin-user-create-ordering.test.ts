@@ -113,4 +113,34 @@ describe('admin-users.ts — createAdminUser validates form fields before rate-l
         const body = createAdminUserMatch![0];
         expect(body).toMatch(/if \(checkUserCreateRateLimit\(ip\)\)/);
     });
+
+    /**
+     * C11R-FRESH-01 regression guard: when `db.insert` throws
+     * ER_DUP_ENTRY (username already exists), BOTH counters must be
+     * rolled back. Without rollback, ten duplicate-username typos within
+     * the 1-hour window lock the admin out of user creation purely from
+     * client-side mistakes. Matches the precedent set by login /
+     * updatePassword / createAdminUser-form-validation ordering:
+     * legitimate user errors must not consume rate-limit slots.
+     */
+    it('rolls back DB rate limit when duplicate-username error is caught', () => {
+        const body = createAdminUserMatch![0];
+        // Locate the ER_DUP_ENTRY branch
+        const dupBranchStart = body.indexOf("hasMySQLErrorCode(e, 'ER_DUP_ENTRY')");
+        expect(dupBranchStart).toBeGreaterThanOrEqual(0);
+
+        // Locate the next return for usernameExists
+        const usernameExistsReturn = body.indexOf("return { error: t('usernameExists') };", dupBranchStart);
+        expect(usernameExistsReturn).toBeGreaterThan(dupBranchStart);
+
+        // Between the dup-entry branch start and the usernameExists return,
+        // both resetRateLimit (DB) and resetUserCreateRateLimit (in-memory)
+        // must be called so that duplicate-username failures don't burn the
+        // rate-limit budget.
+        const dupBranchBody = body.slice(dupBranchStart, usernameExistsReturn);
+        expect(dupBranchBody).toMatch(
+            /resetRateLimit\(ip,\s*'user_create',\s*USER_CREATE_WINDOW_MS\)/,
+        );
+        expect(dupBranchBody).toMatch(/resetUserCreateRateLimit\(ip\)/);
+    });
 });

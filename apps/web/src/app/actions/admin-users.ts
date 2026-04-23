@@ -158,6 +158,20 @@ export async function createAdminUser(formData: FormData) {
         return { success: true };
     } catch (e: unknown) {
         if (hasMySQLErrorCode(e, 'ER_DUP_ENTRY')) {
+            // C11R-FRESH-01: roll back BOTH counters on duplicate-username.
+            // A legitimate admin typo (typing a username that already exists)
+            // is a client-side user error, not a brute-force attempt. Without
+            // rollback, ten duplicate-username typos within the 1-hour window
+            // lock the admin out of user creation. Matches the precedent set
+            // by AGG10R-RPL-01 (validation-before-increment) and AGG9R-RPL-01
+            // (updatePassword validation ordering): legitimate user errors
+            // must not consume rate-limit slots.
+            try {
+                await resetRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
+            } catch {
+                // DB unavailable — in-memory Map will expire naturally
+            }
+            resetUserCreateRateLimit(ip);
             return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
