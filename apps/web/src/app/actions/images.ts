@@ -538,10 +538,13 @@ export async function deleteImages(ids: number[]) {
     const affectedTopics = new Set(imageRecords.map(r => r.topic));
 
     // For large batches, use layout-level revalidation to avoid ISR cache thrash
-    // from hundreds of individual revalidatePath calls
+    // from hundreds of individual revalidatePath calls. C6R-RPL-05 / AGG6R-10:
+    // revalidateAllAppData already invalidates every page including the admin
+    // dashboard, so the follow-up revalidateLocalizedPaths('/admin/dashboard')
+    // was redundant. Dropping the redundant call removes a pointless ISR tag
+    // invalidation without changing visible behavior.
     if (foundIds.length > 20) {
         revalidateAllAppData();
-        revalidateLocalizedPaths('/admin/dashboard');
     } else {
         revalidateLocalizedPaths(
             '/',
