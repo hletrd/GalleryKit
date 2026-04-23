@@ -143,7 +143,7 @@ git values must be treated as compromised and must not be reused.
 - LIKE wildcards (`%`, `_`, `\`) escaped in search to prevent wildcard abuse
 - DB backup dumps stored in `data/backups/` (non-public), served via authenticated API route
 - DB restore validates file headers and uses `--one-database` flag
-- CSV export escapes formula injection characters (`=`, `+`, `-`, `@`, `\t`, `\r`)
+- CSV export escapes formula injection characters (`=`, `+`, `-`, `@`) with leading-whitespace tolerance (C7R-RPL-01), strips C0/C1 control characters, strips Unicode bidi override and isolate chars (U+202A-202E, U+2066-2069) against Trojan-Source-style visual reordering (C7R-RPL-11), and strips zero-width / invisible formatting chars (U+200B-200F ZWSP/ZWNJ/ZWJ/LRM/RLM, U+2060 WJ, U+FEFF BOM, U+180E MVS, U+FFF9-FFFB interlinear anchors) against invisible-character formula-injection bypasses (C8R-RPL-01). See `apps/web/src/lib/csv-escape.ts`
 - `MYSQL_PWD` env var used for mysqldump/restore (not `-p` flag)
 
 ### Privacy
