@@ -186,6 +186,8 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **`createTopic` TOCTOU**: Catches `ER_DUP_ENTRY` instead of check-then-insert
 - **`ensureDirs`**: Promise-based singleton prevents concurrent mkdir
 - **Session secret init**: `INSERT IGNORE` + re-fetch pattern for multi-process safety
+- **Concurrent DB restore prevention**: MySQL advisory lock `gallerykit_db_restore` acquired on a dedicated pool connection for the entire restore window. Concurrent restore requests fail fast with `restoreInProgress` instead of racing the 250 MB upload path. The lock is released automatically on connection close, so a crashed restore never wedges the next attempt
+- **Per-image-processing claim**: MySQL advisory lock `gallerykit:image-processing:{jobId}` acquired before processing so two queue workers (e.g. across a restart boundary or a multi-process deployment) cannot both convert the same upload. Paired with a `WHERE processed = false` conditional UPDATE so the losing worker detects the already-processed state and cleans up its leftover variant files
 
 ## Performance Optimizations
 
