@@ -1,66 +1,61 @@
-# Aggregate Review — Cycle 1 (2026-04-23)
+# Aggregate Review — Cycle 2/100 (2026-04-23)
 
-## Scope
-Merged the current-cycle review outputs under `.context/reviews/`, revalidated the claims against current HEAD, deduped overlaps, and excluded stale findings that no longer reproduce.
+## Agent coverage
+Requested reviewers were executed with rolling retries because the Agent tool hit a `max 6` thread limit when the initial single-batch fan-out was attempted. Completed reviewer outputs exist for:
+- code-reviewer
+- security-reviewer
+- critic
+- verifier
+- test-engineer
+- architect
+- debugger
+- designer
+- perf-reviewer
+- tracer
+- document-specialist
 
-## Reviewer inventory used this cycle
-Registered reviewer roles included or attempted this cycle:
-- `code-reviewer`
-- `security-reviewer`
-- `critic`
-- `verifier`
-- `test-engineer`
-- `architect`
-- `debugger`
-- `designer`
-- leader-authored `performance-reviewer` supplement (exact `perf-reviewer` agent unavailable)
+## Aggregation method
+I deduped repeated claims across reviewer outputs, then re-verified each claim directly against current HEAD before keeping it. Several repeated subagent claims were stale and did **not** match the current code, so they are called out separately below instead of being treated as actionable findings.
 
-Requested but not registered in this environment:
-- `document-specialist`
-- `perf-reviewer` (closest available coverage provided via leader-authored `performance-reviewer.md`)
-- `tracer`
-- `api-reviewer`
-- `quality-reviewer`
-- `style-reviewer`
+## CONFIRMED FINDINGS
 
-## Validation notes
-- Several per-agent files repeated an older exact-multiple pagination finding. That finding was **rejected** during aggregation because current code already returns `hasMore` from `loadMoreImages()` and locks it with unit coverage in `apps/web/src/app/actions/public.ts:10-25`, `apps/web/src/components/load-more.tsx:28-40`, and `apps/web/src/__tests__/public-actions.test.ts:88-99`.
-- Multiple agents independently converged on a broader “route-level async choreography” concern. Manual validation narrowed that theme to the photo/share entrypoints listed below; the home/topic/load-more files cited in stale outputs no longer reproduce the reported bug shape.
-
-## Deduped validated findings
-
-### AGG-01 — Photo/share route entrypoints still serialize independent cached reads on the request hot path
-- **Severity:** MEDIUM
+### C2R2-01 — Metadata tag validation still inserts an avoidable async hop on tag-filtered public pages
+- **Severity:** LOW
 - **Confidence:** HIGH
-- **Cross-agent signal:** High — the route-level async-latency theme appeared in `code-reviewer.md`, `critic.md`, `verifier.md`, `architect.md`, and `debugger.md`; manual validation narrowed it to the currently reproducing files below.
-- **Files:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:25-29,41,68`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:33-46,84-95`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:28-40,95-97`
-- **Why it is a problem:** These entrypoints still defer `getGalleryConfig()` / `getSeoSettings()` / locale and translation reads until after other awaited calls finish, even though those reads are independent and cacheable.
-- **Concrete failure scenario:** Direct photo/share visits and OG crawler requests accumulate avoidable latency before rendering or metadata generation starts returning bytes.
-- **Suggested fix:** Restructure the affected entrypoints into `Promise.all` groups so only truly dependent work remains sequential.
+- **Cross-agent agreement:** High (broad SSR-latency concern was independently raised by code-reviewer, critic, verifier, architect, debugger, perf-reviewer, and tracer; local validation narrowed the real issue to the metadata tag lookup paths below).
+- **Files:** `apps/web/src/app/[locale]/(public)/page.tsx:18-29`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:18-36`
+- **Why it is a problem:** Both `generateMetadata` implementations wait for the initial `Promise.all(...)` to finish and only then start `getTagsCached(...)` when tag filters are present. That extra await is small, but it is still unnecessary work on SEO-critical requests.
+- **Concrete failure scenario:** Requests like `/en?tags=portrait` and `/en/travel?tags=seoul` pay an extra round-trip before metadata can finish, increasing TTFB for crawlers and first render on cold paths.
+- **Suggested fix:** Start the tag lookup promise earlier (or compose it off the existing topic lookup promise) so tag validation overlaps with the other metadata reads.
 
-### AGG-02 — Untitled photo pages use inconsistent fallback titles across metadata, JSON-LD, and viewer UI
-- **Severity:** MEDIUM
+### C2R2-02 — Static icon routes are forced onto Edge runtime, which disables static generation and emits a build warning every release
+- **Severity:** LOW
 - **Confidence:** HIGH
-- **Cross-agent signal:** Medium — uncovered during aggregate validation while checking the photo-route findings.
-- **Files:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:53-63,140-145`, `apps/web/src/components/photo-viewer.tsx:366-371`, `apps/web/src/components/info-bottom-sheet.tsx:119-123`
-- **Why it is a problem:** `generateMetadata()` falls back to `photo.titleWithId` (for example, “Photo 42”), while the page JSON-LD/breadcrumb data and the viewer/sidebar sheet fall back to a generic untitled label.
-- **Concrete failure scenario:** Untitled photos expose different names across the browser title, structured data, and on-page UI, which creates inconsistent SEO metadata and user-facing labeling for the same asset.
-- **Suggested fix:** Centralize photo display-title generation in one shared helper and reuse it everywhere the public photo/share surfaces derive titles.
+- **Cross-agent agreement:** Manual validation finding (not surfaced correctly by subagents).
+- **Files:** `apps/web/src/app/apple-icon.tsx:2-5`, `apps/web/src/app/icon.tsx:2-6`
+- **Why it is a problem:** Both routes render fixed SVG-to-PNG icons with no request-dependent data, but `export const runtime = 'edge'` forces them dynamic. `next build` currently warns: `Using edge runtime on a page currently disables static generation for that page`.
+- **Concrete failure scenario:** Every production build keeps emitting the warning, and icon requests lose the benefits of build-time generation/caching for no product gain.
+- **Suggested fix:** Remove the explicit Edge runtime from the static icon routes so Next can statically generate them.
 
-### AGG-03 — Photo viewer JPEG fallback bypasses configured derivatives and can download the largest asset unnecessarily
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Cross-agent signal:** Medium — confirmed directly in the leader-authored performance pass.
-- **Files:** `apps/web/src/components/photo-viewer.tsx:179-223`
-- **Why it is a problem:** The fallback `<Image>` / `<img>` path points at `image.filename_jpeg` without derivative selection or `srcSet`, so non-AVIF/WebP rendering paths can over-download.
-- **Concrete failure scenario:** Browsers or intermediaries that do not use the AVIF/WebP `<source>` tags fetch a full-size JPEG even when the viewport only needs a much smaller derivative, increasing transfer time and LCP.
-- **Suggested fix:** Build the JPEG fallback from configured derivative sizes as well — ideally with `srcSet` + `sizes`, or at minimum with a nearest-sized derivative.
+## INVALIDATED / STALE REVIEW CLAIMS
 
-## AGENT FAILURES
-- `perf-reviewer`: exact agent type not registered in this environment. Covered by leader-authored `performance-reviewer.md`.
-- `document-specialist`: not registered in this environment.
-- `tracer`: not registered in this environment.
-- Initial `architect` / `debugger` / `designer` spawns hit the platform thread limit (`max 6`) on the first batch; they were retried once as required.
+### I2R2-01 — “Load-more lacks an explicit hasMore contract” is stale and not reproducible on current HEAD
+- **Original sources:** code-reviewer, critic, verifier, test-engineer, architect, debugger, designer, perf-reviewer, tracer
+- **Original severity/confidence:** LOW / HIGH (MEDIUM confidence from designer)
+- **Why it is invalid now:** `loadMoreImages()` already overfetches one row and returns `{ images, hasMore }` (`apps/web/src/app/actions/public.ts:11-25`), and the exact-multiple termination case is already locked by `apps/web/src/__tests__/public-actions.test.ts:89-99`.
+- **Re-open condition:** Only reopen if the server action stops returning `hasMore`, or a reproduced UI trace shows redundant terminal fetches despite the current contract.
 
-## Final sweep
-No additional confirmed security issue surfaced in the current checkout. The highest-signal remaining work for this cycle is performance/correctness cleanup around photo/share entrypoints plus title/fallback consistency on the photo surface.
+### I2R2-02 — The broad “public pages still serialize all independent reads” claim overstates the current code
+- **Original sources:** code-reviewer, critic, verifier, architect, debugger, perf-reviewer, tracer
+- **Original severity/confidence:** MEDIUM / HIGH
+- **Why it is invalid as written:** The cited route bodies already use `Promise.all(...)` for the major public-page read groups (`apps/web/src/app/[locale]/(public)/page.tsx:95-101`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:109-114`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:104-110`). The real remaining issue is narrower: the metadata tag-validation hop called out in C2R2-01.
+- **Re-open condition:** Reopen if new profiling shows other specific route segments regressing to serialized fetches with exact file/line evidence.
+
+## AGENT FAILURES / EXECUTION NOTES
+- Initial single-batch spawn attempt hit the platform limit `collab spawn failed: agent thread limit reached (max 6)`.
+- No unresolved reviewer failures remained after rolling retries; all requested reviewer outputs were produced.
+- Several reviewer outputs appear to have copied stale cycle-6 conclusions without fully reconciling them against current HEAD, so local re-validation was required before aggregation.
+
+## Final actionable count
+- **Confirmed actionable findings:** 2
+- **Invalidated stale findings:** 2 aggregated buckets (covering the repeated false-positive reviewer claims)
