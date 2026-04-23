@@ -122,7 +122,7 @@ git values must be treated as compromised and must not be reused.
 - Cookie attributes: `httpOnly`, `secure` (in production), `sameSite: lax`, `path: /`
 - Session secret: `SESSION_SECRET` env var is required in production; dev/test can fall back to a DB-stored generated secret in `admin_settings`
 - Expired sessions purged automatically (hourly background job)
-- Login rate limiting: 5 attempts per 15-minute window per IP, with bounded Map + LRU eviction
+- Login rate limiting enforced in two buckets: per-IP (5 attempts / 15-min window) and per-account (`acct:<sha256-prefix>` key, same 5/15-min limits) to prevent distributed brute-force where each IP gets a fresh budget but all target the same username. Both buckets use bounded Map + LRU eviction.
 
 ### Middleware Auth Guard
 - `proxy.ts` checks `admin_session` cookie for all `/[locale]/admin/*` sub-routes
@@ -205,7 +205,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 - **Node.js 24+** required, **TypeScript 6.0+**
 - Processed images are stored in `apps/web/public/uploads/`; original uploads are stored privately under the data volume — **ensure both are persisted in Docker**
-- Max upload size: 200MB per file, 2 GiB total per batch by default, 100 files max (configurable via `UPLOAD_MAX_TOTAL_BYTES`)
+- Max upload size: 200 MB per file; batch byte cap (`UPLOAD_MAX_TOTAL_BYTES`, default 2 GiB) and batch file-count cap (`UPLOAD_MAX_FILES_PER_WINDOW`, default 100) are separate limits that both apply to every upload
 - Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 GiB** for general requests and **250 MB** for `/admin/db` restore requests
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
