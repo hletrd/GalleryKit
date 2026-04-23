@@ -380,6 +380,14 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         return { success: true, message: t('passwordUpdated') };
 
     } catch (e) {
+        // C2R-01: rethrow Next.js internal control-flow signals (NEXT_REDIRECT,
+        // NEXT_NOT_FOUND, dynamic-rendering bailouts) before the generic-failure
+        // fallback, matching the login path above. Without this, a future
+        // refactor that places redirect/notFound/revalidatePath inside the
+        // transaction (or inside getCurrentUser/logAuditEvent) would silently
+        // swallow the signal and the user would see a toast instead of the
+        // intended redirect.
+        unstable_rethrow(e);
         console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
         // Roll back pre-incremented rate limit on unexpected errors —
         // the user didn't fail authentication, the infrastructure did.
