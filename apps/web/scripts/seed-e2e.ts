@@ -5,6 +5,21 @@ import dotenv from 'dotenv';
 import { eq, inArray } from 'drizzle-orm';
 import { generateBase56 } from '../src/lib/base56';
 import { UPLOAD_ORIGINAL_ROOT, UPLOAD_ROOT } from '../src/lib/upload-paths';
+import { DEFAULT_IMAGE_SIZES, parseImageSizes } from '../src/lib/gallery-config-shared';
+
+// C1R-05: honor the configured/default image-size contract instead of a
+// hard-coded list. The test E2E pipeline expects derivatives at every
+// configured size; falling back to a static array causes silent drift when
+// the defaults change.
+const CANONICAL_SIZE = 2048;
+const SEED_IMAGE_SIZES: number[] = (() => {
+  const configured = process.env.IMAGE_SIZES?.trim();
+  if (configured) {
+    const parsed = parseImageSizes(configured);
+    if (parsed.length > 0) return parsed;
+  }
+  return [...DEFAULT_IMAGE_SIZES];
+})();
 
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
@@ -74,8 +89,7 @@ async function createVariants(baseName: string, width: number, height: number, h
 
   await base.toFile(path.join(dirs.original, `${baseName}.jpg`));
 
-  const sizes = [640, 1536, 2048, 4096];
-  for (const size of sizes) {
+  for (const size of SEED_IMAGE_SIZES) {
     const resizeWidth = Math.min(size, width);
     const pipeline = sharp({
       create: {
@@ -93,10 +107,16 @@ async function createVariants(baseName: string, width: number, height: number, h
     ]);
   }
 
+  // Canonical (unsuffixed) derivative: prefer the 2048 variant if configured,
+  // otherwise fall back to the largest configured size so the <picture>
+  // srcset defaults continue to resolve.
+  const canonicalSize = SEED_IMAGE_SIZES.includes(CANONICAL_SIZE)
+    ? CANONICAL_SIZE
+    : SEED_IMAGE_SIZES[SEED_IMAGE_SIZES.length - 1];
   await Promise.all([
-    fs.copyFile(path.join(dirs.jpeg, `${baseName}_2048.jpg`), path.join(dirs.jpeg, `${baseName}.jpg`)),
-    fs.copyFile(path.join(dirs.webp, `${baseName}_2048.webp`), path.join(dirs.webp, `${baseName}.webp`)),
-    fs.copyFile(path.join(dirs.avif, `${baseName}_2048.avif`), path.join(dirs.avif, `${baseName}.avif`)),
+    fs.copyFile(path.join(dirs.jpeg, `${baseName}_${canonicalSize}.jpg`), path.join(dirs.jpeg, `${baseName}.jpg`)),
+    fs.copyFile(path.join(dirs.webp, `${baseName}_${canonicalSize}.webp`), path.join(dirs.webp, `${baseName}.webp`)),
+    fs.copyFile(path.join(dirs.avif, `${baseName}_${canonicalSize}.avif`), path.join(dirs.avif, `${baseName}.avif`)),
   ]);
 }
 
@@ -139,7 +159,7 @@ async function main() {
         fs.rm(path.join(dirs.jpeg, row.filename_jpeg), { force: true }),
         fs.rm(path.join(dirs.webp, row.filename_webp), { force: true }),
         fs.rm(path.join(dirs.avif, row.filename_avif), { force: true }),
-        ...[640, 1536, 2048, 4096].flatMap((size) => [
+        ...SEED_IMAGE_SIZES.flatMap((size) => [
           fs.rm(path.join(dirs.jpeg, row.filename_jpeg.replace('.jpg', `_${size}.jpg`)), { force: true }),
           fs.rm(path.join(dirs.webp, row.filename_webp.replace('.webp', `_${size}.webp`)), { force: true }),
           fs.rm(path.join(dirs.avif, row.filename_avif.replace('.avif', `_${size}.avif`)), { force: true }),
