@@ -119,3 +119,19 @@ None.
 ## Defer
 
 All other findings (carry-forwards).
+
+## Implementation status
+
+- AGG10R-RPL-01: FIXED in commit `000000085df31221299248a31372768652a59da8`
+  (`fix(admin): 🛡️ validate createAdminUser fields before rate-limit increment`).
+  Includes regression test `admin-user-create-ordering.test.ts` (9 tests). All
+  gates green: lint, lint:api-auth, lint:action-origin, vitest 50 files/297
+  tests, next build, playwright e2e 19 tests.
+- AGG10R-RPL-04/-05/-06/-07: documented as withdrawals in plan-226. No code
+  change required.
+
+## Deploy status
+
+- `DEPLOY_CMD = npm run deploy` — SUCCESS. Container `gallerykit-web`
+  recreated and running. App serving at http://localhost:3000.
+- Cycle 10 rpl reviews + plans committed in `000000094f021d0ec8e44e15cd66fba53896fd24`.
