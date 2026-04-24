@@ -1,116 +1,145 @@
-# Code Reviewer Deep Review — Cycle 6
+# Code Reviewer Deep Review — Cycle 1
 
 ## Inventory / Coverage
 
-Reviewed the tracked repository with emphasis on `apps/web` source, tests, build/deploy config, and cross-file interactions.
+Reviewed the tracked repository with emphasis on `apps/web` source, tests, build/deploy config, docs, and cross-file interactions.
 
-Coverage inventory:
-- `apps/web/src`: 189 tracked source files
-- `apps/web/src/__tests__`: 41 unit test files
-- `apps/web/e2e`: 7 E2E files/specs
-- `apps/web/scripts`: 13 scripts
-- Root/app config and docs: `README.md`, root/app `package.json`, Next/Vitest/Playwright/ESLint/TS/Drizzle/Docker configs
+Coverage buckets I checked:
+- Public gallery flow: `app/[locale]/(public)`, `app/actions/public.ts`, `components/load-more.tsx`, `lib/data.ts`
+- Admin/auth/maintenance flow: `app/actions/auth.ts`, `app/actions/images.ts`, `app/actions/settings.ts`, `app/actions/seo.ts`, `app/actions/topics.ts`, `app/actions/tags.ts`, `app/actions/sharing.ts`, `app/actions/admin-users.ts`, `app/[locale]/admin/*`
+- Upload / processing / serving: `lib/image-queue.ts`, `lib/process-image.ts`, `lib/serve-upload.ts`, `app/uploads/[...path]/route.ts`, `app/[locale]/(public)/uploads/[...path]/route.ts`
+- Security / request provenance / rate limits: `lib/request-origin.ts`, `lib/api-auth.ts`, `lib/rate-limit.ts`, `lib/session.ts`
+- Supporting logic: `lib/gallery-config*.ts`, `lib/validation.ts`, `lib/sanitize.ts`, `lib/locale-path.ts`, `lib/image-url.ts`, `lib/revalidation.ts`, `lib/restore-maintenance.ts`, `lib/audit.ts`
+- Scripts / config / docs / tests: root and app `package.json`, `README.md`, `CLAUDE.md`, `.context/reviews/prompts/*`, and the relevant `apps/web/src/__tests__` and `apps/web/e2e` coverage around the reviewed flows
 
-Explicitly excluded as non-review targets: generated/untracked/runtime artifacts such as `.next/`, `node_modules/`, `test-results/`, local env files, and binary fixture contents beyond existence/usage checks.
-
-Tooling/verification used:
-- `npm run lint --workspace=apps/web`
-- `npm run test --workspace=apps/web`
-- `npm run build --workspace=apps/web`
-- `npm run lint:api-auth --workspace=apps/web`
-- targeted grep/pattern sweeps for `console.log`, empty catches, hardcoded secrets, route/auth usage, and cross-file call paths
-
-Verification result: lint, unit tests, build, and admin API auth lint all passed.
-
-## Stage 1 — Spec / Intent Compliance
-
-Broadly, the repository still matches the intended product shape: self-hosted localized gallery, admin workflows, image processing pipeline, sharing, backup/restore, and test/build surfaces are present and working at a baseline level.
-
-That said, I do **not** consider Stage 1 fully passed because there are correctness/operational gaps that undermine expected behavior in real usage:
-- rate limiting is effectively global when `TRUST_PROXY` is missing,
-- gallery infinite scroll is built on mutable offset pagination,
-- the checked-in topic seed path creates data that violates current runtime invariants.
+Final sweep focus areas: pagination, upload cleanup, image processing retries, rate limiting, origin validation, and upload serving.
 
 ## Confirmed Issues
 
-### 1. [MEDIUM] Per-IP rate limiting silently collapses into one global bucket when `TRUST_PROXY` is unset
-- **Files / regions:**
-  - `apps/web/src/lib/rate-limit.ts:61-86`
-  - representative callers: `apps/web/src/app/actions/auth.ts:92-107`, `apps/web/src/app/actions/public.ts:39-47`, `apps/web/src/app/actions/images.ts:120-157`, `apps/web/src/app/actions/sharing.ts:84-112`
-- **Why this is a problem:**
-  - `getClientIp()` returns the literal string `"unknown"` whenever `TRUST_PROXY !== 'true'`.
-  - All login/search/upload/share/user-create limits then key off the same constant value.
-- **Concrete failure scenario:**
-  - A direct/self-host deployment (or a proxy deployment with `TRUST_PROXY` accidentally omitted) puts every visitor into the same bucket.
-  - One client can exhaust the login/search/upload/share budget for every other client, creating an application-wide denial of service instead of per-IP throttling.
-- **Suggested fix:**
-  - Fail fast in production when no trusted client IP source is configured, instead of silently falling back to `"unknown"`; or
-  - plumb a real client IP from `NextRequest`/trusted proxy middleware into the rate-limit layer; and
-  - avoid using a single shared constant as the rate-limit key for security-sensitive paths.
-- **Confidence:** High
+### 1. [High] Offset pagination over a live, mutating feed can skip or duplicate images
 
-### 2. [MEDIUM] Infinite scroll uses offset pagination over a live, mutable sort order, so new uploads can cause skipped or duplicated photos
-- **Files / regions:**
-  - `apps/web/src/app/actions/public.ts:11-28`
-  - `apps/web/src/lib/data.ts:318-335`
-  - `apps/web/src/components/load-more.tsx:20-41`
-- **Why this is a problem:**
-  - The gallery sorts by `capture_date`, `created_at`, `id`, but `LoadMore` advances by `offset`.
-  - Offset pagination is unstable when rows are inserted or finish processing between requests.
-- **Concrete failure scenario:**
-  - A user opens the homepage, loads the first 30 photos, then a new processed upload lands at the top of the feed.
-  - The next request asks for `offset=30`; because the dataset shifted, one older photo is skipped or one already-seen photo is duplicated.
-  - This is especially plausible here because uploads become visible asynchronously after queue processing.
-- **Suggested fix:**
-  - Replace offset pagination with cursor/keyset pagination using the active sort tuple (`capture_date`, `created_at`, `id`), and pass that cursor through `loadMoreImages`/`LoadMore`.
-- **Confidence:** High
+**Files / regions**
+- `apps/web/src/app/actions/public.ts:23-40`
+- `apps/web/src/lib/data.ts:318-335`
+- `apps/web/src/lib/data.ts:359-385`
+- `apps/web/src/lib/data.ts:420-438`
+- `apps/web/src/components/load-more.tsx:20-41`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:9-16`
 
-### 3. [LOW] The legacy topic seed path creates topic slugs that the runtime now treats as invalid/unresolvable
-- **Files / regions:**
-  - `apps/web/src/db/seed.ts:4-10`
-  - `apps/web/src/lib/validation.ts:12-15`
-  - `apps/web/src/lib/data.ts:672-704`
-  - `apps/web/src/app/actions/topics.ts:148-153`, `apps/web/src/app/actions/topics.ts:294-299`
-- **Why this is a problem:**
-  - `src/db/seed.ts` inserts uppercase topic slugs (`IDOL`, `PLANE`).
-  - Current runtime rules only accept lowercase slugs.
-  - `getTopicBySlug()` only direct-matches lowercase-safe slugs, and topic mutation actions reject uppercase current slugs.
-- **Concrete failure scenario:**
-  - If a developer/operator runs this seed script, the seeded topics can become unreachable by the public topic route and impossible to update/delete through the current admin action path without manual SQL cleanup.
-- **Suggested fix:**
-  - Normalize seeded slugs to lowercase in `src/db/seed.ts`, or
-  - make topic lookup/admin mutation flows tolerate legacy uppercase slugs long enough to migrate them.
-- **Confidence:** High
+**Why this is a problem**
+- The public infinite-scroll path and the admin image list both page with `offset` while ordering by `capture_date`, `created_at`, and `id`.
+- That pagination scheme is unstable whenever rows are inserted, deleted, or move from unprocessed to processed between requests.
+- Because uploads are processed asynchronously, the gallery content is actively mutating while users are loading more rows.
+
+**Concrete failure scenario**
+- A user loads the homepage and receives the first 30 photos.
+- Before the next `loadMoreImages()` call, a new upload finishes processing and lands at the top of the sort order.
+- The next request asks for `offset=30`, but the underlying result set has shifted, so one older photo is skipped or one already-seen photo is returned again.
+- The same class of issue affects the admin dashboard when a user pages through a list while uploads finish in the background.
+
+**Suggested fix**
+- Replace offset pagination with cursor/keyset pagination based on the active sort tuple (`capture_date`, `created_at`, `id`).
+- Thread that cursor through `loadMoreImages()` and `LoadMore`, and use the same approach for the admin list helpers if you want stable paging there too.
+
+**Confidence**: High
+
+---
+
+### 2. [High] Deleted-during-processing cleanup only deletes the current default size set, so custom size variants can be orphaned
+
+**Files / regions**
+- `apps/web/src/lib/image-queue.ts:272-284`
+- `apps/web/src/lib/process-image.ts:162-200`
+- `apps/web/src/app/actions/images.ts:411-418` (the contrasting delete path already scans for historical variants)
+
+**Why this is a problem**
+- `deleteImageVariants()` only scans the directory for leftover variants when `sizes` is empty.
+- In the queue cleanup path, `image-queue.ts` calls `deleteImageVariants()` with no explicit sizes array, so it uses the default size list instead of the sizes actually used for that job.
+- The admin delete path already does the safer thing and passes `[]` so historical variants are discovered and removed.
+
+**Concrete failure scenario**
+- An image is uploaded while the gallery is configured to emit a custom size set.
+- The user deletes that image while background processing is still running.
+- The queue notices the row was deleted and runs the cleanup branch, but it only deletes files for the default size list.
+- Any derivatives produced with the custom admin-configured sizes remain on disk indefinitely, creating storage leaks and leaving behind stale files that the rest of the code no longer knows about.
+
+**Suggested fix**
+- Make the queue job carry the exact size list used for processing, and pass that same list into cleanup; or
+- for this rare deletion-after-processing race, use the scan-on-delete mode (`[]`) so every matching derivative basename is removed regardless of which size list created it.
+
+**Confidence**: High
+
+---
+
+### 3. [Medium] Failed image processing can leave partially generated derivatives on disk
+
+**Files / regions**
+- `apps/web/src/lib/process-image.ts:381-460`
+- `apps/web/src/lib/image-queue.ts:293-305`
+- `apps/web/src/lib/image-queue.ts:357-361`
+
+**Why this is a problem**
+- `processImageFormats()` writes derivative files sequentially within each format and in parallel across formats.
+- If any `sharp(...).toFile()` call throws after earlier variants have already been written, those earlier files remain on disk.
+- The queue retry path only re-enqueues the job; after the retry budget is exhausted, there is no cleanup pass for already-written derivatives.
+- The repository already has explicit cleanup for orphaned `.tmp` files, which makes the absence of equivalent cleanup for final derivative files stand out.
+
+**Concrete failure scenario**
+- A malformed or unusually expensive source image gets far enough to write a subset of WebP/AVIF/JPEG variants.
+- One later encoder call fails.
+- The job retries a few times and eventually gives up.
+- The partially written derivatives remain forever, even though the image never becomes `processed=true`, so the queue has created real disk waste and a stale-file maintenance burden.
+
+**Suggested fix**
+- On any terminal processing failure, delete all known derivative filenames for that job before giving up; or
+- change the processing flow to stage outputs in a temp location and only promote them after all formats succeed.
+
+**Confidence**: Medium
+
+## Likely Issues
+
+### 4. [Medium] Missing `TRUST_PROXY` silently collapses rate-limited traffic into a single global bucket
+
+**Files / regions**
+- `apps/web/src/lib/rate-limit.ts:61-86`
+- `README.md:135-138`
+- `CLAUDE.md:248-253`
+
+**Why this is a problem**
+- `getClientIp()` returns the literal string `"unknown"` whenever `TRUST_PROXY !== 'true'`.
+- Every login/search/share/admin-user rate-limited path keys off that same value.
+- The docs say `TRUST_PROXY=true` is required behind a reverse proxy, but the code still falls back to a shared bucket instead of failing closed or rejecting the deployment shape.
+
+**Concrete failure scenario**
+- Someone deploys the app directly, or forgets to carry `TRUST_PROXY=true` into the production environment.
+- Every visitor is rate-limited under the same `unknown` key.
+- One abusive client can burn the budget for everyone else, and legitimate users can suddenly lose access to login, search, or other protected flows until the shared window expires.
+
+**Suggested fix**
+- Fail fast in production when proxy headers are expected but `TRUST_PROXY` is not set; or
+- make the caller explicitly opt into the `unknown` fallback so the dangerous behavior is not the default; or
+- require a resolved client IP before applying security-sensitive rate limits.
+
+**Confidence**: Medium
 
 ## Risks Requiring Manual Validation
 
-### A. [RISK] Sensitive admin mutations are inconsistent about explicit same-origin enforcement
-- **Files / regions:**
-  - explicit checks exist in `apps/web/src/app/actions/auth.ts` and `apps/web/src/app/api/admin/db/download/route.ts`
-  - but not in many other sensitive mutations such as `apps/web/src/app/actions/images.ts`, `tags.ts`, `topics.ts`, `settings.ts`, `seo.ts`, `sharing.ts`, `admin-users.ts`, and `apps/web/src/app/[locale]/admin/db-actions.ts`
-- **Why this needs validation:**
-  - This may be acceptable if you are intentionally relying on framework-level Server Action origin protection.
-  - But the codebase currently applies app-level provenance checks only on some sensitive paths, so the trust model is inconsistent and easy to regress during framework/deployment changes.
-- **Manual validation ask:**
-  - Confirm the deployed Next.js/server-action configuration still enforces origin/CSRF protections for all mutation surfaces, especially after proxy/header changes.
-- **Confidence:** Medium
+### A. [Low] The hard pagination caps may be too small if the gallery grows beyond the current assumptions
 
-## Final missed-issues sweep
+**Files / regions**
+- `apps/web/src/app/actions/public.ts:27-30`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:9-16`
 
-I did a final sweep across:
-- route/auth wrappers,
-- upload/restore/backup paths,
-- topic/tag/share flows,
-- pagination/search interactions,
-- runtime/build/deploy config,
-- unit/E2E coverage inventory.
+**Why this needs manual validation**
+- The public infinite-scroll path stops returning rows once `offset > 10000`.
+- The admin list clamps page numbers to 1000, which effectively caps how far back the UI can browse.
+- Those limits are a reasonable DoS guard for small/medium galleries, but they become a functional ceiling if the repository is expected to scale beyond that.
 
-I did **not** find any additional confirmed high-severity code-quality/correctness defects beyond the items above.
+**Manual validation ask**
+- Confirm the product scope really will stay under those caps, or raise the limits / switch to a cursor-based paging model that does not need a hard stop.
 
-## Recommendation
+**Confidence**: Low
 
-**REQUEST CHANGES**
+## Final sweep
 
-Rationale:
-- The repo is in generally solid shape and all verification commands passed.
-- However, the two medium-severity correctness issues are user-visible/operational enough that I would not sign off without fixes.
+I rechecked the pagination paths, upload/cleanup paths, route serving, auth/rate-limit utilities, and the docs/config that constrain those behaviors. I did not find any additional confirmed correctness or maintainability defects beyond the items above.
