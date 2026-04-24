@@ -38,6 +38,18 @@ describe('db/index.ts — pool-connection listener', () => {
         expect(source).toMatch(/await initPromise/);
     });
 
+
+    it('routes pool query and execute through the initialized connection path', () => {
+        expect(source).toMatch(/poolConnection\.query\s*=\s*\(async/);
+        expect(source).toMatch(/const queryConnection = await poolConnection\.getConnection\(\)/);
+        expect(source).toMatch(/return await queryConnection\.query/);
+        expect(source).toMatch(/queryConnection\.release\(\)/);
+        expect(source).toMatch(/poolConnection\.execute\s*=\s*\(async/);
+        expect(source).toMatch(/const executeConnection = await poolConnection\.getConnection\(\)/);
+        expect(source).toMatch(/return await executeConnection\.execute/);
+        expect(source).toMatch(/executeConnection\.release\(\)/);
+    });
+
     it('uses connection.promise() and chains .catch() so SET failures are logged', () => {
         const listenerMatch = /poolConnection\.on\(\s*['"]connection['"]\s*,\s*\(([^)]*)\)\s*=>\s*\{([\s\S]*?)\n\s*\}\s*\)\s*;/m.exec(source);
         expect(listenerMatch).not.toBeNull();

@@ -6,8 +6,21 @@ function trustsProxyHeaders() {
     return process.env.TRUST_PROXY === 'true';
 }
 
+function getHeaderValue(value: string | null | undefined, position: 'first' | 'last' = 'first') {
+    const parts = value?.split(',').map((part) => part.trim()).filter(Boolean) ?? [];
+    if (parts.length === 0) return '';
+    return position === 'last' ? parts[parts.length - 1] : parts[0];
+}
+
 function normalizeHeaderValue(value: string | null | undefined) {
-    return value?.split(',')[0]?.trim() || '';
+    return getHeaderValue(value, 'first');
+}
+
+function normalizeTrustedProxyHeaderValue(value: string | null | undefined) {
+    // Reverse proxies commonly append their trusted hop to the right side of
+    // X-Forwarded-* chains. When TRUST_PROXY is enabled, prefer that
+    // right-most value instead of the left-most client-supplied value.
+    return getHeaderValue(value, 'last');
 }
 
 /** Strip default HTTP/HTTPS ports so that `host:443` matches the browser's
@@ -31,7 +44,7 @@ function getProtocolFromCandidate(candidate: string | null | undefined) {
 
 function getExpectedOrigin(requestHeaders: HeaderLookup) {
     const trustedForwardedProto = trustsProxyHeaders()
-        ? normalizeHeaderValue(requestHeaders.get('x-forwarded-proto'))
+        ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-proto'))
         : '';
     const protocol = trustedForwardedProto
         || getProtocolFromCandidate(requestHeaders.get('origin'))
@@ -39,7 +52,7 @@ function getExpectedOrigin(requestHeaders: HeaderLookup) {
         || 'http';
 
     const trustedForwardedHost = trustsProxyHeaders()
-        ? normalizeHeaderValue(requestHeaders.get('x-forwarded-host'))
+        ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-host'))
         : '';
     const rawHost = trustedForwardedHost
         || normalizeHeaderValue(requestHeaders.get('host'));

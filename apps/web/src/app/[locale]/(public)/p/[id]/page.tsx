@@ -14,8 +14,14 @@ import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
-    loading: () => <div className="flex items-center justify-center min-h-[60vh]"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" /></div>,
+    loading: () => <div className="flex items-center justify-center min-h-[60vh]" role="status" aria-live="polite" aria-label="Loading photo"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" aria-hidden="true" /></div>,
 });
+
+function toIsoTimestamp(value: string | Date | null | undefined) {
+    if (!value) return undefined;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
 
 
 // Cache for 1 week (604800s) as photo content rarely changes
@@ -49,11 +55,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         };
     }
 
-    const displayTitle = getPhotoDisplayTitle(
-        image,
-        t('titleWithId', { id: image.id }),
-        { preferTags: true, formatTitleAsTags: true },
-    );
+    const displayTitle = getPhotoDisplayTitle(image, t('titleWithId', { id: image.id }));
     let keywords: string[] = [];
 
     if (image.tags && image.tags.length > 0) {
@@ -92,7 +94,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             siteName: seo.title,
             images: ogImages,
             type: 'article',
-            publishedTime: image.created_at?.toString(),
+            publishedTime: toIsoTimestamp(image.created_at),
             authors: [seo.author],
         },
         twitter: {
@@ -126,12 +128,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
 
     if (!image) return notFound();
 
-    // Replicate title logic for JSON-LD
-    const displayTitle = getPhotoDisplayTitle(
-        image,
-        t('titleWithId', { id: image.id }),
-        { preferTags: true, formatTitleAsTags: true },
-    );
+    // Keep JSON-LD naming aligned with metadata and the hydrated viewer
+    const displayTitle = getPhotoDisplayTitle(image, t('titleWithId', { id: image.id }));
 
     const keywords = image.tags?.map((t: TagInfo) => t.name) || [];
     if (image.topic) keywords.push(image.topic);
@@ -150,8 +148,8 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
             name: seo.author,
         },
         copyrightNotice: seo.author,
-        datePublished: image.created_at,
-        uploadDate: image.created_at,
+        datePublished: toIsoTimestamp(image.created_at),
+        uploadDate: toIsoTimestamp(image.created_at),
         width: {
             '@type': 'QuantitativeValue',
             value: image.width,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { appendSqlScanChunk, containsDangerousSql, stripSqlCommentsAndLiterals } from '@/lib/sql-restore-scan';
+import { appendSqlScanChunk, containsDangerousSql, SQL_SCAN_TAIL_BYTES, stripSqlCommentsAndLiterals } from '@/lib/sql-restore-scan';
 
 describe('stripSqlCommentsAndLiterals', () => {
     it('masks quoted strings before scanning', () => {
@@ -23,6 +23,15 @@ describe('containsDangerousSql', () => {
     it('detects genuinely dangerous statements', () => {
         expect(containsDangerousSql("GR/**/ANT ALL ON *.* TO 'x'@'%';")).toBe(true);
         expect(containsDangerousSql("CREATE USER 'x'@'%' IDENTIFIED BY 'pw';")).toBe(true);
+    });
+
+
+    it('blocks destructive table-level statements', () => {
+        expect(containsDangerousSql('DROP TABLE images;')).toBe(true);
+        expect(containsDangerousSql('DROP TEMPORARY TABLE images;')).toBe(false);
+        expect(containsDangerousSql('DELETE FROM images WHERE id = 1;')).toBe(true);
+        expect(containsDangerousSql('TRUNCATE TABLE sessions;')).toBe(true);
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('DROP TABLE images');")).toBe(false);
     });
 
     it('blocks CREATE DATABASE (C4R-RPL2-05 defence-in-depth)', () => {
@@ -61,6 +70,19 @@ describe('containsDangerousSql', () => {
     it('ignores dangerous-looking words inside benign data strings', () => {
         expect(containsDangerousSql("INSERT INTO notes VALUES ('Grant Morrison');")).toBe(false);
         expect(containsDangerousSql("INSERT INTO captions VALUES ('Prepare for landing');")).toBe(false);
+    });
+
+
+    it('keeps enough trailing context for dangerous statements split by more than 64 KiB', () => {
+        const firstChunk = `CREATE${' '.repeat(70 * 1024)}`;
+        const secondChunk = 'TRIGGER evil BEFORE INSERT ON images FOR EACH ROW SET @x = 1;';
+
+        const { combined, nextTail } = appendSqlScanChunk('', firstChunk);
+        expect(containsDangerousSql(combined)).toBe(false);
+        expect(nextTail.length).toBeLessThanOrEqual(SQL_SCAN_TAIL_BYTES);
+
+        const nextWindow = appendSqlScanChunk(nextTail, secondChunk);
+        expect(containsDangerousSql(nextWindow.combined)).toBe(true);
     });
 
     it('keeps enough trailing context to detect dangerous statements split across chunk boundaries', () => {

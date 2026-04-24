@@ -138,7 +138,9 @@
     "partialSuccess": "{count} uploaded, {failed} failed.",
     "duplicateWarning": "Duplicate filenames ({count}): {names}. Replaced.",
     "addTagPlaceholder": "+ Tag",
-    "failed": "Upload failed."
+    "failed": "Upload failed.",
+    "noTopicsTitle": "Create a category before uploading",
+    "noTopicsDescription": "Uploads need a category so photos have a gallery destination."
   },
   "imageManager": {
     "selected": "{count} selected",
@@ -443,7 +445,8 @@
     "invalidSettingValue": "Invalid value for setting: {key}",
     "imageSizesLocked": "Output sizes can't be changed after photos have been uploaded. Keep the current sizes or regenerate the library first.",
     "failedToUpdateGallerySettings": "Failed to update gallery settings",
-    "failedToSwitchStorageBackend": "Failed to switch storage backend"
+    "failedToSwitchStorageBackend": "Failed to switch storage backend",
+    "uploadSettingsLocked": "Upload-processing settings can't be changed while uploads are active or after photos exist. Keep the current privacy/output settings or regenerate the library first."
   },
   "aria": {
     "searchPhotos": "Search photos",

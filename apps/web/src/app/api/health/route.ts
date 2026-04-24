@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
     if (isRestoreMaintenanceActive()) {
-        return Response.json({ status: 'restore-maintenance' }, {
+        return Response.json({ status: 'unavailable' }, {
             status: 503,
             headers: {
                 'X-Content-Type-Options': 'nosniff',
@@ -23,7 +23,7 @@ export async function GET() {
         // DB unreachable
     }
 
-    const status = dbOk ? 'ok' : 'degraded';
+    const status = dbOk ? 'ok' : 'unavailable';
     return Response.json({ status }, {
         status: dbOk ? 200 : 503,
         headers: {

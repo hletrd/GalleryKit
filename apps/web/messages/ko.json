@@ -138,7 +138,9 @@
     "partialSuccess": "{count}장 성공, {failed}장 실패했습니다.",
     "duplicateWarning": "중복된 파일명 {count}개: {names}. 기존 사진을 교체했습니다.",
     "addTagPlaceholder": "+ 태그",
-    "failed": "업로드에 실패했습니다."
+    "failed": "업로드에 실패했습니다.",
+    "noTopicsTitle": "업로드 전에 카테고리를 만들어 주세요",
+    "noTopicsDescription": "사진을 업로드하려면 갤러리 목적지로 사용할 카테고리가 필요합니다."
   },
   "imageManager": {
     "selected": "{count}장 선택됨",
@@ -443,7 +445,8 @@
     "invalidSettingValue": "설정값이 올바르지 않습니다: {key}",
     "imageSizesLocked": "사진을 업로드한 뒤에는 출력 크기를 변경할 수 없습니다. 현재 크기를 유지하거나 라이브러리를 다시 생성해 주세요.",
     "failedToUpdateGallerySettings": "갤러리 설정 저장에 실패했습니다",
-    "failedToSwitchStorageBackend": "스토리지 백엔드 전환에 실패했습니다"
+    "failedToSwitchStorageBackend": "스토리지 백엔드 전환에 실패했습니다",
+    "uploadSettingsLocked": "업로드가 진행 중이거나 사진이 이미 있으면 업로드 처리 설정을 변경할 수 없습니다. 현재 개인정보/출력 설정을 유지하거나 라이브러리를 다시 생성해 주세요."
   },
   "aria": {
     "searchPhotos": "사진 검색",

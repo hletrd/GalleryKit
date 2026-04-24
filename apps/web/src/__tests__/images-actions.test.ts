@@ -141,7 +141,13 @@ describe('uploadImages', () => {
         extractExifForDbMock.mockReturnValue({});
         enqueueImageProcessingMock.mockReset();
         revalidateLocalizedPathsMock.mockReset();
-        getGalleryConfigMock.mockResolvedValue({ stripGpsOnUpload: false });
+        getGalleryConfigMock.mockResolvedValue({
+            stripGpsOnUpload: false,
+            imageQualityWebp: 90,
+            imageQualityAvif: 85,
+            imageQualityJpeg: 90,
+            imageSizes: [640, 1536, 2048, 4096],
+        });
         getClientIpMock.mockReturnValue('203.0.113.5');
         cleanupOriginalIfRestoreMaintenanceBeganMock.mockResolvedValue(false);
         settleUploadTrackerClaimMock.mockReset();

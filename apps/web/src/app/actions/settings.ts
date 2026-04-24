@@ -12,6 +12,7 @@ import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normaliz
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
+import { hasActiveUploadClaims } from '@/lib/upload-tracker-state';
 
 export async function getGallerySettingsAdmin() {
     const t = await getTranslations('serverActions');
@@ -69,6 +70,12 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         }
     }
 
+    const changesUploadProcessingContract = ['image_sizes', 'strip_gps_on_upload']
+        .some((key) => Object.prototype.hasOwnProperty.call(sanitizedSettings, key));
+    if (changesUploadProcessingContract && hasActiveUploadClaims()) {
+        return { error: t('uploadSettingsLocked') };
+    }
+
     if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'image_sizes')) {
         const requestedImageSizes = sanitizedSettings.image_sizes;
         const normalizedImageSizes = requestedImageSizes
@@ -98,6 +105,27 @@ export async function updateGallerySettings(settings: Record<string, string>) {
 
             if (existingImage) {
                 return { error: t('imageSizesLocked') };
+            }
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'strip_gps_on_upload')) {
+        const requestedStripGps = sanitizedSettings.strip_gps_on_upload || defaults.strip_gps_on_upload;
+        const [currentStripGpsSetting] = await db
+            .select({ value: adminSettings.value })
+            .from(adminSettings)
+            .where(eq(adminSettings.key, 'strip_gps_on_upload'))
+            .limit(1);
+        const currentStripGps = currentStripGpsSetting?.value ?? defaults.strip_gps_on_upload;
+
+        if (requestedStripGps !== currentStripGps) {
+            const [existingImage] = await db
+                .select({ id: images.id })
+                .from(images)
+                .limit(1);
+
+            if (existingImage) {
+                return { error: t('uploadSettingsLocked') };
             }
         }
     }

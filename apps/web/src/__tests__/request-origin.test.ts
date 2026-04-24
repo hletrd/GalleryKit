@@ -91,6 +91,25 @@ describe('hasTrustedSameOrigin', () => {
         }))).toBe(true);
     });
 
+
+    it('uses the trusted right-most forwarded host/proto when TRUST_PROXY is enabled', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'internal-proxy',
+            'x-forwarded-host': 'evil.example, gallery.atik.kr',
+            'x-forwarded-proto': 'http, https',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe(true);
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'internal-proxy',
+            'x-forwarded-host': 'evil.example, gallery.atik.kr',
+            'x-forwarded-proto': 'http, https',
+            origin: 'http://evil.example',
+        }))).toBe(false);
+    });
+
     it('fails closed by default when origin metadata is missing (C1R-01)', () => {
         expect(hasTrustedSameOrigin(makeHeaders({
             host: 'gallery.atik.kr',

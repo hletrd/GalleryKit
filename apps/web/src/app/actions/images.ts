@@ -16,10 +16,11 @@ import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidati
 import { stripControlChars } from '@/lib/sanitize';
 import { ensureTagRecord, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
-import { getGalleryConfig } from '@/lib/gallery-config';
+import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
 import { cleanupOriginalIfRestoreMaintenanceBegan, getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
-import { settleUploadTrackerClaim, type UploadTrackerEntry } from '@/lib/upload-tracker';
+import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
+import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired } from '@/lib/upload-tracker-state';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { headers } from 'next/headers';
 
@@ -77,35 +78,11 @@ function getShareRevalidationPaths(shareKeys: Iterable<string | null>, groupKeys
     return [...paths];
 }
 
-// Server-side upload tracking to enforce cumulative limits across per-file invocations.
-// The client sends files individually, so per-call batch limits are ineffective.
-const uploadTracker = new Map<string, UploadTrackerEntry>();
-const UPLOAD_TRACKING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const UPLOAD_TRACKER_MAX_KEYS = 2000;
-
-/** Prune expired upload tracker entries to prevent unbounded memory growth. */
-function pruneUploadTracker() {
-    const now = Date.now();
-    for (const [key, entry] of uploadTracker) {
-        if (now - entry.windowStart > UPLOAD_TRACKING_WINDOW_MS * 2) {
-            uploadTracker.delete(key);
-        }
-    }
-    // Hard cap: evict oldest if still over limit after expiry pruning
-    if (uploadTracker.size > UPLOAD_TRACKER_MAX_KEYS) {
-        const excess = uploadTracker.size - UPLOAD_TRACKER_MAX_KEYS;
-        let evicted = 0;
-        for (const key of uploadTracker.keys()) {
-            if (evicted >= excess) break;
-            uploadTracker.delete(key);
-            evicted++;
-        }
-    }
-}
 
 export async function uploadImages(formData: FormData) {
     const t = await getTranslations('serverActions');
-    if (!(await isAdmin())) {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
         return { error: t('unauthorized') };
     }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
@@ -144,9 +121,12 @@ export async function uploadImages(formData: FormData) {
 
     // Server-side cumulative upload tracking across per-file invocations.
     // The client sends files individually, so per-call limits are insufficient.
+    const uploadConfig: GalleryConfig = await getGalleryConfig();
     const requestHeaders = await headers();
     const uploadIp = getClientIp(requestHeaders);
+    const uploadTrackerKey = `${currentUser.id}:${uploadIp}`;
     const now = Date.now();
+    const uploadTracker = getUploadTracker();
     // Prune stale entries unconditionally to prevent unbounded memory growth
     pruneUploadTracker();
     // C8R-RPL-02 / AGG8R-02: close the first-insert TOCTOU. Without an
@@ -155,16 +135,12 @@ export async function uploadImages(formData: FormData) {
     // pass the cumulative-limit check below. Registering the entry on
     // the Map up-front makes subsequent mutations share the same object
     // reference across concurrent invocations.
-    let tracker = uploadTracker.get(uploadIp);
+    let tracker = uploadTracker.get(uploadTrackerKey);
     if (!tracker) {
         tracker = { count: 0, bytes: 0, windowStart: now };
-        uploadTracker.set(uploadIp, tracker);
+        uploadTracker.set(uploadTrackerKey, tracker);
     }
-    if (now - tracker.windowStart > UPLOAD_TRACKING_WINDOW_MS) {
-        tracker.count = 0;
-        tracker.bytes = 0;
-        tracker.windowStart = now;
-    }
+    resetUploadTrackerWindowIfExpired(tracker, now);
     if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
         return { error: t('uploadLimitReached') };
     }
@@ -206,7 +182,7 @@ export async function uploadImages(formData: FormData) {
     // This is placed after all validation checks so no manual rollback is needed.
     tracker.bytes += totalSize;
     tracker.count += files.length;
-    uploadTracker.set(uploadIp, tracker);
+    uploadTracker.set(uploadTrackerKey, tracker);
 
     let successCount = 0;
     let uploadedBytes = 0;
@@ -225,16 +201,8 @@ export async function uploadImages(formData: FormData) {
             // Extract EXIF
             const exifDb = extractExifForDb(data.exifData);
 
-            // Strip GPS coordinates if the privacy setting is enabled
-            try {
-                const config = await getGalleryConfig();
-                if (config.stripGpsOnUpload) {
-                    exifDb.latitude = null;
-                    exifDb.longitude = null;
-                }
-            } catch {
-                // DB unavailable — strip GPS by default (privacy-safe: err on the side of
-                // privacy when the admin's preference can't be verified)
+            // Strip GPS coordinates using the upload-start config snapshot.
+            if (uploadConfig.stripGpsOnUpload) {
                 exifDb.latitude = null;
                 exifDb.longitude = null;
             }
@@ -326,6 +294,12 @@ export async function uploadImages(formData: FormData) {
                     filenameAvif: data.filenameAvif,
                     filenameJpeg: data.filenameJpeg,
                     width: data.width,
+                    quality: {
+                        webp: uploadConfig.imageQualityWebp,
+                        avif: uploadConfig.imageQualityAvif,
+                        jpeg: uploadConfig.imageQualityJpeg,
+                    },
+                    imageSizes: uploadConfig.imageSizes.length > 0 ? uploadConfig.imageSizes : undefined,
                 });
 
                 successCount++;
@@ -343,16 +317,15 @@ export async function uploadImages(formData: FormData) {
     }
 
     if (failedFiles.length > 0 && successCount === 0) {
-        settleUploadTrackerClaim(uploadTracker, uploadIp, files.length, totalSize, successCount, uploadedBytes);
+        settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
         return { error: t('allUploadsFailed') };
     }
 
     // Reconcile the pre-claimed quota with the uploads that actually finished.
-    settleUploadTrackerClaim(uploadTracker, uploadIp, files.length, totalSize, successCount, uploadedBytes);
+    settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
 
     // Audit log for upload action
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'image_upload', 'image', undefined, undefined, {
+    logAuditEvent(currentUser.id, 'image_upload', 'image', undefined, undefined, {
         count: successCount,
         failed: failedFiles.length,
         topic,
@@ -630,13 +603,16 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             return { error: t('imageNotFound') };
         }
 
-        await db.update(images)
+        const [updateResult] = await db.update(images)
             .set({
                 title: sanitizedTitle,
                 description: sanitizedDescription,
                 updated_at: sql`CURRENT_TIMESTAMP`
             })
             .where(eq(images.id, id));
+        if (updateResult.affectedRows === 0) {
+            return { error: t('imageNotFound') };
+        }
 
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'image_update', 'image', String(id)).catch(console.debug);

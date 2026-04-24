@@ -66,6 +66,25 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
     return connection;
 }) as typeof poolConnection.getConnection;
 
+
+poolConnection.query = (async (...args: Parameters<typeof poolConnection.query>) => {
+    const queryConnection = await poolConnection.getConnection();
+    try {
+        return await queryConnection.query(...args as Parameters<typeof queryConnection.query>);
+    } finally {
+        queryConnection.release();
+    }
+}) as typeof poolConnection.query;
+
+poolConnection.execute = (async (...args: Parameters<typeof poolConnection.execute>) => {
+    const executeConnection = await poolConnection.getConnection();
+    try {
+        return await executeConnection.execute(...args as Parameters<typeof executeConnection.execute>);
+    } finally {
+        executeConnection.release();
+    }
+}) as typeof poolConnection.execute;
+
 export const connection = poolConnection;
 export const db = drizzle(poolConnection, { mode: "default", schema });
 export { images, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions, rateLimitBuckets, auditLog } from './schema';

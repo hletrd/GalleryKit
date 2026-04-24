@@ -9,7 +9,6 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
-import siteConfig from '@/site-config.json';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 
 
@@ -58,9 +57,6 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   if (tagSlugs.length > 0) {
     topicOgParams.set('tags', tagSlugs.join(','));
   }
-  topicOgParams.set('label', topicData.label);
-  topicOgParams.set('site', seo.title || siteConfig.title);
-
   const ogImages = seo.og_image_url
     ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: title }]
     : [{

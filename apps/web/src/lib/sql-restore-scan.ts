@@ -10,6 +10,13 @@ const DANGEROUS_SQL_PATTERNS = [
     /\bALTER\s+USER\b/i,
     /\bSET\s+PASSWORD\b/i,
     /\bDROP\s+DATABASE\b/i,
+    // C3RPF-02 / AGG-C3-03: block destructive table-level statements.
+    // A restore file is supposed to represent the application backup shape;
+    // accepting arbitrary table drops/deletes/truncates creates a data-loss
+    // path that --one-database does not prevent.
+    /\bDROP\s+TABLE\b/i,
+    /\bTRUNCATE\s+(?:TABLE\s+)?/i,
+    /\bDELETE\s+FROM\b/i,
     // C4R-RPL2-05: also block CREATE DATABASE. `--one-database` filters out
     // writes that target a different schema, but a malformed dump that
     // creates a sibling database (then USEs it before data writes) would
@@ -51,7 +58,7 @@ const DANGEROUS_SQL_PATTERNS = [
     /\bSET\s+@@global\./i,
 ] as const;
 
-export const SQL_SCAN_TAIL_BYTES = 64 * 1024;
+export const SQL_SCAN_TAIL_BYTES = 1024 * 1024;
 
 function maskMatches(input: string, pattern: RegExp): string {
     return input.replace(pattern, (match) => ' '.repeat(match.length));

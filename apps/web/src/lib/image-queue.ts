@@ -91,6 +91,8 @@ export type ImageProcessingJob = {
     filenameAvif: string;
     filenameJpeg: string;
     width: number;
+    quality?: ImageQualitySettings;
+    imageSizes?: number[];
 };
 
 export type ProcessingQueueState = {
@@ -238,19 +240,22 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             // Pass file path so Sharp uses native mmap instead of pinning on the heap.
-            // Read admin-configured quality and size settings from DB (cached per SSR request).
-            let quality: ImageQualitySettings | undefined;
-            let imageSizes: number[] | undefined;
-            try {
-                const config = await getGalleryConfig();
-                quality = {
-                    webp: config.imageQualityWebp,
-                    avif: config.imageQualityAvif,
-                    jpeg: config.imageQualityJpeg,
-                };
-                imageSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
-            } catch {
-                // DB unavailable during processing — use Sharp defaults (90/85/90)
+            // Prefer upload-time snapshots so one accepted upload action cannot
+            // straddle later admin config changes while it waits in the queue.
+            let quality: ImageQualitySettings | undefined = job.quality;
+            let imageSizes: number[] | undefined = job.imageSizes;
+            if (!quality && !imageSizes) {
+                try {
+                    const config = await getGalleryConfig();
+                    quality = {
+                        webp: config.imageQualityWebp,
+                        avif: config.imageQualityAvif,
+                        jpeg: config.imageQualityJpeg,
+                    };
+                    imageSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
+                } catch {
+                    // DB unavailable during processing — use Sharp defaults (90/85/90)
+                }
             }
             await processImageFormats(
                 originalPath,

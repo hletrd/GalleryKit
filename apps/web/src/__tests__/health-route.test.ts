@@ -28,13 +28,13 @@ describe('/api/health', () => {
         executeMock.mockResolvedValue([{ ok: 1 }]);
     });
 
-    it('returns degraded during restore maintenance even when the database is reachable', async () => {
+    it('returns a generic unavailable status during restore maintenance', async () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(true);
 
         const response = await GET();
 
         expect(response.status).toBe(503);
-        await expect(response.json()).resolves.toEqual({ status: 'restore-maintenance' });
+        await expect(response.json()).resolves.toEqual({ status: 'unavailable' });
         expect(executeMock).not.toHaveBeenCalled();
     });
 
@@ -46,13 +46,13 @@ describe('/api/health', () => {
         expect(executeMock).toHaveBeenCalledTimes(1);
     });
 
-    it('returns degraded when the database probe fails outside maintenance mode', async () => {
+    it('returns a generic unavailable status when the database probe fails', async () => {
         executeMock.mockRejectedValueOnce(new Error('db offline'));
 
         const response = await GET();
 
         expect(response.status).toBe(503);
-        await expect(response.json()).resolves.toEqual({ status: 'degraded' });
+        await expect(response.json()).resolves.toEqual({ status: 'unavailable' });
         expect(executeMock).toHaveBeenCalledTimes(1);
     });
 });

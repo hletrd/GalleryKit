@@ -159,6 +159,7 @@ export async function createPhotoShareLink(imageId: number) {
 
             // Image may have been deleted between the initial check and now
             if (!refreshedImage) {
+                await rollbackShareRateLimitFull(ip, 'share_photo');
                 return { error: t('imageNotFound') };
             }
 

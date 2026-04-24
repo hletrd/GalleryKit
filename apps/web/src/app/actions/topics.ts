@@ -248,13 +248,16 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     throw new Error('TOPIC_NOT_FOUND');
                 }
 
-                await db.update(topics)
+                const [updateResult] = await db.update(topics)
                     .set({
                         label,
                         order,
                         ...(imageFilename ? { image_filename: imageFilename } : {})
                     })
                     .where(eq(topics.slug, cleanCurrentSlug));
+                if (updateResult.affectedRows === 0) {
+                    throw new Error('TOPIC_NOT_FOUND');
+                }
             }
         });
 

@@ -79,9 +79,12 @@ export async function updateTag(id: number, name: string) {
             return { error: t('tagNotFound') };
         }
 
-        await db.update(tags)
+        const [updateResult] = await db.update(tags)
             .set({ name: trimmedName, slug })
             .where(eq(tags.id, id));
+        if (updateResult.affectedRows === 0) {
+            return { error: t('tagNotFound') };
+        }
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tag_update', 'tag', String(id), undefined, { name: trimmedName, slug }).catch(console.debug);
 
