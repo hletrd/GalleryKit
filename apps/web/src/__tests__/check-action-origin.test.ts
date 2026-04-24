@@ -225,3 +225,20 @@ describe('checkActionSource — mixed file', () => {
         expect(report.failed[0]).toContain('deleteFoo');
     });
 });
+
+describe('checkActionSource — aliased exports', () => {
+    it('fails closed for aliased mutating exports that the scanner cannot inspect', () => {
+        const src = `
+            const deleteFoo = async (id) => {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            };
+            export { deleteFoo };
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('UNSUPPORTED aliased export');
+        expect(report.failed[0]).toContain('deleteFoo');
+    });
+});

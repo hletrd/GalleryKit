@@ -12,10 +12,11 @@
     "start": "next start",
     "test": "vitest run",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed-admin.ts",
     "init": "tsx scripts/init-db.ts",
-    "test:e2e": "npx playwright test",
+    "test:e2e": "env -u NO_COLOR npx playwright test",
     "e2e:seed": "tsx scripts/seed-e2e.ts",
     "lint:api-auth": "tsx scripts/check-api-auth.ts",
     "lint:action-origin": "tsx scripts/check-action-origin.ts"

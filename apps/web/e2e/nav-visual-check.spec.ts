@@ -7,7 +7,10 @@ test.describe('Nav visual checks', () => {
     await ensureEnglishLocale(page);
     await page.goto('/');
     await expectNoNextError(page);
-    await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+    await expect(nav).toBeVisible();
+    await expect(nav.getByRole('button', { name: 'Expand menu' })).toBeVisible();
+    await expect(nav.getByRole('button', { name: 'Search photos' })).toBeHidden();
     await page.screenshot({ path: 'test-results/nav-collapsed-mobile.png', fullPage: false });
   });
 
@@ -20,6 +23,7 @@ test.describe('Nav visual checks', () => {
     const nav = page.getByRole('navigation', { name: 'Main navigation' });
     await nav.getByRole('button', { name: 'Expand menu' }).click();
     await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
+    await expect(nav.locator('a[href*="/e2e-smoke"]').first()).toBeVisible();
     await page.screenshot({ path: 'test-results/nav-expanded-mobile.png', fullPage: false });
   });
 
@@ -28,7 +32,10 @@ test.describe('Nav visual checks', () => {
     await ensureEnglishLocale(page);
     await page.goto('/');
     await expectNoNextError(page);
-    await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+    await expect(nav).toBeVisible();
+    await expect(nav.getByRole('button', { name: 'Search photos' })).toBeVisible();
+    await expect(nav.getByRole('button', { name: 'Toggle theme' })).toBeVisible();
     await page.screenshot({ path: 'test-results/nav-desktop.png', fullPage: false });
   });
 });

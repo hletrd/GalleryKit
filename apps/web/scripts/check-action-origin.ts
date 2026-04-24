@@ -179,6 +179,21 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     };
 
     for (const statement of sourceFile.statements) {
+        if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+            for (const element of statement.exportClause.elements) {
+                if (statement.isTypeOnly || element.isTypeOnly) continue;
+                const name = element.name.text;
+                if (!shouldCheckFunction(name)) {
+                    report.skipped.push(`SKIP (getter): ${relative}::${name}`);
+                    continue;
+                }
+                report.failed.push(
+                    `UNSUPPORTED aliased export: ${relative}:${lineOf(statement)} ${name} must use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
+                );
+            }
+            continue;
+        }
+
         // Form 1: `export async function foo() {...}`
         if (ts.isFunctionDeclaration(statement)) {
             const modifiers = ts.getModifiers(statement);

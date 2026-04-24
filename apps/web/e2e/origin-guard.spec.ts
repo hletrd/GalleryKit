@@ -40,10 +40,10 @@ test.describe('Origin guard — admin API rejects cross-origin requests', () => 
             },
         });
 
-        // withAdminAuth returns 401 when no valid session cookie is present.
-        // A 200 here would mean the admin API is publicly accessible, which
-        // is the regression this test guards against.
-        expect([401, 403, 404]).toContain(response.status());
+        // withAdminAuth returns 401 when no valid session cookie is present;
+        // the same-origin guard may return 403. A 404 would mean the test is
+        // passing because the route disappeared, not because the guard works.
+        expect([401, 403]).toContain(response.status());
     });
 
     test('HEAD / returns 200 from the real origin (sanity check)', async ({ request, baseURL }) => {

@@ -64,6 +64,18 @@ describe('checkRouteSource — .ts route files', () => {
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: api/admin/foo/route.ts']);
     });
+
+    it('fails closed for aliased HTTP method exports', () => {
+        const src = `
+            import { withAdminAuth } from '@/lib/api-auth';
+            const GET = withAdminAuth(async (req) => new Response('ok'));
+            export { GET };
+        `;
+        const report = checkRouteSource(src, 'api/admin/foo/route.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('must export GET directly');
+    });
 });
 
 describe('checkRouteSource — extension variants (C5R-RPL-02 / AGG5R-02)', () => {

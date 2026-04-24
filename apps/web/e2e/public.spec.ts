@@ -95,7 +95,7 @@ test('home gallery keeps a full H1 -> H2 -> H3 heading hierarchy', async ({ page
   await expect(page.locator('h2')).toHaveCount(1);
   // At least one photo card H3 should be present when the seed lane is on.
   const h3Count = await page.locator('h3').count();
-  expect(h3Count).toBeGreaterThanOrEqual(0);
+  expect(h3Count).toBeGreaterThan(0);
 });
 
 test('shared-group navigation keeps the shared route context', async ({ page }) => {

@@ -11,6 +11,12 @@
         "dev": "npm run dev --workspace=apps/web",
         "build": "npm run build --workspaces",
         "start": "npm run start --workspace=apps/web",
+        "lint": "npm run lint --workspace=apps/web",
+        "typecheck": "npm exec --workspace=apps/web tsc -- --noEmit",
+        "test": "npm run test --workspace=apps/web",
+        "test:e2e": "npm run test:e2e --workspace=apps/web",
+        "lint:api-auth": "npm run lint:api-auth --workspace=apps/web",
+        "lint:action-origin": "npm run lint:action-origin --workspace=apps/web",
         "deploy": "./scripts/deploy-remote.sh"
     }
 }

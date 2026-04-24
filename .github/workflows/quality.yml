@@ -1,0 +1,76 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: gallery
+          MYSQL_USER: gallery
+          MYSQL_PASSWORD: gallery_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: gallery
+      DB_PASSWORD: gallery_password
+      DB_NAME: gallery
+      DB_SSL: "false"
+      BASE_URL: http://127.0.0.1:3100
+      ADMIN_PASSWORD: correct-horse-battery-staple
+      E2E_ADMIN_PASSWORD: correct-horse-battery-staple
+      SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Security lint gates
+        run: |
+          npm run lint:api-auth
+          npm run lint:action-origin
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Initialize database
+        run: npm run init --workspace=apps/web
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - name: Build
+        run: npm run build

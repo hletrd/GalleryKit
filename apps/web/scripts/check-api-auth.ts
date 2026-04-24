@@ -99,6 +99,18 @@ export function checkRouteSource(content: string, relative: string = 'route.ts')
     for (const statement of sourceFile.statements) {
         const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
         const isExported = !!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+
+        if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+            for (const element of statement.exportClause.elements) {
+                if (statement.isTypeOnly || element.isTypeOnly) continue;
+                if (!HTTP_METHOD_EXPORTS.has(element.name.text)) continue;
+                sawHandlerExport = true;
+                fileHadFailure = true;
+                report.failed.push(`MISSING AUTH: ${relative}:${getLineNumber(sourceFile, statement)} must export ${element.name.text} directly as ${element.name.text} = withAdminAuth(...)`);
+            }
+            continue;
+        }
+
         if (!isExported) continue;
 
         if (ts.isVariableStatement(statement)) {

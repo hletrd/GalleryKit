@@ -65,13 +65,20 @@ test.describe('admin workflows (opt-in)', () => {
     const jpegBuffer = await fs.readFile(uploadPath);
 
     await page.locator('#upload-topic').selectOption('e2e-smoke');
+    const uploadName = `playwright-upload-${Date.now()}.jpg`;
     await page.locator('#admin-content input[type="file"]').setInputFiles({
-      name: `playwright-upload-${Date.now()}.jpg`,
+      name: uploadName,
       mimeType: 'image/jpeg',
       buffer: jpegBuffer,
     });
 
     await page.getByRole('button', { name: /Upload 1 photos|1장 업로드/i }).click();
     await expect(page.getByText(/Uploaded 1 photos\.|1장을 업로드했습니다\./)).toBeVisible({ timeout: 30_000 });
+
+    const uploadedRow = page.getByRole('row').filter({ hasText: uploadName }).first();
+    await expect(uploadedRow).toBeVisible({ timeout: 30_000 });
+    await uploadedRow.getByRole('button', { name: /delete/i }).click();
+    await page.getByRole('button', { name: /^Delete$|^삭제$/i }).click();
+    await expect(uploadedRow).toBeHidden({ timeout: 30_000 });
   });
 });

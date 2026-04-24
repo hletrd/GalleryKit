@@ -52,8 +52,9 @@ describe('Privacy field separation', () => {
      * gap symmetrically.
      */
     it('admin-only keys form exactly the SENSITIVE_KEYS contract (symmetric privacy guard)', () => {
+        const publicKeySet = new Set<string>(publicSelectFieldKeys);
         const adminOnlyKeys = [...adminSelectFieldKeys]
-            .filter((key) => !publicSelectFieldKeys.includes(key))
+            .filter((key) => !publicKeySet.has(key))
             .sort();
         const sensitiveSorted = [...SENSITIVE_KEYS].sort();
         expect(adminOnlyKeys).toEqual(sensitiveSorted);
