@@ -120,18 +120,17 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                 )}
                             >
-                                {topic.image_filename ? (
+                                {topic.image_filename && (
                                     <Image
                                         src={`/resources/${topic.image_filename}`}
-                                        alt={topic.label}
-                                        title={topic.label}
+                                        alt=""
+                                        aria-hidden="true"
                                         width={24}
                                         height={24}
                                         className="w-6 h-6 object-cover rounded-full"
                                     />
-                                ) : (
-                                    topic.label
                                 )}
+                                <span>{topic.label}</span>
                             </Link>
                         );
                     })}

@@ -24,7 +24,7 @@ export function AdminNav() {
     ];
 
     return (
-        <nav aria-label={t('aria.adminNav')} className="flex items-center flex-nowrap gap-x-6 text-sm font-medium overflow-x-auto scrollbar-hide">
+        <nav aria-label={t('aria.adminNav')} className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-medium sm:gap-x-6">
             {links.map(({ href, label }) => {
                 const isActive = stripLocalePrefix(pathname) === stripLocalePrefix(href);
                 return (

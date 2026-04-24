@@ -38,7 +38,7 @@ function getLightboxAutoHidePreference() {
 export function LightboxTrigger({ onClick }: { onClick: () => void }) {
     const { t } = useTranslation();
     return (
-        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8" aria-label={t('aria.openFullscreen')}>
+        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8" aria-label={t('aria.openFullscreen')} aria-keyshortcuts="F" title={`${t('aria.openFullscreen')} (F)`}>
             <Maximize className="h-4 w-4" />
         </Button>
     );
@@ -317,6 +317,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                         }
                     }}
                     aria-label={t('aria.close')}
+                    aria-keyshortcuts="Escape"
+                    title={`${t('aria.close')} (Esc)`}
                 >
                     <X className="h-5 w-5" />
                 </button>
@@ -330,6 +332,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                         toggleFullscreen();
                     }}
                     aria-label={isFullscreen ? t('aria.exitFullscreen') : t('aria.openFullscreen')}
+                    aria-keyshortcuts="F"
+                    title={`${isFullscreen ? t('aria.exitFullscreen') : t('aria.openFullscreen')} (F)`}
                 >
                     {isFullscreen ? (
                         <Minimize className="h-5 w-5" />
@@ -348,6 +352,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                             onNavigate(-1);
                         }}
                         aria-label={t('aria.previousImage')}
+                        aria-keyshortcuts="ArrowLeft"
+                        title={`${t('aria.previousImage')} (←)`}
                     >
                         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
                             <ChevronLeft className="h-6 w-6" />
@@ -365,6 +371,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                             onNavigate(1);
                         }}
                         aria-label={t('aria.nextImage')}
+                        aria-keyshortcuts="ArrowRight"
+                        title={`${t('aria.nextImage')} (→)`}
                     >
                         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
                             <ChevronRight className="h-6 w-6" />

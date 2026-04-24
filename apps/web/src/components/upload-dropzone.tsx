@@ -36,6 +36,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const [files, setFiles] = useState<PendingUploadItem[]>([]);
     const [perFileTags, setPerFileTags] = useState<Record<string, string[]>>({});
     const { t } = useTranslation();
+    const hasTopics = topics.length > 0;
 
     // Refs for accessing latest state during async upload loop
     const selectedTagsRef = useRef(selectedTags);
@@ -116,11 +117,12 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
         onDropRejected,
-        accept: acceptedImageTypes
+        accept: acceptedImageTypes,
+        disabled: uploading || !hasTopics,
     });
 
     const handleUpload = async () => {
-        if (!files.length) return;
+        if (!files.length || !hasTopics) return;
         setUploading(true);
         setProgress(0);
         setCompletedCount(0);
@@ -241,6 +243,12 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                         <option key={t.id} value={t.name} />
                     ))}
                 </datalist>
+                {!hasTopics ? (
+                    <div className="rounded-lg border border-dashed bg-muted/30 p-6 text-center" role="status">
+                        <p className="font-medium">{t('upload.noTopicsTitle')}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">{t('upload.noTopicsDescription')}</p>
+                    </div>
+                ) : (
                 <div className="flex flex-col gap-4">
                     <div>
                         <label htmlFor="upload-topic" className="text-sm font-medium mb-1 block">{t('upload.topic')}</label>
@@ -267,16 +275,17 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                         </div>
                     </div>
                 </div>
+                )}
 
                 {/* Dropzone */}
                 <div
                     {...getRootProps()}
                     className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer transition-colors
                         ${isDragActive ? 'border-primary bg-primary/10' : 'border-muted'}
-                        ${uploading ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/50'}
+                        ${uploading || !hasTopics ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/50 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'}
                     `}
                 >
-                    <input {...getInputProps()} disabled={uploading} />
+                    <input {...getInputProps()} disabled={uploading || !hasTopics} />
                     <UploadCloud className="h-10 w-10 text-muted-foreground mb-4" />
                     <p className="text-lg font-medium">{t('upload.dragDrop')}</p>
                     <p className="text-sm text-muted-foreground">{t('upload.orClick')}</p>
@@ -384,7 +393,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                         className="w-full"
                         size="lg"
                         onClick={handleUpload}
-                        disabled={files.length === 0}
+                        disabled={files.length === 0 || !hasTopics}
                     >
                         {t('upload.uploadButton', { count: files.length })}
                     </Button>

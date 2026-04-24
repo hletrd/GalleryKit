@@ -378,8 +378,8 @@ export function ImageManager({
                                                 className="h-full w-full object-contain"
                                             />
                                         ) : (
-                                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground text-xs text-center p-2">
-                                                <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/40 text-muted-foreground text-xs text-center p-2" role="status" aria-live="polite">
+                                                <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
                                                 <span>{t('common.loading')}</span>
                                             </div>
                                         )}

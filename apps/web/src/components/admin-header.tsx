@@ -11,8 +11,8 @@ export function AdminHeader() {
 
     return (
         <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="container mx-auto flex h-14 items-center px-4">
-                <div className="mr-4 flex">
+            <div className="container mx-auto flex min-h-14 flex-wrap items-center gap-y-2 px-4 py-2">
+                <div className="mr-4 flex flex-1 flex-wrap items-center gap-y-2">
                     <Link className="mr-6 flex items-center space-x-2 font-bold" href={localizePath(locale, '/admin/dashboard')}>
                         <span>{t('nav.admin')}</span>
                     </Link>

@@ -68,8 +68,8 @@ function OptimisticImageInner({ src, alt, className, fallbackSrc, ...props }: Op
                 onError={handleError}
             />
             {isLoading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-muted/20 animate-pulse">
-                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/20 animate-pulse" role="status" aria-live="polite" aria-label={t('common.loading')}>
+                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
                 </div>
             )}
              {error && (

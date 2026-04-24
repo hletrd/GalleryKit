@@ -183,6 +183,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             id="search-input"
                             ref={inputRef}
                             aria-label={t('search.placeholder')}
+                            role="combobox"
+                            aria-autocomplete="list"
+                            aria-controls="search-results"
+                            aria-expanded={results.length > 0}
+                            aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
                             value={query}
                             onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
                             onKeyDown={(e) => {
@@ -200,7 +205,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             placeholder={t('search.placeholder')}
                             className="border-0 focus-visible:ring-0 shadow-none h-8 p-0"
                         />
-                        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
+                        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" role="status" aria-label={t('common.loading')} />}
                         <Button
                             variant="ghost"
                             size="icon"
@@ -213,13 +218,14 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                     </div>
                     <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
                         {results.length > 0 ? (
-                            <div className="p-2" id="search-results">
+                            <div className="p-2" id="search-results" role="listbox" aria-label={t('aria.searchPhotos')}>
                                 {results.map((image, idx) => (
                                     <Link
                                         key={image.id}
                                         ref={(el) => { resultRefs.current[idx] = el; }}
                                         id={`search-result-${idx}`}
-                                        aria-current={idx === activeIndex ? 'true' : undefined}
+                                        role="option"
+                                        aria-selected={idx === activeIndex}
                                         href={localizePath(locale, `/p/${image.id}`)}
                                         onClick={handleClose}
                                         className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
