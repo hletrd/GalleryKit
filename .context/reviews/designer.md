@@ -1,62 +1,77 @@
 # Designer Review — Cycle 1 (2026-04-24)
 
 ## Scope and inventory covered
-Reviewed the repo docs (`CLAUDE.md`, `README.md`, `apps/web/README.md`) and the public/admin frontend surface in `apps/web/src/app/**` and `apps/web/src/components/**`, with special attention to navigation, search, photo viewing, error states, upload flows, and theme/i18n behavior. Browser-checked the live site in Playwright at:
+Reviewed the full UI surface of the Next.js app: app shell, public routes, admin routes, shared interaction components, and the shadcn/Radix primitives that shape focus, loading, empty, and error states.
 
-- `https://gallery.atik.kr/en`
-- `https://gallery.atik.kr/en/tws`
-- `https://gallery.atik.kr/en/p/348`
+### Inventory
+- App shell / route chrome: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/globals.css`, `apps/web/src/app/[locale]/loading.tsx`, `apps/web/src/app/[locale]/error.tsx`, `apps/web/src/app/[locale]/not-found.tsx`, `apps/web/src/app/global-error.tsx`
+- Public routes: `apps/web/src/app/[locale]/(public)/layout.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- Admin routes: `apps/web/src/app/[locale]/admin/layout.tsx`, `apps/web/src/app/[locale]/admin/page.tsx`, `apps/web/src/app/[locale]/admin/login-form.tsx`, `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`, `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`, `apps/web/src/app/[locale]/admin/(protected)/error.tsx`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`, `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`, `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`, `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/password/password-client.tsx`, `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx`, `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`, `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+- Shared components: `apps/web/src/components/nav.tsx`, `apps/web/src/components/nav-client.tsx`, `apps/web/src/components/footer.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/search.tsx`, `apps/web/src/components/tag-filter.tsx`, `apps/web/src/components/tag-input.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/lightbox.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/photo-navigation.tsx`, `apps/web/src/components/info-bottom-sheet.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/components/admin-header.tsx`, `apps/web/src/components/admin-nav.tsx`, `apps/web/src/components/admin-user-manager.tsx`, `apps/web/src/components/theme-provider.tsx`, `apps/web/src/components/i18n-provider.tsx`, `apps/web/src/components/topic-empty-state.tsx`, `apps/web/src/components/optimistic-image.tsx`, `apps/web/src/components/image-zoom.tsx`, `apps/web/src/components/lazy-focus-trap.tsx`
+- UI primitives: `apps/web/src/components/ui/button.tsx`, `input.tsx`, `label.tsx`, `dialog.tsx`, `alert-dialog.tsx`, `dropdown-menu.tsx`, `select.tsx`, `sheet.tsx`, `switch.tsx`, `progress.tsx`, `badge.tsx`, `card.tsx`, `table.tsx`, `textarea.tsx`, `alert.tsx`, `sonner.tsx`, `separator.tsx`, `scroll-area.tsx`, `skeleton.tsx`, `aspect-ratio.tsx`
 
-The browser pass covered both desktop and mobile viewport behavior, keyboard focus, modal/lightbox behavior, and the mobile nav state after route changes.
+Browser verification was used where the app would render; code review was used for the remaining surfaces, with screenshots in `.context/*.png` as visual references.
 
 ## Findings summary
-- Confirmed Issues: 4
-- Likely Issues: 1
-- Risks Requiring Manual Validation: 0
+- Confirmed issues: 6
+- Likely issues: 0
+- Manual re-check needed: 0
 
-## Confirmed Issues
+## Confirmed issues
 
-### DES1 — Mobile nav state persists after navigation, so the next page opens with the menu still expanded
+### DES1 — The footer’s admin link is below WCAG contrast at rest
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/components/nav-client.tsx:26-156`
-- **Why it is a problem:** `isExpanded` is local component state that only resets on a viewport breakpoint change (`matchMedia('(min-width: 768px)')`). There is no pathname effect or link-click collapse path, so the expanded mobile nav survives route transitions in the persistent App Router layout.
-- **Concrete failure scenario:** in mobile browser, a user opens the menu, taps a topic, and lands on the destination page with the nav still expanded. In Playwright, opening the menu on `/en`, clicking `TWS`, and landing on `/en/tws` left the collapse button visible and the header height at 148px, pushing the actual page content down.
-- **Suggested fix:** collapse the menu on any navigation event (`useEffect(() => setIsExpanded(false), [pathname])`), or close it in the topic-link click path before pushing the next route.
+- **Evidence:** `apps/web/src/components/footer.tsx:46-48`
+  Selector: `footer a[rel="nofollow"]`
+- **Why it is a problem:** the admin link is styled as `text-muted-foreground/50`, which produces roughly a 2:1 contrast ratio on the light background. It is visually easy to miss and fails WCAG 1.4.3 for normal-size text.
+- **Scenario:** a low-vision or distracted user scans the footer for “Admin” and cannot reliably distinguish it from the rest of the footer copy.
+- **Fix:** raise the resting contrast to at least `text-muted-foreground` or `text-foreground/70`, and keep the hover state as the emphasis state instead of the default state.
 
-### DES2 — The mobile info bottom sheet is touch-only and never moves focus into the panel
+### DES2 — The tag picker’s keyboard focus is not exposed to assistive tech
 - **Severity:** HIGH
 - **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/components/photo-viewer.tsx:269-277, 586-592`; `apps/web/src/components/info-bottom-sheet.tsx:24-176`
-- **Why it is a problem:** the viewer opens the sheet from a plain button, but the sheet itself starts in `peek` state, uses `onTouch*` handlers on a non-focusable drag handle, and only activates the focus trap when `sheetState === 'expanded'`. There is no keyboard path to expand the sheet or a focus move into the sheet when it opens.
-- **Concrete failure scenario:** on mobile, a user taps Info and sees only the summary row. In Playwright, after clicking the Info button on `/en/p/348`, `document.activeElement` remained the trigger button instead of moving into the sheet. Keyboard, switch, and screen-reader users therefore have no reliable way to reach the EXIF grid.
-- **Suggested fix:** make the drag handle a real button with `aria-expanded`, add keyboard controls for expand/collapse, and move focus into the sheet on open; alternatively open the sheet directly in `expanded` state on click and keep the summary row as the collapsed fallback only.
+- **Evidence:** `apps/web/src/components/tag-input.tsx:159-217`
+  Selectors: `input[role="combobox"][aria-controls="tag-suggestions"]`, `#tag-suggestions [role="option"]`
+- **Why it is a problem:** the combobox updates a visual highlight with arrow keys, but the input never gets `aria-activedescendant`, and the highlighted option has no stable id. Screen readers therefore stay on the text box and do not receive the currently highlighted suggestion.
+- **Scenario:** an admin uses the arrow keys to choose an existing tag; the UI highlight moves, but VoiceOver/NVDA users get no reliable announcement of the active option and must guess which tag will be inserted.
+- **Fix:** assign ids to each suggestion, wire `aria-activedescendant` on the input, and keep the listbox/option pattern fully synchronized with the highlighted row.
 
-### DES3 — Lightbox auto-hides its controls but leaves them focusable, so keyboard focus can land on invisible buttons
-- **Severity:** HIGH
-- **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/components/lightbox.tsx:111-148, 283-355`
-- **Why it is a problem:** when the idle timer fires, the overlay’s opacity is set to `0`, but the buttons remain mounted, tabbable, and exposed to assistive tech. There is no `aria-hidden`, `inert`, or tab-stop suppression when the controls are hidden.
-- **Concrete failure scenario:** a keyboard user opens the lightbox, waits a few seconds, and then tabs forward. In Playwright on `/en/p/348`, after 3.5 seconds the overlay opacity was `0` while `document.activeElement` was still the `Close` button. The result is an invisible focus target inside a modal dialog.
-- **Suggested fix:** if controls are auto-hidden, also remove them from the accessibility tree / tab order, or keep them visible while focus is inside the lightbox and only fade them for pointer-only idle states.
-
-### DES4 — Dropping invalid files gives no validation feedback in the upload flow
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/components/upload-dropzone.tsx:95-106, 258-269`
-- **Why it is a problem:** `useDropzone` is configured with an accept list, but `onDrop` only appends `acceptedFiles`. Rejected files are ignored completely, so the UI never tells the user why a file was not added.
-- **Concrete failure scenario:** a user drags a PDF or unsupported image into the uploader and nothing visibly happens. From the user’s perspective the drop target appears broken, even though the issue is just validation rejection.
-- **Suggested fix:** handle `fileRejections`/`onDropRejected`, surface the rejected file names and reasons inline or via a toast, and keep the accepted-file list separate from validation errors.
-
-## Likely Issues
-
-### DES5 — The root error shell ignores the active theme, so dark-mode users crash into a light-only page
+### DES3 — Search results mix listbox semantics with link semantics
 - **Severity:** MEDIUM
 - **Confidence:** MEDIUM
-- **Files / regions:** `apps/web/src/app/global-error.tsx:45-75`
-- **Why it is a problem:** this boundary renders its own `<html>` and `<body>` without the `ThemeProvider` or a copied `.dark` class. Because the color tokens in `globals.css` default to the light palette unless `.dark` is present, the global error page always renders as light mode.
-- **Concrete failure scenario:** a dark-mode user hits a root-level exception and sees a bright white recovery screen that clashes with the rest of the app and may not match their contrast expectations.
-- **Suggested fix:** bootstrap the theme class/attribute in the global error shell, or read the persisted theme and apply the matching class before rendering the error UI.
+- **Evidence:** `apps/web/src/components/search.tsx:169-231`
+  Selector: `#search-results [role="option"]`
+- **Why it is a problem:** the search overlay presents a `role="listbox"` of results, but each option is a `Link`. That mixes two interaction models: a listbox expects non-interactive options controlled by the combobox, while a link list expects normal tab stops and link navigation.
+- **Scenario:** a keyboard or screen-reader user opens search and hears link semantics inside an option list, which makes the arrow-key and Enter behavior feel inconsistent and harder to predict.
+- **Fix:** choose one pattern and commit to it. Either render a true combobox/listbox with non-link options and navigate on selection, or drop the listbox roles and present a standard searchable link list.
+
+### DES4 — Password confirmation errors are not tied to the offending field
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Evidence:** `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:30-99`
+  Selector: `input[name="confirmPassword"]`
+- **Why it is a problem:** when the confirmation check fails, the form shows a generic alert above the fields, but the confirm input is not marked invalid and the message is not associated with that field. The user gets the error, but not the correction point.
+- **Scenario:** an admin mistypes the new password twice, sees an error, and still has to infer which field needs to be fixed. Screen-reader users hear the alert without a clear field-level relationship.
+- **Fix:** set `aria-invalid` on the confirm field, connect it to an inline help/error node with `aria-describedby`, and keep the summary alert only as a top-level recap.
+
+### DES5 — Settings and SEO pages silently fall back to blank editors when loading fails
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Evidence:** `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:6-10`, `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx:6-17`
+  Related client shells: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:22-179`, `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:29-178`
+- **Why it is a problem:** both pages convert a failed fetch into a normal-looking editor with blank values/default placeholders. That hides the fact that the data load failed and makes the page look like “empty settings” instead of a recoverable error state.
+- **Scenario:** if the settings read is temporarily broken, an admin sees a form that appears valid and may try to save without realizing the page is showing defaults rather than actual persisted values.
+- **Fix:** render a visible error/retry state when the read fails, or disable editing until the server confirms the settings payload has loaded successfully.
+
+### DES6 — Infinite scroll has no explicit keyboard or fallback trigger
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Evidence:** `apps/web/src/components/load-more.tsx:67-94`
+  Selector: the sentinel container and live region inside `LoadMore` (`div[aria-live="polite"]`)
+- **Why it is a problem:** the gallery relies entirely on an `IntersectionObserver` sentinel to fetch more content. That is fine as a progressive enhancement, but there is no visible button or link for users who do not get the sentinel into view or for browsers that do not behave well with the observer.
+- **Scenario:** a keyboard-only user reaches the end of the grid and has no deterministic way to request the next page of images, so the gallery appears to stop early even though more content exists.
+- **Fix:** keep the sentinel for auto-loading, but add a real “Load more” button/link as a fallback and wire it to the same action.
 
 ## Final sweep
-No additional UI/UX, accessibility, responsive, loading/empty/error-state, i18n, or perceived-performance issues were found that were strong enough to report beyond the items above. The main remaining design risks are mobile state persistence, touch-only expansion affordances, and hidden focus in the lightbox idle state.
+No additional UI/UX, accessibility, responsive, loading/empty/error-state, i18n/RTL, or perceived-performance issues were strong enough to report beyond the six above.

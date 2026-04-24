@@ -1,57 +1,77 @@
-# Architect Review — Cycle 1 (2026-04-24)
+# Architectural Review — GalleryKit Cycle 1
 
-## Scope and inventory covered
-Reviewed the repo docs (`CLAUDE.md`, `.context/reviews/prompts/architect.md`, `common_review_scope.md`) and the full `apps/web` surface relevant to architecture and coupling: app routes/layouts/API, server actions, `src/lib`, `src/components`, `src/db`, `scripts`, `messages`, config, and the test surface that documents the expected boundaries.
+**Recovered from read-only architect subagent output.**
 
-## Findings summary
-- Confirmed Issues: 2
-- Likely Issues: 2
-- Risks Requiring Manual Validation: 1
+## Inventory
+Reviewed repo/runtime/deploy/config, all app routes/actions, all components, lib modules, DB/schema, migrations, unit/e2e tests, and messages. Excluded generated/runtime artifacts (`.context`, `.omx`, `.omc`, `node_modules`, `.git`, `test-results`).
 
-## Confirmed Issues
+## Findings
 
-### ARC1 — `getGalleryConfig()` has no failure fallback, so a noncritical settings-table outage can take down the public shell
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/lib/gallery-config.ts:33-39, 68-84`; call sites `apps/web/src/app/[locale]/layout.tsx:73-76`, `apps/web/src/components/nav.tsx:6-12`, `apps/web/src/app/[locale]/(public)/page.tsx:106-121`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:122-133`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:89-95`
-- **Why it is a problem:** `getGalleryConfig()` reads `admin_settings` directly and does not catch DB errors or fall back to `gallery-config-shared` defaults. That makes the root layout, navigation, and several public pages hostage to a settings-table read even when the gallery could otherwise keep rendering with defaults.
-- **Concrete failure scenario:** a transient MySQL lock or outage affecting only `admin_settings` causes the home page and topic/share shells to throw during render. The code already treats SEO settings more defensively; this helper is the outlier.
-- **Suggested fix:** mirror the fallback strategy used by `getSeoSettings()` — catch read failures in `getGalleryConfig()` and return defaults from `gallery-config-shared`, or move the read behind an explicit startup cache with documented fallback semantics.
+### ARCH-001 — Restore maintenance is process-local, but restore locking is database-global
+- **Type:** Confirmed issue
+- **Severity:** High
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/lib/restore-maintenance.ts:1-55`, `apps/web/src/app/[locale]/admin/db-actions.ts:254-311`, `apps/web/src/app/api/health/route.ts:7-16`, `apps/web/src/app/actions/public.ts:23-46`
+- **Problem:** Restore acquires a MySQL advisory lock but maintenance state is a per-process `globalThis` flag.
+- **Concrete failure scenario:** Instance A restores while instance B does not observe maintenance and keeps accepting writes.
+- **Suggested fix:** Move restore maintenance state into shared storage or explicitly enforce/document single-process operation.
 
-### ARC2 — `lib/data.ts` is still mixing read-model queries with operational lifecycle state
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/lib/data.ts:11-109, 594-669`; restore consumer `apps/web/src/app/[locale]/admin/db-actions.ts:21-24, 290-294`
-- **Why it is a problem:** the same module owns the shared-group view buffer, flush timer, backoff state, and `flushBufferedSharedGroupViewCounts()` API alongside the query helpers. That means restore/shutdown orchestration has to import the same module that public routes use for page data, and future changes to the read layer can accidentally alter operational behavior.
-- **Concrete failure scenario:** a refactor to “just the data layer” unintentionally changes restore behavior or queue shutdown because the lifecycle code lives beside the query helpers. The module is no longer a clean read boundary; it is also a process-control boundary.
-- **Suggested fix:** split the shared-group view-count buffer/flush lifecycle into a dedicated module with a narrow API, and keep `lib/data.ts` focused on query composition and cached read helpers.
+### ARCH-002 — Pending image processing bootstrap is one-shot and not self-healing after startup DB failure
+- **Type:** Confirmed issue
+- **Severity:** Medium-High
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/instrumentation.ts:1-6`, `apps/web/src/lib/image-queue.ts:330-381`, `apps/web/src/app/actions/images.ts:298-307`
+- **Problem:** Bootstrap runs once and skips on DB refusal without retry.
+- **Concrete failure scenario:** App starts before MySQL, logs “Skipping,” and old `processed = false` rows remain stranded.
+- **Suggested fix:** Retry bootstrap with backoff until success or trigger it opportunistically after DB is reachable.
 
-## Likely Issues
+### ARCH-003 — The storage abstraction is dead code in production flow
+- **Type:** Confirmed issue
+- **Severity:** Medium
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/lib/storage/index.ts:4-12`, `apps/web/src/lib/storage/types.ts:6-9`, `apps/web/src/app/actions/images.ts:198-248`, `apps/web/src/lib/process-image.ts:233-459`, `apps/web/src/lib/serve-upload.ts:32-115`
+- **Problem:** The abstraction advertises a boundary but uploads, processing, and serving are still hardwired to local filesystem helpers.
+- **Concrete failure scenario:** A maintainer switches storage backend and expects production behavior to change, but live upload/process/serve paths remain local.
+- **Suggested fix:** Delete the unused abstraction until real or route all file IO through it with end-to-end tests.
 
-### ARC3 — `getSharedGroup()` is a query helper with a hidden write contract
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/lib/data.ts:594-669`; call sites `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:29-35, 89-95, 118-144`
-- **Why it is a problem:** the function increments `sharedGroups.view_count` by default and only avoids that write when callers remember to pass `{ incrementViewCount: false }`. That turns a public read helper into a command with opt-out semantics, which is easy to misuse in future callers.
-- **Concrete failure scenario:** a future page, metadata path, or prefetch consumer calls the same helper without the flag and starts counting non-view traffic as real views, or a future refactor accidentally uses the incrementing path in a context that should be read-only.
-- **Suggested fix:** split the API into explicit read vs. record-view operations, or at minimum make the side-effecting path separately named so callers must opt in to the write behavior.
+### ARCH-004 — Rate and analytics controls rely on process-local memory
+- **Type:** Likely risk
+- **Severity:** Medium
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/app/actions/images.ts:56-61`, `apps/web/src/app/actions/images.ts:122-186`, `apps/web/src/lib/data.ts:11-109`, `apps/web/src/instrumentation.ts:16-24`
+- **Problem:** Upload quotas and buffered shared-group view counts are per-process.
+- **Concrete failure scenario:** Multi-instance deployments split upload budgets and can lose buffered analytics on crash.
+- **Suggested fix:** Persist counters in DB/Redis or document them as single-instance/best-effort.
 
-### ARC4 — `image-queue.ts` is not side-effect-free; importing the queue helper starts bootstrap work and timers
-- **Severity:** MEDIUM
-- **Confidence:** MEDIUM
-- **Files / regions:** `apps/web/src/lib/image-queue.ts:330-411`; importers `apps/web/src/app/actions/images.ts:13-15, 298-306`, `apps/web/src/app/[locale]/admin/db-actions.ts:22-24, 292-304`
-- **Why it is a problem:** the module auto-calls `bootstrapImageProcessingQueue()` at import time. A consumer that only wants queue helpers still gets DB probing, pending-job enqueueing, orphan cleanup, and an hourly GC interval.
-- **Concrete failure scenario:** a unit test or a new route imports `enqueueImageProcessing` and unexpectedly triggers queue bootstrap or interval setup. In runtime, incidental import order can produce extra DB work or lifecycle behavior before the app is actually ready to process jobs.
-- **Suggested fix:** move bootstrap and periodic maintenance into an explicit startup path (`instrumentation.ts`/entrypoint or a dedicated initializer) and keep `lib/image-queue.ts` focused on queue operations only.
+### ARCH-005 — Admin API origin protection is not centralized in the API auth wrapper
+- **Type:** Likely risk
+- **Severity:** Medium
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/lib/api-auth.ts:5-18`, `apps/web/scripts/check-api-auth.ts:1-178`, `apps/web/src/app/api/admin/db/download/route.ts:13-31`
+- **Problem:** Current route manually adds same-origin checks, but the lint gate only enforces `withAdminAuth`.
+- **Concrete failure scenario:** A future mutating admin API route passes CI with auth only and ships without same-origin protection.
+- **Suggested fix:** Add same-origin to a stronger wrapper or add a mutating-admin-API origin lint gate.
 
-## Risks Requiring Manual Validation
+### ARCH-006 — Typecheck is coupled to volatile `.next/dev` generated artifacts
+- **Type:** Confirmed issue
+- **Severity:** Medium
+- **Confidence:** High
+- **Files/regions:** `apps/web/tsconfig.json:31-38`, `apps/web/package.json:15`, `.github/workflows/quality.yml:54-55`
+- **Problem:** Normal `tsc --noEmit` includes `.next/dev/types/**/*.ts`, so local dev-generated artifacts can break the quality gate.
+- **Concrete failure scenario:** Running `next dev` generates incompatible `.next/dev` types and typecheck fails even when source code is valid.
+- **Suggested fix:** Remove `.next/dev/types/**/*.ts` from normal include or use a dedicated CI tsconfig/type-generation flow.
 
-### ARC5 — The current deployment model still assumes one process owns queue state, rate limits, and shared-group analytics
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Files / regions:** `apps/web/src/lib/image-queue.ts:94-123, 164-187, 330-373`; `apps/web/src/lib/data.ts:11-109`; `apps/web/src/lib/rate-limit.ts:22-26, 101-149`; `apps/web/src/lib/restore-maintenance.ts:1-56`
-- **Why it matters:** queue claims, buffered view counts, maintenance state, and in-memory fast-path limits are all process-local. That is coherent for the documented single-host runtime, but it is not safe to scale out blindly.
-- **Validate:** confirm the deployment/runbooks continue to enforce a single-process app model, or plan a shared coordination layer before any horizontal scaling.
+### ARCH-007 — Core boundaries are too broad in data, image actions, and UI clusters
+- **Type:** Likely risk
+- **Severity:** Medium-Low
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/lib/data.ts:11-894`, `apps/web/src/app/actions/images.ts:56-623`, `apps/web/src/components/photo-viewer.tsx:40-586`, `apps/web/src/components/image-manager.tsx:62-498`
+- **Problem:** Several files combine unrelated responsibilities and act as change magnets.
+- **Concrete failure scenario:** Small changes to sharing, EXIF, SEO, or metadata regress unrelated behavior due broad files.
+- **Suggested fix:** Split by domain boundary in staged refactors.
 
-## Final sweep
-No relevant `apps/web` source area was skipped. The main architectural pressure points are still the config-read boundary, the mixed query/operational boundary in `lib/data.ts`, and hidden lifecycle side effects in queue/bootstrap code.
+## Verification
+- `npm run lint --workspace=apps/web`: passed.
+- `npm run lint:api-auth --workspace=apps/web && npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm test --workspace=apps/web`: 52 files / 310 tests passed.
+- `npm run typecheck --workspace=apps/web`: failed in architect lane due generated `.next/dev/types/validator.ts`; source-side cause is `apps/web/tsconfig.json:31-38`.
