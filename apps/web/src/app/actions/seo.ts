@@ -6,7 +6,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
-import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
+import { revalidateAllAppData } from '@/lib/revalidation';
 import { validateSeoOgImageUrl } from '@/lib/seo-og-url';
 import { stripControlChars } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
@@ -127,7 +127,6 @@ export async function updateSeoSettings(settings: Record<string, string>) {
         // public metadata pages, so use layout-level invalidation instead of
         // a short hand-maintained path list.
         revalidateAllAppData();
-        revalidateLocalizedPaths('/admin/seo', '/admin/dashboard');
 
         // C1R-04: surface the sanitized values so the client can rehydrate
         // from what was actually persisted rather than its pre-submit state.

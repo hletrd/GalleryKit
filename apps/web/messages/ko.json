@@ -140,7 +140,12 @@
     "addTagPlaceholder": "+ 태그",
     "failed": "업로드에 실패했습니다.",
     "noTopicsTitle": "업로드 전에 카테고리를 만들어 주세요",
-    "noTopicsDescription": "사진을 업로드하려면 갤러리 목적지로 사용할 카테고리가 필요합니다."
+    "noTopicsDescription": "사진을 업로드하려면 갤러리 목적지로 사용할 카테고리가 필요합니다.",
+    "limitExceeded": "업로드 제한을 초과했습니다. 업로드 창마다 최대 {maxFiles}개, {maxSize}까지만 추가할 수 있습니다.",
+    "limitHint": "업로드 창마다 최대 {maxFiles}개, {maxSize}까지 가능합니다.",
+    "tagsForFile": "{file}의 태그",
+    "fileError": "{file}: {error}",
+    "warningSuccess": "{count}개 파일을 업로드했지만 경고가 {warnings}개 있습니다."
   },
   "imageManager": {
     "selected": "{count}장 선택됨",
@@ -190,7 +195,8 @@
     "bulkDeleteCleanupWarning": "데이터 삭제는 완료됐지만 파일 정리 {count}건이 실패했습니다. 서버 로그를 확인해 주세요.",
     "bulkDeleteFailed": "일괄 삭제에 실패했습니다",
     "shareFailed": "그룹 공유에 실패했습니다",
-    "updateFailed": "수정에 실패했습니다"
+    "updateFailed": "수정에 실패했습니다",
+    "tagsForImage": "{title}의 태그"
   },
   "home": {
     "latestUploads": "최근 사진",
@@ -259,7 +265,8 @@
     "topics": {
       "default": "갤러리"
     },
-    "downloadJpeg": "JPEG 다운로드"
+    "downloadJpeg": "JPEG 다운로드",
+    "shortcutsHint": "단축키: 왼쪽/오른쪽 화살표로 사진을 이동하고 F로 라이트박스를 열거나 닫습니다."
   },
   "shared": {
     "viewGallery": "갤러리 보기",
@@ -274,7 +281,10 @@
     "placeholder": "사진, 태그, 카메라 검색...",
     "noResults": "검색 결과가 없습니다",
     "hint": "제목, 태그, 카메라, 설명으로 검색",
-    "toggleHint": "검색 열기/닫기"
+    "toggleHint": "검색 열기/닫기",
+    "searching": "검색 중...",
+    "error": "검색에 실패했습니다. 다시 시도해 주세요.",
+    "resultsCount": "검색 결과 {count}개"
   },
   "notFound": {
     "description": "페이지를 찾을 수 없습니다.",
@@ -321,7 +331,7 @@
     "ogDesc": "소셜 미디어 링크 미리보기에 사용할 이미지입니다. 개별 사진 페이지는 사진 자체가 사용됩니다.",
     "ogImageUrl": "OG 이미지 URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "소셜 미디어 미리보기 이미지의 전체 URL입니다. 권장 크기: 1200x630px. 비워두면 최신 사진이 사용됩니다.",
+    "ogImageUrlHint": "일반 소셜 미디어 미리보기에 사용할 동일 출처 URL 또는 경로입니다. 개별 사진과 공유 페이지는 실제 사진 이미지를 사용합니다.",
     "loadFailed": "SEO 설정을 불러오지 못했습니다. 변경 사항을 저장하기 전에 다시 시도해 주세요."
   },
   "serverActions": {
@@ -446,7 +456,8 @@
     "imageSizesLocked": "사진을 업로드한 뒤에는 출력 크기를 변경할 수 없습니다. 현재 크기를 유지하거나 라이브러리를 다시 생성해 주세요.",
     "failedToUpdateGallerySettings": "갤러리 설정 저장에 실패했습니다",
     "failedToSwitchStorageBackend": "스토리지 백엔드 전환에 실패했습니다",
-    "uploadSettingsLocked": "업로드가 진행 중이거나 사진이 이미 있으면 업로드 처리 설정을 변경할 수 없습니다. 현재 개인정보/출력 설정을 유지하거나 라이브러리를 다시 생성해 주세요."
+    "uploadSettingsLocked": "업로드가 진행 중이거나 사진이 이미 있으면 업로드 처리 설정을 변경할 수 없습니다. 현재 개인정보/출력 설정을 유지하거나 라이브러리를 다시 생성해 주세요.",
+    "tagPersistenceWarning": "{file} 업로드는 완료됐지만 요청한 태그 중 일부를 저장하지 못했습니다."
   },
   "aria": {
     "searchPhotos": "사진 검색",
@@ -521,7 +532,7 @@
     "saveFailed": "설정 저장에 실패했습니다.",
     "noChanges": "저장할 변경사항이 없습니다.",
     "imageProcessingTitle": "이미지 처리",
-    "imageProcessingDesc": "이미지 품질, 출력 크기, 처리 동시성을 설정합니다.",
+    "imageProcessingDesc": "이미지 품질과 출력 크기를 설정합니다.",
     "webpQuality": "WebP 품질",
     "avifQuality": "AVIF 품질",
     "jpegQuality": "JPEG 품질",
@@ -529,7 +540,7 @@
     "imageSizes": "출력 크기",
     "imageSizesHint": "쉼표로 구분된 픽셀 너비 (예: 640,1536,2048,4096)입니다. 값은 자동으로 정렬/중복 제거되며 최대 8개까지만 허용되고, 사진을 업로드한 뒤에는 변경할 수 없습니다.",
     "queueConcurrency": "처리 동시성",
-    "queueConcurrencyHint": "1-16. 동시에 처리할 이미지 수입니다. 높을수록 CPU/메모리 사용량이 증가합니다.",
+    "queueConcurrencyHint": "백그라운드 처리 동시성은 환경 변수 QUEUE_CONCURRENCY로 변경하세요.",
     "galleryDisplayTitle": "갤러리 표시",
     "galleryDisplayDesc": "공개 갤러리의 메이슨리 그리드 레이아웃을 설정합니다.",
     "columnsDesktop": "데스크톱 열 수",
@@ -549,11 +560,16 @@
     "storageTitle": "스토리지 백엔드",
     "storageDesc": "이미지 파일이 저장되는 위치를 설정합니다. 백엔드 변경 시 기존 파일은 마이그레이션되지 않습니다.",
     "storageBackend": "스토리지 백엔드",
-    "storageBackendHint": "처리된 이미지가 저장될 위치를 선택합니다. '로컬'은 파일시스템을 사용합니다. 'MinIO'와 'S3'는 추가 설정이 필요합니다.",
+    "storageBackendHint": "이번 릴리스에서는 로컬 파일시스템 백엔드만 지원합니다.",
     "storageLocal": "로컬 파일시스템",
     "storageMinio": "MinIO",
     "storageS3": "Amazon S3",
-    "storageEnvHint": "S3/MinIO 백엔드는 전환 전에 환경변수(S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET) 설정이 필요합니다.",
-    "loadFailed": "설정을 불러오지 못했습니다. 변경 사항을 저장하기 전에 다시 시도해 주세요."
+    "storageEnvHint": "이번 릴리스에서는 S3/MinIO 변수를 설정하지 마세요. 로컬 파일시스템 저장소가 지원되는 운영 경로입니다.",
+    "loadFailed": "설정을 불러오지 못했습니다. 변경 사항을 저장하기 전에 다시 시도해 주세요.",
+    "imageSizesLockedHint": "이미 사진이 있어 출력 크기는 잠겨 있습니다. 파생 이미지 크기를 바꾸려면 빈 갤러리에서 설정하세요.",
+    "uploadContractLocked": "기존 갤러리에서는 이전 업로드와 새 업로드의 일관성을 위해 이미지 크기와 GPS 제거 설정을 한 번만 정할 수 있습니다."
+  },
+  "footer": {
+    "admin": "관리자"
   }
 }

@@ -9,6 +9,7 @@ import { LOCALES } from '@/lib/constants';
 import { localizeUrl } from '@/lib/locale-path';
 import { getSeoSettings } from '@/lib/data';
 import siteConfig from "@/site-config.json";
+import { getCspNonce } from '@/lib/csp-nonce';
 
 import Script from 'next/script';
 
@@ -74,6 +75,7 @@ export default async function RootLayout({
     getSeoSettings(),
     getMessages(),
   ]);
+  const nonce = await getCspNonce();
 
   return (
     <html
@@ -106,8 +108,8 @@ export default async function RootLayout({
         {/* Pretendard font loaded via self-hosted @font-face in globals.css */}
         {siteConfig.google_analytics_id && /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id) && (
           <>
-            <Script src={`https://www.googletagmanager.com/gtag/js?id=${siteConfig.google_analytics_id}`} strategy="lazyOnload" />
-            <Script id="google-analytics" strategy="lazyOnload">
+            <Script src={`https://www.googletagmanager.com/gtag/js?id=${siteConfig.google_analytics_id}`} strategy="lazyOnload" nonce={nonce} />
+            <Script id="google-analytics" strategy="lazyOnload" nonce={nonce}>
               {`
                 window.dataLayer = window.dataLayer || [];
                 function gtag(){dataLayer.push(arguments);}

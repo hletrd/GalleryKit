@@ -44,3 +44,29 @@ export function getPhotoDocumentTitle(
 ): string {
     return displayTitle ? `${displayTitle} — ${siteTitle}` : fallbackTitle;
 }
+
+
+export function getPhotoDisplayTitleFromTagNames(
+    image: { title: string | null | undefined; tag_names?: string | null | undefined },
+    fallback: string,
+): string {
+    const tags = image.tag_names
+        ?.split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+
+    return getPhotoDisplayTitle(
+        {
+            title: image.title ?? null,
+            tags: tags?.map((name) => ({ id: 0, name, slug: name })) ?? null,
+        },
+        fallback,
+    );
+}
+
+export function getConcisePhotoAltText(
+    image: { title: string | null | undefined; tag_names?: string | null | undefined },
+    fallback: string,
+): string {
+    return getPhotoDisplayTitleFromTagNames(image, fallback).replace(/^#+/, '').replace(/\s+#/g, ', ');
+}

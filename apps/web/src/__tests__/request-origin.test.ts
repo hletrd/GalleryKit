@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hasTrustedSameOrigin, hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
+import { getTrustedRequestProtocol, hasTrustedSameOrigin, hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 
@@ -108,6 +108,17 @@ describe('hasTrustedSameOrigin', () => {
             'x-forwarded-proto': 'http, https',
             origin: 'http://evil.example',
         }))).toBe(false);
+    });
+
+
+    it('uses the same right-most trusted forwarded proto for cookie security decisions', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        expect(getTrustedRequestProtocol(makeHeaders({
+            host: 'internal-proxy',
+            'x-forwarded-proto': 'http, https',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe('https');
     });
 
     it('fails closed by default when origin metadata is missing (C1R-01)', () => {

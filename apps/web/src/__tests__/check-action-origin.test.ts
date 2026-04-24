@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { checkActionSource, walkForTsFiles } from '../../scripts/check-action-origin';
+import { checkActionSource, walkForActionFiles } from '../../scripts/check-action-origin';
 
 /**
  * C5R-RPL-04 / AGG5R-06 — fixture-based coverage for the
@@ -151,7 +151,7 @@ describe('checkActionSource — function-expression exports', () => {
     });
 });
 
-describe('walkForTsFiles — recursive action discovery (C6R-RPL-02 / AGG6R-01)', () => {
+describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-01)', () => {
     let tempRoot: string;
 
     beforeEach(() => {
@@ -169,7 +169,7 @@ describe('walkForTsFiles — recursive action discovery (C6R-RPL-02 / AGG6R-01)'
         fs.mkdirSync(path.join(tempRoot, 'sub', 'deep'));
         fs.writeFileSync(path.join(tempRoot, 'sub', 'deep', 'deeper.ts'), '// deeper');
 
-        const found = walkForTsFiles(tempRoot).map((p) => path.relative(tempRoot, p)).sort();
+        const found = walkForActionFiles(tempRoot).map((p) => path.relative(tempRoot, p)).sort();
         expect(found).toEqual([
             path.join('sub', 'deep', 'deeper.ts'),
             path.join('sub', 'nested.ts'),
@@ -177,23 +177,23 @@ describe('walkForTsFiles — recursive action discovery (C6R-RPL-02 / AGG6R-01)'
         ]);
     });
 
-    it('skips non-.ts files', () => {
+    it('skips non-action source files', () => {
         fs.writeFileSync(path.join(tempRoot, 'keep.ts'), '// keep');
+        fs.writeFileSync(path.join(tempRoot, 'keep-js.js'), '// keep');
         fs.writeFileSync(path.join(tempRoot, 'skip.md'), '# skip');
-        fs.writeFileSync(path.join(tempRoot, 'skip.js'), '// skip');
 
-        const found = walkForTsFiles(tempRoot).map((p) => path.relative(tempRoot, p));
-        expect(found).toEqual(['keep.ts']);
+        const found = walkForActionFiles(tempRoot).map((p) => path.relative(tempRoot, p)).sort();
+        expect(found).toEqual(['keep-js.js', 'keep.ts']);
     });
 
-    it('excludes auth.ts and public.ts at any depth', () => {
+    it('excludes auth.* and public.* at any depth', () => {
         fs.writeFileSync(path.join(tempRoot, 'auth.ts'), '// top auth');
-        fs.writeFileSync(path.join(tempRoot, 'public.ts'), '// top public');
+        fs.writeFileSync(path.join(tempRoot, 'public.tsx'), '// top public');
         fs.mkdirSync(path.join(tempRoot, 'sub'));
         fs.writeFileSync(path.join(tempRoot, 'sub', 'auth.ts'), '// nested auth');
         fs.writeFileSync(path.join(tempRoot, 'sub', 'keep.ts'), '// keep');
 
-        const found = walkForTsFiles(tempRoot).map((p) => path.relative(tempRoot, p));
+        const found = walkForActionFiles(tempRoot).map((p) => path.relative(tempRoot, p));
         expect(found).toContain(path.join('sub', 'keep.ts'));
         expect(found.find((p) => p.endsWith('auth.ts'))).toBeUndefined();
         expect(found.find((p) => p.endsWith('public.ts'))).toBeUndefined();
@@ -240,5 +240,30 @@ describe('checkActionSource — aliased exports', () => {
         expect(report.failed).toHaveLength(1);
         expect(report.failed[0]).toContain('UNSUPPORTED aliased export');
         expect(report.failed[0]).toContain('deleteFoo');
+    });
+});
+
+
+describe('walkForActionFiles — extension coverage', () => {
+    let tempDir: string;
+
+    beforeEach(() => {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'action-origin-ext-'));
+    });
+
+    afterEach(() => {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('discovers TS/TSX/JS action files while excluding auth/public by basename', () => {
+        fs.writeFileSync(path.join(tempDir, 'images.ts'), '');
+        fs.writeFileSync(path.join(tempDir, 'albums.tsx'), '');
+        fs.writeFileSync(path.join(tempDir, 'legacy.js'), '');
+        fs.writeFileSync(path.join(tempDir, 'public.tsx'), '');
+        fs.writeFileSync(path.join(tempDir, 'auth.js'), '');
+        fs.writeFileSync(path.join(tempDir, 'notes.md'), '');
+
+        const discovered = walkForActionFiles(tempDir).map((file) => path.basename(file)).sort();
+        expect(discovered).toEqual(['albums.tsx', 'images.ts', 'legacy.js']);
     });
 });

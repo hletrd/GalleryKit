@@ -12,9 +12,11 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
+import { PhotoViewerLoading } from '@/components/photo-viewer-loading';
+import { getCspNonce } from '@/lib/csp-nonce';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
-    loading: () => <div className="flex items-center justify-center min-h-[60vh]" role="status" aria-live="polite" aria-label="Loading photo"><div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" aria-hidden="true" /></div>,
+    loading: () => <PhotoViewerLoading />,
 });
 
 function toIsoTimestamp(value: string | Date | null | undefined) {
@@ -24,8 +26,9 @@ function toIsoTimestamp(value: string | Date | null | undefined) {
 }
 
 
-// Cache for 1 week (604800s) as photo content rarely changes
-export const revalidate = 604800;
+// Photo metadata and processed-file availability can change after background
+// processing and admin edits, so render fresh instead of keeping week-long ISR.
+export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -70,15 +73,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const ogImageUrl = absoluteImageUrl(imageUrl, seo.url);
     const pageUrl = localizeUrl(seo.url, locale, `/p/${id}`);
 
-    // Use custom OG image if configured, otherwise use photo image
-    const ogImages = seo.og_image_url
-        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
-        : [{
-            url: ogImageUrl,
-            width: image.width,
-            height: image.height,
-            alt: displayTitle,
-        }];
+    const ogImages = [{
+        url: ogImageUrl,
+        width: image.width,
+        height: image.height,
+        alt: displayTitle,
+    }];
 
     return {
         title: displayTitle,
@@ -101,7 +101,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             card: 'summary_large_image',
             title: displayTitle,
             description: image.description || t('descriptionByAuthor', { author: seo.author }),
-            images: seo.og_image_url ? [seo.og_image_url] : [ogImageUrl],
+            images: [ogImageUrl],
         }
     };
 }
@@ -130,6 +130,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
 
     // Keep JSON-LD naming aligned with metadata and the hydrated viewer
     const displayTitle = getPhotoDisplayTitle(image, t('titleWithId', { id: image.id }));
+    const nonce = await getCspNonce();
 
     const keywords = image.tags?.map((t: TagInfo) => t.name) || [];
     if (image.topic) keywords.push(image.topic);
@@ -140,8 +141,6 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         contentUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg}`, seo.url),
         thumbnailUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, seo.url),
         encodingFormat: 'image/jpeg',
-        license: 'https://creativecommons.org/licenses/by-nc/4.0/',
-        acquireLicensePage: siteConfig.parent_url,
         creditText: seo.author,
         creator: {
             '@type': 'Person',
@@ -205,12 +204,14 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         <>
             <script
                 type="application/ld+json"
+                nonce={nonce}
                 dangerouslySetInnerHTML={{
                     __html: safeJsonLd(jsonLd)
                 }}
             />
             <script
                 type="application/ld+json"
+                nonce={nonce}
                 dangerouslySetInnerHTML={{
                     __html: safeJsonLd(breadcrumbLd)
                 }}

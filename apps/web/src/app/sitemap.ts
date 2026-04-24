@@ -5,6 +5,7 @@ import { MetadataRoute } from 'next';
 // request-time `lastModified` values for unchanged pages; crawler freshness
 // should reflect persisted content timestamps only.
 export const dynamic = 'force-dynamic';
+export const revalidate = 3600;
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
@@ -12,16 +13,18 @@ import { localizeUrl } from '@/lib/locale-path';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
-// Google recommends max 50,000 URLs per sitemap file.
-// With 2 locales, cap images at 24,000 to stay well under the limit
-// (24,000 * 2 locales + homepage + topics = ~48,000).
-const MAX_SITEMAP_IMAGES = 24000;
+// Google recommends max 50,000 URLs per sitemap file. Reserve the budget for
+// localized homepage/topic URLs first, then spend the remaining slots on images.
+const MAX_SITEMAP_URLS = 50000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [images, topics] = await Promise.all([
-    getImageIdsForSitemap(MAX_SITEMAP_IMAGES),
-    getTopics(),
-  ]);
+  const topics = await getTopics();
+  const reservedLocalizedUrls = LOCALES.length * (1 + topics.length);
+  const imageBudget = Math.max(
+    0,
+    Math.floor((MAX_SITEMAP_URLS - reservedLocalizedUrls) / LOCALES.length),
+  );
+  const images = imageBudget > 0 ? await getImageIdsForSitemap(imageBudget) : [];
 
   const homepageEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
     url: localizeUrl(BASE_URL, locale, '/'),

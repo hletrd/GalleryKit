@@ -24,8 +24,9 @@ const sharePageRobots = {
     },
 } as const;
 
-export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }): Promise<Metadata> {
     const { key } = await params;
+    const { photoId: photoIdParam } = await searchParams;
     const [locale, t, seo, config, group] = await Promise.all([
         getLocale(),
         getTranslations('sharedGroup'),
@@ -38,33 +39,42 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
         description: t('notFoundDescription'),
         robots: sharePageRobots,
     };
-    const pageUrl = localizeUrl(seo.url, locale, `/g/${key}`);
-    const coverImage = group.images[0];
+    let selectedImage = null;
+    if (photoIdParam && /^\d+$/.test(photoIdParam)) {
+        const selectedId = Number.parseInt(photoIdParam, 10);
+        selectedImage = group.images.find((image) => image.id === selectedId) ?? null;
+    }
+
+    const pagePath = selectedImage ? `/g/${key}?photoId=${selectedImage.id}` : `/g/${key}`;
+    const pageUrl = localizeUrl(seo.url, locale, pagePath);
+    const coverImage = selectedImage ?? group.images[0];
+    const metadataTitle = selectedImage ? getPhotoDisplayTitle(selectedImage, t('photo')) : t('ogTitle');
+    const metadataDescription = selectedImage?.description || (selectedImage ? t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }) : t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }));
     // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
-    // Use custom OG image if configured, otherwise use cover photo
-    const ogImages = seo.og_image_url
-        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
-        : coverImage
-            ? [{
-                url: absoluteImageUrl(`/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
-                width: coverImage.width,
-                height: coverImage.height,
-                alt: t('ogAlt'),
-            }]
-            : [];
+    const coverImageUrl = coverImage
+        ? absoluteImageUrl(`/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url)
+        : null;
+    const ogImages = coverImage && coverImageUrl
+        ? [{
+            url: coverImageUrl,
+            width: coverImage.width,
+            height: coverImage.height,
+            alt: selectedImage ? metadataTitle : t('ogAlt'),
+        }]
+        : [];
 
     return {
-        title: t('ogTitle'),
-        description: t('ogDescription', { count: group.images.length }),
+        title: metadataTitle,
+        description: metadataDescription,
         robots: sharePageRobots,
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
-            title: t('ogTitle'),
-            description: t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }),
+            title: metadataTitle,
+            description: metadataDescription,
             url: pageUrl,
             siteName: seo.title,
             type: 'website',
@@ -72,12 +82,10 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
         },
         twitter: {
             card: 'summary_large_image',
-            title: t('ogTitle'),
-            description: t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }),
-            ...(coverImage && !seo.og_image_url ? {
-                images: [absoluteImageUrl(`/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url)],
-            } : seo.og_image_url ? {
-                images: [seo.og_image_url],
+            title: metadataTitle,
+            description: metadataDescription,
+            ...(coverImageUrl ? {
+                images: [coverImageUrl],
             } : {}),
         },
     };

@@ -1,6 +1,7 @@
 import createMiddleware from 'next-intl/middleware';
 import { NextRequest, NextResponse } from 'next/server';
 import { LOCALES, DEFAULT_LOCALE } from '@/lib/constants';
+import { buildContentSecurityPolicy } from '@/lib/content-security-policy';
 
 const intlMiddleware = createMiddleware({
   locales: [...LOCALES],
@@ -8,6 +9,41 @@ const intlMiddleware = createMiddleware({
   localePrefix: 'always',
   localeDetection: false
 });
+
+function getRequestWithHeaders(request: NextRequest, headers: Headers) {
+  return new NextRequest(request.url, {
+    headers,
+    method: request.method,
+  });
+}
+
+function applyProductionCsp(request: NextRequest, response: NextResponse): NextResponse {
+  if (process.env.NODE_ENV === 'development') {
+    return response;
+  }
+
+  const cspHeader = request.headers.get('Content-Security-Policy');
+  const nonce = request.headers.get('x-nonce');
+  if (!cspHeader || !nonce) {
+    return response;
+  }
+
+  response.headers.set('Content-Security-Policy', cspHeader);
+  response.headers.set('x-nonce', nonce);
+  return response;
+}
+
+function withProductionCspRequest(request: NextRequest): NextRequest {
+  if (process.env.NODE_ENV === 'development') {
+    return request;
+  }
+
+  const nonce = crypto.randomUUID().replace(/-/g, '');
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', buildContentSecurityPolicy({ nonce, isDev: false }));
+  return getRequestWithHeaders(request, requestHeaders);
+}
 
 // Matches /admin/... subpaths but NOT the login page itself (/admin exactly, or /admin with no trailing slash)
 // Protected: /[locale]/admin/anything or /admin/anything (default locale, no prefix)
@@ -30,6 +66,7 @@ function isProtectedAdminRoute(pathname: string): boolean {
 }
 
 export default function middleware(request: NextRequest) {
+  const cspRequest = withProductionCspRequest(request);
   const { pathname } = request.nextUrl;
 
   // Guard: if this is a protected admin sub-route and there's no session cookie, redirect to login
@@ -49,11 +86,11 @@ export default function middleware(request: NextRequest) {
       }
       const url = request.nextUrl.clone();
       url.pathname = loginUrl;
-      return NextResponse.redirect(url);
+      return applyProductionCsp(cspRequest, NextResponse.redirect(url));
     }
   }
 
-  return intlMiddleware(request);
+  return applyProductionCsp(cspRequest, intlMiddleware(cspRequest));
 }
 
 export const config = {

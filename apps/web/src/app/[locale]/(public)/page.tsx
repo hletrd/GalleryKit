@@ -8,12 +8,12 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
+import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
+import { getCspNonce } from '@/lib/csp-nonce';
 
-// Homepage is dynamic, but we can set revalidate for better performance if desired.
-// However, since it shows latest uploads, we might want it fresher or use ISR with short revalidate.
-// Let's stick to force-dynamic or standard behavior for now as user didn't ask for homepage caching explicitly,
-// but adding revalidate=3600 (1 hour) is a safe SEO/Performance win.
-export const revalidate = 3600;
+// Public gallery pages must reflect asynchronous image processing as soon as
+// the background queue marks uploads processed; avoid ISR staleness here.
+export const revalidate = 0;
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { tags: tagsParam } = await searchParams;
@@ -120,6 +120,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     getTopicsCached(),
   ]);
   const baseUrl = seo.url;
+  const nonce = await getCspNonce();
 
   // Parse and validate tag slugs
   const tagSlugs = filterExistingTagSlugs(parseRequestedTagSlugs(tagsParam), allTags);
@@ -145,7 +146,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
       '@type': 'ImageObject',
       contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
       thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, baseUrl),
-      name: img.title || `Photo ${img.id}`,
+      name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
     })),
   } : null;
 
@@ -153,6 +154,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     <>
       <script
         type="application/ld+json"
+        nonce={nonce}
         dangerouslySetInnerHTML={{
           __html: safeJsonLd(websiteLd)
         }}
@@ -160,6 +162,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
       {galleryLd && (
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: safeJsonLd(galleryLd)
           }}

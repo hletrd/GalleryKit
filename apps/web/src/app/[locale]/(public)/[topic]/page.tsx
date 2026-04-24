@@ -10,12 +10,34 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
+import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
+import { getCspNonce } from '@/lib/csp-nonce';
 
 
-export const revalidate = 3600;
+export const revalidate = 0;
+
+const RESERVED_TOPIC_SEGMENTS = new Set([
+  'apple-icon',
+  'favicon.ico',
+  'icon',
+  'manifest',
+  'manifest.webmanifest',
+  'robots.txt',
+  'sitemap.xml',
+]);
+
+function isReservedTopicSegment(segment: string) {
+  return RESERVED_TOPIC_SEGMENTS.has(segment.toLowerCase());
+}
 
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ topic: string }>, searchParams: Promise<{ tags?: string }> }): Promise<Metadata> {
   const { topic } = await params;
+  if (isReservedTopicSegment(topic)) {
+    return {
+      title: '',
+      robots: { index: false, follow: false },
+    };
+  }
   const { tags: tagsParam } = await searchParams;
   const requestedTagSlugs = parseRequestedTagSlugs(tagsParam);
   const topicDataPromise = getTopicBySlugCached(topic);
@@ -98,6 +120,9 @@ export default async function TopicPage({
   searchParams: Promise<{ tags?: string }>
 }) {
   const { topic } = await params;
+  if (isReservedTopicSegment(topic)) {
+    return notFound();
+  }
   const { tags: tagsParam } = await searchParams;
   const [locale, topicData] = await Promise.all([
     getLocale(),
@@ -131,6 +156,7 @@ export default async function TopicPage({
   const tags = allTags.filter(t => t.count > 1);
 
   const baseUrl = seo.url;
+  const nonce = await getCspNonce();
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
@@ -140,7 +166,7 @@ export default async function TopicPage({
       '@type': 'ImageObject',
       contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
       thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, baseUrl),
-      name: img.title || `Photo ${img.id}`,
+      name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
     })),
   } : null;
 
@@ -149,6 +175,7 @@ export default async function TopicPage({
       {galleryLd && (
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: safeJsonLd(galleryLd)
           }}

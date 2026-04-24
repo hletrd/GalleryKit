@@ -11,10 +11,10 @@
  * `// @action-origin-exempt: <reason>`.
  *
  * Scanned files (C5R-RPL-06 / AGG5R-05 + C6R-RPL-02 / AGG6R-01):
- * - Auto-discovered RECURSIVELY via app/actions/ (all .ts descendants),
- *   EXCLUDING `auth.ts` and `public.ts`. `auth.ts` owns its own
+ * - Auto-discovered RECURSIVELY via app/actions/ (all server-action-capable script descendants),
+ *   EXCLUDING files whose basename is `auth` or `public`. `auth.ts` owns its own
  *   `hasTrustedSameOrigin` invocations directly at the call sites that
- *   the scanner cannot generically detect; `public.ts` is the
+ *   the scanner cannot generically detect; `public.*` is the
  *   unauthenticated read-only action surface (search + loadMoreImages)
  *   which intentionally skips the origin check.
  * - `apps/web/src/app/[locale]/admin/db-actions.ts` (hard-coded because
@@ -43,15 +43,17 @@ const REPO_SRC = path.resolve(__dirname, '../src');
  * Files in `app/actions/` that intentionally bypass the generic scanner.
  * Maintained here (not in the scanned set) to avoid false positives.
  */
-const EXCLUDED_ACTION_FILENAMES = new Set(['auth.ts', 'public.ts']);
+const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']);
+
+const EXCLUDED_ACTION_BASENAMES = new Set(['auth', 'public']);
 
 /**
- * Recursively walk a directory collecting all `.ts` files, excluding
- * filenames in `EXCLUDED_ACTION_FILENAMES`. Throws if the root cannot be
+ * Recursively walk a directory collecting action source files, excluding
+ * basenames in `EXCLUDED_ACTION_BASENAMES`. Throws if the root cannot be
  * read — failing loudly is correct because a missing root indicates a
  * repository layout change that breaks the security lint gate.
  */
-export function walkForTsFiles(root: string): string[] {
+export function walkForActionFiles(root: string): string[] {
     const out: string[] = [];
     const stack: string[] = [root];
     while (stack.length > 0) {
@@ -63,8 +65,9 @@ export function walkForTsFiles(root: string): string[] {
                 continue;
             }
             if (!entry.isFile()) continue;
-            if (!entry.name.endsWith('.ts')) continue;
-            if (EXCLUDED_ACTION_FILENAMES.has(entry.name)) continue;
+            const parsed = path.parse(entry.name);
+            if (!ACTION_FILE_EXTENSIONS.has(parsed.ext)) continue;
+            if (EXCLUDED_ACTION_BASENAMES.has(parsed.name)) continue;
             out.push(full);
         }
     }
@@ -73,7 +76,7 @@ export function walkForTsFiles(root: string): string[] {
 
 /**
  * Discover every mutating-action file the scanner should check. Uses
- * RECURSIVE discovery over app/actions/ (all `.ts` descendants) so
+ * RECURSIVE discovery over app/actions/ (all action-capable extensions) so
  * new files added anywhere beneath `actions/` — including nested
  * subdirectories — are covered automatically. Prior behavior was a
  * single-level readdir which would silently miss files in
@@ -83,7 +86,7 @@ function discoverActionFiles(): string[] {
     const actionsDir = path.join(REPO_SRC, 'app/actions');
     let found: string[];
     try {
-        found = walkForTsFiles(actionsDir);
+        found = walkForActionFiles(actionsDir);
     } catch (err) {
         console.error(`Failed to discover action files under ${actionsDir}:`, err);
         throw err;

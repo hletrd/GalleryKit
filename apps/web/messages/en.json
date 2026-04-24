@@ -140,7 +140,12 @@
     "addTagPlaceholder": "+ Tag",
     "failed": "Upload failed.",
     "noTopicsTitle": "Create a category before uploading",
-    "noTopicsDescription": "Uploads need a category so photos have a gallery destination."
+    "noTopicsDescription": "Uploads need a category so photos have a gallery destination.",
+    "limitExceeded": "Upload limit exceeded. Add at most {maxFiles} files and {maxSize} per upload window.",
+    "limitHint": "Up to {maxFiles} files and {maxSize} per upload window.",
+    "tagsForFile": "Tags for {file}",
+    "fileError": "{file}: {error}",
+    "warningSuccess": "Uploaded {count} file(s), with {warnings} warning(s)."
   },
   "imageManager": {
     "selected": "{count} selected",
@@ -190,7 +195,8 @@
     "bulkDeleteCleanupWarning": "Deleted database records, but {count} file cleanup steps failed. Check server logs.",
     "bulkDeleteFailed": "Bulk delete failed",
     "shareFailed": "Failed to share group",
-    "updateFailed": "Failed to update"
+    "updateFailed": "Failed to update",
+    "tagsForImage": "Tags for {title}"
   },
   "home": {
     "latestUploads": "Latest",
@@ -259,7 +265,8 @@
     "topics": {
       "default": "Gallery"
     },
-    "downloadJpeg": "Download JPEG"
+    "downloadJpeg": "Download JPEG",
+    "shortcutsHint": "Shortcuts: Left/Right arrows navigate photos, F opens or closes the lightbox."
   },
   "shared": {
     "viewGallery": "View Gallery",
@@ -274,7 +281,10 @@
     "placeholder": "Search photos, tags, cameras...",
     "noResults": "No results",
     "hint": "Search by title, tag, camera, or description",
-    "toggleHint": "to toggle search"
+    "toggleHint": "to toggle search",
+    "searching": "Searching...",
+    "error": "Search failed. Please try again.",
+    "resultsCount": "{count, plural, one {# result} other {# results}}"
   },
   "notFound": {
     "description": "Page not found.",
@@ -321,7 +331,7 @@
     "ogDesc": "Custom image for social media link previews. Individual photo pages use the photo itself.",
     "ogImageUrl": "OG Image URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "Full URL to an image for social media previews. Recommended: 1200x630px. Leave empty to use the latest photo.",
+    "ogImageUrlHint": "Same-origin URL or path for generic social media previews. Individual photo and share pages use the actual photo image.",
     "loadFailed": "Could not load SEO settings. Please try again before saving changes."
   },
   "serverActions": {
@@ -446,7 +456,8 @@
     "imageSizesLocked": "Output sizes can't be changed after photos have been uploaded. Keep the current sizes or regenerate the library first.",
     "failedToUpdateGallerySettings": "Failed to update gallery settings",
     "failedToSwitchStorageBackend": "Failed to switch storage backend",
-    "uploadSettingsLocked": "Upload-processing settings can't be changed while uploads are active or after photos exist. Keep the current privacy/output settings or regenerate the library first."
+    "uploadSettingsLocked": "Upload-processing settings can't be changed while uploads are active or after photos exist. Keep the current privacy/output settings or regenerate the library first.",
+    "tagPersistenceWarning": "Uploaded {file}, but one or more requested tags could not be saved."
   },
   "aria": {
     "searchPhotos": "Search photos",
@@ -521,7 +532,7 @@
     "saveFailed": "Failed to save settings.",
     "noChanges": "No changes to save.",
     "imageProcessingTitle": "Image Processing",
-    "imageProcessingDesc": "Configure image quality, output sizes, and processing concurrency.",
+    "imageProcessingDesc": "Configure image quality and output sizes.",
     "webpQuality": "WebP Quality",
     "avifQuality": "AVIF Quality",
     "jpegQuality": "JPEG Quality",
@@ -529,7 +540,7 @@
     "imageSizes": "Output Sizes",
     "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096). Values are sorted/deduped automatically, limited to 8 sizes, and can't be changed after photos have been uploaded.",
     "queueConcurrency": "Processing Concurrency",
-    "queueConcurrencyHint": "1-16. Number of images processed simultaneously. Higher uses more CPU/memory.",
+    "queueConcurrencyHint": "Set QUEUE_CONCURRENCY in the environment to change background processing concurrency.",
     "galleryDisplayTitle": "Gallery Display",
     "galleryDisplayDesc": "Configure the masonry grid layout for the public gallery.",
     "columnsDesktop": "Desktop Columns",
@@ -549,11 +560,16 @@
     "storageTitle": "Storage Backend",
     "storageDesc": "Configure where image files are stored. Changing backends does not migrate existing files.",
     "storageBackend": "Storage Backend",
-    "storageBackendHint": "Select where processed images are stored. 'Local' uses the filesystem. 'MinIO' and 'S3' require additional configuration.",
+    "storageBackendHint": "Only the local filesystem backend is supported in this release.",
     "storageLocal": "Local Filesystem",
     "storageMinio": "MinIO",
     "storageS3": "Amazon S3",
-    "storageEnvHint": "S3/MinIO backends require environment variables (S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET) to be configured before switching.",
-    "loadFailed": "Could not load settings. Please try again before saving changes."
+    "storageEnvHint": "Do not configure S3/MinIO variables for this release; local filesystem storage is the supported production path.",
+    "loadFailed": "Could not load settings. Please try again before saving changes.",
+    "imageSizesLockedHint": "Output sizes are locked because photos already exist. Start from an empty gallery to change derivative sizes.",
+    "uploadContractLocked": "Image size and GPS-stripping settings are write-once for an existing gallery so older uploads stay consistent with new uploads."
+  },
+  "footer": {
+    "admin": "Admin"
   }
 }

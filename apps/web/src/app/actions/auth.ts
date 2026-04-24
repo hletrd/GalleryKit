@@ -16,7 +16,7 @@ import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPa
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
-import { hasTrustedSameOrigin } from '@/lib/request-origin';
+import { getTrustedRequestProtocol, hasTrustedSameOrigin } from '@/lib/request-origin';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -203,9 +203,11 @@ export async function login(prevState: { error?: string } | null, formData: Form
                 ));
             });
 
-            // Require Secure when behind TLS or in production.
-            const forwardedProto = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
-            const requestIsHttps = forwardedProto === 'https';
+            // Require Secure when behind TLS or in production. Reuse the
+            // same trusted-proxy protocol normalization as origin checks so
+            // multi-hop X-Forwarded-Proto chains cannot disagree with the
+            // CSRF/origin boundary.
+            const requestIsHttps = getTrustedRequestProtocol(requestHeaders) === 'https';
             const requireSecureCookie = requestIsHttps || process.env.NODE_ENV === 'production';
 
             cookieStore.set(COOKIE_NAME, sessionToken, {

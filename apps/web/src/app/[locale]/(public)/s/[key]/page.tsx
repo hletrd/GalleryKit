@@ -43,21 +43,18 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
         description: t('ogNotFoundDescription'),
         robots: sharePageRobots,
     };
-    const isTitleFilename = image.title && /\.[a-z0-9]{3,4}$/i.test(image.title);
-    const title = image.title && !isTitleFilename ? image.title : t('ogTitle');
+    const title = getPhotoDisplayTitle(image, t('ogTitle'));
     const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
     // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
-    // Use custom OG image if configured, otherwise use photo image
-    const ogImages = seo.og_image_url
-        ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }]
-        : [{
-            url: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
-            width: image.width,
-            height: image.height,
-            alt: title,
-        }];
+    const ogImageUrl = absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url);
+    const ogImages = [{
+        url: ogImageUrl,
+        width: image.width,
+        height: image.height,
+        alt: title,
+    }];
 
     return {
         title: title,
@@ -79,7 +76,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             card: 'summary_large_image',
             title: title,
             description: image.description || t('ogDescription', { site: seo.title }),
-            images: seo.og_image_url ? [seo.og_image_url] : [absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url)],
+            images: [ogImageUrl],
         },
     };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getPhotoDisplayTitle, getPhotoDocumentTitle, isFilenameLikeTitle } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDisplayTitleFromTagNames, getPhotoDocumentTitle, isFilenameLikeTitle } from '@/lib/photo-title';
 
 describe('isFilenameLikeTitle', () => {
     it('recognizes filename-like titles', () => {
@@ -56,6 +56,18 @@ describe('getPhotoDisplayTitle', () => {
             title: null,
             tags: [],
         }, 'Photo 42')).toBe('Photo 42');
+    });
+});
+
+
+
+describe('lite photo title helpers', () => {
+    it('normalizes filename-like lite titles to tag-derived display titles', () => {
+        expect(getPhotoDisplayTitleFromTagNames({ title: 'IMG_0001.JPG', tag_names: 'Seoul,Night' }, 'Photo 1')).toBe('#Seoul #Night');
+    });
+
+    it('keeps concise alt text instead of verbose hash-prefixed tag strings', () => {
+        expect(getConcisePhotoAltText({ title: 'IMG_0001.JPG', tag_names: 'Seoul,Night' }, 'Photo')).toBe('Seoul, Night');
     });
 });
 

@@ -17,6 +17,7 @@ const {
     headersMock,
     maintenanceMessageMock,
     logAuditEventMock,
+    ensureTagRecordMock,
 } = vi.hoisted(() => ({
     statfsMock: vi.fn(),
     insertMock: vi.fn(),
@@ -34,6 +35,7 @@ const {
     headersMock: vi.fn(),
     maintenanceMessageMock: vi.fn(),
     logAuditEventMock: vi.fn(),
+    ensureTagRecordMock: vi.fn(),
 }));
 
 function makeInsertChain<T>(result: T) {
@@ -115,6 +117,17 @@ vi.mock('@/lib/audit', () => ({
     logAuditEvent: logAuditEventMock,
 }));
 
+vi.mock('@/lib/tag-records', () => ({
+    getTagSlug: (name: string) => name
+        .normalize('NFKC')
+        .toLocaleLowerCase()
+        .replace(/[\s_]+/gu, '-')
+        .replace(/[^\p{Letter}\p{Number}-]+/gu, '')
+        .replace(/-{2,}/g, '-')
+        .replace(/(^-|-$)/g, ''),
+    ensureTagRecord: ensureTagRecordMock,
+}));
+
 import { uploadImages } from '@/app/actions/images';
 
 describe('uploadImages', () => {
@@ -155,6 +168,11 @@ describe('uploadImages', () => {
         maintenanceMessageMock.mockReturnValue(null);
         logAuditEventMock.mockReset();
         logAuditEventMock.mockResolvedValue(undefined);
+        ensureTagRecordMock.mockReset();
+        ensureTagRecordMock.mockImplementation(async (_writer, cleanName: string, slug: string) => ({
+            kind: 'found',
+            tag: { id: 7, name: cleanName, slug },
+        }));
     });
 
     it('revalidates the affected topic path after a successful upload', async () => {
@@ -178,5 +196,22 @@ describe('uploadImages', () => {
         await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTagNames' });
         expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('returns a warning when requested upload tags cannot be persisted', async () => {
+        insertMock.mockImplementation(() => makeInsertChain([{ insertId: 9 }]));
+        ensureTagRecordMock.mockRejectedValueOnce(new Error('tag insert failed'));
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', 'Night Sky');
+
+        await expect(uploadImages(formData)).resolves.toMatchObject({
+            success: true,
+            count: 1,
+            warnings: ['tagPersistenceWarning'],
+        });
+        expect(enqueueImageProcessingMock).toHaveBeenCalledWith(expect.objectContaining({ id: 9, topic: 'travel' }));
     });
 });

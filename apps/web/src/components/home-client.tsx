@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 
 function useColumnCount() {
     const [count, setCount] = useState(2);
@@ -147,22 +148,8 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
             <h2 className="sr-only">{t('home.photosHeading')}</h2>
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
                 {orderedImages.map((image, index) => {
-                    const altText = (image.description && image.description.trim())
-                        ? image.description
-                        : (image.title && image.title.trim() && !image.title.match(/\.[a-z0-9]{3,4}$/i))
-                            ? image.title
-                            : image.tag_names
-                                ? image.tag_names.split(',').map((t: string) => t.trim()).join(', ')
-                                : t('common.photo');
-                    const displayTitle = (() => {
-                        if (image.title && image.title.trim().length > 0) {
-                             return image.title;
-                        }
-                        if (image.tag_names) {
-                            return image.tag_names.split(',').map((tag: string) => `#${tag.trim()}`).join(' ');
-                        }
-                        return image.user_filename || t('common.untitled');
-                    })();
+                    const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled'));
+                    const altText = getConcisePhotoAltText(image, t('common.photo'));
 
                     const isAboveFold = index < columnCount;
 

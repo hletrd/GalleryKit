@@ -91,6 +91,7 @@ export type ImageProcessingJob = {
     filenameAvif: string;
     filenameJpeg: string;
     width: number;
+    topic?: string | null;
     quality?: ImageQualitySettings;
     imageSizes?: number[];
 };
@@ -223,7 +224,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             // US-009: Claim check — verify the row still exists and is unprocessed
-            const [check] = await db.select({ id: images.id }).from(images)
+            const [check] = await db.select({ id: images.id, topic: images.topic }).from(images)
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
             if (!check) {
                 console.debug(`[Queue] Image ${job.id} no longer pending, skipping`);
@@ -298,10 +299,6 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             console.debug(`[Queue] Job ${job.id} complete`);
-            // revalidatePath removed from per-job callback to avoid ISR cache
-            // thrashing — uploading 10 images was triggering 11 homepage
-            // invalidations. The single revalidatePath after the upload loop
-            // (in uploadImages) is sufficient.
         } catch (err) {
             console.error(`Background processing failed for ${job.id}`, err);
             const retries = (state.retryCounts.get(job.id) || 0) + 1;
@@ -400,6 +397,7 @@ export const bootstrapImageProcessingQueue = async () => {
             filename_avif: images.filename_avif,
             filename_jpeg: images.filename_jpeg,
             width: images.width,
+            topic: images.topic,
         })
             .from(images)
             .where(pendingWhere)
@@ -413,6 +411,7 @@ export const bootstrapImageProcessingQueue = async () => {
                 filenameAvif: image.filename_avif,
                 filenameJpeg: image.filename_jpeg,
                 width: image.width,
+                topic: image.topic,
             });
 
         }

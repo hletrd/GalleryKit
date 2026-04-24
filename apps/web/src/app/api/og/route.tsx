@@ -2,8 +2,9 @@ import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import siteConfig from '@/site-config.json';
+import { getSeoSettings } from '@/lib/data';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 const MAX_TOPIC_LABEL_LENGTH = 100;
 
@@ -27,7 +28,8 @@ export async function GET(req: NextRequest) {
     const topic = searchParams.get('topic');
     const tags = searchParams.get('tags');
     const topicLabel = clampDisplayText(topicLabelFromSlug(topic ?? ''), MAX_TOPIC_LABEL_LENGTH);
-    const siteTitle = siteConfig.title;
+    const seo = await getSeoSettings();
+    const siteTitle = seo.title || siteConfig.title;
 
     if (!topic || topic.length > 200 || !isValidSlug(topic)) {
       return new Response('Missing or invalid topic param', { status: 400 });

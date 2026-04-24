@@ -1,3 +1,25 @@
+
+const APP_BACKUP_TABLES = [
+    'admin_settings',
+    'admin_users',
+    'audit_log',
+    'image_tags',
+    'images',
+    'rate_limit_buckets',
+    'sessions',
+    'shared_group_images',
+    'shared_groups',
+    'tags',
+    'topic_aliases',
+    'topics',
+] as const;
+
+const APP_BACKUP_TABLE_PATTERN = APP_BACKUP_TABLES.join('|');
+const ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN = new RegExp(
+    "\\bDROP\\s+TABLE\\s+IF\\s+EXISTS\\s+`?(?:" + APP_BACKUP_TABLE_PATTERN + ")`?\\s*;",
+    'gi',
+);
+
 const DANGEROUS_SQL_PATTERNS = [
     /\bGRANT\s/i,
     // C5R-RPL-01: also block REVOKE and RENAME USER. Legitimate mysqldump
@@ -72,6 +94,7 @@ export function stripSqlCommentsAndLiterals(input: string): string {
     const withoutConditionals = input.replace(/\/\*!(\d{5,6})\s*([\s\S]*?)\*\//g, (_, _version, inner) => inner);
 
     const withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, '');
+    const withoutAllowedAppBackupDrops = maskMatches(withoutComments, ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN);
 
     return [
         /'(?:''|\\.|[^'\\])*'/gs,
@@ -82,7 +105,7 @@ export function stripSqlCommentsAndLiterals(input: string): string {
         // Binary literals: b'...' or 0b... (MySQL bit-value literals)
         /b'[01]+'/g,
         /0b[01]+/g,
-    ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutComments);
+    ].reduce((acc, pattern) => maskMatches(acc, pattern), withoutAllowedAppBackupDrops);
 }
 
 export function containsDangerousSql(input: string): boolean {

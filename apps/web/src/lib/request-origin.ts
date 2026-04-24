@@ -42,14 +42,18 @@ function getProtocolFromCandidate(candidate: string | null | undefined) {
     return origin ? new URL(origin).protocol.replace(/:$/, '') : null;
 }
 
-function getExpectedOrigin(requestHeaders: HeaderLookup) {
+export function getTrustedRequestProtocol(requestHeaders: HeaderLookup) {
     const trustedForwardedProto = trustsProxyHeaders()
         ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-proto'))
         : '';
-    const protocol = trustedForwardedProto
+    return trustedForwardedProto
         || getProtocolFromCandidate(requestHeaders.get('origin'))
         || getProtocolFromCandidate(requestHeaders.get('referer'))
         || 'http';
+}
+
+function getExpectedOrigin(requestHeaders: HeaderLookup) {
+    const protocol = getTrustedRequestProtocol(requestHeaders);
 
     const trustedForwardedHost = trustsProxyHeaders()
         ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-host'))

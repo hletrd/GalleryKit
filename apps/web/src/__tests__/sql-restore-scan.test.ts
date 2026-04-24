@@ -26,8 +26,22 @@ describe('containsDangerousSql', () => {
     });
 
 
+    it('allows the app-generated mysqldump table reset profile for known app tables', () => {
+        const appDump = [
+            'DROP TABLE IF EXISTS `topics`;',
+            'CREATE TABLE `topics` (`slug` varchar(255) NOT NULL);',
+            'INSERT INTO `topics` VALUES (\'travel\',\'Travel\');',
+            'DROP TABLE IF EXISTS `images`;',
+            'CREATE TABLE `images` (`id` int NOT NULL);',
+        ].join('\n');
+
+        expect(containsDangerousSql(appDump)).toBe(false);
+    });
+
     it('blocks destructive table-level statements', () => {
         expect(containsDangerousSql('DROP TABLE images;')).toBe(true);
+        expect(containsDangerousSql('DROP TABLE IF EXISTS `images`;')).toBe(false);
+        expect(containsDangerousSql('DROP TABLE IF EXISTS `unknown_table`;')).toBe(true);
         expect(containsDangerousSql('DROP TEMPORARY TABLE images;')).toBe(false);
         expect(containsDangerousSql('DELETE FROM images WHERE id = 1;')).toBe(true);
         expect(containsDangerousSql('TRUNCATE TABLE sessions;')).toBe(true);

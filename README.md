@@ -128,6 +128,8 @@ SESSION_SECRET=<openssl rand -hex 32>
 BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix
 # IMAGE_BASE_URL=https://cdn.example.com
+# DB_SSL=false  # TLS is enabled automatically for non-localhost DB_HOST values; set false only behind a trusted private link.
+# QUEUE_CONCURRENCY=2
 # UPLOAD_MAX_TOTAL_BYTES=2147483648
 # UPLOAD_MAX_FILES_PER_WINDOW=100
 # TRUST_PROXY=true
@@ -138,10 +140,11 @@ If you ever seeded an environment from older checked-in examples, rotate both
 git values must be treated as compromised and must not be reused.
 
 If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. The shipped compose file forwards `IMAGE_BASE_URL` and `UPLOAD_MAX_TOTAL_BYTES` as Docker build args when they are present in the shell/Compose environment; export them before `docker compose ... --build` if you rely on non-default build-time values. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development.
+`DB_SSL` defaults to TLS for non-localhost database hosts and plaintext for loopback/private local development; set `DB_SSL=false` only when the database connection is protected by a trusted private network. `QUEUE_CONCURRENCY` controls the in-process `PQueue` image conversion workers (default `2`); raise it only after confirming CPU and memory headroom.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config now caps general requests at **2 GiB** and `/admin/db` restore requests at **250 MB** to match the app-side limits; keep those layers aligned if you customize either side.
 The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. It is intended as a single web-instance/single-writer deployment; restore maintenance, upload quotas, and image queue state are process-local. Keep those protections if you adapt the compose file, and do not scale the web service horizontally without moving those coordination states into shared storage.
 
-**`TRUST_PROXY=true` is required for rate limiting to work correctly behind a reverse proxy** (nginx, Caddy, Cloudflare, load balancers, etc.). The server reads `X-Forwarded-For` / `X-Real-IP` only when this flag is set; without it, `getClientIp()` returns `"unknown"` and every request collapses into a single shared rate-limit bucket, which both (a) lets abusive clients exhaust the login / search / share budgets shared with legitimate users, and (b) lets spoofed `X-Forwarded-For` headers be ignored (since they are never trusted at all). The same trusted-proxy setting also affects same-origin validation for mutating admin actions and DB backup downloads, so the proxy must forward the correct `Host` and `X-Forwarded-Proto` headers. Only enable when the incoming headers are actually set by a trusted proxy hop.
+**`TRUST_PROXY=true` is required for rate limiting to work correctly behind a reverse proxy** (nginx, Caddy, Cloudflare, load balancers, etc.). The server reads `X-Forwarded-For` / `X-Real-IP` only when this flag is set; without it, `getClientIp()` returns `"unknown"` and every request collapses into a single shared rate-limit bucket, which both (a) lets abusive clients exhaust the login / search / share budgets shared with legitimate users, and (b) lets spoofed `X-Forwarded-For` headers be ignored (since they are never trusted at all). The same trusted-proxy setting also affects same-origin validation for mutating admin actions, login cookie security, and DB backup downloads, so the proxy must overwrite `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` with values from the trusted edge hop. Only enable when the incoming headers are actually set by a trusted proxy hop.
 For bootstrap auth, prefer a generated secret or a precomputed Argon2 hash; do not deploy with placeholder passwords such as `password`.
 
 ### Development

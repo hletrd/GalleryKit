@@ -187,6 +187,7 @@ export async function uploadImages(formData: FormData) {
     let successCount = 0;
     let uploadedBytes = 0;
     const failedFiles: string[] = [];
+    const warnings: string[] = [];
 
     for (const file of files) {
         // Track saved original filename for cleanup on DB insert failure
@@ -254,17 +255,20 @@ export async function uploadImages(formData: FormData) {
                     try {
                         const uniqueTagNames = Array.from(new Set(tagNames))
                             .map(t => t.trim()).filter(Boolean);
+                        const skippedTagNames: string[] = [];
                         if (uniqueTagNames.length > 0) {
                             const tagRecords = [];
                             for (const cleanName of uniqueTagNames) {
                                 const slug = getTagSlug(cleanName);
                                 if (!isValidTagSlug(slug)) {
                                     console.warn(`Skipping tag with invalid generated slug: "${cleanName}"`);
+                                    skippedTagNames.push(cleanName);
                                     continue;
                                 }
                                 const resolvedTag = await ensureTagRecord(db, cleanName, slug);
                                 if (resolvedTag.kind === 'collision') {
                                     console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
+                                    skippedTagNames.push(cleanName);
                                     continue;
                                 }
                                 if (resolvedTag.kind === 'found') {
@@ -281,8 +285,12 @@ export async function uploadImages(formData: FormData) {
                                 );
                             }
                         }
+                        if (skippedTagNames.length > 0) {
+                            warnings.push(t('tagPersistenceWarning', { file: file.name }));
+                        }
                     } catch (err) {
                         console.error('Failed to process tags for image', insertedImage.id, err);
+                        warnings.push(t('tagPersistenceWarning', { file: file.name }));
                     }
                 }
 
@@ -294,6 +302,7 @@ export async function uploadImages(formData: FormData) {
                     filenameAvif: data.filenameAvif,
                     filenameJpeg: data.filenameJpeg,
                     width: data.width,
+                    topic,
                     quality: {
                         webp: uploadConfig.imageQualityWebp,
                         avif: uploadConfig.imageQualityAvif,
@@ -339,6 +348,7 @@ export async function uploadImages(formData: FormData) {
         success: true,
         count: successCount,
         failed: failedFiles,
+        warnings,
         replaced: []
     };
 }
@@ -596,7 +606,7 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     }
 
     try {
-        const [existingImage] = await db.select({ topic: images.topic })
+        const [existingImage] = await db.select({ topic: images.topic, share_key: images.share_key })
             .from(images).where(eq(images.id, id));
 
         if (!existingImage) {
@@ -617,8 +627,10 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'image_update', 'image', String(id)).catch(console.debug);
 
+        const affectedGroupKeys = await getSharedGroupKeysForImages([id]);
+        const shareRevalidationPaths = getShareRevalidationPaths([existingImage.share_key], affectedGroupKeys);
         const topicPath = existingImage.topic ? `/${existingImage.topic}` : undefined;
-        revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/', ...(topicPath ? [topicPath] : []));
+        revalidateLocalizedPaths(`/p/${id}`, '/admin/dashboard', '/', ...(topicPath ? [topicPath] : []), ...shareRevalidationPaths);
         // C1R-04: return the sanitized/normalized values so the admin UI can
         // rehydrate local state from what was actually persisted instead of
         // the pre-submit raw input. Without this, trailing whitespace or
