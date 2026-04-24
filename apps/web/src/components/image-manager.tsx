@@ -253,9 +253,9 @@ export function ImageManager({
     return (
         <div className="space-y-4">
             {selectedIds.size > 0 && (
-                <div className="bg-muted/50 p-2 rounded-md flex items-center justify-between">
+                <div className="sticky top-0 z-20 bg-muted/95 p-2 rounded-md flex flex-col gap-2 border shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-sm font-medium px-2">{t('imageManager.selected', { count: selectedIds.size })}</span>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <Dialog
                             open={isBatchTagDialogOpen}
                             onOpenChange={(open) => {
@@ -270,7 +270,7 @@ export function ImageManager({
                                     {t('imageManager.batchAddButton')}
                                 </Button>
                             </DialogTrigger>
-                            <DialogContent>
+                            <DialogContent closeLabel={t('aria.close')}>
                                 <DialogHeader>
                                     <DialogTitle>{t('imageManager.batchAddTitle', { count: selectedIds.size })}</DialogTitle>
                                     <div className="py-2">
@@ -336,15 +336,18 @@ export function ImageManager({
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead className="w-[50px]">
-                                <input
+                            <TableHead className="w-[56px]">
+                                <label className="inline-flex min-h-8 min-w-8 items-center justify-center">
+                                    <span className="sr-only">{t('aria.selectAll')}</span>
+                                    <input
                                     ref={selectAllRef}
                                     type="checkbox"
-                                    className="h-4 w-4 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    className="h-5 w-5 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     checked={images.length > 0 && selectedIds.size === images.length}
                                     onChange={toggleSelectAll}
                                     aria-label={t('aria.selectAll')}
                                 />
+                                </label>
                             </TableHead>
                             <TableHead>{t('imageManager.preview')}</TableHead>
                             <TableHead>{t('imageManager.title')}</TableHead>
@@ -359,13 +362,16 @@ export function ImageManager({
                         {images.map((image) => (
                             <TableRow key={image.id} data-state={selectedIds.has(image.id) ? "selected" : undefined}>
                                 <TableCell>
-                                     <input
+                                    <label className="inline-flex min-h-8 min-w-8 items-center justify-center">
+                                        <span className="sr-only">{t('aria.selectImage', { title: image.title || image.id })}</span>
+                                        <input
                                         type="checkbox"
-                                        className="h-4 w-4 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        className="h-5 w-5 rounded border-gray-300 text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                         checked={selectedIds.has(image.id)}
                                         onChange={() => toggleSelect(image.id)}
                                         aria-label={t('aria.selectImage', { title: image.title || image.id })}
                                     />
+                                    </label>
                                 </TableCell>
                                 <TableCell>
                                     <div className="relative h-32 w-32 overflow-hidden rounded border bg-muted flex items-center justify-center">
@@ -425,6 +431,7 @@ export function ImageManager({
                                                 }
                                             }}
                                             placeholder={t('imageManager.addTag')}
+                                            ariaLabel={t('imageManager.tagsForImage', { title: image.title || image.user_filename || image.id })}
                                             className="w-full"
                                         />
                                     </div>
@@ -472,7 +479,7 @@ export function ImageManager({
             </div>
 
             <Dialog open={!!editingImage} onOpenChange={(open) => !open && setEditingImage(null)}>
-                <DialogContent>
+                <DialogContent closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('imageManager.editTitle')}</DialogTitle>
                         <DialogDescription>{t('imageManager.editDesc')}</DialogDescription>

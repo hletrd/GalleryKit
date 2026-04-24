@@ -89,7 +89,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                             {t('users.add')}
                         </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent closeLabel={t('aria.close')}>
                         <DialogHeader>
                             <DialogTitle>{t('users.createTitle')}</DialogTitle>
                             <DialogDescription>

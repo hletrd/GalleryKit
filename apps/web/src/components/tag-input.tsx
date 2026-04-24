@@ -18,6 +18,7 @@ interface TagInputProps {
     onTagsChange: (tags: string[]) => void;
     placeholder?: string;
     className?: string;
+    ariaLabel?: string;
 }
 
 export function normalizeTagInputValue(value: string) {
@@ -40,6 +41,7 @@ export function TagInput({
     onTagsChange,
     placeholder,
     className,
+    ariaLabel,
 }: TagInputProps) {
     const { t } = useTranslation();
     const [inputValue, setInputValue] = React.useState('');
@@ -169,6 +171,7 @@ export function TagInput({
                     ref={inputRef}
                     type="text"
                     role="combobox"
+                    aria-label={ariaLabel || placeholder}
                     aria-autocomplete="list"
                     aria-expanded={isOpen && !!(inputValue || filteredTags.length > 0)}
                     aria-controls={suggestionsId}

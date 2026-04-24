@@ -40,6 +40,11 @@ export function LoginForm() {
                         <Input id="login-username" type="text" name="username" placeholder={t('username')} required autoFocus autoComplete="username" maxLength={64} />
                         <label htmlFor="login-password" className="sr-only">{t('password')}</label>
                         <Input id="login-password" type="password" name="password" placeholder={t('password')} required autoComplete="current-password" maxLength={1024} />
+                        {state?.error && (
+                            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert" aria-live="assertive">
+                                {state.error}
+                            </p>
+                        )}
                         <Button type="submit" className="w-full" disabled={isPending}>
                             {isPending ? t('submitting') : t('submit')}
                         </Button>

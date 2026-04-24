@@ -145,7 +145,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
             </AlertDialog>
 
             <Dialog open={!!editingTag} onOpenChange={(open) => !open && setEditingTag(null)}>
-                <DialogContent>
+                <DialogContent closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('tags.edit')}</DialogTitle>
                     </DialogHeader>

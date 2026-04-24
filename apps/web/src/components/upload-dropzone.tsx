@@ -19,6 +19,11 @@ export interface PendingUploadItem {
     file: File;
 }
 
+interface UploadLimits {
+    maxFiles: number;
+    maxTotalBytes: number;
+}
+
 export function createPendingUploadItems(
     acceptedFiles: File[],
     createId: () => string = () => crypto.randomUUID()
@@ -26,7 +31,23 @@ export function createPendingUploadItems(
     return acceptedFiles.map((file) => ({ id: createId(), file }));
 }
 
-export function UploadDropzone({ topics, availableTags }: { topics: { slug: string, label: string }[], availableTags: { id: number, name: string, slug: string }[] }) {
+function formatBytes(bytes: number) {
+    const mib = 1024 * 1024;
+    const gib = 1024 * mib;
+    if (bytes >= gib && bytes % gib === 0) return `${bytes / gib}GB`;
+    if (bytes >= mib) return `${Math.round(bytes / mib)}MB`;
+    return `${bytes}B`;
+}
+
+export function UploadDropzone({
+    topics,
+    availableTags,
+    uploadLimits = { maxFiles: 100, maxTotalBytes: 2 * 1024 * 1024 * 1024 },
+}: {
+    topics: { slug: string, label: string }[];
+    availableTags: { id: number, name: string, slug: string }[];
+    uploadLimits?: UploadLimits;
+}) {
     const router = useRouter();
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
@@ -35,6 +56,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [files, setFiles] = useState<PendingUploadItem[]>([]);
     const [perFileTags, setPerFileTags] = useState<Record<string, string[]>>({});
+    const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
     const { t } = useTranslation();
     const hasTopics = topics.length > 0;
 
@@ -95,8 +117,32 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
     const previewUrls = previewVersion >= 0 ? previewUrlsRef.current : previewUrlsRef.current;
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
-        setFiles(prev => [...prev, ...createPendingUploadItems(acceptedFiles)]);
-    }, []);
+        setFiles(prev => {
+            const existingBytes = prev.reduce((sum, item) => sum + item.file.size, 0);
+            const remainingFiles = Math.max(uploadLimits.maxFiles - prev.length, 0);
+            const remainingBytes = Math.max(uploadLimits.maxTotalBytes - existingBytes, 0);
+            const nextFiles: File[] = [];
+            let nextBytes = 0;
+
+            for (const file of acceptedFiles) {
+                if (nextFiles.length >= remainingFiles || nextBytes + file.size > remainingBytes) {
+                    continue;
+                }
+                nextFiles.push(file);
+                nextBytes += file.size;
+            }
+
+            const rejectedCount = acceptedFiles.length - nextFiles.length;
+            if (rejectedCount > 0) {
+                toast.error(t('upload.limitExceeded', {
+                    maxFiles: uploadLimits.maxFiles,
+                    maxSize: formatBytes(uploadLimits.maxTotalBytes),
+                }));
+            }
+
+            return [...prev, ...createPendingUploadItems(nextFiles)];
+        });
+    }, [t, uploadLimits.maxFiles, uploadLimits.maxTotalBytes]);
 
     const acceptedImageTypes = useMemo(() => ({
         'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']
@@ -126,12 +172,14 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         setUploading(true);
         setProgress(0);
         setCompletedCount(0);
+        setFileErrors({});
 
         try {
         const UPLOAD_CONCURRENCY = 3;
 
         let successCount = 0;
         const failedFiles: File[] = [];
+        const uploadWarnings: string[] = [];
         const duplicateFiles: string[] = [];
         const totalFiles = files.length;
         let completedSoFar = 0;
@@ -156,15 +204,21 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                 const res = await uploadImages(formData);
                 if (res?.error) {
                     console.error(`Failed to upload ${file.name}:`, res.error);
+                    setFileErrors(prev => ({ ...prev, [fileId]: res.error }));
                     failedFiles.push(file);
                 } else {
                     successCount++;
+                    if (res?.warnings?.length) {
+                        uploadWarnings.push(...res.warnings);
+                        setFileErrors(prev => ({ ...prev, [fileId]: res.warnings.join(' ') }));
+                    }
                     if (res?.replaced?.length) {
                         duplicateFiles.push(...res.replaced);
                     }
                 }
             } catch (e) {
                 console.error(`Failed to upload ${file.name}:`, e);
+                setFileErrors(prev => ({ ...prev, [fileId]: t('upload.failed') }));
                 failedFiles.push(file);
             }
 
@@ -199,12 +253,17 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         }
 
         if (failedFiles.length === 0) {
-            toast.success(t('upload.success', { count: successCount }));
+            if (uploadWarnings.length > 0) {
+                toast.warning(t('upload.warningSuccess', { count: successCount, warnings: uploadWarnings.length }));
+            } else {
+                toast.success(t('upload.success', { count: successCount }));
+            }
             // Remove uploaded files from the list, keeping any new ones that might have been added
             const uploadedIds = new Set(files.map(({ id }) => id));
             setFiles(prev => prev.filter(({ id }) => !uploadedIds.has(id)));
             setSelectedTags([]);
             setPerFileTags({});
+            setFileErrors({});
             router.refresh();
         } else {
             toast.warning(t('upload.partialSuccess', { count: successCount, failed: failedFiles.length }));
@@ -233,6 +292,11 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         const newTags = { ...perFileTags };
         delete newTags[id];
         setPerFileTags(newTags);
+        setFileErrors(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+        });
     };
 
     return (
@@ -289,6 +353,9 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                     <UploadCloud className="h-10 w-10 text-muted-foreground mb-4" />
                     <p className="text-lg font-medium">{t('upload.dragDrop')}</p>
                     <p className="text-sm text-muted-foreground">{t('upload.orClick')}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                        {t('upload.limitHint', { maxFiles: uploadLimits.maxFiles, maxSize: formatBytes(uploadLimits.maxTotalBytes) })}
+                    </p>
                 </div>
 
                 {/* Progress Bar during upload */}
@@ -314,6 +381,7 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                             {files.map(({ id: fileId, file }, i) => {
                                 const localTags = perFileTags[fileId] || [];
                                 const previewUrl = previewUrls.get(fileId) || '';
+                                const fileError = fileErrors[fileId];
 
                                 return (
                                 <Card key={fileId} className="relative group border bg-muted/30">
@@ -376,9 +444,15 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
                                                         }));
                                                     }}
                                                     placeholder={t('upload.addTagPlaceholder')}
+                                                    ariaLabel={t('upload.tagsForFile', { file: file.name })}
                                                     className="w-full text-xs"
                                                 />
                                             </div>
+                                            {fileError && (
+                                                <p className="text-xs text-destructive" role="alert">
+                                                    {t('upload.fileError', { file: file.name, error: fileError })}
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                 </Card>

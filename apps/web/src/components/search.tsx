@@ -35,6 +35,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
+    const [searchError, setSearchError] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -56,10 +57,12 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
             requestIdRef.current++;
             setLoading(false);
             setResults([]);
+            setSearchError(false);
             return;
         }
         const requestId = ++requestIdRef.current;
         setLoading(true);
+        setSearchError(false);
         try {
             const data = await searchImagesAction(searchQuery);
             if (requestId === requestIdRef.current) {
@@ -68,6 +71,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
         } catch {
             if (requestId === requestIdRef.current) {
                 setResults([]);
+                setSearchError(true);
             }
         } finally {
             if (requestId === requestIdRef.current) {
@@ -82,6 +86,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
             requestIdRef.current++;
             setLoading(false);
             setResults([]);
+            setSearchError(false);
             return;
         }
         debounceRef.current = setTimeout(() => {
@@ -203,7 +208,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                                 }
                             }}
                             placeholder={t('search.placeholder')}
-                            className="border-0 focus-visible:ring-0 shadow-none h-8 p-0"
+                            className="border-0 p-0 h-8 shadow-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         />
                         {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" role="status" aria-label={t('common.loading')} />}
                         <Button
@@ -215,6 +220,17 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                         >
                             <X className="h-4 w-4" />
                         </Button>
+                    </div>
+                    <div className="sr-only" aria-live="polite" aria-atomic="true">
+                        {loading
+                            ? t('search.searching')
+                            : searchError
+                                ? t('search.error')
+                                : query.trim() && results.length > 0
+                                    ? t('search.resultsCount', { count: results.length })
+                                    : query.trim()
+                                        ? t('search.noResults')
+                                        : ''}
                     </div>
                     <div className="flex-1 overflow-y-auto sm:max-h-[60vh]">
                         {results.length > 0 ? (
@@ -253,7 +269,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             </div>
                         ) : query.trim() ? (
                             <div className="p-8 text-center text-muted-foreground text-sm">
-                                {loading ? '' : t('search.noResults')}
+                                {loading ? '' : searchError ? t('search.error') : t('search.noResults')}
                             </div>
                         ) : (
                             <div className="p-8 text-center text-muted-foreground text-sm">

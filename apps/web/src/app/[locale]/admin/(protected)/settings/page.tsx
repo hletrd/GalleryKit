@@ -1,13 +1,15 @@
 import { getGallerySettingsAdmin } from '@/app/actions/settings';
 import { SettingsClient } from './settings-client';
 import { getTranslations } from 'next-intl/server';
+import { getImageCount } from '@/lib/data';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-    const [result, t] = await Promise.all([
+    const [result, t, imageCount] = await Promise.all([
         getGallerySettingsAdmin(),
         getTranslations('settings'),
+        getImageCount(undefined, undefined, { includeUnprocessed: true }),
     ]);
 
     if (!result.success) {
@@ -18,5 +20,5 @@ export default async function SettingsPage() {
         );
     }
 
-    return <SettingsClient initialSettings={result.settings} />;
+    return <SettingsClient initialSettings={result.settings} hasExistingImages={imageCount > 0} />;
 }

@@ -17,9 +17,10 @@ import { localizePath } from '@/lib/locale-path';
 
 interface SettingsClientProps {
     initialSettings: Record<string, string>;
+    hasExistingImages: boolean;
 }
 
-export function SettingsClient({ initialSettings }: SettingsClientProps) {
+export function SettingsClient({ initialSettings, hasExistingImages }: SettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
     const defaults = getSettingDefaults();
@@ -146,8 +147,12 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                             onChange={(e) => handleChange('image_sizes', e.target.value)}
                             placeholder={getPlaceholder('image_sizes')}
                             pattern="[0-9]+(\s*,\s*[0-9]+)*"
+                            disabled={hasExistingImages}
+                            aria-describedby="image-sizes-help"
                         />
-                        <p className="text-xs text-muted-foreground">{t('settings.imageSizesHint')}</p>
+                        <p id="image-sizes-help" className="text-xs text-muted-foreground">
+                            {hasExistingImages ? t('settings.imageSizesLockedHint') : t('settings.imageSizesHint')}
+                        </p>
                     </div>
                 </CardContent>
             </Card>
@@ -174,6 +179,11 @@ export function SettingsClient({ initialSettings }: SettingsClientProps) {
                             aria-label={t('settings.stripGps')}
                         />
                     </div>
+                    {hasExistingImages && (
+                        <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+                            {t('settings.uploadContractLocked')}
+                        </p>
+                    )}
                 </CardContent>
             </Card>
         </div>

@@ -26,6 +26,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
     const sheetRef = useRef<HTMLDivElement>(null);
+    const dragHandleRef = useRef<HTMLButtonElement>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
     const touchStartY = useRef<number | null>(null);
     const touchStartTime = useRef<number | null>(null);
@@ -123,6 +124,12 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
         }
     }, [isOpen, sheetState]);
 
+    useEffect(() => {
+        if (isOpen && sheetState !== 'expanded') {
+            requestAnimationFrame(() => dragHandleRef.current?.focus());
+        }
+    }, [isOpen, sheetState]);
+
     if (!isOpen || !image) return null;
 
     const displayTitle = getPhotoDisplayTitle(
@@ -166,6 +173,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
             >
                 {/* Drag handle */}
                 <button
+                    ref={dragHandleRef}
                     type="button"
                     className="flex w-full justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => setSheetState((prev) => (prev === 'expanded' ? 'peek' : 'expanded'))}

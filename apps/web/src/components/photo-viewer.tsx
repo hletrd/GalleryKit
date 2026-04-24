@@ -22,7 +22,7 @@ import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-import { getPhotoDisplayTitle, getPhotoDocumentTitle } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle } from '@/lib/photo-title';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -181,12 +181,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     const srcSetData = useMemo(() => {
         if (!image) return null;
-        const getAltText = (img: ImageDetail) => {
-            if (img.description && img.description.trim()) return img.description;
-            if (img.title && img.title.trim() && !img.title.match(/\.[a-z0-9]{3,4}$/i)) return img.title;
-            if (img.tags && img.tags.length > 0) return img.tags.map((t: TagInfo) => t.name).join(', ');
-            return t('common.photo');
-        };
+        const getAltText = (img: ImageDetail) => getConcisePhotoAltText(img, t('common.photo'));
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
         const jpegFallbackTargetSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
@@ -245,6 +240,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 assistive tech has a single top-level heading per WCAG 1.3.1
                 and 2.4.6 (AGG3R-01 / C3R-RPL-01). */}
             <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
+            <p className="mb-2 text-xs text-muted-foreground" id="photo-viewer-shortcuts">
+                {t('viewer.shortcutsHint')}
+            </p>
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
                 {!isSharedView && (
                     <Button asChild variant="ghost" className="pl-0 gap-2">

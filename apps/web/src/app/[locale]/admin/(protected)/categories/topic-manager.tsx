@@ -165,7 +165,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     <DialogTrigger asChild>
                         <Button><Plus className="mr-2 h-4 w-4" /> {t('categories.add')}</Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent closeLabel={t('aria.close')}>
                         <DialogHeader>
                             <DialogTitle>{t('categories.add')}</DialogTitle>
                         </DialogHeader>
@@ -250,7 +250,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             </AlertDialog>
 
             <Dialog open={!!editingTopic} onOpenChange={(open) => !open && setEditingTopic(null)}>
-                <DialogContent className="max-w-xl">
+                <DialogContent className="max-w-xl" closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('categories.edit')}</DialogTitle>
                     </DialogHeader>

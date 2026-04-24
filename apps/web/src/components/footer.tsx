@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getLocale } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import siteConfig from "@/site-config.json";
 import { localizePath } from '@/lib/locale-path';
 
@@ -25,7 +25,10 @@ function GithubIcon({ className }: { className?: string }) {
 }
 
 export async function Footer() {
-    const locale = await getLocale();
+    const [locale, t] = await Promise.all([
+        getLocale(),
+        getTranslations('footer'),
+    ]);
 
     return (
         <footer className="border-t py-6 md:py-0">
@@ -44,7 +47,7 @@ export async function Footer() {
                         GitHub
                     </Link>
                     <Link href={localizePath(locale, '/admin')} rel="nofollow" className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors">
-                        Admin
+                        {t('admin')}
                     </Link>
                 </div>
             </div>
