@@ -1,122 +1,59 @@
-# Security Review Report
+# Security Review Report — PROMPT 1 / cycle 4
 
-**Scope:** Whole-repo security review of the GalleryKit Next.js app, auth/session layer, server actions, API routes, upload/download pipeline, DB backup/restore flow, deployment scripts, nginx/Next security headers, and supporting libraries.
-
+**Scope:** Whole-repo security review of GalleryKit (`/Users/hletrd/flash-shared/gallery`).
 **Risk Level:** MEDIUM
 
-## Inventory Reviewed
+## Inventory reviewed
+Auth/session/admin boundary: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/proxy.ts`, admin layouts/pages.
 
-Primary attack-surface files reviewed:
-- `apps/web/src/app/actions/auth.ts`
-- `apps/web/src/app/actions/images.ts`
-- `apps/web/src/app/actions/public.ts`
-- `apps/web/src/app/actions/sharing.ts`
-- `apps/web/src/app/actions/admin-users.ts`
-- `apps/web/src/app/actions/topics.ts`
-- `apps/web/src/app/actions/tags.ts`
-- `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/seo.ts`
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/app/api/admin/db/download/route.ts`
-- `apps/web/src/app/api/health/route.ts`
-- `apps/web/src/app/api/live/route.ts`
-- `apps/web/src/app/api/og/route.tsx`
-- `apps/web/src/app/uploads/[...path]/route.ts`
-- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
-- `apps/web/src/lib/request-origin.ts`
-- `apps/web/src/lib/action-guards.ts`
-- `apps/web/src/lib/api-auth.ts`
-- `apps/web/src/lib/session.ts`
-- `apps/web/src/lib/rate-limit.ts`
-- `apps/web/src/lib/auth-rate-limit.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/serve-upload.ts`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/lib/process-topic-image.ts`
-- `apps/web/src/lib/upload-paths.ts`
-- `apps/web/src/lib/sql-restore-scan.ts`
-- `apps/web/next.config.ts`
-- `apps/web/nginx/default.conf`
-- `apps/web/scripts/*.ts|js`
-- `scripts/deploy-remote.sh`
-- `apps/web/deploy.sh`
+Admin mutation surfaces: `apps/web/src/app/actions/{admin-users,images,settings,seo,tags,topics,sharing}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`.
 
-## Scan Summary
+Uploads/path traversal: `apps/web/src/lib/{serve-upload,upload-paths,process-image,storage/local,image-queue}.ts`, upload route handlers.
 
-- Secrets scan of current tree: **no committed hardcoded credentials confirmed** in tracked source/examples. Ignored local secret files exist (`.env.deploy`, `apps/web/.env.local`) but were not dumped into this report.
-- Dependency audit: `npm audit --json` => **0 known vulnerabilities**.
-- Git-history targeted grep: no concrete active secret value surfaced from the targeted patterns run during this review.
+DB/backup/restore/rate limiting/audit: `apps/web/src/db/*`, `apps/web/src/lib/{db-restore,sql-restore-scan,rate-limit,auth-rate-limit,audit,backup-filename,mysql-cli-ssl}.ts`, scripts and drizzle config.
+
+Public privacy/output/deploy: `apps/web/src/lib/data.ts`, public actions, `safe-json-ld`, `seo-og-url`, OG route, site config, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, Docker/deploy files, `.env.local*`, `.gitignore`, security lint scripts.
+
+## Verification performed
+- Secrets scan across source/config/history.
+- `npm audit --workspaces --json` → 0 vulnerabilities.
+- `npm run lint:api-auth --workspace=apps/web` → pass.
+- `npm run lint:action-origin --workspace=apps/web` → pass.
 
 ## Findings
 
-### 1) Production CSP allows inline script/style execution and weakens XSS containment
-- **Severity:** MEDIUM
-- **Category:** OWASP A05:2021 – Security Misconfiguration
-- **Status:** Confirmed
+### SEC-C4-01 — Live secrets stored in local repo checkout
+- **Severity:** HIGH
+- **Category:** OWASP A02 / Secrets management
+- **Location:** `apps/web/.env.local:2-9`
 - **Confidence:** High
-- **Location:** `apps/web/next.config.ts:63-84`
-- **Code region:** production CSP includes:
-  - `script-src 'unsafe-inline' 'self' https://www.googletagmanager.com`
-  - `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net`
-- **Exploit / failure scenario:** If any HTML/script injection bug lands elsewhere in the app or in third-party content/config, the CSP will not meaningfully block inline JavaScript execution because `'unsafe-inline'` permits it. This turns CSP from a strong last-line defense into a weak allowlist. The same applies to inline style injection and reliance on a third-party style CDN.
-- **Blast radius:** Any successful injection on a page viewed by an authenticated admin can execute in the admin origin, enabling session-riding actions and privileged data access.
-- **Suggested fix:** Move to nonce- or hash-based CSP for scripts/styles; remove `'unsafe-inline'`; self-host required CSS where possible.
+- **Status:** Confirmed
+- **Issue:** DB, admin bootstrap, and session secrets exist in the workspace-local `.env.local`. The file is gitignored, but still present in the reviewed repo path.
+- **Failure scenario:** A shared archive, support bundle, backup leak, screen-share, or local compromise exposes DB credentials, admin bootstrap password, and a session signing secret.
+- **Suggested fix:** Rotate the secrets, keep live secrets outside the checkout, and keep only placeholder examples in repo.
 
-### 2) `TRUST_PROXY=true` makes security decisions depend on forwarded headers
-- **Severity:** MEDIUM
-- **Category:** OWASP A05:2021 – Security Misconfiguration / A01:2021 – Broken Access Control (deployment-dependent)
-- **Status:** Risk
+### SEC-C4-02 — Deployment nginx config does not enforce HTTPS
+- **Severity:** HIGH
+- **Category:** OWASP A05 / Deployment security
+- **Location:** `apps/web/nginx/default.conf:12-18`, `41-53`, `57-83`, `108-122`
 - **Confidence:** Medium
-- **Location:**
-  - `apps/web/src/lib/request-origin.ts:32-45, 50-52, 66-89`
-  - `apps/web/src/lib/rate-limit.ts:61-79`
-- **Code region:** when `TRUST_PROXY === 'true'`, the app trusts `x-forwarded-host`, `x-forwarded-proto`, `x-forwarded-for`, and `x-real-ip` for:
-  - same-origin enforcement on admin mutations/downloads
-  - client-IP derivation for login/search/share/admin-user rate limiting
-- **Exploit / failure scenario:** If the Next.js app is ever exposed directly, or deployed behind a proxy/CDN that forwards attacker-supplied `X-Forwarded-*` headers without normalizing them, an attacker can spoof client IPs to evade throttling and can potentially satisfy origin checks with forged forwarded host/proto metadata. This is not exploitable in the documented nginx setup as written, but it is a sharp deployment footgun.
-- **Blast radius:** Weakens brute-force protection and origin-based admin mutation defenses across the entire privileged surface.
-- **Suggested fix:** Keep the app reachable only through a trusted reverse proxy; ignore `x-forwarded-host` unless the platform guarantees header sanitation; consider deriving expected origin from a fixed config value (for example `BASE_URL`) instead of forwarded host; document `TRUST_PROXY` as unsafe unless the proxy overwrites forwarded headers.
+- **Status:** Likely
+- **Issue:** The shipped nginx server block listens on port 80 and proxies admin/auth traffic, with no TLS listener or HTTP→HTTPS redirect in this repo config.
+- **Failure scenario:** If this config is deployed as the public edge, admin logins/cookies can traverse plaintext HTTP.
+- **Suggested fix:** Terminate TLS in this nginx config or explicitly enforce/document an external TLS proxy; redirect port 80 to HTTPS.
 
-### 3) Public health endpoint discloses internal maintenance and DB-readiness state
-- **Severity:** LOW
-- **Category:** OWASP A01:2021 / A05:2021 (information exposure via operational endpoint)
-- **Status:** Confirmed
+### SEC-C4-03 — Production CSP still allows inline script execution
+- **Severity:** MEDIUM
+- **Category:** OWASP A05 / Unsafe headers
+- **Location:** `apps/web/next.config.ts:73-76`
 - **Confidence:** High
-- **Location:** `apps/web/src/app/api/health/route.ts:7-29`
-- **Code region:** unauthenticated route returns:
-  - `503 { status: 'restore-maintenance' }`
-  - `200 { status: 'ok' }`
-  - `503 { status: 'degraded' }`
-- **Exploit / failure scenario:** External users can poll the endpoint to learn exactly when DB restores are running or when the database is unhealthy, which helps attackers time nuisance traffic, social engineering, or opportunistic probing during maintenance windows.
-- **Blast radius:** Low direct impact, but it exposes internal operational state to the public internet.
-- **Suggested fix:** Restrict `/api/health` to internal probes / allowlisted networks, or return a generic readiness result without distinguishing maintenance vs DB degradation on the public edge.
+- **Status:** Risk
+- **Issue:** Production CSP permits inline JavaScript via `script-src 'unsafe-inline' ...`, weakening CSP as an XSS containment layer.
+- **Failure scenario:** A future stored/reflected injection in metadata, translations, framework output, or third-party snippets can execute inline payloads.
+- **Suggested fix:** Remove `'unsafe-inline'` from production `script-src`; use nonces/hashes and consider `strict-dynamic` if compatible.
 
-## Areas Checked With No Confirmed Vulnerability
+## Confirmed good controls
+Admin auth boundaries, same-origin checks, HMAC/timing-safe session handling, upload path containment, restore scanning/maintenance controls, Drizzle parameterization, dependency audit, API-auth/action-origin lint gates all looked materially hardened.
 
-- **Secrets in current tracked tree:** no committed API keys, tokens, private keys, or plaintext credentials confirmed.
-- **Dependency CVEs:** `npm audit` clean.
-- **Authentication:** Argon2id password hashing, HMAC-signed session tokens, hashed session IDs in DB, constant-time signature compare, session invalidation on password change/login all looked sound.
-- **Authorization:** admin server actions consistently enforce `isAdmin()` plus same-origin checks; admin API route uses `withAdminAuth` and the backup download route adds extra origin validation.
-- **SQL injection:** application queries are parameterized via Drizzle or parameterized mysql2 calls; reviewed raw SQL restore scan and backup/restore child-process argument handling.
-- **Command injection:** `spawn()` usage for `mysqldump`/`mysql` passes argv arrays rather than shell strings.
-- **Upload/download & path traversal:** upload-serving and backup-download paths enforce containment, filename/path validation, and symlink rejection.
-- **SSRF:** no server-side fetch of user-controlled external URLs was confirmed in runtime code.
-- **XSS in JSON-LD:** `safeJsonLd()` correctly escapes `<`, U+2028, and U+2029 before `dangerouslySetInnerHTML`.
-- **Public/private data separation:** `publicSelectFields` excludes GPS/original filenames/user filenames and has a compile-time guard.
-
-## OWASP Top 10 Coverage
-
-- **A01 Broken Access Control:** reviewed admin actions/routes, share-link access, upload/download path checks
-- **A02 Cryptographic Failures:** reviewed Argon2/session token/HMAC/cookie handling
-- **A03 Injection:** reviewed SQL/raw SQL, command spawning, XSS/JSON-LD, CSV formula escaping
-- **A04 Insecure Design:** reviewed share-link issuance/revocation, restore maintenance locking, queue restore coordination
-- **A05 Security Misconfiguration:** reviewed CSP, proxy trust, nginx headers, health endpoint exposure
-- **A06 Vulnerable Components:** `npm audit` clean
-- **A07 Identification/Auth Failures:** reviewed login, password change, session invalidation, rate limiting
-- **A08 Software/Data Integrity Failures:** reviewed restore scanning, backup/restore CLI invocation, deployment scripts
-- **A09 Logging/Monitoring Failures:** audit logging present on high-value auth/admin flows; no major gap confirmed
-- **A10 SSRF:** no confirmed SSRF sink found
-
-## Final Assessment
-
-The repo is in better-than-average shape for a self-hosted app: auth, path handling, SQL usage, backup/restore command invocation, and privacy separation are all notably hardened. I did **not** find a current-tree critical or high-severity confirmed vulnerability. The main remaining issues are defense-in-depth / deployment-hardening gaps: a permissive production CSP, reliance on forwarded headers when `TRUST_PROXY=true`, and a publicly chatty health endpoint.
+## Final sweep / skipped files
+Skipped generated/vendor/artifact data (`.next`, `node_modules`, `test-results`, historical `.context` artifacts, binary images). No additional high-confidence auth bypass, SQL injection, path traversal, SSRF, unsafe shell interpolation, or public PII leakage was found.

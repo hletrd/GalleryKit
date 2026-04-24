@@ -1,117 +1,74 @@
-# Code Reviewer Report
+# Code Review Summary — PROMPT 1 / cycle 4
 
-## Inventory / Files Examined
+**Scope:** Full-repo review of review-relevant code/config/runtime files, excluding `node_modules`, `.next`, `.git`, `test-results`, generated artifacts, and binary assets.
 
-Reviewed the full non-generated repo surface relevant to runtime behavior and quality:
+**Files Reviewed:** 192 review-relevant files
+- `src/app`: 55
+- `src/components`: 44
+- `src/lib`: 46
+- `src/db`: 3
+- `src/other`: 5
+- `apps/web/scripts`: 14
+- `apps/web` config/root files: 21
+- root config/scripts: 4
 
-- Root rules/docs/scripts: 5
-  - `AGENTS.md`, `CLAUDE.md`, `README.md`, `package.json`, `scripts/deploy-remote.sh`
-- App configs/public/site files: 19
-- App source (non-test): 152
-- Unit tests: 57
-- E2E specs/helpers: 6
-- Migration/schema files: 7
-- Scripts: 14
-- Locale message files: 2
+**Validation performed**
+- Read/inventoried all review-relevant files via repo-wide scan
+- `npm --prefix apps/web run typecheck` ✅
+- `npm --prefix apps/web run lint` ✅
+- `npm --prefix apps/web run lint:api-auth` ✅
+- `npm --prefix apps/web run lint:action-origin` ✅
+- Repo-wide pattern scans for `console.log`, empty catches, hardcoded secrets ✅
 
-Total review-relevant text/code files examined via inventory + whole-tree static sweep: **262**.
+## By Severity
+- **CRITICAL:** 0
+- **HIGH:** 1
+- **MEDIUM:** 2
+- **LOW:** 1
 
-Whole-repo checks run:
+## Issues
 
-- `npm run typecheck --workspace=apps/web` ✅
-- `npm run lint --workspace=apps/web` ✅
-- `npm run lint:api-auth --workspace=apps/web` ✅
-- `npm run lint:action-origin --workspace=apps/web` ✅
-- `npm test --workspace=apps/web` ✅ (57 files / 329 tests passed)
-- `npm run test:e2e --workspace=apps/web` ⚠️ blocked by missing MySQL on `127.0.0.1:3306`
-- Repo-wide grep sweeps for `console.log`, empty `catch`, likely hardcoded secrets, risky file/SQL/process patterns ✅
-
-Notes:
-
-- MCP/LSP code-intel transport was unavailable during this run, so type safety was verified with repo-native `tsc`/eslint/test commands instead.
-- I directly read the high-risk cross-file paths (`auth`, `request-origin`, uploads, image queue/processing, DB backup/restore, public routes, admin actions/components, data layer), then did a whole-tree sweep over the remaining relevant files/tests/config.
-
-## Findings by Severity
-
-### MEDIUM
-
-#### 1) Same-origin guard trusts the first forwarded hop, not the trusted one
-- **File / region:** `apps/web/src/lib/request-origin.ts:9-10,32-45,79-86`
-- **Status:** **Likely**
+### CR-C4-01 — Backup generation and restore scanning are misaligned; the app can likely reject its own backups
+- **Severity:** HIGH
 - **Confidence:** Medium
-- **Why this is an issue:** `normalizeHeaderValue()` always takes the first comma-separated value. When `TRUST_PROXY=true`, both `x-forwarded-proto` and `x-forwarded-host` flow through that helper. In chained / append-style proxy setups, the left-most value can be attacker-controlled while the trusted proxy appends the real hop later.
-- **Concrete failure scenario:** A deployment behind an append-style reverse proxy receives `X-Forwarded-Host: evil.example, gallery.atik.kr` and matching `Origin: https://evil.example`. `hasTrustedSameOrigin()` can derive `https://evil.example` as the expected origin and incorrectly accept the request for admin actions / backup download.
-- **Suggested fix:** Parse trusted proxy headers the same way `getClientIp()` treats `x-forwarded-for`: prefer the trusted/right-most hop (or reject multi-valued `x-forwarded-host`/`x-forwarded-proto` outright unless the deployment guarantees overwrite semantics). Add regression tests for comma-separated forwarded chains.
+- **Status:** Likely
+- **File / region:** `apps/web/src/app/[locale]/admin/db-actions.ts:136-143`, `apps/web/src/app/[locale]/admin/db-actions.ts:367-381`, `apps/web/src/lib/sql-restore-scan.ts:17-19`
+- **Issue:** `dumpDatabase()` invokes `mysqldump` with only `--single-transaction` and `--quick`, while `restoreDatabase()` rejects dumps containing `DROP TABLE` / `DELETE FROM`.
+- **Failure scenario:** An admin creates a backup from the UI, later uploads that same `.sql` file into restore, and receives the localized `disallowedSql`/restore failure because the scanner blocks statements emitted by the dump command.
+- **Suggested fix:** Make dump and restore deterministic: add dump flags matching the scanner, relax the scanner for the exact app-generated dump statement set, and add a golden-path round-trip test.
 
-#### 2) CSV export still triple-buffers large datasets in memory
-- **File / region:** `apps/web/src/app/[locale]/admin/db-actions.ts:51-93`
-- **Status:** **Confirmed**
+### CR-C4-02 — Uploads can silently lose requested tags while still reporting success
+- **Severity:** MEDIUM
 - **Confidence:** High
-- **Why this is an issue:** The implementation loads up to 50k rows into `results`, copies them into `csvLines`, then materializes a second full copy with `csvLines.join("\n")`. The comment says it avoids holding both the DB result and full CSV in memory simultaneously, but the code still creates multiple large live representations.
-- **Concrete failure scenario:** On a large gallery with long titles/tag lists, `exportImagesCsv()` can spike heap usage badly enough to stall the process or OOM the admin request, especially under concurrent exports.
-- **Suggested fix:** Stream rows directly to the response/download path, or paginate/chunk rows and append incrementally so only one bounded chunk is live at a time. Avoid `results` + `csvLines` + `csvContent` existing together.
+- **Status:** Confirmed
+- **File / region:** `apps/web/src/app/actions/images.ts:252-287`, `apps/web/src/app/actions/images.ts:305-343`
+- **Issue:** In `uploadImages()`, tag creation/linking errors are caught, logged, and ignored. The upload still counts as successful.
+- **Failure scenario:** An admin uploads photos with tags during a transient DB issue. The UI shows upload success, but search/filter pages cannot find those photos by the requested tags.
+- **Suggested fix:** Treat tag persistence as part of the upload contract: use a transaction or return per-file warnings/errors so the client can surface partial success and retry.
 
-#### 3) SQL restore scanner can be bypassed across large chunk/comment boundaries
-- **File / region:**
-  - `apps/web/src/lib/sql-restore-scan.ts:54-95`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:362-384`
-- **Status:** **Risk**
-- **Confidence:** Medium
-- **Why this is an issue:** The scanner only carries a fixed `64 * 1024` tail between 1 MB restore chunks. That catches short boundary splits, but not statements whose dangerous tokens are separated by more than 64 KB of comment/literal content that gets stripped before matching.
-- **Concrete failure scenario:** A crafted dump splits a banned statement (for example `CREATE ... TRIGGER` / `CREATE ... PROCEDURE`) across chunk boundaries with >64 KB of removable comment/literal padding between tokens. The fixed tail drops the first token, the regex never sees the full statement, and `mysql` executes it during restore.
-- **Suggested fix:** Replace the fixed-window regex scan with a streaming SQL lexer/tokenizer that preserves parse state across chunks after comment/literal stripping, or at minimum keep state keyed to partial dangerous-token prefixes instead of raw byte windows. Add regression coverage with a >64 KB split.
-
-### LOW
-
-#### 4) Regression tests miss the two boundary cases above
-- **File / region:**
-  - `apps/web/src/__tests__/request-origin.test.ts:24-114`
-  - `apps/web/src/__tests__/sql-restore-scan.test.ts:66-75`
-- **Status:** **Confirmed**
+### CR-C4-03 — The storage-backend abstraction is exposed as switchable, but the live pipeline bypasses it entirely
+- **Severity:** MEDIUM
 - **Confidence:** High
-- **Why this is an issue:** Current tests cover single-hop forwarded headers and a 2 KB SQL chunk split, but not comma-separated forwarded chains or >64 KB scanner boundaries.
-- **Concrete failure scenario:** Refactors preserve the happy-path tests while reintroducing (or failing to catch) proxy-chain provenance bugs or long-gap SQL-scan bypasses.
-- **Suggested fix:** Add explicit tests for multi-value `x-forwarded-host` / `x-forwarded-proto`, and for a split dangerous statement with a gap larger than `SQL_SCAN_TAIL_BYTES`.
+- **Status:** Confirmed
+- **File / region:** `apps/web/src/lib/storage/index.ts:52-143`, `apps/web/src/lib/process-image.ts:242-253`, `apps/web/src/lib/process-image.ts:362-444`, `apps/web/src/lib/serve-upload.ts:63-103`, `apps/web/src/lib/upload-paths.ts:12-46`
+- **Issue:** `storage/index.ts` exposes a backend singleton and backend-switching API, but upload processing, file writes, file serving, and path resolution still talk directly to the local filesystem.
+- **Failure scenario:** A maintainer calls `switchStorageBackend(...)` expecting uploads/reads to move off local disk; new code using `getStorage()` behaves one way while real upload/serve paths continue writing and serving local paths.
+- **Suggested fix:** Remove the unfinished abstraction until backend switching is real, or route all save/read/delete/serve paths through `StorageBackend`.
 
-## Final Sweep / Commonly Missed Issues Check
+### CR-C4-04 — Generated OG images ignore runtime SEO branding and can drift from the rest of the site
+- **Severity:** LOW
+- **Confidence:** High
+- **Status:** Confirmed
+- **File / region:** `apps/web/src/app/api/og/route.tsx:4-5`, `apps/web/src/app/api/og/route.tsx:29-30`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:55-67`
+- **Issue:** `/api/og` reads branding from static `site-config.json`, while page metadata elsewhere uses runtime/admin-managed `getSeoSettings()`.
+- **Failure scenario:** An admin updates SEO branding. Page metadata updates, but generated topic OG images still render the old build-time site title.
+- **Suggested fix:** Use the same metadata source for OG generation as the rest of the app, or pass already-resolved title/brand through a shared helper.
 
-Checked explicitly for:
+## Final sweep
+Re-checked auth/origin enforcement, upload/process/serve, backup/restore, SEO/OG, storage abstraction vs runtime path, and repo-wide diagnostics. No additional CRITICAL/HIGH issues beyond CR-C4-01 were found.
 
-- hardcoded secrets / credentials in source
-- missing admin auth wrappers on admin API routes
-- missing same-origin checks on mutating server actions
-- path traversal / symlink issues on upload serving and backup download
-- raw SQL / shell-spawn surfaces
-- empty catches / swallowed failures
-- privacy leaks from public image selectors
-- queue / restore / upload cross-file race conditions
-- stale cache / revalidation gaps on admin mutations
-
-No CRITICAL or HIGH issues found in the current repo snapshot.
-
-## Verification Evidence
-
-- Typecheck: pass
-- ESLint: pass
-- API-auth lint: pass
-- Action-origin lint: pass
-- Unit tests: pass (`57` files, `329` tests)
-- E2E: not runnable in this environment because Playwright webServer init failed on missing MySQL (`ECONNREFUSED 127.0.0.1:3306`)
-
-## Final Skipped-File Check
-
-Intentionally skipped as non-review-relevant/generated/runtime artifacts:
-
-- `node_modules/**`
-- `.next/**`
-- `playwright-report/**`
-- `test-results/**`
-- `.git/**`
-- `.omx/**`, `.omc/**`, `.context/**`, `plan/**` runtime/history artifacts
-- binary fixtures/images (for example `apps/web/e2e/fixtures/*.jpg`, screenshots)
-
-No other review-relevant source/config/test files were intentionally skipped.
+## Skipped files/categories
+Unit/e2e tests, `.context/**`, `.omx/**`, `.omc/**`, `plan/**`, binary/static assets, `node_modules`, `.next`, `.git`, and `test-results` were skipped as non-authoritative for this review lane.
 
 ## Recommendation
-
-**COMMENT** — repo is generally in good shape and passes its configured gates, but the three medium findings above are worth addressing before treating the current state as fully hardened.
+REQUEST CHANGES
