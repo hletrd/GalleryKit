@@ -120,6 +120,7 @@ export const auditLog = mysqlTable("audit_log", {
     metadata: text("metadata"),
     created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => ({
+    createdAtIdx: index("audit_created_at_idx").on(table.created_at),
     userIdx: index("audit_user_idx").on(table.userId, table.created_at),
     actionIdx: index("audit_action_idx").on(table.action, table.created_at),
 }));

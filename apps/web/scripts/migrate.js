@@ -449,6 +449,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureIndex(connection, dbName, 'images', 'idx_images_user_filename', 'CREATE INDEX idx_images_user_filename ON images (user_filename)');
     await ensureIndex(connection, dbName, 'audit_log', 'audit_user_idx', 'CREATE INDEX audit_user_idx ON audit_log (user_id, created_at)');
     await ensureIndex(connection, dbName, 'audit_log', 'audit_action_idx', 'CREATE INDEX audit_action_idx ON audit_log (action, created_at)');
+    await ensureIndex(connection, dbName, 'audit_log', 'audit_created_at_idx', 'CREATE INDEX audit_created_at_idx ON audit_log (created_at)');
     await ensureIndex(connection, dbName, 'sessions', 'idx_sessions_expires_at', 'CREATE INDEX idx_sessions_expires_at ON sessions (expires_at)');
     await ensureIndex(connection, dbName, 'shared_group_images', 'idx_shared_group_images_group_position', 'CREATE INDEX idx_shared_group_images_group_position ON shared_group_images (group_id, position)');
 

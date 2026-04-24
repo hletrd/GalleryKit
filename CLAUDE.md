@@ -122,12 +122,12 @@ git values must be treated as compromised and must not be reused.
 - Cookie attributes: `httpOnly`, `secure` (in production), `sameSite: lax`, `path: /`
 - Session secret: `SESSION_SECRET` env var is required in production; dev/test can fall back to a DB-stored generated secret in `admin_settings`
 - Expired sessions purged automatically (hourly background job)
-- Login rate limiting enforced in two buckets: per-IP (5 attempts / 15-min window) and per-account (`acct:<sha256-prefix>` key, same 5/15-min limits) to prevent distributed brute-force where each IP gets a fresh budget but all target the same username. Both buckets use bounded Map + LRU eviction.
+- Login rate limiting enforced in two buckets: per-IP (5 attempts / 15-min window) and per-account (`acct:<sha256-prefix>` key, same 5/15-min limits) to prevent distributed brute-force where each IP gets a fresh budget but all target the same username. Both buckets use bounded Maps with oldest-entry eviction when caps are exceeded.
 
 ### Middleware Auth Guard
 - `proxy.ts` checks `admin_session` cookie for all `/[locale]/admin/*` sub-routes
 - Unauthenticated requests redirected to login page
-- Every server action independently verifies auth via `isAdmin()` (defense in depth)
+- Every mutating admin server action independently verifies auth via `isAdmin()` (defense in depth). Public actions such as search/load-more are intentionally anonymous and rely on validation + rate limiting instead.
 - Last admin deletion prevented to avoid lockout
 
 ### File Upload Security
@@ -168,7 +168,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 1. Files uploaded via `uploadImages()` server action
 2. Original saved to the private upload store under `data/uploads/original/`
-3. Enqueued to `PQueue` (concurrency: 1) for background processing
+3. Enqueued to `PQueue` (default concurrency: 2; override with `QUEUE_CONCURRENCY`) for background processing
 4. Queue job **claims** image (conditional `WHERE processed = false`) before processing
 5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at 4 sizes each
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
@@ -231,11 +231,11 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
 
 - `npm run lint:api-auth --workspace=apps/web`
   - Scans every `apps/web/src/app/api/admin/**/route.{ts,tsx,js,mjs,cjs}` file.
-  - Requires each HTTP-method export (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) to wrap `withAdminAuth(...)`. Function-declaration handlers are rejected — use the variable-export form so the wrapper is explicit.
+  - Requires each HTTP-method export (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) to wrap `withAdminAuth(...)`. Function-declaration and aliased exports are rejected — use the direct variable-export form so the wrapper is explicit.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-api-auth.test.ts`.
 - `npm run lint:action-origin --workspace=apps/web`
   - Scans `apps/web/src/app/actions/*.ts` (auto-discovered via glob, excluding `auth.ts` and `public.ts`) plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
-  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to call `requireSameOriginAdmin()`.
+  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to call `requireSameOriginAdmin()`. Aliased exports are rejected so the scanner can inspect the committed implementation body.
   - Auto-exempts read-only getters (name matches `^get[A-Z]`) and exports carrying a `/** @action-origin-exempt: <reason> */` leading comment.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
