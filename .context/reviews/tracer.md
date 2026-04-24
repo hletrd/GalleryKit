@@ -1,59 +1,119 @@
-# Tracer Deep Review — Cycle 2 Recovery (2026-04-24)
+# Tracer Review — Prompt 1 Cycle 4/100
 
-## Inventory and method
+Repo: `/Users/hletrd/flash-shared/gallery`
+Scope traced: upload → process → serve → share, admin auth → actions/API, DB backup/restore, settings/i18n, image navigation, cache invalidation.
 
-Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
+## Method and competing hypotheses
 
-Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
+I traced state transitions from server actions into DB rows, background queue state, derivative files, public routes, and cache invalidation calls. I specifically tested these hypotheses against source evidence:
 
-- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
-- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
-- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
-- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
-- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
-
-Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
+- **H1: Auth/API action gates are missing on an admin mutation.** Rejected for the current tree: `npm run lint:action-origin` and `npm run lint:api-auth` pass; protected admin layout also re-checks `isAdmin()`.
+- **H2: Public upload serving allows original-file disclosure or traversal.** Rejected for current tracked routes: only `jpeg/webp/avif` are allowed and `lstat`/`realpath` containment is checked.
+- **H3: Upload/process/cache state can diverge.** Confirmed: processing completion does not invalidate pages that filter `processed=true`; several related cache invalidation paths miss share or navigation dependents.
+- **H4: DB restore maintenance prevents all concurrent writes.** Rejected: the maintenance flag is process-local, while deployments can have multiple Node workers/processes.
+- **H5: Settings/i18n config is internally coherent.** Partly confirmed: English/Korean key parity is clean, but settings/upload has a timing window that can leave derivatives generated with a stale processing contract.
 
 ## Findings summary
 
 | ID | Severity | Confidence | Status | Summary |
-|---|---|---|---|---|
-| AGG2C2-01 | HIGH | High | Confirmed | Deleting images does not invalidate cached direct-share or group-share pages |
-| AGG2C2-02 | MEDIUM | High | Confirmed | Login/password DB rate limits still check before increment across processes |
-| AGG2C2-04 | MEDIUM | Medium-High | Confirmed | `image_sizes` can change while unprocessed jobs are in flight |
+|---|---:|---:|---|---|
+| TR-C4-01 | High | High | Confirmed | Upload completion can leave public caches stuck before the new image becomes `processed=true` |
+| TR-C4-02 | High | High | Confirmed | Restore maintenance is process-local, so other workers can mutate state during a restore |
+| TR-C4-03 | High | Medium-High | Likely | The restore scanner rejects standard app-generated `mysqldump` files containing `DROP TABLE` |
+| TR-C4-04 | Medium | High | Confirmed | Metadata edits do not invalidate direct-share or group-share pages |
+| TR-C4-05 | Medium | High | Confirmed | Deleting a photo does not invalidate cached adjacent photo navigation |
+| TR-C4-06 | Medium | Medium | Likely | A new-gallery settings/upload race can generate derivatives using stale image-size/GPS settings |
 
 ## Detailed findings
 
-### AGG2C2-01 — Deleting images does not invalidate cached direct-share or group-share pages
+### TR-C4-01 — Upload completion can leave public caches stuck before the new image becomes `processed=true`
 
-- **Status:** Confirmed
-- **Severity:** HIGH
+- **Severity:** High
 - **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/images.ts:367-427`, `apps/web/src/app/actions/images.ts:461-555`, `apps/web/src/db/schema.ts:87-104`, `apps/web/src/lib/data.ts:552-630`, `apps/web/src/app/actions/sharing.ts:320-381`.
-- **Why this is a problem:** `deleteImage` and `deleteImages` fetch filenames/topic, delete the image rows, and revalidate `/`, `/p/{id}`, the topic, and admin dashboard. They never fetch `images.share_key` nor group keys joined through `shared_group_images`, even though dedicated share revoke/delete paths revalidate `/s/{key}` and `/g/{key}`.
-- **Failure scenario:** An admin shares a photo or group, the public share page is generated and cached, then the admin deletes the image. The DB row/group link is gone, but `/s/<key>` or `/g/<key>` can remain cached and keep exposing stale deleted-photo content until natural ISR expiry or unrelated broad invalidation.
-- **Suggested fix:** Before deletion, collect direct `share_key` values and affected `shared_groups.key` values for the target image IDs; after successful deletion, include `/s/{key}` and `/g/{key}` in targeted revalidation (or broad layout revalidation for large batches). Add a regression test/static guard.
-
-### AGG2C2-02 — Login/password DB rate limits still check before increment across processes
-
 - **Status:** Confirmed
-- **Severity:** MEDIUM
+- **Flow:** upload → queue process → public list serve → cache invalidation
+- **Evidence:**
+  - `uploadImages` inserts the image with `processed: false` before queueing: `apps/web/src/app/actions/images.ts:216-232`.
+  - The upload action invalidates `/`, `/admin/dashboard`, and the topic immediately after enqueue: `apps/web/src/app/actions/images.ts:335-336`.
+  - Public list queries exclude unprocessed rows: `apps/web/src/lib/data.ts:295-303`.
+  - The queue later flips `processed` to true: `apps/web/src/lib/image-queue.ts:284-287`.
+  - The queue explicitly does **not** revalidate on completion: `apps/web/src/lib/image-queue.ts:300-304`.
+  - Home/topic pages can cache list results for an hour: `apps/web/src/app/[locale]/(public)/page.tsx:12-16`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:15`.
+- **Concrete failure scenario:** Admin uploads a photo. The upload action invalidates the homepage/topic while the row is still `processed=false`. A visitor or bot hits the homepage before Sharp finishes; the regenerated ISR page excludes the new row and can remain stale for up to 3600 seconds. The queue later marks the row processed but does not invalidate the public list, so the processed photo is not served until natural revalidation or another mutation.
+- **Suggested fix:** Reintroduce post-processing invalidation, but batch/debounce it to avoid the earlier ISR-thrash concern. After `processed=true`, revalidate `/`, the image topic, and `/p/{id}` (or enqueue IDs/topics into a short debounce flusher). Add a regression test proving that queue completion triggers invalidation after the processed flip, not only at upload acceptance.
+
+### TR-C4-02 — Restore maintenance is process-local, so other workers can mutate state during a restore
+
+- **Severity:** High
 - **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/auth.ts:108-141`, `apps/web/src/app/actions/auth.ts:320-337`, `apps/web/src/lib/rate-limit.ts:172-215`, safer reference pattern in `apps/web/src/app/actions/public.ts:63-94`.
-- **Why this is a problem:** Auth flows pre-check DB buckets via `checkRateLimit`, then increment. In a multi-process deployment, concurrent bad attempts can all observe the old count before any increment lands. Search/share/admin-user flows already use the safer increment-before-check pattern with `includesCurrentRequest` semantics and rollback.
-- **Failure scenario:** With max 5 attempts, two Node workers receive bad login attempts for the same account bucket while DB count is 4. Both read 4, both run Argon2, then DB count lands at 6, admitting extra expensive guesses across workers.
-- **Suggested fix:** Move DB `incrementRateLimit` before `checkRateLimit` for login IP/account and password-change buckets; check using `isRateLimitExceeded(count, max, true)`; roll back both in-memory and DB counters when an over-limit request is rejected before authentication work.
-
-### AGG2C2-04 — `image_sizes` can change while unprocessed jobs are in flight
-
 - **Status:** Confirmed
-- **Severity:** MEDIUM
+- **Flow:** DB restore/backup → admin actions/API → upload/process/share/settings
+- **Evidence:**
+  - Restore maintenance state is stored on `globalThis`: `apps/web/src/lib/restore-maintenance.ts:1-22`, and toggled only in the current process: `apps/web/src/lib/restore-maintenance.ts:44-55`.
+  - `restoreDatabase` acquires a MySQL advisory lock only for the restore action itself: `apps/web/src/app/[locale]/admin/db-actions.ts:258-269`.
+  - It then sets process-local maintenance and quiesces only this process's queue: `apps/web/src/app/[locale]/admin/db-actions.ts:271-299`.
+  - Mutating actions trust that same process-local flag, e.g. uploads: `apps/web/src/app/actions/images.ts:91-94`, settings: `apps/web/src/app/actions/settings.ts:44-45`, sharing: `apps/web/src/app/actions/sharing.ts:98-99`.
+- **Concrete failure scenario:** Production runs two Node workers. Worker A starts a 250 MB restore, sets its own `globalThis` maintenance flag, and streams SQL into MySQL. A concurrent upload/share/settings request lands on Worker B, where `isRestoreMaintenanceActive()` is false. Worker B writes rows and queues processing against the database while Worker A is restoring, causing lost writes, FK failures, or derivatives for rows that the restore later replaces.
+- **Suggested fix:** Move restore maintenance to shared state: a DB `admin_settings` maintenance row with TTL/owner, a named advisory lock checked by all mutating actions, or an external lock (Redis, etc.). Mutating actions and queue bootstrap should consult the shared lock, not only `globalThis`; queue quiesce/resume should be coordinated across workers.
+
+### TR-C4-03 — The restore scanner rejects standard app-generated `mysqldump` files containing `DROP TABLE`
+
+- **Severity:** High
 - **Confidence:** Medium-High
-- **Files/regions:** `apps/web/src/app/actions/settings.ts:72-103`, `apps/web/src/app/actions/images.ts:224-305`, `apps/web/src/lib/image-queue.ts:240-263`, `apps/web/src/lib/process-image.ts:390-444`, public image URL consumers in `apps/web/src/lib/image-url.ts:24-48` and public routes.
-- **Why this is a problem:** Settings blocks output-size changes only when a processed image exists. A new gallery can upload images (`processed=false`), start queue jobs with old sizes, then change `image_sizes` before any row becomes processed. The UI/public pages then request derivative filenames for the new size set while queued jobs may have produced only the old size set.
-- **Failure scenario:** Admin uploads photos, immediately changes output sizes while processing is still running, then public thumbnails/metadata URLs are generated for sizes that do not exist on disk, causing broken images/OG previews after rows flip to processed.
-- **Suggested fix:** Lock `image_sizes` once any image row exists, not only once a processed row exists, unless a full queue quiesce/regeneration workflow is introduced. Update admin copy/tests to reflect “uploaded” rather than “processed.”
+- **Status:** Likely
+- **Flow:** DB backup → restore scanner → restore
+- **Evidence:**
+  - `dumpDatabase` invokes `mysqldump` without `--skip-add-drop-table` or equivalent: `apps/web/src/app/[locale]/admin/db-actions.ts:136-140`.
+  - The restore scanner rejects `DROP TABLE`: `apps/web/src/lib/sql-restore-scan.ts:13-19`.
+  - Restore scans the entire uploaded SQL and returns `disallowedSql` on any match: `apps/web/src/app/[locale]/admin/db-actions.ts:362-381`.
+  - The test suite codifies `DROP TABLE images;` as dangerous: `apps/web/src/__tests__/sql-restore-scan.test.ts:30`.
+- **Concrete failure scenario:** Admin clicks Backup, downloads the app's own mysqldump, then later uploads that file to Restore. Standard mysqldump output normally includes `DROP TABLE IF EXISTS` before `CREATE TABLE`; the scanner rejects the file before `mysql` runs, so the backup/restore loop is not self-compatible.
+- **Suggested fix:** Make backup and restore policy agree. Either add `--skip-add-drop-table` to the dump command and add a round-trip fixture test, or permit the exact mysqldump-safe `DROP TABLE IF EXISTS \`known_app_table\`` pattern after validating table names against the schema. The former is safer and smaller.
 
-## Final missed-issue sweep
+### TR-C4-04 — Metadata edits do not invalidate direct-share or group-share pages
 
-Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.
+- **Severity:** Medium
+- **Confidence:** High
+- **Status:** Confirmed
+- **Flow:** admin action → shared serve → cache invalidation
+- **Evidence:**
+  - `updateImageMetadata` fetches only the image topic before updating: `apps/web/src/app/actions/images.ts:598-621`.
+  - It revalidates `/p/{id}`, `/admin/dashboard`, `/`, and the topic, but no `/s/{share_key}` or `/g/{groupKey}`: `apps/web/src/app/actions/images.ts:620-621`.
+  - Share pages render metadata/title/description from cached share lookups: direct share `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:46-64`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:101-126`; group share `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:118-143`.
+  - The file already has helpers for collecting share/group revalidation paths used by delete paths: `apps/web/src/app/actions/images.ts:57-79`.
+- **Concrete failure scenario:** Admin shares a photo, then corrects its title/description. `/p/{id}` updates after revalidation, but `/s/{key}` and any `/g/{key}` containing the image can keep serving the old title/description/OG data until another broad invalidation or natural expiry.
+- **Suggested fix:** In `updateImageMetadata`, select `share_key` and collect affected group keys with `getSharedGroupKeysForImages([id])`; include the resulting `/s/*` and `/g/*` paths in `revalidateLocalizedPaths`. Add regression coverage mirroring the delete revalidation tests.
+
+### TR-C4-05 — Deleting a photo does not invalidate cached adjacent photo navigation
+
+- **Severity:** Medium
+- **Confidence:** High
+- **Status:** Confirmed
+- **Flow:** image navigation → delete → cache invalidation
+- **Evidence:**
+  - Photo detail pages cache for a week: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:27-28`.
+  - Each photo page computes `prevId`/`nextId` from the current DB ordering: `apps/web/src/lib/data.ts:465-545`.
+  - `deleteImage` revalidates the deleted photo, home, topic, admin dashboard, and share paths only: `apps/web/src/app/actions/images.ts:427`.
+  - `deleteImages` revalidates only found IDs/topics/share paths for small batches: `apps/web/src/app/actions/images.ts:553-562`.
+- **Concrete failure scenario:** Photo 11 is cached with `nextId=10`. Admin deletes photo 10. `/p/11` is not revalidated, so its arrow/prefetch still points to `/p/10`; users navigating from photo 11 hit a deleted/not-found page until the week-long ISR entry is invalidated.
+- **Suggested fix:** Before deletion, compute adjacent public photo IDs around the deleted IDs in the same global sort order and revalidate those `/p/{adjacentId}` pages too. For batch deletes, collect boundary neighbors after excluding all deleted IDs, or use layout-level revalidation when neighbor computation is too costly.
+
+### TR-C4-06 — A new-gallery settings/upload race can generate derivatives using stale image-size/GPS settings
+
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Status:** Likely
+- **Flow:** settings/i18n → upload → process → serve
+- **Evidence:**
+  - Upload snapshots the processing config before claiming upload capacity: `apps/web/src/app/actions/images.ts:122-125` versus the later tracker pre-claim at `apps/web/src/app/actions/images.ts:179-185`.
+  - Settings only blocks upload-contract changes if the process-local upload tracker has active claims or an image row exists: `apps/web/src/app/actions/settings.ts:73-77`, `apps/web/src/app/actions/settings.ts:100-130`.
+  - The queued job uses the upload-time snapshot for qualities/sizes: `apps/web/src/app/actions/images.ts:289-303`, `apps/web/src/lib/image-queue.ts:242-268`.
+  - Public URL builders use current configured sizes when rendering metadata/viewers: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:67-70`, `apps/web/src/components/photo-viewer.tsx:213-225`.
+- **Concrete failure scenario:** Empty gallery. Upload request A reads old `image_sizes`, then stalls before tracker pre-claim/DB insert. Settings request B changes `image_sizes` because there are no active claims and no image rows. Request A then inserts and queues a job with the old size list. Public pages use the new size list and request derivative filenames that were never generated, causing broken thumbnails/OG images. The same process-local tracker also cannot protect across workers.
+- **Suggested fix:** Serialize processing-contract changes with uploads. Claim a shared upload/settings lock before reading `getGalleryConfig()`, or move the processing contract into the image row/job payload and have all renderers choose sizes from per-image metadata. At minimum, pre-claim before config read and use a DB-backed lock so settings cannot change between config snapshot and row creation across processes.
+
+## Traced surfaces without new findings
+
+- **Admin auth/actions/API:** `npm run lint:action-origin` reported all mutating server actions enforce `requireSameOriginAdmin`; `npm run lint:api-auth` reported the admin download API route is wrapped. Protected admin layout also redirects unauthenticated users via `isAdmin()`.
+- **i18n key parity:** A JSON flatten comparison of `apps/web/messages/en.json` and `apps/web/messages/ko.json` found zero missing keys in either direction.
+- **Upload serving:** `serveUploadFile` restricts top-level directories/extensions and checks symlink/realpath containment before streaming (`apps/web/src/lib/serve-upload.ts:32-102`). I did not find a current traversal/original-disclosure path in tracked code.
