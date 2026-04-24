@@ -75,4 +75,57 @@ describe('auth.ts — updatePassword validates form fields before rate-limit inc
             /incrementRateLimit\(ip,\s*'password_change',\s*LOGIN_WINDOW_MS\)/,
         );
     });
+
+    it('checks the DB password_change bucket only after pre-incrementing it', () => {
+        const body = updatePasswordMatch![0];
+        const preIncrement = body.indexOf(
+            "incrementRateLimit(ip, 'password_change'",
+        );
+        const dbCheck = body.indexOf(
+            "checkRateLimit(ip, 'password_change'",
+        );
+        expect(preIncrement).toBeGreaterThanOrEqual(0);
+        expect(dbCheck).toBeGreaterThanOrEqual(0);
+        expect(preIncrement).toBeLessThan(dbCheck);
+    });
+
+    it('uses includes-current-request semantics for over-limit password_change checks', () => {
+        const body = updatePasswordMatch![0];
+        expect(body).toContain('isRateLimitExceeded(dbLimit.count, PASSWORD_CHANGE_MAX_ATTEMPTS, true)');
+    });
+});
+
+describe('auth.ts — login DB-backed rate limits include the current request', () => {
+    const authSource = readFileSync(
+        resolve(__dirname, '..', 'app', 'actions', 'auth.ts'),
+        'utf-8',
+    );
+
+    const loginMatch = /export async function login[\s\S]*?^}/m.exec(authSource);
+
+    it('login exists in auth.ts', () => {
+        expect(loginMatch).not.toBeNull();
+    });
+
+    it('increments login IP and account buckets before checking DB counts', () => {
+        const body = loginMatch![0];
+        const ipIncrement = body.indexOf("incrementRateLimit(ip, 'login'");
+        const accountIncrement = body.indexOf("incrementRateLimit(accountRateLimitKey, 'login_account'");
+        const ipCheck = body.indexOf("checkRateLimit(ip, 'login'");
+        const accountCheck = body.indexOf("checkRateLimit(accountRateLimitKey, 'login_account'");
+        expect(ipIncrement).toBeGreaterThanOrEqual(0);
+        expect(accountIncrement).toBeGreaterThanOrEqual(0);
+        expect(ipCheck).toBeGreaterThanOrEqual(0);
+        expect(accountCheck).toBeGreaterThanOrEqual(0);
+        expect(ipIncrement).toBeLessThan(ipCheck);
+        expect(accountIncrement).toBeLessThan(accountCheck);
+    });
+
+    it('uses includes-current-request semantics and rolls back rejected login attempts', () => {
+        const body = loginMatch![0];
+        expect(body).toContain('isRateLimitExceeded(dbLimit.count, LOGIN_MAX_ATTEMPTS, true)');
+        expect(body).toContain('isRateLimitExceeded(accountLimit.count, LOGIN_MAX_ATTEMPTS, true)');
+        expect(body).toContain('rollbackLoginRateLimit(ip)');
+        expect(body).toContain("decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS)");
+    });
 });

@@ -11,7 +11,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey, isRateLimitExceeded } from '@/lib/rate-limit';
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackLoginRateLimit, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
@@ -105,29 +105,11 @@ export async function login(prevState: { error?: string } | null, formData: Form
         return { error: t('tooManyAttempts') };
     }
 
-    // DB-backed check for accuracy across restarts
-    try {
-        const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
-        if (dbLimit.limited) {
-            return { error: t('tooManyAttempts') };
-        }
-    } catch {
-        // DB unavailable — rely on in-memory Map
-    }
-
     // ── Account-scoped rate limit: throttle per-username, not just per-IP ──
     // This prevents distributed brute-force attacks where each IP gets a fresh
     // budget but all target the same account. The bucket key is prefixed with
     // "acct:" to avoid collisions with IP-based buckets.
     const accountRateLimitKey = buildAccountRateLimitKey(username);
-    try {
-        const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
-        if (accountLimit.limited) {
-            return { error: t('tooManyAttempts') };
-        }
-    } catch {
-        // DB unavailable — IP-based limit still applies
-    }
 
     // ── Increment rate limit BEFORE the expensive Argon2 verify (TOCTOU fix) ──
     // Without this, concurrent requests all pass the check before any of them
@@ -141,6 +123,26 @@ export async function login(prevState: { error?: string } | null, formData: Form
         await incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
     } catch (err) {
         console.debug('Failed to pre-increment login rate limit:', err);
+    }
+
+    // DB-backed check for accuracy across restarts. The DB counter already
+    // includes this request, so use strict `>` semantics and roll back if this
+    // request is rejected before authentication work is performed.
+    try {
+        const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        if (
+            isRateLimitExceeded(dbLimit.count, LOGIN_MAX_ATTEMPTS, true)
+            || isRateLimitExceeded(accountLimit.count, LOGIN_MAX_ATTEMPTS, true)
+        ) {
+            await Promise.allSettled([
+                rollbackLoginRateLimit(ip),
+                decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS),
+            ]);
+            return { error: t('tooManyAttempts') };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map
     }
 
     try {
@@ -317,15 +319,6 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     if (limitData.count >= PASSWORD_CHANGE_MAX_ATTEMPTS) {
         return { error: t('tooManyAttempts') };
     }
-    try {
-        const dbLimit = await checkRateLimit(ip, 'password_change', PASSWORD_CHANGE_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
-        if (dbLimit.limited) {
-            return { error: t('tooManyAttempts') };
-        }
-    } catch {
-        // DB unavailable — rely on in-memory Map
-    }
-
     // ── Increment rate limit BEFORE the expensive Argon2 verify (TOCTOU fix) ──
     // Without this, concurrent requests all pass the check before any of them
     // record the failed attempt, allowing burst brute-force attacks.
@@ -337,6 +330,16 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         await incrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
     } catch (err) {
         console.debug('Failed to pre-increment password change rate limit:', err);
+    }
+
+    try {
+        const dbLimit = await checkRateLimit(ip, 'password_change', PASSWORD_CHANGE_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        if (isRateLimitExceeded(dbLimit.count, PASSWORD_CHANGE_MAX_ATTEMPTS, true)) {
+            await rollbackPasswordChangeRateLimit(ip);
+            return { error: t('tooManyAttempts') };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory Map
     }
 
     try {
