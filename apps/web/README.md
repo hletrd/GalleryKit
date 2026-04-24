@@ -8,6 +8,8 @@ See the [root README](../../README.md) for full documentation.
 
 ```bash
 npm install
+cp src/site-config.example.json src/site-config.json
+npm run init
 npm run dev
 ```
 
@@ -30,5 +32,5 @@ npm run dev
 - Total batch upload size defaults to **2 GiB**. Override with `UPLOAD_MAX_TOTAL_BYTES` only if your deployment can safely absorb larger multipart bodies.
 - Set `TRUST_PROXY=true` when running behind the provided nginx reverse proxy or another trusted proxy chain so rate limits use real client IPs and same-origin checks use the forwarded host/protocol. Ensure the proxy overwrites `Host` and `X-Forwarded-Proto` with trusted values.
 - The checked-in `docker-compose.yml` assumes a Linux host with `network_mode: host`, a host-managed MySQL instance, and a host-side `src/site-config.json` bind mount. Build/deploy flows now fail fast if `src/site-config.json` is missing.
-- If `ADMIN_PASSWORD` is stored as an Argon2 hash, set a separate plaintext `E2E_ADMIN_PASSWORD` for opt-in Playwright admin login flows.
-- Remote admin Playwright runs are blocked by default; set `E2E_ALLOW_REMOTE_ADMIN=true` only when you intentionally want to exercise a non-local target with a dedicated `E2E_ADMIN_PASSWORD`.
+- If `ADMIN_PASSWORD` is stored as an Argon2 hash, set a separate plaintext `E2E_ADMIN_PASSWORD` and `E2E_ADMIN_ENABLED=true` for local Playwright admin login flows.
+- Remote admin Playwright runs are blocked by default; set both `E2E_ADMIN_ENABLED=true` and `E2E_ALLOW_REMOTE_ADMIN=true` only when you intentionally want to exercise a non-local target with a dedicated `E2E_ADMIN_PASSWORD`.

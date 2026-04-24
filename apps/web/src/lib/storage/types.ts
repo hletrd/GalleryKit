@@ -10,9 +10,8 @@
  *
  * Key conventions:
  * - `key` is a relative path like `original/abc.jpg` or `webp/abc.webp`
- * - Backends handle their own prefix/bucket mapping internally
- * - Local backend keys map to `UPLOAD_ROOT/<key>`
- * - S3/MinIO backend keys map to `<bucket>/<key>`
+ * - The current local backend maps keys to `UPLOAD_ROOT/<key>`
+ * - Do not assume every upload/serve path uses this abstraction yet
  */
 
 import type { Readable } from 'stream';
@@ -33,7 +32,7 @@ export interface StorageObjectInfo {
     size?: number;
 }
 
-/** Parameters for creating a presigned URL (S3/MinIO only). */
+/** Parameters for future signed/public URL implementations; local storage currently ignores these. */
 export interface PresignedUrlOptions {
     /** How long the URL is valid, in seconds. Default: 3600 */
     expiresIn?: number;
@@ -94,9 +93,8 @@ export interface StorageBackend {
     copy(srcKey: string, destKey: string): Promise<void>;
 
     /**
-     * Get a public or presigned URL for a file.
-     * For local backend this returns a relative path like `/uploads/jpeg/foo.jpg`.
-     * For S3/MinIO this returns a presigned URL or public URL.
+     * Get a public URL for a file.
+     * For the current local backend this returns a relative path like `/uploads/jpeg/foo.jpg`.
      */
     getUrl(key: string, options?: PresignedUrlOptions): Promise<string>;
 

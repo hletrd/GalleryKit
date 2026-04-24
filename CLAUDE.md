@@ -28,7 +28,7 @@ gallerykit/
 │   │   │   │   ├── p/[id]/   # Photo viewer page
 │   │   │   │   ├── g/[key]/  # Shared group pages
 │   │   │   │   └── s/[key]/  # Shared link pages
-│   │   │   └── actions.ts    # Server actions (uploads, CRUD)
+│   │   │   └── actions/      # Server actions (uploads, CRUD, topics, settings)
 │   │   ├── components/       # React components
 │   │   ├── db/               # Drizzle schema and connection
 │   │   ├── lib/              # Utilities (image processing, etc.)
@@ -87,7 +87,7 @@ git values must be treated as compromised and must not be reused.
 
 | File | Purpose |
 |------|---------|
-| `apps/web/src/app/actions.ts` | Server actions for uploads, image CRUD, auth, session management |
+| `apps/web/src/app/actions/` | Server actions for uploads, image CRUD, topics, settings, and admin mutations |
 | `apps/web/src/db/schema.ts` | Drizzle ORM schema with composite indexes |
 | `apps/web/src/lib/process-image.ts` | Sharp pipeline (parallel AVIF/WebP/JPEG, ICC parsing, bounds checks) |
 | `apps/web/src/lib/data.ts` | Data access layer with React cache() deduplication |
@@ -139,7 +139,7 @@ git values must be treated as compromised and must not be reused.
 - **Headers**: `X-Content-Type-Options: nosniff`, immutable cache-control
 
 ### Database Security
-- All queries via Drizzle ORM (parameterized, no raw SQL with user input)
+- Most application queries use Drizzle ORM parameterization; audited raw-SQL surfaces are confined to schema/admin maintenance helpers and must not concatenate untrusted input
 - LIKE wildcards (`%`, `_`, `\`) escaped in search to prevent wildcard abuse
 - DB backup dumps stored in `data/backups/` (non-public), served via authenticated API route
 - DB restore validates file headers and uses `--one-database` flag

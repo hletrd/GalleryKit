@@ -36,7 +36,7 @@
 - **Sharing** -- per-photo and group share links with Base56 short keys
 - **Admin Dashboard** -- drag-and-drop uploads, batch editing, multi-user auth (Argon2)
 - **Internationalization** -- English and Korean (next-intl)
-- **Docker Ready** -- standalone output, single-command deployment
+- **Docker Support** -- standalone output with documented Linux host-network + reverse-proxy deployment
 
 ## Configuration
 
@@ -90,6 +90,8 @@ gallerykit/
 git clone https://github.com/hletrd/gallerykit.git
 cd gallerykit
 npm install
+cp apps/web/src/site-config.example.json apps/web/src/site-config.json
+npm run init --workspace=apps/web
 ```
 
 ### Remote Deploy Helper
@@ -124,6 +126,7 @@ BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix
 # IMAGE_BASE_URL=https://cdn.example.com
 # UPLOAD_MAX_TOTAL_BYTES=2147483648
+# UPLOAD_MAX_FILES_PER_WINDOW=100
 # TRUST_PROXY=true
 ```
 
