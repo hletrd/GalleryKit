@@ -1,81 +1,105 @@
-# Critic Deep Review — Cycle 2 Recovery (2026-04-24)
+# Critic Review — Cycle 3 review-plan-fix
 
-## Inventory and method
+## Inventory / coverage
 
-Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
+Reviewed the highest-signal repo surfaces and their cross-file interactions:
 
-Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
+- Auth / session / rate limiting:
+  - `apps/web/src/app/actions/auth.ts`
+  - `apps/web/src/lib/session.ts`
+  - `apps/web/src/lib/rate-limit.ts`
+  - `apps/web/src/lib/auth-rate-limit.ts`
+  - `apps/web/src/lib/request-origin.ts`
+  - `apps/web/src/lib/action-guards.ts`
+  - `apps/web/src/proxy.ts`
+- Public pages / SEO / OG:
+  - `apps/web/src/app/[locale]/(public)/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+  - `apps/web/src/app/api/og/route.tsx`
+  - `apps/web/src/lib/photo-title.ts`
+  - `apps/web/src/components/photo-viewer.tsx`
+- Upload / processing / sharing / admin DB:
+  - `apps/web/src/app/actions/images.ts`
+  - `apps/web/src/lib/process-image.ts`
+  - `apps/web/src/lib/image-queue.ts`
+  - `apps/web/src/lib/data.ts`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts`
+  - `apps/web/src/app/api/admin/db/download/route.ts`
+- Config / deploy / ops:
+  - `apps/web/docker-compose.yml`
+  - `apps/web/nginx/default.conf`
+  - `apps/web/next.config.ts`
+  - `README.md`
 
-- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
-- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
-- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
-- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
-- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
+Cross-checks run:
+- `npm run typecheck --workspace=apps/web` ✅
+- `npm test --workspace=apps/web` ✅ (57 files, 329 tests)
 
-Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
+## Findings
 
-## Findings summary
-
-| ID | Severity | Confidence | Status | Summary |
-|---|---|---|---|---|
-| AGG2C2-01 | HIGH | High | Confirmed | Deleting images does not invalidate cached direct-share or group-share pages |
-| AGG2C2-02 | MEDIUM | High | Confirmed | Login/password DB rate limits still check before increment across processes |
-| AGG2C2-03 | MEDIUM | High | Confirmed | Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out |
-| AGG2C2-04 | MEDIUM | Medium-High | Confirmed | `image_sizes` can change while unprocessed jobs are in flight |
-| AGG2C2-05 | MEDIUM | High | Confirmed | Quick-start docs run DB init before required environment setup |
-
-## Detailed findings
-
-### AGG2C2-01 — Deleting images does not invalidate cached direct-share or group-share pages
-
-- **Status:** Confirmed
-- **Severity:** HIGH
-- **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/images.ts:367-427`, `apps/web/src/app/actions/images.ts:461-555`, `apps/web/src/db/schema.ts:87-104`, `apps/web/src/lib/data.ts:552-630`, `apps/web/src/app/actions/sharing.ts:320-381`.
-- **Why this is a problem:** `deleteImage` and `deleteImages` fetch filenames/topic, delete the image rows, and revalidate `/`, `/p/{id}`, the topic, and admin dashboard. They never fetch `images.share_key` nor group keys joined through `shared_group_images`, even though dedicated share revoke/delete paths revalidate `/s/{key}` and `/g/{key}`.
-- **Failure scenario:** An admin shares a photo or group, the public share page is generated and cached, then the admin deletes the image. The DB row/group link is gone, but `/s/<key>` or `/g/<key>` can remain cached and keep exposing stale deleted-photo content until natural ISR expiry or unrelated broad invalidation.
-- **Suggested fix:** Before deletion, collect direct `share_key` values and affected `shared_groups.key` values for the target image IDs; after successful deletion, include `/s/{key}` and `/g/{key}` in targeted revalidation (or broad layout revalidation for large batches). Add a regression test/static guard.
-
-### AGG2C2-02 — Login/password DB rate limits still check before increment across processes
-
-- **Status:** Confirmed
+### 1) Photo detail SEO/title logic disagrees with the actual UI and suppresses curated titles
 - **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/auth.ts:108-141`, `apps/web/src/app/actions/auth.ts:320-337`, `apps/web/src/lib/rate-limit.ts:172-215`, safer reference pattern in `apps/web/src/app/actions/public.ts:63-94`.
-- **Why this is a problem:** Auth flows pre-check DB buckets via `checkRateLimit`, then increment. In a multi-process deployment, concurrent bad attempts can all observe the old count before any increment lands. Search/share/admin-user flows already use the safer increment-before-check pattern with `includesCurrentRequest` semantics and rollback.
-- **Failure scenario:** With max 5 attempts, two Node workers receive bad login attempts for the same account bucket while DB count is 4. Both read 4, both run Argon2, then DB count lands at 6, admitting extra expensive guesses across workers.
-- **Suggested fix:** Move DB `incrementRateLimit` before `checkRateLimit` for login IP/account and password-change buckets; check using `isRateLimitExceeded(count, max, true)`; roll back both in-memory and DB counters when an over-limit request is rejected before authentication work.
+- **Confidence:** HIGH
+- **Files / regions:**
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:52-56`
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:129-134`
+  - `apps/web/src/lib/photo-title.ts:17-35`
+  - `apps/web/src/components/photo-viewer.tsx:82-97`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:101-102`
+- **Code region:** photo page metadata + JSON-LD call `getPhotoDisplayTitle(..., { preferTags: true, formatTitleAsTags: true })`, while the hydrated viewer and shared-photo page use the default helper behavior.
+- **Failure scenario:** A photo with title `Sunrise at Hallasan` and tags `landscape, jeju` gets SSR metadata/OG title like `#landscape #jeju` (or `#Sunrise #at #Hallasan` when no tags exist), but after hydration the browser title and visible viewer use `Sunrise at Hallasan`. Crawlers/social previews/indexed titles diverge from what users actually see.
+- **Suggested fix:** Stop using the tag-preferred / tag-formatting options in `p/[id]/page.tsx` for metadata/JSON-LD. Reuse the same default title path as `PhotoViewer` and shared pages, or introduce one shared `getPhotoSeoTitle()` helper and use it everywhere.
 
-### AGG2C2-03 — Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out
-
-- **Status:** Confirmed
+### 2) `/api/og` still trusts attacker-controlled `label` and `site` query params
 - **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `apps/web/src/app/[locale]/admin/db-actions.ts:127-140`, `apps/web/src/app/[locale]/admin/db-actions.ts:396-408`, `apps/web/src/db/index.ts:6-25`, `apps/web/scripts/mysql-connection-options.js:11-23`, `apps/web/.env.local.example:7`.
-- **Why this is a problem:** Runtime DB and migration helpers honor `DB_SSL=false` for non-local DB hosts, but admin backup/restore force `--ssl-mode=REQUIRED` for every non-local host. Operators following the documented opt-out can have app queries and migrations work while backup/restore fail.
-- **Failure scenario:** A private VPC MySQL endpoint has TLS disabled and the deployment sets `DB_SSL=false`. Admin backup/restore invoke `mysqldump`/`mysql` with `--ssl-mode=REQUIRED`, causing the maintenance operation to fail despite documented configuration.
-- **Suggested fix:** Centralize CLI SSL arg derivation from the same localhost + `DB_SSL=false` policy and test it; use the helper for both dump and restore.
+- **Confidence:** HIGH
+- **Files / regions:**
+  - `apps/web/src/app/api/og/route.tsx:29-33`
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:57-67`
+- **Code region:** OG route reads `searchParams.get('label')` / `searchParams.get('site')` and renders them directly after truncation.
+- **Failure scenario:** Anyone can request `/api/og?topic=e2e-smoke&label=Urgent%20Invoice&site=PayPal` and get a convincing branded social card served from this domain. Topic slug validation does not prevent brand/text spoofing.
+- **Suggested fix:** Do not trust public `label` / `site` params. Either derive them server-side inside the route, sign the params, or ignore them and fall back to canonical topic/site values. At minimum, `site` should come from trusted config, not the request.
 
-### AGG2C2-04 — `image_sizes` can change while unprocessed jobs are in flight
+### 3) Photo page Open Graph `publishedTime` uses `Date.toString()` instead of ISO-8601
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Files / regions:**
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:88-96`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:20-24`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:75-77`
+- **Code region:** photo page sets `publishedTime: image.created_at?.toString()`; shared-photo page already uses `toIsoTimestamp(...)`.
+- **Failure scenario:** `<meta property="article:published_time">` gets a locale-specific string like `Fri Apr 24 2026 ...` instead of an ISO timestamp. Parsers/social consumers can reject or misread it; direct photo pages and shared photo pages behave inconsistently.
+- **Suggested fix:** Reuse the shared `toIsoTimestamp` logic for the photo page too.
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
-- **Confidence:** Medium-High
-- **Files/regions:** `apps/web/src/app/actions/settings.ts:72-103`, `apps/web/src/app/actions/images.ts:224-305`, `apps/web/src/lib/image-queue.ts:240-263`, `apps/web/src/lib/process-image.ts:390-444`, public image URL consumers in `apps/web/src/lib/image-url.ts:24-48` and public routes.
-- **Why this is a problem:** Settings blocks output-size changes only when a processed image exists. A new gallery can upload images (`processed=false`), start queue jobs with old sizes, then change `image_sizes` before any row becomes processed. The UI/public pages then request derivative filenames for the new size set while queued jobs may have produced only the old size set.
-- **Failure scenario:** Admin uploads photos, immediately changes output sizes while processing is still running, then public thumbnails/metadata URLs are generated for sizes that do not exist on disk, causing broken images/OG previews after rows flip to processed.
-- **Suggested fix:** Lock `image_sizes` once any image row exists, not only once a processed row exists, unless a full queue quiesce/regeneration workflow is introduced. Update admin copy/tests to reflect “uploaded” rather than “processed.”
+### 4) Cumulative upload throttling is keyed only by IP, so legitimate admins can block each other
+- **Severity:** LOW
+- **Confidence:** HIGH
+- **Files / regions:**
+  - `apps/web/src/app/actions/images.ts:145-191`
+- **Code region:** upload tracker uses `const uploadIp = getClientIp(requestHeaders)` and `uploadTracker.get(uploadIp)` for the hourly file/byte window.
+- **Failure scenario:** Two admins behind the same NAT/VPN/office proxy share one `UPLOAD_MAX_FILES_PER_WINDOW` and one cumulative byte budget. Admin A uploads a large batch; Admin B gets `uploadLimitReached` / `cumulativeUploadSizeExceeded` even though they are a separate authenticated user.
+- **Suggested fix:** Key the cumulative tracker by authenticated admin identity (for example `userId`, or `userId + ip`) instead of raw IP alone. If multi-instance correctness matters, move this limiter to persistent storage rather than process memory.
 
-### AGG2C2-05 — Quick-start docs run DB init before required environment setup
+## Representative implementation simulations
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `README.md:87-115`, `apps/web/README.md:7-14`, `apps/web/scripts/init-db.ts:14-30`, `apps/web/scripts/mysql-connection-options.js:3-22`, `apps/web/.env.local.example:1-29`.
-- **Why this is a problem:** Both root and app quick-start flows list `npm run init` before telling users to copy/edit `.env.local`, but init/migration require DB credentials and bootstrap admin/session configuration.
-- **Failure scenario:** A fresh evaluator follows the quick start literally; `npm run init` fails with missing DB env before the docs explain where to set it, creating a broken first-run path.
-- **Suggested fix:** Reorder quick-start instructions so MySQL/env/site-config setup comes before `npm run init`, and list the login/upload smoke check after init/dev.
+1. **Fix photo title inconsistency**
+   - Update only `p/[id]/page.tsx` to use the default helper path.
+   - Add a regression test asserting photo metadata title matches the same helper semantics used by `PhotoViewer` / shared pages.
+   - No missing code-context blockers.
 
-## Final missed-issue sweep
+2. **Fix OG spoof surface**
+   - Update `api/og/route.tsx` to stop trusting `label` / `site`.
+   - Adjust topic-page metadata URL generation if the route no longer needs those params.
+   - Current code gives enough context; no architecture discovery needed.
 
-Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.
+3. **Fix upload quota false positives**
+   - Update `uploadImages()` key construction to include the authenticated admin identity.
+   - Add a unit test around tracker-key behavior.
+   - If the intended product policy is “shared quota per source IP”, document that explicitly; otherwise the executor can proceed without guessing.
+
+## Final sweep
+
+No test/type errors surfaced in the current tree, but the four issues above remain actionable and are not protected by the current automated suite.

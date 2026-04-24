@@ -1,59 +1,122 @@
-# Security Reviewer Deep Review — Cycle 2 Recovery (2026-04-24)
+# Security Review Report
 
-## Inventory and method
+**Scope:** Whole-repo security review of the GalleryKit Next.js app, auth/session layer, server actions, API routes, upload/download pipeline, DB backup/restore flow, deployment scripts, nginx/Next security headers, and supporting libraries.
 
-Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
+**Risk Level:** MEDIUM
 
-Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
+## Inventory Reviewed
 
-- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
-- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
-- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
-- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
-- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
+Primary attack-surface files reviewed:
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/admin-users.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/settings.ts`
+- `apps/web/src/app/actions/seo.ts`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/app/api/health/route.ts`
+- `apps/web/src/app/api/live/route.ts`
+- `apps/web/src/app/api/og/route.tsx`
+- `apps/web/src/app/uploads/[...path]/route.ts`
+- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+- `apps/web/src/lib/request-origin.ts`
+- `apps/web/src/lib/action-guards.ts`
+- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/session.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/auth-rate-limit.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/serve-upload.ts`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/process-topic-image.ts`
+- `apps/web/src/lib/upload-paths.ts`
+- `apps/web/src/lib/sql-restore-scan.ts`
+- `apps/web/next.config.ts`
+- `apps/web/nginx/default.conf`
+- `apps/web/scripts/*.ts|js`
+- `scripts/deploy-remote.sh`
+- `apps/web/deploy.sh`
 
-Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
+## Scan Summary
 
-## Findings summary
+- Secrets scan of current tree: **no committed hardcoded credentials confirmed** in tracked source/examples. Ignored local secret files exist (`.env.deploy`, `apps/web/.env.local`) but were not dumped into this report.
+- Dependency audit: `npm audit --json` => **0 known vulnerabilities**.
+- Git-history targeted grep: no concrete active secret value surfaced from the targeted patterns run during this review.
 
-| ID | Severity | Confidence | Status | Summary |
-|---|---|---|---|---|
-| AGG2C2-01 | HIGH | High | Confirmed | Deleting images does not invalidate cached direct-share or group-share pages |
-| AGG2C2-02 | MEDIUM | High | Confirmed | Login/password DB rate limits still check before increment across processes |
-| AGG2C2-03 | MEDIUM | High | Confirmed | Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out |
+## Findings
 
-## Detailed findings
-
-### AGG2C2-01 — Deleting images does not invalidate cached direct-share or group-share pages
-
-- **Status:** Confirmed
-- **Severity:** HIGH
-- **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/images.ts:367-427`, `apps/web/src/app/actions/images.ts:461-555`, `apps/web/src/db/schema.ts:87-104`, `apps/web/src/lib/data.ts:552-630`, `apps/web/src/app/actions/sharing.ts:320-381`.
-- **Why this is a problem:** `deleteImage` and `deleteImages` fetch filenames/topic, delete the image rows, and revalidate `/`, `/p/{id}`, the topic, and admin dashboard. They never fetch `images.share_key` nor group keys joined through `shared_group_images`, even though dedicated share revoke/delete paths revalidate `/s/{key}` and `/g/{key}`.
-- **Failure scenario:** An admin shares a photo or group, the public share page is generated and cached, then the admin deletes the image. The DB row/group link is gone, but `/s/<key>` or `/g/<key>` can remain cached and keep exposing stale deleted-photo content until natural ISR expiry or unrelated broad invalidation.
-- **Suggested fix:** Before deletion, collect direct `share_key` values and affected `shared_groups.key` values for the target image IDs; after successful deletion, include `/s/{key}` and `/g/{key}` in targeted revalidation (or broad layout revalidation for large batches). Add a regression test/static guard.
-
-### AGG2C2-02 — Login/password DB rate limits still check before increment across processes
-
-- **Status:** Confirmed
+### 1) Production CSP allows inline script/style execution and weakens XSS containment
 - **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/auth.ts:108-141`, `apps/web/src/app/actions/auth.ts:320-337`, `apps/web/src/lib/rate-limit.ts:172-215`, safer reference pattern in `apps/web/src/app/actions/public.ts:63-94`.
-- **Why this is a problem:** Auth flows pre-check DB buckets via `checkRateLimit`, then increment. In a multi-process deployment, concurrent bad attempts can all observe the old count before any increment lands. Search/share/admin-user flows already use the safer increment-before-check pattern with `includesCurrentRequest` semantics and rollback.
-- **Failure scenario:** With max 5 attempts, two Node workers receive bad login attempts for the same account bucket while DB count is 4. Both read 4, both run Argon2, then DB count lands at 6, admitting extra expensive guesses across workers.
-- **Suggested fix:** Move DB `incrementRateLimit` before `checkRateLimit` for login IP/account and password-change buckets; check using `isRateLimitExceeded(count, max, true)`; roll back both in-memory and DB counters when an over-limit request is rejected before authentication work.
-
-### AGG2C2-03 — Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out
-
+- **Category:** OWASP A05:2021 – Security Misconfiguration
 - **Status:** Confirmed
-- **Severity:** MEDIUM
 - **Confidence:** High
-- **Files/regions:** `apps/web/src/app/[locale]/admin/db-actions.ts:127-140`, `apps/web/src/app/[locale]/admin/db-actions.ts:396-408`, `apps/web/src/db/index.ts:6-25`, `apps/web/scripts/mysql-connection-options.js:11-23`, `apps/web/.env.local.example:7`.
-- **Why this is a problem:** Runtime DB and migration helpers honor `DB_SSL=false` for non-local DB hosts, but admin backup/restore force `--ssl-mode=REQUIRED` for every non-local host. Operators following the documented opt-out can have app queries and migrations work while backup/restore fail.
-- **Failure scenario:** A private VPC MySQL endpoint has TLS disabled and the deployment sets `DB_SSL=false`. Admin backup/restore invoke `mysqldump`/`mysql` with `--ssl-mode=REQUIRED`, causing the maintenance operation to fail despite documented configuration.
-- **Suggested fix:** Centralize CLI SSL arg derivation from the same localhost + `DB_SSL=false` policy and test it; use the helper for both dump and restore.
+- **Location:** `apps/web/next.config.ts:63-84`
+- **Code region:** production CSP includes:
+  - `script-src 'unsafe-inline' 'self' https://www.googletagmanager.com`
+  - `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net`
+- **Exploit / failure scenario:** If any HTML/script injection bug lands elsewhere in the app or in third-party content/config, the CSP will not meaningfully block inline JavaScript execution because `'unsafe-inline'` permits it. This turns CSP from a strong last-line defense into a weak allowlist. The same applies to inline style injection and reliance on a third-party style CDN.
+- **Blast radius:** Any successful injection on a page viewed by an authenticated admin can execute in the admin origin, enabling session-riding actions and privileged data access.
+- **Suggested fix:** Move to nonce- or hash-based CSP for scripts/styles; remove `'unsafe-inline'`; self-host required CSS where possible.
 
-## Final missed-issue sweep
+### 2) `TRUST_PROXY=true` makes security decisions depend on forwarded headers
+- **Severity:** MEDIUM
+- **Category:** OWASP A05:2021 – Security Misconfiguration / A01:2021 – Broken Access Control (deployment-dependent)
+- **Status:** Risk
+- **Confidence:** Medium
+- **Location:**
+  - `apps/web/src/lib/request-origin.ts:32-45, 50-52, 66-89`
+  - `apps/web/src/lib/rate-limit.ts:61-79`
+- **Code region:** when `TRUST_PROXY === 'true'`, the app trusts `x-forwarded-host`, `x-forwarded-proto`, `x-forwarded-for`, and `x-real-ip` for:
+  - same-origin enforcement on admin mutations/downloads
+  - client-IP derivation for login/search/share/admin-user rate limiting
+- **Exploit / failure scenario:** If the Next.js app is ever exposed directly, or deployed behind a proxy/CDN that forwards attacker-supplied `X-Forwarded-*` headers without normalizing them, an attacker can spoof client IPs to evade throttling and can potentially satisfy origin checks with forged forwarded host/proto metadata. This is not exploitable in the documented nginx setup as written, but it is a sharp deployment footgun.
+- **Blast radius:** Weakens brute-force protection and origin-based admin mutation defenses across the entire privileged surface.
+- **Suggested fix:** Keep the app reachable only through a trusted reverse proxy; ignore `x-forwarded-host` unless the platform guarantees header sanitation; consider deriving expected origin from a fixed config value (for example `BASE_URL`) instead of forwarded host; document `TRUST_PROXY` as unsafe unless the proxy overwrites forwarded headers.
 
-Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.
+### 3) Public health endpoint discloses internal maintenance and DB-readiness state
+- **Severity:** LOW
+- **Category:** OWASP A01:2021 / A05:2021 (information exposure via operational endpoint)
+- **Status:** Confirmed
+- **Confidence:** High
+- **Location:** `apps/web/src/app/api/health/route.ts:7-29`
+- **Code region:** unauthenticated route returns:
+  - `503 { status: 'restore-maintenance' }`
+  - `200 { status: 'ok' }`
+  - `503 { status: 'degraded' }`
+- **Exploit / failure scenario:** External users can poll the endpoint to learn exactly when DB restores are running or when the database is unhealthy, which helps attackers time nuisance traffic, social engineering, or opportunistic probing during maintenance windows.
+- **Blast radius:** Low direct impact, but it exposes internal operational state to the public internet.
+- **Suggested fix:** Restrict `/api/health` to internal probes / allowlisted networks, or return a generic readiness result without distinguishing maintenance vs DB degradation on the public edge.
+
+## Areas Checked With No Confirmed Vulnerability
+
+- **Secrets in current tracked tree:** no committed API keys, tokens, private keys, or plaintext credentials confirmed.
+- **Dependency CVEs:** `npm audit` clean.
+- **Authentication:** Argon2id password hashing, HMAC-signed session tokens, hashed session IDs in DB, constant-time signature compare, session invalidation on password change/login all looked sound.
+- **Authorization:** admin server actions consistently enforce `isAdmin()` plus same-origin checks; admin API route uses `withAdminAuth` and the backup download route adds extra origin validation.
+- **SQL injection:** application queries are parameterized via Drizzle or parameterized mysql2 calls; reviewed raw SQL restore scan and backup/restore child-process argument handling.
+- **Command injection:** `spawn()` usage for `mysqldump`/`mysql` passes argv arrays rather than shell strings.
+- **Upload/download & path traversal:** upload-serving and backup-download paths enforce containment, filename/path validation, and symlink rejection.
+- **SSRF:** no server-side fetch of user-controlled external URLs was confirmed in runtime code.
+- **XSS in JSON-LD:** `safeJsonLd()` correctly escapes `<`, U+2028, and U+2029 before `dangerouslySetInnerHTML`.
+- **Public/private data separation:** `publicSelectFields` excludes GPS/original filenames/user filenames and has a compile-time guard.
+
+## OWASP Top 10 Coverage
+
+- **A01 Broken Access Control:** reviewed admin actions/routes, share-link access, upload/download path checks
+- **A02 Cryptographic Failures:** reviewed Argon2/session token/HMAC/cookie handling
+- **A03 Injection:** reviewed SQL/raw SQL, command spawning, XSS/JSON-LD, CSV formula escaping
+- **A04 Insecure Design:** reviewed share-link issuance/revocation, restore maintenance locking, queue restore coordination
+- **A05 Security Misconfiguration:** reviewed CSP, proxy trust, nginx headers, health endpoint exposure
+- **A06 Vulnerable Components:** `npm audit` clean
+- **A07 Identification/Auth Failures:** reviewed login, password change, session invalidation, rate limiting
+- **A08 Software/Data Integrity Failures:** reviewed restore scanning, backup/restore CLI invocation, deployment scripts
+- **A09 Logging/Monitoring Failures:** audit logging present on high-value auth/admin flows; no major gap confirmed
+- **A10 SSRF:** no confirmed SSRF sink found
+
+## Final Assessment
+
+The repo is in better-than-average shape for a self-hosted app: auth, path handling, SQL usage, backup/restore command invocation, and privacy separation are all notably hardened. I did **not** find a current-tree critical or high-severity confirmed vulnerability. The main remaining issues are defense-in-depth / deployment-hardening gaps: a permissive production CSP, reliance on forwarded headers when `TRUST_PROXY=true`, and a publicly chatty health endpoint.

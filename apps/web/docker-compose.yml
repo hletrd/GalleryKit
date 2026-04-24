@@ -4,6 +4,9 @@ services:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
+      args:
+        IMAGE_BASE_URL: ${IMAGE_BASE_URL:-}
+        UPLOAD_MAX_TOTAL_BYTES: ${UPLOAD_MAX_TOTAL_BYTES:-}
     container_name: gallerykit-web
     restart: always
     stop_grace_period: 30s

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**GalleryKit** is a high-performance, self-hosted photo gallery application built with Next.js 16. It features a masonry grid layout, automatic image optimization, EXIF extraction, and multi-user admin authentication.
+**GalleryKit** is a high-performance, self-hosted photo gallery application built with Next.js 16. It features a masonry grid layout, automatic image optimization, EXIF extraction, and multiple root-admin accounts (authentication only; no role/capability separation yet).
 
 **Demo:** https://gallery.atik.kr
 
@@ -153,6 +153,11 @@ git values must be treated as compromised and must not be reused.
 - `publicSelectFields` derived from `adminSelectFields` by omitting PII fields — separate object reference prevents accidental leakage
 - Compile-time guard (`_SensitiveKeysInPublic`) enforces no sensitive keys in `publicSelectFields`
 
+
+### Runtime topology
+- The shipped Docker Compose deployment is a **single web-instance / single-writer** topology. Restore maintenance flags, upload quota tracking, and image queue state are process-local; do not horizontally scale the web service unless those coordination states are moved to a shared store.
+- Admin accounts are multiple root admins. The current schema has no role/capability model, so any admin can upload, edit, export/restore DB backups, change settings, and manage other admins.
+
 ## Database Indexes
 
 The `images` table has composite indexes optimized for query patterns:
@@ -170,7 +175,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 2. Original saved to the private upload store under `data/uploads/original/`
 3. Enqueued to `PQueue` (default concurrency: 2; override with `QUEUE_CONCURRENCY`) for background processing
 4. Queue job **claims** image (conditional `WHERE processed = false`) before processing
-5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at 4 sizes each
+5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at configurable sizes each (default: 640, 1536, 2048, 4096; admin-configurable up to 8 sizes)
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
 7. Conditional UPDATE marks as processed; if image was deleted mid-processing, orphaned files are cleaned up
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
@@ -245,7 +250,7 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
 ## Deployment Checklist
 
 1. Configure `.env.local` with production MySQL credentials
-2. Generate a unique `SESSION_SECRET`: `openssl rand -hex 32`
+2. Generate a unique runtime `SESSION_SECRET`: `openssl rand -hex 32`
 3. Copy `site-config.example.json` to `site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing
 4. Run `docker compose -f apps/web/docker-compose.yml up -d --build`
 5. Initialize DB: container runs migrations automatically

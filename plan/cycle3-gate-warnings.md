@@ -5,6 +5,7 @@ Purpose: record non-blocking gate warnings observed during the Cycle 3 full-repo
 ## Deferred warnings
 
 ### GW3-01 — `next build` still emits the generic Edge-runtime static-generation warning
+- **Observed again:** 2026-04-24 during cycle 3/100 `npm run build`.
 - **Gate:** `npm run build --workspaces`
 - **Citation:** build output while compiling app routes; relevant source route is `apps/web/src/app/api/og/route.tsx:1-103`
 - **Severity / confidence:** WARNING / HIGH
@@ -12,6 +13,7 @@ Purpose: record non-blocking gate warnings observed during the Cycle 3 full-repo
 - **Exit criterion to reopen:** Re-open if the project decides to move `/api/og` off the Edge runtime, or if a Next.js-compatible way is adopted to retain the current behavior without the warning.
 
 ### GW3-02 — Playwright local web-server startup prints `NO_COLOR` / `FORCE_COLOR` environment warnings
+- **Observed status 2026-04-24:** not reproduced as a blocking warning; e2e passed after local MySQL recovery.
 - **Gate:** `npm run test:e2e --workspace=apps/web`
 - **Citation:** E2E output from the Playwright-managed local web server startup during Cycle 3 verification
 - **Severity / confidence:** WARNING / MEDIUM

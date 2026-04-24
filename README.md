@@ -34,7 +34,7 @@
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS
 - **Tagging & Search** -- full metadata search across titles, descriptions, cameras, and tags
 - **Sharing** -- per-photo and group share links with Base56 short keys
-- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multi-user auth (Argon2)
+- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multiple root-admin accounts (Argon2; no role separation yet)
 - **Internationalization** -- English and Korean (next-intl)
 - **Docker Support** -- standalone output with documented Linux host-network + reverse-proxy deployment
 
@@ -115,7 +115,7 @@ npm run deploy
 
 ### Environment Setup
 
-Do this before `npm run init --workspace=apps/web`; the init script needs DB credentials and admin/session secrets. Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap secret, and public URLs:
+Do this before `npm run init --workspace=apps/web`; the init script needs DB credentials plus `ADMIN_PASSWORD`. `SESSION_SECRET` is required for production runtime session signing, but it is not an init-time requirement. Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap secret, runtime session secret, and public URLs:
 
 ```env
 DB_HOST=127.0.0.1
@@ -137,9 +137,9 @@ If you ever seeded an environment from older checked-in examples, rotate both
 `SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical
 git values must be treated as compromised and must not be reused.
 
-If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development.
+If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. The shipped compose file forwards `IMAGE_BASE_URL` and `UPLOAD_MAX_TOTAL_BYTES` as Docker build args when they are present in the shell/Compose environment; export them before `docker compose ... --build` if you rely on non-default build-time values. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config now caps general requests at **2 GiB** and `/admin/db` restore requests at **250 MB** to match the app-side limits; keep those layers aligned if you customize either side.
-The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. Keep those protections if you adapt the compose file.
+The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. It is intended as a single web-instance/single-writer deployment; restore maintenance, upload quotas, and image queue state are process-local. Keep those protections if you adapt the compose file, and do not scale the web service horizontally without moving those coordination states into shared storage.
 
 **`TRUST_PROXY=true` is required for rate limiting to work correctly behind a reverse proxy** (nginx, Caddy, Cloudflare, load balancers, etc.). The server reads `X-Forwarded-For` / `X-Real-IP` only when this flag is set; without it, `getClientIp()` returns `"unknown"` and every request collapses into a single shared rate-limit bucket, which both (a) lets abusive clients exhaust the login / search / share budgets shared with legitimate users, and (b) lets spoofed `X-Forwarded-For` headers be ignored (since they are never trusted at all). The same trusted-proxy setting also affects same-origin validation for mutating admin actions and DB backup downloads, so the proxy must forward the correct `Host` and `X-Forwarded-Proto` headers. Only enable when the incoming headers are actually set by a trusted proxy hop.
 For bootstrap auth, prefer a generated secret or a precomputed Argon2 hash; do not deploy with placeholder passwords such as `password`.

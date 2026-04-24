@@ -1,59 +1,117 @@
-# Code Reviewer Deep Review — Cycle 2 Recovery (2026-04-24)
+# Code Reviewer Report
 
-## Inventory and method
+## Inventory / Files Examined
 
-Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
+Reviewed the full non-generated repo surface relevant to runtime behavior and quality:
 
-Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
+- Root rules/docs/scripts: 5
+  - `AGENTS.md`, `CLAUDE.md`, `README.md`, `package.json`, `scripts/deploy-remote.sh`
+- App configs/public/site files: 19
+- App source (non-test): 152
+- Unit tests: 57
+- E2E specs/helpers: 6
+- Migration/schema files: 7
+- Scripts: 14
+- Locale message files: 2
 
-- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
-- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
-- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
-- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
-- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
+Total review-relevant text/code files examined via inventory + whole-tree static sweep: **262**.
 
-Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
+Whole-repo checks run:
 
-## Findings summary
+- `npm run typecheck --workspace=apps/web` ✅
+- `npm run lint --workspace=apps/web` ✅
+- `npm run lint:api-auth --workspace=apps/web` ✅
+- `npm run lint:action-origin --workspace=apps/web` ✅
+- `npm test --workspace=apps/web` ✅ (57 files / 329 tests passed)
+- `npm run test:e2e --workspace=apps/web` ⚠️ blocked by missing MySQL on `127.0.0.1:3306`
+- Repo-wide grep sweeps for `console.log`, empty `catch`, likely hardcoded secrets, risky file/SQL/process patterns ✅
 
-| ID | Severity | Confidence | Status | Summary |
-|---|---|---|---|---|
-| AGG2C2-01 | HIGH | High | Confirmed | Deleting images does not invalidate cached direct-share or group-share pages |
-| AGG2C2-02 | MEDIUM | High | Confirmed | Login/password DB rate limits still check before increment across processes |
-| AGG2C2-04 | MEDIUM | Medium-High | Confirmed | `image_sizes` can change while unprocessed jobs are in flight |
+Notes:
 
-## Detailed findings
+- MCP/LSP code-intel transport was unavailable during this run, so type safety was verified with repo-native `tsc`/eslint/test commands instead.
+- I directly read the high-risk cross-file paths (`auth`, `request-origin`, uploads, image queue/processing, DB backup/restore, public routes, admin actions/components, data layer), then did a whole-tree sweep over the remaining relevant files/tests/config.
 
-### AGG2C2-01 — Deleting images does not invalidate cached direct-share or group-share pages
+## Findings by Severity
 
-- **Status:** Confirmed
-- **Severity:** HIGH
+### MEDIUM
+
+#### 1) Same-origin guard trusts the first forwarded hop, not the trusted one
+- **File / region:** `apps/web/src/lib/request-origin.ts:9-10,32-45,79-86`
+- **Status:** **Likely**
+- **Confidence:** Medium
+- **Why this is an issue:** `normalizeHeaderValue()` always takes the first comma-separated value. When `TRUST_PROXY=true`, both `x-forwarded-proto` and `x-forwarded-host` flow through that helper. In chained / append-style proxy setups, the left-most value can be attacker-controlled while the trusted proxy appends the real hop later.
+- **Concrete failure scenario:** A deployment behind an append-style reverse proxy receives `X-Forwarded-Host: evil.example, gallery.atik.kr` and matching `Origin: https://evil.example`. `hasTrustedSameOrigin()` can derive `https://evil.example` as the expected origin and incorrectly accept the request for admin actions / backup download.
+- **Suggested fix:** Parse trusted proxy headers the same way `getClientIp()` treats `x-forwarded-for`: prefer the trusted/right-most hop (or reject multi-valued `x-forwarded-host`/`x-forwarded-proto` outright unless the deployment guarantees overwrite semantics). Add regression tests for comma-separated forwarded chains.
+
+#### 2) CSV export still triple-buffers large datasets in memory
+- **File / region:** `apps/web/src/app/[locale]/admin/db-actions.ts:51-93`
+- **Status:** **Confirmed**
 - **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/images.ts:367-427`, `apps/web/src/app/actions/images.ts:461-555`, `apps/web/src/db/schema.ts:87-104`, `apps/web/src/lib/data.ts:552-630`, `apps/web/src/app/actions/sharing.ts:320-381`.
-- **Why this is a problem:** `deleteImage` and `deleteImages` fetch filenames/topic, delete the image rows, and revalidate `/`, `/p/{id}`, the topic, and admin dashboard. They never fetch `images.share_key` nor group keys joined through `shared_group_images`, even though dedicated share revoke/delete paths revalidate `/s/{key}` and `/g/{key}`.
-- **Failure scenario:** An admin shares a photo or group, the public share page is generated and cached, then the admin deletes the image. The DB row/group link is gone, but `/s/<key>` or `/g/<key>` can remain cached and keep exposing stale deleted-photo content until natural ISR expiry or unrelated broad invalidation.
-- **Suggested fix:** Before deletion, collect direct `share_key` values and affected `shared_groups.key` values for the target image IDs; after successful deletion, include `/s/{key}` and `/g/{key}` in targeted revalidation (or broad layout revalidation for large batches). Add a regression test/static guard.
+- **Why this is an issue:** The implementation loads up to 50k rows into `results`, copies them into `csvLines`, then materializes a second full copy with `csvLines.join("\n")`. The comment says it avoids holding both the DB result and full CSV in memory simultaneously, but the code still creates multiple large live representations.
+- **Concrete failure scenario:** On a large gallery with long titles/tag lists, `exportImagesCsv()` can spike heap usage badly enough to stall the process or OOM the admin request, especially under concurrent exports.
+- **Suggested fix:** Stream rows directly to the response/download path, or paginate/chunk rows and append incrementally so only one bounded chunk is live at a time. Avoid `results` + `csvLines` + `csvContent` existing together.
 
-### AGG2C2-02 — Login/password DB rate limits still check before increment across processes
+#### 3) SQL restore scanner can be bypassed across large chunk/comment boundaries
+- **File / region:**
+  - `apps/web/src/lib/sql-restore-scan.ts:54-95`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:362-384`
+- **Status:** **Risk**
+- **Confidence:** Medium
+- **Why this is an issue:** The scanner only carries a fixed `64 * 1024` tail between 1 MB restore chunks. That catches short boundary splits, but not statements whose dangerous tokens are separated by more than 64 KB of comment/literal content that gets stripped before matching.
+- **Concrete failure scenario:** A crafted dump splits a banned statement (for example `CREATE ... TRIGGER` / `CREATE ... PROCEDURE`) across chunk boundaries with >64 KB of removable comment/literal padding between tokens. The fixed tail drops the first token, the regex never sees the full statement, and `mysql` executes it during restore.
+- **Suggested fix:** Replace the fixed-window regex scan with a streaming SQL lexer/tokenizer that preserves parse state across chunks after comment/literal stripping, or at minimum keep state keyed to partial dangerous-token prefixes instead of raw byte windows. Add regression coverage with a >64 KB split.
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
+### LOW
+
+#### 4) Regression tests miss the two boundary cases above
+- **File / region:**
+  - `apps/web/src/__tests__/request-origin.test.ts:24-114`
+  - `apps/web/src/__tests__/sql-restore-scan.test.ts:66-75`
+- **Status:** **Confirmed**
 - **Confidence:** High
-- **Files/regions:** `apps/web/src/app/actions/auth.ts:108-141`, `apps/web/src/app/actions/auth.ts:320-337`, `apps/web/src/lib/rate-limit.ts:172-215`, safer reference pattern in `apps/web/src/app/actions/public.ts:63-94`.
-- **Why this is a problem:** Auth flows pre-check DB buckets via `checkRateLimit`, then increment. In a multi-process deployment, concurrent bad attempts can all observe the old count before any increment lands. Search/share/admin-user flows already use the safer increment-before-check pattern with `includesCurrentRequest` semantics and rollback.
-- **Failure scenario:** With max 5 attempts, two Node workers receive bad login attempts for the same account bucket while DB count is 4. Both read 4, both run Argon2, then DB count lands at 6, admitting extra expensive guesses across workers.
-- **Suggested fix:** Move DB `incrementRateLimit` before `checkRateLimit` for login IP/account and password-change buckets; check using `isRateLimitExceeded(count, max, true)`; roll back both in-memory and DB counters when an over-limit request is rejected before authentication work.
+- **Why this is an issue:** Current tests cover single-hop forwarded headers and a 2 KB SQL chunk split, but not comma-separated forwarded chains or >64 KB scanner boundaries.
+- **Concrete failure scenario:** Refactors preserve the happy-path tests while reintroducing (or failing to catch) proxy-chain provenance bugs or long-gap SQL-scan bypasses.
+- **Suggested fix:** Add explicit tests for multi-value `x-forwarded-host` / `x-forwarded-proto`, and for a split dangerous statement with a gap larger than `SQL_SCAN_TAIL_BYTES`.
 
-### AGG2C2-04 — `image_sizes` can change while unprocessed jobs are in flight
+## Final Sweep / Commonly Missed Issues Check
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
-- **Confidence:** Medium-High
-- **Files/regions:** `apps/web/src/app/actions/settings.ts:72-103`, `apps/web/src/app/actions/images.ts:224-305`, `apps/web/src/lib/image-queue.ts:240-263`, `apps/web/src/lib/process-image.ts:390-444`, public image URL consumers in `apps/web/src/lib/image-url.ts:24-48` and public routes.
-- **Why this is a problem:** Settings blocks output-size changes only when a processed image exists. A new gallery can upload images (`processed=false`), start queue jobs with old sizes, then change `image_sizes` before any row becomes processed. The UI/public pages then request derivative filenames for the new size set while queued jobs may have produced only the old size set.
-- **Failure scenario:** Admin uploads photos, immediately changes output sizes while processing is still running, then public thumbnails/metadata URLs are generated for sizes that do not exist on disk, causing broken images/OG previews after rows flip to processed.
-- **Suggested fix:** Lock `image_sizes` once any image row exists, not only once a processed row exists, unless a full queue quiesce/regeneration workflow is introduced. Update admin copy/tests to reflect “uploaded” rather than “processed.”
+Checked explicitly for:
 
-## Final missed-issue sweep
+- hardcoded secrets / credentials in source
+- missing admin auth wrappers on admin API routes
+- missing same-origin checks on mutating server actions
+- path traversal / symlink issues on upload serving and backup download
+- raw SQL / shell-spawn surfaces
+- empty catches / swallowed failures
+- privacy leaks from public image selectors
+- queue / restore / upload cross-file race conditions
+- stale cache / revalidation gaps on admin mutations
 
-Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.
+No CRITICAL or HIGH issues found in the current repo snapshot.
+
+## Verification Evidence
+
+- Typecheck: pass
+- ESLint: pass
+- API-auth lint: pass
+- Action-origin lint: pass
+- Unit tests: pass (`57` files, `329` tests)
+- E2E: not runnable in this environment because Playwright webServer init failed on missing MySQL (`ECONNREFUSED 127.0.0.1:3306`)
+
+## Final Skipped-File Check
+
+Intentionally skipped as non-review-relevant/generated/runtime artifacts:
+
+- `node_modules/**`
+- `.next/**`
+- `playwright-report/**`
+- `test-results/**`
+- `.git/**`
+- `.omx/**`, `.omc/**`, `.context/**`, `plan/**` runtime/history artifacts
+- binary fixtures/images (for example `apps/web/e2e/fixtures/*.jpg`, screenshots)
+
+No other review-relevant source/config/test files were intentionally skipped.
+
+## Recommendation
+
+**COMMENT** — repo is generally in good shape and passes its configured gates, but the three medium findings above are worth addressing before treating the current state as fully hardened.

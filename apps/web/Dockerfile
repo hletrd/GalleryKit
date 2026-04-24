@@ -32,6 +32,10 @@ COPY apps/web/package.json ./apps/web/
 RUN npm ci --omit=dev --workspace=apps/web
 
 FROM build-base AS builder
+ARG IMAGE_BASE_URL
+ARG UPLOAD_MAX_TOTAL_BYTES
+ENV IMAGE_BASE_URL=${IMAGE_BASE_URL}
+ENV UPLOAD_MAX_TOTAL_BYTES=${UPLOAD_MAX_TOTAL_BYTES}
 WORKDIR /app
 # Full node_modules for build step (includes devDependencies needed by next build)
 COPY --from=deps /app/node_modules ./node_modules
