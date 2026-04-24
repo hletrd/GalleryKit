@@ -1,48 +1,48 @@
-# Cycle 3 Dependency / Runtime / API / Package Review
+# Dependency / Release Review — PROMPT 1, cycle 4/100
 
-## Scope inspected
+Repository scope reviewed: package/config/deploy files, dependency versions, scripts, Docker/runtime assumptions, package-lock health, security posture, external library usage, and dependency-driven performance hazards.
 
-Reviewed the dependency and runtime contract surfaces in this repo:
-
-- `package.json`, `package-lock.json`
-- `apps/web/package.json`
-- `apps/web/Dockerfile`, `apps/web/docker-compose.yml`
-- `apps/web/next.config.ts`, `apps/web/playwright.config.ts`, `apps/web/vitest.config.ts`, `apps/web/tailwind.config.ts`, `apps/web/drizzle.config.ts`, `apps/web/eslint.config.mjs`
-- `apps/web/src/db/index.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/mysql-cli-ssl.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/queue-shutdown.ts`
-- environment/docs cross-checks in `README.md`, `apps/web/README.md`, `apps/web/.env.local.example`, `apps/web/.dockerignore`
-
-## Verification
-
-- `npm audit --json` → **0 vulnerabilities**
-- `npm run typecheck --workspace=apps/web` → **passed**
+## Executive summary
+- Security posture is currently clean: `npm audit --omit=dev` reported **0 vulnerabilities**.
+- I did **not** flag the Docker MariaDB client choice as a hard mismatch; MariaDB documents that the legacy `mysql` name remains available as a Unix symlink to `mariadb`.
+- The main actionable risks are a **TypeScript 6 / typescript-eslint compatibility gap**, a **prerelease migration tool release risk**, and a **CPU/threadpool oversubscription hazard** in the native image/auth hot path.
 
 ## Findings
 
-### DE-01 — Docker build/runtime env drift breaks build-time Next config
-- **Status:** confirmed
-- **Severity:** HIGH
-- **Confidence:** HIGH
-- **File / region:** `apps/web/Dockerfile:21-44`, `apps/web/docker-compose.yml:13-17`, `apps/web/.dockerignore:1-8`, `apps/web/next.config.ts:1-96`
-- **What’s wrong:** `next.config.ts` reads `process.env.IMAGE_BASE_URL` and `process.env.UPLOAD_MAX_TOTAL_BYTES` at build time, but the Docker path never passes those values into the build. `.dockerignore` excludes `.env*`, and `docker-compose.yml` only injects `.env.local` into the **runtime** container via `env_file`, not the build stage. Docker/Next docs both treat build args / build-phase config as separate from runtime container env.
-- **Failure scenario:** An operator follows the docs, sets `IMAGE_BASE_URL` or a custom upload cap in `apps/web/.env.local`, then runs `docker compose ... --build`. The resulting image is built without those values, so `remotePatterns` / CSP allowances remain at defaults and any custom request-body limit diverges between the framework and the app. CDN-hosted optimized images can fail, and custom upload-size deployments can become inconsistent or reject traffic unexpectedly.
-- **Suggested fix:** Thread the build-time values through `docker-compose.yml` `build.args` and matching `ARG` / build-stage `ENV` declarations in `apps/web/Dockerfile`, or add a prebuild gate that fails when required build-time settings are only present in runtime env.
-- **Risk:** the image is reproducible only for the default env set; any non-default deployment config can silently bake the wrong Next runtime contract.
+### 1) TypeScript 6 is outside the declared typescript-eslint support window
+- **Severity:** medium
+- **Confidence:** high
+- **Classification:** confirmed
+- **File / region:** `apps/web/package.json:63-70`; `package-lock.json:5794-5810`; `package-lock.json:3368-3609`
+- **What I found:** The app pins `typescript` to `^6`, while `eslint-config-next` pulls in `typescript-eslint` 8.50.0 and the locked `@typescript-eslint/*` packages declare a peer range of `>=4.8.4 <6.0.0`.
+- **Concrete failure scenario:** a clean install or a future lockfile refresh can leave the lint/type tooling in an unsupported state. That can surface as peer-dependency warnings today and as lint/parser breakage or incompatible rule behavior after the next TypeScript 6.x minor or a typescript-eslint update.
+- **Suggested fix:** either pin TypeScript below 6 until the lint stack explicitly supports 6, or upgrade the `typescript-eslint` / ESLint stack to a release line that declares TS 6 support before allowing the TypeScript major to float.
+- **Primary source:** https://github.com/typescript-eslint/typescript-eslint/blob/main/packages/eslint-plugin/package.json
 
-### DE-02 — mysql2 session init race leaves `GROUP_CONCAT` at default on Drizzle query path
-- **Status:** confirmed
-- **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **File / region:** `apps/web/src/db/index.ts:28-67`, `apps/web/src/lib/data.ts:398-417`, `apps/web/src/app/[locale]/admin/db-actions.ts:33-99`
-- **What’s wrong:** The pool-connection hook issues `SET group_concat_max_len = 65535` asynchronously, but `mysql2/promise`’s `query`/`execute` paths call the core pool’s `getConnection()` / `query()` flow and do **not** wait for that per-connection promise. The `getConnection` wrapper only protects explicit `pool.getConnection()` callers; the app’s main Drizzle paths use `db.select(...)`, which goes through pool queries directly. That means a fresh connection can start a `GROUP_CONCAT` query before the session variable has finished applying.
-- **Failure scenario:** Under startup churn or when the pool creates a new connection, one of the `GROUP_CONCAT` queries in `apps/web/src/lib/data.ts` or the CSV export in `apps/web/src/app/[locale]/admin/db-actions.ts` can still run at MySQL’s default 1024-byte limit and silently truncate long tag lists.
-- **Suggested fix:** Do not rely on an async `connection` event for session state. Either gate all query entry points on an awaited per-connection bootstrap before the first statement runs, or remove the session dependence and replace the affected tag-aggregation queries with a strategy that does not depend on `group_concat_max_len`.
-- **Risk:** truncation is silent, so the symptom is data loss in exports / tag displays rather than a hard error.
+### 2) `drizzle-kit` is pinned to a prerelease line with documented breakage risk
+- **Severity:** low/medium
+- **Confidence:** medium
+- **Classification:** risk
+- **File / region:** `apps/web/package.json:56-63`; `package-lock.json:4941-4955`
+- **What I found:** `drizzle-kit` is locked to `1.0.0-beta.9-e89174b`. Drizzle’s own beta release notes explicitly warn that the v1 beta line can introduce breaking changes.
+- **Concrete failure scenario:** schema generation or migration commands can change behavior between lockfile refreshes or after a registry re-resolve, which can turn a routine deploy or database bootstrap into a migration drift incident.
+- **Suggested fix:** move to a stable `drizzle-kit` release if one matches the schema workflow, or keep this prerelease line tightly pinned and covered by migration-focused CI so lockfile regeneration does not happen casually.
+- **Primary source:** https://orm.drizzle.team/docs/latest-releases/drizzle-orm-v1beta2
 
-## Sources used for the dependency/runtime claims
+### 3) Native image processing and password hashing can oversubscribe CPU / libuv threads in containers
+- **Severity:** medium
+- **Confidence:** medium
+- **Classification:** likely risk
+- **File / region:** `apps/web/scripts/entrypoint.sh:24-31`; `apps/web/src/lib/process-image.ts:16-23`; `apps/web/src/app/actions/auth.ts:57-66, 157-160`
+- **What I found:** the entrypoint sets `UV_THREADPOOL_SIZE` from `nproc`, and `process-image.ts` sets sharp concurrency from `os.cpus().length - 1`. Node’s docs say `os.cpus().length` should not be used to estimate application parallelism, and sharp’s docs note that its concurrency maps to libvips thread creation and is capped by the libuv threadpool.
+- **Concrete failure scenario:** on a container with a tight CPU quota but many host cores, the process can start far more native workers than the container can actually run. A batch photo import or a burst of login checks can then saturate the event loop, inflate queue time, and degrade unrelated requests.
+- **Suggested fix:** use `os.availableParallelism()` or a small fixed cap for both sharp and `UV_THREADPOOL_SIZE`, and keep the defaults conservative rather than deriving them from host CPU count.
+- **Primary sources:** https://nodejs.org/download/release/v20.9.0/docs/api/os.html ; https://www.npmjs.com/package/sharp/v/0.9.3?activeTab=readme
 
-- Docker Compose build args: https://docs.docker.com/reference/compose-file/build/
-- Dockerfile ARG scoping: https://docs.docker.com/reference/dockerfile/
-- Next.js config phase/build behavior: https://nextjs.org/docs/app/api-reference/config/next-config-js
-- mysql2 promise pool / core pool behavior:
-  - https://raw.githubusercontent.com/sidorares/node-mysql2/master/lib/promise/pool.js
-  - https://raw.githubusercontent.com/sidorares/node-mysql2/master/lib/base/pool.js
+## Checks that passed
+- `npm audit --omit=dev` reported **0 vulnerabilities**.
+- The Docker runtime client choice looks internally consistent: MariaDB docs state the `mysql` command remains available as a Unix symlink on Unix-like systems.
+
+## Notes
+- I did not find a package-lock integrity failure that blocked installation.
+- I did not flag `apps/web/Dockerfile` / `apps/web/docker-compose.yml` as a runtime package mismatch beyond the CPU/threadpool concern above.

@@ -1,52 +1,77 @@
-# Verifier Review — Cycle 3 (Prompt 1)
+# Verifier Review — Cycle 4 (Prompt 1)
 
 ## Scope and method
 
-This pass checked the current tracked repo state against the documented behavior in `README.md`, `apps/web/README.md`, `CLAUDE.md`, and the active plan/context artifacts. I inspected the behavior surfaces most relevant to uploads, config changes, public photo rendering, auth, and backups:
+I checked the current repository state against the documented behavior in `README.md`, `apps/web/README.md`, `CLAUDE.md`, and the active config/test surfaces that matter for auth, proxying, uploads, backups, and build invariants.
+
+Inspected surfaces included:
 
 - Docs/config: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/.env.local.example`
-- Upload/config/public code: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `apps/web/src/components/upload-dropzone.tsx`
-- Tests: `apps/web/src/__tests__/settings-image-sizes-lock.test.ts`, `apps/web/src/__tests__/images-actions.test.ts`, the rest of the Vitest surface under `apps/web/src/__tests__/`
+- Auth/proxy/backups: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/app/api/admin/db/download/route.ts`
+- Security gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`
+- Tests: `apps/web/src/__tests__/request-origin.test.ts`, `apps/web/src/__tests__/backup-download-route.test.ts`, `apps/web/src/__tests__/rate-limit.test.ts`, `apps/web/src/__tests__/auth-rate-limit.test.ts`, `apps/web/src/__tests__/check-api-auth.test.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`
 
 Verification commands run on the live repo state:
 
+- `npm test --workspace=apps/web` → 57 files, 333 tests passing
 - `npm run lint --workspace=apps/web` → clean
-- `npm test --workspace=apps/web` → 57 files / 329 tests passing
-- `npm run build --workspace=apps/web` → succeeds (one expected Next edge-runtime warning only)
+- `npm run typecheck --workspace=apps/web` → clean
+- `npm run build --workspace=apps/web` → succeeds (one expected Next.js edge-runtime warning only)
+- `npm run lint:api-auth --workspace=apps/web` → clean
+- `npm run lint:action-origin --workspace=apps/web` → clean
 
 ## Findings summary
 
 | ID | Severity | Status | Confidence | Summary |
 |---|---|---|---|---|
-| C3V-01 | MEDIUM | Likely | Medium-High | Gallery settings are not snapshotted across in-flight uploads, so `image_sizes` and GPS-stripping can change mid-batch and produce mixed derivative sets / privacy leaks |
+| C4V-01 | MEDIUM | Confirmed | High | Login session cookies parse `X-Forwarded-Proto` differently than the rest of the proxy-aware code, which can mis-set the `Secure` flag in multi-hop proxy setups |
+| C4V-02 | LOW | Confirmed | High | The README overstates how much `TRUST_PROXY` is required for same-origin validation, which is a docs/config mismatch rather than a runtime bug |
+| C4V-03 | LOW/MEDIUM | Risk | Medium | The same-origin action scanner only walks `.ts` files, so a future `.tsx`/`.js` mutating action could evade the gate |
 
-## Detailed finding
+## Detailed findings
 
-### C3V-01 — Gallery settings are not snapshotted across in-flight uploads
+### C4V-01 — Login cookie `Secure` flag uses the wrong forwarded-proto hop
 
 - **Severity:** MEDIUM
-- **Status:** Likely
-- **Confidence:** Medium-High
-- **Risk:** Mixed derivative sets can break public thumbnail/OG URLs; toggling privacy settings mid-batch can leave some photos with GPS data unexpectedly retained.
+- **Status:** Confirmed
+- **Confidence:** High
 - **Files / code regions:**
-  - `apps/web/src/app/actions/settings.ts:72-103`
-  - `apps/web/src/app/actions/images.ts:228-239, 321-329`
-  - `apps/web/src/lib/image-queue.ts:240-263`
-  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:65-67, 143-144`
-  - `apps/web/src/components/upload-dropzone.tsx:137-184`
-  - regression coverage gap: `apps/web/src/__tests__/settings-image-sizes-lock.test.ts:16-22`
-- **Why this is a problem:** The settings write path only blocks `image_sizes` changes once an `images` row already exists. But uploads are processed in separate server-action calls per file, and the queue worker reads the active gallery config when each job runs. That means a settings change can land after an upload batch has started but before the first row exists or before later jobs run.
-- **Concrete failure scenario:** An admin starts a multi-file upload, then changes `image_sizes` or toggles `strip_gps_on_upload` while the batch is still in flight. Some files are processed with the old config and later files with the new config. Public pages then request derivative filenames based on the current config, which can 404 for older images, and GPS metadata can remain on some uploads even though the privacy setting was expected to apply to the whole batch.
-- **Suggested fix:** Capture a single gallery-config snapshot at upload start and pass that snapshot through the whole upload/queue pipeline, or block config changes with a DB-level/upload-claim guard until in-flight uploads drain. At minimum, the current `image_sizes` gate should key off in-flight upload activity, not just “any row exists.” Add a concurrency regression test that overlaps a config change with an active batch upload.
-- **Evidence:**
-  - `settings.ts` only checks `images LIMIT 1` and does not coordinate with active upload claims or queued jobs.
-  - `upload-dropzone.tsx` sends each file as its own server-action request, widening the race window.
-  - `image-queue.ts` and `images.ts` read `getGalleryConfig()` during processing, so the effective config is not frozen per upload batch.
-  - `page.tsx` builds public derivative URLs from the current config, so mixed old/new derivative sets can surface as broken images or OG thumbnails.
-  - `settings-image-sizes-lock.test.ts` only asserts the static presence of the `limit(1)` guard; it does not exercise concurrent upload/config-change behavior.
+  - `apps/web/src/app/actions/auth.ts:206-214`
+  - contrast: `apps/web/src/lib/request-origin.ts:19-24, 45-64`
+- **Why this is a problem:** The login action determines `secure` via `requestHeaders.get('x-forwarded-proto')?.split(',')[0]`, which takes the *first* comma-separated value. The proxy-aware origin helper elsewhere in the repo explicitly treats the trusted hop as the *right-most* value when `TRUST_PROXY=true`. Those two policies disagree.
+- **Concrete failure scenario:** In a chained proxy deployment, the forwarded proto chain can contain multiple values. If the first value is `http` and the trusted outer proxy’s value is `https`, the login action will set `secure=false` even though the browser is on HTTPS. That weakens session cookies and can also cause inconsistent behavior across proxy layers.
+- **Suggested fix:** Reuse the same trusted-proxy header normalization logic that `request-origin.ts` uses, or centralize proto parsing in a shared helper that explicitly honors `TRUST_PROXY` and the right-most trusted hop.
 
-## Final skipped-file sweep
+### C4V-02 — README overstates the `TRUST_PROXY` dependency for same-origin checks
 
-I did not deeply inspect generated or dependency artifacts (`.next/`, `node_modules/`, `test-results/`, binary screenshots/media blobs) because they are build/runtime outputs, not source-of-truth behavior. I also did not re-audit every unrelated component or historical `.context/reviews/*` artifact; the review focused on the source/config/test paths that directly implement the documented upload/config/public-render behavior.
+- **Severity:** LOW
+- **Status:** Confirmed
+- **Confidence:** High
+- **Files / code regions:**
+  - `README.md:142-145`
+  - `apps/web/README.md:39-41`
+  - `apps/web/src/lib/request-origin.ts:45-64`
+- **Why this is a problem:** The docs say `TRUST_PROXY=true` is required for same-origin validation and that the proxy must forward Host / X-Forwarded-Proto. The implementation actually falls back to plain `Host` + `Origin`/`Referer` matching when `TRUST_PROXY` is unset, and the shipped nginx config does not set `X-Forwarded-Host` at all. So the documentation is broader than the code.
+- **Concrete failure scenario:** An operator reading the README may assume same-origin checks are proxy-dependent in all deployments, and may over-configure or misdiagnose a working local / direct deployment. The inverse risk is also possible: they may think the nginx config must add headers it does not actually need.
+- **Suggested fix:** Narrow the docs to say `TRUST_PROXY` is required for correct client-IP rate limiting, while same-origin checks only consume forwarded headers when a trusted proxy provides them. If you want to keep the stronger claim, add a test that proves it against the actual nginx header behavior.
 
-No other confirmed correctness issues were found in the inspected surfaces.
+### C4V-03 — Same-origin action scanner only covers `.ts` files
+
+- **Severity:** LOW/MEDIUM
+- **Status:** Risk
+- **Confidence:** Medium
+- **Files / code regions:**
+  - `apps/web/scripts/check-action-origin.ts:49-68`
+- **Why this is a problem:** The security scanner only discovers `.ts` descendants under `app/actions/`. That is fine for the current codebase, but Next.js server actions can also be authored in `.tsx` or `.js` variants, and the repo already treats route files more flexibly in the analogous API-auth scanner.
+- **Concrete failure scenario:** A future mutating action is added as `actions/foo.tsx` or `actions/foo.js`. It would compile and ship, but this gate would never inspect it for `requireSameOriginAdmin()`, creating a bypass in the lint coverage.
+- **Suggested fix:** Either codify `.ts`-only as a hard repository rule in docs/tests, or broaden the scanner to the action-file extensions the repo intends to allow.
+
+## Final missed-issues sweep
+
+I did a second pass over the security-sensitive surfaces after the main inspection:
+
+- `npm run lint:api-auth` passed, so the admin API route auth wrapper gate is currently enforced.
+- `npm run lint:action-origin` passed, so the current mutating action set is covered by the same-origin gate.
+- `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` all passed, so there is no current build/test breakage in the inspected state.
+
+I did not find additional confirmed correctness issues beyond the three items above.
