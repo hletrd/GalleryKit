@@ -1,77 +1,59 @@
-# Code Review Report — code-reviewer lane
+# Code Reviewer Deep Review — Cycle 2 Recovery (2026-04-24)
 
-## Scope and inventory
-- Repository root reviewed from `/Users/hletrd/flash-shared/gallery`.
-- Inventory pass found **272 review-relevant text/code/config files**.
-- Deep review focused on all executable/runtime surfaces under:
-  - `apps/web/src/app/**`
-  - `apps/web/src/components/**`
-  - `apps/web/src/lib/**`
-  - `apps/web/src/db/**`
-  - `apps/web/src/i18n/**`
-  - `apps/web/src/__tests__/**`
-  - `apps/web/scripts/**`
-  - `apps/web/e2e/**`
-  - runtime/build/deploy config (`next.config.ts`, `playwright.config.ts`, `vitest.config.ts`, Docker/nginx/workflow files, package manifests, READMEs)
-- Skipped as non-reviewable/generated artifacts after inventory sweep: binary screenshots/assets, upload fixtures/derivatives, `node_modules/**`, `test-results/**`, `.context/**` historical reports/plans, `plan/**`, `.omx/**`, `.omc/**`, and generated lock/snapshot artifacts such as `package-lock.json` and `apps/web/drizzle/meta/*.json`.
+## Inventory and method
 
-## Stage 1 — Spec compliance
-- README-advertised feature set broadly matches the implementation: public gallery, topic pages, shared links, admin CRUD, image processing pipeline, i18n, backup/restore, and deployment surfaces are all present.
-- No repository-wide “wrong feature / missing core feature” mismatch was confirmed in this pass.
+Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
 
-## Stage 2 — Code quality / correctness findings
+Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
 
-### 1) `getClientIp()` mis-identifies the client once you are not in the repo’s exact one-proxy topology
+- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
+- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
+- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
+- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
+- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
+
+Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
+
+## Findings summary
+
+| ID | Severity | Confidence | Status | Summary |
+|---|---|---|---|---|
+| AGG2C2-01 | HIGH | High | Confirmed | Deleting images does not invalidate cached direct-share or group-share pages |
+| AGG2C2-02 | MEDIUM | High | Confirmed | Login/password DB rate limits still check before increment across processes |
+| AGG2C2-04 | MEDIUM | Medium-High | Confirmed | `image_sizes` can change while unprocessed jobs are in flight |
+
+## Detailed findings
+
+### AGG2C2-01 — Deleting images does not invalidate cached direct-share or group-share pages
+
+- **Status:** Confirmed
+- **Severity:** HIGH
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/app/actions/images.ts:367-427`, `apps/web/src/app/actions/images.ts:461-555`, `apps/web/src/db/schema.ts:87-104`, `apps/web/src/lib/data.ts:552-630`, `apps/web/src/app/actions/sharing.ts:320-381`.
+- **Why this is a problem:** `deleteImage` and `deleteImages` fetch filenames/topic, delete the image rows, and revalidate `/`, `/p/{id}`, the topic, and admin dashboard. They never fetch `images.share_key` nor group keys joined through `shared_group_images`, even though dedicated share revoke/delete paths revalidate `/s/{key}` and `/g/{key}`.
+- **Failure scenario:** An admin shares a photo or group, the public share page is generated and cached, then the admin deletes the image. The DB row/group link is gone, but `/s/<key>` or `/g/<key>` can remain cached and keep exposing stale deleted-photo content until natural ISR expiry or unrelated broad invalidation.
+- **Suggested fix:** Before deletion, collect direct `share_key` values and affected `shared_groups.key` values for the target image IDs; after successful deletion, include `/s/{key}` and `/g/{key}` in targeted revalidation (or broad layout revalidation for large batches). Add a regression test/static guard.
+
+### AGG2C2-02 — Login/password DB rate limits still check before increment across processes
+
+- **Status:** Confirmed
 - **Severity:** MEDIUM
-- **Confidence:** HIGH
-- **Status:** CONFIRMED
-- **Primary evidence:**
-  - `apps/web/src/lib/rate-limit.ts:61-79`
-  - `apps/web/src/__tests__/rate-limit.test.ts:90-100`
-  - `apps/web/nginx/default.conf:49-52`, `66-68`, `115-117`
-- **Issue:** The implementation intentionally chooses the **right-most** IP from `X-Forwarded-For`. That only matches the current sample nginx topology when nginx is the sole trusted proxy hop. In any common multi-hop deployment (Cloudflare/ALB → nginx → app), the right-most hop is usually the **proxy**, not the browser client.
-- **Failure scenario:** Login/search/share/upload rate limits collapse many users behind the same edge or load balancer into a shared bucket; audit entries also log the wrong IP. The current tests actually lock this incorrect assumption in.
-- **Concrete fix:** Replace the right-most selection with explicit trusted-hop handling. Either:
-  1. parse `X-Forwarded-For` from the left and strip a configured number of trusted proxies, or
-  2. trust a single canonical proxy header (`X-Real-IP` / provider-specific header) only when the proxy contract guarantees it.
-  Also add regression tests for direct-connect, single-proxy, and multi-proxy chains.
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/app/actions/auth.ts:108-141`, `apps/web/src/app/actions/auth.ts:320-337`, `apps/web/src/lib/rate-limit.ts:172-215`, safer reference pattern in `apps/web/src/app/actions/public.ts:63-94`.
+- **Why this is a problem:** Auth flows pre-check DB buckets via `checkRateLimit`, then increment. In a multi-process deployment, concurrent bad attempts can all observe the old count before any increment lands. Search/share/admin-user flows already use the safer increment-before-check pattern with `includesCurrentRequest` semantics and rollback.
+- **Failure scenario:** With max 5 attempts, two Node workers receive bad login attempts for the same account bucket while DB count is 4. Both read 4, both run Argon2, then DB count lands at 6, admitting extra expensive guesses across workers.
+- **Suggested fix:** Move DB `incrementRateLimit` before `checkRateLimit` for login IP/account and password-change buckets; check using `isRateLimitExceeded(count, max, true)`; roll back both in-memory and DB counters when an over-limit request is rejected before authentication work.
 
-### 2) CDN-backed image deployments can silently break the histogram feature
-- **Severity:** LOW
-- **Confidence:** MEDIUM
-- **Status:** LIKELY
-- **Primary evidence:**
-  - `apps/web/src/components/histogram.tsx:234-266`
-  - `apps/web/src/lib/constants.ts:6-7`
-  - `apps/web/next.config.ts:7-55`
-  - `README.md:95-107`
-- **Issue:** The app explicitly supports absolute `IMAGE_BASE_URL` values for CDN/fronted image delivery, but the histogram client always loads the rendered image into a canvas and reads pixels. If `imageUrl(...)` resolves to a cross-origin CDN without permissive CORS, the canvas becomes tainted and the histogram falls back to an empty state.
-- **Failure scenario:** A deployment using `IMAGE_BASE_URL=https://cdn.example.com` works for image rendering, but the histogram panel never populates in the photo viewer.
-- **Concrete fix:** Either route histogram sampling through a same-origin URL/proxy, or make the CDN CORS requirement explicit and detectable (for example: fail loudly in UI when cross-origin pixels are unavailable, and document required `Access-Control-Allow-Origin` behavior).
+### AGG2C2-04 — `image_sizes` can change while unprocessed jobs are in flight
 
-### 3) The same-origin lint gate still has blind spots for future server-action files
-- **Severity:** LOW
-- **Confidence:** HIGH
-- **Status:** RISK
-- **Primary evidence:**
-  - `apps/web/scripts/check-action-origin.ts:46-93`
-  - `apps/web/scripts/check-action-origin.ts:244-260`
-- **Issue:** The scanner only auto-discovers `.ts` files under `src/app/actions/` plus one hard-coded `db-actions.ts`. That means a future mutating server action placed in a `.tsx` / `.js` / `.mjs` module, or outside those hardcoded paths, can evade the CI gate entirely while still shipping without `requireSameOriginAdmin()`.
-- **Failure scenario:** A new mutating action lands in `src/app/actions/foo.tsx` (or another `use server` module outside the current allowlist), CI remains green, and the defense-in-depth origin check is silently absent.
-- **Concrete fix:** Expand discovery to all route-legal source extensions and/or scan every `src/app/**` module containing `use server`. Add a regression test proving `.tsx` and off-path action modules are covered.
+- **Status:** Confirmed
+- **Severity:** MEDIUM
+- **Confidence:** Medium-High
+- **Files/regions:** `apps/web/src/app/actions/settings.ts:72-103`, `apps/web/src/app/actions/images.ts:224-305`, `apps/web/src/lib/image-queue.ts:240-263`, `apps/web/src/lib/process-image.ts:390-444`, public image URL consumers in `apps/web/src/lib/image-url.ts:24-48` and public routes.
+- **Why this is a problem:** Settings blocks output-size changes only when a processed image exists. A new gallery can upload images (`processed=false`), start queue jobs with old sizes, then change `image_sizes` before any row becomes processed. The UI/public pages then request derivative filenames for the new size set while queued jobs may have produced only the old size set.
+- **Failure scenario:** Admin uploads photos, immediately changes output sizes while processing is still running, then public thumbnails/metadata URLs are generated for sizes that do not exist on disk, causing broken images/OG previews after rows flip to processed.
+- **Suggested fix:** Lock `image_sizes` once any image row exists, not only once a processed row exists, unless a full queue quiesce/regeneration workflow is introduced. Update admin copy/tests to reflect “uploaded” rather than “processed.”
 
-## Final sweep
-- Re-checked the dominant high-risk surfaces after findings collection: auth/session, rate limiting, data/privacy query shapes, image pipeline/queueing, public upload serving, backup/restore, sharing, settings/SEO, middleware, deployment config, and the repo’s lint/test gates.
-- I did **not** find any current CRITICAL or HIGH severity issue.
-- I did **not** find a repo-wide spec mismatch.
-- Remaining skipped files are the non-executable/generated artifacts listed in the inventory section above.
+## Final missed-issue sweep
 
-## Verification evidence
-- `npm test --workspace=apps/web` ✅ (54 files / 316 tests passed)
-- `npm run typecheck --workspace=apps/web` ✅
-- `npm run lint --workspace=apps/web` ✅
-- `npm run build --workspace=apps/web` ✅
-
-## Verdict
-- **Recommendation:** COMMENT
-- Rationale: core gates are green and I did not confirm any HIGH/CRITICAL defect, but the medium-severity proxy/IP handling bug should be addressed before relying on rate limiting or audit IPs in more complex production topologies.
+Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.

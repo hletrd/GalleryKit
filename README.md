@@ -90,9 +90,16 @@ gallerykit/
 git clone https://github.com/hletrd/gallerykit.git
 cd gallerykit
 npm install
+# Create a MySQL database/user first, then copy and edit the app environment.
+cp apps/web/.env.local.example apps/web/.env.local
+$EDITOR apps/web/.env.local
 cp apps/web/src/site-config.example.json apps/web/src/site-config.json
+$EDITOR apps/web/src/site-config.json
 npm run init --workspace=apps/web
+npm run dev
 ```
+
+After the dev server starts, log in at `/en/admin`, upload one photo, and confirm the public homepage renders it.
 
 ### Remote Deploy Helper
 
@@ -108,11 +115,7 @@ npm run deploy
 
 ### Environment Setup
 
-```bash
-cp apps/web/.env.local.example apps/web/.env.local
-```
-
-Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap secret, and public URLs:
+Do this before `npm run init --workspace=apps/web`; the init script needs DB credentials and admin/session secrets. Edit `apps/web/.env.local` with your MySQL credentials, strong admin bootstrap secret, and public URLs:
 
 ```env
 DB_HOST=127.0.0.1

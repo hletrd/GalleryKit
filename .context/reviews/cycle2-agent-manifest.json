@@ -1,0 +1,10 @@
+{
+  "cycle": 2,
+  "date": "2026-04-24",
+  "repo": "/Users/hletrd/flash-shared/gallery",
+  "agent_tool_status": "spawn unavailable: agent thread limit reached (max 6) on batch attempt and retry",
+  "available_agent_types": ["code-reviewer", "security-reviewer", "critic", "verifier", "test-engineer", "architect", "debugger", "designer"],
+  "reviewer_style_local_prompts": ["/Users/hletrd/.claude/agents/perf-reviewer.md", "/Users/hletrd/.codex/agents/product-marketer-reviewer.md", "/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md"],
+  "compatibility_lanes_written": ["code-reviewer", "security-reviewer", "critic", "verifier", "test-engineer", "architect", "debugger", "designer", "perf-reviewer", "tracer", "document-specialist", "product-marketer-reviewer"],
+  "archived_recovery_partials": ".context/reviews/recovery-cycle2-partials/"
+}

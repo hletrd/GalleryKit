@@ -6,12 +6,19 @@ See the [root README](../../README.md) for full documentation.
 
 ## Quick Start
 
+Run these commands from `apps/web/` after creating a MySQL database/user:
+
 ```bash
 npm install
+cp .env.local.example .env.local
+$EDITOR .env.local
 cp src/site-config.example.json src/site-config.json
+$EDITOR src/site-config.json
 npm run init
 npm run dev
 ```
+
+After the dev server starts, log in at `/en/admin`, upload one photo, and confirm the public homepage renders it.
 
 ## Scripts
 

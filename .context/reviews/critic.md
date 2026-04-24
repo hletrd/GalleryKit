@@ -1,121 +1,81 @@
-# Critic deep code review — 2026-04-24
+# Critic Deep Review — Cycle 2 Recovery (2026-04-24)
 
-## Scope / inventory
+## Inventory and method
 
-Reviewed the tracked, review-relevant text/code/config surface under the current repo:
+Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
 
-- Root docs/config/workflow: `README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `.dockerignore`, `.nvmrc`, `.github/workflows/quality.yml`, `.github/dependabot.yml`, `.vscode/*`, root/package manifests, deploy helper.
-- App docs/deploy/config: `apps/web/README.md`, `Dockerfile`, `docker-compose.yml`, nginx config, env example, Next/Vitest/Playwright/TS/Tailwind/ESLint/PostCSS/Drizzle configs.
-- Runtime code: all tracked files under `apps/web/src/app/**`, `apps/web/src/components/**`, `apps/web/src/lib/**`, `apps/web/src/db/**`, `apps/web/src/i18n/**`, `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`.
-- Scripts/migrations: all tracked files under `apps/web/scripts/**` and `apps/web/drizzle/*.sql` plus journal.
-- Tests: all tracked files under `apps/web/src/__tests__/**` and `apps/web/e2e/**`.
-- Messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
 
-Skipped as non-review-relevant artifacts after final sweep: `.context/**`, `.omx/**`, `plan/**`, `test-results/**`, generated `.tsbuildinfo`, `drizzle/meta/*.json` snapshots, binary fixtures/assets (`.png`, `.jpg`, `.avif`, `.webp`, `.woff2`, uploaded derivatives), and historical review/plan logs.
+- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
+- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
+- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
+- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
+- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
 
-## Verification run
+Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
 
-- `npm run lint --workspace=apps/web` ✅
-- `npm run typecheck --workspace=apps/web` ✅
-- `npm run test --workspace=apps/web` ✅ (54 files / 316 tests)
-- `npm run test:e2e --workspace=apps/web` ❌ blocked by missing local MySQL (`ECONNREFUSED 127.0.0.1:3306`)
+## Findings summary
 
-## Findings
+| ID | Severity | Confidence | Status | Summary |
+|---|---|---|---|---|
+| AGG2C2-01 | HIGH | High | Confirmed | Deleting images does not invalidate cached direct-share or group-share pages |
+| AGG2C2-02 | MEDIUM | High | Confirmed | Login/password DB rate limits still check before increment across processes |
+| AGG2C2-03 | MEDIUM | High | Confirmed | Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out |
+| AGG2C2-04 | MEDIUM | Medium-High | Confirmed | `image_sizes` can change while unprocessed jobs are in flight |
+| AGG2C2-05 | MEDIUM | High | Confirmed | Quick-start docs run DB init before required environment setup |
 
-### 1) [CONFIRMED] Host-nginx deployment docs contradict the checked-in nginx static upload config
+## Detailed findings
+
+### AGG2C2-01 — Deleting images does not invalidate cached direct-share or group-share pages
+
+- **Status:** Confirmed
 - **Severity:** HIGH
 - **Confidence:** High
-- **Evidence:**
-  - `README.md:139,161-169` documents a **host-network + host nginx** deployment.
-  - `apps/web/README.md:33-34` repeats the same host-nginx assumption.
-  - `apps/web/docker-compose.yml:10-22` runs only the app container and mounts `./public` into the **container** at `/app/apps/web/public`.
-  - `apps/web/nginx/default.conf:89-95` serves `/uploads/**` with `root /app/apps/web/public;`.
-- **Why this is a problem:** that root path exists inside the container, not on the host nginx process described by the docs. A host nginx using this file will look for uploads in a path it does not own.
-- **Failure scenario:** deployment follows the README exactly, nginx starts on the host, HTML works, but all upload URLs 404 because nginx cannot read `/app/apps/web/public/...` on the host filesystem.
-- **Concrete fix:** choose one model and make docs/config agree:
-  1. either mount the uploads directory into the host nginx-visible path and update `root`,
-  2. or stop serving uploads directly from host nginx and proxy `/uploads/**` to Next,
-  3. or ship a companion nginx container and document that instead of host nginx.
+- **Files/regions:** `apps/web/src/app/actions/images.ts:367-427`, `apps/web/src/app/actions/images.ts:461-555`, `apps/web/src/db/schema.ts:87-104`, `apps/web/src/lib/data.ts:552-630`, `apps/web/src/app/actions/sharing.ts:320-381`.
+- **Why this is a problem:** `deleteImage` and `deleteImages` fetch filenames/topic, delete the image rows, and revalidate `/`, `/p/{id}`, the topic, and admin dashboard. They never fetch `images.share_key` nor group keys joined through `shared_group_images`, even though dedicated share revoke/delete paths revalidate `/s/{key}` and `/g/{key}`.
+- **Failure scenario:** An admin shares a photo or group, the public share page is generated and cached, then the admin deletes the image. The DB row/group link is gone, but `/s/<key>` or `/g/<key>` can remain cached and keep exposing stale deleted-photo content until natural ISR expiry or unrelated broad invalidation.
+- **Suggested fix:** Before deletion, collect direct `share_key` values and affected `shared_groups.key` values for the target image IDs; after successful deletion, include `/s/{key}` and `/g/{key}` in targeted revalidation (or broad layout revalidation for large batches). Add a regression test/static guard.
 
-### 2) [CONFIRMED] “Fail fast if site-config is missing” is defeated by a tracked localhost placeholder
-- **Severity:** HIGH
-- **Confidence:** High
-- **Evidence:**
-  - `apps/web/.gitignore:49` says `src/site-config.json` should be local-only.
-  - `apps/web/src/site-config.json:4-5` is nevertheless tracked, and its canonical URLs are `http://localhost:3000`.
-  - `apps/web/scripts/ensure-site-config.mjs:4-8` only checks **existence**, not whether the file is still a placeholder.
-  - `README.md:162-169` and `apps/web/README.md:34` claim build/deploy now fail fast when the real file is missing.
-  - `.github/workflows/quality.yml:51-52` explicitly copies the example into place in CI, so CI also never proves that the config is real/customized.
-- **Why this is a problem:** the repo mixes two incompatible models: “site-config.json is local-only and must be supplied” vs “a tracked placeholder already exists”. That means the advertised fail-fast guarantee is mostly illusory.
-- **Failure scenario:** operator forgets to customize `apps/web/src/site-config.json`, build still succeeds, and production emits localhost canonical URLs/sitemap/OG links/robots sitemap references.
-- **Concrete fix:**
-  - untrack `apps/web/src/site-config.json` for real,
-  - keep only `site-config.example.json`,
-  - have CI create the file explicitly,
-  - and make `ensure-site-config.mjs` reject obvious placeholder values like `http://localhost:3000` in production/deploy builds.
+### AGG2C2-02 — Login/password DB rate limits still check before increment across processes
 
-### 3) [CONFIRMED] The same-origin action lint gate has real blind spots and can provide false confidence
-- **Severity:** HIGH
-- **Confidence:** High
-- **Evidence:**
-  - `apps/web/scripts/check-action-origin.ts:46-67` only discovers `.ts` files and excludes any basename `auth.ts` / `public.ts` at **any depth**.
-  - `apps/web/src/__tests__/check-action-origin.test.ts:165-199` locks that exact behavior in.
-  - `apps/web/scripts/check-action-origin.ts:109-125,171-178` treats *any* AST call named `requireSameOriginAdmin` as success; it does not verify that the result is checked before mutation.
-- **Why this is a problem:** the repo treats this script as a security gate, but today it can miss valid Next action files (`.tsx`, `.js`, etc.), skip unrelated nested files just because they are named `auth.ts`/`public.ts`, or pass a dead-code / no-op `requireSameOriginAdmin()` call.
-- **Failure scenario:**
-  - a future mutating server action lands in `app/actions/foo.tsx` or `app/actions/nested/public.ts` and bypasses the lint entirely, or
-  - a refactor leaves `await requireSameOriginAdmin()` in unreachable code and the scanner still reports green.
-- **Concrete fix:**
-  - scan all supported action extensions (`.ts`, `.tsx`, `.js`, `.mjs`, `.cjs` if supported),
-  - exclude only the exact top-level files that are intentionally special-cased,
-  - strengthen the check so it requires the standard “call + early return on error” pattern (or an explicit approved helper),
-  - add regression fixtures for `.tsx`, nested `public.ts`, and dead-code/no-op call cases.
-
-### 4) [LIKELY] Restore maintenance is process-local, but the rest of the system treats it like a global maintenance mode
-- **Severity:** MEDIUM
-- **Confidence:** Medium
-- **Evidence:**
-  - `apps/web/src/lib/restore-maintenance.ts:1-18,44-55` stores maintenance state in `globalThis` only.
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:271-301` sets/clears that flag around restore work.
-  - Many runtime guards consume that flag as if it were authoritative (`apps/web/src/app/actions/public.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/app/api/health/route.ts`).
-  - `apps/web/src/__tests__/restore-maintenance.test.ts:5-52` only verifies single-process behavior.
-- **Why this is a problem:** the MySQL advisory lock is global for restore exclusivity, but the “maintenance mode” that blocks uploads/search/view buffering/health is not. In any multi-process, rolling deploy, or horizontally scaled setup, one process can be restoring while another keeps accepting work.
-- **Failure scenario:** a restore starts on process A; process B still serves public actions and accepts admin mutations/uploads because its own `globalThis` flag never flipped. You get a partially “paused” system during a destructive restore.
-- **Concrete fix:** move restore-maintenance state into a shared store (DB row / dedicated table / lock-backed status check) and have health/actions/query code consult that shared state instead of a process-local symbol.
-
-### 5) [RISK] The admin API gate enforces authentication but not same-origin for future mutating routes
+- **Status:** Confirmed
 - **Severity:** MEDIUM
 - **Confidence:** High
-- **Evidence:**
-  - `apps/web/src/lib/api-auth.ts:10-26` wraps handlers with `isAdmin()` only.
-  - `apps/web/scripts/check-api-auth.ts:64-72,122-124` only checks that exports are wrapped with something named `withAdminAuth(...)`.
-  - Middleware explicitly excludes `/api/*` from its matcher (`apps/web/src/proxy.ts:59-64`).
-- **Why this is a problem:** the current repo has only one admin API route and it manually adds origin checks, but the architectural guardrail for *future* `/api/admin/*` mutations is incomplete. A future POST/DELETE route can pass CI with auth-only wrapping and still miss the origin/confused-deputy protection that server actions now enforce.
-- **Failure scenario:** a new `POST /api/admin/...` lands, uses `withAdminAuth`, passes `lint:api-auth`, and ships without same-origin validation because nothing in the wrapper or lint gate requires it.
-- **Concrete fix:** add a dedicated mutating-route wrapper (for example `withAdminMutationAuth`) that combines auth + origin validation, and make the lint gate require it for non-GET/HEAD handlers.
+- **Files/regions:** `apps/web/src/app/actions/auth.ts:108-141`, `apps/web/src/app/actions/auth.ts:320-337`, `apps/web/src/lib/rate-limit.ts:172-215`, safer reference pattern in `apps/web/src/app/actions/public.ts:63-94`.
+- **Why this is a problem:** Auth flows pre-check DB buckets via `checkRateLimit`, then increment. In a multi-process deployment, concurrent bad attempts can all observe the old count before any increment lands. Search/share/admin-user flows already use the safer increment-before-check pattern with `includesCurrentRequest` semantics and rollback.
+- **Failure scenario:** With max 5 attempts, two Node workers receive bad login attempts for the same account bucket while DB count is 4. Both read 4, both run Argon2, then DB count lands at 6, admitting extra expensive guesses across workers.
+- **Suggested fix:** Move DB `incrementRateLimit` before `checkRateLimit` for login IP/account and password-change buckets; check using `isRateLimitExceeded(count, max, true)`; roll back both in-memory and DB counters when an over-limit request is rejected before authentication work.
 
-## Representative task simulations
+### AGG2C2-03 — Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out
 
-1. **Operator follows documented host-nginx deploy path**
-   - Uses `apps/web/docker-compose.yml` as documented.
-   - Starts host nginx with `apps/web/nginx/default.conf`.
-   - Requests `/uploads/jpeg/...`.
-   - nginx resolves against `/app/apps/web/public` on the host, not inside the app container.
-   - Result: broken image serving despite a “successful” deploy.
+- **Status:** Confirmed
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **Files/regions:** `apps/web/src/app/[locale]/admin/db-actions.ts:127-140`, `apps/web/src/app/[locale]/admin/db-actions.ts:396-408`, `apps/web/src/db/index.ts:6-25`, `apps/web/scripts/mysql-connection-options.js:11-23`, `apps/web/.env.local.example:7`.
+- **Why this is a problem:** Runtime DB and migration helpers honor `DB_SSL=false` for non-local DB hosts, but admin backup/restore force `--ssl-mode=REQUIRED` for every non-local host. Operators following the documented opt-out can have app queries and migrations work while backup/restore fail.
+- **Failure scenario:** A private VPC MySQL endpoint has TLS disabled and the deployment sets `DB_SSL=false`. Admin backup/restore invoke `mysqldump`/`mysql` with `--ssl-mode=REQUIRED`, causing the maintenance operation to fail despite documented configuration.
+- **Suggested fix:** Centralize CLI SSL arg derivation from the same localhost + `DB_SSL=false` policy and test it; use the helper for both dump and restore.
 
-2. **Contributor adds a new mutating server action in `app/actions/foo.tsx`**
-   - Current `check-action-origin.ts` ignores it because discovery is `.ts`-only.
-   - CI passes.
-   - The file can omit `requireSameOriginAdmin()` entirely.
-   - Result: the repo’s documented security gate silently stops applying.
+### AGG2C2-04 — `image_sizes` can change while unprocessed jobs are in flight
 
-3. **Restore runs during a rolling deploy / multi-process setup**
-   - Process A sets the in-memory maintenance symbol and starts restore.
-   - Process B keeps `active=false`, so public/admin guards still run normally there.
-   - Result: writes, queue activity, or view-count buffering can continue during the restore window.
+- **Status:** Confirmed
+- **Severity:** MEDIUM
+- **Confidence:** Medium-High
+- **Files/regions:** `apps/web/src/app/actions/settings.ts:72-103`, `apps/web/src/app/actions/images.ts:224-305`, `apps/web/src/lib/image-queue.ts:240-263`, `apps/web/src/lib/process-image.ts:390-444`, public image URL consumers in `apps/web/src/lib/image-url.ts:24-48` and public routes.
+- **Why this is a problem:** Settings blocks output-size changes only when a processed image exists. A new gallery can upload images (`processed=false`), start queue jobs with old sizes, then change `image_sizes` before any row becomes processed. The UI/public pages then request derivative filenames for the new size set while queued jobs may have produced only the old size set.
+- **Failure scenario:** Admin uploads photos, immediately changes output sizes while processing is still running, then public thumbnails/metadata URLs are generated for sizes that do not exist on disk, causing broken images/OG previews after rows flip to processed.
+- **Suggested fix:** Lock `image_sizes` once any image row exists, not only once a processed row exists, unless a full queue quiesce/regeneration workflow is introduced. Update admin copy/tests to reflect “uploaded” rather than “processed.”
 
-## Final sweep
+### AGG2C2-05 — Quick-start docs run DB init before required environment setup
 
-- No additional **current** auth bypass or unit-test failure surfaced after the repo-wide source/config/test sweep.
-- The strongest problems are architectural/operational confidence gaps: deployment docs vs config drift, placeholder config defeating “fail fast”, and security lint gates that are narrower than their documentation suggests.
-- E2E verification is still outstanding because the local MySQL dependency was unavailable during this run.
+- **Status:** Confirmed
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **Files/regions:** `README.md:87-115`, `apps/web/README.md:7-14`, `apps/web/scripts/init-db.ts:14-30`, `apps/web/scripts/mysql-connection-options.js:3-22`, `apps/web/.env.local.example:1-29`.
+- **Why this is a problem:** Both root and app quick-start flows list `npm run init` before telling users to copy/edit `.env.local`, but init/migration require DB credentials and bootstrap admin/session configuration.
+- **Failure scenario:** A fresh evaluator follows the quick start literally; `npm run init` fails with missing DB env before the docs explain where to set it, creating a broken first-run path.
+- **Suggested fix:** Reorder quick-start instructions so MySQL/env/site-config setup comes before `npm run init`, and list the login/upload smoke check after init/dev.
+
+## Final missed-issue sweep
+
+Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.
