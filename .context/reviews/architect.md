@@ -1,46 +1,57 @@
-# Architect Review — Cycle 6 (2026-04-23)
+# Architect Review — Cycle 1 (2026-04-24)
 
 ## Scope and inventory covered
-Built a repository inventory across root docs/config plus `apps/web/src` (`app`: 55 files, `components`: 44, `lib`: 42, `db`: 3, `__tests__`: 41) and reviewed the architecture-defining boundaries between routes, server actions, query/data helpers, operational state, deployment config, and the documented single-host runtime model.
+Reviewed the repo docs (`CLAUDE.md`, `.context/reviews/prompts/architect.md`, `common_review_scope.md`) and the full `apps/web` surface relevant to architecture and coupling: app routes/layouts/API, server actions, `src/lib`, `src/components`, `src/db`, `scripts`, `messages`, config, and the test surface that documents the expected boundaries.
 
 ## Findings summary
 - Confirmed Issues: 2
-- Likely Issues: 0
+- Likely Issues: 2
 - Risks Requiring Manual Validation: 1
 
 ## Confirmed Issues
 
-### ARCH6-01 — The public photo route breaks its own ISR boundary by reading admin auth state during render
+### ARC1 — `getGalleryConfig()` has no failure fallback, so a noncritical settings-table outage can take down the public shell
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Status:** Confirmed
-- **Files / regions:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:21-22`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:118-125`, `apps/web/src/app/actions/auth.ts:21-23`, `apps/web/src/app/actions/auth.ts:31-53`
-- **Why it is a problem:** The photo page declares a one-week `revalidate` window, but the route also calls `isAdmin()` during render to decide whether share/admin controls should be shown. That auth path depends on `cookies()`, which makes the page request-specific. Architecturally, this mixes a public cacheable document with per-user admin personalization, so the route can no longer cleanly behave like a static/ISR page.
-- **Concrete failure scenario:** A hot public photo link receives heavy anonymous traffic. Instead of serving a stable cached route shell for a week, the server must render the page per request because auth state is consulted during render, increasing TTFB and wasting DB work on `getImageCached`, `getSeoSettings`, and `getGalleryConfig` for traffic that is almost always anonymous.
-- **Suggested fix:** Remove `isAdmin()` from the public page render path. Keep the page purely public/cached, and move share/admin affordances behind a separate dynamic island or admin-only endpoint/action that hydrates after the public shell loads. If request-time personalization is intentionally required, make that explicit with a dynamic route contract rather than an ISR contract.
+- **Files / regions:** `apps/web/src/lib/gallery-config.ts:33-39, 68-84`; call sites `apps/web/src/app/[locale]/layout.tsx:73-76`, `apps/web/src/components/nav.tsx:6-12`, `apps/web/src/app/[locale]/(public)/page.tsx:106-121`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:122-133`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:89-95`
+- **Why it is a problem:** `getGalleryConfig()` reads `admin_settings` directly and does not catch DB errors or fall back to `gallery-config-shared` defaults. That makes the root layout, navigation, and several public pages hostage to a settings-table read even when the gallery could otherwise keep rendering with defaults.
+- **Concrete failure scenario:** a transient MySQL lock or outage affecting only `admin_settings` causes the home page and topic/share shells to throw during render. The code already treats SEO settings more defensively; this helper is the outlier.
+- **Suggested fix:** mirror the fallback strategy used by `getSeoSettings()` — catch read failures in `getGalleryConfig()` and return defaults from `gallery-config-shared`, or move the read behind an explicit startup cache with documented fallback semantics.
 
-### ARCH6-02 — `lib/data.ts` is still carrying both the read model and operational write-side lifecycle
+### ARC2 — `lib/data.ts` is still mixing read-model queries with operational lifecycle state
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Status:** Confirmed
-- **Files / regions:** `apps/web/src/lib/data.ts:11-109`, `apps/web/src/lib/data.ts:111-889`, `apps/web/src/app/[locale]/admin/db-actions.ts:18-23`, `apps/web/src/app/[locale]/admin/db-actions.ts:273-279`, `apps/web/src/instrumentation.ts:13-22`
-- **Why it is a problem:** `lib/data.ts` is not just a query/read-model module anymore. It owns mutable process state (`viewCountBuffer`, timers, flush backoff), operational lifecycle APIs (`flushBufferedSharedGroupViewCounts()`), privacy field shaping, SEO settings reads, shared-link reads, search, sitemap helpers, and gallery queries. That forces restore/shutdown orchestration to import the same module that public routes use for page data. The boundary between “read data for pages” and “operate background state” is blurred.
-- **Concrete failure scenario:** A future refactor to public query code, privacy field selection, or SEO helpers unintentionally affects restore/shutdown behavior because those operational paths import `@/lib/data` just to flush buffered view counts before restore or process exit. This also makes it harder to extract background work into a worker/process later because the operational API is welded to the route-facing query surface.
-- **Suggested fix:** Split the shared-group view buffering/flush lifecycle into a dedicated module (for example `lib/shared-group-views.ts` or `lib/view-count-buffer.ts`) with a narrow API such as `recordGroupView()`, `flushGroupViews()`, and `shutdownGroupViews()`. Keep `lib/data.ts` focused on query composition, field shaping, and cached read helpers.
+- **Files / regions:** `apps/web/src/lib/data.ts:11-109, 594-669`; restore consumer `apps/web/src/app/[locale]/admin/db-actions.ts:21-24, 290-294`
+- **Why it is a problem:** the same module owns the shared-group view buffer, flush timer, backoff state, and `flushBufferedSharedGroupViewCounts()` API alongside the query helpers. That means restore/shutdown orchestration has to import the same module that public routes use for page data, and future changes to the read layer can accidentally alter operational behavior.
+- **Concrete failure scenario:** a refactor to “just the data layer” unintentionally changes restore behavior or queue shutdown because the lifecycle code lives beside the query helpers. The module is no longer a clean read boundary; it is also a process-control boundary.
+- **Suggested fix:** split the shared-group view-count buffer/flush lifecycle into a dedicated module with a narrow API, and keep `lib/data.ts` focused on query composition and cached read helpers.
 
 ## Likely Issues
-- None identified beyond the confirmed issues above.
+
+### ARC3 — `getSharedGroup()` is a query helper with a hidden write contract
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Files / regions:** `apps/web/src/lib/data.ts:594-669`; call sites `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:29-35, 89-95, 118-144`
+- **Why it is a problem:** the function increments `sharedGroups.view_count` by default and only avoids that write when callers remember to pass `{ incrementViewCount: false }`. That turns a public read helper into a command with opt-out semantics, which is easy to misuse in future callers.
+- **Concrete failure scenario:** a future page, metadata path, or prefetch consumer calls the same helper without the flag and starts counting non-view traffic as real views, or a future refactor accidentally uses the incrementing path in a context that should be read-only.
+- **Suggested fix:** split the API into explicit read vs. record-view operations, or at minimum make the side-effecting path separately named so callers must opt in to the write behavior.
+
+### ARC4 — `image-queue.ts` is not side-effect-free; importing the queue helper starts bootstrap work and timers
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Files / regions:** `apps/web/src/lib/image-queue.ts:330-411`; importers `apps/web/src/app/actions/images.ts:13-15, 298-306`, `apps/web/src/app/[locale]/admin/db-actions.ts:22-24, 292-304`
+- **Why it is a problem:** the module auto-calls `bootstrapImageProcessingQueue()` at import time. A consumer that only wants queue helpers still gets DB probing, pending-job enqueueing, orphan cleanup, and an hourly GC interval.
+- **Concrete failure scenario:** a unit test or a new route imports `enqueueImageProcessing` and unexpectedly triggers queue bootstrap or interval setup. In runtime, incidental import order can produce extra DB work or lifecycle behavior before the app is actually ready to process jobs.
+- **Suggested fix:** move bootstrap and periodic maintenance into an explicit startup path (`instrumentation.ts`/entrypoint or a dedicated initializer) and keep `lib/image-queue.ts` focused on queue operations only.
 
 ## Risks Requiring Manual Validation
 
-### ARCH6-R01 — The codebase still assumes the documented single-process deployment model; scale-out would violate multiple runtime invariants
+### ARC5 — The current deployment model still assumes one process owns queue state, rate limits, and shared-group analytics
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Status:** Risk requiring manual validation
-- **Files / regions:** `apps/web/docker-compose.yml:1-22`, `apps/web/src/lib/image-queue.ts:77-94`, `apps/web/src/lib/restore-maintenance.ts:1-55`, `apps/web/src/app/actions/images.ts:55-80`, `apps/web/src/app/actions/images.ts:120-172`, `apps/web/src/lib/rate-limit.ts:22-26`
-- **Why it is a problem:** The documented runtime model is a single `web` service on one host, which matches the implementation: image queue state lives in `globalThis`, restore maintenance is process-local, upload throttling uses a module-local `Map`, and login/search fast paths use in-memory maps. That is acceptable for the current compose model, but the architectural constraint is implicit rather than enforced. If operations ever add a second app instance, behavior will diverge immediately.
-- **Concrete failure scenario:** During a DB restore, instance A enters restore maintenance and drains its queue, while instance B keeps accepting uploads because its process-local maintenance flag is still false. Likewise, per-IP upload limits and in-memory fast-path rate limits become instance-specific, and queue bootstrap happens independently on each process.
-- **Suggested fix:** Either (a) codify “single app instance only” as an explicit operational invariant in deployment/runbooks and monitoring, or (b) move these coordination points to shared infrastructure (DB-backed maintenance flag, distributed queue/lease model, shared rate-limit state) before any horizontal scaling.
+- **Files / regions:** `apps/web/src/lib/image-queue.ts:94-123, 164-187, 330-373`; `apps/web/src/lib/data.ts:11-109`; `apps/web/src/lib/rate-limit.ts:22-26, 101-149`; `apps/web/src/lib/restore-maintenance.ts:1-56`
+- **Why it matters:** queue claims, buffered view counts, maintenance state, and in-memory fast-path limits are all process-local. That is coherent for the documented single-host runtime, but it is not safe to scale out blindly.
+- **Validate:** confirm the deployment/runbooks continue to enforce a single-process app model, or plan a shared coordination layer before any horizontal scaling.
 
 ## Final sweep
-The codebase remains largely well-layered in the main app/actions/components split, and the local-only storage abstraction is now correctly documented as not part of the live pipeline. The two material architectural problems still present are the public photo route’s cache/personalization boundary violation and the continued mixing of read-model concerns with operational lifecycle state inside `lib/data.ts`.
+No relevant `apps/web` source area was skipped. The main architectural pressure points are still the config-read boundary, the mixed query/operational boundary in `lib/data.ts`, and hidden lifecycle side effects in queue/bootstrap code.

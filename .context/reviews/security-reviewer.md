@@ -1,114 +1,27 @@
 # Security Review Report
 
-**Scope:** Entire repository, with focus on auth/session handling, admin/public routes, file upload/serve paths, backup/restore flows, privacy boundaries, reverse-proxy/deployment config, docs/examples, and dependency/secrets hygiene.
+**Scope:** Entire repository, with emphasis on auth/session handling, public routes, upload/serve paths, backup/restore, sharing, rate limiting, and env/doc mismatches.
 
 **Inventory Reviewed:**
-- App routes/pages: `apps/web/src/app/**` including public pages, admin pages, API routes, upload routes, OG route, health/live routes
-- Server actions: `apps/web/src/app/actions*.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`
-- Security-critical libs: `src/lib/{session,api-auth,request-origin,rate-limit,auth-rate-limit,serve-upload,upload-paths,validation,data,audit,db-restore,sql-restore-scan,safe-json-ld,seo-og-url,process-image,process-topic-image,gallery-config*}.ts`
-- Data layer/schema: `apps/web/src/db/{index,schema}.ts`, Drizzle SQL snapshots/migrations
-- Deployment/config: `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`
-- Scripts/docs/examples: `apps/web/scripts/**`, `README.md`, `CLAUDE.md`, `apps/web/.env.local.example`
-- Verification artifacts: auth-route lint check, dependency audit, tracked-source secrets grep, targeted git-history scan
+- Auth/session/rate-limit controls: `apps/web/src/lib/{session,rate-limit,auth-rate-limit,request-origin,api-auth,action-guards}.ts`, `apps/web/src/app/actions/auth.ts`
+- Public/admin server actions: `apps/web/src/app/actions/{public,images,sharing,settings,seo,tags,topics,admin-users}.ts`
+- File serving/upload/processing: `apps/web/src/lib/{serve-upload,upload-paths,process-image,process-topic-image,validation,sanitize,upload-limits}.ts`, `apps/web/src/app/uploads/[...path]/route.ts`, `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+- Backup/restore: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/{db-restore,sql-restore-scan,backup-filename}.ts`
+- Public surfaces and metadata: `apps/web/src/app/[locale]/(public)/**`, `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/sitemap.ts`, `apps/web/src/app/robots.ts`, `apps/web/src/lib/{data,constants,image-url,seo-og-url,tag-slugs}.ts`
+- Deployment/docs/config: `apps/web/next.config.ts`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/src/site-config.json`, `README.md`, `apps/web/README.md`, `CLAUDE.md`, `.env.deploy.example`, `apps/web/.env.local.example`
+- Final sweep: cross-file query parsing, CSP, fallback URL config, and reviewed existing security tests/docs for alignment
 
 **Risk Level:** MEDIUM
 
 ## Summary
 - Critical Issues: 0
 - High Issues: 0
-- Medium Issues: 2
+- Medium Issues: 1
 - Low Issues: 1
 
 ## Confirmed Issues
 
-### 1. Historically committed bootstrap/admin secrets remain permanently compromised
-**Severity:** MEDIUM  
-**Category:** OWASP A02 / Secrets management  
-**Location:** `git history -> d7c3279:apps/web/.env.local.example:1-11`  
-**Confidence:** High  
-**Exploitability:** Remote, unauthenticated, but only against deployments that reused old example values  
-**Blast Radius:** Any environment that copied the old `SESSION_SECRET` or bootstrap password can be fully compromised via forged admin sessions or trivial admin login
-
-**Why this is a problem:**
-A targeted git-history scan confirmed that the initial commit shipped a real `SESSION_SECRET` plus `ADMIN_PASSWORD=password` and `DB_PASSWORD=password` in the example env file. Even though HEAD now uses placeholders and adds warnings, git history is public/immutable from an attacker’s point of view. Any deployment that ever reused those values must be treated as compromised until rotated.
-
-**Evidence:**
-- `git show d7c3279:apps/web/.env.local.example` includes:
-  - `DB_PASSWORD=password`
-  - `ADMIN_PASSWORD=password`
-  - `SESSION_SECRET=5e47a072d912b3cf7976d4b13bb75a7f20f7524eb5f7083b188de0a95ffbc555`
-- Current docs/examples now warn about rotation (`README.md`, `CLAUDE.md`, `apps/web/.env.local.example`), so this is a history exposure rather than a HEAD leak.
-
-**Concrete failure scenario:**
-An operator bootstraps production from an old clone, backup, or copied `.env.local.example`. An attacker who knows the historic `SESSION_SECRET` can mint valid `admin_session` cookies; if `ADMIN_PASSWORD=password` was reused, normal login is enough.
-
-**Remediation:**
-- Treat the historical values as permanently exposed.
-- Force rotation of `SESSION_SECRET`, bootstrap/admin credentials, and any DB credentials copied from old examples.
-- Keep placeholders non-live-looking in examples.
-
-```env
-# BAD (historical example)
-DB_PASSWORD=password
-ADMIN_PASSWORD=password
-SESSION_SECRET=5e47a072d912b3cf7976d4b13bb75a7f20f7524eb5f7083b188de0a95ffbc555
-
-# GOOD
-DB_PASSWORD=<environment-specific-secret>
-ADMIN_PASSWORD=<generate-a-strong-admin-secret-or-argon2-hash>
-SESSION_SECRET=<generate-with: openssl rand -hex 32>
-```
-
-## Likely Issues
-
-### 2. Same-origin helper fails open when both `Origin` and `Referer` are missing
-**Severity:** MEDIUM  
-**Category:** OWASP A01 / CSRF-adjacent request validation weakness  
-**Location:** `apps/web/src/lib/request-origin.ts:66-86`, used by `apps/web/src/app/actions/auth.ts:92-95`  
-**Confidence:** Medium  
-**Exploitability:** Cross-site, browser/proxy-dependent  
-**Blast Radius:** Auth flows that rely on this helper (`login`, and the same helper if reused elsewhere) lose their intended source-validation guarantee when source headers are absent
-
-**Why this is a problem:**
-`hasTrustedSameOriginWithOptions()` defaults `allowMissingSource` to `true`, and returns success when both `Origin` and `Referer` are absent. That means the auth flow’s explicit source check is effectively bypassed in any edge case where these headers are stripped by privacy tooling, unusual browser behavior, or an intermediate proxy/CDN.
-
-**Concrete failure scenario:**
-A deployment sits behind middleware that strips `Referer`, and a browser/request path omits `Origin` on a cross-site POST. `login()` calls `hasTrustedSameOrigin()` and accepts the request because missing-source falls through to `true`, weakening the intended CSRF/login-CSRF barrier.
-
-**Remediation:**
-Fail closed by default and only opt into `allowMissingSource: true` for endpoints where missing-source requests are intentionally acceptable.
-
-```ts
-// BAD
-export function hasTrustedSameOrigin(requestHeaders: HeaderLookup) {
-  return hasTrustedSameOriginWithOptions(requestHeaders);
-}
-
-export function hasTrustedSameOriginWithOptions(
-  requestHeaders: HeaderLookup,
-  options: { allowMissingSource?: boolean } = {}
-) {
-  const { allowMissingSource = true } = options;
-  // ...
-  return allowMissingSource;
-}
-
-// GOOD
-export function hasTrustedSameOrigin(requestHeaders: HeaderLookup) {
-  return hasTrustedSameOriginWithOptions(requestHeaders, { allowMissingSource: false });
-}
-
-export function hasTrustedSameOriginWithOptions(
-  requestHeaders: HeaderLookup,
-  options: { allowMissingSource?: boolean } = {}
-) {
-  const { allowMissingSource = false } = options;
-  // ...
-  return allowMissingSource;
-}
-```
-
-### 3. Production CSP still permits inline script execution
+### 1. Production CSP still allows inline script execution
 **Severity:** LOW  
 **Category:** OWASP A05 / Security misconfiguration  
 **Location:** `apps/web/next.config.ts:72-75`  
@@ -117,13 +30,13 @@ export function hasTrustedSameOriginWithOptions(
 **Blast Radius:** Site-wide; weakens XSS containment across every page
 
 **Why this is a problem:**
-The production CSP includes `script-src 'self' 'unsafe-inline' https://www.googletagmanager.com`. That means any future HTML/script injection bug can execute inline JavaScript instead of being blocked by policy. I did not confirm an active XSS sink beyond controlled JSON-LD serialization, so this is a hardening gap rather than a complete exploit chain.
+The production `Content-Security-Policy` still includes `script-src 'self' 'unsafe-inline' https://www.googletagmanager.com`. That means any future HTML/script injection bug can execute inline JavaScript instead of being blocked by policy. This repo already does the right thing in a number of places (`safeJsonLd`, escaped React text, same-origin checks), but the CSP remains permissive enough that one missed sink would become immediately exploitable.
 
 **Concrete failure scenario:**
 A future reflected/stored markup bug lands in a localized string, SEO field, or new UI surface. Because inline scripts are allowed, an attacker can execute payloads that a strict nonce/hash-based CSP would have blocked.
 
-**Remediation:**
-Move analytics/bootstrap code to nonce- or hash-based scripts and remove `'unsafe-inline'` from production `script-src`.
+**Suggested fix:**
+Move analytics/bootstrap code to nonce- or hash-based scripts and remove `'unsafe-inline'` from the production `script-src` policy.
 
 ```ts
 // BAD
@@ -133,34 +46,60 @@ Move analytics/bootstrap code to nonce- or hash-based scripts and remove `'unsaf
 "script-src 'self' 'nonce-<per-request-nonce>' https://www.googletagmanager.com"
 ```
 
+## Likely Issues
+
+### 2. Public tag query parsing is unbounded and can be abused for request amplification / DoS
+**Severity:** MEDIUM  
+**Category:** OWASP A04 / Insecure Design, input validation, rate limiting  
+**Location:** `apps/web/src/lib/tag-slugs.ts:3-19`, `apps/web/src/app/[locale]/(public)/page.tsx:18-33,104-120`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:18-43,95-132`, `apps/web/src/app/api/og/route.tsx:29-40`  
+**Confidence:** Medium  
+**Exploitability:** Remote, unauthenticated  
+**Blast Radius:** Public homepage, topic pages, and OG image generation
+
+**Why this is a problem:**
+`parseRequestedTagSlugs()` accepts the full `tags` query string, splits it into an unbounded array, and the public pages/OG route then process that array without a total-length or token-count cap. The home and topic pages also feed the raw result into `filterExistingTagSlugs()`, which does `availableTags.some(...)` per requested tag. That creates an attacker-controlled amount of string allocation and O(n×m) matching work on public requests.
+
+**Concrete failure scenario:**
+An attacker requests a URL with thousands of comma-separated tags, e.g. `?tags=a,b,c,...`. The server allocates a large array, trims/deduplicates it, repeatedly scans the full tag list, and then repeats similar work again while generating metadata/OG content. Enough of these requests can materially increase CPU and memory pressure, even though the individual tag names themselves are harmless.
+
+**Suggested fix:**
+Cap the total `tags` query length and the number of parsed tag tokens before splitting/filtering, and reject or truncate anything over the limit. If the app only needs a small number of filters, stop after the first N valid tags instead of processing the whole query string.
+
 ## Risks Requiring Manual Validation
 
-1. **Deployment rotation audit for historical secrets**
-   - Current tracked files are clean, but operational environments must be checked to ensure none still use the historical `SESSION_SECRET`/bootstrap values from `d7c3279`.
+### 3. Production still falls back to the checked-in localhost site config if `BASE_URL` is unset
+**Severity:** LOW  
+**Category:** OWASP A05 / deployment misconfiguration, env/doc mismatch  
+**Location:** `apps/web/src/site-config.json:1-5`, `apps/web/src/lib/constants.ts:11-14`, `apps/web/src/lib/data.ts:883-890`, `apps/web/src/app/robots.ts:13-21`, `apps/web/src/app/sitemap.ts:8-12,19-55`  
+**Confidence:** Low  
+**Exploitability:** Operator mistake / misdeployment, not remote exploitation  
+**Blast Radius:** Canonical URLs, sitemap, robots, metadata, and OG tags
 
-2. **Header preservation on auth POST paths**
-   - If the current `allowMissingSource` behavior is kept, validate with real browser/proxy traffic that `Origin` or `Referer` is always present on auth-related requests in production.
+**Why this is a problem:**
+The repository ships `apps/web/src/site-config.json` with `http://localhost:3000` values, and the app falls back to that file when `BASE_URL` is not set. That fallback then flows into canonical URLs, sitemap entries, robots.txt, and SEO metadata. The docs do warn operators to replace the file or set `BASE_URL`, but the code does not enforce a production-safe value.
+
+**Concrete failure scenario:**
+A deployment boots with the checked-in config still mounted or with `BASE_URL` omitted. Public pages start advertising localhost URLs in `robots.txt`, `sitemap.xml`, OpenGraph tags, and canonical metadata. That breaks crawlability and leaks an internal hostname into user-visible metadata.
+
+**Suggested fix:**
+Make production startup/build fail closed when `BASE_URL` is missing or when the active site config still points at localhost. A small validation in `ensure-site-config.mjs` or `getSeoSettings()` would align the runtime behavior with the deployment docs.
 
 ## What I checked and did not flag
-- **Current tracked-source secrets:** no live secrets found in current repository files.
-- **Dependency audit:** `npm audit --json` in `apps/web/` returned `0` vulnerabilities.
-- **Admin API auth coverage:** `npm run lint:api-auth` passed; current `/api/admin/*` route is wrapped with `withAdminAuth(...)`.
-- **Path traversal / file serving:** upload serving path validation, symlink rejection, directory allowlist, and containment checks look solid.
-- **Session handling:** session tokens are HMAC-signed, DB-stored as hashes, compared with `timingSafeEqual`, and production refuses DB-backed secret fallback.
-- **Privacy boundary:** public data selection omits GPS, original filenames, and user filenames; compile-time guard in `data.ts` is a strong control.
-- **Backup/restore:** authenticated backup download, filename validation, symlink/realpath checks, restricted dump/restore env, restore size cap, and dangerous-SQL scanning are all materially hardened.
-- **SQL injection review:** application query paths are parameterized through Drizzle or parameterized mysql2 calls; I did not find a confirmed injection sink.
+- No current tracked-source secrets or hardcoded credentials found in the repository state reviewed here.
+- Auth/session flow is otherwise well hardened: HMAC session tokens, `httpOnly` cookies, same-origin checks on sensitive mutations, and defense-in-depth route/API auth wrappers.
+- File serving and backup download paths have solid path containment, filename validation, and symlink checks.
+- Backup/restore scanning is materially hardened against dangerous SQL payloads and concurrent restore races.
+- Public data selection still excludes GPS and original filenames from unauthenticated reads.
 
 ## Security Checklist
 - [x] Secrets scan completed
-- [x] Dependency audit completed
 - [x] Authentication/session code reviewed
 - [x] Authorization on admin/API paths reviewed
-- [x] Input validation and file handling reviewed
-- [x] Backup/restore and upload/serve paths reviewed
+- [x] Input validation and public-route query handling reviewed
+- [x] File upload / file serve / backup / restore reviewed
 - [x] Final missed-issues sweep completed
 
 ## Verification Notes
-- Secrets scan: targeted `rg` across source/docs/examples plus git-history spot check
-- Dependency audit: `npm audit --json` in `apps/web/` → 0 vulns
-- Admin API auth check: `npm run lint:api-auth` → passed
+- Static inspection of all security-relevant app, lib, route, and docs files listed above
+- Cross-file review of public tag parsing, metadata generation, CSP, and config fallbacks
+- Final sweep for common misses: auth bypass, path traversal, SSRF, session/cookie safety, and secrets leakage
