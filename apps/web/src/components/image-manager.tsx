@@ -274,7 +274,11 @@ export function ImageManager({
                                 <DialogHeader>
                                     <DialogTitle>{t('imageManager.batchAddTitle', { count: selectedIds.size })}</DialogTitle>
                                     <div className="py-2">
+                                        <Label htmlFor="batch-add-tag-input" className="mb-2 block">
+                                            {t('imageManager.addTag')}
+                                        </Label>
                                         <Input
+                                            id="batch-add-tag-input"
                                             value={tagInput}
                                             onChange={(e) => setTagInput(e.target.value)}
                                             placeholder={t('imageManager.placeholderTag')}

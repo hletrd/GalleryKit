@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import FocusTrap from '@/components/lazy-focus-trap';
-import { Info, MapPin, Calendar, Clock } from "lucide-react";
+import { Info, MapPin, Calendar, Clock, X } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
@@ -156,17 +156,27 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                     overflowY: sheetState === 'expanded' ? 'auto' : 'hidden',
                     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
             >
                 {/* Drag handle */}
-                <div className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing">
+                <div
+                    className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none"
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                >
                     <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
                 </div>
 
                 {/* Peek content — always rendered so transition is smooth */}
-                <div className="px-4 pb-3">
+                <div className="px-4 pb-3 pr-12 relative">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="absolute right-4 top-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        aria-label={t('aria.close')}
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
                     {/* Title */}
                     <h2 className="font-semibold text-base leading-snug line-clamp-2 mb-1">
                         {displayTitle}

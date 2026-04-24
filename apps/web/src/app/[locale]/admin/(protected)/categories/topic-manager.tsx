@@ -170,9 +170,18 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                             <DialogTitle>{t('categories.add')}</DialogTitle>
                         </DialogHeader>
                         <form action={handleCreate} className="space-y-4">
-                            <Input name="label" placeholder={t('categories.placeholderLabel')} required maxLength={100} />
-                            <Input name="slug" placeholder={t('categories.placeholderSlug')} required maxLength={100} />
-                            <Input type="number" name="order" placeholder={t('categories.placeholderOrder')} />
+                            <div className="grid w-full items-center gap-1.5">
+                                <label htmlFor="create-topic-label" className="text-sm font-medium leading-none">{t('categories.label')}</label>
+                                <Input id="create-topic-label" name="label" placeholder={t('categories.placeholderLabel')} required maxLength={100} />
+                            </div>
+                            <div className="grid w-full items-center gap-1.5">
+                                <label htmlFor="create-topic-slug" className="text-sm font-medium leading-none">{t('categories.slug')}</label>
+                                <Input id="create-topic-slug" name="slug" placeholder={t('categories.placeholderSlug')} required maxLength={100} />
+                            </div>
+                            <div className="grid w-full items-center gap-1.5">
+                                <label htmlFor="create-topic-order" className="text-sm font-medium leading-none">{t('categories.order')}</label>
+                                <Input id="create-topic-order" type="number" name="order" placeholder={t('categories.placeholderOrder')} />
+                            </div>
                             <div className="grid w-full items-center gap-1.5">
                                 <label htmlFor="image" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{t('categories.image')}</label>
                                 <Input id="image" type="file" name="image" accept="image/*" />
@@ -248,9 +257,18 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     {editingTopic && (
                         <div className="space-y-6">
                             <form action={handleUpdate} className="space-y-4">
-                                <Input name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required maxLength={100} />
-                                <Input name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required maxLength={100} />
-                                <Input type="number" name="order" defaultValue={editingTopic.order ?? 0} placeholder={t('categories.order')} />
+                                <div className="grid w-full items-center gap-1.5">
+                                    <label htmlFor="edit-topic-label" className="text-sm font-medium leading-none">{t('categories.label')}</label>
+                                    <Input id="edit-topic-label" name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required maxLength={100} />
+                                </div>
+                                <div className="grid w-full items-center gap-1.5">
+                                    <label htmlFor="edit-topic-slug" className="text-sm font-medium leading-none">{t('categories.slug')}</label>
+                                    <Input id="edit-topic-slug" name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required maxLength={100} />
+                                </div>
+                                <div className="grid w-full items-center gap-1.5">
+                                    <label htmlFor="edit-topic-order" className="text-sm font-medium leading-none">{t('categories.order')}</label>
+                                    <Input id="edit-topic-order" type="number" name="order" defaultValue={editingTopic.order ?? 0} placeholder={t('categories.order')} />
+                                </div>
                                 <div className="grid w-full items-center gap-1.5">
                                     <label htmlFor="edit-image" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">{t('categories.image')}</label>
                                     <Input id="edit-image" type="file" name="image" accept="image/*" />
