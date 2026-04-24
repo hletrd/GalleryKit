@@ -1,48 +1,101 @@
-# Document Specialist Deep Review — Cycle 2 Recovery (2026-04-24)
+# Document Specialist Review — Cycle 4 (Prompt 1)
 
-## Inventory and method
+## Scope
+I reviewed the authoritative docs and config surfaces against current code, focusing on:
 
-Agent-tool fan-out was attempted in one batch and retried once, but this session was already at the platform child-agent limit (`agent thread limit reached (max 6)`). Per Prompt 1 recovery rules, this compatibility lane completed the review directly and wrote this per-agent file rather than discarding partial review work. Earlier partial files for `document-specialist`, `perf-reviewer`, `product-marketer-reviewer`, and `tracer` were preserved under `.context/reviews/recovery-cycle2-partials/` before replacement.
+- `CLAUDE.md`
+- `AGENTS.md`
+- `README.md`
+- `apps/web/README.md`
+- `package.json`
+- `apps/web/package.json`
+- `apps/web/Dockerfile`
+- `apps/web/docker-compose.yml`
+- `apps/web/next.config.ts`
+- `apps/web/.env.local.example`
+- `.context/plans/README.md`
+- `.context/plans/plan-112-admin-settings-page.md`
+- `.context/plans/plan-113-minio-s3-storage.md`
+- `.context/reviews/cycle6-r2-critic.md`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/upload-limits.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/storage/index.ts`
+- `apps/web/src/lib/mysql-cli-ssl.ts`
+- `apps/web/scripts/mysql-connection-options.js`
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
 
-Review-relevant inventory was built from `git ls-files` and focused on tracked source, tests, scripts, docs, deploy config, i18n messages, and active plan/context artifacts. Dependency/build/runtime artifacts (`node_modules`, `.next`, binary screenshots/fixtures, `test-results`, tsbuildinfo) were excluded. Key surfaces inspected for this lane included:
-
-- Server actions and auth: `apps/web/src/app/actions/{auth,images,settings,sharing,topics,tags,admin-users,seo,public}.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/{action-guards,rate-limit,auth-rate-limit,restore-maintenance,revalidation}.ts`.
-- Data/schema/cache: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, public page routes under `apps/web/src/app/[locale]/(public)/**`.
-- Upload/processing/config: `apps/web/src/lib/{image-queue,process-image,upload-limits,upload-paths,gallery-config,gallery-config-shared}.ts`, settings UI/messages.
-- Tests/gates: Vitest tests under `apps/web/src/__tests__/`, Playwright tests under `apps/web/e2e/`, custom lint scripts, package scripts.
-- Docs/deploy: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `.env.local.example`, Docker/nginx/deploy files.
-
-Final sweep: re-ran targeted `rg` sweeps for `share_key`, `sharedGroupImages`, `revalidateLocalizedPaths`, `checkRateLimit`, `incrementRateLimit`, `DB_SSL`, `--ssl-mode`, `image_sizes`, and setup/init documentation, then checked each finding against current source before recording it.
+Package scripts and Docker config were checked as well; they largely align with the code paths they reference. The issues below are concentrated in stale plan/review artifacts and a few missing operator warnings.
 
 ## Findings summary
 
-| ID | Severity | Confidence | Status | Summary |
-|---|---|---|---|---|
-| AGG2C2-03 | MEDIUM | High | Confirmed | Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out |
-| AGG2C2-05 | MEDIUM | High | Confirmed | Quick-start docs run DB init before required environment setup |
+| ID | Severity | Status | Summary |
+|---|---|---|---|
+| DS-04-01 | Medium | confirmed | Stale settings-surface docs and locale copy still describe UI controls that no longer exist. |
+| DS-04-02 | Medium | confirmed | Queue concurrency is real code, but the operator-facing docs still do not document the actual `QUEUE_CONCURRENCY` knob. |
+| DS-04-03 | Medium | confirmed | `IMAGE_BASE_URL` docs miss the exact URL-shape constraints enforced by `next.config.ts`. |
+| DS-04-04 | Medium | confirmed | Top-level docs omit the default-TLS / `DB_SSL=false` behavior for non-local MySQL hosts. |
 
 ## Detailed findings
 
-### AGG2C2-03 — Backup/restore CLI SSL policy ignores the documented `DB_SSL=false` opt-out
+### DS-04-01 — Stale settings-surface docs and locale copy describe controls that are no longer present
+**Severity:** Medium
+**Status:** confirmed
+**Confidence:** High
+**Files / regions:** `.context/plans/plan-112-admin-settings-page.md:10-64`, `.context/plans/plan-113-minio-s3-storage.md:10-78`, `.context/reviews/cycle6-r2-critic.md:24-28`, `apps/web/messages/en.json:543-556`, `apps/web/messages/ko.json:543-556` vs `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:89-178`, `apps/web/src/lib/gallery-config-shared.ts:10-19`, `apps/web/src/lib/upload-limits.ts:1-12`, `apps/web/src/lib/storage/index.ts:1-18`
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `apps/web/src/app/[locale]/admin/db-actions.ts:127-140`, `apps/web/src/app/[locale]/admin/db-actions.ts:396-408`, `apps/web/src/db/index.ts:6-25`, `apps/web/scripts/mysql-connection-options.js:11-23`, `apps/web/.env.local.example:7`.
-- **Why this is a problem:** Runtime DB and migration helpers honor `DB_SSL=false` for non-local DB hosts, but admin backup/restore force `--ssl-mode=REQUIRED` for every non-local host. Operators following the documented opt-out can have app queries and migrations work while backup/restore fail.
-- **Failure scenario:** A private VPC MySQL endpoint has TLS disabled and the deployment sets `DB_SSL=false`. Admin backup/restore invoke `mysqldump`/`mysql` with `--ssl-mode=REQUIRED`, causing the maintenance operation to fail despite documented configuration.
-- **Suggested fix:** Centralize CLI SSL arg derivation from the same localhost + `DB_SSL=false` policy and test it; use the helper for both dump and restore.
+The current settings UI only renders image quality, image sizes, and the GPS privacy toggle. The live setting key list is five entries:
 
-### AGG2C2-05 — Quick-start docs run DB init before required environment setup
+- `image_quality_webp`
+- `image_quality_avif`
+- `image_quality_jpeg`
+- `image_sizes`
+- `strip_gps_on_upload`
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `README.md:87-115`, `apps/web/README.md:7-14`, `apps/web/scripts/init-db.ts:14-30`, `apps/web/scripts/mysql-connection-options.js:3-22`, `apps/web/.env.local.example:1-29`.
-- **Why this is a problem:** Both root and app quick-start flows list `npm run init` before telling users to copy/edit `.env.local`, but init/migration require DB credentials and bootstrap admin/session configuration.
-- **Failure scenario:** A fresh evaluator follows the quick start literally; `npm run init` fails with missing DB env before the docs explain where to set it, creating a broken first-run path.
-- **Suggested fix:** Reorder quick-start instructions so MySQL/env/site-config setup comes before `npm run init`, and list the login/upload smoke check after init/dev.
+But the plan/review artifacts still describe a much broader settings surface: queue concurrency, upload limits, display columns, and a storage-backend switch. The locale catalogs still contain matching headings and hints for Upload Limits and Storage Backend even though those sections are not rendered by the current settings page and the corresponding values are env-only or experimental.
 
-## Final missed-issue sweep
+**Concrete failure scenario:** a maintainer or translator consults the active plan/review docs and expects to find UI controls for queue concurrency or storage backend switching. They spend time debugging a missing setting rather than recognizing that those knobs are not part of the current admin surface.
 
-Rechecked the inventory and targeted sweeps listed above after drafting findings. No relevant tracked source/config/doc/test file in this lane was intentionally skipped beyond generated/dependency/binary artifacts.
+**Suggested fix:** mark the stale plan/review files as historical or rewrite them to the current contract; remove dead locale copy or wire the UI if those sections are meant to exist; keep the current settings contract documented as only the five live keys above.
+
+### DS-04-02 — Queue concurrency is real code, but the operator-facing docs do not document the actual env knob
+**Severity:** Medium
+**Status:** confirmed
+**Confidence:** High
+**Files / regions:** `apps/web/src/lib/image-queue.ts:116-120`, `apps/web/.env.local.example:31-38`, `apps/web/README.md:34-43`, `README.md:118-145`
+
+`image-queue.ts` still reads `process.env.QUEUE_CONCURRENCY` and falls back to `2`, but the onboarding docs and env example do not mention that knob. The env example documents `SHARP_CONCURRENCY`, which controls libvips worker threads, but not the queue concurrency that actually determines how many image jobs can run at once.
+
+**Concrete failure scenario:** an operator increases `SHARP_CONCURRENCY` expecting uploads to process more quickly, but the queue still runs at the default parallelism because `QUEUE_CONCURRENCY` was never set. Throughput stays unchanged and the person tunes the wrong layer.
+
+**Suggested fix:** add `QUEUE_CONCURRENCY` to `apps/web/.env.local.example` and the app/root README env notes, or explicitly say that queue parallelism is intentionally fixed and not an operator knob.
+
+### DS-04-03 — `IMAGE_BASE_URL` docs miss the exact URL-shape constraints enforced by the build
+**Severity:** Medium
+**Status:** confirmed
+**Confidence:** High
+**Files / regions:** `README.md:140-141`, `apps/web/README.md:37-38`, `apps/web/next.config.ts:7-31`
+
+The docs correctly say `IMAGE_BASE_URL` must be set before build time and should use HTTPS in production. The build, however, is stricter than the text makes clear: it requires an absolute `http(s)` URL and rejects credentials, query strings, and hashes entirely.
+
+**Concrete failure scenario:** a deployer uses a signed CDN URL or a URL with embedded credentials/query params. Local testing may look fine until `next build` fails with a validation error, blocking the image build step.
+
+**Suggested fix:** extend the `IMAGE_BASE_URL` docs with the exact constraints: absolute URL only, `http`/`https` only, HTTPS required in production, and no username/password/query/hash components.
+
+### DS-04-04 — Top-level docs omit the default-TLS / `DB_SSL=false` behavior for non-local MySQL hosts
+**Severity:** Medium
+**Status:** confirmed
+**Confidence:** High
+**Files / regions:** `apps/web/scripts/mysql-connection-options.js:1-23`, `apps/web/.env.local.example:1-7`, `README.md:118-145`, `apps/web/README.md:34-41`
+
+The MySQL connection helper automatically enables TLS for any non-localhost DB host unless `DB_SSL=false` is set. That behavior is only hinted in the env example comment; the higher-level README docs do not call it out.
+
+**Concrete failure scenario:** an operator points the app at a remote MySQL instance and assumes plaintext or self-signed TLS will work the same way local MySQL does. The connection fails because the helper is trying to enforce TLS by default.
+
+**Suggested fix:** add a short top-level note in README/CLAUDE/app README that non-local DB hosts default to TLS and that `DB_SSL=false` is the opt-out when the deployment intentionally uses a non-TLS or self-signed path.
+
+## Reusable takeaway
+The core code/docs contract is mostly aligned, especially for the Docker and script surfaces, but the docs still drift around the settings surface and a few environment-level knobs. The fastest cleanup path is to remove or relabel stale plan/review guidance, then patch the onboarding docs for the real env-only controls and URL/TLS constraints.
