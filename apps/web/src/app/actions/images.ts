@@ -2,7 +2,7 @@
 
 import path from 'path';
 import { statfs } from 'fs/promises';
-import { db, images, imageTags } from '@/db';
+import { db, images, imageTags, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile } from '@/lib/upload-paths';
@@ -51,6 +51,30 @@ async function collectImageCleanupFailures(tasks: {
             reason,
         }] satisfies ImageCleanupFailure[];
     });
+}
+
+async function getSharedGroupKeysForImages(imageIds: number[]) {
+    if (imageIds.length === 0) return [];
+
+    const rows = await db.select({ key: sharedGroups.key })
+        .from(sharedGroupImages)
+        .innerJoin(sharedGroups, eq(sharedGroupImages.groupId, sharedGroups.id))
+        .where(inArray(sharedGroupImages.imageId, imageIds));
+
+    return [...new Set(rows.map((row) => row.key).filter(Boolean))];
+}
+
+function getShareRevalidationPaths(shareKeys: Iterable<string | null>, groupKeys: Iterable<string>) {
+    const paths = new Set<string>();
+
+    for (const shareKey of shareKeys) {
+        if (shareKey) paths.add(`/s/${shareKey}`);
+    }
+    for (const groupKey of groupKeys) {
+        paths.add(`/g/${groupKey}`);
+    }
+
+    return [...paths];
 }
 
 // Server-side upload tracking to enforce cumulative limits across per-file invocations.
@@ -372,6 +396,7 @@ export async function deleteImage(id: number) {
         filename_webp: images.filename_webp,
         filename_avif: images.filename_avif,
         filename_jpeg: images.filename_jpeg,
+        share_key: images.share_key,
     }).from(images).where(eq(images.id, id));
     if (!image) return { error: t('imageNotFound') };
 
@@ -386,6 +411,8 @@ export async function deleteImage(id: number) {
     }
 
     const imageTopic = image.topic;
+    const affectedGroupKeys = await getSharedGroupKeysForImages([id]);
+    const shareRevalidationPaths = getShareRevalidationPaths([image.share_key], affectedGroupKeys);
 
     const currentUser = await getCurrentUser();
 
@@ -424,7 +451,7 @@ export async function deleteImage(id: number) {
         });
     }
 
-    revalidateLocalizedPaths('/', `/p/${id}`, `/${imageTopic}`, '/admin/dashboard');
+    revalidateLocalizedPaths('/', `/p/${id}`, `/${imageTopic}`, '/admin/dashboard', ...shareRevalidationPaths);
 
     return { success: true, cleanupFailureCount: cleanupFailures.length };
 }
@@ -466,6 +493,7 @@ export async function deleteImages(ids: number[]) {
         filename_webp: images.filename_webp,
         filename_avif: images.filename_avif,
         filename_jpeg: images.filename_jpeg,
+        share_key: images.share_key,
     }).from(images).where(inArray(images.id, ids));
 
     // Validate all filenames before deleting anything
@@ -483,6 +511,11 @@ export async function deleteImages(ids: number[]) {
     const foundIdSet = new Set(imageRecords.map(img => img.id));
     const foundIds = [...foundIdSet];
     const notFoundCount = ids.filter(id => !foundIdSet.has(id)).length;
+    const affectedGroupKeys = await getSharedGroupKeysForImages(foundIds);
+    const shareRevalidationPaths = getShareRevalidationPaths(
+        imageRecords.map((image) => image.share_key),
+        affectedGroupKeys,
+    );
 
     // Remove from processing queue so queue detects deletion (matches deleteImage behavior)
     const queueState = getProcessingQueueState();
@@ -551,7 +584,8 @@ export async function deleteImages(ids: number[]) {
             '/',
             '/admin/dashboard',
             ...foundIds.map(id => `/p/${id}`),
-            ...[...affectedTopics].map(topic => `/${topic}`)
+            ...[...affectedTopics].map(topic => `/${topic}`),
+            ...shareRevalidationPaths,
         );
     }
     return { success: true, count: successCount, errors: errorCount, cleanupFailureCount: cleanupFailures.length };
