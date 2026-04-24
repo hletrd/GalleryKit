@@ -1,0 +1,378 @@
+# Critic cycle1 review-plan-fix specialist review
+
+Date: 2026-04-24
+Repo: `/Users/hletrd/flash-shared/gallery`
+Reviewer posture: skeptical, cross-file, operationally biased
+
+## Scope and method
+
+I inventoried and examined the tracked **live repo surface**: runtime code, configs, scripts, docs, migrations, tests, and e2e coverage. I did **not** sample within that live surface.
+
+I explicitly excluded archival/generated/non-runtime material from issue generation:
+- archival plans (.context/plans/** + plan/**): 67
+- archival reviews (.context/reviews/**): 359
+- tracked binary assets (*.png, *.jpg, *.jpeg, *.woff2): 3
+
+I also ran non-destructive verification commands:
+- `npm test --workspace=apps/web` → **50 test files, 298 tests passed**
+- `npm run lint --workspace=apps/web` → **passed**
+- `npm run build --workspace=apps/web` → **passed**
+- `npx tsc -p apps/web/tsconfig.json --noEmit` → **fails** at `apps/web/src/__tests__/privacy-fields.test.ts(56,62)`
+
+## Review-relevant inventory (267 files examined)
+
+- **app config/docs** (21)
+  - `apps/web/.dockerignore`
+  - `apps/web/.env.local.example`
+  - `apps/web/.gitignore`
+  - `apps/web/Dockerfile`
+  - `apps/web/README.md`
+  - `apps/web/components.json`
+  - `apps/web/deploy.sh`
+  - `apps/web/docker-compose.yml`
+  - `apps/web/drizzle.config.ts`
+  - `apps/web/eslint.config.mjs`
+  - `apps/web/next.config.ts`
+  - `apps/web/nginx/default.conf`
+  - `apps/web/package.json`
+  - `apps/web/playwright.config.ts`
+  - `apps/web/postcss.config.mjs`
+  - `apps/web/public/.gitkeep`
+  - `apps/web/public/histogram-worker.js`
+  - `apps/web/tailwind.config.ts`
+  - `apps/web/tsconfig.json`
+  - `apps/web/tsconfig.scripts.json`
+  - `apps/web/vitest.config.ts`
+- **app infra** (4)
+  - `apps/web/src/i18n/request.ts`
+  - `apps/web/src/instrumentation.ts`
+  - `apps/web/src/proxy.ts`
+  - `apps/web/src/site-config.example.json`
+- **app routes/actions** (55)
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/layout.tsx`
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+  - `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+  - `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/password/password-client.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
+  - `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts`
+  - `apps/web/src/app/[locale]/admin/layout.tsx`
+  - `apps/web/src/app/[locale]/admin/login-form.tsx`
+  - `apps/web/src/app/[locale]/admin/page.tsx`
+  - `apps/web/src/app/[locale]/error.tsx`
+  - `apps/web/src/app/[locale]/globals.css`
+  - `apps/web/src/app/[locale]/layout.tsx`
+  - `apps/web/src/app/[locale]/loading.tsx`
+  - `apps/web/src/app/[locale]/not-found.tsx`
+  - `apps/web/src/app/actions.ts`
+  - `apps/web/src/app/actions/admin-users.ts`
+  - `apps/web/src/app/actions/auth.ts`
+  - `apps/web/src/app/actions/images.ts`
+  - `apps/web/src/app/actions/public.ts`
+  - `apps/web/src/app/actions/seo.ts`
+  - `apps/web/src/app/actions/settings.ts`
+  - `apps/web/src/app/actions/sharing.ts`
+  - `apps/web/src/app/actions/tags.ts`
+  - `apps/web/src/app/actions/topics.ts`
+  - `apps/web/src/app/api/admin/db/download/route.ts`
+  - `apps/web/src/app/api/health/route.ts`
+  - `apps/web/src/app/api/live/route.ts`
+  - `apps/web/src/app/api/og/route.tsx`
+  - `apps/web/src/app/apple-icon.tsx`
+  - `apps/web/src/app/global-error.tsx`
+  - `apps/web/src/app/icon.tsx`
+  - `apps/web/src/app/manifest.ts`
+  - `apps/web/src/app/robots.ts`
+  - `apps/web/src/app/sitemap.ts`
+  - `apps/web/src/app/uploads/[...path]/route.ts`
+- **components** (44)
+  - `apps/web/src/components/admin-header.tsx`
+  - `apps/web/src/components/admin-nav.tsx`
+  - `apps/web/src/components/admin-user-manager.tsx`
+  - `apps/web/src/components/footer.tsx`
+  - `apps/web/src/components/histogram.tsx`
+  - `apps/web/src/components/home-client.tsx`
+  - `apps/web/src/components/i18n-provider.tsx`
+  - `apps/web/src/components/image-manager.tsx`
+  - `apps/web/src/components/image-zoom.tsx`
+  - `apps/web/src/components/info-bottom-sheet.tsx`
+  - `apps/web/src/components/lazy-focus-trap.tsx`
+  - `apps/web/src/components/lightbox.tsx`
+  - `apps/web/src/components/load-more.tsx`
+  - `apps/web/src/components/nav-client.tsx`
+  - `apps/web/src/components/nav.tsx`
+  - `apps/web/src/components/optimistic-image.tsx`
+  - `apps/web/src/components/photo-navigation.tsx`
+  - `apps/web/src/components/photo-viewer.tsx`
+  - `apps/web/src/components/search.tsx`
+  - `apps/web/src/components/tag-filter.tsx`
+  - `apps/web/src/components/tag-input.tsx`
+  - `apps/web/src/components/theme-provider.tsx`
+  - `apps/web/src/components/topic-empty-state.tsx`
+  - `apps/web/src/components/ui/alert-dialog.tsx`
+  - `apps/web/src/components/ui/alert.tsx`
+  - `apps/web/src/components/ui/aspect-ratio.tsx`
+  - `apps/web/src/components/ui/badge.tsx`
+  - `apps/web/src/components/ui/button.tsx`
+  - `apps/web/src/components/ui/card.tsx`
+  - `apps/web/src/components/ui/dialog.tsx`
+  - `apps/web/src/components/ui/dropdown-menu.tsx`
+  - `apps/web/src/components/ui/input.tsx`
+  - `apps/web/src/components/ui/label.tsx`
+  - `apps/web/src/components/ui/progress.tsx`
+  - `apps/web/src/components/ui/scroll-area.tsx`
+  - `apps/web/src/components/ui/select.tsx`
+  - `apps/web/src/components/ui/separator.tsx`
+  - `apps/web/src/components/ui/sheet.tsx`
+  - `apps/web/src/components/ui/skeleton.tsx`
+  - `apps/web/src/components/ui/sonner.tsx`
+  - `apps/web/src/components/ui/switch.tsx`
+  - `apps/web/src/components/ui/table.tsx`
+  - `apps/web/src/components/ui/textarea.tsx`
+  - `apps/web/src/components/upload-dropzone.tsx`
+- **db** (3)
+  - `apps/web/src/db/index.ts`
+  - `apps/web/src/db/schema.ts`
+  - `apps/web/src/db/seed.ts`
+- **e2e** (6)
+  - `apps/web/e2e/admin.spec.ts`
+  - `apps/web/e2e/helpers.ts`
+  - `apps/web/e2e/nav-visual-check.spec.ts`
+  - `apps/web/e2e/origin-guard.spec.ts`
+  - `apps/web/e2e/public.spec.ts`
+  - `apps/web/e2e/test-fixes.spec.ts`
+- **i18n messages** (2)
+  - `apps/web/messages/en.json`
+  - `apps/web/messages/ko.json`
+- **lib** (44)
+  - `apps/web/src/lib/action-guards.ts`
+  - `apps/web/src/lib/action-result.ts`
+  - `apps/web/src/lib/api-auth.ts`
+  - `apps/web/src/lib/audit.ts`
+  - `apps/web/src/lib/auth-rate-limit.ts`
+  - `apps/web/src/lib/backup-filename.ts`
+  - `apps/web/src/lib/base56.ts`
+  - `apps/web/src/lib/clipboard.ts`
+  - `apps/web/src/lib/constants.ts`
+  - `apps/web/src/lib/csv-escape.ts`
+  - `apps/web/src/lib/data.ts`
+  - `apps/web/src/lib/db-restore.ts`
+  - `apps/web/src/lib/error-shell.ts`
+  - `apps/web/src/lib/exif-datetime.ts`
+  - `apps/web/src/lib/gallery-config-shared.ts`
+  - `apps/web/src/lib/gallery-config.ts`
+  - `apps/web/src/lib/image-queue.ts`
+  - `apps/web/src/lib/image-types.ts`
+  - `apps/web/src/lib/image-url.ts`
+  - `apps/web/src/lib/locale-path.ts`
+  - `apps/web/src/lib/photo-title.ts`
+  - `apps/web/src/lib/process-image.ts`
+  - `apps/web/src/lib/process-topic-image.ts`
+  - `apps/web/src/lib/queue-shutdown.ts`
+  - `apps/web/src/lib/rate-limit.ts`
+  - `apps/web/src/lib/request-origin.ts`
+  - `apps/web/src/lib/restore-maintenance.ts`
+  - `apps/web/src/lib/revalidation.ts`
+  - `apps/web/src/lib/safe-json-ld.ts`
+  - `apps/web/src/lib/sanitize.ts`
+  - `apps/web/src/lib/seo-og-url.ts`
+  - `apps/web/src/lib/serve-upload.ts`
+  - `apps/web/src/lib/session.ts`
+  - `apps/web/src/lib/sql-restore-scan.ts`
+  - `apps/web/src/lib/storage/index.ts`
+  - `apps/web/src/lib/storage/local.ts`
+  - `apps/web/src/lib/storage/types.ts`
+  - `apps/web/src/lib/tag-records.ts`
+  - `apps/web/src/lib/tag-slugs.ts`
+  - `apps/web/src/lib/upload-limits.ts`
+  - `apps/web/src/lib/upload-paths.ts`
+  - `apps/web/src/lib/upload-tracker.ts`
+  - `apps/web/src/lib/utils.ts`
+  - `apps/web/src/lib/validation.ts`
+- **migrations** (6)
+  - `apps/web/drizzle/0000_nappy_madelyne_pryor.sql`
+  - `apps/web/drizzle/0001_sync_current_schema.sql`
+  - `apps/web/drizzle/0002_fix_processed_default.sql`
+  - `apps/web/drizzle/meta/0000_snapshot.json`
+  - `apps/web/drizzle/meta/0001_snapshot.json`
+  - `apps/web/drizzle/meta/_journal.json`
+- **root/config/docs** (18)
+  - `.dockerignore`
+  - `.env.deploy.example`
+  - `.github/assets/logo.svg`
+  - `.github/dependabot.yml`
+  - `.gitignore`
+  - `.nvmrc`
+  - `.vscode/extensions.json`
+  - `.vscode/launch.json`
+  - `.vscode/settings.json`
+  - `.vscode/tasks.json`
+  - `AGENTS.md`
+  - `CLAUDE.md`
+  - `LICENSE`
+  - `README.md`
+  - `package-lock.json`
+  - `package.json`
+  - `scripts/deploy-remote.sh`
+  - `test-results/.last-run.json`
+- **scripts** (14)
+  - `apps/web/scripts/check-action-origin.ts`
+  - `apps/web/scripts/check-api-auth.ts`
+  - `apps/web/scripts/ensure-site-config.mjs`
+  - `apps/web/scripts/entrypoint.sh`
+  - `apps/web/scripts/init-db.ts`
+  - `apps/web/scripts/migrate-admin-auth.ts`
+  - `apps/web/scripts/migrate-aliases.ts`
+  - `apps/web/scripts/migrate-capture-date.js`
+  - `apps/web/scripts/migrate-titles.ts`
+  - `apps/web/scripts/migrate.js`
+  - `apps/web/scripts/migration-add-column.ts`
+  - `apps/web/scripts/mysql-connection-options.js`
+  - `apps/web/scripts/seed-admin.ts`
+  - `apps/web/scripts/seed-e2e.ts`
+- **tests** (50)
+  - `apps/web/src/__tests__/action-guards.test.ts`
+  - `apps/web/src/__tests__/admin-user-create-ordering.test.ts`
+  - `apps/web/src/__tests__/admin-users.test.ts`
+  - `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts`
+  - `apps/web/src/__tests__/auth-rate-limit.test.ts`
+  - `apps/web/src/__tests__/auth-rethrow.test.ts`
+  - `apps/web/src/__tests__/backup-download-route.test.ts`
+  - `apps/web/src/__tests__/backup-filename.test.ts`
+  - `apps/web/src/__tests__/base56.test.ts`
+  - `apps/web/src/__tests__/check-action-origin.test.ts`
+  - `apps/web/src/__tests__/check-api-auth.test.ts`
+  - `apps/web/src/__tests__/clipboard.test.ts`
+  - `apps/web/src/__tests__/csv-escape.test.ts`
+  - `apps/web/src/__tests__/data-pagination.test.ts`
+  - `apps/web/src/__tests__/db-pool-connection-handler.test.ts`
+  - `apps/web/src/__tests__/db-restore.test.ts`
+  - `apps/web/src/__tests__/error-shell.test.ts`
+  - `apps/web/src/__tests__/exif-datetime.test.ts`
+  - `apps/web/src/__tests__/gallery-config-shared.test.ts`
+  - `apps/web/src/__tests__/health-route.test.ts`
+  - `apps/web/src/__tests__/histogram.test.ts`
+  - `apps/web/src/__tests__/image-url.test.ts`
+  - `apps/web/src/__tests__/images-actions.test.ts`
+  - `apps/web/src/__tests__/lightbox.test.ts`
+  - `apps/web/src/__tests__/live-route.test.ts`
+  - `apps/web/src/__tests__/locale-path.test.ts`
+  - `apps/web/src/__tests__/next-config.test.ts`
+  - `apps/web/src/__tests__/photo-title.test.ts`
+  - `apps/web/src/__tests__/privacy-fields.test.ts`
+  - `apps/web/src/__tests__/public-actions.test.ts`
+  - `apps/web/src/__tests__/queue-shutdown.test.ts`
+  - `apps/web/src/__tests__/rate-limit.test.ts`
+  - `apps/web/src/__tests__/request-origin.test.ts`
+  - `apps/web/src/__tests__/restore-maintenance.test.ts`
+  - `apps/web/src/__tests__/revalidation.test.ts`
+  - `apps/web/src/__tests__/safe-json-ld.test.ts`
+  - `apps/web/src/__tests__/sanitize.test.ts`
+  - `apps/web/src/__tests__/seo-actions.test.ts`
+  - `apps/web/src/__tests__/serve-upload.test.ts`
+  - `apps/web/src/__tests__/session.test.ts`
+  - `apps/web/src/__tests__/shared-page-title.test.ts`
+  - `apps/web/src/__tests__/sql-restore-scan.test.ts`
+  - `apps/web/src/__tests__/tag-input.test.ts`
+  - `apps/web/src/__tests__/tag-records.test.ts`
+  - `apps/web/src/__tests__/tag-slugs.test.ts`
+  - `apps/web/src/__tests__/tags-actions.test.ts`
+  - `apps/web/src/__tests__/topics-actions.test.ts`
+  - `apps/web/src/__tests__/upload-dropzone.test.ts`
+  - `apps/web/src/__tests__/upload-tracker.test.ts`
+  - `apps/web/src/__tests__/validation.test.ts`
+
+## Findings
+
+### 1) Confirmed: `createAdminUser` leaks DB-backed rate-limit counts on the over-limit path
+- **Severity:** Medium
+- **Confidence:** High
+- **Status:** Confirmed issue
+- **Code region:** `apps/web/src/app/actions/admin-users.ts:114-129`
+- **Why this matters:** this action pre-increments the persistent `user_create` bucket, but the over-limit branch only repairs the in-memory mirror.
+- **Concrete failure scenario:** an admin hits the hourly create-user cap. Every extra blocked click still executes `incrementRateLimit(...)` and leaves the DB row inflated. After a process restart or on another node, the DB is the source of truth, so the admin remains over-budget longer than intended.
+- **Evidence:** unlike `searchImagesAction` and `sharing.ts`, this branch does **not** call `decrementRateLimit` / a symmetric rollback helper after `isRateLimitExceeded(...)` trips.
+- **Suggested fix:** factor a shared rollback helper for `user_create` and invoke it on the over-limit branch, matching the already-fixed symmetry in `apps/web/src/app/actions/public.ts:65-86` and `apps/web/src/app/actions/sharing.ts:119-129,234-239`.
+
+### 2) Likely risk: restore maintenance is process-local, so restore fencing is not safe in multi-instance / multi-process deployment shapes
+- **Severity:** High
+- **Confidence:** Medium
+- **Status:** Likely risk with strong evidence
+- **Code region:**
+  - `apps/web/src/lib/restore-maintenance.ts:1-55`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:245-291`
+  - `apps/web/src/lib/image-queue.ts:163-168,374-380`
+  - `apps/web/src/app/api/health/route.ts:7-13`
+  - `apps/web/src/lib/data.ts:28-39`
+- **Why this matters:** the maintenance flag is just `globalThis[Symbol.for(...)]`. The DB advisory lock stops **concurrent restores**, but it does **not** propagate the "maintenance mode" fence to other app processes.
+- **Concrete failure scenario:** instance A starts `restoreDatabase()` and sets its local flag. Instance B (or another Node process after clustering/restart) keeps accepting uploads/admin writes, continues queue work, and reports non-maintenance health. That creates write-vs-restore races against the same database.
+- **Cross-file coupling:** the repo relies on `isRestoreMaintenanceActive()` to block queueing, view-count buffering, health reporting, and many actions, but all of those checks read only the local boolean.
+- **Suggested fix:** store restore-maintenance state in shared storage (DB row, Redis, filesystem lock, etc.) and make the read-side gates consult that shared state; alternatively, pair the GET_LOCK with a durable maintenance row checked by every guarded surface.
+
+### 3) Confirmed: the repo is not type-clean, and there is no package-level typecheck script catching it
+- **Severity:** Medium
+- **Confidence:** High
+- **Status:** Confirmed issue
+- **Code region:**
+  - `apps/web/src/__tests__/privacy-fields.test.ts:54-57`
+  - `apps/web/package.json:8-21`
+  - `apps/web/tsconfig.json:24-30`
+- **Why this matters:** lint/tests/build all pass, so this regression can sit unnoticed until a contributor/editor/CI runs plain TypeScript verification.
+- **Concrete failure scenario:** `npx tsc -p apps/web/tsconfig.json --noEmit` fails because `publicSelectFieldKeys.includes(key)` expects a public-key union, but `key` comes from the broader admin-key union. That breaks strict editor feedback and any future CI typecheck gate.
+- **Observed failure:** `apps/web/src/__tests__/privacy-fields.test.ts(56,62): error TS2345 ... 'filename_original' is not assignable ...`
+- **Suggested fix:** compare via `new Set<string>(publicSelectFieldKeys)` or widen the array type before `.includes(...)`; then add a first-class `typecheck` script and run it in CI/local verification.
+
+### 4) Likely risk: database backups accumulate forever in the persistent data volume
+- **Severity:** Medium
+- **Confidence:** Medium-High
+- **Status:** Likely operational risk
+- **Code region:**
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:120-123,168-221`
+  - `apps/web/src/app/api/admin/db/download/route.ts:36-68`
+  - `apps/web/docker-compose.yml:19-22`
+- **Why this matters:** the system writes every successful dump to `data/backups`, persists that directory, exposes download, but has no retention, listing, delete, or pruning path.
+- **Concrete failure scenario:** periodic manual/automated backups eventually fill `./data`; once the volume fills, uploads start failing the disk-space precheck or writes fail mid-request, and backup/restore become brittle exactly when operators need them.
+- **Suggested fix:** add explicit retention (age/count cap), admin listing + delete, or move backups to object storage with lifecycle rules.
+
+### 5) Likely risk: shared-group view counts are intentionally lossy and can silently drop data under crash/outage pressure
+- **Severity:** Low-Medium
+- **Confidence:** Medium
+- **Status:** Likely risk
+- **Code region:**
+  - `apps/web/src/lib/data.ts:11-39,87-104`
+  - `apps/web/src/instrumentation.ts:8-30`
+- **Why this matters:** view counts are buffered in memory for up to 5 seconds and hard-drop new groups once the buffer reaches 1000 entries.
+- **Concrete failure scenario:** a crash/SIGKILL/redeploy before graceful shutdown loses all buffered increments; a DB outage triggers backoff and can drop fresh increments once the buffer is full. Operators see silently low share-view analytics rather than explicit degraded telemetry.
+- **Suggested fix:** if these counts matter, move to a durable queue / shared buffer or perform immediate atomic DB increments; at minimum, surface dropped-count metrics so loss is observable.
+
+## Missed-issues sweep
+
+I did a final sweep over the repo’s highest-risk paths: auth/origin checks, upload path traversal, backup/restore, restore SQL scanning, privacy field separation, queue shutdown, deployment scripts, Docker/runtime headers, and the main public/admin routes.
+
+### What I did **not** find as a confirmed issue
+- No direct admin auth bypass in the current protected-page flow (`proxy.ts` + protected layouts + server-side `isAdmin()` checks).
+- No confirmed public upload traversal in the live `/uploads` serving path; the current `lstat` + `realpath` containment checks in `serve-upload.ts` are materially stronger than the common naive `path.join` pattern.
+- No failing unit/e2e-style test suite from the shipped Vitest surface; current regressions are more about operational assumptions and missing gates than obvious broken behavior.
+
+### Residual uncertainty
+- The restore-maintenance and lossy-buffer findings depend on deployment shape and operational expectations; they become much more serious if the app is ever clustered or run behind multiple app instances.
+- I excluded archival plans/reviews from issue generation because they are not live runtime logic; if you want process/governance review of those artifacts too, that should be a separate pass.

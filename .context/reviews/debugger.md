@@ -1,39 +1,52 @@
-# Gallery repository debugger review
+# Debugger Review — Gallery Workspace
 
-I reviewed the repo inventory first, then walked the relevant app, lib, component, route, and test files end-to-end before doing a final missed-issues sweep.
+Scope: reviewed the runtime source tree under `apps/web/src/**`, plus the web app configs and route handlers that affect auth, uploads, pagination, sharing, restore/backup, and image serving. I also ran `npm run typecheck --workspace=apps/web` and `npm test --workspace=apps/web` successfully.
 
-## Confirmed issues
+## Confirmed
 
-### 1) Info bottom sheet opens in the wrong state
-- **File:** `apps/web/src/components/info-bottom-sheet.tsx:34-42`
-- **Severity:** medium
-- **Confidence:** high
-- **Failure scenario:** when the mobile info panel is opened from a closed state, the effect forces `sheetState` to `expanded` instead of the documented `peek` state. That means the first tap opens the full sheet with backdrop/focus-trap behavior, which is a different interaction than the surrounding logic and comments describe.
-- **Fix:** make the open-transition state match the intended peek behavior, or update the comments/tests if expanded is now the desired UX. Keep the open-state reset in one place so the trigger/backdrop logic stays aligned.
+### 1) Newly processed uploads can stay hidden until ISR expiry
+- **Severity:** Medium
+- **Confidence:** High
+- **Files:**
+  - `apps/web/src/app/actions/images.ts:338-339`
+  - `apps/web/src/lib/image-queue.ts:296-300`
+  - `apps/web/src/app/[locale]/(public)/page.tsx:16`
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:16`
+- **Failure scenario:** `uploadImages()` revalidates `/` and the topic path immediately after the DB insert, but the new row is still `processed=false` at that moment. The queue later flips `processed=true` and deliberately does **not** revalidate on success. Because the public homepage/topic pages are ISR-cached for 3600s, the new photo can remain absent from the gallery until the cache naturally expires or some unrelated mutation revalidates the path.
+- **Concrete fix:** move the relevant `revalidateLocalizedPaths('/', '/<topic>')` call to the queue success path after `processed=true` is committed, or add a small batched flush in `image-queue.ts` so successful processing invalidates the homepage/topic pages once the image is actually visible.
 
-### 2) Admin backup download auth can emit cacheable 401s
-- **File:** `apps/web/src/lib/api-auth.ts:12-18` and `apps/web/src/app/api/admin/db/download/route.ts:13-32`
-- **Severity:** medium
-- **Confidence:** high
-- **Failure scenario:** the `withAdminAuth()` wrapper returns a plain JSON 401 before the route body runs, so the route-level no-store headers never execute for unauthenticated requests. A proxy or browser cache can therefore retain the denial response for `/api/admin/db/download?...`, causing later authenticated download attempts to receive a stale unauthorized response.
-- **Fix:** have `withAdminAuth()` return a response with `Cache-Control: no-store, no-cache, must-revalidate` (and ideally `Pragma: no-cache`) on the unauthenticated path, or move the auth check into a shared helper that always attaches anti-cache headers.
+## Likely
 
-## Likely risks
+### 2) Offset pagination on a live sort order can skip/duplicate items
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Files:**
+  - `apps/web/src/lib/data.ts:318-335`
+  - `apps/web/src/lib/data.ts:359-391`
+  - `apps/web/src/lib/data.ts:398-417`
+  - `apps/web/src/components/load-more.tsx:30-66`
+  - `apps/web/src/components/home-client.tsx:252-259`
+- **Failure scenario:** the gallery feed is sorted by mutable fields (`capture_date`, `created_at`, `id`) and paged with `OFFSET`. If an upload/delete happens while a user is paging, rows can shift above or below the current offset. The user then sees duplicates, gaps, or an apparent “missing photo” when loading more.
+- **Concrete fix:** switch to cursor-based pagination using the existing sort tuple `(capture_date, created_at, id)` instead of `OFFSET`, and have `LoadMore` carry a cursor from the last visible item.
 
-### 3) Infinite scroll uses offset pagination against a live, mutable sort order
-- **File:** `apps/web/src/lib/data.ts:318-335` and `359-391`; `apps/web/src/components/load-more.tsx:29-51`
-- **Severity:** medium
-- **Confidence:** high
-- **Failure scenario:** the gallery feed is sorted by `(capture_date, created_at, id)` but paged by `offset`. If uploads or deletions happen while a user is paging, rows can shift above the current offset. The next fetch can then duplicate already-shown photos or skip unseen ones, which is very hard to reason about from the client side.
-- **Fix:** switch the load-more flow to cursor pagination keyed off the last seen sort tuple, or introduce a snapshot token so paging is stable even as the underlying table changes.
-
-### 4) CSV export is fully materialized in memory and returned through a server action
+### 3) CSV export materializes the full result set and the full CSV string in memory
+- **Severity:** Medium
+- **Confidence:** High
 - **File:** `apps/web/src/app/[locale]/admin/db-actions.ts:50-98`
-- **Severity:** medium
-- **Confidence:** medium
-- **Failure scenario:** for large galleries, the export path allocates the DB result array, then a full `csvLines` array, then the final `csvContent` string, and finally ships that string through the server-action response. Near the 50k-row cap, this can become slow or fail with memory/transport limits before the browser ever gets a downloadable file.
-- **Fix:** stream CSV from an authenticated route or write it to a temporary file and download it using the existing backup-download pattern instead of returning the full payload from the action.
+- **Failure scenario:** `exportImagesCsv()` loads up to 50k rows, builds `csvLines: string[]`, then `join()`s them into one large string and returns that string through a server action. Large galleries can hit memory pressure, slow responses, or transport limits before the browser even starts downloading.
+- **Concrete fix:** stream the export to a temp file or directly to the authenticated download route pattern already used for database backups, instead of returning the entire CSV payload from the action.
 
-## Missed-issues sweep
-- I re-checked the public routes, auth/session flow, upload/processing queue, restore pipeline, and the larger client components for race windows, stale assumptions, and brittle failure handling.
-- I did not find any additional high-confidence defects beyond the four items above.
+## Risk
+
+### 4) Experimental local storage writes are not atomic on failure
+- **Severity:** Low
+- **Confidence:** Low
+- **File:** `apps/web/src/lib/storage/local.ts:55-77`
+- **Failure scenario:** `writeStream()` and `writeBuffer()` write directly to the final destination path. If the stream/write fails mid-flight, a truncated file can be left behind and later reads may observe a partially written object.
+- **Concrete fix:** write to a temp key and rename on success, or delete the destination on write failure before returning.
+
+## Final sweep
+
+- I re-checked the previously reported info-bottom-sheet and admin backup cache issues; they appear fixed and are not repeated here.
+- I did not find additional high-confidence defects in auth/session/origin checks, upload/delete flows, sharing, serve-upload containment, or the SQL restore scanner beyond the findings above.
+- Skipped only generated/build artifacts and review-artifact files under `.context/reviews/**`; the runtime source files in `apps/web/src/**` and the relevant config/route files were reviewed.

@@ -75,3 +75,59 @@ Browser verification was used where the app would render; code review was used f
 
 ## Final sweep
 No additional UI/UX, accessibility, responsive, loading/empty/error-state, i18n/RTL, or perceived-performance issues were strong enough to report beyond the six above.
+
+---
+
+# Designer Review — Cycle 2 (2026-04-24)
+
+## Scope and inventory covered
+I re-reviewed the full UI surface after the earlier cycle, with emphasis on the current Next.js frontend implementation:
+
+- App shell / route chrome: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/globals.css`, `apps/web/src/app/[locale]/loading.tsx`, `apps/web/src/app/[locale]/error.tsx`, `apps/web/src/app/[locale]/not-found.tsx`, `apps/web/src/app/global-error.tsx`
+- Public routes: `apps/web/src/app/[locale]/(public)/layout.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- Admin routes: `apps/web/src/app/[locale]/admin/layout.tsx`, `apps/web/src/app/[locale]/admin/page.tsx`, `apps/web/src/app/[locale]/admin/login-form.tsx`, `apps/web/src/app/[locale]/admin/(protected)/*`
+- Shared components: navigation, search, gallery grid, lightbox, photo viewer/navigation, upload dropzone, tag controls, admin managers, error/loading shells, and shadcn/Radix primitives
+- Supporting UX helpers: `apps/web/src/lib/locale-path.ts`, `apps/web/src/lib/photo-title.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/image-url.ts`, `apps/web/src/lib/error-shell.ts`, `apps/web/src/lib/clipboard.ts`
+- Tests and E2E: `apps/web/src/__tests__/*` and `apps/web/e2e/*` relevant to search, lightbox, nav, tag input, and UI states
+
+Browser verification was attempted against the running dev server. The live gallery route could not fully render because the local database was unavailable in this environment, so the app fell back to the generic error shell. That still confirmed the app boots and that the error boundary copy is active, but it limited runtime inspection of the gallery itself.
+
+## Findings summary
+- Confirmed issues: 3
+- Likely issues: 0
+- Manual re-check needed: 0
+
+## Confirmed issues
+
+### DES7 — The search dialog’s primary input removes its visible focus indicator
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Evidence:** `apps/web/src/components/search.tsx:182-202`
+  Selector: `#search-input`
+- **Why it is a problem:** the shared `Input` primitive already removes the default outline, and the search overlay then overrides the focus ring with `focus-visible:ring-0`. That leaves the modal’s first focus target with no visible focus affordance beyond the text caret.
+- **Scenario:** a keyboard user presses Cmd/Ctrl+K, the dialog opens, and focus lands in the search field. Because the field has no visible ring or border change, it is easy to miss where typing will go.
+- **Fix:** restore a visible focus treatment for the search input. A 2px ring or accent border on focus is enough; keep the modal layout but do not zero out the focus ring.
+
+### DES8 — Search results mix listbox semantics with link navigation, so Enter on a typed query does not navigate
+- **Severity:** MEDIUM
+- **Confidence:** MEDIUM
+- **Evidence:** `apps/web/src/components/search.tsx:169-245`
+  Selectors: `#search-dialog`, `#search-results [href]`
+- **Why it is a problem:** the overlay advertises a `role="listbox"` but each row is a link, not a true option. The keyboard model is also incomplete: pressing Enter only works when a result is arrow-selected; typing a query and pressing Enter does nothing.
+- **Scenario:** a user opens search, types a title, and presses Enter expecting the first match to open. Nothing happens unless they first use the arrow keys, which is a poor affordance for a primary navigation tool.
+- **Fix:** choose one interaction model and finish it. Either:
+  - render a standard searchable link list and let Enter activate the first visible result, or
+  - implement a proper combobox/listbox with selectable options and `aria-selected`/`aria-activedescendant` kept in sync.
+
+### DES9 — Upload previews claim support for file types the browser image element cannot reliably display
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Evidence:** `apps/web/src/components/upload-dropzone.tsx:100-102, 321-327`
+  Selector: the preview `<img>` inside each file card
+- **Why it is a problem:** the dropzone accepts `.arw`, `.heic`, `.heif`, `.tiff`, `.tif`, and other formats, but the preview grid uses a plain `<img src={previewUrl}>`. Many of those formats are not natively renderable in common browsers, so the preview area can be blank or broken even though the file was accepted.
+- **Scenario:** a photographer drops a HEIC or RAW file, sees it accepted, and then gets an empty preview tile. The user cannot tell whether the file was imported correctly or whether the preview system failed.
+- **Fix:** either narrow the accepted previewable formats, or add a fallback presentation for unsupported types (file badge, icon, dimensions, or server-generated preview) so the UI never shows a broken image tile.
+
+## Final sweep
+- I did not find any additional high-confidence issues that were strong enough to report after re-checking the remaining UI files and tests.
+- RTL is not currently a shipped concern because the locale set is `en`/`ko`, but the root layout still hard-codes `dir="ltr"` in `apps/web/src/app/[locale]/layout.tsx:79-85`; revisit that if an RTL locale is ever introduced.
