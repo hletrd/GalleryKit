@@ -91,13 +91,12 @@ export async function updateGallerySettings(settings: Record<string, string>) {
             ?? defaults.image_sizes;
 
         if (normalizedImageSizes !== currentImageSizes) {
-            const [processedImage] = await db
+            const [existingImage] = await db
                 .select({ id: images.id })
                 .from(images)
-                .where(eq(images.processed, true))
                 .limit(1);
 
-            if (processedImage) {
+            if (existingImage) {
                 return { error: t('imageSizesLocked') };
             }
         }

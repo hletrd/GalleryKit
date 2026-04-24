@@ -441,7 +441,7 @@
     "failedToFetchGallerySettings": "Failed to fetch gallery settings",
     "invalidSettingKey": "Invalid setting key",
     "invalidSettingValue": "Invalid value for setting: {key}",
-    "imageSizesLocked": "Output sizes can't be changed after images have already been processed. Keep the current sizes or regenerate the library first.",
+    "imageSizesLocked": "Output sizes can't be changed after photos have been uploaded. Keep the current sizes or regenerate the library first.",
     "failedToUpdateGallerySettings": "Failed to update gallery settings",
     "failedToSwitchStorageBackend": "Failed to switch storage backend"
   },
@@ -524,7 +524,7 @@
     "jpegQuality": "JPEG Quality",
     "qualityHint": "1-100. Higher = better quality, larger files.",
     "imageSizes": "Output Sizes",
-    "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096). Values are sorted/deduped automatically, limited to 8 sizes, and can't be changed after photos have already been processed.",
+    "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096). Values are sorted/deduped automatically, limited to 8 sizes, and can't be changed after photos have been uploaded.",
     "queueConcurrency": "Processing Concurrency",
     "queueConcurrencyHint": "1-16. Number of images processed simultaneously. Higher uses more CPU/memory.",
     "galleryDisplayTitle": "Gallery Display",

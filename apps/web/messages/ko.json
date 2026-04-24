@@ -441,7 +441,7 @@
     "failedToFetchGallerySettings": "갤러리 설정을 불러오지 못했습니다",
     "invalidSettingKey": "잘못된 설정 키입니다",
     "invalidSettingValue": "설정값이 올바르지 않습니다: {key}",
-    "imageSizesLocked": "이미 처리된 사진이 있으면 출력 크기를 변경할 수 없습니다. 현재 크기를 유지하거나 라이브러리를 다시 생성해 주세요.",
+    "imageSizesLocked": "사진을 업로드한 뒤에는 출력 크기를 변경할 수 없습니다. 현재 크기를 유지하거나 라이브러리를 다시 생성해 주세요.",
     "failedToUpdateGallerySettings": "갤러리 설정 저장에 실패했습니다",
     "failedToSwitchStorageBackend": "스토리지 백엔드 전환에 실패했습니다"
   },
@@ -524,7 +524,7 @@
     "jpegQuality": "JPEG 품질",
     "qualityHint": "1-100. 높을수록 화질이 좋지만 파일이 커집니다.",
     "imageSizes": "출력 크기",
-    "imageSizesHint": "쉼표로 구분된 픽셀 너비 (예: 640,1536,2048,4096)입니다. 값은 자동으로 정렬/중복 제거되며 최대 8개까지만 허용되고, 사진이 이미 처리된 뒤에는 변경할 수 없습니다.",
+    "imageSizesHint": "쉼표로 구분된 픽셀 너비 (예: 640,1536,2048,4096)입니다. 값은 자동으로 정렬/중복 제거되며 최대 8개까지만 허용되고, 사진을 업로드한 뒤에는 변경할 수 없습니다.",
     "queueConcurrency": "처리 동시성",
     "queueConcurrencyHint": "1-16. 동시에 처리할 이미지 수입니다. 높을수록 CPU/메모리 사용량이 증가합니다.",
     "galleryDisplayTitle": "갤러리 표시",
