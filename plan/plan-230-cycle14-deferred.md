@@ -118,4 +118,10 @@ All deferrals respect repo policy: only LOW severity (no HIGH/MEDIUM/security/co
 
 ## Done condition
 
-This plan is informational; there is no implementation work this cycle. The cycle bookkeeping commit will record this plan + the per-agent reviews + the aggregate, then the per-cycle deploy will run.
+This plan is informational; there is no implementation work this cycle. The cycle bookkeeping commit recorded this plan + the per-agent reviews + the aggregate.
+
+## Deploy log
+
+- Bookkeeping commit: `00000000d7209bce3ca22a78bd7b94ef698784e0` (mined to 8 leading hex zeros, GPG-signed).
+- `npm run deploy` (per-cycle) completed successfully on 2026-04-23. Docker image `web-web` rebuilt and `gallerykit-web` container recreated and started; app reports running at http://localhost:3000.
+- DEPLOY: per-cycle-success.
