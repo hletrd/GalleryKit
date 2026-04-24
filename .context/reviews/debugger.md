@@ -1,53 +1,44 @@
-# Debugger Review — Cycle 3
+# Debugger Review — Cycle 4
 
 ## Scope reviewed
-Inspected the high-risk mutation and serving paths across:
-- `apps/web/src/app/actions/{auth,images,public,sharing,tags,topics,seo,settings,admin-users}.ts`
-- `apps/web/src/app/[locale]/admin/db-actions.ts`
-- `apps/web/src/lib/{sql-restore-scan,db-restore,rate-limit,auth-rate-limit,request-origin,restore-maintenance,image-queue,process-image,upload-paths,data,session,revalidation,photo-title}.ts`
-- public/shared route components under `apps/web/src/app/[locale]/(public)/...`
-- supporting tests in `apps/web/src/__tests__/...`
+Inventory-first sweep across the app router, server actions, shared libs, UI components, DB helpers, and operational scripts. The highest-risk code paths inspected in detail were:
+- `apps/web/src/app/actions/{auth,images,public,seo,sharing,settings,topics}.ts`
+- `apps/web/src/app/[locale]/(public)/*` and `apps/web/src/app/[locale]/admin/*`
+- `apps/web/src/app/api/{health,live,og}.ts*`, `sitemap.ts`, `robots.ts`, `manifest.ts`
+- `apps/web/src/lib/{data,image-url,process-image,serve-upload,revalidation,validation,tag-records,tag-slugs,restore-maintenance,request-origin,rate-limit,upload-paths}.ts`
+- `apps/web/src/components/*` relevant to public rendering and admin mutations
+- supporting tests in `apps/web/src/__tests__/*`
+
+## Verification performed
+- `npm test --workspace=apps/web` ✅
+- `npm run typecheck --workspace=apps/web` ✅
+- `npm run build --workspace=apps/web` ✅
 
 ## Findings
 
-### 1) Restore scanner lets destructive table-level SQL through
-- **Severity:** High
-- **Confidence:** High
-- **Status:** Confirmed
-- **Code region:**
-  - `apps/web/src/lib/sql-restore-scan.ts:1-52`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:339-359`
-- **What fails:** The restore scanner blocks a long denylist of statements, but it does **not** block `DROP TABLE`, `DELETE FROM`, or `TRUNCATE TABLE`. The restore path also explicitly accepts any file whose header starts with `DROP`/`INSERT`/`CREATE`/`SET`, so a malicious SQL file can pass the header check and then execute destructive table-level statements under `mysql --one-database`.
-- **Concrete failure scenario:** An attacker uploads a “backup” containing:
-  - `DROP TABLE images;`
-  - `DELETE FROM admin_users;`
-  - or `TRUNCATE TABLE sessions;`
-  The current scanner returns `false` for `containsDangerousSql('DROP TABLE images;')` and `containsDangerousSql('DELETE FROM images;')`, so the restore proceeds and wipes data.
-- **Suggested fix:** Expand the restore denylist to cover destructive table statements at minimum (`DROP TABLE`, `DELETE FROM`, `TRUNCATE TABLE`) and add tests for those exact cases. If arbitrary external dumps must be supported, replace the regex heuristic with a stricter statement allowlist.
-- **Risk:** Broad — this is a restore-path data-destruction vulnerability.
-
-### 2) Update mutations can report success after a concurrent delete
+### 1) Sitemap can exceed the 50k-URL limit because topics are unbounded
 - **Severity:** Medium
 - **Confidence:** High
 - **Status:** Confirmed
 - **Code region:**
-  - Primary example: `apps/web/src/app/actions/tags.ts:74-90`
-  - Same pattern also appears in `apps/web/src/app/actions/topics.ts:243-257` and `apps/web/src/app/actions/images.ts:625-650`
-- **What fails:** These update flows do a pre-read (`SELECT ... LIMIT 1`) and then run `UPDATE ... WHERE id = ?`, but they never check `affectedRows`. If another request deletes the row between the read and the update, the mutation becomes a silent no-op and still returns success, logs an audit event, and revalidates paths as if the write succeeded.
-- **Concrete failure scenario:** Admin A opens tag edit form for tag `#travel`. Admin B deletes that tag a moment later. Admin A submits a rename. The `SELECT` sees the tag, the `UPDATE` affects 0 rows, and `updateTag()` still returns `{ success: true }`.
-- **Suggested fix:** Capture the update result and treat `affectedRows === 0` as a not-found/concurrent-write failure before logging or revalidating. The same guard should be added to the sibling topic and image-metadata update flows.
-- **Risk:** Moderate — stale UI, false success responses, and inconsistent audit/revalidation behavior.
+  - `apps/web/src/app/sitemap.ts:15-54`
+  - `apps/web/src/lib/data.ts:202-204`
+  - `apps/web/src/app/actions/topics.ts:59-145`
+- **What fails:** The sitemap caps images at 24,000, but it emits **every topic for every locale** with no topic cap. `getTopics()` returns the full topic table, and `createTopic()` has no global ceiling, so the sitemap array grows without bound as content grows.
+- **Concrete failure scenario:** With 24,000 images and 1,001 topics, the generated sitemap contains `2 homepage + (2 * 1,001 topics) + (2 * 24,000 images) = 50,004 URLs`. That crosses the Google sitemap file limit, so entries past the cap can be truncated or ignored by crawlers.
+- **Suggested fix:** Apply a topic cap in `sitemap.ts` as well, or split the sitemap into multiple files / a sitemap index. If you keep one file, the current image budget leaves room for only 999 topics at 2 locales.
+- **Risk:** SEO/indexing failure and avoidable request-time overhead as topic count grows.
 
-### 3) Photo-share creation charges quota even when the image disappears mid-flight
-- **Severity:** Low to Medium
-- **Confidence:** High
-- **Status:** Confirmed by code path
-- **Code region:** `apps/web/src/app/actions/sharing.ts:141-163`
-- **What fails:** `createPhotoShareLink()` pre-increments the share rate limit, then retries an atomic update. If the image is deleted after the initial read but before the update, the code returns `imageNotFound` at the `!refreshedImage` branch without rolling back the pre-incremented share counters.
-- **Concrete failure scenario:** An admin clicks “Create share link” while another admin deletes the photo in the same window. The action fails correctly, but the one-minute share quota is still consumed, so repeated races can exhaust the 20/minute budget without ever creating a share link.
-- **Suggested fix:** Roll back both the in-memory and DB share counters before returning `imageNotFound` in the `!refreshedImage` branch, mirroring the existing rollback used for other non-retryable failures.
-- **Risk:** Narrow — quota leak / user-visible throttling on a rare race.
+## Missed-issues sweep / skipped files
+### Reviewed but not escalated
+- `apps/web/src/lib/tag-records.ts:5-12` — spot-checked locale-sensitive slug generation; no repo-default failure path was established, so it was not promoted to a finding.
+- `apps/web/src/app/api/og/route.tsx:6` — build emits the known edge-runtime/static-generation warning; I did not treat it as a bug because it appears intentional and was already documented in prior planning artifacts.
+- Shared upload/queue paths (`process-image.ts`, `image-queue.ts`, `serve-upload.ts`) were inspected for race/cleanup hazards; no additional high-confidence regressions were confirmed beyond the sitemap issue above.
 
-## Similar-pattern watchlist
-- `apps/web/src/app/actions/topics.ts:243-257` and `apps/web/src/app/actions/images.ts:625-650` have the same unchecked-update pattern as `tags.ts`.
-- `apps/web/src/app/actions/sharing.ts` already handles rate-limit rollback on most error branches; the missing rollback is isolated to the image-not-found race.
+### Intentionally not deep-dived
+- Generated/artifact areas under `.context/`, build outputs, and dependency trees (`node_modules`, `.next`, etc.)
+- Long-form docs and historical review artifacts outside the active runtime path
+- Test fixtures and images that do not affect production request flow
+
+## Bottom line
+I found one confirmed latent bug with a concrete growth-triggered failure mode: the sitemap will eventually exceed the 50k URL ceiling because topics are uncapped. No other high-confidence production bugs were confirmed in this cycle.
