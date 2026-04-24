@@ -1,105 +1,133 @@
-# Critic Review — Cycle 3 review-plan-fix
+# Critic Review — PROMPT 1 / cycle 4/100
 
 ## Inventory / coverage
 
-Reviewed the highest-signal repo surfaces and their cross-file interactions:
+Reviewed the highest-signal repository surfaces for product correctness, hidden assumptions, brittle invariants, review-history drift, and cross-file coupling.
 
-- Auth / session / rate limiting:
+### Docs / config / deploy
+- `README.md`
+- `apps/web/README.md`
+- `package.json`
+- `apps/web/package.json`
+- `apps/web/next.config.ts`
+- `apps/web/Dockerfile`
+- `apps/web/docker-compose.yml`
+- `apps/web/nginx/default.conf`
+
+### Prior review / plan history
+- `.context/reviews/critic.md`
+- `.context/reviews/_aggregate-cycle4-rpl.md`
+- `.context/reviews/critic-cycle4-rpl2.md`
+- `plan/cycle4-gate-warnings.md`
+
+### Core app surfaces
+- Auth / session / provenance:
   - `apps/web/src/app/actions/auth.ts`
   - `apps/web/src/lib/session.ts`
-  - `apps/web/src/lib/rate-limit.ts`
-  - `apps/web/src/lib/auth-rate-limit.ts`
   - `apps/web/src/lib/request-origin.ts`
   - `apps/web/src/lib/action-guards.ts`
-  - `apps/web/src/proxy.ts`
-- Public pages / SEO / OG:
+  - `apps/web/src/lib/api-auth.ts`
+- Public pages / metadata / sharing:
   - `apps/web/src/app/[locale]/(public)/page.tsx`
   - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
   - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
   - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
   - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
   - `apps/web/src/app/api/og/route.tsx`
-  - `apps/web/src/lib/photo-title.ts`
+  - `apps/web/src/components/home-client.tsx`
   - `apps/web/src/components/photo-viewer.tsx`
-- Upload / processing / sharing / admin DB:
-  - `apps/web/src/app/actions/images.ts`
-  - `apps/web/src/lib/process-image.ts`
-  - `apps/web/src/lib/image-queue.ts`
+  - `apps/web/src/components/lightbox.tsx`
+  - `apps/web/src/lib/photo-title.ts`
   - `apps/web/src/lib/data.ts`
-  - `apps/web/src/app/[locale]/admin/db-actions.ts`
-  - `apps/web/src/app/api/admin/db/download/route.ts`
-- Config / deploy / ops:
-  - `apps/web/docker-compose.yml`
-  - `apps/web/nginx/default.conf`
-  - `apps/web/next.config.ts`
-  - `README.md`
+- Upload / restore / queue state:
+  - `apps/web/src/app/actions/images.ts`
+  - `apps/web/src/lib/upload-tracker-state.ts`
+  - `apps/web/src/lib/image-queue.ts`
+  - `apps/web/src/lib/restore-maintenance.ts`
 
-Cross-checks run:
+## Verification snapshot
 - `npm run typecheck --workspace=apps/web` ✅
-- `npm test --workspace=apps/web` ✅ (57 files, 329 tests)
+- `npm test --workspace=apps/web` ✅ (`57` files, `333` tests)
+- `npm run lint --workspace=apps/web` ✅
 
 ## Findings
 
-### 1) Photo detail SEO/title logic disagrees with the actual UI and suppresses curated titles
+### 1) Shared-photo metadata still drops the normalized tag/title fallback shown in the actual page UI
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Files / regions:**
-  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:52-56`
-  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:129-134`
-  - `apps/web/src/lib/photo-title.ts:17-35`
-  - `apps/web/src/components/photo-viewer.tsx:82-97`
-  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:101-102`
-- **Code region:** photo page metadata + JSON-LD call `getPhotoDisplayTitle(..., { preferTags: true, formatTitleAsTags: true })`, while the hydrated viewer and shared-photo page use the default helper behavior.
-- **Failure scenario:** A photo with title `Sunrise at Hallasan` and tags `landscape, jeju` gets SSR metadata/OG title like `#landscape #jeju` (or `#Sunrise #at #Hallasan` when no tags exist), but after hydration the browser title and visible viewer use `Sunrise at Hallasan`. Crawlers/social previews/indexed titles diverge from what users actually see.
-- **Suggested fix:** Stop using the tag-preferred / tag-formatting options in `p/[id]/page.tsx` for metadata/JSON-LD. Reuse the same default title path as `PhotoViewer` and shared pages, or introduce one shared `getPhotoSeoTitle()` helper and use it everywhere.
+- **Status:** CONFIRMED
+- **Exact references:**
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:46-47`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:62-84`
+  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:101-113`
+  - `apps/web/src/lib/data.ts:552-584`
+- **Code region:** `generateMetadata()` still does `const title = image.title && !isTitleFilename ? image.title : t('ogTitle')`, while the rendered page heading uses `getPhotoDisplayTitle(image, t('sharedPhoto'))`; the share query already fetches tags.
+- **Failure scenario:** A shared photo with no meaningful title but with tags (for example tag `Seoul`) renders `#Seoul` in-page, but crawlers/social previews/browser metadata get the generic title `Shared Photo`. The public URL and the visible page disagree about what the content is called.
+- **Suggested fix:** Reuse `getPhotoDisplayTitle(image, t('sharedPhoto'))` inside `generateMetadata()` so title/OG/Twitter stay aligned with the rendered heading.
 
-### 2) `/api/og` still trusts attacker-controlled `label` and `site` query params
+### 2) Shareable `/g/[key]?photoId=...` deep links render a specific photo, but metadata always describes the generic group view
 - **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Files / regions:**
-  - `apps/web/src/app/api/og/route.tsx:29-33`
-  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:57-67`
-- **Code region:** OG route reads `searchParams.get('label')` / `searchParams.get('site')` and renders them directly after truncation.
-- **Failure scenario:** Anyone can request `/api/og?topic=e2e-smoke&label=Urgent%20Invoice&site=PayPal` and get a convincing branded social card served from this domain. Topic slug validation does not prevent brand/text spoofing.
-- **Suggested fix:** Do not trust public `label` / `site` params. Either derive them server-side inside the route, sign the params, or ignore them and fall back to canonical topic/site values. At minimum, `site` should come from trusted config, not the request.
+- **Status:** CONFIRMED
+- **Exact references:**
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:27-84`
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:101-145`
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:161-164`
+- **Code region:** the page creates stable deep links with `?photoId=${image.id}` and renders a selected photo view when that query param is present, but `generateMetadata()` ignores `searchParams` entirely and always emits the generic shared-group title/cover image.
+- **Failure scenario:** Someone shares `/en/g/abc123?photoId=7`; the recipient opens a specific image view, but Slack/iMessage/Discord previews show the group cover and `Shared Photos` instead of the selected image. Deep-link sharing works functionally but previews the wrong content.
+- **Suggested fix:** Accept `searchParams` in `generateMetadata()`, resolve the selected image when `photoId` is valid, and emit selected-photo title/image metadata; fall back to the generic group metadata only when no photo is selected.
 
-### 3) Photo page Open Graph `publishedTime` uses `Date.toString()` instead of ISO-8601
+### 3) Gallery-listing title normalization is still inconsistent across visible cards, ARIA labels, and JSON-LD
+- **Severity:** MEDIUM
+- **Confidence:** HIGH
+- **Status:** CONFIRMED
+- **Exact references:**
+  - `apps/web/src/components/home-client.tsx:150-165`
+  - `apps/web/src/components/home-client.tsx:233-242`
+  - `apps/web/src/app/[locale]/(public)/page.tsx:139-149`
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:134-144`
+  - `apps/web/src/lib/data.ts:372-375`
+  - `apps/web/src/lib/photo-title.ts:17-37`
+- **Code region:** `HomeClient` uses filename-like titles for `displayTitle` (`if (image.title && image.title.trim().length > 0) return image.title;`), and home/topic JSON-LD emits `img.title || \`Photo ${img.id}\`` instead of the normalized display-title rules already centralized in `photo-title.ts`.
+- **Failure scenario:** A photo whose stored title is `IMG_0001.JPG` and whose tags are meaningful will show a filename in the gallery card title/ARIA label, while detail/shared pages normalize to tags or fallback copy. Search-engine structured data also gets `IMG_0001.JPG` or `Photo 42` even though the gallery already has `tag_names` available.
+- **Suggested fix:** Add a lite-payload normalization helper (for `{ title, tag_names }`) and reuse it in `HomeClient` plus home/topic JSON-LD generation so list surfaces match detail/share surfaces.
+
+### 4) Review-history artifacts still contain unresolved-looking findings that the current tree has already fixed
 - **Severity:** LOW
 - **Confidence:** HIGH
-- **Files / regions:**
-  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:88-96`
-  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:20-24`
-  - `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:75-77`
-- **Code region:** photo page sets `publishedTime: image.created_at?.toString()`; shared-photo page already uses `toIsoTimestamp(...)`.
-- **Failure scenario:** `<meta property="article:published_time">` gets a locale-specific string like `Fri Apr 24 2026 ...` instead of an ISO timestamp. Parsers/social consumers can reject or misread it; direct photo pages and shared photo pages behave inconsistently.
-- **Suggested fix:** Reuse the shared `toIsoTimestamp` logic for the photo page too.
+- **Status:** CONFIRMED
+- **Exact references:**
+  - `.context/reviews/_aggregate-cycle4-rpl.md:5-12`
+  - `apps/web/src/app/actions/topics.ts:167-175`
+- **Code region:** the cycle-4 aggregate still presents `updateTopic` missing `stripControlChars` as the current actionable issue, but `updateTopic` now sanitizes both `label` and `slug` before validation.
+- **Failure scenario:** Later planning/review passes can pick up old “open” issues from the aggregate archive, spend time re-triaging already-fixed work, and under-weight newer defects because historical review artifacts read like live backlog.
+- **Suggested fix:** Mark archive reviews as historical/resolved when superseded, or generate a small current-state index that distinguishes open review debt from preserved history.
 
-### 4) Cumulative upload throttling is keyed only by IP, so legitimate admins can block each other
-- **Severity:** LOW
+### 5) Correctness still depends on a brittle single-instance / single-writer deployment contract
+- **Severity:** MEDIUM
 - **Confidence:** HIGH
-- **Files / regions:**
-  - `apps/web/src/app/actions/images.ts:145-191`
-- **Code region:** upload tracker uses `const uploadIp = getClientIp(requestHeaders)` and `uploadTracker.get(uploadIp)` for the hourly file/byte window.
-- **Failure scenario:** Two admins behind the same NAT/VPN/office proxy share one `UPLOAD_MAX_FILES_PER_WINDOW` and one cumulative byte budget. Admin A uploads a large batch; Admin B gets `uploadLimitReached` / `cumulativeUploadSizeExceeded` even though they are a separate authenticated user.
-- **Suggested fix:** Key the cumulative tracker by authenticated admin identity (for example `userId`, or `userId + ip`) instead of raw IP alone. If multi-instance correctness matters, move this limiter to persistent storage rather than process memory.
+- **Status:** RISK
+- **Exact references:**
+  - `apps/web/src/lib/restore-maintenance.ts:1-22`
+  - `apps/web/src/lib/upload-tracker-state.ts:7-20`
+  - `apps/web/src/lib/data.ts:11-25`
+  - `apps/web/src/lib/data.ts:28-40`
+  - `apps/web/src/lib/image-queue.ts:67-131`
+  - `apps/web/docker-compose.yml:13-25`
+  - `README.md:140-144`
+- **Code region:** restore maintenance, upload quotas, buffered share-group view counts, and the image-processing queue all use in-memory `globalThis` / module-local state. The docs warn about a single-instance deployment, and the compose file hardcodes one host-networked service, but the invariant is operational rather than enforced in-product.
+- **Failure scenario:** If an operator later adds a second web replica behind a load balancer, one instance can enter restore maintenance while another continues accepting writes; upload quotas split by process; view counts become per-node buffers; and queue/bootstrap behavior becomes nondeterministic across workers.
+- **Suggested fix:** Either hard-enforce singleton deployment in ops/CI/release docs and health checks, or move coordination state (restore gate, upload limiter, queue bookkeeping, view-count buffering) into shared infrastructure before claiming multi-instance safety.
 
-## Representative implementation simulations
+## Missed-issues sweep
+- I specifically re-checked previously surfaced metadata/OG/upload findings before writing this pass; some earlier issues are fixed, which is why this review includes an explicit review-history-drift finding rather than repeating stale bugs.
+- I re-checked auth/session/provenance surfaces after the prior review; no new confirmed auth bypass or path-traversal bug surfaced in the reviewed code paths.
+- I did **not** find a failing lint/type/test gate to anchor any new build-breakage claim.
 
-1. **Fix photo title inconsistency**
-   - Update only `p/[id]/page.tsx` to use the default helper path.
-   - Add a regression test asserting photo metadata title matches the same helper semantics used by `PhotoViewer` / shared pages.
-   - No missing code-context blockers.
-
-2. **Fix OG spoof surface**
-   - Update `api/og/route.tsx` to stop trusting `label` / `site`.
-   - Adjust topic-page metadata URL generation if the route no longer needs those params.
-   - Current code gives enough context; no architecture discovery needed.
-
-3. **Fix upload quota false positives**
-   - Update `uploadImages()` key construction to include the authenticated admin identity.
-   - Add a unit test around tracker-key behavior.
-   - If the intended product policy is “shared quota per source IP”, document that explicitly; otherwise the executor can proceed without guessing.
-
-## Final sweep
-
-No test/type errors surfaced in the current tree, but the four issues above remain actionable and are not protected by the current automated suite.
+## Skipped file disclosure
+Not audited line-by-line in this pass:
+- generated artifacts under `apps/web/.next/**` except where used to confirm review/deploy drift
+- dependency trees under `node_modules/**`
+- binary/image fixtures under `.context/*.png`, `apps/web/public/uploads/**`, and `apps/web/data/uploads/**`
+- older archived review/plan files outside the directly relevant current-cycle artifacts listed above
+- most presentational primitives under `apps/web/src/components/ui/**` where no product/security/coupling signal appeared during this review
