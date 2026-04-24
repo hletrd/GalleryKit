@@ -1,3 +1,4 @@
+import { createHash, createHmac, randomBytes } from 'crypto';
 import { expect, Page } from '@playwright/test';
 
 const requestedBaseUrl = process.env.E2E_BASE_URL?.trim() || `http://127.0.0.1:${process.env.E2E_PORT || '3100'}`;
@@ -70,6 +71,82 @@ function resolveAdminE2EPassword(origin: string) {
   }
 
   return adminPassword;
+}
+
+
+function generateE2ESessionToken(secret: string): string {
+  const timestamp = Date.now().toString();
+  const random = randomBytes(16).toString('hex');
+  const data = `${timestamp}:${random}`;
+  const signature = createHmac('sha256', secret).update(data).digest('hex');
+  return `${data}:${signature}`;
+}
+
+export async function createAdminSessionCookie() {
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (!secret || secret.length < 32) {
+    throw new Error('SESSION_SECRET must be set for authenticated E2E requests');
+  }
+
+  const mysql = await import('mysql2/promise');
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: Number(process.env.DB_PORT || '3306'),
+    user: process.env.DB_USER || 'gallery',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'gallery',
+  });
+
+  try {
+    const [queryRows] = await connection.execute('SELECT id FROM admin_users WHERE username = ? LIMIT 1', ['admin']);
+    const rows = queryRows as Array<{ id: number }>;
+    const admin = rows[0];
+    if (!admin) {
+      throw new Error('No admin user exists for authenticated E2E request');
+    }
+
+    const token = generateE2ESessionToken(secret);
+    const sessionId = createHash('sha256').update(token).digest('hex');
+    await connection.execute(
+      'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 DAY))',
+      [sessionId, admin.id],
+    );
+
+    return `admin_session=${token}`;
+  } finally {
+    await connection.end();
+  }
+}
+
+
+export async function waitForImageProcessed(userFilename: string, timeoutMs = 30_000) {
+  const mysql = await import('mysql2/promise');
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: Number(process.env.DB_PORT || '3306'),
+    user: process.env.DB_USER || 'gallery',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'gallery',
+  });
+
+  const startedAt = Date.now();
+  try {
+    while (Date.now() - startedAt < timeoutMs) {
+      const [queryRows] = await connection.execute(
+        'SELECT processed FROM images WHERE user_filename = ? LIMIT 1',
+        [userFilename],
+      );
+      const rows = queryRows as Array<{ processed: number | boolean }>;
+      if (rows[0]?.processed === 1 || rows[0]?.processed === true) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  } finally {
+    await connection.end();
+  }
+
+  throw new Error(`Timed out waiting for ${userFilename} to finish image processing`);
 }
 
 export async function ensureEnglishLocale(page: Page) {

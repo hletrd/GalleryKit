@@ -1,4 +1,3 @@
-
 {
   "nav": {
     "dashboard": "Dashboard",
@@ -204,7 +203,8 @@
     "backToTop": "Back to top",
     "browsePhotosWithTag": "Browse {tags} photos on {site}",
     "latestPhoto": "Latest Photo",
-    "photosHeading": "Photos"
+    "photosHeading": "Photos",
+    "loadMore": "Load more"
   },
   "login": {
     "title": "Admin",
@@ -233,7 +233,6 @@
     "originalDimensions": "Original",
     "previewDimensions": "Preview",
     "capturedAt": "Taken",
-    "downloadOriginal": "Download JPEG",
     "linkCopied": "Link copied.",
     "copyFailed": "Share link created, but copying it failed on this browser.",
     "errorSharing": "Could not create share link.",
@@ -257,7 +256,8 @@
     "bitDepth": "Bit Depth",
     "topics": {
       "default": "Gallery"
-    }
+    },
+    "downloadJpeg": "Download JPEG"
   },
   "shared": {
     "viewGallery": "View Gallery",
@@ -319,7 +319,8 @@
     "ogDesc": "Custom image for social media link previews. Individual photo pages use the photo itself.",
     "ogImageUrl": "OG Image URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "Full URL to an image for social media previews. Recommended: 1200x630px. Leave empty to use the latest photo."
+    "ogImageUrlHint": "Full URL to an image for social media previews. Recommended: 1200x630px. Leave empty to use the latest photo.",
+    "loadFailed": "Could not load SEO settings. Please try again before saving changes."
   },
   "serverActions": {
     "unauthorized": "Not authorized",
@@ -549,6 +550,7 @@
     "storageLocal": "Local Filesystem",
     "storageMinio": "MinIO",
     "storageS3": "Amazon S3",
-    "storageEnvHint": "S3/MinIO backends require environment variables (S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET) to be configured before switching."
+    "storageEnvHint": "S3/MinIO backends require environment variables (S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET) to be configured before switching.",
+    "loadFailed": "Could not load settings. Please try again before saving changes."
   }
 }

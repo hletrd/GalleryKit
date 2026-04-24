@@ -1,18 +1,22 @@
 import { getSeoSettingsAdmin } from '@/app/actions/seo';
 import { SeoSettingsClient } from './seo-client';
+import { getTranslations } from 'next-intl/server';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SeoPage() {
-    const result = await getSeoSettingsAdmin();
-    const settings = result.success ? result.settings : {
-        seo_title: '',
-        seo_description: '',
-        seo_nav_title: '',
-        seo_author: '',
-        seo_locale: '',
-        seo_og_image_url: '',
-    };
+    const [result, t] = await Promise.all([
+        getSeoSettingsAdmin(),
+        getTranslations('seo'),
+    ]);
 
-    return <SeoSettingsClient initialSettings={settings} />;
+    if (!result.success) {
+        return (
+            <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+                {t('loadFailed')}
+            </div>
+        );
+    }
+
+    return <SeoSettingsClient initialSettings={result.settings} />;
 }

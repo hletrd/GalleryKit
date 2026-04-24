@@ -82,6 +82,8 @@ describe('backup download route', () => {
         }));
 
         expect(response.status).toBe(401);
+        expect(response.headers.get('Cache-Control')).toContain('no-store');
+        expect(response.headers.get('Pragma')).toBe('no-cache');
         await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' });
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });

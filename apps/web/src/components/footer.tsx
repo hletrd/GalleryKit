@@ -43,7 +43,7 @@ export async function Footer() {
                         <GithubIcon className="h-4 w-4" />
                         GitHub
                     </Link>
-                    <Link href={localizePath(locale, '/admin')} rel="nofollow" className="text-xs text-muted-foreground/50 hover:text-muted-foreground hover:underline transition-colors">
+                    <Link href={localizePath(locale, '/admin')} rel="nofollow" className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors">
                         Admin
                     </Link>
                 </div>

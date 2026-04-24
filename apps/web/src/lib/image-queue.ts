@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, images, sessions } from '@/db';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, asc, gt } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
@@ -66,6 +66,8 @@ async function cleanOrphanedTmpFiles(): Promise<void> {
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
 const CLAIM_RETRY_DELAY_MS = 5000;
+const BOOTSTRAP_BATCH_SIZE = 500;
+const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 
 /** Prune retry Maps to prevent unbounded growth from abandoned jobs. */
@@ -100,6 +102,9 @@ export type ProcessingQueueState = {
     shuttingDown: boolean;
     shutdownPromise?: Promise<void>;
     gcInterval?: ReturnType<typeof setInterval>;
+    bootstrapRetryTimer?: ReturnType<typeof setTimeout>;
+    bootstrapContinuationScheduled?: boolean;
+    bootstrapCursorId: number | null;
 };
 
 export const getProcessingQueueState = (): ProcessingQueueState => {
@@ -115,6 +120,8 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
             claimRetryCounts: new Map<number, number>(),
             bootstrapped: false,
             shuttingDown: false,
+            bootstrapContinuationScheduled: false,
+            bootstrapCursorId: null,
         };
     }
 
@@ -327,12 +334,60 @@ export async function purgeExpiredSessions() {
     }
 }
 
+function isConnectionRefusedError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const directCode = 'code' in err ? (err as { code?: unknown }).code : undefined;
+    if (directCode === 'ECONNREFUSED') return true;
+    const cause = err.cause;
+    return !!(
+        cause
+        && typeof cause === 'object'
+        && 'code' in cause
+        && (cause as { code?: unknown }).code === 'ECONNREFUSED'
+    );
+}
+
+function scheduleBootstrapRetry(state: ProcessingQueueState, reason: string) {
+    if (state.bootstrapRetryTimer || state.shuttingDown || isRestoreMaintenanceActive()) return;
+    console.warn(`${reason} Retrying image queue bootstrap in ${BOOTSTRAP_RETRY_DELAY_MS / 1000}s.`);
+    state.bootstrapRetryTimer = setTimeout(() => {
+        state.bootstrapRetryTimer = undefined;
+        bootstrapImageProcessingQueue().catch((err) => console.debug('bootstrapImageProcessingQueue retry failed:', err));
+    }, BOOTSTRAP_RETRY_DELAY_MS);
+    state.bootstrapRetryTimer.unref?.();
+}
+
+function scheduleBootstrapContinuation(state: ProcessingQueueState) {
+    if (state.bootstrapContinuationScheduled) return;
+    state.bootstrapContinuationScheduled = true;
+    state.queue.onIdle()
+        .then(() => {
+            state.bootstrapContinuationScheduled = false;
+            if (!state.shuttingDown && !isRestoreMaintenanceActive()) {
+                bootstrapImageProcessingQueue().catch((err) => console.debug('bootstrapImageProcessingQueue continuation failed:', err));
+            }
+        })
+        .catch((err) => {
+            state.bootstrapContinuationScheduled = false;
+            console.debug('bootstrap continuation scheduling failed:', err);
+        });
+}
+
 export const bootstrapImageProcessingQueue = async () => {
     const state = getProcessingQueueState();
-    if (state.bootstrapped || state.shuttingDown || isRestoreMaintenanceActive()) return;
+    if (state.bootstrapped || state.shuttingDown || isRestoreMaintenanceActive() || state.bootstrapContinuationScheduled) return;
 
     try {
-        // Select only columns needed for enqueue — skip blob-like fields for potentially hundreds of rows.
+        if (state.bootstrapRetryTimer) {
+            clearTimeout(state.bootstrapRetryTimer);
+            state.bootstrapRetryTimer = undefined;
+        }
+        // Select only columns needed for enqueue and cap the in-memory backlog per bootstrap pass.
+        // Continue from the highest scanned id so a small set of permanently failing low-id rows cannot
+        // monopolize every bootstrap batch and starve later pending rows.
+        const pendingWhere = state.bootstrapCursorId === null
+            ? eq(images.processed, false)
+            : and(eq(images.processed, false), gt(images.id, state.bootstrapCursorId));
         const pending = await db.select({
             id: images.id,
             filename_original: images.filename_original,
@@ -340,7 +395,11 @@ export const bootstrapImageProcessingQueue = async () => {
             filename_avif: images.filename_avif,
             filename_jpeg: images.filename_jpeg,
             width: images.width,
-        }).from(images).where(eq(images.processed, false));
+        })
+            .from(images)
+            .where(pendingWhere)
+            .orderBy(asc(images.id))
+            .limit(BOOTSTRAP_BATCH_SIZE);
         for (const image of pending) {
             enqueueImageProcessing({
                 id: image.id,
@@ -352,7 +411,16 @@ export const bootstrapImageProcessingQueue = async () => {
             });
 
         }
-        state.bootstrapped = true;
+        const lastPending = pending.at(-1);
+        if (lastPending) {
+            state.bootstrapCursorId = lastPending.id;
+        }
+        state.bootstrapped = pending.length < BOOTSTRAP_BATCH_SIZE;
+        if (state.bootstrapped) {
+            state.bootstrapCursorId = null;
+        } else {
+            scheduleBootstrapContinuation(state);
+        }
 
         // Clean up orphaned .tmp files from crashed image processing runs.
         // These are created during atomic rename in processImageFormats and
@@ -373,11 +441,11 @@ export const bootstrapImageProcessingQueue = async () => {
         }, 60 * 60 * 1000); // every hour
         state.gcInterval.unref?.();
     } catch (err: unknown) {
-        // Suppress connection refused errors during build/startup
-        if (!(err instanceof Error && (('code' in err && (err as { code: string }).code === 'ECONNREFUSED') || (err.cause && typeof err.cause === 'object' && 'code' in err.cause && (err.cause as { code: string }).code === 'ECONNREFUSED')))) {
-            console.error('Failed to bootstrap image processing queue', err);
+        if (isConnectionRefusedError(err)) {
+            scheduleBootstrapRetry(state, 'Could not connect to database to bootstrap queue (ECONNREFUSED).');
         } else {
-             console.warn('Could not connect to database to bootstrap queue (ECONNREFUSED). Skipping.');
+            console.error('Failed to bootstrap image processing queue', err);
+            scheduleBootstrapRetry(state, 'Image queue bootstrap failed.');
         }
     }
 };
@@ -393,6 +461,12 @@ export async function quiesceImageProcessingQueueForRestore(
     state.retryCounts.clear();
     state.claimRetryCounts.clear();
     state.bootstrapped = false;
+    state.bootstrapContinuationScheduled = false;
+    state.bootstrapCursorId = null;
+    if (state.bootstrapRetryTimer) {
+        clearTimeout(state.bootstrapRetryTimer);
+        state.bootstrapRetryTimer = undefined;
+    }
 }
 
 export async function resumeImageProcessingQueueAfterRestore(

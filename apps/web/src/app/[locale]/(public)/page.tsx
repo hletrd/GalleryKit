@@ -41,22 +41,28 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: seo.title })
     : seo.description;
 
+  const robots = tagSlugs.length > 0 ? { index: false, follow: true } : undefined;
+
   if (seo.og_image_url) {
+    const ogImages = [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }];
     return {
       title,
       description,
+      alternates: { canonical: pageUrl },
+      robots,
       openGraph: {
         title,
         description,
         url: pageUrl,
         siteName: seo.title,
-        images: [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }],
+        images: ogImages,
         type: 'website',
       },
       twitter: {
         card: 'summary_large_image',
         title,
         description,
+        images: ogImages.map((image) => image.url),
       },
     };
   }
@@ -85,6 +91,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   return {
     title: title,
     description: description,
+    alternates: { canonical: pageUrl },
+    robots,
     openGraph: {
       title: title,
       description: description,
@@ -97,6 +105,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       card: 'summary_large_image',
       title: title,
       description: description,
+      images: ogImages.map((image) => image.url),
     },
   };
 }

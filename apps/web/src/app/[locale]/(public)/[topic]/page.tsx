@@ -76,6 +76,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     alternates: {
       canonical: pageUrl,
     },
+    robots: tagSlugs.length > 0 ? { index: false, follow: true } : undefined,
     openGraph: {
       title: `${title} | ${seo.title}`,
       description: description,
@@ -88,6 +89,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
       card: 'summary_large_image',
       title: `${title} | ${seo.title}`,
       description: description,
+      images: ogImages.map((image) => image.url),
     },
   };
 }

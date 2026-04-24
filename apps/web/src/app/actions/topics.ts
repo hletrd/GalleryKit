@@ -93,7 +93,7 @@ export async function createTopic(formData: FormData) {
         return { error: t('labelTooLong') };
     }
 
-    let imageFilename = null;
+    let imageFilename: string | null = null;
     let imageWarning: string | undefined;
     if (imageFile && imageFile.size > 0 && imageFile.name !== 'undefined') {
          try {
@@ -107,6 +107,10 @@ export async function createTopic(formData: FormData) {
     try {
         return await withTopicRouteMutationLock(async () => {
             if (await topicRouteSegmentExists(slug)) {
+                if (imageFilename) {
+                    await deleteTopicImage(imageFilename);
+                    imageFilename = null;
+                }
                 return { error: t('slugConflictsWithRoute') };
             }
 

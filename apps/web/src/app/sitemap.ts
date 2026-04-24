@@ -1,9 +1,10 @@
 import { getImageIdsForSitemap, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
-// ISR: revalidate daily; force-dynamic required because DB isn't available at build time.
+// Dynamic because the database is not available at build time. Do not emit
+// request-time `lastModified` values for unchanged pages; crawler freshness
+// should reflect persisted content timestamps only.
 export const dynamic = 'force-dynamic';
-export const revalidate = 86400;
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
@@ -24,7 +25,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const homepageEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
     url: localizeUrl(BASE_URL, locale, '/'),
-    lastModified: new Date(),
     changeFrequency: 'daily',
     priority: 1,
   }));
@@ -32,7 +32,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const topicEntries: MetadataRoute.Sitemap = topics.flatMap((topic) =>
     LOCALES.map((locale) => ({
       url: localizeUrl(BASE_URL, locale, `/${topic.slug}`),
-      lastModified: new Date(),
       changeFrequency: 'weekly' as const,
       priority: 0.8,
     }))
@@ -42,7 +41,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const imageEntries: MetadataRoute.Sitemap = images.flatMap((image) =>
     LOCALES.map((locale) => ({
       url: localizeUrl(BASE_URL, locale, `/p/${image.id}`),
-      lastModified: new Date(image.created_at || Date.now()),
+      lastModified: image.created_at ? new Date(image.created_at) : undefined,
       changeFrequency: 'weekly' as const,
       priority: 0.7,
     }))

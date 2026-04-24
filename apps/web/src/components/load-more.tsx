@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadMoreImages } from '@/app/actions';
 import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 
@@ -85,7 +86,10 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         <>
             {hasMore && (
                 <div ref={sentinelRef} className="flex justify-center py-8">
-                    {loading && <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />}
+                    <Button type="button" variant="outline" onClick={loadMore} disabled={loading}>
+                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        {loading ? t('home.loadingMore') : t('home.loadMore')}
+                    </Button>
                 </div>
             )}
             <div className="sr-only" aria-live="polite" aria-atomic="true">

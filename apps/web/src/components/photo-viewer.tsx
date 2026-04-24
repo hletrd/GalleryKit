@@ -553,7 +553,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             href={downloadHref}
                                             download={`photo-${image.id}.${downloadExt}`}
                                         >
-                                            <Download className="h-4 w-4" /> {t('viewer.downloadOriginal')}
+                                            <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
                                         </a>
                                     </Button>
                                 )}

@@ -47,6 +47,7 @@ export function TagInput({
     const [highlightedIndex, setHighlightedIndex] = React.useState(0);
     const inputRef = React.useRef<HTMLInputElement>(null);
     const containerRef = React.useRef<HTMLDivElement>(null);
+    const suggestionsId = React.useId();
 
     const filteredTags = React.useMemo(() => {
         const lowerInput = inputValue.trim().toLowerCase();
@@ -140,6 +141,14 @@ export function TagInput({
         setHighlightedIndex(0);
     }, [filteredTags.length, showCreateOption]);
 
+    const activeDescendantId = isOpen
+        ? highlightedIndex < filteredTags.length
+            ? `${suggestionsId}-option-${filteredTags[highlightedIndex]?.id}`
+            : showCreateOption && highlightedIndex === filteredTags.length
+                ? `${suggestionsId}-create`
+                : undefined
+        : undefined;
+
     return (
         <div className={cn("relative", className)} ref={containerRef}>
             <div className="flex flex-wrap items-center gap-2 p-2 rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
@@ -162,7 +171,8 @@ export function TagInput({
                     role="combobox"
                     aria-autocomplete="list"
                     aria-expanded={isOpen && !!(inputValue || filteredTags.length > 0)}
-                    aria-controls="tag-suggestions"
+                    aria-controls={suggestionsId}
+                    aria-activedescendant={activeDescendantId}
                     className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
                     placeholder={selectedTags.length === 0 ? placeholder : ''}
                     value={inputValue}
@@ -177,7 +187,7 @@ export function TagInput({
 
             {isOpen && (inputValue || filteredTags.length > 0) && (
                 <div className="absolute top-full left-0 w-full mt-1 z-50 rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-in fade-in-0 zoom-in-95">
-                    <div className="max-h-[300px] overflow-auto p-1" id="tag-suggestions" role="listbox">
+                    <div className="max-h-[300px] overflow-auto p-1" id={suggestionsId} role="listbox">
                         {filteredTags.length === 0 && !showCreateOption && (
                             <div className="py-2 px-2 text-sm text-muted-foreground text-center">
                                 {t('tagInput.noMatches')}
@@ -187,6 +197,7 @@ export function TagInput({
                         {filteredTags.map((tag, index) => (
                             <div
                                 key={tag.id}
+                                id={`${suggestionsId}-option-${tag.id}`}
                                 role="option"
                                 aria-selected={highlightedIndex === index}
                                 className={cn(
@@ -203,6 +214,7 @@ export function TagInput({
 
                         {showCreateOption && (
                             <div
+                                id={`${suggestionsId}-create`}
                                 role="option"
                                 aria-selected={highlightedIndex === filteredTags.length}
                                 className={cn(

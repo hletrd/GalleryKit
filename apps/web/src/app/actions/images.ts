@@ -15,7 +15,7 @@ import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
 import { ensureTagRecord, getTagSlug } from '@/lib/tag-records';
-import { MAX_TOTAL_UPLOAD_BYTES } from '@/lib/upload-limits';
+import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
 import { cleanupOriginalIfRestoreMaintenanceBegan, getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -57,7 +57,6 @@ async function collectImageCleanupFailures(tasks: {
 // The client sends files individually, so per-call batch limits are ineffective.
 const uploadTracker = new Map<string, UploadTrackerEntry>();
 const UPLOAD_TRACKING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const UPLOAD_MAX_FILES_PER_WINDOW = 100;
 const UPLOAD_TRACKER_MAX_KEYS = 2000;
 
 /** Prune expired upload tracker entries to prevent unbounded memory growth. */
@@ -117,7 +116,7 @@ export async function uploadImages(formData: FormData) {
     }
 
     if (!files.length) return { error: t('noFilesProvided') };
-    if (files.length > 100) return { error: t('tooManyFiles') };
+    if (files.length > UPLOAD_MAX_FILES_PER_WINDOW) return { error: t('tooManyFiles') };
 
     // Server-side cumulative upload tracking across per-file invocations.
     // The client sends files individually, so per-call limits are insufficient.

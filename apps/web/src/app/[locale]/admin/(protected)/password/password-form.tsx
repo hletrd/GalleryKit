@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "@/components/i18n-provider";
 
 type ActionState = {
     error?: string;
@@ -19,8 +20,6 @@ const startState: ActionState = {
     error: '',
     success: false
 };
-
-import { useTranslation } from "@/components/i18n-provider";
 
 export function PasswordForm() {
     const [state, formAction, isPending] = useActionState(updatePassword, startState);
@@ -52,7 +51,7 @@ export function PasswordForm() {
             )}
             {confirmError && (
                 <Alert variant="destructive">
-                    <AlertDescription>{confirmError}</AlertDescription>
+                    <AlertDescription id="confirmPassword-error-summary">{confirmError}</AlertDescription>
                 </Alert>
             )}
 
@@ -96,7 +95,14 @@ export function PasswordForm() {
                     minLength={12}
                     maxLength={1024}
                     autoComplete="new-password"
+                    aria-invalid={confirmError ? 'true' : undefined}
+                    aria-describedby={confirmError ? 'confirmPassword-error' : undefined}
                 />
+                {confirmError && (
+                    <p id="confirmPassword-error" className="text-sm text-destructive">
+                        {confirmError}
+                    </p>
+                )}
             </div>
 
             <Button type="submit" disabled={isPending}>

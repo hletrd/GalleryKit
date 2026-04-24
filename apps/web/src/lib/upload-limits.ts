@@ -1,4 +1,5 @@
 const DEFAULT_MAX_TOTAL_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
+const DEFAULT_MAX_FILES_PER_WINDOW = 100;
 
 function parsePositiveIntEnv(name: string, fallback: number): number {
     const rawValue = process.env[name]?.trim();
@@ -8,6 +9,7 @@ function parsePositiveIntEnv(name: string, fallback: number): number {
 }
 
 export const MAX_TOTAL_UPLOAD_BYTES = parsePositiveIntEnv('UPLOAD_MAX_TOTAL_BYTES', DEFAULT_MAX_TOTAL_UPLOAD_BYTES);
+export const UPLOAD_MAX_FILES_PER_WINDOW = parsePositiveIntEnv('UPLOAD_MAX_FILES_PER_WINDOW', DEFAULT_MAX_FILES_PER_WINDOW);
 
 export function formatUploadLimit(bytes: number): string {
     const gib = 1024 * 1024 * 1024;

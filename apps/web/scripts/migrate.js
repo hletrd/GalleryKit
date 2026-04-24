@@ -512,9 +512,12 @@ async function seedAdmin(connection) {
     if (!password) {
         throw new Error('ADMIN_PASSWORD must be set explicitly before running migrations.');
     }
-    assertStrongBootstrapPassword(password);
-
-    const hash = await argon2.hash(password, { type: argon2.argon2id });
+    const hash = password.startsWith('$argon2')
+        ? password
+        : await (async () => {
+            assertStrongBootstrapPassword(password);
+            return argon2.hash(password, { type: argon2.argon2id });
+        })();
     await connection.query('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)', ['admin', hash]);
     console.log('[Migration] Admin user created.');
 }

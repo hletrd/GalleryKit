@@ -1,17 +1,17 @@
 import { test, expect } from '@playwright/test';
 
+import { adminE2EEnabled, createAdminSessionCookie } from './helpers';
+
 /**
  * C6R-RPL-08 / AGG6R-04 — end-to-end assertion that `requireSameOriginAdmin`
  * rejects requests with a spoofed cross-origin `Origin` header.
  *
  * Strategy:
- * - Use Playwright's `request` context to POST directly (no browser) with
+ * - Use Playwright's `request` context to call a concrete admin API route with
  *   a bogus Origin header pointing at an attacker-controlled domain.
- * - Target a public server action (search) because it uses the same
- *   `hasTrustedSameOrigin` primitive (directly in public.ts the check is
- *   skipped, but we exercise `/api/admin/db/download` which ALSO enforces
- *   admin auth + same-origin via `withAdminAuth`). The route rejects
- *   with 401/403 on missing session.
+ * - The unauthenticated case must reject with 401/403 instead of passing due
+ *   to a missing route. When admin E2E credentials are configured, a second
+ *   authenticated request locks the same-origin guard to a definite 403.
  *
  * This test locks in the defense-in-depth that the framework-level CSRF
  * path is not the only guard: a regression that disabled the middleware
@@ -20,7 +20,8 @@ import { test, expect } from '@playwright/test';
  *
  * Because the test only hits a route that returns HTTP status (not a
  * server action which returns opaque base64 bundles), it is robust to
- * Next.js internal changes and does not require admin credentials.
+ * Next.js internal changes; the authenticated branch creates a short-lived
+ * local E2E session instead of depending on browser Secure-cookie behavior.
  */
 
 test.describe('Origin guard — admin API rejects cross-origin requests', () => {
@@ -44,6 +45,26 @@ test.describe('Origin guard — admin API rejects cross-origin requests', () => 
         // the same-origin guard may return 403. A 404 would mean the test is
         // passing because the route disappeared, not because the guard works.
         expect([401, 403]).toContain(response.status());
+    });
+
+    test('authenticated admin request with a spoofed cross-origin header returns 403', async ({ request, baseURL }) => {
+        test.skip(!adminE2EEnabled, 'admin credentials are not configured for authenticated origin-guard E2E');
+        if (!baseURL) {
+            test.skip(true, 'baseURL not configured for this runner');
+            return;
+        }
+
+        const cookieHeader = await createAdminSessionCookie();
+
+        const response = await request.get(`${baseURL}/api/admin/db/download?file=nothing.sql`, {
+            headers: {
+                'Cookie': cookieHeader,
+                'Origin': 'https://attacker.example.com',
+                'Referer': 'https://attacker.example.com/',
+            },
+        });
+
+        expect(response.status()).toBe(403);
     });
 
     test('HEAD / returns 200 from the real origin (sanity check)', async ({ request, baseURL }) => {

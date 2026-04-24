@@ -12,7 +12,7 @@
     "start": "next start",
     "test": "vitest run",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed-admin.ts",
     "init": "tsx scripts/init-db.ts",

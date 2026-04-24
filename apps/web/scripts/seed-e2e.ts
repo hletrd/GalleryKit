@@ -4,8 +4,9 @@ import sharp from 'sharp';
 import dotenv from 'dotenv';
 import { eq, inArray } from 'drizzle-orm';
 import { generateBase56 } from '../src/lib/base56';
-import { UPLOAD_ORIGINAL_ROOT, UPLOAD_ROOT } from '../src/lib/upload-paths';
 import { DEFAULT_IMAGE_SIZES, parseImageSizes } from '../src/lib/gallery-config-shared';
+
+dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
 // C1R-05: honor the configured/default image-size contract instead of a
 // hard-coded list. The test E2E pipeline expects derivatives at every
@@ -20,8 +21,6 @@ const SEED_IMAGE_SIZES: number[] = (() => {
   }
   return [...DEFAULT_IMAGE_SIZES];
 })();
-
-dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 
 type SeedImage = {
   key: string;
@@ -65,19 +64,41 @@ const seedImages: SeedImage[] = [
   },
 ];
 
-const uploadRoot = UPLOAD_ROOT;
-const dirs = {
-  original: UPLOAD_ORIGINAL_ROOT,
-  jpeg: path.join(uploadRoot, 'jpeg'),
-  webp: path.join(uploadRoot, 'webp'),
-  avif: path.join(uploadRoot, 'avif'),
+type UploadDirs = {
+  original: string;
+  jpeg: string;
+  webp: string;
+  avif: string;
 };
 
+let uploadDirs: UploadDirs | null = null;
+
+function getUploadDirs(): UploadDirs {
+  if (!uploadDirs) {
+    throw new Error('Upload directories have not been initialized');
+  }
+  return uploadDirs;
+}
+
+async function initializeUploadDirs() {
+  const { UPLOAD_ORIGINAL_ROOT, UPLOAD_ROOT } = await import('../src/lib/upload-paths');
+  uploadDirs = {
+    original: UPLOAD_ORIGINAL_ROOT,
+    jpeg: path.join(UPLOAD_ROOT, 'jpeg'),
+    webp: path.join(UPLOAD_ROOT, 'webp'),
+    avif: path.join(UPLOAD_ROOT, 'avif'),
+  };
+}
+
 async function ensureDirs() {
+  const dirs = getUploadDirs();
   await Promise.all(Object.values(dirs).map((dir) => fs.mkdir(dir, { recursive: true })));
 }
 
 async function createVariants(baseName: string, width: number, height: number, hue: number) {
+  const dirs = getUploadDirs();
+  await fs.rm(path.join(dirs.original, `${baseName}.jpg`), { force: true });
+
   const base = sharp({
     create: {
       width,
@@ -91,6 +112,12 @@ async function createVariants(baseName: string, width: number, height: number, h
 
   for (const size of SEED_IMAGE_SIZES) {
     const resizeWidth = Math.min(size, width);
+    await Promise.all([
+      fs.rm(path.join(dirs.jpeg, `${baseName}_${size}.jpg`), { force: true }),
+      fs.rm(path.join(dirs.webp, `${baseName}_${size}.webp`), { force: true }),
+      fs.rm(path.join(dirs.avif, `${baseName}_${size}.avif`), { force: true }),
+    ]);
+
     const pipeline = sharp({
       create: {
         width,
@@ -114,6 +141,11 @@ async function createVariants(baseName: string, width: number, height: number, h
     ? CANONICAL_SIZE
     : SEED_IMAGE_SIZES[SEED_IMAGE_SIZES.length - 1];
   await Promise.all([
+    fs.rm(path.join(dirs.jpeg, `${baseName}.jpg`), { force: true }),
+    fs.rm(path.join(dirs.webp, `${baseName}.webp`), { force: true }),
+    fs.rm(path.join(dirs.avif, `${baseName}.avif`), { force: true }),
+  ]);
+  await Promise.all([
     fs.copyFile(path.join(dirs.jpeg, `${baseName}_${canonicalSize}.jpg`), path.join(dirs.jpeg, `${baseName}.jpg`)),
     fs.copyFile(path.join(dirs.webp, `${baseName}_${canonicalSize}.webp`), path.join(dirs.webp, `${baseName}.webp`)),
     fs.copyFile(path.join(dirs.avif, `${baseName}_${canonicalSize}.avif`), path.join(dirs.avif, `${baseName}.avif`)),
@@ -126,9 +158,12 @@ async function main() {
       process.exit(1);
   }
 
+  await initializeUploadDirs();
   await ensureDirs();
 
   const { connection, db, images, imageTags, sharedGroupImages, sharedGroups, tags, topicAliases, topics } = await import('../src/db');
+
+  const dirs = getUploadDirs();
 
   try {
     await db.insert(topics).values(seedTopic).onDuplicateKeyUpdate({

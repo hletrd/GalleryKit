@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { test, expect } from '@playwright/test';
-import { adminE2EEnabled, expectNoNextError, loginAsAdmin } from './helpers';
+import { adminE2EEnabled, expectNoNextError, loginAsAdmin, waitForImageProcessed } from './helpers';
 
 test.describe('admin workflows (opt-in)', () => {
   test.skip(!adminE2EEnabled, 'Set E2E_ADMIN_ENABLED=true to run admin E2E against a seeded environment.');
@@ -77,6 +77,7 @@ test.describe('admin workflows (opt-in)', () => {
 
     const uploadedRow = page.getByRole('row').filter({ hasText: uploadName }).first();
     await expect(uploadedRow).toBeVisible({ timeout: 30_000 });
+    await waitForImageProcessed(uploadName);
     await uploadedRow.getByRole('button', { name: /delete/i }).click();
     await page.getByRole('button', { name: /^Delete$|^삭제$/i }).click();
     await expect(uploadedRow).toBeHidden({ timeout: 30_000 });
