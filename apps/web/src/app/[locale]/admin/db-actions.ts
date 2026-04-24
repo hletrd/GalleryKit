@@ -23,6 +23,7 @@ import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
 import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
+import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
@@ -124,8 +125,7 @@ export async function dumpDatabase() {
 
     await fs.mkdir(backupsDir, { recursive: true });
 
-    const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
-    const sslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
+    const sslArgs = getMysqlCliSslArgs(DB_HOST);
 
     return new Promise<{ success: boolean, filename?: string, url?: string, error?: string }>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
@@ -393,8 +393,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         return { success: false, error: t('missingDbConfig') };
     }
 
-    const isLocalDB = ['127.0.0.1', 'localhost', '::1'].includes(DB_HOST);
-    const restoreSslArgs = isLocalDB ? [] : ['--ssl-mode=REQUIRED'];
+    const restoreSslArgs = getMysqlCliSslArgs(DB_HOST);
 
     return new Promise<{ success: boolean, error?: string }>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
