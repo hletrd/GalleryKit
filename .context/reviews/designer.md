@@ -1,8 +1,8 @@
-# UI/UX Designer Review — Cycle 3
+# UI/UX Designer Review — Cycle 4
 
-**Repository:** `/Users/hletrd/flash-shared/gallery`
-**App:** Next.js App Router web frontend (`apps/web`)
-**Date:** 2026-04-24
+**Repository:** `/Users/hletrd/flash-shared/gallery`  
+**App:** Next.js App Router web frontend (`apps/web`)  
+**Date:** 2026-04-25  
 **Commit:** not committed, per prompt.
 
 ## Method / inventory
@@ -11,145 +11,107 @@ Review focus: public gallery IA, admin IA, keyboard/focus, WCAG 2.2, loading/emp
 
 Tracked UI surface reviewed:
 
-- Public routes: `apps/web/src/app/[locale]/(public)/layout.tsx`, `page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`
+- Public routes: `apps/web/src/app/[locale]/(public)/layout.tsx`, `page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`
 - App shell/state: `apps/web/src/app/[locale]/layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `global-error.tsx`, `globals.css`
 - Public components: `nav.tsx`, `nav-client.tsx`, `footer.tsx`, `home-client.tsx`, `search.tsx`, `tag-filter.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `image-zoom.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `histogram.tsx`, `optimistic-image.tsx`
-- Admin routes/components: admin layouts/pages, `admin-header.tsx`, `admin-nav.tsx`, `image-manager.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`, `admin-user-manager.tsx`, category/tag/SEO/settings/password/db clients
-- UI primitives: `components/ui/*`, especially `button`, `input`, `table`, `dialog`, `alert-dialog`, `sheet`, `sonner`
-- i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `constants.ts`, `locale-path.ts`, `i18n/request.ts`
+- Admin routes/components: admin layouts/pages, `admin-header.tsx`, `admin-nav.tsx`, `admin/login-form.tsx`, `dashboard/dashboard-client.tsx`, `image-manager.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`
+- UI primitives: `components/ui/*`, especially `button`, `input`, `dialog`, `sheet`, `alert-dialog`, `sonner`
+- i18n/theme/layout: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `components/i18n-provider.tsx`, `components/theme-provider.tsx`, `app/[locale]/layout.tsx`, `app/[locale]/globals.css`
 
 ## Runtime blocker
 
-Local browser validation was partially blocked because the dev server could not read the gallery database on the public route. In browser output for `/en`, the public page fell through to the route error boundary because `<Nav>`/home queries failed. Admin login still rendered, so the shell itself is healthy, but the public gallery could not be fully exercised end-to-end in this environment.
+Local browser validation was partially blocked because the public gallery cannot read the database in this environment. A live request to `/en` falls through to the public error boundary after `topics` / image queries fail with `ECONNREFUSED 127.0.0.1:3306`. The admin login shell still renders, so I validated that surface in-browser and relied on source inspection for the rest.
 
 ## Findings
 
-### UX-01 — Public data outages collapse to a generic error shell instead of a gallery-specific maintenance/empty state
+### UX-01 — Public gallery data failure still drops the whole shell
 
 - **Severity:** MEDIUM
 - **Confidence:** High
 - **Status:** confirmed
 - **File / region:** `apps/web/src/app/[locale]/(public)/page.tsx:113-130`, `apps/web/src/components/nav.tsx:6-13`, `apps/web/src/app/[locale]/error.tsx:7-35`
-- **Failure / user scenario:** If the DB is temporarily unavailable, the public gallery turns into a generic app error rather than keeping brand/nav/footer context with a localized gallery maintenance state. That is especially harsh for a read-mostly photo gallery.
-- **Suggested fix:** Catch optional chrome/data failures separately from the main gallery render. Keep the public shell visible and render a branded, localized maintenance/empty state with retry guidance when tags/topics cannot load.
-- **Risk:** Users see the product as broken instead of temporarily unavailable; IA context is lost.
+- **Failure / user scenario:** When the DB is unavailable, the home page cannot keep the public chrome visible or explain the outage in gallery terms. Browser/curl output for `/en` shows the route failing through the generic error path instead of rendering a branded maintenance or empty state.
+- **Suggested fix:** Catch public chrome/data failures separately, keep the shell visible, and render a localized maintenance/empty state with retry guidance. Reserve the generic error boundary for truly fatal conditions.
 
-### UX-02 — Search autocomplete is keyboarded but still lacks complete combobox/listbox semantics
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** likely
-- **File / region:** `apps/web/src/components/search.tsx:169-247`
-- **Failure / user scenario:** Keyboard users can open search and arrow through results, but screen readers do not get a full combobox/listbox pattern. The result rows are links, not announced options, and the active row is not exposed with the right semantics.
-- **Suggested fix:** Finish the ARIA combobox pattern: keep the input as `role="combobox"`, give the results container `role="listbox"`, expose each row as `role="option"` with `aria-selected`, and stop using `aria-current="true"` for active result state.
-- **Risk:** The visual interaction works, but assistive technology gets weaker feedback than it should.
-
-### UX-03 — Topic navigation can degrade into image-only pills, which hurts scanability and discoverability
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** risk
-- **File / region:** `apps/web/src/components/nav-client.tsx:108-135`
-- **Failure / user scenario:** If the site owner enables topic thumbnails, the visible text label disappears and users are left with tiny 24px images as the only navigation affordance.
-- **Suggested fix:** Keep the label visible next to the thumbnail, or at minimum use a label + thumbnail composition that still scans well on touch devices.
-- **Risk:** Navigation becomes harder to read, harder to localize, and weaker on mobile/touch.
-
-### UX-04 — Admin navigation hides overflow with no strong mobile disclosure
+### UX-02 — Search field hides its focus state
 
 - **Severity:** MEDIUM
 - **Confidence:** High
 - **Status:** confirmed
-- **File / region:** `apps/web/src/components/admin-nav.tsx:26-44`, `apps/web/src/components/admin-header.tsx:13-24`
-- **Failure / user scenario:** On narrow viewports, admin sections can disappear offscreen behind a hidden horizontal scroll region. There is no menu affordance, wrap, or edge fade telling the user more tools exist.
-- **Suggested fix:** Switch to a wrapped or disclosed mobile nav. If horizontal scroll remains, keep the scrollbars visible and add stronger cues that the region is scrollable.
-- **Risk:** Admin IA becomes partially invisible exactly where users need it most.
+- **File / region:** `apps/web/src/components/search.tsx:182-206`
+- **Failure / user scenario:** The search input removes its ring/outline (`focus-visible:ring-0 shadow-none outline-none`) and does not replace it on the dialog shell. Keyboard users can land in the field without a visible cue that focus is there.
+- **Suggested fix:** Restore a visible focus ring on the input, or move the focus treatment to the surrounding header/container so the active element is obvious at a glance.
 
-### UX-05 — The admin dashboard squeezes upload and image management too early at tablet widths
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:30-39`, `apps/web/src/components/image-manager.tsx:335-471`
-- **Failure / user scenario:** At tablet/small laptop widths, the upload panel and dense image table share the screen too aggressively. The table becomes a cramped nested scroll surface and selection/edit/delete actions slow down.
-- **Suggested fix:** Stack the panels until a wider breakpoint, or make image management the full-width primary work surface and move upload into a secondary/collapsible panel.
-- **Risk:** Batch admin work becomes slower, more error-prone, and less comfortable on real hardware.
-
-### UX-06 — The upload dropzone does not present a clearly styled keyboard focus affordance
-
-- **Severity:** MEDIUM
-- **Confidence:** Medium-high
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/upload-dropzone.tsx:271-283`
-- **Failure / user scenario:** A keyboard user tabs to the upload area but gets no intentionally designed visible focus treatment; it reads as a drag target, not a keyboard-operable control.
-- **Suggested fix:** Add an explicit `focus-visible` ring/outline, plus helper text that explains accepted file types and keyboard activation.
-- **Risk:** WCAG 2.4.7 focus visibility is weaker than it should be.
-
-### UX-07 — Upload UX has no empty-state guard when no categories exist
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/upload-dropzone.tsx:29-35, 246-256, 381-390`
-- **Failure / user scenario:** On a fresh install or after categories are deleted, the topic select defaults to `''`, but the upload surface still looks usable and the upload button remains enabled. The user only discovers the problem after attempting upload.
-- **Suggested fix:** Detect `topics.length === 0` and replace the upload form with a clear empty state and a link to create categories, or disable upload until at least one topic exists.
-- **Risk:** New admins hit a dead-end workflow with no immediate explanation.
-
-### UX-08 — Loading and processing states are not consistently announced to assistive tech
+### UX-03 — Search results/errors are not announced as state changes
 
 - **Severity:** LOW-MEDIUM
 - **Confidence:** High
 - **Status:** confirmed
-- **File / region:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:16-18`, `apps/web/src/components/optimistic-image.tsx:70-79`, `apps/web/src/components/image-manager.tsx:380-384`
-- **Failure / user scenario:** The route loader is accessible, but the dynamic photo-viewer fallback and image-processing overlays are visually clear only. Screen-reader users get inconsistent or no status announcements while content loads.
-- **Suggested fix:** Introduce a shared loading/status primitive with `role="status"`, `aria-live="polite"`, localized text, and decorative spinner `aria-hidden="true"`.
-- **Risk:** Users relying on AT do not get a reliable sense of progress.
+- **File / region:** `apps/web/src/components/search.tsx:52-76, 219-263`
+- **Failure / user scenario:** Search updates are silent to assistive tech, and the error path just clears the result list. That makes “no results” indistinguishable from “search failed,” and there is no polite live region like the one used in `load-more.tsx`.
+- **Suggested fix:** Add an `aria-live="polite"` status region for “searching,” result counts, and error states. Keep the empty state and failure state visually and semantically distinct.
 
-### UX-09 — Shared dialog/sheet primitives still hardcode the close label in English
+### UX-04 — Admin dashboard still squeezes upload and management too early
+
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **Status:** confirmed
+- **File / region:** `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:30-39`
+- **Failure / user scenario:** The dashboard stays single-column until `xl`, so common laptop/tablet widths force the upload surface and the dense image manager into a cramped two-pane layout. The table becomes hard to scan and interact with.
+- **Suggested fix:** Stack the panes until a wider breakpoint, or let the image manager take the full width on medium screens and demote upload to a secondary panel.
+
+### UX-05 — Login failure feedback is toast-only and not field-linked
+
+- **Severity:** LOW-MEDIUM
+- **Confidence:** Medium
+- **Status:** likely
+- **File / region:** `apps/web/src/app/[locale]/admin/login-form.tsx:21-45`, `apps/web/src/app/actions/auth.ts:70-111, 148-206`
+- **Failure / user scenario:** The form has native required fields, but once the request reaches the server the only error path is a toast. There is no inline error region, no `aria-invalid`, and no message tied to the username/password inputs, so keyboard and screen-reader users get little guidance on what to correct.
+- **Suggested fix:** Render a form-level error region inside the card and, if field-specific validation is added later, bind it with `aria-describedby` / `aria-invalid` instead of relying on toasts alone.
+
+### UX-06 — Shared overlay close controls still announce English in all locales
 
 - **Severity:** LOW
 - **Confidence:** High
 - **Status:** confirmed
 - **File / region:** `apps/web/src/components/ui/dialog.tsx:69-76`, `apps/web/src/components/ui/sheet.tsx:75-78`
-- **Failure / user scenario:** Korean users can open localized dialogs/sheets but the close button remains announced as “Close” instead of the current locale.
-- **Suggested fix:** Pass a localized close label into the primitive, or wrap the primitive in localized call sites that own the close text.
-- **Risk:** Small but systemic i18n polish gap across shared overlays.
+- **Failure / user scenario:** Korean users can open localized dialogs/sheets, but the close button is still announced as “Close” because the primitives hardcode the label.
+- **Suggested fix:** Thread localized close labels through the primitives or let each localized call site provide the `sr-only` text.
 
-### UX-10 — RTL is not ready beyond an explicit `dir="ltr"` lock
+### UX-07 — RTL is acknowledged but not actually prepared
 
 - **Severity:** LOW
 - **Confidence:** High
 - **Status:** risk
-- **File / region:** `apps/web/src/app/[locale]/layout.tsx:79-84`
-- **Failure / user scenario:** If RTL locales are added later, the app will need a broader pass because direction is hardcoded LTR and many surfaces use physical `left/right` positioning.
-- **Suggested fix:** Add a locale-to-direction map and convert the most important physical placements to logical start/end utilities before introducing RTL locales.
-- **Risk:** RTL support would be expensive and error-prone if added late.
+- **File / region:** `apps/web/src/app/[locale]/layout.tsx:79-84`, plus the many physical `left/right` placements throughout the shell
+- **Failure / user scenario:** If an RTL locale is introduced later, the app will need a broad layout pass because the root element is locked to `dir="ltr"` and many components use physical positioning rather than logical start/end.
+- **Suggested fix:** Add a locale-to-direction map and migrate the highest-traffic layouts/components to logical spacing/placement before introducing RTL content.
 
-### UX-11 — Photo-viewer keyboard shortcuts are useful but largely undiscoverable
+### UX-08 — Photo-viewer shortcuts remain hidden behind titles only
 
 - **Severity:** LOW-MEDIUM
 - **Confidence:** High
 - **Status:** confirmed
-- **File / region:** `apps/web/src/components/photo-viewer.tsx:165-177`, `apps/web/src/components/lightbox.tsx:38-44, 179-202`
-- **Failure / user scenario:** Arrow navigation and fullscreen toggles exist, but first-time users have no visible shortcut hint and the controls do not expose `aria-keyshortcuts`.
-- **Suggested fix:** Add terse visible hints or tooltips, and expose `aria-keyshortcuts` on the relevant controls.
-- **Risk:** Power features stay hidden, so the viewer feels less polished than it is.
+- **File / region:** `apps/web/src/components/lightbox.tsx:38-44, 179-202`; `apps/web/src/components/photo-viewer.tsx:165-177`
+- **Failure / user scenario:** The viewer supports `F`, arrow keys, and Escape, but the only discoverability is a `title` attribute and `aria-keyshortcuts`. First-time users do not see a visible keyboard hint, so the richer navigation feels less polished than it is.
+- **Suggested fix:** Add a compact on-screen shortcut hint or a help affordance near the toolbar / lightbox trigger.
 
-### UX-12 — The blur placeholder is effectively a no-op, so cards still pop in abruptly
+### UX-09 — The blur placeholder still does almost nothing
 
 - **Severity:** LOW
 - **Confidence:** High
 - **Status:** confirmed
-- **File / region:** `apps/web/src/components/home-client.tsx:219-229`
-- **Failure / user scenario:** The grid uses a 1×1 transparent PNG as `blurDataURL`, which does not meaningfully soften the loading transition. On slower connections the card still appears to snap from muted block to full image.
-- **Suggested fix:** Generate a real per-image low-res blur at ingest time and store it with the derivative metadata.
-- **Risk:** Perceived performance is weaker than it could be even though the rest of the image pipeline is strong.
+- **File / region:** `apps/web/src/components/home-client.tsx:219-228`
+- **Failure / user scenario:** The fallback uses a 1×1 transparent PNG, so slow-loading cards still pop in abruptly instead of fading from a meaningful blurred preview.
+- **Suggested fix:** Generate a real low-res blur or dominant-color placeholder at ingest time and persist it with the image metadata.
 
 ## Overall assessment
 
-The frontend is solid and clearly better than a generic shadcn/Tailwind app. The public browsing flow is visually coherent, the photo viewer is featureful, and the admin system is functional. The remaining UX debt is concentrated in three places:
+The UI is structurally strong: the app shell, viewer, and admin toolset are coherent and mostly accessible. The remaining UX debt is concentrated in four places:
 
-1. **Resilience** — the public gallery still collapses into a generic error when a critical query fails.
-2. **Discoverability / accessibility** — search semantics, shortcut discoverability, loading announcements, and some shared primitives still need polish.
-3. **Responsive IA** — the admin nav and dashboard become cramped or hidden on smaller screens.
+1. **Resilience** — the public gallery still collapses to a generic error shell when the DB is unavailable.
+2. **Interaction feedback** — search focus, search results, and login failures need clearer state handling.
+3. **Responsive admin ergonomics** — the dashboard still compresses too much before it reaches a wide breakpoint.
+4. **Polish / internationalization** — close labels, RTL readiness, shortcut discoverability, and blur placeholders still need refinement.
 
 No code was changed in this review pass.
