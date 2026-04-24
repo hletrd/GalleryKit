@@ -111,6 +111,17 @@ describe('searchImagesAction', () => {
         expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울'], 3, 40);
     });
 
+    it('keeps the sentinel row available when the caller asks for 100 images', async () => {
+        getImagesLiteMock.mockResolvedValue(Array.from({ length: 101 }, (_, index) => ({ id: index + 1 })));
+
+        await expect(loadMoreImages('seoul', ['서울'], 0, 100)).resolves.toEqual({
+            images: Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })),
+            hasMore: true,
+        });
+
+        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울'], 101, 0);
+    });
+
     it('short-circuits searchImagesAction during restore maintenance before rate-limit or DB work', async () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(true);
 

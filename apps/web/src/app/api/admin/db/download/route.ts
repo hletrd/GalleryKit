@@ -25,21 +25,30 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
     };
 
     if (!hasTrustedSameOriginWithOptions(requestHeaders, { allowMissingSource: false })) {
-        return new NextResponse('Unauthorized', { status: 403 });
+        return new NextResponse('Unauthorized', {
+            status: 403,
+            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        });
     }
 
     const file = request.nextUrl.searchParams.get('file');
     if (!file || !isValidBackupFilename(file)) {
-        return new NextResponse('Invalid filename', { status: 400 });
+        return new NextResponse('Invalid filename', {
+            status: 400,
+            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        });
     }
 
     const backupsDir = path.resolve(process.cwd(), 'data', 'backups');
     const filePath = path.resolve(backupsDir, file);
 
     // Containment check
-    if (!filePath.startsWith(backupsDir + path.sep)) {
-        return new NextResponse('Access denied', { status: 403 });
-    }
+        if (!filePath.startsWith(backupsDir + path.sep)) {
+            return new NextResponse('Access denied', {
+                status: 403,
+                headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+            });
+        }
 
     try {
         const resolvedBackupsDir = await realpath(backupsDir).catch((err: unknown) => {
@@ -50,12 +59,18 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         });
         const stats = await lstat(filePath);
         if (stats.isSymbolicLink() || !stats.isFile()) {
-            return new NextResponse('Access denied', { status: 403 });
+            return new NextResponse('Access denied', {
+                status: 403,
+                headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+            });
         }
 
         const resolvedFilePath = await realpath(filePath);
         if (!resolvedFilePath.startsWith(`${resolvedBackupsDir}${path.sep}`)) {
-            return new NextResponse('Access denied', { status: 403 });
+            return new NextResponse('Access denied', {
+                status: 403,
+                headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+            });
         }
 
         const currentUser = await getCurrentUser();
@@ -79,9 +94,15 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
         });
     } catch (err: unknown) {
         if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-            return new NextResponse('File not found', { status: 404 });
+            return new NextResponse('File not found', {
+                status: 404,
+                headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+            });
         }
         console.error('Error downloading backup file:', err);
-        return new NextResponse('Internal Server Error', { status: 500 });
+        return new NextResponse('Internal Server Error', {
+            status: 500,
+            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        });
     }
 });

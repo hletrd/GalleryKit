@@ -66,22 +66,35 @@ function validatedNumber(map: Map<string, string>, key: GallerySettingKey): numb
 }
 
 async function _getGalleryConfig(): Promise<GalleryConfig> {
-    const map = await getSettingsMap();
+    try {
+        const map = await getSettingsMap();
 
-    // Use parseImageSizes for sorted output and invalid-input fallback (C13-01)
-    const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
+        // Use parseImageSizes for sorted output and invalid-input fallback (C13-01)
+        const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
 
-    return {
-        imageQualityWebp: validatedNumber(map, 'image_quality_webp'),
-        imageQualityAvif: validatedNumber(map, 'image_quality_avif'),
-        imageQualityJpeg: validatedNumber(map, 'image_quality_jpeg'),
-        imageSizes,
-        stripGpsOnUpload: (() => {
-            const raw = getSetting(map, 'strip_gps_on_upload');
-            if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
-            return raw === 'true';
-        })(),
-    };
+        return {
+            imageQualityWebp: validatedNumber(map, 'image_quality_webp'),
+            imageQualityAvif: validatedNumber(map, 'image_quality_avif'),
+            imageQualityJpeg: validatedNumber(map, 'image_quality_jpeg'),
+            imageSizes,
+            stripGpsOnUpload: (() => {
+                const raw = getSetting(map, 'strip_gps_on_upload');
+                if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
+                return raw === 'true';
+            })(),
+        };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[gallery-config] Falling back to defaults because admin_settings could not be read: ${message}`);
+
+        return {
+            imageQualityWebp: Number(DEFAULTS.image_quality_webp),
+            imageQualityAvif: Number(DEFAULTS.image_quality_avif),
+            imageQualityJpeg: Number(DEFAULTS.image_quality_jpeg),
+            imageSizes: parseImageSizes(DEFAULTS.image_sizes),
+            stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
+        };
+    }
 }
 
 /** Cached gallery config — deduped within a single SSR request via React cache(). */

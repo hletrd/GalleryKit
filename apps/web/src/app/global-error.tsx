@@ -42,6 +42,11 @@ function detectBrandTitle() {
     return resolveErrorShellBrand(document, siteConfig.nav_title, siteConfig.title);
 }
 
+function detectDarkMode() {
+    if (typeof document === 'undefined') return false;
+    return document.documentElement.classList.contains('dark');
+}
+
 export default function GlobalError({
     reset,
 }: {
@@ -51,9 +56,10 @@ export default function GlobalError({
     const locale = detectLocale();
     const copy = COPY[locale];
     const brandTitle = detectBrandTitle();
+    const isDark = detectDarkMode();
 
     return (
-        <html lang={locale}>
+        <html lang={locale} className={isDark ? 'dark' : undefined}>
             <body className="min-h-screen bg-background text-foreground">
                 <main className="min-h-screen flex items-center justify-center px-6">
                     <div className="w-full max-w-md rounded-2xl border border-border bg-card/95 p-8 text-center shadow-lg">

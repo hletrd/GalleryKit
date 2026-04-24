@@ -1,7 +1,14 @@
 type TagLike = { slug: string };
 
+const MAX_TAG_QUERY_LENGTH = 256;
+const MAX_TAG_COUNT = 20;
+
 export function parseRequestedTagSlugs(tagsParam?: string) {
     if (!tagsParam) {
+        return [];
+    }
+
+    if (tagsParam.length > MAX_TAG_QUERY_LENGTH) {
         return [];
     }
 
@@ -10,6 +17,7 @@ export function parseRequestedTagSlugs(tagsParam?: string) {
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean)
+        .slice(0, MAX_TAG_COUNT)
         .filter((slug) => {
             if (seen.has(slug)) {
                 return false;

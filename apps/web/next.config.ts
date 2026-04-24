@@ -71,7 +71,7 @@ const nextConfig: NextConfig = {
         ].join('; ')
       : [
           "default-src 'self'",
-          "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
+          "script-src 'unsafe-inline' 'self' https://www.googletagmanager.com",
           "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
           `img-src ${cspImgSrc.join(' ')}`,
           "font-src 'self' data:",

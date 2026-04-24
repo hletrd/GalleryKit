@@ -58,7 +58,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
-    const [timerShowInfo, setTimerShowInfo] = useState(false);
     const [isPinned, setIsPinned] = useState(false);
     const [showLightbox, setShowLightbox] = useState(false);
     const [isSharingPhoto, setIsSharingPhoto] = useState(false);
@@ -76,15 +75,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const currentIndex = images.findIndex((img) => img.id === currentImageId);
     const image = images[currentIndex];
 
-    // Track the base document title on the client only so the component
-    // stays SSR-safe when rendered in a server environment.
-    const siteTitleRef = useRef(siteTitle);
     useEffect(() => {
-        siteTitleRef.current = document.title;
-        return () => {
-            document.title = siteTitleRef.current;
-        };
-    }, []);
+        setCurrentImageId(initialImageId);
+    }, [initialImageId]);
 
     const normalizedDisplayTitle = useMemo(() => (
         image
@@ -99,11 +92,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         document.title = getPhotoDocumentTitle(
             normalizedDisplayTitle,
             siteTitle,
-            siteTitleRef.current,
+            siteTitle,
         );
     }, [normalizedDisplayTitle, siteTitle]);
 
-    const showInfo = isPinned || timerShowInfo;
+    const showInfo = isPinned;
     const photoViewerSizes = getPhotoViewerImageSizes(showInfo);
     const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
@@ -162,7 +155,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 // Crossing into mobile: close sidebar (user can reopen via button)
                 if (isPinned) {
                     setIsPinned(false);
-                    setTimerShowInfo(false);
                 }
             }
         };
@@ -315,7 +307,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         onClick={() => {
                             if (isPinned) {
                                 setIsPinned(false);
-                                setTimerShowInfo(false);
                             } else {
                                 setIsPinned(true);
                             }

@@ -406,6 +406,3 @@ export async function resumeImageProcessingQueueAfterRestore(
     queue.start();
     await bootstrapImageProcessingQueue();
 }
-
-// Auto-bootstrap when this module is imported
-void bootstrapImageProcessingQueue();

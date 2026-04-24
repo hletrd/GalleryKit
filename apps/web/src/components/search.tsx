@@ -17,11 +17,23 @@ interface SearchProps {
     previewImageSizes?: number[];
 }
 
+interface SearchResult {
+    id: number;
+    title: string | null;
+    description: string | null;
+    filename_jpeg: string;
+    width: number;
+    height: number;
+    topic: string;
+    topic_label: string | null;
+    camera_model: string | null;
+}
+
 export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps) {
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
-    const [results, setResults] = useState<{ id: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null }[]>([]);
+    const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
@@ -171,7 +183,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             id="search-input"
                             ref={inputRef}
                             role="combobox"
-                            aria-expanded={results.length > 0}
+                            aria-expanded={isOpen}
                             aria-autocomplete="list"
                             aria-controls="search-results"
                             aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}

@@ -10,7 +10,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useTranslation } from "@/components/i18n-provider";
 import { cn } from "@/lib/utils";
-import { DEFAULT_LOCALE } from "@/lib/constants";
+import { DEFAULT_LOCALE, LOCALES } from "@/lib/constants";
 import siteConfig from "@/site-config.json";
 import { Search } from "@/components/search";
 import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
@@ -42,7 +42,12 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
         return () => mql.removeEventListener('change', handler);
     }, []);
 
-    const otherLocale = locale === 'en' ? 'ko' : 'en';
+    useEffect(() => {
+        const frame = requestAnimationFrame(() => setIsExpanded(false));
+        return () => cancelAnimationFrame(frame);
+    }, [pathname]);
+
+    const otherLocale = LOCALES.find((supportedLocale) => supportedLocale !== locale) ?? DEFAULT_LOCALE;
     const localizedHomeHref = siteConfig.home_link.startsWith('http')
         ? siteConfig.home_link
         : localizePath(locale, siteConfig.home_link);

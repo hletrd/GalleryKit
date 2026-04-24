@@ -43,13 +43,28 @@ const poolConnection = mysql.createPool({
 // runtime the listener receives the base callback-style PoolConnection from
 // the mysql2 (non-promise) module, which does expose `.promise()`. Cast
 // through `CallbackPoolConnection` so the cast is explicit and documented.
+const connectionInitPromises = new WeakMap<CallbackPoolConnection, Promise<void>>();
+
 poolConnection.on('connection', (connection) => {
     const callbackConnection = connection as unknown as CallbackPoolConnection;
-    callbackConnection.promise().query('SET group_concat_max_len = 65535')
+    const initPromise = callbackConnection.promise().query('SET group_concat_max_len = 65535')
+        .then(() => undefined)
         .catch((err: unknown) => {
             console.error('[db] Failed to set group_concat_max_len on pooled connection:', err);
         });
+    connectionInitPromises.set(callbackConnection, initPromise);
 });
+
+const originalGetConnection = poolConnection.getConnection.bind(poolConnection);
+poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection.getConnection>) => {
+    const connection = await originalGetConnection(...args);
+    const callbackConnection = connection as unknown as CallbackPoolConnection;
+    const initPromise = connectionInitPromises.get(callbackConnection);
+    if (initPromise) {
+        await initPromise;
+    }
+    return connection;
+}) as typeof poolConnection.getConnection;
 
 export const connection = poolConnection;
 export const db = drizzle(poolConnection, { mode: "default", schema });

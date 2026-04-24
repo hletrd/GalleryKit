@@ -11,72 +11,6 @@ import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
-function reorderForColumns<T extends { id: number; width?: number; height?: number }>(items: T[], columnCount: number): T[] {
-    if (columnCount <= 1 || items.length === 0) return items;
-
-    const columns: { items: T[]; height: number }[] =
-        Array.from({ length: columnCount }, () => ({ items: [], height: 0 }));
-
-    // Distribute items to shortest column (greedy algorithm)
-    for (const item of items) {
-        // Use aspect ratio to estimate relative height (normalized to width=1)
-        const aspectRatio = (item.width && item.height && item.width > 0)
-            ? item.height / item.width
-            : 1;
-
-        let shortest = 0;
-        for (let i = 1; i < columns.length; i++) {
-            if (columns[i].height < columns[shortest].height) {
-                shortest = i;
-            }
-        }
-
-        columns[shortest].items.push(item);
-        columns[shortest].height += aspectRatio;
-    }
-
-    // Interleave: CSS columns fills top-to-bottom, so to get left-to-right
-    // visual order, we need to arrange items so that CSS columns produces
-    // the correct visual order.
-    // CSS columns with N columns takes items [0..k-1] in col 1, [k..2k-1] in col 2, etc.
-    // We want col[0][0], col[1][0], col[2][0], col[0][1], col[1][1], ...
-    // So we need to output in column-first order that CSS will then re-distribute.
-
-    // The trick: determine how many items go in each CSS column
-    const totalItems = items.length;
-    const basePerCol = Math.floor(totalItems / columnCount);
-    const extras = totalItems % columnCount;
-
-    // CSS columns distributes: first (extras) columns get (basePerCol+1) items,
-    // remaining columns get basePerCol items
-    const cssColSizes: number[] = [];
-    for (let i = 0; i < columnCount; i++) {
-        cssColSizes.push(i < extras ? basePerCol + 1 : basePerCol);
-    }
-
-    const result: T[] = [];
-    for (let col = 0; col < columnCount; col++) {
-        const count = cssColSizes[col];
-        for (let row = 0; row < count; row++) {
-            if (row < columns[col].items.length) {
-                result.push(columns[col].items[row]);
-            }
-        }
-    }
-
-    // If any items were missed due to uneven distribution, append them
-    if (result.length < items.length) {
-        const resultIds = new Set(result.map(r => r.id));
-        for (const item of items) {
-            if (!resultIds.has(item.id)) {
-                result.push(item);
-            }
-        }
-    }
-
-    return result;
-}
-
 function useColumnCount() {
     const [count, setCount] = useState(2);
 
@@ -172,7 +106,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
     }, []);
 
     const columnCount = useColumnCount();
-    const orderedImages = useMemo(() => reorderForColumns(allImages, columnCount), [allImages, columnCount]);
+    const orderedImages = allImages;
     const topicsMap = useMemo(() => {
         const map: Record<string, string> = {};
         for (const t of topics || []) map[t.slug] = t.label;

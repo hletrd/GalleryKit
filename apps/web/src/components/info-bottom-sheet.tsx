@@ -26,6 +26,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
     const sheetRef = useRef<HTMLDivElement>(null);
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
     const touchStartY = useRef<number | null>(null);
     const touchStartTime = useRef<number | null>(null);
     const prevIsOpenRef = useRef(isOpen);
@@ -35,7 +36,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     useEffect(() => {
         if (isOpen && !prevIsOpenRef.current) {
             // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop-driven state sync: resetting internal state when the dialog opens is a valid React pattern (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
-            setSheetState('peek');
+            setSheetState('expanded');
         }
         prevIsOpenRef.current = isOpen;
     }, [isOpen]);
@@ -116,6 +117,12 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isOpen, onClose]);
 
+    useEffect(() => {
+        if (isOpen && sheetState === 'expanded') {
+            requestAnimationFrame(() => closeButtonRef.current?.focus());
+        }
+    }, [isOpen, sheetState]);
+
     if (!isOpen || !image) return null;
 
     const displayTitle = getPhotoDisplayTitle(
@@ -158,18 +165,33 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                 }}
             >
                 {/* Drag handle */}
-                <div
-                    className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none"
+                <button
+                    type="button"
+                    className="flex w-full justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    onClick={() => setSheetState((prev) => (prev === 'expanded' ? 'peek' : 'expanded'))}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                            onClose();
+                            return;
+                        }
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSheetState((prev) => (prev === 'expanded' ? 'peek' : 'expanded'));
+                        }
+                    }}
                     onTouchStart={handleTouchStart}
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
+                    aria-expanded={sheetState === 'expanded'}
+                    aria-label={t('viewer.info')}
                 >
                     <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
-                </div>
+                </button>
 
                 {/* Peek content — always rendered so transition is smooth */}
                 <div className="px-4 pb-3 pr-12 relative">
                     <button
+                        ref={closeButtonRef}
                         type="button"
                         onClick={onClose}
                         className="absolute right-4 top-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -198,7 +220,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
 
                 {/* Expanded content */}
                 {sheetState === 'expanded' && (
-                    <div className="px-4 pb-8 pt-1">
+                    <div className="max-h-[calc(95vh-140px)] overflow-y-auto px-4 pb-8 pt-1">
                         {/* Tags */}
                         {image.tags && image.tags.length > 0 && (
                             <div className="flex flex-wrap gap-2 mb-4">

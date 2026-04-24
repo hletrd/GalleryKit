@@ -19,6 +19,7 @@ describe('normalizeConfiguredImageSizes', () => {
     it('rejects malformed values and overlong lists', () => {
         expect(normalizeConfiguredImageSizes('640,,1536')).toBeNull();
         expect(normalizeConfiguredImageSizes('640,wide')).toBeNull();
+        expect(normalizeConfiguredImageSizes('640.5,1536')).toBeNull();
         expect(normalizeConfiguredImageSizes(Array.from({ length: MAX_IMAGE_SIZE_COUNT + 1 }, (_, index) => String(index + 1)).join(','))).toBeNull();
     });
 });
@@ -58,5 +59,6 @@ describe('isValidSettingValue(image_sizes)', () => {
     it('accepts canonicalizable lists and rejects invalid ones', () => {
         expect(isValidSettingValue('image_sizes', '2048,640,1536')).toBe(true);
         expect(isValidSettingValue('image_sizes', '640,,1536')).toBe(false);
+        expect(isValidSettingValue('image_sizes', '640.5,1536')).toBe(false);
     });
 });

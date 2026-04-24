@@ -53,7 +53,7 @@ export default defineConfig({
   ],
   webServer: useLocalServer
     ? {
-        command: `env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run e2e:seed && env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run build && rm -rf .next/standalone/apps/web/.next/static && cp -R .next/static .next/standalone/apps/web/.next/static && env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true HOSTNAME=${host} PORT=${localPort} node .next/standalone/apps/web/server.js`,
+        command: `env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run e2e:seed && env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run build && rm -rf .next/standalone/apps/web/.next/static && cp -R .next/static .next/standalone/apps/web/.next/static && env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true sh -c '. ./.env.local && HOSTNAME=${host} PORT=${localPort} node .next/standalone/apps/web/server.js'`,
         cwd: __dirname,
         url: baseURL,
         reuseExistingServer: true,

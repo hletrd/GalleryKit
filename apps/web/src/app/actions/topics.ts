@@ -206,8 +206,6 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     }
 
     try {
-        let affectedRows = 0;
-
         await withTopicRouteMutationLock(async () => {
             if (slug !== cleanCurrentSlug && await topicRouteSegmentExists(slug)) {
                 throw new Error('SLUG_CONFLICTS_WITH_ROUTE');
@@ -216,12 +214,12 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
             if (slug !== cleanCurrentSlug) {
                 const nextImageFilename = imageFilename ?? previousImageFilename ?? null;
                 await db.transaction(async (tx) => {
-                    const [existingTopic] = await tx.select({ slug: topics.slug })
+                    const [transactionTopic] = await tx.select({ slug: topics.slug })
                         .from(topics)
                         .where(eq(topics.slug, cleanCurrentSlug))
                         .limit(1);
 
-                    if (!existingTopic) {
+                    if (!transactionTopic) {
                         throw new Error('TOPIC_NOT_FOUND');
                     }
 
@@ -234,28 +232,27 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
                     await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));
 
-                    const [deleteResult] = await tx.delete(topics)
+                    await tx.delete(topics)
                         .where(eq(topics.slug, cleanCurrentSlug));
-                    affectedRows = deleteResult.affectedRows;
                 });
             } else {
-                const [updateResult] = await db.update(topics)
+                const [existingTopic] = await db.select({ slug: topics.slug })
+                    .from(topics)
+                    .where(eq(topics.slug, cleanCurrentSlug))
+                    .limit(1);
+                if (!existingTopic) {
+                    throw new Error('TOPIC_NOT_FOUND');
+                }
+
+                await db.update(topics)
                     .set({
                         label,
                         order,
                         ...(imageFilename ? { image_filename: imageFilename } : {})
                     })
                     .where(eq(topics.slug, cleanCurrentSlug));
-                affectedRows = updateResult.affectedRows;
             }
         });
-
-        if (affectedRows === 0) {
-            if (imageFilename) {
-                await deleteTopicImage(imageFilename);
-            }
-            return { error: t('topicNotFound') };
-        }
 
         if (previousImageFilename && imageFilename && previousImageFilename !== imageFilename) {
             try { await deleteTopicImage(previousImageFilename); }

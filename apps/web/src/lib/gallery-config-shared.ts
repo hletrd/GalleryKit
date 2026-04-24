@@ -35,11 +35,13 @@ export type SeoSettingKey = typeof SEO_SETTING_KEYS[number];
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
+const DEFAULT_IMAGE_SIZE_VALUES = [640, 1536, 2048, 4096] as const;
+
 const DEFAULTS: Record<GallerySettingKey, string> = {
     image_quality_webp: '90',
     image_quality_avif: '85',
     image_quality_jpeg: '90',
-    image_sizes: '640,1536,2048,4096',
+    image_sizes: DEFAULT_IMAGE_SIZE_VALUES.join(','),
     strip_gps_on_upload: 'false',
 };
 
@@ -69,7 +71,7 @@ export function getSettingDefaults(): Record<GallerySettingKey, string> {
 // ── Image Size Helpers ────────────────────────────────────────────────────────
 
 /** Default image output sizes — used when no admin-configured sizes are provided. */
-export const DEFAULT_IMAGE_SIZES = [640, 1536, 2048, 4096];
+export const DEFAULT_IMAGE_SIZES = [...DEFAULT_IMAGE_SIZE_VALUES];
 
 /** Default OG image target size — used for social media previews. */
 export const DEFAULT_OG_TARGET_SIZE = 1536;
@@ -91,7 +93,7 @@ export function normalizeConfiguredImageSizes(sizesStr: string): string | null {
     }
 
     const parsed = rawParts.map((segment) => Number(segment));
-    if (parsed.some((value) => !Number.isFinite(value) || value <= 0 || value > 10000)) {
+    if (parsed.some((value) => !Number.isInteger(value) || value <= 0 || value > 10000)) {
         return null;
     }
 

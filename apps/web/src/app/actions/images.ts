@@ -597,17 +597,13 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             return { error: t('imageNotFound') };
         }
 
-        const [result] = await db.update(images)
+        await db.update(images)
             .set({
                 title: sanitizedTitle,
                 description: sanitizedDescription,
                 updated_at: sql`CURRENT_TIMESTAMP`
             })
             .where(eq(images.id, id));
-
-        if (result.affectedRows === 0) {
-            return { error: t('imageNotFound') };
-        }
 
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'image_update', 'image', String(id)).catch(console.debug);

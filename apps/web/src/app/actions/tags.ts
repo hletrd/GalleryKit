@@ -72,12 +72,16 @@ export async function updateTag(id: number, name: string) {
     if (!isValidTagSlug(slug)) return { error: t('invalidTagFormat') };
 
     try {
-        const [result] = await db.update(tags)
-            .set({ name: trimmedName, slug })
+        const [existingTag] = await db.select({ id: tags.id })
+            .from(tags)
             .where(eq(tags.id, id));
-        if (result.affectedRows === 0) {
+        if (!existingTag) {
             return { error: t('tagNotFound') };
         }
+
+        await db.update(tags)
+            .set({ name: trimmedName, slug })
+            .where(eq(tags.id, id));
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'tag_update', 'tag', String(id), undefined, { name: trimmedName, slug }).catch(console.debug);
 

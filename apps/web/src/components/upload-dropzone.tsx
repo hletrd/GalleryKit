@@ -2,6 +2,7 @@
 
 import { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
+import type { FileRejection } from 'react-dropzone';
 import { useRouter } from 'next/navigation';
 import { uploadImages } from '@/app/actions';
 import { Button } from "@/components/ui/button"
@@ -100,8 +101,21 @@ export function UploadDropzone({ topics, availableTags }: { topics: { slug: stri
         'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']
     }), []);
 
+    const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
+        if (fileRejections.length === 0) return;
+        const names = fileRejections.slice(0, 3).map(({ file }) => file.name).join(', ');
+        const extraCount = fileRejections.length - Math.min(fileRejections.length, 3);
+        const reason = fileRejections[0]?.errors[0]?.message ?? t('upload.failed');
+        toast.error(
+            extraCount > 0
+                ? `${names} +${extraCount} — ${reason}`
+                : `${names} — ${reason}`,
+        );
+    }, [t]);
+
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
+        onDropRejected,
         accept: acceptedImageTypes
     });
 

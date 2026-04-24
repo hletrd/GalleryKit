@@ -7,16 +7,14 @@ import { resolve } from 'path';
  * `db/index.ts` runs `connection.promise().query('SET group_concat_max_len = 65535')`.
  *
  * Even though the pool is created via `mysql2/promise`, the 'connection'
- * event receives the base callback-style Connection. Calling `.query(...)`
- * directly returns `undefined`, not a Promise — chaining `.catch` on it
- * crashes with the mysql2 runtime guard. Call `.promise()` first to obtain
- * a PromiseConnection whose `.query(...)` returns a real Promise.
+ * event receives the base callback-style Connection. We still call
+ * `.promise().query(...)` to set the session variable, but the pool now
+ * waits for that per-connection initialization promise before handing the
+ * connection back to callers. That keeps the first query on a new pooled
+ * connection from racing the session setup.
  *
  * The `.catch()` handler ensures a transient failure is logged via
- * `console.error` instead of (a) producing an unhandled promise rejection
- * under Node 24 strict defaults, AND (b) silently reverting the pooled
- * connection to the MySQL default 1024-byte limit, which would truncate
- * `GROUP_CONCAT` output in `exportImagesCsv` and SEO settings.
+ * `console.error` instead of producing an unhandled promise rejection.
  *
  * This test is a structural assertion in the spirit of `auth-rethrow.test.ts`:
  * read the source and verify the error-handling is present.
@@ -30,6 +28,14 @@ describe('db/index.ts — pool-connection listener', () => {
 
     it("attaches a 'connection' listener to the pool", () => {
         expect(source).toMatch(/poolConnection\.on\(\s*['"]connection['"]\s*,/);
+    });
+
+    it('stores a per-connection init promise and awaits it in getConnection()', () => {
+        expect(source).toMatch(/new WeakMap<CallbackPoolConnection,\s*Promise<void>>\(\)/);
+        expect(source).toMatch(/connectionInitPromises\.set\(/);
+        expect(source).toMatch(/const originalGetConnection = poolConnection\.getConnection\.bind\(poolConnection\)/);
+        expect(source).toMatch(/await originalGetConnection\(/);
+        expect(source).toMatch(/await initPromise/);
     });
 
     it('uses connection.promise() and chains .catch() so SET failures are logged', () => {

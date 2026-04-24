@@ -143,14 +143,14 @@ export async function GET(req: NextRequest) {
         }
       },
     );
-  } catch (e: unknown) {
+    } catch (e: unknown) {
     if (e instanceof Error) {
         console.error(`${e.message}`);
     }
     return new Response(`Failed to generate the image`, {
       status: 500,
       headers: {
-        'Cache-Control': 'public, max-age=60',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     });
   }

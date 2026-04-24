@@ -17,6 +17,10 @@ describe('tag slug parsing', () => {
             'macro',
         ]);
     });
+
+    it('rejects overlong tag query strings', () => {
+        expect(parseRequestedTagSlugs('a'.repeat(257))).toEqual([]);
+    });
 });
 
 describe('existing tag filtering', () => {

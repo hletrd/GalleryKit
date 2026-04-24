@@ -2,6 +2,8 @@
 
 ## Active Plans
 
+- 231 — Cycle 1 UX, Accessibility, Lifecycle, and Style Consistency Fixes — TODO
+- 230 — Cycle 1 Core Safety, Correctness, Performance, and Verification Fixes — TODO
 - 214 — Deferred Review Coverage (Cycle 5) — TODO / deferred
 - 210 — Deferred Gate Warnings (Cycle 5) — TODO / deferred
 - 207 — Deferred Review Findings (Cycle 3) — TODO / deferred

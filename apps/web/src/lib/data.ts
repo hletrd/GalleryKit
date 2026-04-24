@@ -330,7 +330,7 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const effectiveLimit = limit > 0 ? Math.min(limit, 100) : 100;
+    const effectiveLimit = limit > 0 ? Math.min(limit, 101) : 101;
     return query.limit(effectiveLimit).offset(offset);
 }
 
@@ -368,7 +368,7 @@ export async function getImagesLitePage(
         return { images: [], totalCount: 0, hasMore: false };
     }
 
-    const normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
+    const normalizedPageSize = Math.min(Math.max(pageSize, 1), 101);
     const baseQuery = db.select({
         ...publicSelectFields,
         tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,

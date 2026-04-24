@@ -56,6 +56,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
     const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
     const closeButtonRef = useRef<HTMLButtonElement>(null);
     const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+    const dialogRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -121,6 +122,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
             clearTimeout(hideTimer.current);
         }
         hideTimer.current = setTimeout(() => {
+            if (dialogRef.current?.contains(document.activeElement)) {
+                setControlsVisible(true);
+                return;
+            }
             setControlsVisible(false);
         }, 3000);
     }, [shouldAutoHideControls]);
@@ -138,6 +143,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         }
 
         hideTimer.current = setTimeout(() => {
+            if (dialogRef.current?.contains(document.activeElement)) {
+                setControlsVisible(true);
+                return;
+            }
             setControlsVisible(false);
         }, 3000);
         return () => {
@@ -200,6 +209,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         showControls();
     }, [showControls]);
 
+    const controlVisibilityProps = controlsVisible
+        ? {}
+        : { tabIndex: -1, 'aria-hidden': true as const };
+
     const { avifSrcSet, webpSrcSet, jpegSrc } = useMemo(() => {
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
@@ -245,17 +258,19 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
     return (
         <FocusTrap focusTrapOptions={{ allowOutsideClick: true }}>
         <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label={t('aria.lightbox')}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black"
             onClick={handleBackdropClick}
             onMouseMove={handleMouseMove}
+            onFocusCapture={showControls}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
         >
             {/* Image */}
-            <picture className="w-full h-full flex items-center justify-center">
+            <picture className="w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
                 {avifSrcSet && (
                     <source
                         type="image/avif"
@@ -291,6 +306,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 {/* Close button — top right */}
                 <button
                     ref={closeButtonRef}
+                    {...controlVisibilityProps}
                     className="pointer-events-auto absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
@@ -307,6 +323,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
 
                 {/* Fullscreen toggle — top right, second from right */}
                 <button
+                    {...controlVisibilityProps}
                     className="pointer-events-auto absolute top-4 right-16 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
@@ -324,6 +341,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 {/* Prev button — left edge */}
                 {prevId !== null && (
                     <button
+                        {...controlVisibilityProps}
                         className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20"
                         onClick={(e) => {
                             e.stopPropagation();
@@ -340,6 +358,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 {/* Next button — right edge */}
                 {nextId !== null && (
                     <button
+                        {...controlVisibilityProps}
                         className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20"
                         onClick={(e) => {
                             e.stopPropagation();

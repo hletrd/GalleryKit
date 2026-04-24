@@ -8,7 +8,10 @@ export async function GET() {
     if (isRestoreMaintenanceActive()) {
         return Response.json({ status: 'restore-maintenance' }, {
             status: 503,
-            headers: { 'X-Content-Type-Options': 'nosniff' },
+            headers: {
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+            },
         });
     }
 
@@ -23,6 +26,9 @@ export async function GET() {
     const status = dbOk ? 'ok' : 'degraded';
     return Response.json({ status }, {
         status: dbOk ? 200 : 503,
-        headers: { 'X-Content-Type-Options': 'nosniff' },
+        headers: {
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
     });
 }
