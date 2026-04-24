@@ -124,6 +124,7 @@ describe('uploadImages', () => {
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 1 });
         getTranslationsMock.mockResolvedValue((key: string) => key);
+        saveOriginalAndGetMetadataMock.mockReset();
         saveOriginalAndGetMetadataMock.mockResolvedValue({
             filenameOriginal: 'original.jpg',
             filenameWebp: 'photo.webp',
@@ -136,6 +137,7 @@ describe('uploadImages', () => {
             blurDataUrl: 'data:image/png;base64,abc',
             exifData: {},
         });
+        extractExifForDbMock.mockReset();
         extractExifForDbMock.mockReturnValue({});
         enqueueImageProcessingMock.mockReset();
         revalidateLocalizedPathsMock.mockReset();
@@ -159,5 +161,16 @@ describe('uploadImages', () => {
 
         await expect(uploadImages(formData)).resolves.toMatchObject({ success: true, count: 1 });
         expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/', '/admin/dashboard', '/travel');
+    });
+
+    it('rejects upload tags whose generated slug would be empty', async () => {
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '!!!');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTagNames' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
     });
 });

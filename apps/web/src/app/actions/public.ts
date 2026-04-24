@@ -8,6 +8,18 @@ import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit } from '@/lib/rate-limit';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
+async function rollbackSearchAttempt(ip: string) {
+    const currentEntry = searchRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        currentEntry.count--;
+    } else {
+        searchRateLimit.delete(ip);
+    }
+    await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch((err) => {
+        console.debug('Failed to roll back search DB rate limit:', err);
+    });
+}
+
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
     if (isRestoreMaintenanceActive()) return { images: [], hasMore: false };
     // Validate slug format before passing to data layer (defense in depth)
@@ -77,15 +89,7 @@ export async function searchImagesAction(query: string) {
             // Prior code only rolled back the in-memory counter, leaving the
             // DB counter inflated by 1 per over-limit event. Over the 60s
             // window, legitimate burst users paid an extra counted attempt.
-            const currentEntry = searchRateLimit.get(ip);
-            if (currentEntry && currentEntry.count > 1) {
-                currentEntry.count--;
-            } else {
-                searchRateLimit.delete(ip);
-            }
-            await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch((err) => {
-                console.debug('Failed to roll back search DB rate limit after over-limit:', err);
-            });
+            await rollbackSearchAttempt(ip);
             return [];
         }
     } catch {
@@ -94,5 +98,10 @@ export async function searchImagesAction(query: string) {
 
     // sanitizedQuery already has stripControlChars applied — belt-and-suspenders slice
     const safeQuery = sanitizedQuery.slice(0, 200);
-    return searchImages(safeQuery, 20);
+    try {
+        return await searchImages(safeQuery, 20);
+    } catch (err) {
+        await rollbackSearchAttempt(ip);
+        throw err;
+    }
 }

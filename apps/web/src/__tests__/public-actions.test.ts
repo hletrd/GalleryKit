@@ -158,4 +158,13 @@ describe('searchImagesAction', () => {
             resetAt: expect.any(Number),
         });
     });
+
+    it('rolls back both search counters when the search query throws after pre-increment', async () => {
+        searchImagesMock.mockRejectedValue(new Error('db query failed'));
+
+        await expect(searchImagesAction('landscape')).rejects.toThrow('db query failed');
+
+        expect(searchRateLimit.has('203.0.113.42')).toBe(false);
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'search', 60_000);
+    });
 });

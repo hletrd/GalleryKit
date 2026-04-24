@@ -15,26 +15,37 @@ export function OptimisticImage(props: OptimisticImageProps) {
     return <OptimisticImageInner key={props.src as string} {...props} />;
 }
 
-function OptimisticImageInner({ src, alt, className, ...props }: OptimisticImageProps) {
+function OptimisticImageInner({ src, alt, className, fallbackSrc, ...props }: OptimisticImageProps) {
     const { t } = useTranslation();
     const [imgSrc, setImgSrc] = useState(src);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
+    const retryCountRef = useRef(0);
     const retryTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
     // Clear retry timer on unmount
     useEffect(() => () => { clearTimeout(retryTimerRef.current); }, []);
 
     const handleError = () => {
-        // Stop retrying immediately if we got a definitive 404 (image doesn't exist).
-        // Only retry on network errors or 5xx (image may still be processing).
-        if (retryCount < 5) {
+        if (fallbackSrc && imgSrc !== fallbackSrc) {
+            setImgSrc(fallbackSrc);
+            retryCountRef.current = 0;
+            setRetryCount(0);
+            setIsLoading(true);
+            return;
+        }
+
+        const isLocalUpload = typeof src === 'string' && src.startsWith('/uploads/');
+        const maxRetries = isLocalUpload ? 1 : 5;
+        if (retryCount < maxRetries) {
             const delay = Math.min(500 * Math.pow(2, retryCount), 15000);
             retryTimerRef.current = setTimeout(() => {
-                setRetryCount(c => c + 1);
+                const nextRetry = retryCountRef.current + 1;
+                retryCountRef.current = nextRetry;
+                setRetryCount(nextRetry);
                 const separator = typeof src === 'string' && src.includes('?') ? '&' : '?';
-                setImgSrc(`${src}${separator}retry=${retryCount + 1}`);
+                setImgSrc(`${src}${separator}retry=${nextRetry}`);
             }, delay);
         } else {
             setError(true);

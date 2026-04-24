@@ -8,6 +8,7 @@ const {
     headersMock,
     getClientIpMock,
     checkRateLimitMock,
+    decrementRateLimitMock,
     incrementRateLimitMock,
     isRateLimitExceededMock,
     resetRateLimitMock,
@@ -23,6 +24,7 @@ const {
     headersMock: vi.fn(),
     getClientIpMock: vi.fn(),
     checkRateLimitMock: vi.fn(),
+    decrementRateLimitMock: vi.fn(),
     incrementRateLimitMock: vi.fn(),
     isRateLimitExceededMock: vi.fn(),
     resetRateLimitMock: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/rate-limit', () => ({
     getClientIp: getClientIpMock,
     checkRateLimit: checkRateLimitMock,
+    decrementRateLimit: decrementRateLimitMock,
     incrementRateLimit: incrementRateLimitMock,
     isRateLimitExceeded: isRateLimitExceededMock,
     resetRateLimit: resetRateLimitMock,
@@ -101,6 +104,7 @@ describe('createAdminUser', () => {
         headersMock.mockResolvedValue({ get: vi.fn().mockReturnValue(null) });
         getClientIpMock.mockReturnValue('203.0.113.5');
         checkRateLimitMock.mockResolvedValue({ count: 1 });
+        decrementRateLimitMock.mockResolvedValue(undefined);
         incrementRateLimitMock.mockResolvedValue(undefined);
         isRateLimitExceededMock.mockReturnValue(false);
         resetRateLimitMock.mockResolvedValue(undefined);
@@ -119,6 +123,22 @@ describe('createAdminUser', () => {
         formData.set('confirmPassword', 'CorrectHorseBatteryStaple?');
 
         await expect(createAdminUser(formData)).resolves.toEqual({ error: 'passwordsDoNotMatch' });
+        expect(argon2HashMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rolls back the DB user_create bucket when the DB-backed limit is already exceeded', async () => {
+        checkRateLimitMock.mockResolvedValue({ count: 11 });
+        isRateLimitExceededMock.mockReturnValue(true);
+
+        const formData = new FormData();
+        formData.set('username', 'new-admin');
+        formData.set('password', 'CorrectHorseBatteryStaple!');
+        formData.set('confirmPassword', 'CorrectHorseBatteryStaple!');
+
+        await expect(createAdminUser(formData)).resolves.toEqual({ error: 'tooManyAttempts' });
+
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000);
         expect(argon2HashMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });

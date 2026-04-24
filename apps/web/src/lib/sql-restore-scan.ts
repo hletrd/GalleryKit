@@ -21,6 +21,10 @@ const DANGEROUS_SQL_PATTERNS = [
     // to execute actions beyond --one-database's scope. Legitimate
     // mysqldump output never emits CALL. Defense-in-depth.
     /\bCALL\s+\w+/i,
+    // C1RPF-03 / AGG1-04: block DO statements. `DO SLEEP(...)` is not
+    // emitted by normal mysqldump output and can hold the restore session
+    // and maintenance lock without touching table data.
+    /\bDO\s+/i,
     /\bLOAD\s+DATA\b/i,
     /\bINTO\s+OUTFILE\b/i,
     /\bINTO\s+DUMPFILE\b/i,

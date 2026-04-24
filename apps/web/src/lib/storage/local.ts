@@ -23,9 +23,18 @@ export class LocalStorageBackend implements StorageBackend {
     readonly name = 'local';
 
     private resolve(key: string): string {
+        const normalizedKey = key.trim();
+        if (
+            normalizedKey.length === 0
+            || normalizedKey === '.'
+            || normalizedKey === '..'
+            || normalizedKey.split(/[\\/]+/).some((segment) => segment === '..')
+        ) {
+            throw new Error(`Invalid storage key: ${key}`);
+        }
         // Prevent path traversal: normalize and ensure result stays within UPLOAD_ROOT
-        const resolved = path.resolve(UPLOAD_ROOT, key);
-        if (!resolved.startsWith(path.resolve(UPLOAD_ROOT) + path.sep) && resolved !== path.resolve(UPLOAD_ROOT)) {
+        const resolved = path.resolve(UPLOAD_ROOT, normalizedKey);
+        if (!resolved.startsWith(path.resolve(UPLOAD_ROOT) + path.sep)) {
             throw new Error(`Path traversal blocked: ${key}`);
         }
         return resolved;

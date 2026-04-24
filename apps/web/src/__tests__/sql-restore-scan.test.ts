@@ -41,6 +41,12 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql('CREATE TABLE images (id INT);\nINSERT INTO images VALUES (1);')).toBe(false);
     });
 
+    it('blocks DO statements that can hold the restore session open', () => {
+        expect(containsDangerousSql('DO SLEEP(5);')).toBe(true);
+        expect(containsDangerousSql('DO 1;')).toBe(true);
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('DO SLEEP(5);');")).toBe(false);
+    });
+
     it('blocks REVOKE (C5R-RPL-01 defence-in-depth)', () => {
         expect(containsDangerousSql("REVOKE ALL ON *.* FROM 'other'@'%';")).toBe(true);
         expect(containsDangerousSql("REVOKE SELECT ON db.tbl FROM 'u'@'%';")).toBe(true);

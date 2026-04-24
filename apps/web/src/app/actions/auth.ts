@@ -241,10 +241,15 @@ export async function login(prevState: { error?: string } | null, formData: Form
 }
 
 export async function logout(formData?: FormData) {
+    const requestHeaders = await headers();
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
     const rawLocale = formData?.get('locale')?.toString() ?? '';
     const locale = isSupportedLocale(rawLocale) ? rawLocale : 'en';
+
+    if (!hasTrustedSameOrigin(requestHeaders)) {
+        redirect(localizePath(locale, '/admin'));
+    }
 
     if (token) {
         const session = await verifySessionToken(token);

@@ -9,7 +9,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
@@ -107,7 +107,7 @@ export async function uploadImages(formData: FormData) {
     }
 
     const tagNames = tagsString
-        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && isValidTagName(t))
+        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && isValidTagName(t) && isValidTagSlug(getTagSlug(t)))
         : [];
 
     // Since tagsString is already sanitized, compare against the pre-split count
@@ -266,7 +266,12 @@ export async function uploadImages(formData: FormData) {
                         if (uniqueTagNames.length > 0) {
                             const tagRecords = [];
                             for (const cleanName of uniqueTagNames) {
-                                const resolvedTag = await ensureTagRecord(db, cleanName, getTagSlug(cleanName));
+                                const slug = getTagSlug(cleanName);
+                                if (!isValidTagSlug(slug)) {
+                                    console.warn(`Skipping tag with invalid generated slug: "${cleanName}"`);
+                                    continue;
+                                }
+                                const resolvedTag = await ensureTagRecord(db, cleanName, slug);
                                 if (resolvedTag.kind === 'collision') {
                                     console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
                                     continue;
@@ -403,20 +408,14 @@ export async function deleteImage(id: number) {
         logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
     }
 
-    // Delete files deterministically (no readdir) — best effort, all in parallel
-    // Read configured sizes to ensure all variants are cleaned up
-    let deleteSizes: number[] | undefined;
-    try {
-        const config = await getGalleryConfig();
-        deleteSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
-    } catch {
-        // DB unavailable — use default sizes
-    }
+    // Delete files best-effort, all in parallel. Use prefix scanning for
+    // derivatives so variants generated under older image-size settings are
+    // removed too, not only variants from the current config.
     const cleanupFailures = await collectImageCleanupFailures([
         { target: 'original', filename: image.filename_original, operation: deleteOriginalUploadFile(image.filename_original) },
-        { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, deleteSizes) },
-        { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, deleteSizes) },
-        { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, deleteSizes) },
+        { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+        { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+        { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
     ]);
 
     if (cleanupFailures.length > 0) {
@@ -515,21 +514,14 @@ export async function deleteImages(ids: number[]) {
         }).catch(console.debug);
     }
 
-    // Clean up files deterministically (no readdir) for all images concurrently
-    // Read configured sizes to ensure all variants are cleaned up
-    let batchDeleteSizes: number[] | undefined;
-    try {
-        const config = await getGalleryConfig();
-        batchDeleteSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
-    } catch {
-        // DB unavailable — use default sizes
-    }
+    // Clean up files concurrently. Use prefix scanning for derivatives so
+    // historical size variants are removed after image-size config changes.
     const cleanupFailures = (await Promise.all(imageRecords.map(async (image) => {
         const failures = await collectImageCleanupFailures([
             { target: 'original', filename: image.filename_original, operation: deleteOriginalUploadFile(image.filename_original) },
-            { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, batchDeleteSizes) },
-            { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, batchDeleteSizes) },
-            { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, batchDeleteSizes) },
+            { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+            { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+            { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
         ]);
 
         if (failures.length > 0) {

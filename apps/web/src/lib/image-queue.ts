@@ -14,6 +14,7 @@ import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { isValidFilename } from '@/lib/validation';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -124,6 +125,13 @@ function getProcessingLockName(jobId: number) {
     return `gallerykit:image-processing:${jobId}`;
 }
 
+function hasValidJobFilenames(job: ImageProcessingJob) {
+    return isValidFilename(job.filenameOriginal)
+        && isValidFilename(job.filenameWebp)
+        && isValidFilename(job.filenameAvif)
+        && isValidFilename(job.filenameJpeg);
+}
+
 async function acquireImageProcessingClaim(jobId: number): Promise<PoolConnection | null> {
     const lockConnection = await connection.getConnection();
     try {
@@ -164,6 +172,10 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
     const state = getProcessingQueueState();
     if (state.shuttingDown || isRestoreMaintenanceActive()) {
         console.debug(`[Queue] Ignoring job ${job.id} while processing is unavailable`);
+        return;
+    }
+    if (!hasValidJobFilenames(job)) {
+        console.error(`[Queue] Rejecting job ${job.id} with invalid filename metadata`);
         return;
     }
     if (state.enqueued.has(job.id)) return;
@@ -254,8 +266,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 verifyFile(jpegPath),
             ]);
             if (!webpOk || !avifOk || !jpegOk) {
-                console.error(`Image processing incomplete for ${job.id}: webp=${webpOk} avif=${avifOk} jpeg=${jpegOk}`);
-                return; // Don't mark as processed — retry will handle it
+                throw new Error(`Image processing incomplete for ${job.id}: webp=${webpOk} avif=${avifOk} jpeg=${jpegOk}`);
             }
 
             // US-001: Conditional update — only mark processed if still unprocessed (not deleted)

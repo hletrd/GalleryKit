@@ -12,7 +12,7 @@ import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, checkRateLimit, incrementRateLimit, isRateLimitExceeded, resetRateLimit } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, resetRateLimit } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
@@ -126,6 +126,9 @@ export async function createAdminUser(formData: FormData) {
             } else {
                 userCreateRateLimit.delete(ip);
             }
+            await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS).catch((err) => {
+                console.debug('Failed to roll back user_create DB rate limit after over-limit:', err);
+            });
             return { error: t('tooManyAttempts') };
         }
     } catch {
