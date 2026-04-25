@@ -2,6 +2,7 @@
 
 ## Active Plans
 
+- 236 — Cycle 6 Loop: SEO Unicode-Formatting Parity + `containsUnicodeFormatting` Helper — TODO
 - 231 — Cycle 1 UX, Accessibility, Lifecycle, and Style Consistency Fixes — TODO
 - 230 — Cycle 1 Core Safety, Correctness, Performance, and Verification Fixes — TODO
 - 214 — Deferred Review Coverage (Cycle 5) — TODO / deferred

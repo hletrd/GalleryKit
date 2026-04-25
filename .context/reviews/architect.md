@@ -1,26 +1,26 @@
-# Architect — Cycle 5 (review-plan-fix loop, 2026-04-25)
+# Architect — Cycle 6 (review-plan-fix loop, 2026-04-25)
 
 ## Architectural lens
-- Cross-cutting policy: Unicode-formatting hardening for admin-controlled persistent strings.
-- Current organisation: one constant in `validation.ts`, two consumer functions (`isValidTopicAlias`, `isValidTagName`), and three other admin-controlled string fields with no consumer (`topic.label`, `image.title`, `image.description`).
+Cross-cutting policy: Unicode-formatting hardening for admin-controlled persistent strings. After cycle 5, the policy lives in two helpers (`isValidTopicAlias`, `isValidTagName`) plus three inline `UNICODE_FORMAT_CHARS.test(...)` call sites in `topics.ts` and `images.ts`. The architectural seam (single helper) was carried over from C5L-ARCH-01. After applying the cycle-6 SEO fix, inline call sites would multiply to seven — the right cycle to extract.
 
 ## New findings
 
-### C5L-ARCH-01 — No single architectural seam for "admin-controlled string sanitization" [LOW] [High confidence]
+### C6L-ARCH-01 — Inline `UNICODE_FORMAT_CHARS.test(...)` call sites have proliferated; extract a single helper [LOW] [High confidence]
 
-**Files:**
-- `apps/web/src/lib/validation.ts:33` (`UNICODE_FORMAT_CHARS`)
-- `apps/web/src/lib/sanitize.ts:6` (`stripControlChars`)
-- Six call sites in `apps/web/src/app/actions/*.ts` that copy-paste the `stripControlChars(rawX)` then `if (clean !== raw) return error` pattern.
+**Files (current state):**
+- `apps/web/src/lib/validation.ts:33` (`UNICODE_FORMAT_CHARS` constant)
+- `apps/web/src/lib/validation.ts:45` (`isValidTopicAlias` consumer)
+- `apps/web/src/lib/validation.ts:56` (`isValidTagName` consumer)
+- `apps/web/src/app/actions/topics.ts:83, 185` (inline tests on `label`)
+- `apps/web/src/app/actions/images.ts:670, 673` (inline tests on `sanitizedTitle` / `sanitizedDescription`)
+- *Pending C6L-SEC-01:* `apps/web/src/app/actions/seo.ts` (four more inline tests if not extracted)
 
-**Why a problem.** The two layers (control-char strip; bidi/invisible reject) are owned by two helpers with non-overlapping consumers. A future contributor asking "how do I sanitize an admin-controlled string?" has to grep both libraries and infer the policy from existing call sites. C3L/C4L progressively added Unicode rejection to two of the four obvious admin string surfaces, leaving the others inconsistent.
+**Why a problem.** Five inline call sites today, growing to nine after the cycle-6 fix. The truthiness-handling differs subtly (required strings test post-trim; nullable strings test the post-strip value with a truthiness guard), and copying the wrong shape into a new field is the next regression mode.
 
-**Concrete failure scenario.** A new admin field (e.g. `topics.description`, `tags.description`, audit-log free-form note) is added; the author copies the closest existing pattern (`stripControlChars` + length check) and silently inherits the parity gap.
-
-**Suggested fix.** Either extract a single `sanitizeAdminString` helper in `lib/sanitize.ts` (return `{ value, error }`), or — at minimum for this cycle — add a reusable `rejectUnicodeFormatting(value): string | null` helper in `validation.ts` and apply it inline in `topics.ts` / `images.ts`. Scope the change minimally: only `topic.label`, `image.title`, `image.description`. Leave `admin_settings`/`seo` for follow-up because their values are intentionally permissive.
+**Suggested fix.** Add a `containsUnicodeFormatting(value: string | null | undefined): boolean` helper in `lib/validation.ts` that handles null/empty → false. Replace inline tests with the helper. Keep the constant exported because `isValidTopicAlias` / `isValidTagName` test on already-trimmed required strings without the truthiness guard.
 
 ## Out of scope
-The single-instance / single-writer topology constraint is documented; no change.
+The single-instance / single-writer topology constraint, sharing tables, and admin-user fields are unaffected.
 
 ## Cross-agent agreement
-Overlaps with critic (C5L-CRIT-01 piecemeal-application), code-reviewer (C5L-CR-01 inconsistency), security-reviewer (C5L-SEC-01 root issue).
+Overlaps with code-reviewer (C6L-CR-02), critic (C6L-CRIT-01 — single-motion fix), security-reviewer (C6L-SEC-01 root).
