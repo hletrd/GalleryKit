@@ -116,8 +116,13 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
     return (
         <div
             ref={containerRef}
+            // F-8: explicit outline utilities instead of `focus-visible:ring-*`
+            // so the focus indicator is independent of the `--ring` CSS
+            // variable chain (which had been resolving to fully transparent
+            // in some Chromium states). A 2px solid blue outline meets WCAG
+            // 2.4.7 / 2.4.11 in both light and dark themes.
             className={cn(
-                'overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                'overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400',
                 isZoomed ? 'cursor-zoom-out' : 'cursor-zoom-in',
                 className
             )}
