@@ -1,104 +1,164 @@
-# Test Engineering Review — Cycle 6
+# Test Engineer Deep Review — Cycle 8 Prompt 1
 
-## Scope and inventory
-- Repo reviewed: `/Users/hletrd/flash-shared/gallery`
-- Docs/config/scripts reviewed: `README.md`, `apps/web/README.md`, root/app `package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `apps/web/next.config.ts`, `apps/web/scripts/*`
-- Source inventory reviewed: 135 non-UI source/config files under `apps/web/src`
-- Automated tests reviewed: 58 Vitest files under `apps/web/src/__tests__`
-- E2E reviewed: 5 Playwright specs + 2 fixtures + `apps/web/e2e/helpers.ts`
-- Fresh verification: `npm test --workspace=apps/web` → **58 files passed, 354 tests passed**
+Repo: `/Users/hletrd/flash-shared/gallery`
+Date: 2026-04-25
+Reviewer focus: test strategy, TDD shape, flakiness, regression coverage, weak assertions
 
-## Coverage map summary
-Strongest coverage is on pure helpers (`rate-limit`, `request-origin`, `validation`, `csv-escape`, `db-restore`, `sql-restore-scan`, `session`, `serve-upload`, `content-security-policy`) and on a few action-level contracts (`auth`, `images`, `topics`, `tags`) mostly through mocked unit tests.
+## Inventory reviewed
 
-Weakest coverage is on:
-- security-critical middleware/runtime surfaces
-- admin backup/restore and share-link actions
-- true image-processing pipelines (tests mock them away)
-- admin settings/SEO persistence flows
-- metadata/OG/icon routes
-- client component behavior outside a few E2E happy paths
+Reviewed without sampling:
+- Unit/Vitest: all `apps/web/src/__tests__/*.test.ts` files (59 files)
+- E2E/Playwright: all `apps/web/e2e/*.spec.ts` files plus `apps/web/e2e/helpers.ts`
+- Test/runtime config: `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`
+- Relevant scripts: all files under `apps/web/scripts/`
+- Source under test and adjacent critical source: action/lib/component/route files referenced by tests, plus uncovered critical flows in `auth`, `settings`, `sharing`, `seo`, `api/og`, search/nav/photo viewer, upload/storage/config, and shared-group view-count buffering.
 
 ## Findings
 
-### 1) Admin DB backup/restore actions are effectively untested
-- **Files/region:** `apps/web/src/app/[locale]/admin/db-actions.ts:33-470`
+### Confirmed risks
+
+#### 1) Critical auth flows are mostly protected by source-text tests, not executable behavior tests
 - **Severity:** High
 - **Confidence:** High
-- **Risk type:** Confirmed
-- **Why this matters:** This file owns CSV export, `mysqldump` backup creation, advisory-lock restore orchestration, SQL scanning, queue quiesce/resume, temp-file cleanup, and post-restore revalidation.
-- **Current gap:** Existing tests cover helpers (`db-restore`, `sql-restore-scan`, `backup-filename`) and the authenticated download route, but there is no direct test coverage for `exportImagesCsv`, `dumpDatabase`, or `restoreDatabase` itself.
-- **Failure scenario current tests miss:** a refactor could stop releasing the restore advisory lock, skip `resumeImageProcessingQueueAfterRestore()`, accept an oversized upload, fail to delete temp files on early return, or mis-handle `mysqldump`/`mysql` child-process failures while all current tests still pass.
-- **Recommendation:** Add focused server-action tests that mock child processes, pool connections, queue hooks, and filesystem cleanup. Minimum cases: unauthorized/origin fail-closed, restore lock already held, size/header/disallowed-SQL rejection, successful restore cleanup/revalidation, `mysqldump` zero-byte output handling, and CSV truncation/audit behavior.
-- **TDD opportunity:** start with failing tests for restore-lock release and restore cleanup because those are the most failure-prone operational branches.
+- **Files:**
+  - `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts:17-25,31-139`
+  - `apps/web/src/__tests__/auth-rethrow.test.ts:12-15,17-52`
+  - `apps/web/src/app/actions/auth.ts:70-245,247-429`
+- **Why this is confirmed:** the current tests explicitly read `auth.ts` as text and assert string ordering/contains. There is no runtime unit test exercising successful login, failed login, logout CSRF rejection, session insertion/deletion, account-scoped bucket reset, or password-change session rotation.
+- **Failure scenario:** a refactor can preserve the searched strings while breaking behavior: wrong cookie flags, partial session rotation, incorrect rollback after DB failure, wrong redirect locale, or broken logout deletion.
+- **Concrete test/fix:** add executable tests for `login`, `logout`, and `updatePassword` with mocked `cookies`, `headers`, `db.transaction`, `argon2`, `verifySessionToken`, and rate-limit helpers. Cover:
+  - login success resets IP + account buckets and sets secure cookie correctly
+  - login invalid credentials increments only once and returns localized error
+  - logout cross-origin request redirects without deleting session
+  - updatePassword rotates *all* sessions and inserts exactly one fresh session
+  - unexpected DB failure rolls back pre-incremented counters
 
-### 2) Share-link creation/revocation has no regression tests despite concurrency/rate-limit logic
-- **Files/region:** `apps/web/src/app/actions/sharing.ts:21-389`
+#### 2) Share-link mutation actions have no direct tests despite high race/rollback complexity
 - **Severity:** High
 - **Confidence:** High
-- **Risk type:** Confirmed
-- **Why this matters:** `createPhotoShareLink`, `createGroupShareLink`, `revokePhotoShareLink`, and `deleteGroupShareLink` contain pre-incremented in-memory + DB rate limits, collision retries, FK-recovery rollback, and race-aware conditional updates.
-- **Current gap:** no Vitest or Playwright coverage references these actions.
-- **Failure scenario current tests miss:** a duplicate-key or deleted-image path could burn rate-limit budget permanently, a concurrent revoke could clear a newly generated key, or group-link creation could stop rolling back on FK failures without any test signal.
-- **Recommendation:** Add unit tests for each branch: existing share key short-circuit, invalid IDs, processed-image gating, DB over-limit rollback, duplicate-key retry, FK failure rollback, concurrent revoke returning `noActiveShareLink`, and successful revalidation/audit payloads. Add one E2E that creates and revokes a photo share and validates public-route access changes.
-- **TDD opportunity:** write a failing test for `rollbackShareRateLimitFull()` coverage before touching any share-link internals in future cycles.
+- **Files:**
+  - `apps/web/src/app/actions/sharing.ts:92-187`
+  - `apps/web/src/app/actions/sharing.ts:189-305`
+  - `apps/web/src/app/actions/sharing.ts:308-389`
+- **Why this is confirmed:** there is no `sharing*.test.ts` coverage. The action file contains retry loops, conditional updates, DB + in-memory rollback, transaction-based group creation, and concurrent-revocation protection.
+- **Failure scenario:** stale share keys can be returned, rate-limit buckets can drift on failures, FK failures can charge the admin anyway, or concurrent revoke/create can revoke the wrong key.
+- **Concrete test/fix:** add a dedicated `sharing-actions.test.ts` covering:
+  - existing `share_key` short-circuit
+  - over-limit rollback for both photo/group share paths
+  - duplicate-key retry exhaustion
+  - `ER_NO_REFERENCED_ROW_2` rollback on group creation
+  - conditional revoke returning `noActiveShareLink` when another request replaced the key
+  - delete-group transaction ordering and revalidation paths
 
-### 3) Security-critical middleware has no direct test coverage
-- **Files/region:** `apps/web/src/proxy.ts:13-103`, `apps/web/src/instrumentation.ts:1-37`
+#### 3) Settings and SEO admin mutations are under-tested; the only settings guard is static text
 - **Severity:** High
 - **Confidence:** High
-- **Risk type:** Manual-validation risk
-- **Why this matters:** `proxy.ts` is the request gate for locale routing, admin-route cookie redirects, and production CSP nonce propagation. `instrumentation.ts` enforces legacy-upload startup checks and graceful queue draining.
-- **Current gap:** no tests reference `proxy.ts` or `instrumentation.ts` directly.
-- **Failure scenario current tests miss:** protected `/admin/...` paths could stop redirecting unauthenticated users, CSP headers/nonces could stop propagating in production, or shutdown/startup hooks could regress without any automated signal.
-- **Recommendation:** Add middleware/instrumentation integration tests: protected-vs-login route classification, locale-preserving redirects, production CSP header propagation, and startup/shutdown hook invocation ordering.
+- **Files:**
+  - `apps/web/src/__tests__/settings-image-sizes-lock.test.ts:5-22`
+  - `apps/web/src/__tests__/seo-actions.test.ts:5-20`
+  - `apps/web/src/app/actions/settings.ts:39-164`
+  - `apps/web/src/app/actions/seo.ts:54-143`
+- **Why this is confirmed:** settings coverage is limited to one source-slice assertion around `image_sizes`; SEO coverage tests only `validateSeoOgImageUrl`, not `updateSeoSettings`. No executable tests cover transactionality, sanitized return payloads, invalid-key rejection, upload-claim locking, `strip_gps_on_upload` locking, deletion-on-empty, or full-app revalidation.
+- **Failure scenario:** invalid admin keys slip through, sanitized values differ from persisted values, upload-setting lockouts regress, or empty values stop deleting rows and silently pin stale config.
+- **Concrete test/fix:** add `settings-actions.test.ts` and `seo-actions-runtime.test.ts` with mocked DB transaction + audit + revalidation. Cover:
+  - invalid key rejection
+  - sanitization before validation
+  - `hasActiveUploadClaims()` lock path
+  - `image_sizes` and `strip_gps_on_upload` existing-image lock paths
+  - empty value deletes row
+  - success returns sanitized settings and calls `revalidateAllAppData()`
 
-### 4) Admin E2E coverage is conditional and does not exercise real settings persistence
-- **Files/region:** `apps/web/e2e/admin.spec.ts:6-7, 40-58`, `apps/web/e2e/helpers.ts:33-45, 47-73`, `apps/web/src/app/actions/settings.ts:38-163`, `apps/web/src/app/actions/seo.ts:52-138`, `apps/web/src/__tests__/settings-image-sizes-lock.test.ts:1-23`, `apps/web/src/__tests__/seo-actions.test.ts:1-20`
-- **Severity:** High
-- **Confidence:** High
-- **Risk type:** Confirmed
-- **Why this matters:** the admin suite is skipped unless `adminE2EEnabled` resolves truthy; in hardened environments using hashed `ADMIN_PASSWORD` without explicit `E2E_ADMIN_PASSWORD`, the entire admin browser suite drops out. Separately, the only settings-browser check flips a switch and reads `data-state`; it never saves, reloads, or verifies server persistence.
-- **Failure scenario current tests miss:** `updateGallerySettings`/`updateSeoSettings` could reject changes, sanitize unexpectedly, fail revalidation, or fail to persist at all while the current admin spec still passes because it only observes client-side hydration and never clicks Save.
-- **Recommendation:** Make one admin path mandatory in CI with explicit E2E credentials, and add browser tests for settings/SEO save + reload persistence. Replace or supplement `settings-image-sizes-lock.test.ts` static-source matching with behavior tests against `updateGallerySettings()`.
-- **TDD opportunity:** write a failing browser test: toggle GPS → click Save → reload page → assert persisted value.
-
-### 5) The “visual check” Playwright spec does not actually assert visual correctness
-- **Files/region:** `apps/web/e2e/nav-visual-check.spec.ts:4-40`
+#### 4) Shared-group view-count buffering/backoff has no regression coverage
 - **Severity:** Medium
 - **Confidence:** High
-- **Risk type:** Confirmed
-- **Why this matters:** all three tests only save screenshots to `test-results/*.png`; there is no snapshot comparison, pixel diff, or baseline assertion.
-- **Failure scenario current tests miss:** major nav spacing/color/layout regressions still pass as long as the page loads and the screenshot file is written.
-- **Recommendation:** convert these to `expect(page).toHaveScreenshot(...)`/`expect(locator).toHaveScreenshot(...)` with stable masking where needed, or remove them if they are only for manual artifact collection.
+- **Files:**
+  - `apps/web/src/lib/data.ts:11-108`
+- **Why this is confirmed:** no test file exercises `bufferGroupViewCount`, `flushGroupViewCounts`, `flushBufferedSharedGroupViewCounts`, buffer-cap enforcement, or failure backoff.
+- **Failure scenario:** DB outage could drop increments, leak timer state, or cause runaway retries/buffer growth without a failing test.
+- **Concrete test/fix:** extract/ export a narrow test seam or add internal test hooks, then cover:
+  - partial chunk failure re-buffering
+  - full failure exponential backoff
+  - buffer-cap drop behavior
+  - maintenance-mode no-op
+  - explicit flush cancelling the timer and draining remaining counts
 
-### 6) The real image-processing pipelines are mocked out, leaving the riskiest file/Sharp behavior unverified
-- **Files/region:** `apps/web/src/lib/process-image.ts:224-589`, `apps/web/src/lib/process-topic-image.ts:42-106`, `apps/web/src/__tests__/images-actions.test.ts:73-77`, `apps/web/src/__tests__/topics-actions.test.ts:108-110`
+#### 5) Search UI’s concurrency and keyboard-selection logic lacks direct tests
 - **Severity:** Medium
 - **Confidence:** High
-- **Risk type:** Confirmed
-- **Why this matters:** upload/topic action tests mock `saveOriginalAndGetMetadata`, `extractExifForDb`, and `processTopicImage`, so the suite never exercises extension allowlists, zero-byte rejection, EXIF parsing, GPS stripping interactions, sized derivative generation, atomic base-file writes, temp-file cleanup, or 512x512 topic-image rendering.
-- **Failure scenario current tests miss:** Sharp output naming could drift from `imageUrl()` expectations, EXIF timestamps/GPS extraction could regress, corrupted uploads could leave orphaned files, or topic-image cleanup could stop removing temp files.
-- **Recommendation:** Add fixture-backed integration tests using small real JPEG/PNG/HEIC samples. Assert derivative filenames, EXIF extraction/normalization, cleanup on invalid inputs, and topic-image output dimensions/format.
+- **Files:**
+  - `apps/web/src/components/search.tsx:53-104,110-145,193-215`
+  - `apps/web/e2e/public.spec.ts:21-59`
+- **Why this is confirmed:** E2E covers open/focus/basic result visibility, but there is no direct unit/integration test for request-id stale-response suppression, debounce cleanup, arrow-key selection, Enter activation, or body-scroll unlock cleanup.
+- **Failure scenario:** an older slow search response can overwrite a newer query, keyboard navigation can regress while the dialog still “opens”, or body scroll can remain locked after close.
+- **Concrete test/fix:** add component tests for `Search` with mocked `searchImagesAction`; cover stale response dropping, debounce cancellation on rapid input changes, arrow navigation bounds, Enter navigation on active result, and body overflow restoration.
 
-### 7) Discoverability/metadata surfaces have almost no automated coverage
-- **Files/region:** `apps/web/src/app/api/og/route.tsx:1-157`, `apps/web/src/app/sitemap.ts:1-59`, `apps/web/src/app/robots.ts:1-20`, `apps/web/src/app/manifest.ts:1-31`, `apps/web/src/app/icon.tsx:1-46`, `apps/web/src/app/apple-icon.tsx:1-41`, `apps/web/src/app/global-error.tsx:1-84`, `apps/web/vitest.config.ts:4-12`
+#### 6) The suite relies heavily on brittle source-inspection tests for UI/runtime behavior
 - **Severity:** Medium
 - **Confidence:** High
-- **Risk type:** Manual-validation risk
-- **Why this matters:** these routes affect SEO, crawler behavior, OG image generation, branding, and fatal-error UX. Current tests cover only the helper `validateSeoOgImageUrl()`, and the Vitest setup has no browser/jsdom environment for rendering these UI surfaces.
-- **Failure scenario current tests miss:** sitemap locale URLs could be malformed, robots could point at the wrong origin, OG generation could reject/clip valid topic/tag combinations incorrectly, or icon/error rendering could break silently.
-- **Recommendation:** add route-level tests for sitemap/robots/manifest/OG status and payload shape, plus minimal render tests for icon/global-error output. If broader client-component coverage is desired, introduce a jsdom/RTL lane instead of relying exclusively on coarse Playwright happy paths.
+- **Files:**
+  - `apps/web/src/__tests__/client-source-contracts.test.ts:5-33`
+  - `apps/web/src/__tests__/db-pool-connection-handler.test.ts:19-20,23-67`
+  - `apps/web/src/__tests__/images-delete-revalidation.test.ts:5-24`
+  - `apps/web/src/__tests__/admin-user-create-ordering.test.ts:22-142`
+  - `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts:17-18,19-139`
+- **Why this is confirmed:** these tests mostly assert `readFileSync(...).toContain()/toMatch()` rather than exercising behavior. They are useful as narrow guardrails, but many are standing in for missing runtime coverage.
+- **Failure scenario:** behavior can break while strings remain present; conversely, benign refactors can cause noisy false failures.
+- **Concrete test/fix:** keep the narrow structural guards only where AST/text shape is the actual contract (lint scanners), but replace UI/action/runtime source-contract checks with behavioral tests around exported functions/components.
 
-## Final sweep / commonly missed issues
-- No skipped Vitest files were found, but **admin Playwright coverage is intentionally skippable** and can disappear in CI depending on credential shape.
-- Several tests are source-text guards rather than behavior tests (`settings-image-sizes-lock.test.ts`, `auth-rate-limit-ordering.test.ts`, `admin-user-create-ordering.test.ts`, `auth-rethrow.test.ts`). They are useful tripwires, but they should not be treated as sufficient proof of runtime behavior.
-- Major client surfaces with zero direct tests include `home-client.tsx`, `nav-client.tsx`, `image-manager.tsx`, `settings-client.tsx`, and `seo-client.tsx`; current strategy relies on a small number of E2E happy paths to cover them indirectly.
+### Likely risks
 
-## Recommended next test additions (priority order)
-1. `db-actions` restore/backup behavior tests
-2. `sharing.ts` server-action regression suite
-3. mandatory admin E2E save/reload coverage for Settings + SEO
-4. real Sharp/fixture integration tests for `process-image` and `process-topic-image`
-5. middleware tests for `proxy.ts`
-6. convert nav screenshot capture into real screenshot assertions
+#### 7) Admin settings Playwright test can false-pass if persistence fails
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Files:**
+  - `apps/web/e2e/admin.spec.ts:45-64`
+- **Why this is likely:** the test only checks `data-state` before/after clicks. It never verifies that the mutation persisted, survived refresh, or returned success feedback.
+- **Failure scenario:** the toggle updates locally in hydrated UI, but the server action fails or is ignored; the test still passes.
+- **Concrete test/fix:** after toggling, wait for a save acknowledgement (toast/network idle if exposed), reload `/admin/settings`, and assert the value persisted; then restore the original state.
+
+#### 8) Fixed 30s DB polling in E2E upload helper is a probable CI flake source
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Files:**
+  - `apps/web/e2e/helpers.ts:151-173`
+  - `apps/web/e2e/admin.spec.ts:83-88`
+- **Why this is likely:** the helper polls MySQL every 500ms and hard-fails at 30s. Slow image processing, cold build caches, or slower CI disks can exceed that budget intermittently.
+- **Failure scenario:** upload/delete workflow flakes only in slower runners although the app is correct.
+- **Concrete test/fix:** make timeout configurable via env, log observed processing duration, and prefer waiting on a UI/API completion signal where possible instead of DB polling alone.
+
+### Manual-validation / evidence gaps
+
+#### 9) “Visual” nav checks are artifact generation, not assertions
+- **Severity:** Medium
+- **Confidence:** High
+- **Files:**
+  - `apps/web/e2e/nav-visual-check.spec.ts:5-40`
+- **Why this is manual-validation risk:** these tests save screenshots but do not compare against a baseline or assert pixel/DOM invariants beyond a few visibility checks.
+- **Failure scenario:** layout regressions slip through CI unless someone manually opens the generated PNGs.
+- **Concrete test/fix:** either convert to Playwright snapshot assertions (`toHaveScreenshot`) with stable masking/thresholds, or downgrade these to explicit manual-review scripts outside the automated gate.
+
+## Missing regression coverage for prior-fix areas
+
+- `auth.ts` prior rate-limit/session-rotation fixes are guarded mainly by static source checks, not runtime regressions.
+- `settings.ts` prior image-size locking fix has only `settings-image-sizes-lock.test.ts`, which is static and does not execute `updateGallerySettings()`.
+- `sharing.ts` contains multiple rollback/race comments and fix history but has no dedicated regression suite.
+- `search.ts` contains explicit stale-request protection (`requestIdRef`) with no dedicated test locking that behavior.
+
+## Final missed-issues sweep
+
+Additional sweep across uncovered critical files found no stronger high-confidence gaps than the items above, but these remain notable secondary gaps:
+- `apps/web/src/app/api/og/route.tsx:25-118` has no direct tests for invalid params, tag truncation/filtering, or response caching headers.
+- `apps/web/src/lib/upload-tracker-state.ts:15-60` has no direct tests for pruning / active-claim detection, even though `settings.ts` depends on it to lock upload-contract changes.
+- `apps/web/src/lib/storage/index.ts:52-141` has no direct tests for backend switching / init rollback.
+
+## Overall assessment
+
+- **Test strategy health:** mixed
+- **Strengths:** strong coverage on many pure helpers, good security-lint scanner tests, useful smoke E2E around public/admin routes
+- **Weakness pattern:** too many critical action flows are covered by source-shape assertions or not covered at all; several visual/e2e checks prove “page loads” rather than “behavior is correct and persisted”
+- **Recommended next TDD order:**
+  1. `sharing-actions.test.ts`
+  2. executable `auth` action tests
+  3. executable `settings` + `seo` action tests
+  4. `search` component concurrency/keyboard tests
+  5. `data.ts` shared-group view-count buffering tests

@@ -1,177 +1,209 @@
-# Perf Reviewer — PROMPT 1 / Cycle 5 Deep Repository Review
+# Perf Reviewer — Cycle 8 Prompt 1 Deep Review
 
-Scope: performance, concurrency, CPU/memory, DB query count, image processing, caching, SSR/rendering, upload/export streaming, queue behavior, frontend responsiveness, and operational bottlenecks.
+Scope: performance, concurrency, CPU/memory, DB/query efficiency, queue/image processing, SSR/cache behavior, client responsiveness, and build/deploy runtime traps.
 
-Constraints honored: review only; no implementation; no commit.
+Constraints honored: review only; no code changes; no commit/push.
 
 ## Performance-relevant inventory
 
-- **Public SSR/rendering:** `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`, `layout.tsx`; `apps/web/src/components/nav.tsx`, `nav-client.tsx`, `home-client.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `histogram.tsx`, `search.tsx`, `tag-filter.tsx`, `optimistic-image.tsx`.
-- **Data/query layer:** `apps/web/src/lib/data.ts`, `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/*.sql`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/revalidation.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/rate-limit.ts`.
-- **Image/upload/queue/storage:** `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/process-image.ts`, `process-topic-image.ts`, `image-queue.ts`, `queue-shutdown.ts`, `upload-limits.ts`, `upload-tracker*.ts`, `serve-upload.ts`, `upload-paths.ts`, `storage/*`, upload route handlers.
-- **Export/backup/restore:** `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/lib/db-restore.ts`, `sql-restore-scan.ts`, `mysql-cli-ssl.ts`.
-- **Config/ops/docs:** `apps/web/next.config.ts`, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, root `README.md`, `apps/web/README.md`, `CLAUDE.md`, package scripts/configs.
-- **Tests inspected for perf-relevant coverage:** queue, public actions, image actions, upload limits/tracker/dropzone, data pagination, db-pool, backup/restore/download, serve-upload, histogram, search/rate-limit tests under `apps/web/src/__tests__` plus e2e specs under `apps/web/e2e`.
+I inventoried all files in the performance-relevant surfaces and inspected them via direct reads plus repo-wide pattern sweeps:
+
+- **Docs / config / deploy**
+  - `README.md`
+  - `apps/web/README.md`
+  - `apps/web/package.json`
+  - `apps/web/next.config.ts`
+  - `apps/web/Dockerfile`
+  - `apps/web/docker-compose.yml`
+  - `apps/web/playwright.config.ts`
+  - `apps/web/vitest.config.ts`
+  - `apps/web/src/instrumentation.ts`
+  - `apps/web/src/proxy.ts`
+
+- **Runtime source inspected**
+  - all files under `apps/web/src/app`
+  - all files under `apps/web/src/components`
+  - all files under `apps/web/src/lib`
+  - all files under `apps/web/src/db`
+
+- **Perf-relevant tests inspected**
+  - all files under `apps/web/src/__tests__`
+  - all files under `apps/web/e2e`
+
+- **Main hot-path clusters**
+  - public gallery/photo/share routes
+  - admin dashboard/upload/tags/topics/settings/db tools
+  - query/data layer
+  - image conversion + queue bootstrap/shutdown
+  - upload/export/download streaming paths
+  - search/load-more/client interaction paths
 
 ## Findings
 
-### PERF-01 — Public gallery/photo pages intentionally disable ISR, so every hot public hit re-runs SSR and DB work
+### PERF-01 — Public gallery list queries are not actually lightweight; they over-fetch EXIF-heavy columns on every page
 
+- **Status:** Confirmed
 - **Severity:** High
 - **Confidence:** High
-- **Status:** Confirmed
 - **Evidence:**
-  - Home exports `revalidate = 0`: `apps/web/src/app/[locale]/(public)/page.tsx:14-17`.
-  - Topic exports `revalidate = 0`: `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:16-18`.
-  - Photo exports `revalidate = 0`: `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:29-31`.
-  - Home request path performs SEO/config/tags/topics and image page queries: `apps/web/src/app/[locale]/(public)/page.tsx:113-131`.
-  - Public layout renders `Nav`, and `Nav` queries topics, SEO, and gallery config per request: `apps/web/src/app/[locale]/(public)/layout.tsx:5-17`, `apps/web/src/components/nav.tsx:6-12`.
-  - Queue marks images processed but does not revalidate public paths after success: `apps/web/src/lib/image-queue.ts:285-301`.
-- **Concrete failure scenario:** A crawler or popular linked photo page causes all home/topic/photo hits to execute fresh React SSR and multiple DB reads. With the pool capped at 10 connections and queue limit 20 (`apps/web/src/db/index.ts:13-22`), hot public traffic can starve admin uploads/search and raise TTFB even though most gallery content is cacheable between mutations.
-- **Suggested fix:** Restore ISR or tag/path caching for public pages, then revalidate precisely when queue processing completes and when metadata/tags/topics mutate. For uploads, after `processed=true`, revalidate `/`, `/${topic}`, `/p/${id}`, sitemap/OG as needed. Keep `revalidate=0` only for admin and truly volatile share-view counts.
+  - `publicSelectFields` inherits almost all of `adminSelectFields`, including many EXIF/display fields not used by gallery grids: `apps/web/src/lib/data.ts:115-152`, `apps/web/src/lib/data.ts:161-181`
+  - public list queries spread `...publicSelectFields` in both `getImagesLite` and `getImagesLitePage`: `apps/web/src/lib/data.ts:322-334`, `apps/web/src/lib/data.ts:372-385`
+  - homepage consumes only a narrow subset for cards: `apps/web/src/components/home-client.tsx:45-57`, `apps/web/src/components/home-client.tsx:150-230`
+  - homepage first page uses `getImagesLitePage(...)`: `apps/web/src/app/[locale]/(public)/page.tsx:133-176`
+  - topic page does the same: `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:156-188`
+- **Failure scenario:** every home/topic request fetches and serializes camera/lens/ISO/f-number/exposure/focal-length/color-space/etc. for 30 images even though the grid never renders them. That inflates DB row size, SSR payload size, and hydration cost.
+- **Concrete fix:** create a true gallery-card projection for public list pages containing only the fields actually rendered (`id`, filenames, width/height, title/description, `tag_names`, `topic`, maybe `user_filename` fallback). Keep EXIF only for detail pages/search where it is used.
 
-### PERF-02 — Listing pagination uses OFFSET plus `COUNT(*) OVER()`, forcing large scans/sorts as the gallery grows
+### PERF-02 — Admin dashboard list query over-fetches the full admin image record for every row
 
+- **Status:** Confirmed
 - **Severity:** High
 - **Confidence:** High
-- **Status:** Confirmed
 - **Evidence:**
-  - Initial public page query selects `COUNT(*) OVER()` and uses `LIMIT/OFFSET`: `apps/web/src/lib/data.ts:371-385`.
-  - Load-more path is offset-based and caps only at offset 10,000: `apps/web/src/app/actions/public.ts:23-40`.
-  - Client keeps increasing `offset` as it appends pages: `apps/web/src/components/load-more.tsx:21-42`.
-  - Home renders all accumulated images in one masonry DOM: `apps/web/src/components/home-client.tsx:83-90`, `apps/web/src/components/home-client.tsx:149-247`.
-- **Concrete failure scenario:** On a 50k-image gallery, the first page needs a windowed total over the filtered result set; later load-more requests at offset 9,000 still require the DB to walk and discard thousands of rows. The browser also keeps all previously loaded cards mounted, so long sessions accumulate DOM, images, and React state.
-- **Suggested fix:** Use keyset/cursor pagination on `(capture_date, created_at, id)` instead of offset. Fetch `limit + 1` for `hasMore` and make total counts cached/async/approximate rather than part of the critical image query. Consider virtualized masonry or a hard client-side window for very long sessions.
+  - admin dashboard fetches `getAdminImagesLite(PAGE_SIZE, offset, true)`: `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:8-22`
+  - `getAdminImagesLite` spreads `...adminSelectFields` for every row: `apps/web/src/lib/data.ts:420-438`
+  - `adminSelectFields` includes many unused columns for this screen, including full EXIF and private/original metadata: `apps/web/src/lib/data.ts:115-152`
+  - dashboard client only needs a much smaller shape: `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:11-19`
+  - row renderer uses an even narrower subset: `apps/web/src/components/image-manager.tsx:49-60`, `apps/web/src/components/image-manager.tsx:377-440`
+- **Failure scenario:** each admin dashboard page pulls 50 oversized rows, increasing query cost and serialized React payload size before the client table even mounts.
+- **Concrete fix:** add a dashboard-specific query selecting only the fields the dashboard actually renders. Keep full admin image reads for edit/detail surfaces only.
 
-### PERF-03 — Public search is leading-wildcard SQL over multiple columns plus tag/alias fallbacks, not indexed full-text search
+### PERF-03 — The main photo viewer forces synchronous image decoding on the critical path
 
-- **Severity:** High
-- **Confidence:** High
 - **Status:** Confirmed
-- **Evidence:**
-  - Search builds `%${escaped}%`: `apps/web/src/lib/data.ts:731-733`.
-  - Main query applies `LIKE` across title, description, camera model, topic slug, and topic label: `apps/web/src/lib/data.ts:743-757`.
-  - If not full, it runs tag and alias JOIN/GROUP BY queries with more leading-wildcard `LIKE`: `apps/web/src/lib/data.ts:766-820`.
-  - Schema indexes cover sort/topic/tag joins, but no FULLTEXT/search index exists: `apps/web/src/db/schema.ts:61-80`.
-- **Concrete failure scenario:** A legitimate user typing in search can trigger up to three table/JOIN scans per debounced query. Rate limiting reduces abuse but does not help expensive legitimate searches on large galleries.
-- **Suggested fix:** Add MySQL FULLTEXT indexes for searchable text fields and a normalized search table/materialized index for tags/topics, or move search to a dedicated engine. Return ranked IDs first, then hydrate small image rows by PK.
-
-### PERF-04 — Public photo prev/next navigation queries can filesort/range-scan because the composite index omits `id`
-
 - **Severity:** Medium
-- **Confidence:** Medium
+- **Confidence:** High
+- **Evidence:**
+  - photo viewer main `<img>` uses `decoding="sync"` with eager loading: `apps/web/src/components/photo-viewer.tsx:218-228`
+- **Failure scenario:** opening or navigating between large photos can block the main thread during decode, causing visible input lag/jank exactly where the UI is supposed to feel most responsive.
+- **Concrete fix:** change to `decoding="async"` or omit the attribute and let the browser choose. If instant navigation is required, prefetch adjacent assets separately rather than forcing synchronous decode.
+
+### PERF-04 — Batch delete can fan out into hundreds of full directory scans at once
+
+- **Status:** Confirmed
+- **Severity:** High
+- **Confidence:** High
+- **Evidence:**
+  - `deleteImageVariants(..., sizes = [])` falls back to scanning the whole derivative directory: `apps/web/src/lib/process-image.ts:170-205`
+  - single delete intentionally calls that path for all three derivative dirs: `apps/web/src/app/actions/images.ts:426-431`
+  - batch delete does this inside `Promise.all(imageRecords.map(...))`: `apps/web/src/app/actions/images.ts:537-553`
+  - batch size is allowed up to 100 images: `apps/web/src/app/actions/images.ts:462-465`
+- **Failure scenario:** deleting 100 images can trigger ~300 concurrent directory scans/unlink waves across `webp/avif/jpeg`, which can saturate disk I/O and stall uploads/queue work.
+- **Concrete fix:** do at most one scan per format per batch, discover all matching legacy variants once, then unlink in a bounded-concurrency pass. Avoid per-image full-directory scans.
+
+### PERF-05 — CSV export still materializes the whole export in server memory and then again in browser memory
+
+- **Status:** Confirmed
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:**
+  - export query loads up to 50k rows into memory: `apps/web/src/app/[locale]/admin/db-actions.ts:51-67`
+  - server builds `csvLines` and then one giant `csvContent` string: `apps/web/src/app/[locale]/admin/db-actions.ts:70-99`
+  - client wraps returned data in a `Blob` before download: `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:94-115`
+- **Failure scenario:** a large export temporarily exists as DB result rows + line array + final string on the server, then as action payload + Blob on the client. That can spike memory and freeze slower browsers.
+- **Concrete fix:** move CSV export to a route handler that streams rows directly to the response. Do not return the CSV body through a Server Action.
+
+### PERF-06 — Live search is still a leading-wildcard multi-query scan without a real search index
+
+- **Status:** Confirmed
+- **Severity:** Medium
+- **Confidence:** High
+- **Evidence:**
+  - search builds `%query%`: `apps/web/src/lib/data.ts:731-733`
+  - primary search scans multiple columns with leading-wildcard `LIKE`: `apps/web/src/lib/data.ts:743-757`
+  - it may then run tag and alias fallback queries too: `apps/web/src/lib/data.ts:766-820`
+  - schema has normal indexes for browse paths, but no full-text search index: `apps/web/src/db/schema.ts:61-80`
+  - client calls this on a 300ms debounce while typing: `apps/web/src/components/search.tsx:89-104`
+- **Failure scenario:** legitimate search use on a large gallery can still trigger expensive scans/JOINs per debounced keystroke; rate limiting reduces abuse, not normal query cost.
+- **Concrete fix:** add MySQL FULLTEXT or a dedicated search table/index. Keep the current fallback logic only for small datasets or as a degraded path.
+
+### PERF-07 — Queue/job concurrency can still oversubscribe CPU under default settings
+
 - **Status:** Likely
-- **Evidence:**
-  - Prev/next use OR range predicates over `capture_date`, `created_at`, and `id`, then order by all three: `apps/web/src/lib/data.ts:465-535`.
-  - The relevant indexes are `(processed, capture_date, created_at)` and `(processed, created_at)`, but neither includes `id` as the final ordering key: `apps/web/src/db/schema.ts:61-66`.
-- **Concrete failure scenario:** On popular photo pages, each request does the base image lookup plus tag query plus two adjacent-image queries. At high cardinality or many equal/null capture dates, MySQL may filesort or scan wider ranges to satisfy `ORDER BY ... id`.
-- **Suggested fix:** Add composite indexes that match the actual order, e.g. `(processed, capture_date, created_at, id)` and topic variant if needed. Consider storing a sortable key or using UNION/keyset branches that are easier for MySQL to optimize than broad OR predicates.
-
-### PERF-05 — Batch delete can launch hundreds of full directory scans concurrently
-
-- **Severity:** High
-- **Confidence:** High
-- **Status:** Confirmed
-- **Evidence:**
-  - `deleteImageVariants(..., sizes = [])` scans the entire derivative directory when sizes are empty: `apps/web/src/lib/process-image.ts:170-205`.
-  - Single delete intentionally passes `[]` for all three derivative dirs: `apps/web/src/app/actions/images.ts:420-428`.
-  - Batch delete runs `Promise.all(imageRecords.map(...))` and each image scans webp/avif/jpeg dirs with `[]`: `apps/web/src/app/actions/images.ts:532-550`.
-  - Batch size allows up to 100 images: `apps/web/src/app/actions/images.ts:459-462`.
-- **Concrete failure scenario:** Deleting 100 images from a gallery with 100k derivative files can schedule ~300 directory scans/unlink waves at once. That can saturate disk I/O, block upload processing, and make the admin request time out.
-- **Suggested fix:** Build filenames deterministically from known/default/current sizes first, and do one directory scan per format per batch to discover legacy variants for all bases. Add a concurrency limiter for filesystem cleanup and return early after DB delete with background cleanup if necessary.
-
-### PERF-06 — Image processing can oversubscribe CPU and memory under default queue settings
-
-- **Severity:** High
-- **Confidence:** Medium
-- **Status:** Likely
-- **Evidence:**
-  - Queue default concurrency is `2`: `apps/web/src/lib/image-queue.ts:118-121`.
-  - Sharp global concurrency defaults to `cpuCount - 1` unless capped: `apps/web/src/lib/process-image.ts:16-23`.
-  - One job generates WebP, AVIF, and JPEG in parallel: `apps/web/src/lib/process-image.ts:439-444`.
-  - Each format loops through every configured size, up to the admin max of 8 sizes: `apps/web/src/lib/process-image.ts:371-418`, `apps/web/src/lib/gallery-config-shared.ts:48-57`.
-  - Docs acknowledge the sharp-heavy path: `CLAUDE.md:172-180`.
-- **Concrete failure scenario:** Two large 45MP uploads in the queue can run six active conversion pipelines while libvips uses most CPU cores. AVIF encodes are CPU/memory intensive; concurrent jobs can make the web process unresponsive or trigger container memory pressure.
-- **Suggested fix:** Introduce a process-wide image-conversion semaphore (not just queue concurrency), generate formats sequentially or with per-format weights, lower default AVIF effort/quality if available, and document memory-based concurrency guidance. Consider moving conversion to a separate worker process/container.
-
-### PERF-07 — Upload transport relies on Server Actions with a 2 GiB body budget and concurrent per-file requests
-
 - **Severity:** Medium
 - **Confidence:** Medium
-- **Status:** Risk
 - **Evidence:**
-  - App default upload body limit is 2 GiB: `apps/web/src/lib/upload-limits.ts:1-24`.
-  - Next server actions and proxy body limits are set from that cap: `apps/web/next.config.ts:52-58`.
-  - nginx permits general bodies up to 2 GiB: `apps/web/nginx/default.conf:20-23`.
-  - Client uploads individual files with concurrency `3`: `apps/web/src/components/upload-dropzone.tsx:177-243`.
-  - Server action then streams the `File` to disk only after framework parsing has produced the `File`: `apps/web/src/app/actions/images.ts:82-200`, `apps/web/src/lib/process-image.ts:224-253`.
-- **Concrete failure scenario:** Three concurrent 200 MB files can keep multiple long-running Server Action requests open. Depending on framework/runtime multipart buffering, this can consume large temp/memory resources before the app-level stream-to-disk code runs.
-- **Suggested fix:** Move uploads to a route handler that streams multipart parts directly to disk/object storage with backpressure and per-file limits. Keep Server Actions for metadata commits only. Add explicit upload concurrency/backpressure config tied to CPU/disk capacity.
+  - queue default concurrency is `2`: `apps/web/src/lib/image-queue.ts:118-121`
+  - Sharp global concurrency defaults to `cpuCount - 1`: `apps/web/src/lib/process-image.ts:16-23`
+  - each job generates three formats in parallel: `apps/web/src/lib/process-image.ts:381-444`
+  - each format may generate multiple sizes: `apps/web/src/lib/process-image.ts:390-436`, `apps/web/src/lib/gallery-config-shared.ts:48-57`, `apps/web/src/lib/gallery-config-shared.ts:150-153`
+- **Failure scenario:** two queued large uploads can mean six active format pipelines while libvips also uses most cores, making the web process sluggish under concurrent public/admin traffic.
+- **Concrete fix:** bound conversion concurrency at the format/job level, not just queue-job level. Consider sequential format generation per job or lower weighted concurrency for AVIF.
 
-### PERF-08 — Upload selection UI can decode/render too many raw previews and TagInput instances
+### PERF-08 — Admin dashboard responsiveness degrades because each row mounts a full `TagInput` with its own global listener and tag filtering work
 
+- **Status:** Confirmed
 - **Severity:** Medium
 - **Confidence:** High
-- **Status:** Confirmed
 - **Evidence:**
-  - Up to 100 files can be selected by default: `apps/web/src/lib/upload-limits.ts:1-12`.
-  - The UI creates object URLs for every selected file: `apps/web/src/components/upload-dropzone.tsx:75-103`.
-  - It renders every selected file in a grid with an `<img src={previewUrl}>`: `apps/web/src/components/upload-dropzone.tsx:380-405`.
-  - It renders a `TagInput` for every file, each filtering all `availableTags`: `apps/web/src/components/upload-dropzone.tsx:436-449`, `apps/web/src/components/tag-input.tsx:54-59`.
-- **Concrete failure scenario:** Selecting 100 high-resolution images/RAW-like files can make the browser decode many full previews and instantiate 100 autocomplete widgets, each scanning the full tag list on input. Admin UI jank/OOM happens before upload starts.
-- **Suggested fix:** Virtualize/limit the preview grid, generate small client-side thumbnails lazily, render per-file `TagInput` only when expanding a file row, and cap visible previews independent of server upload limits.
+  - admin dashboard page size is 50: `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:8-16`
+  - each row renders a `TagInput`: `apps/web/src/components/image-manager.tsx:405-436`
+  - `TagInput` filters the entire `availableTags` array on render/input: `apps/web/src/components/tag-input.tsx:54-59`
+  - each `TagInput` installs its own document-level `mousedown` listener: `apps/web/src/components/tag-input.tsx:131-139`
+  - upload tray can mount even more `TagInput` instances, one per selected file: `apps/web/src/components/upload-dropzone.tsx:397-476`
+- **Failure scenario:** a dashboard page with 50 rows and a large tag catalog mounts dozens of duplicate listeners and autocomplete filters; selecting many upload files amplifies this further and causes noticeable typing/click lag.
+- **Concrete fix:** lazy-open tag editing instead of rendering a full autocomplete in every row/card, and centralize outside-click handling instead of one document listener per instance.
 
-### PERF-09 — CSV export is not streamed; it materializes DB rows, CSV lines, final CSV string, and client Blob
+## Manual-validation risks
 
-- **Severity:** Medium
-- **Confidence:** High
-- **Status:** Confirmed
-- **Evidence:**
-  - Export query loads up to 50k grouped rows into `results`: `apps/web/src/app/[locale]/admin/db-actions.ts:33-67`.
-  - It builds `csvLines`, then joins into one `csvContent` string returned from a Server Action: `apps/web/src/app/[locale]/admin/db-actions.ts:68-99`.
-  - Client wraps returned data in a `Blob` before download: `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:94-124`.
-- **Concrete failure scenario:** A 50k-row export with long filenames/tags can transiently hold the result array, line array, final string, Server Action payload, and browser Blob. This can spike memory and time out on slower networks.
-- **Suggested fix:** Implement an authenticated route handler that streams CSV rows with a DB cursor/query stream and `ReadableStream`, writing directly to the response. Keep the 50k cap or paginate/chunk exports with progress.
+### RISK-01 — Infinite load-more grows DOM/image count without any windowing
 
-### PERF-10 — Some pre-generated upload derivatives still go through Next Image optimization
-
+- **Status:** Manual-validation risk
 - **Severity:** Medium
 - **Confidence:** Medium
-- **Status:** Confirmed risk
 - **Evidence:**
-  - Next Image optimization is enabled for all local patterns and AVIF/WebP output: `apps/web/next.config.ts:59-70`.
-  - Shared-group grid uses `next/image` for an already-sized WebP derivative: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:177-184`.
-  - Search thumbnails use `next/image` for already-sized JPEG derivatives: `apps/web/src/components/search.tsx:249-257`.
-  - Admin previews wrap `next/image` via `OptimisticImage`: `apps/web/src/components/optimistic-image.tsx:56-69`, called from `apps/web/src/components/image-manager.tsx:377-385`.
-  - nginx is already configured to serve upload derivatives directly with immutable caching: `apps/web/nginx/default.conf:93-110`.
-- **Concrete failure scenario:** Browsers request `/_next/image?.../uploads/...` for derivatives the app already generated, causing Node/Sharp optimizer work and `.next/cache` growth instead of direct nginx/sendfile delivery.
-- **Suggested fix:** Use raw `<picture>/<img>` or set `unoptimized` for pre-generated derivative URLs. Reserve Next Image optimization for remote/unprocessed assets that actually need runtime resizing.
+  - load-more keeps increasing offset and appending rows: `apps/web/src/components/load-more.tsx:29-42`
+  - home client appends to `allImages` and renders the whole accumulated set: `apps/web/src/components/home-client.tsx:85-89`, `apps/web/src/components/home-client.tsx:149-236`
+- **Why manual validation:** code shape is clearly unbounded, but the practical breakpoint depends on device memory, gallery length, and image dimensions.
+- **Suggested validation:** profile long-scroll sessions on low-memory mobile hardware; if jank appears, add virtualization or a rolling render window.
 
-### PERF-11 — Single-instance/process-local coordination is an explicit operational scaling bottleneck
+### RISK-02 — Server Action upload transport still carries a very large body budget
 
+- **Status:** Manual-validation risk
 - **Severity:** Medium
-- **Confidence:** High
-- **Status:** Confirmed risk
+- **Confidence:** Medium
 - **Evidence:**
-  - README states the deployment is single web-instance/single-writer and process-local for restore maintenance, upload quotas, and image queue state: `README.md:142-145`.
-  - CLAUDE repeats the same topology warning: `CLAUDE.md:157-158`.
-  - Process-local state appears in queue singleton: `apps/web/src/lib/image-queue.ts:67-131`; upload tracker singleton: `apps/web/src/lib/upload-tracker-state.ts:7-20`; restore maintenance singleton: `apps/web/src/lib/restore-maintenance.ts:1-22`; view-count buffer: `apps/web/src/lib/data.ts:11-21`.
-- **Concrete failure scenario:** Scaling to two web containers to handle more public traffic splits upload quotas/view-count buffers and creates independent in-memory queues. MySQL advisory locks prevent duplicate conversion per job, but process-local admission/maintenance state still diverges, so throughput and correctness become topology-dependent.
-- **Suggested fix:** Before horizontal scaling, move queue/admission/maintenance/view-count state to shared storage (DB/Redis/queue service), or split public read-only serving from a single writer/worker deployment.
+  - total upload body limit defaults to 2 GiB: `apps/web/src/lib/upload-limits.ts:1-24`
+  - Next body limits are wired to that setting: `apps/web/next.config.ts:46-58`
+  - client uploads with concurrency 3: `apps/web/src/components/upload-dropzone.tsx:193-254`
+  - server action receives `File` objects before streaming originals to disk: `apps/web/src/app/actions/images.ts:96-196`, `apps/web/src/lib/process-image.ts:224-253`
+- **Why manual validation:** the actual buffering/temp-file behavior depends on Next/runtime deployment details.
+- **Suggested validation:** load-test concurrent large uploads in the real deployment topology and inspect RSS/tmp usage; if high, move uploads to streaming route handlers.
 
 ## Final missed-issues sweep
 
-- Re-scanned for `revalidate`, `dynamic`, `offset`, `COUNT(*) OVER`, `LIKE`, `GROUP_CONCAT`, `Promise.all`, `concurrency`, streams, object URLs, and upload/download paths across `apps/web/src`, config, docs, and tests.
-- Checked direct static serving: `serve-upload.ts` streams files and production nginx bypasses Node for upload derivatives; no additional critical issue beyond Next Image optimizer paths above.
-- Checked backup/restore: DB dump/download uses process streams; restore streams temp file into `mysql` and gates concurrent restores with a DB advisory lock. The main export gap is CSV, not SQL backup/download.
-- Checked histogram: pixel loop is worker-based and canvas input is capped at 256px; no finding beyond extra small image fetch being acceptable.
-- Checked rate-limit/session GC: bounded in-memory maps and hourly DB cleanup exist; no unbounded-growth finding found.
+- Re-scanned the repo for:
+  - queue/timer/listener leaks
+  - `setInterval`/`setTimeout` cleanup
+  - unbounded `Map`/`Set` growth
+  - `Promise.all` fan-out
+  - `GROUP_CONCAT`, `COUNT(*) OVER()`, leading-wildcard `LIKE`
+  - image decode/worker/object-URL usage
+  - route/cache invalidation patterns
+- No additional confirmed timer-leak issue found:
+  - `lightbox`, `photo-navigation`, `search`, `nav-client`, `optimistic-image`, `histogram`, `image-zoom`, and `info-bottom-sheet` all clean up their listeners/timers.
+- No additional confirmed unbounded-memory issue found in:
+  - queue retry maps (`apps/web/src/lib/image-queue.ts:73-85`)
+  - upload tracker (`apps/web/src/lib/upload-tracker-state.ts:23-42`)
+  - rate-limit maps (`apps/web/src/lib/rate-limit.ts:113-162`)
+- Direct file serving paths are properly streamed rather than buffered:
+  - `apps/web/src/lib/serve-upload.ts:67-103`
+  - `apps/web/src/app/api/admin/db/download/route.ts:82-94`
 
-## Files reviewed
+## Reviewed surfaces
 
-- Root/config/docs: `AGENTS.md`, `README.md`, `CLAUDE.md`, `package.json`, `apps/web/package.json`, `apps/web/README.md`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/playwright.config.ts`, `apps/web/vitest.config.ts`, `apps/web/eslint.config.mjs`, `apps/web/tailwind.config.ts`.
-- DB/data: `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/0000_nappy_madelyne_pryor.sql`, `0001_sync_current_schema.sql`, `0002_fix_processed_default.sql`, `0003_audit_created_at_index.sql`, `apps/web/src/lib/data.ts`, `gallery-config.ts`, `gallery-config-shared.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, `session.ts`, `audit.ts`, `revalidation.ts`.
-- Public/admin app routes and actions: all files under `apps/web/src/app/[locale]/(public)`, `apps/web/src/app/[locale]/admin`, `apps/web/src/app/actions*.ts`, `apps/web/src/app/api`, `apps/web/src/app/sitemap.ts`, `manifest.ts`, `robots.ts`, `proxy.ts`, `instrumentation.ts`.
-- Components: `home-client.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `histogram.tsx`, `search.tsx`, `nav*.tsx`, `footer.tsx`, `image-manager.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`, `tag-filter.tsx`, `optimistic-image.tsx`, UI wrappers used on reviewed paths.
-- Image/upload/storage/export libs: `process-image.ts`, `process-topic-image.ts`, `image-queue.ts`, `queue-shutdown.ts`, `serve-upload.ts`, `upload-limits.ts`, `upload-paths.ts`, `upload-tracker*.ts`, `storage/*`, `db-restore.ts`, `sql-restore-scan.ts`, `mysql-cli-ssl.ts`, `backup-filename.ts`, `csv-escape.ts`.
-- Tests/e2e sampled for relevant coverage: `data-pagination.test.ts`, `public-actions.test.ts`, `image-queue*.test.ts`, `queue-shutdown.test.ts`, `images-actions.test.ts`, `upload-dropzone.test.ts`, `upload-limits.test.ts`, `upload-tracker.test.ts`, `db-pool-connection-handler.test.ts`, `backup-download-route.test.ts`, `db-restore.test.ts`, `serve-upload.test.ts`, `histogram.test.ts`, `rate-limit.test.ts`, plus `apps/web/e2e/*.spec.ts` and helpers.
+- All performance-relevant files under:
+  - `apps/web/src/app`
+  - `apps/web/src/components`
+  - `apps/web/src/lib`
+  - `apps/web/src/db`
+  - `apps/web/src/__tests__`
+  - `apps/web/e2e`
+- Plus:
+  - `apps/web/package.json`
+  - `apps/web/README.md`
+  - `apps/web/next.config.ts`
+  - `apps/web/Dockerfile`
+  - `apps/web/docker-compose.yml`
+  - `apps/web/playwright.config.ts`
+  - root `README.md`
