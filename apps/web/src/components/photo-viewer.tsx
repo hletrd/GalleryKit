@@ -51,9 +51,10 @@ interface PhotoViewerProps {
     siteTitle?: string;
     shareBaseUrl?: string;
     untitledFallbackTitle?: string;
+    showDocumentHeading?: boolean;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -223,7 +224,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     width={image.width}
                     height={image.height}
                     className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
-                    decoding="sync"
+                    decoding="async"
                     loading="eager"
                 />
             </picture>
@@ -239,7 +240,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 in the toolbar/info sidebar already; the goal is to ensure
                 assistive tech has a single top-level heading per WCAG 1.3.1
                 and 2.4.6 (AGG3R-01 / C3R-RPL-01). */}
-            <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
+            {showDocumentHeading && (
+                <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
+            )}
             <p className="mb-2 text-xs text-muted-foreground" id="photo-viewer-shortcuts">
                 {t('viewer.shortcutsHint')}
             </p>

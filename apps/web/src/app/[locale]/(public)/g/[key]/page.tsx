@@ -12,6 +12,8 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
+export const revalidate = 0;
+
 const sharePageRobots = {
     index: false,
     follow: false,
@@ -151,6 +153,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     siteTitle={seo.title}
                     shareBaseUrl={seo.url}
                     untitledFallbackTitle={t('photo')}
+                    showDocumentHeading={false}
                 />
             </>
         );

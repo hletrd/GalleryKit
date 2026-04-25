@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import siteConfig from '@/site-config.json';
-import { getSeoSettings } from '@/lib/data';
+import { getSeoSettings, getTopicBySlug } from '@/lib/data';
 
 export const runtime = 'nodejs';
 
@@ -14,29 +14,28 @@ function clampDisplayText(value: string, maxLength: number) {
   return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-function topicLabelFromSlug(topic: string) {
-  return topic
-    .split(/[-_]+/g)
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
-}
-
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const topic = searchParams.get('topic');
     const tags = searchParams.get('tags');
-    const topicLabel = clampDisplayText(topicLabelFromSlug(topic ?? ''), MAX_TOPIC_LABEL_LENGTH);
-    const seo = await getSeoSettings();
-    const siteTitle = seo.title || siteConfig.title;
 
     if (!topic || topic.length > 200 || !isValidSlug(topic)) {
       return new Response('Missing or invalid topic param', { status: 400 });
     }
 
+    const [seo, topicRecord] = await Promise.all([
+      getSeoSettings(),
+      getTopicBySlug(topic),
+    ]);
+    if (!topicRecord) {
+      return new Response('Topic not found', { status: 404 });
+    }
+
+    const topicLabel = clampDisplayText(topicRecord.label, MAX_TOPIC_LABEL_LENGTH);
+    const siteTitle = seo.title || siteConfig.title;
     const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)) : [];
-    const cacheControl = 'public, max-age=3600, stale-while-revalidate=86400';
+    const cacheControl = 'no-store, no-cache, must-revalidate';
 
     return new ImageResponse(
       (

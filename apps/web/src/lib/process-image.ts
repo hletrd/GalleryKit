@@ -13,7 +13,9 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG 
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 
-const cpuCount = os.cpus()?.length ?? 1;
+const cpuCount = typeof os.availableParallelism === 'function'
+    ? os.availableParallelism()
+    : os.cpus()?.length ?? 1;
 const maxConcurrency = Math.max(1, cpuCount - 1);
 const envConcurrency = Number.parseInt(process.env.SHARP_CONCURRENCY ?? '', 10);
 const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0

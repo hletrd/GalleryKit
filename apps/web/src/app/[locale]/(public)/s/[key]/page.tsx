@@ -11,6 +11,8 @@ import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 
+export const revalidate = 0;
+
 const sharePageRobots = {
     index: false,
     follow: false,
@@ -123,6 +125,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 siteTitle={seo.title}
                 shareBaseUrl={seo.url}
                 untitledFallbackTitle={t('sharedPhoto')}
+                showDocumentHeading={false}
             />
         </>
     );
