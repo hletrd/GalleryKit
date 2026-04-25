@@ -1,12 +1,21 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
+import { createHash } from 'crypto';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import siteConfig from '@/site-config.json';
 import { getSeoSettings, getTopicBySlug } from '@/lib/data';
+import { getClientIp, preIncrementOgAttempt } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
 const MAX_TOPIC_LABEL_LENGTH = 100;
+// AGG8F-01 / plan-233: success-path cache control. The OG image is
+// derived from validated topic + tag list — there is no per-user content
+// to leak. `public, max-age=3600` lets CDNs and crawlers cache an hour;
+// `stale-while-revalidate` keeps unfurl latency low while the revalidate
+// pass runs in the background. The error branch keeps `no-store`.
+const OG_SUCCESS_CACHE_CONTROL = 'public, max-age=3600, stale-while-revalidate=86400';
+const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
 
 function clampDisplayText(value: string, maxLength: number) {
   const trimmed = value.trim().replace(/\s+/g, ' ');
@@ -21,7 +30,28 @@ export async function GET(req: NextRequest) {
     const tags = searchParams.get('tags');
 
     if (!topic || topic.length > 200 || !isValidSlug(topic)) {
-      return new Response('Missing or invalid topic param', { status: 400 });
+      return new Response('Missing or invalid topic param', {
+        status: 400,
+        headers: { 'Cache-Control': OG_ERROR_CACHE_CONTROL },
+      });
+    }
+
+    // AGG8F-01 / plan-233: per-IP rate limit. The route is the only
+    // public unauthenticated CPU-bound endpoint in the repo — every
+    // other public surface (`searchImagesAction`, `loadMoreImages`)
+    // carries an in-memory rate limit. Bring this surface into parity
+    // so a scripted abuser cannot pin Node CPU. 30 requests/minute/IP
+    // is well above natural traffic from social-share unfurls.
+    const ip = getClientIp(req.headers);
+    const now = Date.now();
+    if (preIncrementOgAttempt(ip, now)) {
+      return new Response('Rate limit exceeded', {
+        status: 429,
+        headers: {
+          'Cache-Control': OG_ERROR_CACHE_CONTROL,
+          'Retry-After': '60',
+        },
+      });
     }
 
     const [seo, topicRecord] = await Promise.all([
@@ -29,13 +59,33 @@ export async function GET(req: NextRequest) {
       getTopicBySlug(topic),
     ]);
     if (!topicRecord) {
-      return new Response('Topic not found', { status: 404 });
+      return new Response('Topic not found', {
+        status: 404,
+        headers: { 'Cache-Control': OG_ERROR_CACHE_CONTROL },
+      });
     }
 
     const topicLabel = clampDisplayText(topicRecord.label, MAX_TOPIC_LABEL_LENGTH);
     const siteTitle = seo.title || siteConfig.title;
     const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)) : [];
-    const cacheControl = 'no-store, no-cache, must-revalidate';
+
+    // AGG8F-01 / plan-233: ETag covers the inputs that drive the
+    // rendered image. If a crawler revisits with `If-None-Match`,
+    // short-circuit to 304 without rerunning the SVG/PNG pipeline.
+    const etag = '"' + createHash('sha256')
+      .update(`${topicRecord.slug}|${topicLabel}|${tagList.join(',')}|${siteTitle}`)
+      .digest('hex')
+      .slice(0, 32) + '"';
+    if (req.headers.get('if-none-match') === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          'Cache-Control': OG_SUCCESS_CACHE_CONTROL,
+          'ETag': etag,
+        },
+      });
+    }
+    const cacheControl = OG_SUCCESS_CACHE_CONTROL;
 
     return new ImageResponse(
       (
@@ -138,6 +188,7 @@ export async function GET(req: NextRequest) {
         height: 630,
         headers: {
             'Cache-Control': cacheControl,
+            'ETag': etag,
         }
       },
     );
@@ -148,7 +199,7 @@ export async function GET(req: NextRequest) {
     return new Response(`Failed to generate the image`, {
       status: 500,
       headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Cache-Control': OG_ERROR_CACHE_CONTROL,
       },
     });
   }

@@ -11,6 +11,17 @@ export const SEARCH_WINDOW_MS = 60 * 1000; // 1 minute
 export const SEARCH_MAX_REQUESTS = 30;
 export const SEARCH_RATE_LIMIT_MAX_KEYS = 2000;
 
+// AGG8F-01 / plan-233: in-memory rate-limit for the public unauthenticated
+// `/api/og` endpoint. The route runs a CPU-bound React-tree → SVG → PNG
+// pipeline (~200-400ms per call) and was previously the only public surface
+// in the repo with no rate-limit budget. The budget here — 30 requests
+// per minute per IP — is well above natural per-IP usage from social-share
+// unfurls but small enough that a scripted abuser cannot pin Node CPU.
+export const OG_WINDOW_MS = 60 * 1000;
+export const OG_MAX_REQUESTS = 30;
+export const OG_RATE_LIMIT_MAX_KEYS = 2000;
+export const ogRateLimit = new Map<string, { count: number; resetAt: number }>();
+
 export type RateLimitEntry = { count: number; lastAttempt: number };
 
 export type HeaderLike = { get(name: string): string | null };
@@ -164,6 +175,40 @@ export function pruneSearchRateLimit(now: number, options?: { force?: boolean })
 
 export function resetSearchRateLimitPruneStateForTests() {
     lastSearchRateLimitPruneAt = 0;
+}
+
+// AGG8F-01 / plan-233: pre-increment-then-check helpers for `/api/og`.
+// Uses the same pattern as `loadMoreImages` in actions/public.ts so the
+// public-unauthenticated rate-limit posture is uniform across surfaces.
+export function pruneOgRateLimit(now: number) {
+    for (const [key, entry] of ogRateLimit) {
+        if (entry.resetAt <= now) ogRateLimit.delete(key);
+    }
+    if (ogRateLimit.size > OG_RATE_LIMIT_MAX_KEYS) {
+        const excess = ogRateLimit.size - OG_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of ogRateLimit.keys()) {
+            if (evicted >= excess) break;
+            ogRateLimit.delete(key);
+            evicted++;
+        }
+    }
+}
+
+/** Returns `true` when the (pre-incremented) bucket is over the limit. */
+export function preIncrementOgAttempt(ip: string, now: number): boolean {
+    pruneOgRateLimit(now);
+    const entry = ogRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        ogRateLimit.set(ip, { count: 1, resetAt: now + OG_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    return (ogRateLimit.get(ip)?.count ?? 0) > OG_MAX_REQUESTS;
+}
+
+export function resetOgRateLimitForTests() {
+    ogRateLimit.clear();
 }
 
 // ── MySQL-backed persistent rate limiting ──────────────────────────────
