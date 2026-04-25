@@ -47,11 +47,11 @@ const OPEN_GRAPH_LOCALE_BY_LOCALE: Record<Locale, string> = {
     ko: 'ko_KR',
 };
 
-const OPEN_GRAPH_LOCALE_PATTERN = /^[a-z]{2}_[A-Z]{2}$/;
+const SUPPORTED_OPEN_GRAPH_LOCALES = new Set(Object.values(OPEN_GRAPH_LOCALE_BY_LOCALE));
 
 export function normalizeOpenGraphLocale(value: string | null | undefined): string | null {
     const normalized = value?.trim() ?? '';
-    return OPEN_GRAPH_LOCALE_PATTERN.test(normalized) ? normalized : null;
+    return SUPPORTED_OPEN_GRAPH_LOCALES.has(normalized) ? normalized : null;
 }
 
 export function getOpenGraphLocale(locale: string, configuredLocale?: string | null): string {

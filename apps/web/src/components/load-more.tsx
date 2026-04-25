@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadMoreImages } from '@/app/actions';
+import type { LoadMoreImagesResult } from '@/app/actions/public';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 
-type LoadMoreResult = Awaited<ReturnType<typeof loadMoreImages>>;
+
 
 interface LoadMoreProps {
     topicSlug?: string;
@@ -15,7 +16,7 @@ interface LoadMoreProps {
     initialOffset: number;
     hasMore: boolean;
     limit?: number;
-    onLoadMore: (images: LoadMoreResult['images']) => void;
+    onLoadMore: (images: Extract<LoadMoreImagesResult, { status: 'ok' }>['images']) => void;
 }
 
 export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
@@ -35,10 +36,20 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         try {
             const page = await loadMoreImages(topicSlug, tagSlugs, offset, limit);
             if (version !== queryVersionRef.current) return;
+            if (page.status === 'ok') {
+                setHasMore(page.hasMore);
+                if (page.images.length > 0) {
+                    onLoadMore(page.images);
+                    setOffset(prev => prev + page.images.length);
+                }
+                return;
+            }
+
             setHasMore(page.hasMore);
-            if (page.images.length > 0) {
-                onLoadMore(page.images);
-                setOffset(prev => prev + page.images.length);
+            if (page.status === 'rateLimited') {
+                toast.error(t('home.loadMoreRateLimited'));
+            } else if (page.status === 'maintenance') {
+                toast.error(t('home.loadMoreMaintenance'));
             }
         } catch (error) {
             console.error('Failed to load more images:', error);

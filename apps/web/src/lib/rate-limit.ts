@@ -186,8 +186,9 @@ export async function checkRateLimit(
     type: string,
     maxRequests: number,
     windowMs: number,
+    bucketStart: number = getRateLimitBucketStart(Date.now(), windowMs),
 ): Promise<{ limited: boolean; count: number }> {
-    const start = getRateLimitBucketStart(Date.now(), windowMs);
+    const start = bucketStart;
 
     const rows = await db
         .select({ count: rateLimitBuckets.count })
@@ -213,8 +214,9 @@ export async function incrementRateLimit(
     ip: string,
     type: string,
     windowMs: number,
+    bucketStart: number = getRateLimitBucketStart(Date.now(), windowMs),
 ): Promise<void> {
-    const start = getRateLimitBucketStart(Date.now(), windowMs);
+    const start = bucketStart;
 
     await db.insert(rateLimitBuckets).values({
         ip,
@@ -230,8 +232,9 @@ export async function resetRateLimit(
     ip: string,
     type: string,
     windowMs: number,
+    bucketStart: number = getRateLimitBucketStart(Date.now(), windowMs),
 ): Promise<void> {
-    const start = getRateLimitBucketStart(Date.now(), windowMs);
+    const start = bucketStart;
 
     await db.delete(rateLimitBuckets).where(
         and(
@@ -252,8 +255,9 @@ export async function decrementRateLimit(
     ip: string,
     type: string,
     windowMs: number,
+    bucketStart: number = getRateLimitBucketStart(Date.now(), windowMs),
 ): Promise<void> {
-    const start = getRateLimitBucketStart(Date.now(), windowMs);
+    const start = bucketStart;
 
     // Atomically decrement; if count drops to 0 or below, delete the row
     await db.update(rateLimitBuckets)

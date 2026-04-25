@@ -195,7 +195,6 @@ export function UploadDropzone({
         let successCount = 0;
         const failedFiles: File[] = [];
         const uploadWarnings: string[] = [];
-        const duplicateFiles: string[] = [];
         const totalFiles = files.length;
         let completedSoFar = 0;
 
@@ -227,9 +226,6 @@ export function UploadDropzone({
                         uploadWarnings.push(...res.warnings);
                         setFileErrors(prev => ({ ...prev, [fileId]: res.warnings.join(' ') }));
                     }
-                    if (res?.replaced?.length) {
-                        duplicateFiles.push(...res.replaced);
-                    }
                 }
             } catch (e) {
                 console.error(`Failed to upload ${file.name}:`, e);
@@ -256,16 +252,6 @@ export function UploadDropzone({
         }
 
         await Promise.all(inFlight);
-
-        if (duplicateFiles.length > 0) {
-            const maxNames = 3;
-            const visibleNames = duplicateFiles.slice(0, maxNames);
-            const extraCount = duplicateFiles.length - visibleNames.length;
-            const names = extraCount > 0
-                ? `${visibleNames.join(', ')} +${extraCount}`
-                : visibleNames.join(', ');
-            toast.warning(t('upload.duplicateWarning', { count: duplicateFiles.length, names }));
-        }
 
         if (failedFiles.length === 0) {
             if (uploadWarnings.length > 0) {

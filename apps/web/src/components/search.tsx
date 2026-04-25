@@ -35,7 +35,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
-    const [searchError, setSearchError] = useState(false);
+    const [searchStatus, setSearchStatus] = useState<'failed' | 'rateLimited' | 'maintenance' | 'invalid' | null>(null);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -57,21 +57,27 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
             requestIdRef.current++;
             setLoading(false);
             setResults([]);
-            setSearchError(false);
+            setSearchStatus(null);
             return;
         }
         const requestId = ++requestIdRef.current;
         setLoading(true);
-        setSearchError(false);
+        setSearchStatus(null);
         try {
             const data = await searchImagesAction(searchQuery);
             if (requestId === requestIdRef.current) {
-                setResults(data);
+                if (data.status === 'ok') {
+                    setResults(data.results);
+                    setSearchStatus(null);
+                } else {
+                    setResults([]);
+                    setSearchStatus(data.status);
+                }
             }
         } catch {
             if (requestId === requestIdRef.current) {
                 setResults([]);
-                setSearchError(true);
+                setSearchStatus('failed');
             }
         } finally {
             if (requestId === requestIdRef.current) {
@@ -86,7 +92,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
             requestIdRef.current++;
             setLoading(false);
             setResults([]);
-            setSearchError(false);
+            setSearchStatus(null);
             return;
         }
         debounceRef.current = setTimeout(() => {
@@ -224,8 +230,8 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                     <div className="sr-only" aria-live="polite" aria-atomic="true">
                         {loading
                             ? t('search.searching')
-                            : searchError
-                                ? t('search.error')
+                            : searchStatus
+                                ? t(`search.${searchStatus}`)
                                 : query.trim() && results.length > 0
                                     ? t('search.resultsCount', { count: results.length })
                                     : query.trim()
@@ -269,7 +275,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             </div>
                         ) : query.trim() ? (
                             <div className="p-8 text-center text-muted-foreground text-sm">
-                                {loading ? '' : searchError ? t('search.error') : t('search.noResults')}
+                                {loading ? '' : searchStatus ? t(`search.${searchStatus}`) : t('search.noResults')}
                             </div>
                         ) : (
                             <div className="p-8 text-center text-muted-foreground text-sm">

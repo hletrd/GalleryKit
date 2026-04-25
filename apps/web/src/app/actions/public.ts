@@ -5,17 +5,29 @@ import { getImagesLite, searchImages } from '@/lib/data';
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit } from '@/lib/rate-limit';
+import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit, getRateLimitBucketStart } from '@/lib/rate-limit';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
-async function rollbackSearchAttempt(ip: string) {
+type PublicImageListItem = Awaited<ReturnType<typeof getImagesLite>>[number];
+type PublicSearchItem = Awaited<ReturnType<typeof searchImages>>[number];
+
+export type LoadMoreImagesResult =
+    | { status: 'ok'; images: PublicImageListItem[]; hasMore: boolean }
+    | { status: 'maintenance' | 'rateLimited'; images: []; hasMore: true }
+    | { status: 'invalid'; images: []; hasMore: false };
+
+export type SearchImagesResult =
+    | { status: 'ok'; results: PublicSearchItem[] }
+    | { status: 'maintenance' | 'rateLimited' | 'invalid'; results: [] };
+
+async function rollbackSearchAttempt(ip: string, bucketStart: number) {
     const currentEntry = searchRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
         currentEntry.count--;
     } else {
         searchRateLimit.delete(ip);
     }
-    await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS).catch((err) => {
+    await decrementRateLimit(ip, 'search', SEARCH_WINDOW_MS, bucketStart).catch((err) => {
         console.debug('Failed to roll back search DB rate limit:', err);
     });
 }
@@ -52,26 +64,23 @@ function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
     return (loadMoreRateLimit.get(ip)?.count ?? 0) > LOAD_MORE_MAX_REQUESTS;
 }
 
-async function rollbackLoadMoreAttempt(ip: string) {
+function rollbackLoadMoreAttempt(ip: string) {
     const currentEntry = loadMoreRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
         currentEntry.count--;
     } else {
         loadMoreRateLimit.delete(ip);
     }
-    await decrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS).catch((err) => {
-        console.debug('Failed to roll back load_more DB rate limit:', err);
-    });
 }
 
-export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
-    if (isRestoreMaintenanceActive()) return { images: [], hasMore: false };
+export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30): Promise<LoadMoreImagesResult> {
+    if (isRestoreMaintenanceActive()) return { status: 'maintenance', images: [], hasMore: true };
     // Validate slug format before passing to data layer (defense in depth)
-    if (topicSlug && (!isValidSlug(topicSlug))) return { images: [], hasMore: false };
+    if (topicSlug && (!isValidSlug(topicSlug))) return { status: 'invalid', images: [], hasMore: false };
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
     const safeOffset = Math.max(Math.floor(Number(offset)) || 0, 0);
     // Cap maximum offset to prevent deep pagination DoS
-    if (safeOffset > 10000) return { images: [], hasMore: false };
+    if (safeOffset > 10000) return { status: 'invalid', images: [], hasMore: false };
     // Cap tag array and validate format to prevent complex query DoS
     const safeTags = (tagSlugs || [])
         .slice(0, 20)
@@ -82,51 +91,45 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
 
+    // Load-more is an automatically triggered, low-risk public read path. Keep
+    // it on the in-memory limiter fast path so every scroll batch does not pay
+    // persistent DB write/read latency before the actual image query.
     if (preIncrementLoadMoreAttempt(ip, now)) {
-        return { images: [], hasMore: false };
-    }
-
-    try {
-        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS);
-        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS);
-        if (isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
-            await rollbackLoadMoreAttempt(ip);
-            return { images: [], hasMore: false };
-        }
-    } catch {
-        // DB unavailable — rely on the in-memory pre-increment fallback.
+        return { status: 'rateLimited', images: [], hasMore: true };
     }
 
     try {
         const rows = await getImagesLite(topicSlug, safeTags, safeLimit + 1, safeOffset);
         return {
+            status: 'ok',
             images: rows.slice(0, safeLimit),
             hasMore: rows.length > safeLimit,
         };
     } catch (err) {
-        await rollbackLoadMoreAttempt(ip);
+        rollbackLoadMoreAttempt(ip);
         throw err;
     }
 }
 
-export async function searchImagesAction(query: string) {
-    if (!query || typeof query !== 'string') return [];
-    if (isRestoreMaintenanceActive()) return [];
+export async function searchImagesAction(query: string): Promise<SearchImagesResult> {
+    if (!query || typeof query !== 'string') return { status: 'invalid', results: [] };
+    if (isRestoreMaintenanceActive()) return { status: 'maintenance', results: [] };
     // Sanitize before validation so length checks operate on the same value
     // that will be stored (matches uploadImages/settings.ts pattern, see C46-02).
     const sanitizedQuery = stripControlChars(query.trim()) ?? '';
-    if (sanitizedQuery.length > 200 || sanitizedQuery.length < 2) return [];
+    if (sanitizedQuery.length > 200 || sanitizedQuery.length < 2) return { status: 'invalid', results: [] };
 
     // Server-side rate limiting for search (LIKE queries are expensive)
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
+    const bucketStart = getRateLimitBucketStart(now, SEARCH_WINDOW_MS);
     pruneSearchRateLimit(now);
 
     // Fast-path check from in-memory Map
     const entry = searchRateLimit.get(ip);
     if (entry && entry.resetAt > now && entry.count >= SEARCH_MAX_REQUESTS) {
-        return [];
+        return { status: 'rateLimited', results: [] };
     }
 
     // Increment BEFORE the DB-backed check (TOCTOU fix).
@@ -139,11 +142,10 @@ export async function searchImagesAction(query: string) {
     }
 
     // DB-backed increment BEFORE the check (matches sharing.ts and admin-users.ts pattern).
-    // Placing incrementRateLimit before checkRateLimit ensures the counter reflects
-    // the current request when the check runs, preventing burst attacks that exploit
-    // the gap between check and increment.
+    // Use one pinned bucketStart for increment/check/rollback so a request that
+    // crosses a minute boundary cannot decrement the wrong MySQL bucket.
     try {
-        await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS);
+        await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS, bucketStart);
     } catch {
         // DB unavailable — keep the in-memory pre-increment so the in-memory
         // rate limit remains effective during DB outages. The in-memory map
@@ -152,14 +154,10 @@ export async function searchImagesAction(query: string) {
 
     // DB-backed check for accuracy across restarts
     try {
-        const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS, bucketStart);
         if (isRateLimitExceeded(dbLimit.count, SEARCH_MAX_REQUESTS, true)) {
-            // C6R-RPL-03 / AGG6R-02: symmetric rollback of BOTH counters.
-            // Prior code only rolled back the in-memory counter, leaving the
-            // DB counter inflated by 1 per over-limit event. Over the 60s
-            // window, legitimate burst users paid an extra counted attempt.
-            await rollbackSearchAttempt(ip);
-            return [];
+            await rollbackSearchAttempt(ip, bucketStart);
+            return { status: 'rateLimited', results: [] };
         }
     } catch {
         // DB unavailable — rely on in-memory Map
@@ -168,9 +166,9 @@ export async function searchImagesAction(query: string) {
     // sanitizedQuery already has stripControlChars applied — belt-and-suspenders slice
     const safeQuery = sanitizedQuery.slice(0, 200);
     try {
-        return await searchImages(safeQuery, 20);
+        return { status: 'ok', results: await searchImages(safeQuery, 20) };
     } catch (err) {
-        await rollbackSearchAttempt(ip);
+        await rollbackSearchAttempt(ip, bucketStart);
         throw err;
     }
 }

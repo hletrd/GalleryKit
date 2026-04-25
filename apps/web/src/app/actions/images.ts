@@ -352,8 +352,7 @@ export async function uploadImages(formData: FormData) {
         success: true,
         count: successCount,
         failed: failedFiles,
-        warnings,
-        replaced: []
+        warnings
     };
 }
 
