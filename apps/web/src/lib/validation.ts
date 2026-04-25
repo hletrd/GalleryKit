@@ -27,9 +27,10 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 //   formatting characters used for visual spoofing).
 //
 // Lineage: introduced for CSV export hardening (C7R-RPL-11 / C8R-RPL-01),
-// extended to topic aliases (C3L-SEC-01), extended to tag names (C4L-SEC-01).
-// Exported so all consumers share one source of truth and stay in lock-step
-// when the character set evolves.
+// extended to topic aliases (C3L-SEC-01), tag names (C4L-SEC-01), and
+// topic.label / image.title / image.description (C5L-SEC-01). Exported so
+// all consumers share one source of truth and stay in lock-step when the
+// character set evolves.
 export const UNICODE_FORMAT_CHARS = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/;
 
 // Allow CJK characters, emojis, and most symbols for aliases, but disallow:

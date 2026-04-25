@@ -203,6 +203,32 @@ describe('topic actions', () => {
         expect(insertMock).not.toHaveBeenCalled();
     });
 
+    // C5L-SEC-01: parity with topic-alias (C3L-SEC-01) and tag-name
+    // (C4L-SEC-01) Unicode-formatting rejection. Labels render in admin
+    // tables, public navigation, and OG previews; bidi/invisible chars
+    // would otherwise enable visual spoofing.
+    it('rejects createTopic with invalidLabel when the label contains a Unicode bidi override', async () => {
+        const formData = new FormData();
+        formData.set('label', 'Travel‮2026'); // RLO override
+        formData.set('slug', 'travel');
+        formData.set('order', '0');
+
+        await expect(createTopic(formData)).resolves.toEqual({ error: 'invalidLabel' });
+        expect(selectMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects createTopic with invalidLabel when the label contains a zero-width space', async () => {
+        const formData = new FormData();
+        formData.set('label', 'Travel​2026'); // ZWSP
+        formData.set('slug', 'travel');
+        formData.set('order', '0');
+
+        await expect(createTopic(formData)).resolves.toEqual({ error: 'invalidLabel' });
+        expect(selectMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
     it('rejects createTopic when the slug matches a reserved locale segment', async () => {
         const formData = new FormData();
         formData.set('label', 'English');
@@ -287,6 +313,19 @@ describe('topic actions', () => {
     it('rejects updateTopic with invalidLabel when the label contains control characters', async () => {
         const formData = new FormData();
         formData.set('label', 'Updated\u0000');
+        formData.set('slug', 'travel');
+        formData.set('order', '0');
+
+        await expect(updateTopic('travel', formData)).resolves.toEqual({ error: 'invalidLabel' });
+        expect(selectMock).not.toHaveBeenCalled();
+        expect(updateMock).not.toHaveBeenCalled();
+    });
+
+    // C5L-SEC-01: updateTopic must reject Unicode bidi/invisible chars in
+    // labels for parity with createTopic.
+    it('rejects updateTopic with invalidLabel when the label contains a Unicode bidi override', async () => {
+        const formData = new FormData();
+        formData.set('label', 'Updated‮Reversed'); // RLO override
         formData.set('slug', 'travel');
         formData.set('order', '0');
 

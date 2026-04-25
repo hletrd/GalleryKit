@@ -9,7 +9,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, UNICODE_FORMAT_CHARS } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
@@ -657,10 +657,22 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     }
 
     // Sanitize title and description BEFORE length validation so checks
-    // operate on the same value that will be stored (matches settings.ts/seo.ts
-    // pattern, see C29-09/C30-01 and C45-03).
+    // operate on the same value that will be stored. Follows the
+    // sanitize-before-validate ordering from settings.ts/seo.ts (C29-09 /
+    // C30-01 / C45-03); null preservation is image-specific (DB columns are
+    // nullable). Unicode-formatting rejection added in C5L-SEC-01 to close
+    // the parity gap with topic aliases (C3L-SEC-01) and tag names
+    // (C4L-SEC-01) for admin-controlled persistent strings rendered into
+    // public photo viewer, lightbox, OG images, and SEO previews.
     const sanitizedTitle = stripControlChars(title ? title.trim() : null) || null;
     const sanitizedDescription = stripControlChars(description ? description.trim() : null) || null;
+
+    if (sanitizedTitle && UNICODE_FORMAT_CHARS.test(sanitizedTitle)) {
+        return { error: t('invalidTitle') };
+    }
+    if (sanitizedDescription && UNICODE_FORMAT_CHARS.test(sanitizedDescription)) {
+        return { error: t('invalidDescription') };
+    }
 
     if (sanitizedTitle && sanitizedTitle.length > 255) {
         return { error: t('titleTooLong') };

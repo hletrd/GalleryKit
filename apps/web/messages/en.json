@@ -347,6 +347,8 @@
     "failedToUpdateTopic": "Could not update category.",
     "invalidSlug": "Invalid slug",
     "invalidLabel": "Invalid label",
+    "invalidTitle": "Invalid title",
+    "invalidDescription": "Invalid description",
     "cannotDeleteCategoryWithImages": "Remove photos from this category first.",
     "failedToDeleteTopic": "Could not delete category.",
     "invalidTopicSlug": "Invalid category slug",
