@@ -22,7 +22,7 @@ import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
-import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, humanizeTagLabel } from '@/lib/photo-title';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -391,8 +391,20 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 {image.tags && image.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-2 mt-4 mb-2">
                                         {image.tags.map((tag: TagInfo) => (
+                                            // AGG2L-LOW-01 / plan-303-A: route the
+                                            // chip text through `humanizeTagLabel`
+                                            // so the desktop info-sidebar tag chip
+                                            // renders the same humanized form
+                                            // (`#Music Festival`) as the masonry
+                                            // card and tag-filter pill. Without
+                                            // this, the desktop sidebar shows
+                                            // `#Music_Festival` while the rest of
+                                            // the page shows `#Music Festival`,
+                                            // re-introducing the AGG1L-LOW-01
+                                            // drift the cycle-1 plan tried to
+                                            // close.
                                             <Badge key={tag.slug} variant="secondary" className="text-xs">
-                                                #{tag.name}
+                                                #{humanizeTagLabel(tag.name)}
                                             </Badge>
                                         ))}
                                     </div>

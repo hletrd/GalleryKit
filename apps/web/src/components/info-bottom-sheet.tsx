@@ -7,7 +7,7 @@ import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
-import { getPhotoDisplayTitle } from '@/lib/photo-title';
+import { getPhotoDisplayTitle, humanizeTagLabel } from '@/lib/photo-title';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
@@ -239,8 +239,13 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                         {image.tags && image.tags.length > 0 && (
                             <div className="flex flex-wrap gap-2 mb-4">
                                 {image.tags.map((tag: TagInfo) => (
+                                    // AGG2L-LOW-01 / plan-303-A: route through
+                                    // `humanizeTagLabel` so the bottom-sheet tag
+                                    // chip stays consistent with the masonry
+                                    // card and the desktop info sidebar. See
+                                    // `photo-viewer.tsx` for the matching fix.
                                     <Badge key={tag.slug} variant="secondary" className="text-xs">
-                                        #{tag.name}
+                                        #{humanizeTagLabel(tag.name)}
                                     </Badge>
                                 ))}
                             </div>
