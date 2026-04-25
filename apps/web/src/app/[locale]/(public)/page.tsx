@@ -3,7 +3,7 @@ import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizeUrl } from '@/lib/locale-path';
+import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
@@ -44,12 +44,17 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 
   const robots = tagSlugs.length > 0 ? { index: false, follow: true } : undefined;
 
+  // AGG1L-LOW-04 / plan-301-C: emit hreflang alternates on the home page
+  // too (previously missing). The unfiltered home page is the highest-SEO
+  // surface and benefits the most from cross-locale association.
+  const alternateLanguages = buildHreflangAlternates(seo.url, '/');
+
   if (seo.og_image_url) {
     const ogImages = [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }];
     return {
       title,
       description,
-      alternates: { canonical: pageUrl },
+      alternates: { canonical: pageUrl, languages: alternateLanguages },
       robots,
       openGraph: {
         title,
@@ -94,7 +99,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   return {
     title: title,
     description: description,
-    alternates: { canonical: pageUrl },
+    alternates: { canonical: pageUrl, languages: alternateLanguages },
     robots,
     openGraph: {
       title: title,

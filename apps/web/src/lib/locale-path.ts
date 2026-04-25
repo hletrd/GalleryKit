@@ -1,4 +1,4 @@
-import { LOCALES, type Locale } from '@/lib/constants';
+import { DEFAULT_LOCALE, LOCALES, type Locale } from '@/lib/constants';
 
 function normalizePath(path: string): string {
     if (!path) return '/';
@@ -71,4 +71,25 @@ export function getOpenGraphLocale(locale: string, configuredLocale?: string | n
 export function getAlternateOpenGraphLocales(locale: string, configuredLocale?: string | null): string[] {
     const current = getOpenGraphLocale(locale, configuredLocale);
     return Object.values(OPEN_GRAPH_LOCALE_BY_LOCALE).filter((candidate) => candidate !== current);
+}
+
+/**
+ * AGG1L-LOW-04 / plan-301-C: build the hreflang `alternates.languages`
+ * map for a given canonical path.
+ *
+ * Iterates the `LOCALES` constant so adding a new locale
+ * automatically extends the alternate-language map at every consumer
+ * (no inline `{ en: ..., ko: ... }` literals to keep in sync). The
+ * `x-default` key points at the default locale so search engines have
+ * a fallback for unsupported / unspecified locales.
+ *
+ * Returned object shape matches Next.js `Metadata.alternates.languages`.
+ */
+export function buildHreflangAlternates(baseUrl: string, path: string): Record<string, string> {
+    const alternates: Record<string, string> = {};
+    for (const locale of LOCALES) {
+        alternates[locale] = localizeUrl(baseUrl, locale, path);
+    }
+    alternates['x-default'] = localizeUrl(baseUrl, DEFAULT_LOCALE, path);
+    return alternates;
 }

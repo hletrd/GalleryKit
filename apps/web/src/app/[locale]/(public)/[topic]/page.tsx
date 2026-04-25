@@ -5,7 +5,7 @@ import { Metadata } from 'next';
 
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
+import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
@@ -89,14 +89,12 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
         alt: title,
       }];
 
-  // F-17: emit hreflang alternates for the topic page in both supported
-  // locales (and `x-default`) so search engines can associate `/en/<topic>`
-  // with `/ko/<topic>` and avoid duplicate-content penalties.
-  const alternateLanguages = {
-    en: localizeUrl(seo.url, 'en', `/${topicData.slug}`),
-    ko: localizeUrl(seo.url, 'ko', `/${topicData.slug}`),
-    'x-default': localizeUrl(seo.url, 'en', `/${topicData.slug}`),
-  };
+  // F-17 / AGG1L-LOW-04 / plan-301-C: emit hreflang alternates for the
+  // topic page in every supported locale (and `x-default`) so search
+  // engines can associate `/en/<topic>` with `/ko/<topic>` and avoid
+  // duplicate-content penalties. The map is generated from the LOCALES
+  // constant so adding a new locale automatically extends it.
+  const alternateLanguages = buildHreflangAlternates(seo.url, `/${topicData.slug}`);
 
   return {
     title: title,

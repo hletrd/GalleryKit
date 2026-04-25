@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { absoluteUrl, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl, stripLocalePrefix } from '@/lib/locale-path';
+import { absoluteUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl, stripLocalePrefix } from '@/lib/locale-path';
 
 describe('stripLocalePrefix', () => {
     it('removes supported locale prefixes and keeps non-locale paths intact', () => {
@@ -67,5 +67,29 @@ describe('Open Graph locale helpers', () => {
         expect(getOpenGraphLocale('ko', 'fr_FR')).toBe('ko_KR');
         // Unsupported route locale + invalid override → en default.
         expect(getOpenGraphLocale('unknown', 'fr_FR')).toBe('en_US');
+    });
+});
+
+describe('buildHreflangAlternates (AGG1L-LOW-04)', () => {
+    it('emits an entry per supported locale plus x-default', () => {
+        const alternates = buildHreflangAlternates('https://gallery.example.com', '/');
+        expect(alternates).toEqual({
+            en: 'https://gallery.example.com/en',
+            ko: 'https://gallery.example.com/ko',
+            'x-default': 'https://gallery.example.com/en',
+        });
+    });
+
+    it('preserves the path segment across locales', () => {
+        const alternates = buildHreflangAlternates('https://gallery.example.com', '/p/42');
+        expect(alternates.en).toBe('https://gallery.example.com/en/p/42');
+        expect(alternates.ko).toBe('https://gallery.example.com/ko/p/42');
+        expect(alternates['x-default']).toBe('https://gallery.example.com/en/p/42');
+    });
+
+    it('handles topic-style paths', () => {
+        const alternates = buildHreflangAlternates('https://gallery.example.com', '/landscape');
+        expect(alternates.en).toBe('https://gallery.example.com/en/landscape');
+        expect(alternates.ko).toBe('https://gallery.example.com/ko/landscape');
     });
 });

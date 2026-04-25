@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { TagInfo } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
+import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -86,13 +86,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         alt: displayTitle,
     }];
 
-    // F-17: emit hreflang alternates so `/en/p/<id>` and `/ko/p/<id>` are
-    // associated for SEO instead of being treated as separate pages.
-    const alternateLanguages = {
-        en: localizeUrl(seo.url, 'en', `/p/${id}`),
-        ko: localizeUrl(seo.url, 'ko', `/p/${id}`),
-        'x-default': localizeUrl(seo.url, 'en', `/p/${id}`),
-    };
+    // F-17 / AGG1L-LOW-04 / plan-301-C: emit hreflang alternates so
+    // `/en/p/<id>` and `/ko/p/<id>` are associated for SEO instead of
+    // being treated as separate pages. The map is generated from the
+    // LOCALES constant so adding a new locale automatically extends it.
+    const alternateLanguages = buildHreflangAlternates(seo.url, `/p/${id}`);
 
     return {
         title: displayTitle,
