@@ -25,7 +25,18 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 // - Question marks (query parameters)
 // - Hash/Pound (fragments)
 // - Whitespace (better UX for URLs, though encoded spaces theoretically work)
+// C3L-SEC-01: also reject Unicode bidi-override / isolate formatting
+// characters (U+202A-202E LRE/RLE/PDF/LRO/RLO; U+2066-2069 LRI/RLI/FSI/PDI)
+// and zero-width / invisible formatting characters (U+200B-200F
+// ZWSP/ZWNJ/ZWJ/LRM/RLM; U+2060 WJ; U+FEFF BOM; U+180E MVS;
+// U+FFF9-FFFB interlinear annotation anchors). Topic aliases become URL
+// path segments and admin-UI strings, so they must match the same
+// hardening posture as CSV export (see `lib/csv-escape.ts`,
+// C7R-RPL-11 / C8R-RPL-01) against Trojan-Source-style visual reordering
+// and invisible-character spoofing of admin-managed values.
+const UNICODE_FORMAT_CHARS = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/;
 export function isValidTopicAlias(alias: string): boolean {
+    if (UNICODE_FORMAT_CHARS.test(alias)) return false;
     return alias.length > 0 && alias.length <= 255 && /^[^./\\\s?\x00#<>"'&]+$/.test(alias);
 }
 

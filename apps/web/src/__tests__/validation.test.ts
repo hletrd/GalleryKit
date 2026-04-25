@@ -93,6 +93,30 @@ describe('isValidTopicAlias', () => {
         expect(isValidTopicAlias("a'b")).toBe(false);
         expect(isValidTopicAlias('a&b')).toBe(false);
     });
+
+    // C3L-SEC-01: defense-in-depth parity with CSV export hardening
+    // (C7R-RPL-11 / C8R-RPL-01). Topic aliases become URL path segments
+    // and admin-UI strings, so they must reject Unicode bidi overrides
+    // (Trojan Source) and zero-width / invisible formatting characters.
+    it('rejects Unicode bidi override / isolate characters', () => {
+        expect(isValidTopicAlias('a‮b')).toBe(false); // RLO
+        expect(isValidTopicAlias('a‪b')).toBe(false); // LRE
+        expect(isValidTopicAlias('a‭b')).toBe(false); // LRO
+        expect(isValidTopicAlias('a⁦b')).toBe(false); // LRI
+        expect(isValidTopicAlias('a⁩b')).toBe(false); // PDI
+    });
+
+    it('rejects zero-width / invisible formatting characters', () => {
+        expect(isValidTopicAlias('a​b')).toBe(false); // ZWSP
+        expect(isValidTopicAlias('a‌b')).toBe(false); // ZWNJ
+        expect(isValidTopicAlias('a‍b')).toBe(false); // ZWJ
+        expect(isValidTopicAlias('a‎b')).toBe(false); // LRM
+        expect(isValidTopicAlias('a‏b')).toBe(false); // RLM
+        expect(isValidTopicAlias('a⁠b')).toBe(false); // WJ
+        expect(isValidTopicAlias('a﻿b')).toBe(false); // BOM
+        expect(isValidTopicAlias('a᠎b')).toBe(false); // MVS
+        expect(isValidTopicAlias('a￹b')).toBe(false); // interlinear anchor
+    });
 });
 
 describe('isReservedTopicRouteSegment', () => {
