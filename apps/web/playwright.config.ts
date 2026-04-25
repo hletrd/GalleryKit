@@ -28,6 +28,7 @@ const localServerUrl = (() => {
   return url.toString().replace(/\/$/, '');
 })();
 const baseURL = useLocalServer ? localServerUrl : requestedBaseUrl;
+const reuseExistingServer = process.env.E2E_REUSE_SERVER === 'true';
 
 if (!useLocalServer && process.env.E2E_ADMIN_ENABLED === 'true' && process.env.E2E_ALLOW_REMOTE_ADMIN !== 'true') {
   throw new Error('Remote admin E2E is disabled by default. Set E2E_ALLOW_REMOTE_ADMIN=true to opt in.');
@@ -61,7 +62,7 @@ export default defineConfig({
         command: `${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run init && ${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run e2e:seed && ${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run build && rm -rf .next/standalone/apps/web/.next/static && cp -R .next/static .next/standalone/apps/web/.next/static && ${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true HOSTNAME=${host} PORT=${localPort} node .next/standalone/apps/web/server.js`,
         cwd: __dirname,
         url: baseURL,
-        reuseExistingServer: true,
+        reuseExistingServer,
         timeout: 180_000,
       }
     : undefined,
