@@ -68,5 +68,12 @@ export function getConcisePhotoAltText(
     image: { title: string | null | undefined; tag_names?: string | null | undefined },
     fallback: string,
 ): string {
-    return getPhotoDisplayTitleFromTagNames(image, fallback).replace(/^#+/, '').replace(/\s+#/g, ', ');
+    // F-18: derive alt text from the photo's tag list (or title) so screen
+    // reader users get distinguishable per-photo labels instead of a wall
+    // of identical "Photo" placeholders. Underscores in slug-like tag
+    // names are also normalized to spaces so labels read naturally.
+    return getPhotoDisplayTitleFromTagNames(image, fallback)
+        .replace(/^#+/, '')
+        .replace(/\s+#/g, ', ')
+        .replace(/_/g, ' ');
 }

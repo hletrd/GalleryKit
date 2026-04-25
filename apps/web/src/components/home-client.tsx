@@ -114,9 +114,12 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
         return map;
     }, [topics]);
     const displayTags = useMemo(() => {
+        // F-5: replace `_` with space when echoing the active tag in the
+        // page heading so users see human-readable hashtags instead of raw
+        // slugs (`#Color in Music Festival` not `#Color_in_Music_Festival`).
         return (currentTags || []).map((tag) => {
             const match = tags.find((t) => t.slug === tag.trim().toLowerCase());
-            return match?.name ?? tag;
+            return (match?.name ?? tag).replace(/_/g, ' ');
         });
     }, [currentTags, tags]);
 
@@ -146,9 +149,15 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                 Prevents the heading-level skip flagged by WCAG 1.3.1 / 2.4.6
                 (AGG3R-04 / C3R-RPL-04). */}
             <h2 className="sr-only">{t('home.photosHeading')}</h2>
-            <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 gap-4 space-y-4">
+            {/* F-15: at 2560px the `xl:columns-4` cap leaves ~500px gutters
+                on each side, so add a 5th column at the `2xl` breakpoint
+                (1536px+) to make better use of widescreen real estate. */}
+            <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
                 {orderedImages.map((image, index) => {
-                    const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled'));
+                    // F-5 / F-18: normalize raw slug underscores so the
+                    // visible card title and the SR-announced label both
+                    // read naturally.
+                    const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled')).replace(/_/g, ' ');
                     const altText = getConcisePhotoAltText(image, t('common.photo'));
 
                     const isAboveFold = index < columnCount;
