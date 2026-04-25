@@ -47,11 +47,18 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
         }
     };
 
-    // Interactive pills need WCAG 2.5.8 AA minimum target size (24x24).
-    // The base Badge variant uses `px-2 py-0.5` which renders ~22px tall;
-    // bump vertical padding so the tappable region clears the minimum.
-    // (AGG3R-03 / C3R-RPL-03)
-    const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[24px] py-1";
+    // Interactive pills must clear the 44x44 touch-target floor recommended
+    // by WCAG 2.5.5 AAA / Apple HIG / Google MDN. WCAG 2.5.8 AA only requires
+    // 24x24, but real-world thumb targets need 44 px to avoid mis-taps. The
+    // base Badge already applies `px-2 py-0.5`; we override with a wider
+    // padding plus an explicit min-height so the tappable region is
+    // unambiguous. (F-1, supersedes AGG3R-03 / C3R-RPL-03)
+    const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-2";
+
+    // Display-format the tag name. Tag slugs canonically use `_` to
+    // separate words; users see those as "Color in Music Festival"
+    // rather than "Color_in_Music_Festival". (F-5)
+    const displayName = (name: string) => name.replace(/_/g, ' ');
 
     return (
         <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
@@ -86,7 +93,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                         onKeyDown={handleKeyDown(tag.slug)}
                         aria-pressed={currentTags.includes(tag.slug)}
                     >
-                        {tag.name}
+                        {displayName(tag.name)}
                         <span className="opacity-60 text-[10px]">({tag.count})</span>
                     </button>
                 </Badge>
