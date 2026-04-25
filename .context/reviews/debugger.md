@@ -1,66 +1,45 @@
-# Cycle 5 deep repository review
+# Latent Bug Review — Cycle 6 / Debugger
 
-## Verification
-- `npm run lint --workspace=apps/web` ✅
-- `npm run typecheck --workspace=apps/web` ✅
-- `npm run test --workspace=apps/web` ✅
-- `npm run test:e2e --workspace=apps/web` ⛔ the local web server bootstrap stopped on missing DB env (`DB_NAME`) in this shell, so I treated that as an environment prerequisite rather than a code defect.
+Scope: full repository sweep with emphasis on latent failure modes, regressions, stale-state bugs, race conditions, cleanup/rollback failures, and hidden assumptions.
+
+## Inventory / coverage notes
+Reviewed the repo’s primary application surface, including:
+- `apps/web/src/app/**` routes, pages, server actions, and API routes
+- `apps/web/src/components/**` client components
+- `apps/web/src/lib/**` core helpers, validation, storage, queue, restore, and security helpers
+- `apps/web/src/db/**` schema/connection wiring
+- `apps/web/src/__tests__/**` for intended behavior and regression clues
+- top-level docs: `README.md`, `apps/web/README.md`, `package.json`, `apps/web/package.json`, `CLAUDE.md`
 
 ## Findings
 
-### 1) Image-processing retries can deadlock after a temporary claim miss
-- **Severity:** HIGH
+### 1) Partial-success uploads do not refresh the dashboard data
+- **File/region:** `apps/web/src/components/upload-dropzone.tsx:270-294`
+- **Severity:** Medium
 - **Confidence:** High
-- **Status:** confirmed
-- **File:** `apps/web/src/lib/image-queue.ts:191-223, 315-324`
-- **What happens:** if `acquireImageProcessingClaim(job.id)` returns `null`, the code schedules `setTimeout(() => enqueueImageProcessing(job), delay)` but leaves `state.enqueued` set. When the timer fires, `enqueueImageProcessing()` immediately returns at line 191 because the job is still marked as enqueued, so the retry never actually happens.
-- **Failure scenario:** a job that briefly loses the MySQL claim to another worker, or to a stale lock during failover, can remain stuck forever in the pending state instead of being retried.
-- **Suggested fix:** clear `state.enqueued.delete(job.id)` before scheduling the delayed retry, or add a retry-only path that bypasses the `enqueued` guard. Add a regression test that simulates one claim miss and verifies the retry actually requeues.
+- **Status:** Confirmed
+- **Failure scenario:** A mixed upload batch where some files succeed and some fail shows a partial-success toast, but the server-rendered dashboard list is not refreshed. The successful uploads can remain invisible until a manual refresh or another unrelated action causes revalidation.
+- **Why this is a bug:** The success path calls `router.refresh()`, but the partial-success path only updates local file state and resets progress. The server-side list of recent uploads is stale even though the upload action succeeded for at least one file.
+- **Concrete fix:** Call `router.refresh()` in the partial-success branch as well, or otherwise trigger the same revalidation/update that the full-success branch uses after a successful upload action.
 
-### 2) Restore-file header validation accepts malformed dumps because the regex is grouped incorrectly
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** confirmed
-- **File:** `apps/web/src/app/[locale]/admin/db-actions.ts:355-359`
-- **What happens:** `validHeader` is built with `/^(--)|(CREATE\s)|(INSERT\s)|(DROP\s)|(SET\s)|(\/\*!)/`. The `^` anchor only applies to the first alternative, so any header text that contains `CREATE`, `INSERT`, `DROP`, `SET`, or `/*!` anywhere in the first 256 bytes passes the check.
-- **Failure scenario:** a non-dump file or a crafted blob with one of those tokens buried in a header comment/metadata can slip past the front-door validation and reach the MySQL restore step, which defeats the purpose of the preflight guard.
-- **Suggested fix:** group the alternation, e.g. `^(?:--|CREATE\s|INSERT\s|DROP\s|SET\s|/\*!)`, and add a test for both a valid dump header and a misleading header that only contains the keyword later in the string.
-
-### 3) Auth rate-limit cleanup mutates in-memory state before the DB reset succeeds, so auth success/failure paths can drift
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** likely
-- **Files:** `apps/web/src/app/actions/auth.ts:168-179, 385-395` and `apps/web/src/lib/auth-rate-limit.ts:29-31, 65-67`
-- **What happens:** `clearSuccessfulLoginAttempts()` and `clearSuccessfulPasswordAttempts()` delete the in-memory entry first and then attempt the DB reset. If the DB cleanup fails, the in-memory bucket is already gone but the DB bucket remains, so later attempts can be throttled by stale DB state even after a successful auth event.
-- **Extra login-path issue:** `login()` clears the rate-limit buckets *before* the session row/cookie are created. If the session transaction fails after that point, the catch block only rolls back one counter from an already-cleared bucket, which erases prior failed-attempt pressure.
-- **Failure scenario:** a transient DB error during the cleanup step can leave a user apparently authenticated but still rate-limited on the next attempt, or a failed session-creation attempt can reset the login budget too early.
-- **Suggested fix:** make the cleanup order transactional: do the irreversible auth step first, then clear the buckets; and in the helper functions, only delete the in-memory entry after the DB reset succeeds (or restore the previous state if the DB write fails). That keeps the two counters in sync.
-
-### 4) Tag slug normalization depends on the host/browser locale, so tag identity can drift across environments
-- **Severity:** MEDIUM
+### 2) Infinite-scroll observer is never reattached after query resets
+- **File/region:** `apps/web/src/components/load-more.tsx:60-83` (with the reset logic at `60-66`)
+- **Severity:** Medium
 - **Confidence:** Medium
-- **Status:** likely
-- **Files:** `apps/web/src/components/tag-input.tsx:24-35` and `apps/web/src/lib/tag-records.ts:5-12`
-- **What happens:** both the client-side tag matcher and the server-side slug generator use `toLocaleLowerCase()` with no explicit locale. That makes normalization depend on the browser/Node default locale instead of a stable language-agnostic rule.
-- **Failure scenario:** on a Turkish or otherwise non-English locale, casing for letters like `I/i` can normalize differently on the client and server. That can produce duplicate suggestions, failed exact-match detection, or inconsistent slugs across deployments.
-- **Suggested fix:** switch both call sites to locale-stable normalization (`toLowerCase()` or `toLocaleLowerCase('en-US')`) and add a regression test for a locale-sensitive input.
+- **Status:** Likely / manual-validation risk
+- **Failure scenario:** If the gallery query changes while the `LoadMore` component instance stays mounted, or if `hasMore` toggles from `false` to `true`, the sentinel DOM node is replaced but the `IntersectionObserver` still watches the original node. Infinite scroll can silently stop working for the new result set, leaving only the manual button path.
+- **Why this is a bug:** The component explicitly resets query-derived state when `queryKey` changes, which means it expects prop-driven updates without a full remount. But the observer effect is `[]`, so it never re-observes a newly rendered sentinel.
+- **Concrete fix:** Re-run the observer setup when the sentinel/query state changes, or use a callback ref that disconnects/reconnects as the sentinel element mounts and unmounts.
 
-### 5) The upload-dropzone limit warning is emitted from a functional state updater, which is a side-effectful pattern
-- **Severity:** LOW
+### 3) Trusted-proxy IP selection falls back to the least trustworthy IP when the chain is shorter than expected
+- **File/region:** `apps/web/src/lib/rate-limit.ts:69-89`
+- **Severity:** Medium
 - **Confidence:** Medium
-- **Status:** confirmed
-- **File:** `apps/web/src/components/upload-dropzone.tsx:119-145`
-- **What happens:** the `toast.error(...)` call lives inside the `setFiles(prev => { ... })` updater. Functional updaters are supposed to be pure; React can replay them under concurrent rendering / Strict Mode, which can duplicate side effects.
-- **Failure scenario:** a single over-limit drop can show the limit toast more than once in development or under render replays.
-- **Suggested fix:** move the toast emission out of the updater. Compute the rejected count first, call `toast.error(...)` once, and then update state with a pure `setFiles` callback.
+- **Status:** Likely / manual-validation risk
+- **Failure scenario:** With `TRUST_PROXY=true` and `TRUSTED_PROXY_HOPS` set higher than the actual `X-Forwarded-For` chain length, the code falls back to `validParts[0]` — the left-most value, which is the easiest one for a direct client to spoof. That can weaken IP-based login/search/share throttling and corrupt audit attribution whenever a proxy hop is missing, bypassed, or stripped.
+- **Why this is a bug:** The code comment says the right-most trusted hop should be used so a client cannot spoof the left-most chain value. The fallback contradicts that threat model by trusting the first valid entry precisely when the chain is too short to validate the configured hop count.
+- **Concrete fix:** Fail closed when the forwarded chain is shorter than the configured trusted hop count, or fall back to a clearly untrusted placeholder / `x-real-ip` only if that is explicitly validated by the deployment model.
 
-## Final missed-issues sweep
-I rechecked the rest of the high-risk surfaces after the findings above: auth, rate limiting, upload/restore, image queueing, tag/topic mutation, SEO/public data loaders, and the app/api routes. I did not find another issue with comparable confidence beyond the five listed above.
-
-## Files reviewed
-Representative files and surfaces inspected in this pass:
-- Root/app config: `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/playwright.config.ts`, `README.md`, `apps/web/README.md`
-- Core auth/rate-limit/restore/data logic: `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/app/actions/seo.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/actions/tags.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/admin-users.ts`, `apps/web/src/lib/{rate-limit.ts,auth-rate-limit.ts,request-origin.ts,restore-maintenance.ts,db-restore.ts,image-queue.ts,process-image.ts,process-topic-image.ts,serve-upload.ts,tag-records.ts,tag-slugs.ts,gallery-config.ts,gallery-config-shared.ts,content-security-policy.ts,image-url.ts,revalidation.ts,validation.ts,upload-paths.ts,upload-tracker.ts,upload-tracker-state.ts,storage/local.ts}`
-- Routes/layouts/public pages: `apps/web/src/app/[locale]/**/*`, `apps/web/src/app/api/**/*`, `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`
-- Components reviewed for runtime/UI edge cases: `apps/web/src/components/{photo-viewer.tsx,lightbox.tsx,search.tsx,upload-dropzone.tsx,image-manager.tsx,tag-input.tsx,admin-user-manager.tsx,info-bottom-sheet.tsx,nav.tsx,footer.tsx}` and the shared UI primitives under `apps/web/src/components/ui/`
-- Tests and scripts used as coverage signals: `apps/web/src/__tests__/*`, `apps/web/e2e/*`, `apps/web/scripts/*`, `apps/web/drizzle/*`, `apps/web/messages/*`, `apps/web/src/site-config.example.json`
+## Final sweep notes
+- I did not find additional high-confidence latent bugs in the other reviewed routes/components after checking the core upload, auth/origin, queue, restore, sharing, tag/topic, and admin flows.
+- The remaining observations were either intentional behavior, already guarded by tests, or too deployment-specific to count as a confirmed issue.
