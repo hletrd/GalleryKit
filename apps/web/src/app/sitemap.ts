@@ -22,13 +22,28 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 const MAX_SITEMAP_URLS = 50000;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const topics = await getTopics();
-  const reservedLocalizedUrls = LOCALES.length * (1 + topics.length);
-  const imageBudget = Math.max(
-    0,
-    Math.floor((MAX_SITEMAP_URLS - reservedLocalizedUrls) / LOCALES.length),
-  );
-  const images = imageBudget > 0 ? await getImageIdsForSitemap(imageBudget) : [];
+  // AGG8F-02 / plan-234 follow-up: when this route is prerendered at build
+  // time the DB is intentionally not reachable (Docker build stage has no DB
+  // network). Tolerate that failure and emit a minimal homepage-only sitemap;
+  // ISR will replace it with the real one on the first runtime hit. We do
+  // not swallow runtime errors silently — at runtime a DB outage already
+  // surfaces via /api/health and observability, so the same fallback there
+  // is preferable to a 5xx on /sitemap.xml that would teach crawlers to back off.
+  let topics: Awaited<ReturnType<typeof getTopics>> = [];
+  let images: Awaited<ReturnType<typeof getImageIdsForSitemap>> = [];
+  try {
+    topics = await getTopics();
+    const reservedLocalizedUrls = LOCALES.length * (1 + topics.length);
+    const imageBudget = Math.max(
+      0,
+      Math.floor((MAX_SITEMAP_URLS - reservedLocalizedUrls) / LOCALES.length),
+    );
+    images = imageBudget > 0 ? await getImageIdsForSitemap(imageBudget) : [];
+  } catch (err) {
+    console.warn('[sitemap] falling back to homepage-only sitemap:', err);
+    topics = [];
+    images = [];
+  }
 
   const homepageEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
     url: localizeUrl(BASE_URL, locale, '/'),
