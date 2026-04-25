@@ -86,12 +86,21 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         alt: displayTitle,
     }];
 
+    // F-17: emit hreflang alternates so `/en/p/<id>` and `/ko/p/<id>` are
+    // associated for SEO instead of being treated as separate pages.
+    const alternateLanguages = {
+        en: localizeUrl(seo.url, 'en', `/p/${id}`),
+        ko: localizeUrl(seo.url, 'ko', `/p/${id}`),
+        'x-default': localizeUrl(seo.url, 'en', `/p/${id}`),
+    };
+
     return {
         title: displayTitle,
         description: metadataDescription,
         keywords: keywords,
         alternates: {
             canonical: pageUrl,
+            languages: alternateLanguages,
         },
         openGraph: {
             title: displayTitle,

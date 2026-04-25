@@ -89,11 +89,21 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
         alt: title,
       }];
 
+  // F-17: emit hreflang alternates for the topic page in both supported
+  // locales (and `x-default`) so search engines can associate `/en/<topic>`
+  // with `/ko/<topic>` and avoid duplicate-content penalties.
+  const alternateLanguages = {
+    en: localizeUrl(seo.url, 'en', `/${topicData.slug}`),
+    ko: localizeUrl(seo.url, 'ko', `/${topicData.slug}`),
+    'x-default': localizeUrl(seo.url, 'en', `/${topicData.slug}`),
+  };
+
   return {
     title: title,
     description: description,
     alternates: {
       canonical: pageUrl,
+      languages: alternateLanguages,
     },
     robots: tagSlugs.length > 0 ? { index: false, follow: true } : undefined,
     openGraph: {
