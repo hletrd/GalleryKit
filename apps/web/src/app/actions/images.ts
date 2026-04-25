@@ -22,6 +22,7 @@ import { cleanupOriginalIfRestoreMaintenanceBegan, getRestoreMaintenanceMessage 
 import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
 import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired } from '@/lib/upload-tracker-state';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
+import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { headers } from 'next/headers';
 
 type ImageCleanupFailure = {
@@ -30,28 +31,52 @@ type ImageCleanupFailure = {
     reason: string;
 };
 
+const USER_FILENAME_MAX_LENGTH = 255;
+const CLEANUP_RETRY_DELAY_MS = 50;
+
+function getSafeUserFilename(filename: string): string | null {
+    const sanitized = stripControlChars(path.basename(filename).trim())?.trim() ?? '';
+    if (!sanitized || sanitized.length > USER_FILENAME_MAX_LENGTH) {
+        return null;
+    }
+    return sanitized;
+}
+
+function wait(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function collectImageCleanupFailures(tasks: {
     target: ImageCleanupFailure['target'];
     filename: string;
-    operation: Promise<void>;
+    operation: () => Promise<void>;
 }[]) {
-    const settled = await Promise.allSettled(tasks.map((task) => task.operation));
-
-    return settled.flatMap((result, index) => {
-        if (result.status === 'fulfilled') {
-            return [];
+    const settled = await Promise.all(tasks.map(async (task) => {
+        let lastReason: unknown;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                await task.operation();
+                return null;
+            } catch (err) {
+                lastReason = err;
+                if (attempt === 0) {
+                    await wait(CLEANUP_RETRY_DELAY_MS);
+                }
+            }
         }
 
-        const reason = result.reason instanceof Error
-            ? result.reason.message
-            : String(result.reason ?? 'unknown cleanup failure');
+        const reason = lastReason instanceof Error
+            ? lastReason.message
+            : String(lastReason ?? 'unknown cleanup failure');
 
-        return [{
-            target: tasks[index].target,
-            filename: tasks[index].filename,
+        return {
+            target: task.target,
+            filename: task.filename,
             reason,
-        }] satisfies ImageCleanupFailure[];
-    });
+        } satisfies ImageCleanupFailure;
+    }));
+
+    return settled.filter((failure): failure is ImageCleanupFailure => failure !== null);
 }
 
 async function getSharedGroupKeysForImages(imageIds: number[]) {
@@ -81,6 +106,10 @@ function getShareRevalidationPaths(shareKeys: Iterable<string | null>, groupKeys
 
 export async function uploadImages(formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     const currentUser = await getCurrentUser();
     if (!currentUser) {
         return { error: t('unauthorized') };
@@ -88,11 +117,6 @@ export async function uploadImages(formData: FormData) {
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { error: maintenanceError };
-    }
-
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
     // Topic is now a string slug — sanitize before validation (defense in depth)
     const topic = stripControlChars(formData.get('topic')?.toString() ?? '') ?? '';
@@ -119,8 +143,23 @@ export async function uploadImages(formData: FormData) {
     if (!files.length) return { error: t('noFilesProvided') };
     if (files.length > UPLOAD_MAX_FILES_PER_WINDOW) return { error: t('tooManyFiles') };
 
+    const userFilenames = new Map<File, string>();
+    for (const file of files) {
+        const safeFilename = getSafeUserFilename(file.name);
+        if (!safeFilename) {
+            return { error: t('invalidFilename') };
+        }
+        userFilenames.set(file, safeFilename);
+    }
+
     // Server-side cumulative upload tracking across per-file invocations.
     // The client sends files individually, so per-call limits are insufficient.
+    const uploadContractLock = await acquireUploadProcessingContractLock();
+    if (!uploadContractLock) {
+        return { error: t('uploadSettingsLocked') };
+    }
+
+    try {
     const uploadConfig: GalleryConfig = await getGalleryConfig();
     const requestHeaders = await headers();
     const uploadIp = getClientIp(requestHeaders);
@@ -197,7 +236,11 @@ export async function uploadImages(formData: FormData) {
         // Track saved original filename for cleanup on DB insert failure
         let savedOriginalFilename: string | null = null;
         try {
-            const originalFilename = path.basename(file.name).trim();
+            const originalFilename = userFilenames.get(file) ?? getSafeUserFilename(file.name);
+            if (!originalFilename) {
+                failedFiles.push(file.name);
+                continue;
+            }
 
             // Phase 1: Save original and get metadata (fast)
             const data = await saveOriginalAndGetMetadata(file);
@@ -213,6 +256,14 @@ export async function uploadImages(formData: FormData) {
             }
 
             if (await cleanupOriginalIfRestoreMaintenanceBegan(savedOriginalFilename, deleteOriginalUploadFile)) {
+                savedOriginalFilename = null;
+                failedFiles.push(file.name);
+                continue;
+            }
+
+            const lateMaintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+            if (lateMaintenanceError) {
+                await deleteOriginalUploadFile(savedOriginalFilename);
                 savedOriginalFilename = null;
                 failedFiles.push(file.name);
                 continue;
@@ -354,20 +405,23 @@ export async function uploadImages(formData: FormData) {
         failed: failedFiles,
         warnings
     };
+    } finally {
+        await uploadContractLock.release();
+    }
 }
 
 export async function deleteImage(id: number) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { error: maintenanceError };
-    }
 
     // Validate ID is a positive integer
     if (!Number.isInteger(id) || id <= 0) {
@@ -424,10 +478,10 @@ export async function deleteImage(id: number) {
     // derivatives so variants generated under older image-size settings are
     // removed too, not only variants from the current config.
     const cleanupFailures = await collectImageCleanupFailures([
-        { target: 'original', filename: image.filename_original, operation: deleteOriginalUploadFile(image.filename_original) },
-        { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-        { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-        { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
+        { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
+        { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+        { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+        { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
     ]);
 
     if (cleanupFailures.length > 0) {
@@ -444,16 +498,16 @@ export async function deleteImage(id: number) {
 
 export async function deleteImages(ids: number[]) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { error: maintenanceError };
-    }
 
     if (!Array.isArray(ids) || ids.length === 0) {
         return { error: t('noImagesSelected') };
@@ -536,10 +590,10 @@ export async function deleteImages(ids: number[]) {
     // historical size variants are removed after image-size config changes.
     const cleanupFailures = (await Promise.all(imageRecords.map(async (image) => {
         const failures = await collectImageCleanupFailures([
-            { target: 'original', filename: image.filename_original, operation: deleteOriginalUploadFile(image.filename_original) },
-            { target: 'webp', filename: image.filename_webp, operation: deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-            { target: 'avif', filename: image.filename_avif, operation: deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-            { target: 'jpeg', filename: image.filename_jpeg, operation: deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
+            { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
+            { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+            { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+            { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
         ]);
 
         if (failures.length > 0) {
@@ -579,16 +633,16 @@ export async function deleteImages(ids: number[]) {
 
 export async function updateImageMetadata(id: number, title: string | null, description: string | null) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { error: maintenanceError };
-    }
 
     if (!Number.isInteger(id) || id <= 0) {
         return { error: t('invalidImageId') };

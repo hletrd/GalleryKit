@@ -58,12 +58,12 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
 
 export async function createTopic(formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed (defense in
@@ -146,12 +146,12 @@ export async function createTopic(formData: FormData) {
 
 export async function updateTopic(currentSlug: string, formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and should not silently proceed (defense in
@@ -295,12 +295,12 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
 
 export async function deleteTopic(slug: string) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed on a
@@ -355,12 +355,12 @@ export async function deleteTopic(slug: string) {
 
 export async function createTopicAlias(topicSlug: string, alias: string) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // Sanitize before validation — reject malformed input: if sanitization
     // changes the value, the input contained control characters and must not
@@ -422,12 +422,12 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
 
 export async function deleteTopicAlias(topicSlug: string, alias: string) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed on a

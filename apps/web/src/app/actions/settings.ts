@@ -13,6 +13,7 @@ import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { hasActiveUploadClaims } from '@/lib/upload-tracker-state';
+import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 
 /** @action-origin-exempt: read-only admin getter */
 export async function getGallerySettingsAdmin() {
@@ -38,12 +39,12 @@ export async function getGallerySettingsAdmin() {
 
 export async function updateGallerySettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
     const defaults = getSettingDefaults();
 
     // Validate all provided keys are allowed
@@ -77,61 +78,68 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         return { error: t('uploadSettingsLocked') };
     }
 
-    if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'image_sizes')) {
-        const requestedImageSizes = sanitizedSettings.image_sizes;
-        const normalizedImageSizes = requestedImageSizes
-            ? normalizeConfiguredImageSizes(requestedImageSizes)
-            : defaults.image_sizes;
-        if (!normalizedImageSizes) {
-            return { error: t('invalidSettingValue', { key: 'image_sizes' }) };
-        }
-        if (requestedImageSizes) {
-            sanitizedSettings.image_sizes = normalizedImageSizes;
-        }
-
-        const [currentImageSizesSetting] = await db
-            .select({ value: adminSettings.value })
-            .from(adminSettings)
-            .where(eq(adminSettings.key, 'image_sizes'))
-            .limit(1);
-
-        const currentImageSizes = normalizeConfiguredImageSizes(currentImageSizesSetting?.value ?? defaults.image_sizes)
-            ?? defaults.image_sizes;
-
-        if (normalizedImageSizes !== currentImageSizes) {
-            const [existingImage] = await db
-                .select({ id: images.id })
-                .from(images)
-                .limit(1);
-
-            if (existingImage) {
-                return { error: t('imageSizesLocked') };
-            }
-        }
-    }
-
-    if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'strip_gps_on_upload')) {
-        const requestedStripGps = sanitizedSettings.strip_gps_on_upload || defaults.strip_gps_on_upload;
-        const [currentStripGpsSetting] = await db
-            .select({ value: adminSettings.value })
-            .from(adminSettings)
-            .where(eq(adminSettings.key, 'strip_gps_on_upload'))
-            .limit(1);
-        const currentStripGps = currentStripGpsSetting?.value ?? defaults.strip_gps_on_upload;
-
-        if (requestedStripGps !== currentStripGps) {
-            const [existingImage] = await db
-                .select({ id: images.id })
-                .from(images)
-                .limit(1);
-
-            if (existingImage) {
-                return { error: t('uploadSettingsLocked') };
-            }
-        }
+    const uploadContractLock = changesUploadProcessingContract
+        ? await acquireUploadProcessingContractLock()
+        : null;
+    if (changesUploadProcessingContract && !uploadContractLock) {
+        return { error: t('uploadSettingsLocked') };
     }
 
     try {
+        if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'image_sizes')) {
+            const requestedImageSizes = sanitizedSettings.image_sizes;
+            const normalizedImageSizes = requestedImageSizes
+                ? normalizeConfiguredImageSizes(requestedImageSizes)
+                : defaults.image_sizes;
+            if (!normalizedImageSizes) {
+                return { error: t('invalidSettingValue', { key: 'image_sizes' }) };
+            }
+            if (requestedImageSizes) {
+                sanitizedSettings.image_sizes = normalizedImageSizes;
+            }
+
+            const [currentImageSizesSetting] = await db
+                .select({ value: adminSettings.value })
+                .from(adminSettings)
+                .where(eq(adminSettings.key, 'image_sizes'))
+                .limit(1);
+
+            const currentImageSizes = normalizeConfiguredImageSizes(currentImageSizesSetting?.value ?? defaults.image_sizes)
+                ?? defaults.image_sizes;
+
+            if (normalizedImageSizes !== currentImageSizes) {
+                const [existingImage] = await db
+                    .select({ id: images.id })
+                    .from(images)
+                    .limit(1);
+
+                if (existingImage) {
+                    return { error: t('imageSizesLocked') };
+                }
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(sanitizedSettings, 'strip_gps_on_upload')) {
+            const requestedStripGps = sanitizedSettings.strip_gps_on_upload || defaults.strip_gps_on_upload;
+            const [currentStripGpsSetting] = await db
+                .select({ value: adminSettings.value })
+                .from(adminSettings)
+                .where(eq(adminSettings.key, 'strip_gps_on_upload'))
+                .limit(1);
+            const currentStripGps = currentStripGpsSetting?.value ?? defaults.strip_gps_on_upload;
+
+            if (requestedStripGps !== currentStripGps) {
+                const [existingImage] = await db
+                    .select({ id: images.id })
+                    .from(images)
+                    .limit(1);
+
+                if (existingImage) {
+                    return { error: t('uploadSettingsLocked') };
+                }
+            }
+        }
+
         // Upsert each setting atomically in a transaction to prevent partial writes on crash
         await db.transaction(async (tx) => {
             for (const [key, value] of Object.entries(sanitizedSettings)) {
@@ -160,5 +168,7 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     } catch (err) {
         console.error('Failed to update gallery settings', err);
         return { error: t('failedToUpdateGallerySettings') };
+    } finally {
+        await uploadContractLock?.release();
     }
 }

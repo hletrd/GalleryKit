@@ -32,16 +32,16 @@ import { escapeCsvField } from "@/lib/csv-escape";
 
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { error: t('unauthorized') };
     }
     // C2R-02: defense-in-depth same-origin check for mutating/exporting server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { error: maintenanceError };
-    }
 
     // group_concat_max_len is already set to 65535 on every pool connection
     // via poolConnection.on('connection', ...) in db/index.ts — no per-session
@@ -101,16 +101,16 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
 
 export async function dumpDatabase() {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { success: false as const, error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { success: false as const, error: t('unauthorized') };
     }
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { success: false as const, error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) {
-        return { success: false as const, error: maintenanceError };
-    }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;
 
@@ -244,6 +244,10 @@ export async function dumpDatabase() {
 
 export async function restoreDatabase(formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { success: false, error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { success: false, error: t('unauthorized') };
     }

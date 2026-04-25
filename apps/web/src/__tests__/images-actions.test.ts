@@ -19,6 +19,8 @@ const {
     maintenanceMessageMock,
     logAuditEventMock,
     ensureTagRecordMock,
+    acquireUploadProcessingContractLockMock,
+    uploadContractReleaseMock,
 } = vi.hoisted(() => ({
     statfsMock: vi.fn(),
     mkdirMock: vi.fn(),
@@ -38,6 +40,8 @@ const {
     maintenanceMessageMock: vi.fn(),
     logAuditEventMock: vi.fn(),
     ensureTagRecordMock: vi.fn(),
+    acquireUploadProcessingContractLockMock: vi.fn(),
+    uploadContractReleaseMock: vi.fn(),
 }));
 
 function makeInsertChain<T>(result: T) {
@@ -108,6 +112,10 @@ vi.mock('@/lib/action-guards', () => ({
     requireSameOriginAdmin: vi.fn(async () => null),
 }));
 
+vi.mock('@/lib/upload-processing-contract-lock', () => ({
+    acquireUploadProcessingContractLock: acquireUploadProcessingContractLockMock,
+}));
+
 vi.mock('@/lib/upload-tracker', () => ({
     settleUploadTrackerClaim: settleUploadTrackerClaimMock,
 }));
@@ -174,6 +182,10 @@ describe('uploadImages', () => {
         maintenanceMessageMock.mockReturnValue(null);
         logAuditEventMock.mockReset();
         logAuditEventMock.mockResolvedValue(undefined);
+        uploadContractReleaseMock.mockReset();
+        uploadContractReleaseMock.mockResolvedValue(undefined);
+        acquireUploadProcessingContractLockMock.mockReset();
+        acquireUploadProcessingContractLockMock.mockResolvedValue({ release: uploadContractReleaseMock });
         ensureTagRecordMock.mockReset();
         ensureTagRecordMock.mockImplementation(async (_writer, cleanName: string, slug: string) => ({
             kind: 'found',
@@ -191,6 +203,7 @@ describe('uploadImages', () => {
 
         await expect(uploadImages(formData)).resolves.toMatchObject({ success: true, count: 1 });
         expect(revalidateLocalizedPathsMock).toHaveBeenCalledWith('/', '/admin/dashboard', '/travel');
+        expect(uploadContractReleaseMock).toHaveBeenCalled();
     });
 
     it('rejects upload tags whose generated slug would be empty', async () => {
@@ -200,6 +213,18 @@ describe('uploadImages', () => {
         formData.set('tags', '!!!');
 
         await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTagNames' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects unsafe original filenames before file I/O', async () => {
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], `${'a'.repeat(256)}.jpg`, { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidFilename' });
+        expect(acquireUploadProcessingContractLockMock).not.toHaveBeenCalled();
         expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });

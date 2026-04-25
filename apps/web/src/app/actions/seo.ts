@@ -53,12 +53,12 @@ export async function getSeoSettingsAdmin() {
 
 export async function updateSeoSettings(settings: Record<string, string>) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // Validate all provided keys are allowed
     const allowedKeys = new Set(SEO_SETTING_KEYS);
