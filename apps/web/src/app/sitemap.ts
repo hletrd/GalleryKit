@@ -1,10 +1,14 @@
 import { getImageIdsForSitemap, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
-// Dynamic because the database is not available at build time. Do not emit
-// request-time `lastModified` values for unchanged pages; crawler freshness
-// should reflect persisted content timestamps only.
-export const dynamic = 'force-dynamic';
+// AGG8F-02 / plan-234: drop `force-dynamic` so the existing `revalidate = 3600`
+// actually takes effect. The previous combination silently disabled the
+// revalidate value (force-dynamic overrides it), leaving every crawler hit to
+// rerun the full sitemap query against the live DB. ISR with hourly
+// revalidation keeps freshness within the bound expected by Googlebot for
+// content this stable and protects the DB from sustained crawler bursts.
+// Image lastModified continues to come from persisted `created_at` timestamps,
+// not request time, so cached responses do not lie about freshness.
 export const revalidate = 3600;
 
 import siteConfig from "@/site-config.json";
