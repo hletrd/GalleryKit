@@ -1,8 +1,35 @@
 # Plan 233 — Cycle 8 fresh: harden `/api/og` (cache + rate-limit)
 
+**Status:** DONE (cycle 8 recovery — landed 2026-04-25)
 **Source finding:** AGG8F-01 (4 agents: code-reviewer, perf, security, tracer)
 **Severity:** MEDIUM
 **Confidence:** High
+
+## Outcome
+
+Implemented per the fix shape below across two commits:
+- `feat(api): ⚡ rate-limit /api/og + ETag/304 + public cache-control` —
+  edits to `apps/web/src/app/api/og/route.tsx` and
+  `apps/web/src/lib/rate-limit.ts`. Adds `OG_WINDOW_MS`,
+  `OG_MAX_REQUESTS`, `ogRateLimit`, `pruneOgRateLimit`,
+  `preIncrementOgAttempt`, `resetOgRateLimitForTests`. Route now sends
+  `public, max-age=3600, stale-while-revalidate=86400` plus a stable
+  ETag on success, returns 304 on `If-None-Match`, and 429 with
+  `Retry-After: 60` over the bucket.
+- `test(rate-limit): ✅ cover preIncrementOgAttempt window + prune` —
+  new `apps/web/src/__tests__/og-rate-limit.test.ts` covering bucket
+  saturation, window reset, and prune behavior.
+
+A separate gate-fix commit (`fix(sitemap): 🐛 tolerate offline DB during
+build prerender`) was needed because dropping `force-dynamic` from
+`sitemap.ts` in `dc1fa30` (AGG8F-02 / plan-234) made the build
+prerender step fail when the DB is unreachable; the sitemap route now
+falls back to a homepage-only sitemap on data-layer errors and ISR
+fills it on the first runtime hit.
+
+All gates green: lint, typecheck, lint:api-auth, lint:action-origin,
+vitest (393 tests), Playwright (20 passed / 1 skipped), build. Deploy
+issued via `npm run deploy` after push.
 
 ## Problem
 
