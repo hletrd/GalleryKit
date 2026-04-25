@@ -31,12 +31,20 @@ type ImageCleanupFailure = {
     reason: string;
 };
 
-const USER_FILENAME_MAX_LENGTH = 255;
+// C2L2-03: schema column is `varchar(255)` which is a UTF-8 byte budget on
+// MySQL. Bound the byte length so high-codepoint filenames (CJK, emoji) are
+// rejected at the action boundary instead of failing at INSERT time after
+// disk and EXIF work has been done.
+const USER_FILENAME_MAX_BYTES = 255;
 const CLEANUP_RETRY_DELAY_MS = 50;
 
 function getSafeUserFilename(filename: string): string | null {
-    const sanitized = stripControlChars(path.basename(filename).trim())?.trim() ?? '';
-    if (!sanitized || sanitized.length > USER_FILENAME_MAX_LENGTH) {
+    // C2L2-05: a single trailing `.trim()` is sufficient. `stripControlChars`
+    // already removes ASCII control bytes, and the post-strip trim handles
+    // any whitespace that the strip exposed.
+    const sanitized = stripControlChars(path.basename(filename))?.trim() ?? '';
+    if (!sanitized) return null;
+    if (Buffer.byteLength(sanitized, 'utf8') > USER_FILENAME_MAX_BYTES) {
         return null;
     }
     return sanitized;
