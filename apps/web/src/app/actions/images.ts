@@ -138,13 +138,20 @@ export async function uploadImages(formData: FormData) {
         return { error: t('tagsStringTooLong') };
     }
 
-    const tagNames = tagsString
-        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0 && isValidTagName(t) && isValidTagSlug(getTagSlug(t)))
+    // C7L-FIX-01: single split — derive both the validated tag list AND the
+    // count of non-empty candidates from the same source so the validate /
+    // count steps cannot drift if the parse rule changes. The earlier shape
+    // ran `tagsString.split(',')` twice, which silently created a maintenance
+    // hazard: changing the separator or trim rule in the validate pass
+    // without updating the count pass would have made every batch return
+    // `invalidTagNames`. The fix also avoids the redundant array allocation
+    // on the upload hot path. Defense in depth still abort-on-any-bad-tag.
+    const candidateTags = tagsString
+        ? tagsString.split(',').map(t => t.trim()).filter(t => t.length > 0)
         : [];
+    const tagNames = candidateTags.filter(t => isValidTagName(t) && isValidTagSlug(getTagSlug(t)));
 
-    // Since tagsString is already sanitized, compare against the pre-split count
-    // without re-sanitizing (defense in depth: ensures no tag names were invalid)
-    if (tagsString && tagNames.length !== tagsString.split(',').filter(t => t.trim().length > 0).length) {
+    if (candidateTags.length !== tagNames.length) {
         return { error: t('invalidTagNames') };
     }
 

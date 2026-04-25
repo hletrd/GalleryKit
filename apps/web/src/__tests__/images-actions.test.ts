@@ -217,6 +217,24 @@ describe('uploadImages', () => {
         expect(insertMock).not.toHaveBeenCalled();
     });
 
+    it('rejects the entire upload batch when any single tag fails validation (C7L-FIX-01 / C7L-TE-01)', async () => {
+        // Two candidate tags split from `tagsString`: the first is valid, the
+        // second contains an angle bracket that `isValidTagName` rejects.
+        // Defense in depth: a single bad tag aborts the whole batch so the
+        // admin can correct before persistence. Locks in the single-source
+        // split contract introduced by C7L-FIX-01 — if a future edit forgets
+        // to compare the candidate count against the validated tag count,
+        // this test fails.
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', 'good-tag, ba<d-tag');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTagNames' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
     it('rejects unsafe original filenames before file I/O', async () => {
         const formData = new FormData();
         formData.append('files', new File(['binary'], `${'a'.repeat(256)}.jpg`, { type: 'image/jpeg' }));
