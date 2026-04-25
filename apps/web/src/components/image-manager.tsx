@@ -332,7 +332,7 @@ export function ImageManager({
                 </div>
             )}
 
-            <div className="rounded-md border">
+            <div className="min-w-0 rounded-md border">
                 <Table>
                     <TableHeader>
                         <TableRow>

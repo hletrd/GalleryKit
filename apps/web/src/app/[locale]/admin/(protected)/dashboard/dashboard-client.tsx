@@ -23,19 +23,19 @@ export function DashboardClient({ images, topics, tags, page, totalPages, imageS
     const { t, locale } = useTranslation();
 
     return (
-        <div className="space-y-8">
+        <div className="min-w-0 space-y-8">
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold">{t('dashboard.title')}</h1>
             </div>
 
-            <div className="grid gap-8 2xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]">
-                <div>
+            <div className="grid min-w-0 gap-8 2xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]">
+                <div className="min-w-0">
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.uploadNew')}</h2>
                     <UploadDropzone topics={topics} availableTags={tags} uploadLimits={uploadLimits} />
                 </div>
-                <div>
+                <div className="min-w-0">
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.recentUploads')}</h2>
-                    <div className="max-h-[calc(100vh-16rem)] overflow-auto 2xl:max-h-[calc(100vh-14rem)]">
+                    <div className="max-w-full max-h-[calc(100vh-16rem)] overflow-auto 2xl:max-h-[calc(100vh-14rem)]">
                         <ImageManager initialImages={images} availableTags={tags} imageSizes={imageSizes} shareBaseUrl={shareBaseUrl} />
                     </div>
                     {totalPages > 1 && (

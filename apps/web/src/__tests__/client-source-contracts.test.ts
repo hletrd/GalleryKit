@@ -22,7 +22,7 @@ describe('client component source contracts', () => {
 
   it('keeps the mobile info bottom sheet modal while it is open', () => {
     const code = source('components/info-bottom-sheet.tsx');
-    expect(code).toContain('<FocusTrap active={isOpen}');
+    expect(code).toMatch(/<FocusTrap\s+active={isOpen}/);
     expect(code).toContain('aria-modal="true"');
     expect(code).not.toContain("aria-modal={sheetState === 'expanded'");
   });

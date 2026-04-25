@@ -3,7 +3,7 @@
 import { login } from '@/app/actions';
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { useActionState } from 'react';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
@@ -30,7 +30,7 @@ export function LoginForm() {
         <div className="flex items-center justify-center min-h-[60vh]">
             <Card className="w-full max-w-sm">
                 <CardHeader>
-                    <CardTitle>{t('title')}</CardTitle>
+                    <h1 className="text-2xl font-semibold leading-none tracking-tight">{t('title')}</h1>
                     <CardDescription>{t('description')}</CardDescription>
                 </CardHeader>
                 <CardContent>
