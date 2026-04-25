@@ -17,12 +17,21 @@ function useColumnCount() {
 
     useEffect(() => {
         let rafId: number | null = null;
+        // AGG1L-LOW-02 / plan-301-B: thresholds mirror the Tailwind
+        // breakpoints used in the masonry container's class string
+        // (`columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5`),
+        // so the above-the-fold image priority logic stays in sync with
+        // the actual column count rendered by the browser. Without this
+        // mirror, a 5-column 2xl viewport would only flag the first 4
+        // images as `loading="eager"` / `fetchPriority="high"` and the
+        // 5th slot would lazy-load (LCP regression).
         const update = () => {
             const w = window.innerWidth;
             if (w < 640) setCount(1);
             else if (w < 768) setCount(2);
             else if (w < 1280) setCount(3);
-            else setCount(4);
+            else if (w < 1536) setCount(4);
+            else setCount(5);
         };
         const handleResize = () => {
             if (rafId !== null) cancelAnimationFrame(rafId);
