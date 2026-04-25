@@ -12,7 +12,7 @@ import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, resetRateLimit } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
@@ -50,8 +50,20 @@ function checkUserCreateRateLimit(ip: string): boolean {
     return entry.count > USER_CREATE_MAX_ATTEMPTS;
 }
 
-function resetUserCreateRateLimit(ip: string) {
-    userCreateRateLimit.delete(ip);
+function rollbackUserCreateRateLimitAttempt(ip: string) {
+    const currentEntry = userCreateRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        currentEntry.count--;
+    } else if (currentEntry) {
+        userCreateRateLimit.delete(ip);
+    }
+}
+
+async function rollbackUserCreateRateLimit(ip: string, reason: string) {
+    rollbackUserCreateRateLimitAttempt(ip);
+    await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS).catch((err) => {
+        console.debug(`Failed to roll back user_create DB rate limit after ${reason}:`, err);
+    });
 }
 
 // Admin User Management
@@ -119,16 +131,7 @@ export async function createAdminUser(formData: FormData) {
         await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
         const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
         if (isRateLimitExceeded(dbLimit.count, USER_CREATE_MAX_ATTEMPTS, true)) {
-            // Roll back in-memory pre-increment to stay consistent with DB source of truth.
-            const currentEntry = userCreateRateLimit.get(ip);
-            if (currentEntry && currentEntry.count > 1) {
-                currentEntry.count--;
-            } else {
-                userCreateRateLimit.delete(ip);
-            }
-            await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS).catch((err) => {
-                console.debug('Failed to roll back user_create DB rate limit after over-limit:', err);
-            });
+            await rollbackUserCreateRateLimit(ip, 'over-limit');
             return { error: t('tooManyAttempts') };
         }
     } catch {
@@ -148,14 +151,10 @@ export async function createAdminUser(formData: FormData) {
             logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(newUserId)).catch(console.debug);
         }
 
-        // Roll back DB rate limit on successful creation — this was a legitimate
-        // action, not a brute-force attempt. Matches login pattern (A-01 fix).
-        try {
-            await resetRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
-        } catch {
-            // DB unavailable — in-memory Map will expire naturally
-        }
-        resetUserCreateRateLimit(ip);
+        // Roll back only this pre-incremented attempt. Deleting the whole bucket
+        // lets alternating success/duplicate requests erase concurrent pressure
+        // and bypass the hourly user_create budget.
+        await rollbackUserCreateRateLimit(ip, 'successful creation');
 
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
@@ -169,23 +168,13 @@ export async function createAdminUser(formData: FormData) {
             // by AGG10R-RPL-01 (validation-before-increment) and AGG9R-RPL-01
             // (updatePassword validation ordering): legitimate user errors
             // must not consume rate-limit slots.
-            try {
-                await resetRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
-            } catch {
-                // DB unavailable — in-memory Map will expire naturally
-            }
-            resetUserCreateRateLimit(ip);
+            await rollbackUserCreateRateLimit(ip, 'duplicate username');
             return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
         // Roll back DB rate limit on unexpected errors — the user didn't
         // fail due to brute-force, the infrastructure did.
-        try {
-            await resetRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
-        } catch {
-            // DB unavailable — in-memory Map will expire naturally
-        }
-        resetUserCreateRateLimit(ip);
+        await rollbackUserCreateRateLimit(ip, 'unexpected create failure');
         return { error: t('failedToCreateUser') };
     }
 }

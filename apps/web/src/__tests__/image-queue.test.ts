@@ -80,4 +80,33 @@ describe('enqueueImageProcessing filename guard', () => {
         expect(state.enqueued.has(7)).toBe(false);
         expect(queueAddMock).not.toHaveBeenCalled();
     });
+
+    it('marks bootstrap stale and schedules a retry scan after repeated processing failures', async () => {
+        vi.useFakeTimers();
+        const state = getProcessingQueueState();
+        state.bootstrapped = true;
+
+        enqueueImageProcessing({
+            id: 8,
+            filenameOriginal: 'original.jpg',
+            filenameWebp: 'safe.webp',
+            filenameAvif: 'safe.avif',
+            filenameJpeg: 'safe.jpg',
+            width: 1200,
+        });
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const task = queueAddMock.mock.calls.at(-1)?.[0] as (() => Promise<void>) | undefined;
+            expect(task).toBeDefined();
+            await task!();
+        }
+
+        expect(state.bootstrapped).toBe(false);
+        expect(state.bootstrapRetryTimer).toBeDefined();
+        if (state.bootstrapRetryTimer) {
+            clearTimeout(state.bootstrapRetryTimer);
+            state.bootstrapRetryTimer = undefined;
+        }
+        vi.useRealTimers();
+    });
 });

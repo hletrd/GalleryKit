@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     buildAccountRateLimitKey,
     getClientIp,
+    getTrustedProxyHopCount,
     normalizeIp,
     getRateLimitBucketStart,
     isRateLimitExceeded,
@@ -12,12 +13,18 @@ import {
 } from '@/lib/rate-limit';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
+const originalTrustedProxyHops = process.env.TRUSTED_PROXY_HOPS;
 
 afterEach(() => {
     if (originalTrustProxy === undefined) {
         delete process.env.TRUST_PROXY;
     } else {
         process.env.TRUST_PROXY = originalTrustProxy;
+    }
+    if (originalTrustedProxyHops === undefined) {
+        delete process.env.TRUSTED_PROXY_HOPS;
+    } else {
+        process.env.TRUSTED_PROXY_HOPS = originalTrustedProxyHops;
     }
 
     searchRateLimit.clear();
@@ -88,7 +95,7 @@ describe('isRateLimitExceeded', () => {
 });
 
 describe('getClientIp', () => {
-    it('prefers the right-most forwarded IP when TRUST_PROXY is enabled', () => {
+    it('uses the nearest trusted forwarded IP by default when TRUST_PROXY is enabled', () => {
         process.env.TRUST_PROXY = 'true';
 
         const headers = new Map<string, string>([
@@ -96,6 +103,30 @@ describe('getClientIp', () => {
             ['x-real-ip', '203.0.113.7'],
         ]);
 
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
+    });
+
+    it('uses TRUSTED_PROXY_HOPS to select the client before a known trusted proxy chain', () => {
+        process.env.TRUST_PROXY = 'true';
+        process.env.TRUSTED_PROXY_HOPS = '2';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10, 203.0.113.7'],
+            ['x-real-ip', '203.0.113.7'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
+    });
+
+    it('falls back to one trusted hop when TRUSTED_PROXY_HOPS is invalid', () => {
+        process.env.TRUST_PROXY = 'true';
+        process.env.TRUSTED_PROXY_HOPS = '0';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10, 203.0.113.7'],
+        ]);
+
+        expect(getTrustedProxyHopCount()).toBe(1);
         expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
     });
 

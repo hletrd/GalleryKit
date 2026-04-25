@@ -120,7 +120,7 @@ vi.mock('@/lib/audit', () => ({
 vi.mock('@/lib/tag-records', () => ({
     getTagSlug: (name: string) => name
         .normalize('NFKC')
-        .toLocaleLowerCase()
+        .toLowerCase()
         .replace(/[\s_]+/gu, '-')
         .replace(/[^\p{Letter}\p{Number}-]+/gu, '')
         .replace(/-{2,}/g, '-')
@@ -194,6 +194,19 @@ describe('uploadImages', () => {
         formData.set('tags', '!!!');
 
         await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTagNames' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when upload disk-space inspection fails', async () => {
+        statfsMock.mockRejectedValueOnce(new Error('missing upload volume'));
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'insufficientDiskSpace' });
         expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });

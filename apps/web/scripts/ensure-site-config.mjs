@@ -11,7 +11,14 @@ if (!fs.existsSync(siteConfigPath)) {
 const siteConfig = JSON.parse(fs.readFileSync(siteConfigPath, 'utf8'));
 const configuredUrl = String(process.env.BASE_URL || siteConfig.url || '').trim();
 const isProductionBuild = process.env.NODE_ENV === 'production';
-const placeholderHosts = new Set(['example.com', 'www.example.com']);
+const placeholderHosts = new Set([
+  'example.com',
+  'www.example.com',
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+]);
 
 if (isProductionBuild && !configuredUrl) {
   console.error('Missing production base URL. Set BASE_URL or customize src/site-config.json before building.');

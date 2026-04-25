@@ -27,8 +27,8 @@ export async function recordFailedLoginAttempt(ip: string, now: number) {
 }
 
 export async function clearSuccessfulLoginAttempts(ip: string) {
-    loginRateLimit.delete(ip);
     await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+    loginRateLimit.delete(ip);
 }
 
 /**
@@ -64,8 +64,8 @@ export function getPasswordChangeRateLimitEntry(ip: string, now: number): RateLi
 }
 
 export async function clearSuccessfulPasswordAttempts(ip: string) {
-    passwordChangeRateLimit.delete(ip);
     await resetRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+    passwordChangeRateLimit.delete(ip);
 }
 
 /**

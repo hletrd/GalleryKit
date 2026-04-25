@@ -22,7 +22,7 @@ import { requireSameOriginAdmin } from "@/lib/action-guards";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
 import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
-import { isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
+import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
@@ -353,7 +353,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         await fd.close();
     }
     const headerBytes = headerBuf.subarray(0, headerBytesRead).toString('utf8');
-    const validHeader = /^(--)|(CREATE\s)|(INSERT\s)|(DROP\s)|(SET\s)|(\/\*!)/.test(headerBytes.trimStart());
+    const validHeader = hasPlausibleSqlDumpHeader(headerBytes);
     if (!validHeader) {
         await fs.unlink(tempPath).catch(() => {});
         return { success: false, error: t('invalidSqlDump') };

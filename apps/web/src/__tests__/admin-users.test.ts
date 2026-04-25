@@ -142,4 +142,33 @@ describe('createAdminUser', () => {
         expect(argon2HashMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });
+
+    it('rolls back only the current attempt after successful creation', async () => {
+        insertMock.mockReturnValue(makeInsertChain([{ insertId: 7 }]));
+
+        const formData = new FormData();
+        formData.set('username', 'new-admin');
+        formData.set('password', 'CorrectHorseBatteryStaple!');
+        formData.set('confirmPassword', 'CorrectHorseBatteryStaple!');
+
+        await expect(createAdminUser(formData)).resolves.toEqual({ success: true });
+
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000);
+        expect(resetRateLimitMock).not.toHaveBeenCalled();
+    });
+
+    it('rolls back only the current attempt after duplicate-username failure', async () => {
+        const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+        insertMock.mockReturnValue({ values: vi.fn().mockRejectedValue(duplicate) });
+
+        const formData = new FormData();
+        formData.set('username', 'existing-admin');
+        formData.set('password', 'CorrectHorseBatteryStaple!');
+        formData.set('confirmPassword', 'CorrectHorseBatteryStaple!');
+
+        await expect(createAdminUser(formData)).resolves.toEqual({ error: 'usernameExists' });
+
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000);
+        expect(resetRateLimitMock).not.toHaveBeenCalled();
+    });
 });

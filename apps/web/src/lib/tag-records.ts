@@ -5,7 +5,7 @@ import { db, tags } from '@/db';
 export function getTagSlug(name: string) {
     return name
         .normalize('NFKC')
-        .toLocaleLowerCase()
+        .toLowerCase()
         .replace(/[\s_]+/gu, '-')
         .replace(/[^\p{Letter}\p{Number}-]+/gu, '')
         .replace(/-{2,}/g, '-')

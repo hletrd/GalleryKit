@@ -134,13 +134,10 @@ describe('admin-users.ts — createAdminUser validates form fields before rate-l
         expect(usernameExistsReturn).toBeGreaterThan(dupBranchStart);
 
         // Between the dup-entry branch start and the usernameExists return,
-        // both resetRateLimit (DB) and resetUserCreateRateLimit (in-memory)
-        // must be called so that duplicate-username failures don't burn the
-        // rate-limit budget.
+        // a one-attempt rollback must be called so duplicate-username failures
+        // don't burn the current attempt, without deleting concurrent pressure
+        // from the whole bucket.
         const dupBranchBody = body.slice(dupBranchStart, usernameExistsReturn);
-        expect(dupBranchBody).toMatch(
-            /resetRateLimit\(ip,\s*'user_create',\s*USER_CREATE_WINDOW_MS\)/,
-        );
-        expect(dupBranchBody).toMatch(/resetUserCreateRateLimit\(ip\)/);
+        expect(dupBranchBody).toMatch(/rollbackUserCreateRateLimit\(ip,\s*'duplicate username'\)/);
     });
 });

@@ -11,4 +11,9 @@ describe('getTagSlug', () => {
         expect(getTagSlug('풍경')).toBe('풍경');
         expect(getTagSlug('서울 야경')).toBe('서울-야경');
     });
+
+    it('uses locale-independent casing for Turkish I variants', () => {
+        expect(getTagSlug('Istanbul')).toBe('istanbul');
+        expect(getTagSlug('İstanbul')).toBe('istanbul');
+    });
 });

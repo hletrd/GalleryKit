@@ -152,8 +152,9 @@ export async function uploadImages(formData: FormData) {
         if (freeBytes < 1024 * 1024 * 1024) {
             return { error: t('insufficientDiskSpace') };
         }
-    } catch {
-        // statfs may fail on some platforms; proceed anyway
+    } catch (err) {
+        console.error('Failed to inspect upload disk space', err);
+        return { error: t('insufficientDiskSpace') };
     }
 
     // Validate total upload size (per-call limit)

@@ -18,6 +18,7 @@ export type HeaderLike = { get(name: string): string | null };
 const RATE_LIMIT_BUCKET_KEY_MAX_LENGTH = 45;
 const ACCOUNT_RATE_LIMIT_PREFIX = 'acct:';
 const ACCOUNT_RATE_LIMIT_HASH_LENGTH = RATE_LIMIT_BUCKET_KEY_MAX_LENGTH - ACCOUNT_RATE_LIMIT_PREFIX.length;
+const DEFAULT_TRUSTED_PROXY_HOPS = 1;
 
 // In-memory Maps kept as fast-path cache. On restart they are empty;
 // the DB is the source of truth.
@@ -58,6 +59,13 @@ export function buildAccountRateLimitKey(username: string): string {
     return `${ACCOUNT_RATE_LIMIT_PREFIX}${digest.slice(0, ACCOUNT_RATE_LIMIT_HASH_LENGTH)}`;
 }
 
+export function getTrustedProxyHopCount(value: string | undefined = process.env.TRUSTED_PROXY_HOPS): number {
+    if (!value) return DEFAULT_TRUSTED_PROXY_HOPS;
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || parsed < 1) return DEFAULT_TRUSTED_PROXY_HOPS;
+    return parsed;
+}
+
 export function getClientIp(headerStore: HeaderLike): string {
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
     // Without it, an attacker can spoof X-Forwarded-For to bypass rate limits.
@@ -65,12 +73,19 @@ export function getClientIp(headerStore: HeaderLike): string {
         const xForwardedFor = headerStore.get('x-forwarded-for');
         if (xForwardedFor && xForwardedFor.length <= 512) {
             const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
-            // The shipped nginx config uses proxy_add_x_forwarded_for, which appends
-            // the real client IP to any incoming chain. Prefer the right-most valid
-            // hop so an attacker-controlled left-most value cannot win.
-            for (const part of parts.reverse()) {
-                const normalized = normalizeIp(part || null);
-                if (normalized) return normalized;
+            // Default to the nearest trusted proxy hop (right-most valid IP) so a
+            // direct client cannot spoof the left-most chain value. Deployments
+            // with a known trusted chain (for example CDN/LB -> nginx -> app) can
+            // set TRUSTED_PROXY_HOPS=2 to select the client IP immediately before
+            // the trusted proxy pair.
+            const validParts = parts.map((part) => normalizeIp(part)).filter((part): part is string => Boolean(part));
+            const hopCount = getTrustedProxyHopCount();
+            const trustedHopIndex = validParts.length - hopCount;
+            if (trustedHopIndex >= 0) {
+                return validParts[trustedHopIndex];
+            }
+            if (validParts.length > 0) {
+                return validParts[0];
             }
         }
 

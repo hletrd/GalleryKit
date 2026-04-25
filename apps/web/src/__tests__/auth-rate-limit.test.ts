@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { incrementRateLimit, resetRateLimit, loginRateLimit } = vi.hoisted(() => ({
+const { decrementRateLimit, incrementRateLimit, resetRateLimit, loginRateLimit } = vi.hoisted(() => ({
+    decrementRateLimit: vi.fn(),
     incrementRateLimit: vi.fn(),
     resetRateLimit: vi.fn(),
     loginRateLimit: new Map<string, { count: number; lastAttempt: number }>(),
@@ -8,22 +9,27 @@ const { incrementRateLimit, resetRateLimit, loginRateLimit } = vi.hoisted(() => 
 
 vi.mock('@/lib/rate-limit', () => ({
     LOGIN_WINDOW_MS: 15 * 60 * 1000,
+    decrementRateLimit,
     incrementRateLimit,
     resetRateLimit,
     loginRateLimit,
 }));
 
 import {
+    clearSuccessfulPasswordAttempts,
     clearSuccessfulLoginAttempts,
     getLoginRateLimitEntry,
+    passwordChangeRateLimit,
     recordFailedLoginAttempt,
 } from '@/lib/auth-rate-limit';
 
 describe('auth-rate-limit helpers', () => {
     beforeEach(() => {
+        decrementRateLimit.mockReset();
         incrementRateLimit.mockReset();
         resetRateLimit.mockReset();
         loginRateLimit.clear();
+        passwordChangeRateLimit.clear();
     });
 
     it('resets expired in-memory login counts before evaluating a new attempt', () => {
@@ -61,5 +67,29 @@ describe('auth-rate-limit helpers', () => {
 
         expect(loginRateLimit.has('203.0.113.3')).toBe(false);
         expect(resetRateLimit).toHaveBeenCalledWith('203.0.113.3', 'login', 15 * 60 * 1000);
+    });
+
+    it('keeps successful-login memory state when the DB reset fails', async () => {
+        resetRateLimit.mockRejectedValue(new Error('db down'));
+        loginRateLimit.set('203.0.113.4', {
+            count: 2,
+            lastAttempt: 999,
+        });
+
+        await expect(clearSuccessfulLoginAttempts('203.0.113.4')).rejects.toThrow('db down');
+
+        expect(loginRateLimit.has('203.0.113.4')).toBe(true);
+    });
+
+    it('keeps successful-password memory state when the DB reset fails', async () => {
+        resetRateLimit.mockRejectedValue(new Error('db down'));
+        passwordChangeRateLimit.set('203.0.113.5', {
+            count: 2,
+            lastAttempt: 999,
+        });
+
+        await expect(clearSuccessfulPasswordAttempts('203.0.113.5')).rejects.toThrow('db down');
+
+        expect(passwordChangeRateLimit.has('203.0.113.5')).toBe(true);
     });
 });
