@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDisplayTitleFromTagNames, getPhotoDocumentTitle, isFilenameLikeTitle } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDisplayTitleFromTagNames, getPhotoDocumentTitle, humanizeTagLabel, isFilenameLikeTitle } from '@/lib/photo-title';
 
 describe('isFilenameLikeTitle', () => {
     it('recognizes filename-like titles', () => {
@@ -68,6 +68,32 @@ describe('lite photo title helpers', () => {
 
     it('keeps concise alt text instead of verbose hash-prefixed tag strings', () => {
         expect(getConcisePhotoAltText({ title: 'IMG_0001.JPG', tag_names: 'Seoul,Night' }, 'Photo')).toBe('Seoul, Night');
+    });
+
+    // AGG1L-LOW-01 / plan-301-A: underscore normalization is applied at
+    // the helper level (`humanizeTagLabel` inside `getPhotoDisplayTitle`)
+    // so visible display title, alt text, and JSON-LD `name` all agree.
+    it('humanizes slug-style underscores in tag-derived display titles', () => {
+        expect(getPhotoDisplayTitleFromTagNames({ title: 'IMG_0001.JPG', tag_names: 'Music_Festival,Night_Sky' }, 'Photo 1')).toBe('#Music Festival #Night Sky');
+    });
+
+    it('humanizes slug-style underscores in tag-derived alt text', () => {
+        expect(getConcisePhotoAltText({ title: 'IMG_0001.JPG', tag_names: 'Music_Festival,Night_Sky' }, 'Photo')).toBe('Music Festival, Night Sky');
+    });
+});
+
+describe('humanizeTagLabel', () => {
+    it('replaces underscores with spaces', () => {
+        expect(humanizeTagLabel('Color_in_Music_Festival')).toBe('Color in Music Festival');
+    });
+
+    it('passes through labels without underscores', () => {
+        expect(humanizeTagLabel('Seoul')).toBe('Seoul');
+        expect(humanizeTagLabel('Color in Music Festival')).toBe('Color in Music Festival');
+    });
+
+    it('handles empty input', () => {
+        expect(humanizeTagLabel('')).toBe('');
     });
 });
 

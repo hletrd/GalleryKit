@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 import { useTranslation } from "@/components/i18n-provider";
+import { humanizeTagLabel } from "@/lib/photo-title";
 
 export function TagFilter({ tags }: { tags: { id: number, name: string, slug: string, count: number }[] }) {
     const router = useRouter();
@@ -55,10 +56,11 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
     // unambiguous. (F-1, supersedes AGG3R-03 / C3R-RPL-03)
     const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-2";
 
-    // Display-format the tag name. Tag slugs canonically use `_` to
-    // separate words; users see those as "Color in Music Festival"
-    // rather than "Color_in_Music_Festival". (F-5)
-    const displayName = (name: string) => name.replace(/_/g, ' ');
+    // F-5 / AGG1L-LOW-01: tag slugs canonically use `_` to separate
+    // words; render those as spaces via the shared `humanizeTagLabel`
+    // utility so all consumers (visible UI, alt text, JSON-LD `name`)
+    // produce the same humanized output.
+    const displayName = humanizeTagLabel;
 
     return (
         <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>

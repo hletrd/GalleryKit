@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
-import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
+import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames, humanizeTagLabel } from '@/lib/photo-title';
 
 function useColumnCount() {
     const [count, setCount] = useState(2);
@@ -114,12 +114,13 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
         return map;
     }, [topics]);
     const displayTags = useMemo(() => {
-        // F-5: replace `_` with space when echoing the active tag in the
-        // page heading so users see human-readable hashtags instead of raw
-        // slugs (`#Color in Music Festival` not `#Color_in_Music_Festival`).
+        // F-5 / AGG1L-LOW-01: humanize via the shared `humanizeTagLabel`
+        // helper so the active-filter chip and the masonry card title
+        // both derive their underscore-stripped form from the same
+        // single-source-of-truth utility.
         return (currentTags || []).map((tag) => {
             const match = tags.find((t) => t.slug === tag.trim().toLowerCase());
-            return (match?.name ?? tag).replace(/_/g, ' ');
+            return humanizeTagLabel(match?.name ?? tag);
         });
     }, [currentTags, tags]);
 
@@ -154,10 +155,12 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                 (1536px+) to make better use of widescreen real estate. */}
             <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
                 {orderedImages.map((image, index) => {
-                    // F-5 / F-18: normalize raw slug underscores so the
-                    // visible card title and the SR-announced label both
-                    // read naturally.
-                    const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled')).replace(/_/g, ' ');
+                    // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is
+                    // now baked into `getPhotoDisplayTitleFromTagNames` and
+                    // `getConcisePhotoAltText` via the shared
+                    // `humanizeTagLabel` helper, so the card title and the
+                    // alt text agree without any inline post-processing.
+                    const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled'));
                     const altText = getConcisePhotoAltText(image, t('common.photo'));
 
                     const isAboveFold = index < columnCount;

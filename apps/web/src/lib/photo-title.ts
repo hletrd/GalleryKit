@@ -14,13 +14,28 @@ export function isFilenameLikeTitle(title: string | null | undefined): boolean {
     return Boolean(title && /\.[a-z0-9]{3,4}$/i.test(title));
 }
 
+/**
+ * AGG1L-LOW-01 / plan-301-A: humanize a slug- or word-shaped tag label.
+ *
+ * Tag slugs (and `tag_names` rows derived from them) canonically use `_`
+ * as a word separator. The visible UI, the alt-text, and the JSON-LD
+ * `name` field should all show those as spaces — `Color_in_Music_Festival`
+ * is awkward in every consumer.
+ *
+ * The single source of truth for the transform lives here so visible UI,
+ * alt text, and structured-data emitters cannot drift from each other.
+ */
+export function humanizeTagLabel(name: string): string {
+    return name.replace(/_/g, ' ');
+}
+
 export function getPhotoDisplayTitle(
     image: PhotoTitleInput,
     fallback: string,
     options: PhotoTitleOptions = {},
 ): string {
     if (options.preferTags && image.tags && image.tags.length > 0) {
-        return image.tags.map((tag) => `#${tag.name}`).join(' ');
+        return image.tags.map((tag) => `#${humanizeTagLabel(tag.name)}`).join(' ');
     }
 
     if (image.title && image.title.trim() && !isFilenameLikeTitle(image.title)) {
@@ -31,7 +46,7 @@ export function getPhotoDisplayTitle(
     }
 
     if (image.tags && image.tags.length > 0) {
-        return image.tags.map((tag) => `#${tag.name}`).join(' ');
+        return image.tags.map((tag) => `#${humanizeTagLabel(tag.name)}`).join(' ');
     }
 
     return fallback;
@@ -68,12 +83,13 @@ export function getConcisePhotoAltText(
     image: { title: string | null | undefined; tag_names?: string | null | undefined },
     fallback: string,
 ): string {
-    // F-18: derive alt text from the photo's tag list (or title) so screen
-    // reader users get distinguishable per-photo labels instead of a wall
-    // of identical "Photo" placeholders. Underscores in slug-like tag
-    // names are also normalized to spaces so labels read naturally.
+    // F-18 / AGG1L-LOW-01: derive alt text from the photo's tag list (or
+    // title) so screen reader users get distinguishable per-photo labels
+    // instead of a wall of identical "Photo" placeholders. Underscores
+    // are normalized via `humanizeTagLabel` (now applied at the helper
+    // level above), so this routine just strips the `#` prefix marks
+    // that `getPhotoDisplayTitle` adds for visual hashtag formatting.
     return getPhotoDisplayTitleFromTagNames(image, fallback)
         .replace(/^#+/, '')
-        .replace(/\s+#/g, ', ')
-        .replace(/_/g, ' ');
+        .replace(/\s+#/g, ', ');
 }
