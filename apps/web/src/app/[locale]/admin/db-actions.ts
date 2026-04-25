@@ -123,7 +123,11 @@ export async function dumpDatabase() {
     const backupsDir = path.join(process.cwd(), 'data', 'backups');
     const outputPath = path.join(backupsDir, filename);
 
-    await fs.mkdir(backupsDir, { recursive: true });
+    // C2L2-08: create the backups directory owner-only so its mode aligns with
+    // the per-file `0o600` mode applied below. Operators on multi-user hosts
+    // benefit from defense-in-depth even though CLAUDE.md accepts plaintext
+    // backups at rest as the personal-gallery threat model.
+    await fs.mkdir(backupsDir, { recursive: true, mode: 0o700 });
 
     const sslArgs = getMysqlCliSslArgs(DB_HOST);
 
