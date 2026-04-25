@@ -155,7 +155,9 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                 aria-label={t('aria.searchPhotos')}
                 aria-haspopup="dialog"
                 aria-expanded={isOpen}
-                className="h-9 w-9"
+                // 44x44 touch-target floor; matches the adjacent theme/locale
+                // buttons in the nav (F-3).
+                className="h-11 w-11"
             >
                 <SearchIcon className="h-4 w-4" />
             </Button>
@@ -221,7 +223,9 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             variant="ghost"
                             size="icon"
                             onClick={handleClose}
-                            className="h-8 w-8 shrink-0"
+                            // 44x44 touch-target floor for the dialog dismiss
+                            // affordance on mobile (F-21).
+                            className="h-11 w-11 shrink-0"
                             aria-label={t('aria.close')}
                         >
                             <X className="h-4 w-4" />
