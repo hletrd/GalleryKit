@@ -11,7 +11,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey, isRateLimitExceeded } from '@/lib/rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey, isRateLimitExceeded, getRateLimitBucketStart } from '@/lib/rate-limit';
 import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackLoginRateLimit, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
@@ -95,6 +95,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
     }
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
+    const loginBucketStart = getRateLimitBucketStart(now, LOGIN_WINDOW_MS);
 
     pruneLoginRateLimit(now);
 
@@ -118,9 +119,9 @@ export async function login(prevState: { error?: string } | null, formData: Form
         limitData.count += 1;
         limitData.lastAttempt = now;
         loginRateLimit.set(ip, limitData);
-        await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+        await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, loginBucketStart);
         // Also increment account-scoped bucket
-        await incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
+        await incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
     } catch (err) {
         console.debug('Failed to pre-increment login rate limit:', err);
     }
@@ -129,15 +130,15 @@ export async function login(prevState: { error?: string } | null, formData: Form
     // includes this request, so use strict `>` semantics and roll back if this
     // request is rejected before authentication work is performed.
     try {
-        const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
-        const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, loginBucketStart);
+        const accountLimit = await checkRateLimit(accountRateLimitKey, 'login_account', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, loginBucketStart);
         if (
             isRateLimitExceeded(dbLimit.count, LOGIN_MAX_ATTEMPTS, true)
             || isRateLimitExceeded(accountLimit.count, LOGIN_MAX_ATTEMPTS, true)
         ) {
             await Promise.allSettled([
-                rollbackLoginRateLimit(ip),
-                decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS),
+                rollbackLoginRateLimit(ip, loginBucketStart),
+                decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart),
             ]);
             return { error: t('tooManyAttempts') };
         }
@@ -168,12 +169,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
         // Login succeeded — roll back the pre-incremented rate limit counters
         // (both IP-scoped and account-scoped)
         try {
-            await clearSuccessfulLoginAttempts(ip);
+            await clearSuccessfulLoginAttempts(ip, loginBucketStart);
         } catch (err) {
             console.error('Failed to reset login rate limit for IP:', ip, err);
         }
         try {
-            await resetRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
+            await resetRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
         } catch (err) {
             console.debug('Failed to reset account-scoped login rate limit:', err);
         }
@@ -231,12 +232,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
         // the user didn't fail authentication, the infrastructure did.
         // Use decrement instead of delete so concurrent rollbacks don't lose counts (C1-07).
         try {
-            await rollbackLoginRateLimit(ip);
+            await rollbackLoginRateLimit(ip, loginBucketStart);
         } catch (rollbackErr) {
             console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
         }
         try {
-            await decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS);
+            await decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
         } catch (rollbackErr) {
             console.debug('Failed to roll back account-scoped login rate limit after unexpected error:', rollbackErr);
         }
@@ -316,6 +317,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
 
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
+    const passwordBucketStart = getRateLimitBucketStart(now, LOGIN_WINDOW_MS);
     prunePasswordChangeRateLimit(now);
     const limitData = getPasswordChangeRateLimitEntry(ip, now);
     if (limitData.count >= PASSWORD_CHANGE_MAX_ATTEMPTS) {
@@ -329,15 +331,15 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         limitData.count += 1;
         limitData.lastAttempt = now;
         passwordChangeRateLimit.set(ip, limitData);
-        await incrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+        await incrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS, passwordBucketStart);
     } catch (err) {
         console.debug('Failed to pre-increment password change rate limit:', err);
     }
 
     try {
-        const dbLimit = await checkRateLimit(ip, 'password_change', PASSWORD_CHANGE_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'password_change', PASSWORD_CHANGE_MAX_ATTEMPTS, LOGIN_WINDOW_MS, passwordBucketStart);
         if (isRateLimitExceeded(dbLimit.count, PASSWORD_CHANGE_MAX_ATTEMPTS, true)) {
-            await rollbackPasswordChangeRateLimit(ip);
+            await rollbackPasswordChangeRateLimit(ip, passwordBucketStart);
             return { error: t('tooManyAttempts') };
         }
     } catch {
@@ -397,7 +399,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         // irrecoverably lost — the catch-branch rollback only decrements
         // once.
         try {
-            await clearSuccessfulPasswordAttempts(ip);
+            await clearSuccessfulPasswordAttempts(ip, passwordBucketStart);
         } catch (err) {
             console.error('Failed to reset password change rate limit for IP:', ip, err);
         }
@@ -420,7 +422,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         // the user didn't fail authentication, the infrastructure did.
         // Use decrement instead of delete so concurrent rollbacks don't lose counts (C1-07).
         try {
-            await rollbackPasswordChangeRateLimit(ip);
+            await rollbackPasswordChangeRateLimit(ip, passwordBucketStart);
         } catch (rollbackErr) {
             console.debug('Failed to roll back password change rate limit after unexpected error:', rollbackErr);
         }

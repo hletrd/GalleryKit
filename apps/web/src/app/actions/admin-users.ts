@@ -12,7 +12,7 @@ import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
@@ -59,9 +59,9 @@ function rollbackUserCreateRateLimitAttempt(ip: string) {
     }
 }
 
-async function rollbackUserCreateRateLimit(ip: string, reason: string) {
+async function rollbackUserCreateRateLimit(ip: string, reason: string, bucketStart?: number) {
     rollbackUserCreateRateLimitAttempt(ip);
-    await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS).catch((err) => {
+    await decrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS, bucketStart).catch((err) => {
         console.debug(`Failed to roll back user_create DB rate limit after ${reason}:`, err);
     });
 }
@@ -81,12 +81,12 @@ export async function getAdminUsers() {
 
 export async function createAdminUser(formData: FormData) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     // AGG10R-RPL-01: validate form-field shape BEFORE the rate-limit
     // pre-increment, mirroring the AGG9R-RPL-01 fix applied to
@@ -121,6 +121,7 @@ export async function createAdminUser(formData: FormData) {
     // TOCTOU between check and increment across concurrent requests.
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
+    const userCreateBucketStart = getRateLimitBucketStart(Date.now(), USER_CREATE_WINDOW_MS);
     if (checkUserCreateRateLimit(ip)) {
         return { error: t('tooManyAttempts') };
     }
@@ -129,10 +130,10 @@ export async function createAdminUser(formData: FormData) {
     // either can proceed, preventing burst attacks that exploit the gap
     // between check and increment.
     try {
-        await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
-        const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
+        await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS, userCreateBucketStart);
+        const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS, userCreateBucketStart);
         if (isRateLimitExceeded(dbLimit.count, USER_CREATE_MAX_ATTEMPTS, true)) {
-            await rollbackUserCreateRateLimit(ip, 'over-limit');
+            await rollbackUserCreateRateLimit(ip, 'over-limit', userCreateBucketStart);
             return { error: t('tooManyAttempts') };
         }
     } catch {
@@ -155,7 +156,7 @@ export async function createAdminUser(formData: FormData) {
         // Roll back only this pre-incremented attempt. Deleting the whole bucket
         // lets alternating success/duplicate requests erase concurrent pressure
         // and bypass the hourly user_create budget.
-        await rollbackUserCreateRateLimit(ip, 'successful creation');
+        await rollbackUserCreateRateLimit(ip, 'successful creation', userCreateBucketStart);
 
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
@@ -169,26 +170,26 @@ export async function createAdminUser(formData: FormData) {
             // by AGG10R-RPL-01 (validation-before-increment) and AGG9R-RPL-01
             // (updatePassword validation ordering): legitimate user errors
             // must not consume rate-limit slots.
-            await rollbackUserCreateRateLimit(ip, 'duplicate username');
+            await rollbackUserCreateRateLimit(ip, 'duplicate username', userCreateBucketStart);
             return { error: t('usernameExists') };
         }
         console.error('Create user failed', e);
         // Roll back DB rate limit on unexpected errors — the user didn't
         // fail due to brute-force, the infrastructure did.
-        await rollbackUserCreateRateLimit(ip, 'unexpected create failure');
+        await rollbackUserCreateRateLimit(ip, 'unexpected create failure', userCreateBucketStart);
         return { error: t('failedToCreateUser') };
     }
 }
 
 export async function deleteAdminUser(id: number) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     const currentUser = await getCurrentUser();
     if (!currentUser) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(id) || id <= 0) {
         return { error: t('invalidUserId') };

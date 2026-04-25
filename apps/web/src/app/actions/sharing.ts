@@ -5,7 +5,7 @@ import { db, images, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 import { headers } from 'next/headers';
-import { getClientIp, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
+import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -82,24 +82,25 @@ function rollbackShareRateLimit(ip: string, scope: ShareRateLimitScope) {
  * where the DB counter was pre-incremented but the action did not
  * ultimately execute.
  */
-async function rollbackShareRateLimitFull(ip: string, scope: ShareRateLimitScope) {
+async function rollbackShareRateLimitFull(ip: string, scope: ShareRateLimitScope, bucketStart?: number) {
     rollbackShareRateLimit(ip, scope);
-    await decrementRateLimit(ip, scope, SHARE_RATE_LIMIT_WINDOW_MS).catch((err) => {
+    await decrementRateLimit(ip, scope, SHARE_RATE_LIMIT_WINDOW_MS, bucketStart).catch((err) => {
         console.debug(`Failed to roll back DB share rate limit for scope ${scope}:`, err);
     });
 }
 
 export async function createPhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
+    const shareBucketStart = getRateLimitBucketStart(Date.now(), SHARE_RATE_LIMIT_WINDOW_MS);
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { error: t('invalidImageId') };
@@ -120,12 +121,12 @@ export async function createPhotoShareLink(imageId: number) {
     }
     // DB-backed check for accuracy across restarts (pre-increment before check)
     try {
-        await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS);
-        const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
+        await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
+        const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
         if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
             // C6R-RPL-03: roll back BOTH counters so the DB counter doesn't
             // drift ahead of the in-memory counter over the window.
-            await rollbackShareRateLimitFull(ip, 'share_photo');
+            await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -159,7 +160,7 @@ export async function createPhotoShareLink(imageId: number) {
 
             // Image may have been deleted between the initial check and now
             if (!refreshedImage) {
-                await rollbackShareRateLimitFull(ip, 'share_photo');
+                await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
                 return { error: t('imageNotFound') };
             }
 
@@ -177,26 +178,27 @@ export async function createPhotoShareLink(imageId: number) {
             // Non-retryable error — roll back both rate-limit counters
             // so the admin isn't charged for an infrastructure failure
             // (C7R-RPL-03 / AGG7R-03).
-            await rollbackShareRateLimitFull(ip, 'share_photo');
+            await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
             return { error: t('failedToGenerateKey') };
         }
     }
     // Exhausted retries — roll back both counters for the same reason.
-    await rollbackShareRateLimitFull(ip, 'share_photo');
+    await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
     return { error: t('failedToGenerateKey') };
 }
 
 export async function createGroupShareLink(imageIds: number[]) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
+    const shareBucketStart = getRateLimitBucketStart(Date.now(), SHARE_RATE_LIMIT_WINDOW_MS);
 
     if (!Array.isArray(imageIds) || imageIds.length === 0) {
         return { error: t('noImagesSelected') };
@@ -232,11 +234,11 @@ export async function createGroupShareLink(imageIds: number[]) {
     }
     // DB-backed check for accuracy across restarts (pre-increment before check)
     try {
-        await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS);
-        const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
+        await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
+        const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
         if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
             // C6R-RPL-03: roll back BOTH counters.
-            await rollbackShareRateLimitFull(ip, 'share_group');
+            await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
             return { error: t('tooManyShareRequests') };
         }
     } catch {
@@ -290,29 +292,29 @@ export async function createGroupShareLink(imageIds: number[]) {
                 // roll back the DB rate-limit counter so the admin isn't
                 // penalized for a deleted image. In-memory counter rolled
                 // back symmetrically.
-                await rollbackShareRateLimitFull(ip, 'share_group');
+                await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
                 return { error: t('imagesNotFound') };
             }
             // Non-retryable error — roll back both rate-limit counters
             // so the admin isn't charged for an infrastructure failure
             // (C7R-RPL-03 / AGG7R-03).
-            await rollbackShareRateLimitFull(ip, 'share_group');
+            await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
             return { error: t('failedToCreateGroup') };
         }
     }
     // Exhausted retries — roll back both counters for the same reason.
-    await rollbackShareRateLimitFull(ip, 'share_group');
+    await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
     return { error: t('failedToCreateGroup') };
 }
 
 export async function revokePhotoShareLink(imageId: number) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(imageId) || imageId <= 0) {
         return { error: t('invalidImageId') };
@@ -347,12 +349,12 @@ export async function revokePhotoShareLink(imageId: number) {
 
 export async function deleteGroupShareLink(groupId: number) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
     // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
-    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-    if (maintenanceError) return { error: maintenanceError };
 
     if (!Number.isInteger(groupId) || groupId <= 0) {
         return { error: t('invalidGroupId') };

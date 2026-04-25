@@ -95,7 +95,7 @@ describe('isRateLimitExceeded', () => {
 });
 
 describe('getClientIp', () => {
-    it('uses the nearest trusted forwarded IP by default when TRUST_PROXY is enabled', () => {
+    it('uses the client before the nearest trusted proxy by default when TRUST_PROXY is enabled', () => {
         process.env.TRUST_PROXY = 'true';
 
         const headers = new Map<string, string>([
@@ -103,7 +103,7 @@ describe('getClientIp', () => {
             ['x-real-ip', '203.0.113.7'],
         ]);
 
-        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
     });
 
     it('uses TRUSTED_PROXY_HOPS to select the client before a known trusted proxy chain', () => {
@@ -111,7 +111,7 @@ describe('getClientIp', () => {
         process.env.TRUSTED_PROXY_HOPS = '2';
 
         const headers = new Map<string, string>([
-            ['x-forwarded-for', '198.51.100.10, 203.0.113.7'],
+            ['x-forwarded-for', '198.51.100.10, 203.0.113.7, 192.0.2.44'],
             ['x-real-ip', '203.0.113.7'],
         ]);
 
@@ -127,7 +127,7 @@ describe('getClientIp', () => {
         ]);
 
         expect(getTrustedProxyHopCount()).toBe(1);
-        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
     });
 
     it('falls back to x-real-ip when forwarded-for is absent or invalid', () => {

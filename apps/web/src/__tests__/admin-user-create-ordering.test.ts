@@ -105,7 +105,7 @@ describe('admin-users.ts — createAdminUser validates form fields before rate-l
     it('pre-increment is still present (guards against accidental removal of the TOCTOU fix)', () => {
         const body = createAdminUserMatch![0];
         expect(body).toMatch(
-            /incrementRateLimit\(ip,\s*'user_create',\s*USER_CREATE_WINDOW_MS\)/,
+            /incrementRateLimit\(ip,\s*'user_create',\s*USER_CREATE_WINDOW_MS,\s*userCreateBucketStart\)/,
         );
     });
 
@@ -138,6 +138,6 @@ describe('admin-users.ts — createAdminUser validates form fields before rate-l
         // don't burn the current attempt, without deleting concurrent pressure
         // from the whole bucket.
         const dupBranchBody = body.slice(dupBranchStart, usernameExistsReturn);
-        expect(dupBranchBody).toMatch(/rollbackUserCreateRateLimit\(ip,\s*'duplicate username'\)/);
+        expect(dupBranchBody).toMatch(/rollbackUserCreateRateLimit\(ip,\s*'duplicate username',\s*userCreateBucketStart\)/);
     });
 });

@@ -73,16 +73,17 @@ export function getClientIp(headerStore: HeaderLike): string {
         const xForwardedFor = headerStore.get('x-forwarded-for');
         if (xForwardedFor && xForwardedFor.length <= 512) {
             const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
-            // Default to the nearest trusted proxy hop (right-most valid IP) so a
-            // direct client cannot spoof the left-most chain value. Deployments
-            // with a known trusted chain (for example CDN/LB -> nginx -> app) can
-            // set TRUSTED_PROXY_HOPS=2 to select the client IP immediately before
-            // the trusted proxy pair.
+            // Select the client immediately before the trusted proxy suffix.
+            // For example, with "client, cdn, nginx" and
+            // TRUSTED_PROXY_HOPS=2, the trusted suffix is "cdn, nginx" and
+            // the client is the address just before it. Do not trust a chain
+            // that is shorter than or equal to the configured trusted suffix:
+            // there is no untrusted client slot to select.
             const validParts = parts.map((part) => normalizeIp(part)).filter((part): part is string => Boolean(part));
             const hopCount = getTrustedProxyHopCount();
-            const trustedHopIndex = validParts.length - hopCount;
-            if (trustedHopIndex >= 0) {
-                return validParts[trustedHopIndex];
+            const clientIndex = validParts.length - hopCount - 1;
+            if (clientIndex >= 0) {
+                return validParts[clientIndex];
             }
         }
 

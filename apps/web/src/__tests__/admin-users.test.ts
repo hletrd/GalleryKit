@@ -9,6 +9,7 @@ const {
     getClientIpMock,
     checkRateLimitMock,
     decrementRateLimitMock,
+    getRateLimitBucketStartMock,
     incrementRateLimitMock,
     isRateLimitExceededMock,
     resetRateLimitMock,
@@ -25,6 +26,7 @@ const {
     getClientIpMock: vi.fn(),
     checkRateLimitMock: vi.fn(),
     decrementRateLimitMock: vi.fn(),
+    getRateLimitBucketStartMock: vi.fn(),
     incrementRateLimitMock: vi.fn(),
     isRateLimitExceededMock: vi.fn(),
     resetRateLimitMock: vi.fn(),
@@ -70,6 +72,7 @@ vi.mock('@/lib/rate-limit', () => ({
     getClientIp: getClientIpMock,
     checkRateLimit: checkRateLimitMock,
     decrementRateLimit: decrementRateLimitMock,
+    getRateLimitBucketStart: getRateLimitBucketStartMock,
     incrementRateLimit: incrementRateLimitMock,
     isRateLimitExceeded: isRateLimitExceededMock,
     resetRateLimit: resetRateLimitMock,
@@ -105,6 +108,7 @@ describe('createAdminUser', () => {
         getClientIpMock.mockReturnValue('203.0.113.5');
         checkRateLimitMock.mockResolvedValue({ count: 1 });
         decrementRateLimitMock.mockResolvedValue(undefined);
+        getRateLimitBucketStartMock.mockReturnValue(12345);
         incrementRateLimitMock.mockResolvedValue(undefined);
         isRateLimitExceededMock.mockReturnValue(false);
         resetRateLimitMock.mockResolvedValue(undefined);
@@ -138,7 +142,7 @@ describe('createAdminUser', () => {
 
         await expect(createAdminUser(formData)).resolves.toEqual({ error: 'tooManyAttempts' });
 
-        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000);
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000, 12345);
         expect(argon2HashMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });
@@ -153,7 +157,7 @@ describe('createAdminUser', () => {
 
         await expect(createAdminUser(formData)).resolves.toEqual({ success: true });
 
-        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000);
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000, 12345);
         expect(resetRateLimitMock).not.toHaveBeenCalled();
     });
 
@@ -168,7 +172,7 @@ describe('createAdminUser', () => {
 
         await expect(createAdminUser(formData)).resolves.toEqual({ error: 'usernameExists' });
 
-        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000);
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000, 12345);
         expect(resetRateLimitMock).not.toHaveBeenCalled();
     });
 });

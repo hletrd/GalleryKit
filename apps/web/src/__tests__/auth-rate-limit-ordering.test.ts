@@ -72,7 +72,7 @@ describe('auth.ts — updatePassword validates form fields before rate-limit inc
     it('pre-increment is still present (guards against accidental removal of the TOCTOU fix)', () => {
         const body = updatePasswordMatch![0];
         expect(body).toMatch(
-            /incrementRateLimit\(ip,\s*'password_change',\s*LOGIN_WINDOW_MS\)/,
+            /incrementRateLimit\(ip,\s*'password_change',\s*LOGIN_WINDOW_MS,\s*passwordBucketStart\)/,
         );
     });
 
@@ -133,7 +133,7 @@ describe('auth.ts — login DB-backed rate limits include the current request', 
         const body = loginMatch![0];
         expect(body).toContain('isRateLimitExceeded(dbLimit.count, LOGIN_MAX_ATTEMPTS, true)');
         expect(body).toContain('isRateLimitExceeded(accountLimit.count, LOGIN_MAX_ATTEMPTS, true)');
-        expect(body).toContain('rollbackLoginRateLimit(ip)');
-        expect(body).toContain("decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS)");
+        expect(body).toContain('rollbackLoginRateLimit(ip, loginBucketStart)');
+        expect(body).toContain("decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart)");
     });
 });

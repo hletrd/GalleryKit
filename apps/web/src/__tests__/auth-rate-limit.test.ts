@@ -53,7 +53,15 @@ describe('auth-rate-limit helpers', () => {
             count: 1,
             lastAttempt: 123_456,
         });
-        expect(incrementRateLimit).toHaveBeenCalledWith('203.0.113.2', 'login', 15 * 60 * 1000);
+        expect(incrementRateLimit).toHaveBeenCalledWith('203.0.113.2', 'login', 15 * 60 * 1000, undefined);
+    });
+
+    it('persists failed attempts to a caller-pinned DB bucket when provided', async () => {
+        incrementRateLimit.mockResolvedValue(undefined);
+
+        await recordFailedLoginAttempt('203.0.113.2', 123_456, 123_000);
+
+        expect(incrementRateLimit).toHaveBeenCalledWith('203.0.113.2', 'login', 15 * 60 * 1000, 123_000);
     });
 
     it('clears successful-login state from both memory and the DB bucket', async () => {
@@ -66,7 +74,7 @@ describe('auth-rate-limit helpers', () => {
         await clearSuccessfulLoginAttempts('203.0.113.3');
 
         expect(loginRateLimit.has('203.0.113.3')).toBe(false);
-        expect(resetRateLimit).toHaveBeenCalledWith('203.0.113.3', 'login', 15 * 60 * 1000);
+        expect(resetRateLimit).toHaveBeenCalledWith('203.0.113.3', 'login', 15 * 60 * 1000, undefined);
     });
 
     it('keeps successful-login memory state when the DB reset fails', async () => {

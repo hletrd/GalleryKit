@@ -17,17 +17,17 @@ export function getLoginRateLimitEntry(ip: string, now: number): RateLimitEntry 
     return entry;
 }
 
-export async function recordFailedLoginAttempt(ip: string, now: number) {
+export async function recordFailedLoginAttempt(ip: string, now: number, bucketStart?: number) {
     const entry = getLoginRateLimitEntry(ip, now);
     entry.count += 1;
     entry.lastAttempt = now;
     loginRateLimit.set(ip, entry);
 
-    await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+    await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, bucketStart);
 }
 
-export async function clearSuccessfulLoginAttempts(ip: string) {
-    await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+export async function clearSuccessfulLoginAttempts(ip: string, bucketStart?: number) {
+    await resetRateLimit(ip, 'login', LOGIN_WINDOW_MS, bucketStart);
     loginRateLimit.delete(ip);
 }
 
@@ -37,14 +37,14 @@ export async function clearSuccessfulLoginAttempts(ip: string) {
  * pre-incremented count should be rolled back. Using decrement instead of
  * delete prevents concurrent rollbacks from losing counts (C1-07).
  */
-export async function rollbackLoginRateLimit(ip: string) {
+export async function rollbackLoginRateLimit(ip: string, bucketStart?: number) {
     const entry = loginRateLimit.get(ip);
     if (entry && entry.count > 1) {
         entry.count -= 1;
     } else if (entry) {
         loginRateLimit.delete(ip);
     }
-    await decrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+    await decrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, bucketStart);
 }
 
 // Separate in-memory Map for password change rate limiting.
@@ -63,8 +63,8 @@ export function getPasswordChangeRateLimitEntry(ip: string, now: number): RateLi
     return entry;
 }
 
-export async function clearSuccessfulPasswordAttempts(ip: string) {
-    await resetRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+export async function clearSuccessfulPasswordAttempts(ip: string, bucketStart?: number) {
+    await resetRateLimit(ip, 'password_change', LOGIN_WINDOW_MS, bucketStart);
     passwordChangeRateLimit.delete(ip);
 }
 
@@ -73,14 +73,14 @@ export async function clearSuccessfulPasswordAttempts(ip: string) {
  * Same rationale as rollbackLoginRateLimit — prevents concurrent rollbacks from
  * losing counts (C1-07).
  */
-export async function rollbackPasswordChangeRateLimit(ip: string) {
+export async function rollbackPasswordChangeRateLimit(ip: string, bucketStart?: number) {
     const entry = passwordChangeRateLimit.get(ip);
     if (entry && entry.count > 1) {
         entry.count -= 1;
     } else if (entry) {
         passwordChangeRateLimit.delete(ip);
     }
-    await decrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+    await decrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS, bucketStart);
 }
 
 /** Prune expired entries and enforce hard cap on password change rate-limit Map. */
