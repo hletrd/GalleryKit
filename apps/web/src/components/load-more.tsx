@@ -8,8 +8,6 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
 
-
-
 interface LoadMoreProps {
     topicSlug?: string;
     tagSlugs?: string[];

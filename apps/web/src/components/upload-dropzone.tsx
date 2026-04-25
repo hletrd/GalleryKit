@@ -190,104 +190,103 @@ export function UploadDropzone({
         setFileErrors({});
 
         try {
-        const UPLOAD_CONCURRENCY = 3;
+            const UPLOAD_CONCURRENCY = 3;
 
-        let successCount = 0;
-        const failedFiles: File[] = [];
-        const uploadWarnings: string[] = [];
-        const totalFiles = files.length;
-        let completedSoFar = 0;
+            let successCount = 0;
+            const failedFiles: File[] = [];
+            const uploadWarnings: string[] = [];
+            const totalFiles = files.length;
+            let completedSoFar = 0;
 
-        const uploadFile = async ({ id, file }: PendingUploadItem) => {
-            const fileId = id;
+            const uploadFile = async ({ id, file }: PendingUploadItem) => {
+                const fileId = id;
 
-            const formData = new FormData();
-            formData.append('files', file);
-            formData.append('topic', topic);
+                const formData = new FormData();
+                formData.append('files', file);
+                formData.append('topic', topic);
 
-            // Merge global selectedTags and per-file tags using LATEST values from Ref
-            const currentPerFileTags = perFileTagsRef.current;
-            const currentSelectedTags = selectedTagsRef.current;
+                // Merge global selectedTags and per-file tags using LATEST values from Ref
+                const currentPerFileTags = perFileTagsRef.current;
+                const currentSelectedTags = selectedTagsRef.current;
 
-            const localTags = currentPerFileTags[fileId] || [];
-            // Dedup tags
-            const allTags = Array.from(new Set([...currentSelectedTags, ...localTags]));
-            formData.append('tags', allTags.join(','));
+                const localTags = currentPerFileTags[fileId] || [];
+                // Dedup tags
+                const allTags = Array.from(new Set([...currentSelectedTags, ...localTags]));
+                formData.append('tags', allTags.join(','));
 
-            try {
-                const res = await uploadImages(formData);
-                if (res?.error) {
-                    console.error(`Failed to upload ${file.name}:`, res.error);
-                    setFileErrors(prev => ({ ...prev, [fileId]: res.error }));
-                    failedFiles.push(file);
-                } else {
-                    successCount++;
-                    if (res?.warnings?.length) {
-                        uploadWarnings.push(...res.warnings);
-                        setFileErrors(prev => ({ ...prev, [fileId]: res.warnings.join(' ') }));
+                try {
+                    const res = await uploadImages(formData);
+                    if (res?.error) {
+                        console.error(`Failed to upload ${file.name}:`, res.error);
+                        setFileErrors(prev => ({ ...prev, [fileId]: res.error }));
+                        failedFiles.push(file);
+                    } else {
+                        successCount++;
+                        if (res?.warnings?.length) {
+                            uploadWarnings.push(...res.warnings);
+                            setFileErrors(prev => ({ ...prev, [fileId]: res.warnings.join(' ') }));
+                        }
                     }
+                } catch (e) {
+                    console.error(`Failed to upload ${file.name}:`, e);
+                    setFileErrors(prev => ({ ...prev, [fileId]: t('upload.failed') }));
+                    failedFiles.push(file);
                 }
-            } catch (e) {
-                console.error(`Failed to upload ${file.name}:`, e);
-                setFileErrors(prev => ({ ...prev, [fileId]: t('upload.failed') }));
-                failedFiles.push(file);
+
+                completedSoFar++;
+                setCompletedCount(completedSoFar);
+                setProgress(Math.round((completedSoFar / totalFiles) * 100));
+            };
+
+            // Process files in parallel with concurrency limit
+            const queue = [...files];
+            const inFlight = new Set<Promise<void>>();
+
+            for (const item of queue) {
+                const promise: Promise<void> = uploadFile(item).finally(() => inFlight.delete(promise));
+                inFlight.add(promise);
+
+                if (inFlight.size >= UPLOAD_CONCURRENCY) {
+                    await Promise.race(inFlight);
+                }
             }
 
-            completedSoFar++;
-            setCompletedCount(completedSoFar);
-            setProgress(Math.round((completedSoFar / totalFiles) * 100));
-        };
+            await Promise.all(inFlight);
 
-        // Process files in parallel with concurrency limit
-        const queue = [...files];
-        const inFlight = new Set<Promise<void>>();
-
-        for (const item of queue) {
-            const promise: Promise<void> = uploadFile(item).finally(() => inFlight.delete(promise));
-            inFlight.add(promise);
-
-            if (inFlight.size >= UPLOAD_CONCURRENCY) {
-                await Promise.race(inFlight);
-            }
-        }
-
-        await Promise.all(inFlight);
-
-        if (failedFiles.length === 0) {
-            if (uploadWarnings.length > 0) {
-                toast.warning(t('upload.warningSuccess', { count: successCount, warnings: uploadWarnings.length }));
-            } else {
-                toast.success(t('upload.success', { count: successCount }));
-            }
-            // Remove uploaded files from the list, keeping any new ones that might have been added
-            const uploadedIds = new Set(files.map(({ id }) => id));
-            const remainingFiles = filesRef.current.filter(({ id }) => !uploadedIds.has(id));
-            filesRef.current = remainingFiles;
-            setFiles(remainingFiles);
-            setSelectedTags([]);
-            setPerFileTags({});
-            setFileErrors({});
-            router.refresh();
-        } else {
-            toast.warning(t('upload.partialSuccess', { count: successCount, failed: failedFiles.length }));
-            // Keep failed files and any new files
-            const failedSet = new Set(failedFiles);
-            const attemptedIds = new Set(files.map(({ id }) => id));
-            const remainingFiles = filesRef.current.filter((item) => failedSet.has(item.file) || !attemptedIds.has(item.id));
-            filesRef.current = remainingFiles;
-            setFiles(remainingFiles);
-            setProgress(0);
-            if (successCount > 0) {
+            if (failedFiles.length === 0) {
+                if (uploadWarnings.length > 0) {
+                    toast.warning(t('upload.warningSuccess', { count: successCount, warnings: uploadWarnings.length }));
+                } else {
+                    toast.success(t('upload.success', { count: successCount }));
+                }
+                // Remove uploaded files from the list, keeping any new ones that might have been added
+                const uploadedIds = new Set(files.map(({ id }) => id));
+                const remainingFiles = filesRef.current.filter(({ id }) => !uploadedIds.has(id));
+                filesRef.current = remainingFiles;
+                setFiles(remainingFiles);
+                setSelectedTags([]);
+                setPerFileTags({});
+                setFileErrors({});
                 router.refresh();
+            } else {
+                toast.warning(t('upload.partialSuccess', { count: successCount, failed: failedFiles.length }));
+                // Keep failed files and any new files
+                const failedSet = new Set(failedFiles);
+                const attemptedIds = new Set(files.map(({ id }) => id));
+                const remainingFiles = filesRef.current.filter((item) => failedSet.has(item.file) || !attemptedIds.has(item.id));
+                filesRef.current = remainingFiles;
+                setFiles(remainingFiles);
+                setProgress(0);
+                if (successCount > 0) {
+                    router.refresh();
+                }
             }
-        }
         } catch {
             toast.error(t('upload.failed'));
         } finally {
             setUploading(false);
         }
     };
-
 
 
     const removeFile = (index: number) => {
