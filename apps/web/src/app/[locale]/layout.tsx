@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/lib/constants';
-import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizeUrl } from '@/lib/locale-path';
+import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
 import { getSeoSettings } from '@/lib/data';
 import siteConfig from "@/site-config.json";
 import { getCspNonce } from '@/lib/csp-nonce';
@@ -25,12 +25,18 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
       template: `%s | ${seo.title}`
     },
     description: seo.description,
+    // AGG2L-LOW-02 / plan-303-B: derive the hreflang alternates map from the
+    // shared `buildHreflangAlternates` helper instead of inlining
+    // `{ 'en': ..., 'ko': ... }` literals. This keeps the root layout in sync
+    // with the home / topic / photo pages (all of which already use the
+    // helper post plan-301-C) and makes adding a new locale to `LOCALES`
+    // automatically extend every alternate-language map. It also unifies
+    // `x-default` semantics across the site: the helper resolves it to
+    // `localizeUrl(seo.url, DEFAULT_LOCALE, '/')` (e.g. `…/en`) instead of
+    // the bare `seo.url`, so search engines see one consistent default URL
+    // regardless of which surface emits the metadata.
     alternates: {
-      languages: {
-        'en': localizeUrl(seo.url, 'en', '/'),
-        'ko': localizeUrl(seo.url, 'ko', '/'),
-        'x-default': seo.url,
-      },
+      languages: buildHreflangAlternates(seo.url, '/'),
     },
     openGraph: {
       title: seo.title,
