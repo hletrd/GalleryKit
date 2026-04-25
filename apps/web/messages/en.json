@@ -221,7 +221,9 @@
     "username": "Username",
     "password": "Password",
     "submit": "Sign in",
-    "submitting": "Signing in..."
+    "submitting": "Signing in...",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
   },
   "viewer": {
     "backTo": "Back to {topic}",

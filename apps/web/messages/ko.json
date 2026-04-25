@@ -221,7 +221,9 @@
     "username": "아이디",
     "password": "비밀번호",
     "submit": "로그인",
-    "submitting": "로그인 중..."
+    "submitting": "로그인 중...",
+    "showPassword": "비밀번호 표시",
+    "hidePassword": "비밀번호 숨기기"
   },
   "viewer": {
     "backTo": "{topic}(으)로 돌아가기",
