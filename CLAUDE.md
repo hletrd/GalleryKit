@@ -94,7 +94,7 @@ git values must be treated as compromised and must not be reused.
 | `apps/web/src/proxy.ts` | i18n routing + middleware-level admin auth guard |
 | `apps/web/src/app/[locale]/admin/db-actions.ts` | DB backup/restore with security hardening |
 | `apps/web/src/app/api/admin/db/download/route.ts` | Authenticated backup file download |
-| `apps/web/src/site-config.json` | Site metadata (title, SEO, links) |
+| `apps/web/src/site-config.json` | File-backed site defaults and static links; DB-backed admin settings override editable SEO/branding fields |
 
 - **Storage Backend (Not Yet Integrated):** The `@/lib/storage` module still exists as an internal abstraction, but the product currently supports local filesystem storage only. Do not document or expose S3/MinIO switching as a supported admin feature until the upload/processing/serving pipeline is wired end-to-end.
 
@@ -193,8 +193,9 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **`ensureDirs`**: Promise-based singleton prevents concurrent mkdir
 - **Session secret init**: `INSERT IGNORE` + re-fetch pattern for multi-process safety
 - **Concurrent DB restore prevention**: MySQL advisory lock `gallerykit_db_restore` acquired on a dedicated pool connection for the entire restore window. Concurrent restore requests fail fast with `restoreInProgress` instead of racing the 250 MB upload path. The lock is released automatically on connection close, so a crashed restore never wedges the next attempt
+- **Upload-processing contract changes**: MySQL advisory lock `gallerykit_upload_processing_contract` serializes uploads with `image_sizes` / `strip_gps_on_upload` changes so the first committed image cannot race a setting that is intended to lock once photos exist
 - **Per-image-processing claim**: MySQL advisory lock `gallerykit:image-processing:{jobId}` acquired before processing so two queue workers (e.g. across a restart boundary or a multi-process deployment) cannot both convert the same upload. Paired with a `WHERE processed = false` conditional UPDATE so the losing worker detects the already-processed state and cleans up its leftover variant files
-- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, topic renames, admin-user deletes, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
+- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, upload-contract changes, topic renames, admin-user deletes, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
 
 ## Performance Optimizations
 
@@ -242,7 +243,7 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
 - `npm run lint:action-origin --workspace=apps/web`
   - Scans `apps/web/src/app/actions/` recursively for server-action-capable extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`), excluding basenames `auth` and `public`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
   - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to store the `requireSameOriginAdmin()` result and return early when that result is present. A bare call or ignored result is rejected. Aliased exports are rejected so the scanner can inspect the committed implementation body.
-  - Read-only exports must carry an explicit `/** @action-origin-exempt: <reason> */` leading comment; getter-style names are not automatically exempt because names are not proof of read-only behavior.
+  - Read-only exports must carry an explicit leading comment containing `@action-origin-exempt: <reason>`; getter-style names are not automatically exempt because names are not proof of read-only behavior.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 

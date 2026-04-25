@@ -2,7 +2,6 @@
     "title": "GalleryKit",
     "description": "A self-hosted photo gallery",
     "url": "https://example.com",
-    "parent_url": "https://example.com",
     "locale": "en_US",
     "author": "",
     "nav_title": "GalleryKit",

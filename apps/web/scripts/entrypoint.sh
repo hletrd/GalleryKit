@@ -24,10 +24,14 @@ fi
 # Set UV_THREADPOOL_SIZE to CPU count if not set
 if [ -z "$UV_THREADPOOL_SIZE" ]; then
     if command -v nproc > /dev/null; then
-        export UV_THREADPOOL_SIZE=$(nproc)
+        detected_parallelism=$(nproc)
     else
-        export UV_THREADPOOL_SIZE=4
+        detected_parallelism=4
     fi
+    if [ "$detected_parallelism" -gt 8 ]; then
+        detected_parallelism=8
+    fi
+    export UV_THREADPOOL_SIZE="$detected_parallelism"
     echo "Auto-configured UV_THREADPOOL_SIZE=$UV_THREADPOOL_SIZE"
 fi
 

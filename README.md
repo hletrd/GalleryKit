@@ -40,14 +40,13 @@
 
 ## Configuration
 
-Site configuration lives in `apps/web/src/site-config.json`:
+File-backed site configuration lives in `apps/web/src/site-config.json` for static links and analytics. SEO/branding fields that admins can edit in the dashboard (`title`, `description`, `nav_title`, `author`, `locale`, and OG image URL) are stored in the database and override the file defaults at runtime.
 
 ```json
 {
     "title": "Site Title",
     "description": "Site Description",
     "url": "https://your-site.com",
-    "parent_url": "https://parent-site.com",
     "locale": "en_US",
     "author": "Author Name",
     "nav_title": "Navigation Title",
@@ -140,12 +139,13 @@ If you ever seeded an environment from older checked-in examples, rotate both
 `SESSION_SECRET` and any bootstrap/admin credentials immediately. Historical
 git values must be treated as compromised and must not be reused.
 
-If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. The shipped compose file forwards `IMAGE_BASE_URL` and `UPLOAD_MAX_TOTAL_BYTES` as Docker build args when they are present in the shell/Compose environment; export them before `docker compose ... --build` if you rely on non-default build-time values. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development.
+Production builds require a real absolute public URL: set `BASE_URL` or replace `site-config.json.url` with a non-placeholder origin before `next build` / Docker build. The example values (`https://example.com`, localhost) are development placeholders and are rejected by the production build guard.
+If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. The shipped compose file forwards `IMAGE_BASE_URL` and `UPLOAD_MAX_TOTAL_BYTES` as Docker build args when they are present in the shell/Compose environment; export them before `docker compose ... --build` if you rely on non-default build-time values. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development. `IMAGE_BASE_URL` must be an absolute URL without credentials, query strings, or hashes.
 `DB_SSL` defaults to TLS for non-localhost database hosts and plaintext for loopback/private local development; set `DB_SSL=false` only when the database connection is protected by a trusted private network. `QUEUE_CONCURRENCY` controls the in-process `PQueue` image conversion workers (default `2`); raise it only after confirming CPU and memory headroom.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config now caps general requests at **2 GiB** and `/admin/db` restore requests at **250 MB** to match the app-side limits; keep those layers aligned if you customize either side.
 The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. It is intended as a single web-instance/single-writer deployment; restore maintenance, upload quotas, and image queue state are process-local. Keep those protections if you adapt the compose file, and do not scale the web service horizontally without moving those coordination states into shared storage.
 
-**`TRUST_PROXY=true` is required for rate limiting to work correctly behind a reverse proxy** (nginx, Caddy, Cloudflare, load balancers, etc.). The server reads `X-Forwarded-For` / `X-Real-IP` only when this flag is set; without it, `getClientIp()` returns `"unknown"` and every request collapses into a single shared rate-limit bucket, which both (a) lets abusive clients exhaust the login / search / share budgets shared with legitimate users, and (b) lets spoofed `X-Forwarded-For` headers be ignored (since they are never trusted at all). By default, `TRUSTED_PROXY_HOPS=1` selects the nearest trusted proxy hop from the right side of the `X-Forwarded-For` chain; set `TRUSTED_PROXY_HOPS=2` only when you have exactly two trusted hops in front of the app (for example CDN/LB → nginx → app) and the outer hop overwrites untrusted incoming forwarded headers. The same trusted-proxy setting also affects same-origin validation for mutating admin actions, login cookie security, and DB backup downloads, so the proxy must overwrite `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` with values from the trusted edge hop. Only enable when the incoming headers are actually set by a trusted proxy hop.
+**`TRUST_PROXY=true` is required for rate limiting to work correctly behind a reverse proxy** (nginx, Caddy, Cloudflare, load balancers, etc.). The server reads `X-Forwarded-For` / `X-Real-IP` only when this flag is set; without it, `getClientIp()` returns `"unknown"` and every request collapses into a single shared rate-limit bucket, which both (a) lets abusive clients exhaust the login / search / share budgets shared with legitimate users, and (b) lets spoofed `X-Forwarded-For` headers be ignored (since they are never trusted at all). By default, `TRUSTED_PROXY_HOPS=1` treats the right-most forwarded address as the trusted proxy and selects the client immediately before it; set `TRUSTED_PROXY_HOPS=2` only when you have exactly two trusted hops in front of the app (for example CDN/LB → nginx → app) and the outer hop overwrites untrusted incoming forwarded headers. The same trusted-proxy setting also affects same-origin validation for mutating admin actions, login cookie security, and DB backup downloads, so the proxy must overwrite `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto` with values from the trusted edge hop. Admin same-origin checks intentionally fail closed when both `Origin` and `Referer` are absent. Only enable proxy trust when the incoming headers are actually set by a trusted proxy hop.
 For bootstrap auth, prefer a generated secret or a precomputed Argon2 hash; do not deploy with placeholder passwords such as `password`.
 
 ### Development
