@@ -152,11 +152,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
             )}
 
             {/* Sheet */}
-            <FocusTrap active={isOpen && sheetState === 'expanded'} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
+            <FocusTrap active={isOpen} focusTrapOptions={{ allowOutsideClick: true, initialFocus: false }}>
             <div
                 ref={sheetRef}
                 role="dialog"
-                aria-modal={sheetState === 'expanded' ? 'true' : undefined}
+                aria-modal="true"
                 aria-label={t('viewer.bottomSheet')}
                 className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl shadow-2xl transition-transform duration-300 ease-out"
                 style={{

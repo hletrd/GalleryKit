@@ -266,6 +266,12 @@ describe('topic actions', () => {
         expect(deleteMock).toHaveBeenCalledTimes(1);
     });
 
+    it('reports aliasNotFound when deleting a stale alias affects no rows', async () => {
+        deleteMock.mockReturnValueOnce(makeWriteChain([{ affectedRows: 0 }]));
+
+        await expect(deleteTopicAlias('travel', 'stale-alias')).resolves.toEqual({ error: 'aliasNotFound' });
+    });
+
     it('serializes alias creation behind the shared route lock before inserting', async () => {
         selectMock
             .mockReturnValueOnce(makeSelectChain([]))

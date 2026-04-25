@@ -16,7 +16,7 @@ import Script from 'next/script';
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
   const seo = await getSeoSettings();
-  const openGraphLocale = getOpenGraphLocale(locale);
+  const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
 
   return {
     metadataBase: new URL(seo.url),
@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
       url: seo.url,
       siteName: seo.title,
       locale: openGraphLocale,
-      alternateLocale: getAlternateOpenGraphLocales(locale),
+      alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
       type: "website",
     },
     twitter: {

@@ -5,7 +5,7 @@ import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
-import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile } from '@/lib/upload-paths';
+import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -145,8 +145,11 @@ export async function uploadImages(formData: FormData) {
         return { error: t('uploadLimitReached') };
     }
 
-    // Disk space pre-check: require at least 1GB free before accepting uploads
+    // Disk space pre-check: require at least 1GB free before accepting uploads.
+    // Ensure the upload tree exists first so fresh volumes do not map ENOENT
+    // from statfs() to a misleading "insufficient disk space" error.
     try {
+        await ensureUploadDirectories();
         const stats = await statfs(UPLOAD_DIR_ORIGINAL);
         const freeBytes = stats.bfree * stats.bsize;
         if (freeBytes < 1024 * 1024 * 1024) {

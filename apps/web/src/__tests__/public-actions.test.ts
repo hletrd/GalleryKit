@@ -111,6 +111,16 @@ describe('searchImagesAction', () => {
         expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울'], 3, 40);
     });
 
+    it('rate-limits anonymous loadMoreImages with DB-backed rollback on over-limit', async () => {
+        checkRateLimitMock.mockResolvedValue({ limited: true, count: 121 });
+
+        await expect(loadMoreImages('seoul', ['서울'], 10, 20)).resolves.toEqual({ images: [], hasMore: false });
+
+        expect(getImagesLiteMock).not.toHaveBeenCalled();
+        expect(incrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'load_more', 60_000);
+        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'load_more', 60_000);
+    });
+
     it('keeps the sentinel row available when the caller asks for 100 images', async () => {
         getImagesLiteMock.mockResolvedValue(Array.from({ length: 101 }, (_, index) => ({ id: index + 1 })));
 

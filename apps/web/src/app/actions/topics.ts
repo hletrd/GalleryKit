@@ -463,6 +463,8 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         if (delResult.affectedRows > 0) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'topic_alias_delete', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
+        } else {
+            return { error: t('aliasNotFound') };
         }
     } catch (e) {
         console.error('Failed to delete topic alias:', e);

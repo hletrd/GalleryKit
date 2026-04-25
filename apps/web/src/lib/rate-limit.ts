@@ -84,9 +84,6 @@ export function getClientIp(headerStore: HeaderLike): string {
             if (trustedHopIndex >= 0) {
                 return validParts[trustedHopIndex];
             }
-            if (validParts.length > 0) {
-                return validParts[0];
-            }
         }
 
         const xRealIp = normalizeIp(headerStore.get('x-real-ip'));

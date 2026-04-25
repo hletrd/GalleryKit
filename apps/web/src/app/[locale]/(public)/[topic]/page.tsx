@@ -73,7 +73,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     : t('photosInTopic', { topic: topicData.label });
 
   const pageUrl = localizeUrl(seo.url, locale, `/${topicData.slug}`);
-  const openGraphLocale = getOpenGraphLocale(locale);
+  const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
 
   // Use custom OG image if configured, otherwise use generated OG image
   const topicOgParams = new URLSearchParams({ topic: topicData.slug });
@@ -103,7 +103,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
       siteName: seo.title,
       images: ogImages,
       locale: openGraphLocale,
-      alternateLocale: getAlternateOpenGraphLocales(locale),
+      alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
       type: 'website',
     },
     twitter: {

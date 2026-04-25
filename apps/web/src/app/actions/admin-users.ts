@@ -67,6 +67,7 @@ async function rollbackUserCreateRateLimit(ip: string, reason: string) {
 }
 
 // Admin User Management
+/** @action-origin-exempt: read-only admin getter */
 export async function getAdminUsers() {
     if (!(await isAdmin())) return [];
 

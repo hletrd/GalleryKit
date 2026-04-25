@@ -45,7 +45,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
     const title = getPhotoDisplayTitle(image, t('ogTitle'));
     const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
-    const openGraphLocale = getOpenGraphLocale(locale);
+    const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
     // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
@@ -73,7 +73,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             type: 'article',
             publishedTime: toIsoTimestamp(image.created_at),
             locale: openGraphLocale,
-            alternateLocale: getAlternateOpenGraphLocales(locale),
+            alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
         },
         twitter: {
             card: 'summary_large_image',

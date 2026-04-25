@@ -15,4 +15,11 @@ describe('buildContentSecurityPolicy', () => {
 
     expect(csp).toContain("script-src 'unsafe-inline' 'unsafe-eval' 'self'");
   });
+
+  it('does not allow unused third-party style CDNs in production', () => {
+    const csp = buildContentSecurityPolicy({ nonce: 'abc123', isDev: false, imageBaseUrl: null });
+
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'");
+    expect(csp).not.toContain('cdn.jsdelivr.net');
+  });
 });

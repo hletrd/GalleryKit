@@ -42,15 +42,44 @@ describe('checkActionSource — function declarations', () => {
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
     });
 
-    it('auto-exempts getter-style function declarations (name starts with get[A-Z])', () => {
+    it('fails when requireSameOriginAdmin is hidden in an uncalled nested helper', () => {
+        const src = `
+            export async function deleteFoo(id) {
+                async function guard() {
+                    return requireSameOriginAdmin();
+                }
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('fails when requireSameOriginAdmin appears only in a dead branch', () => {
+        const src = `
+            export async function deleteFoo(id) {
+                if (false) {
+                    await requireSameOriginAdmin();
+                }
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('requires explicit exemptions for getter-style function declarations', () => {
         const src = `
             export async function getFoo() {
                 return [];
             }
         `;
         const report = checkActionSource(src, 'actions/fixture.ts');
-        expect(report.failed).toEqual([]);
-        expect(report.skipped).toContain('SKIP (getter): actions/fixture.ts::getFoo');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+        expect(report.failed[0]).toContain('getFoo');
     });
 
     it('respects the @action-origin-exempt leading comment', () => {
@@ -93,13 +122,14 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
     });
 
-    it('auto-exempts getter-style arrow-function exports', () => {
+    it('requires explicit exemptions for getter-style arrow-function exports', () => {
         const src = `
             export const getFoo = async () => [];
         `;
         const report = checkActionSource(src, 'actions/fixture.ts');
-        expect(report.failed).toEqual([]);
-        expect(report.skipped).toContain('SKIP (getter): actions/fixture.ts::getFoo');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+        expect(report.failed[0]).toContain('getFoo');
     });
 
     it('ignores non-async arrow-function exports (not a server action)', () => {
@@ -203,6 +233,7 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
 describe('checkActionSource — mixed file', () => {
     it('reports each export independently', () => {
         const src = `
+            /** @action-origin-exempt: read-only fixture */
             export async function getFoo() { return []; }
             export async function updateFoo(id) {
                 const originError = await requireSameOriginAdmin();
@@ -218,7 +249,7 @@ describe('checkActionSource — mixed file', () => {
             };
         `;
         const report = checkActionSource(src, 'actions/fixture.ts');
-        expect(report.skipped).toContain('SKIP (getter): actions/fixture.ts::getFoo');
+        expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::getFoo');
         expect(report.passed).toContain('OK: actions/fixture.ts::updateFoo');
         expect(report.passed).toContain('OK: actions/fixture.ts::createFoo');
         expect(report.failed).toHaveLength(1);

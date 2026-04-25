@@ -29,7 +29,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     allTagsPromise,
   ]);
   const pageUrl = localizeUrl(seo.url, locale, '/');
-  const openGraphLocale = getOpenGraphLocale(locale);
+  const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
   const tagSlugs = requestedTagSlugs.length > 0
     ? filterExistingTagSlugs(requestedTagSlugs, allTags)
     : [];
@@ -58,7 +58,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
         siteName: seo.title,
         images: ogImages,
         locale: openGraphLocale,
-        alternateLocale: getAlternateOpenGraphLocales(locale),
+        alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
         type: 'website',
       },
       twitter: {
@@ -103,7 +103,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       siteName: seo.title,
       images: ogImages,
       locale: openGraphLocale,
-      alternateLocale: getAlternateOpenGraphLocales(locale),
+      alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
       type: 'website',
     },
     twitter: {

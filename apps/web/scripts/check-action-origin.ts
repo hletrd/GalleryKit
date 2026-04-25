@@ -26,9 +26,10 @@
  * allow-list edit required.
  *
  * Exemptions:
- * - Read-only getters (function/variable name starts with `get[A-Z]`)
- *   are automatically exempt — they don't mutate.
- * - Each export can additionally opt-out with a leading JSDoc comment:
+ * - Read-only exports must opt out with a leading JSDoc comment.
+ *   Getter-style names are not automatically trusted because names are not
+ *   proof that an exported server action is read-only.
+ * - Each export can opt out with a leading JSDoc comment:
  *     /** @action-origin-exempt: <reason> **\/
  *
  * Run with: npx tsx scripts/check-action-origin.ts
@@ -96,12 +97,6 @@ function discoverActionFiles(): string[] {
     return found.sort();
 }
 
-const AUTOMATIC_NAME_EXEMPTIONS = /^get[A-Z]/;
-
-function shouldCheckFunction(name: string): boolean {
-    return !AUTOMATIC_NAME_EXEMPTIONS.test(name);
-}
-
 function hasExemptComment(node: ts.Node, source: string): boolean {
     const start = node.getFullStart();
     const end = node.getStart();
@@ -109,23 +104,39 @@ function hasExemptComment(node: ts.Node, source: string): boolean {
     return /@action-origin-exempt/.test(leadingText);
 }
 
-function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
-    let found = false;
-    function visit(node: ts.Node) {
-        if (found) return;
-        if (
-            ts.isCallExpression(node)
-            && ts.isIdentifier(node.expression)
-            && node.expression.text === 'requireSameOriginAdmin'
-        ) {
-            found = true;
-            return;
-        }
-        // Also accept `await requireSameOriginAdmin(...)` (via AwaitExpression wrapping the call).
-        node.forEachChild(visit);
+function isRequireSameOriginAdminExpression(node: ts.Node): boolean {
+    const expression = ts.isAwaitExpression(node) ? node.expression : node;
+    return (
+        ts.isCallExpression(expression)
+        && ts.isIdentifier(expression.expression)
+        && expression.expression.text === 'requireSameOriginAdmin'
+    );
+}
+
+function statementCallsRequireSameOriginAdmin(statement: ts.Statement): boolean {
+    if (ts.isExpressionStatement(statement)) {
+        return isRequireSameOriginAdminExpression(statement.expression);
     }
-    body.forEachChild(visit);
-    return found;
+
+    if (ts.isVariableStatement(statement)) {
+        return statement.declarationList.declarations.some((declaration) => (
+            !!declaration.initializer
+            && isRequireSameOriginAdminExpression(declaration.initializer)
+        ));
+    }
+
+    return false;
+}
+
+function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
+    // Only accept an effective guard call in the exported action's own top-level
+    // body. Recursive AST search let dead branches and uncalled nested helpers
+    // satisfy the gate even though the real action path had no provenance check.
+    if (!ts.isBlock(body)) {
+        return false;
+    }
+
+    return body.statements.some(statementCallsRequireSameOriginAdmin);
 }
 
 type CheckReport = {
@@ -161,11 +172,6 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             return;
         }
 
-        if (!shouldCheckFunction(name)) {
-            report.skipped.push(`SKIP (getter): ${relative}::${name}`);
-            return;
-        }
-
         if (!body) {
             report.failed.push(`MISSING BODY: ${relative}::${name}`);
             return;
@@ -186,10 +192,6 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             for (const element of statement.exportClause.elements) {
                 if (statement.isTypeOnly || element.isTypeOnly) continue;
                 const name = element.name.text;
-                if (!shouldCheckFunction(name)) {
-                    report.skipped.push(`SKIP (getter): ${relative}::${name}`);
-                    continue;
-                }
                 report.failed.push(
                     `UNSUPPORTED aliased export: ${relative}:${lineOf(statement)} ${name} must use a direct exported async function/const so requireSameOriginAdmin() can be verified`,
                 );

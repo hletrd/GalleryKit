@@ -47,7 +47,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
 
     const pagePath = selectedImage ? `/g/${key}?photoId=${selectedImage.id}` : `/g/${key}`;
     const pageUrl = localizeUrl(seo.url, locale, pagePath);
-    const openGraphLocale = getOpenGraphLocale(locale);
+    const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
     const coverImage = selectedImage ?? group.images[0];
     const metadataTitle = selectedImage ? getPhotoDisplayTitle(selectedImage, t('photo')) : t('ogTitle');
     const metadataDescription = selectedImage?.description || (selectedImage ? t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }) : t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }));
@@ -81,7 +81,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
             type: 'website',
             images: ogImages,
             locale: openGraphLocale,
-            alternateLocale: getAlternateOpenGraphLocales(locale),
+            alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
         },
         twitter: {
             card: 'summary_large_image',

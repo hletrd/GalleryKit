@@ -47,13 +47,21 @@ const OPEN_GRAPH_LOCALE_BY_LOCALE: Record<Locale, string> = {
     ko: 'ko_KR',
 };
 
-export function getOpenGraphLocale(locale: string): string {
-    return isSupportedLocale(locale)
-        ? OPEN_GRAPH_LOCALE_BY_LOCALE[locale]
-        : OPEN_GRAPH_LOCALE_BY_LOCALE.en;
+const OPEN_GRAPH_LOCALE_PATTERN = /^[a-z]{2}_[A-Z]{2}$/;
+
+export function normalizeOpenGraphLocale(value: string | null | undefined): string | null {
+    const normalized = value?.trim() ?? '';
+    return OPEN_GRAPH_LOCALE_PATTERN.test(normalized) ? normalized : null;
 }
 
-export function getAlternateOpenGraphLocales(locale: string): string[] {
-    const current = getOpenGraphLocale(locale);
+export function getOpenGraphLocale(locale: string, configuredLocale?: string | null): string {
+    return normalizeOpenGraphLocale(configuredLocale)
+        ?? (isSupportedLocale(locale)
+            ? OPEN_GRAPH_LOCALE_BY_LOCALE[locale]
+            : OPEN_GRAPH_LOCALE_BY_LOCALE.en);
+}
+
+export function getAlternateOpenGraphLocales(locale: string, configuredLocale?: string | null): string[] {
+    const current = getOpenGraphLocale(locale, configuredLocale);
     return Object.values(OPEN_GRAPH_LOCALE_BY_LOCALE).filter((candidate) => candidate !== current);
 }

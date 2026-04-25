@@ -63,7 +63,7 @@ export function buildContentSecurityPolicy({
   return [
     "default-src 'self'",
     `script-src ${scriptSources.join(' ')}`,
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline'",
     `img-src ${imgSrc}`,
     "font-src 'self' data:",
     "connect-src 'self' https://www.google-analytics.com",

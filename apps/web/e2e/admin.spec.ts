@@ -3,6 +3,11 @@ import fs from 'fs/promises';
 import { test, expect } from '@playwright/test';
 import { adminE2EEnabled, expectNoNextError, loginAsAdmin, waitForImageProcessed } from './helpers';
 
+test('admin E2E credentials are configured when CI expects admin coverage', () => {
+  test.skip(process.env.CI !== 'true', 'Local runs may omit admin E2E credentials.');
+  expect(adminE2EEnabled).toBe(true);
+});
+
 test.describe('admin workflows (opt-in)', () => {
   test.skip(!adminE2EEnabled, 'Set E2E_ADMIN_ENABLED=true to run admin E2E against a seeded environment.');
 

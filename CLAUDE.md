@@ -127,7 +127,7 @@ git values must be treated as compromised and must not be reused.
 ### Middleware Auth Guard
 - `proxy.ts` checks `admin_session` cookie for all `/[locale]/admin/*` sub-routes
 - Unauthenticated requests redirected to login page
-- Every mutating admin server action independently verifies auth via `isAdmin()` (defense in depth). Public actions such as search/load-more are intentionally anonymous and rely on validation + rate limiting instead.
+- Every mutating admin server action independently verifies auth via `isAdmin()` (defense in depth). Public actions such as search/load-more are intentionally anonymous and rely on validation plus bounded per-IP rate limiting instead.
 - Last admin deletion prevented to avoid lockout
 
 ### File Upload Security
@@ -199,7 +199,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 - **React `cache()`** wraps `getImage`, `getTopicBySlug`, `getTopicsWithAliases` for SSR deduplication
 - **`Promise.all`** parallelizes independent DB queries in `getImage()` (tags + prev + next)
-- **ISR caching**: Photo pages (1 week), topic/home pages (1 hour), admin pages force-dynamic
+- **Public route freshness**: public photo, topic, shared, and home pages currently set `revalidate = 0` so asynchronous image processing and metadata updates are visible immediately; admin pages remain dynamic. Reintroduce ISR only with an explicit invalidation/freshness plan
 - **Masonry grid**: `useMemo` for reorder, `requestAnimationFrame` debounced resize
 - **ImageZoom**: Ref-based DOM manipulation (no React re-renders on mousemove)
 - **Histogram**: Canvas capped at 256x256 for fast computation

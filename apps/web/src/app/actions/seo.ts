@@ -8,6 +8,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { validateSeoOgImageUrl } from '@/lib/seo-og-url';
+import { normalizeOpenGraphLocale } from '@/lib/locale-path';
 import { stripControlChars } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import type { SeoSettingKey } from '@/lib/gallery-config-shared';
@@ -22,6 +23,7 @@ const MAX_AUTHOR_LENGTH = 200;
 const MAX_LOCALE_LENGTH = 10;
 const MAX_OG_IMAGE_URL_LENGTH = 500;
 
+/** @action-origin-exempt: read-only admin getter */
 export async function getSeoSettingsAdmin() {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
@@ -90,6 +92,9 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     }
     if (sanitizedSettings.seo_locale && sanitizedSettings.seo_locale.length > MAX_LOCALE_LENGTH) {
         return { error: t('seoLocaleTooLong') };
+    }
+    if (sanitizedSettings.seo_locale && !normalizeOpenGraphLocale(sanitizedSettings.seo_locale)) {
+        return { error: t('seoLocaleInvalid') };
     }
     if (sanitizedSettings.seo_og_image_url && sanitizedSettings.seo_og_image_url.length > MAX_OG_IMAGE_URL_LENGTH) {
         return { error: t('seoOgImageUrlTooLong') };

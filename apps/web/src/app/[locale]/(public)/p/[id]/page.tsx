@@ -77,7 +77,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         || (author
             ? t('descriptionByAuthorWithTitle', { author, title: displayTitle })
             : displayTitle);
-    const openGraphLocale = getOpenGraphLocale(locale);
+    const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
 
     const ogImages = [{
         url: ogImageUrl,
@@ -103,7 +103,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             publishedTime: toIsoTimestamp(image.created_at),
             ...(author ? { authors: [author] } : {}),
             locale: openGraphLocale,
-            alternateLocale: getAlternateOpenGraphLocales(locale),
+            alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
         },
         twitter: {
             card: 'summary_large_image',

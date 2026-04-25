@@ -14,6 +14,7 @@ import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { hasActiveUploadClaims } from '@/lib/upload-tracker-state';
 
+/** @action-origin-exempt: read-only admin getter */
 export async function getGallerySettingsAdmin() {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };

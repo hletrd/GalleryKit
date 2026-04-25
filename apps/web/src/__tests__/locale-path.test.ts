@@ -44,4 +44,13 @@ describe('Open Graph locale helpers', () => {
         expect(getAlternateOpenGraphLocales('en')).toEqual(['ko_KR']);
         expect(getAlternateOpenGraphLocales('ko')).toEqual(['en_US']);
     });
+
+    it('honors a valid configured Open Graph locale override', () => {
+        expect(getOpenGraphLocale('ko', 'en_US')).toBe('en_US');
+        expect(getAlternateOpenGraphLocales('ko', 'en_US')).toEqual(['ko_KR']);
+    });
+
+    it('ignores malformed Open Graph locale overrides', () => {
+        expect(getOpenGraphLocale('ko', 'korean')).toBe('ko_KR');
+    });
 });

@@ -23,7 +23,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
     const [loading, setLoading] = useState(false);
     const [hasMore, setHasMore] = useState(initialHasMore);
     const [offset, setOffset] = useState(initialOffset);
-    const sentinelRef = useRef<HTMLDivElement>(null);
+    const observerRef = useRef<IntersectionObserver | null>(null);
     const loadingRef = useRef(false);
     const queryVersionRef = useRef(0);
 
@@ -65,9 +65,11 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         setHasMore(initialHasMore);
     }, [initialHasMore, initialOffset, queryKey]);
 
-    useEffect(() => {
-        const sentinel = sentinelRef.current;
-        if (!sentinel) return;
+    const setSentinelRef = useCallback((node: HTMLDivElement | null) => {
+        observerRef.current?.disconnect();
+        observerRef.current = null;
+
+        if (!node) return;
 
         const observer = new IntersectionObserver(
             (entries) => {
@@ -78,14 +80,16 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
             { rootMargin: '200px' }
         );
 
-        observer.observe(sentinel);
-        return () => observer.disconnect();
+        observer.observe(node);
+        observerRef.current = observer;
     }, []);
+
+    useEffect(() => () => observerRef.current?.disconnect(), []);
 
     return (
         <>
             {hasMore && (
-                <div ref={sentinelRef} className="flex justify-center py-8">
+                <div ref={setSentinelRef} className="flex justify-center py-8">
                     <Button type="button" variant="outline" onClick={loadMore} disabled={loading}>
                         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         {loading ? t('home.loadingMore') : t('home.loadMore')}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
     statfsMock,
+    mkdirMock,
     insertMock,
     isAdminMock,
     getCurrentUserMock,
@@ -20,6 +21,7 @@ const {
     ensureTagRecordMock,
 } = vi.hoisted(() => ({
     statfsMock: vi.fn(),
+    mkdirMock: vi.fn(),
     insertMock: vi.fn(),
     isAdminMock: vi.fn(),
     getCurrentUserMock: vi.fn(),
@@ -46,6 +48,7 @@ function makeInsertChain<T>(result: T) {
 
 vi.mock('fs/promises', () => ({
     statfs: statfsMock,
+    mkdir: mkdirMock,
 }));
 
 vi.mock('@/db', () => ({
@@ -132,7 +135,10 @@ import { uploadImages } from '@/app/actions/images';
 
 describe('uploadImages', () => {
     beforeEach(() => {
+        statfsMock.mockReset();
         statfsMock.mockResolvedValue({ bfree: 2_000_000, bsize: 1024 });
+        mkdirMock.mockReset();
+        mkdirMock.mockResolvedValue(undefined);
         insertMock.mockReset();
         isAdminMock.mockResolvedValue(true);
         getCurrentUserMock.mockResolvedValue({ id: 1 });
@@ -198,7 +204,21 @@ describe('uploadImages', () => {
         expect(insertMock).not.toHaveBeenCalled();
     });
 
-    it('fails closed when upload disk-space inspection fails', async () => {
+    it('creates upload directories before inspecting disk space', async () => {
+        insertMock.mockReturnValue(makeInsertChain([{ insertId: 9 }]));
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toMatchObject({ success: true, count: 1 });
+        expect(mkdirMock).toHaveBeenCalled();
+        expect(statfsMock).toHaveBeenCalled();
+        expect(mkdirMock.mock.invocationCallOrder[0]).toBeLessThan(statfsMock.mock.invocationCallOrder[0]);
+    });
+
+    it('fails closed when upload disk-space inspection fails after directories are ensured', async () => {
         statfsMock.mockRejectedValueOnce(new Error('missing upload volume'));
 
         const formData = new FormData();

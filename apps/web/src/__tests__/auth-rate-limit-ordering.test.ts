@@ -93,6 +93,14 @@ describe('auth.ts — updatePassword validates form fields before rate-limit inc
         const body = updatePasswordMatch![0];
         expect(body).toContain('isRateLimitExceeded(dbLimit.count, PASSWORD_CHANGE_MAX_ATTEMPTS, true)');
     });
+
+    it('rotates all sessions and inserts a fresh current session after password change', () => {
+        const body = updatePasswordMatch![0];
+        expect(body).toContain('await tx.delete(sessions).where(eq(sessions.userId, currentUser.id))');
+        expect(body).toContain('await tx.insert(sessions).values');
+        expect(body).not.toContain('sessions.id} != ${currentSession.id}');
+        expect(body).toContain('cookieStore.set(COOKIE_NAME, newSessionToken');
+    });
 });
 
 describe('auth.ts — login DB-backed rate limits include the current request', () => {

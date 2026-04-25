@@ -20,6 +20,50 @@ async function rollbackSearchAttempt(ip: string) {
     });
 }
 
+const LOAD_MORE_WINDOW_MS = 60 * 1000;
+const LOAD_MORE_MAX_REQUESTS = 120;
+const LOAD_MORE_RATE_LIMIT_MAX_KEYS = 2000;
+const loadMoreRateLimit = new Map<string, { count: number; resetAt: number }>();
+
+function pruneLoadMoreRateLimit(now: number) {
+    for (const [key, entry] of loadMoreRateLimit) {
+        if (entry.resetAt <= now) loadMoreRateLimit.delete(key);
+    }
+
+    if (loadMoreRateLimit.size > LOAD_MORE_RATE_LIMIT_MAX_KEYS) {
+        const excess = loadMoreRateLimit.size - LOAD_MORE_RATE_LIMIT_MAX_KEYS;
+        let evicted = 0;
+        for (const key of loadMoreRateLimit.keys()) {
+            if (evicted >= excess) break;
+            loadMoreRateLimit.delete(key);
+            evicted++;
+        }
+    }
+}
+
+function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
+    pruneLoadMoreRateLimit(now);
+    const entry = loadMoreRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        loadMoreRateLimit.set(ip, { count: 1, resetAt: now + LOAD_MORE_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    return (loadMoreRateLimit.get(ip)?.count ?? 0) > LOAD_MORE_MAX_REQUESTS;
+}
+
+async function rollbackLoadMoreAttempt(ip: string) {
+    const currentEntry = loadMoreRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        currentEntry.count--;
+    } else {
+        loadMoreRateLimit.delete(ip);
+    }
+    await decrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS).catch((err) => {
+        console.debug('Failed to roll back load_more DB rate limit:', err);
+    });
+}
+
 export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30) {
     if (isRestoreMaintenanceActive()) return { images: [], hasMore: false };
     // Validate slug format before passing to data layer (defense in depth)
@@ -33,11 +77,36 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
         .slice(0, 20)
         .map((slug) => slug.trim())
         .filter(isValidTagSlug);
-    const rows = await getImagesLite(topicSlug, safeTags, safeLimit + 1, safeOffset);
-    return {
-        images: rows.slice(0, safeLimit),
-        hasMore: rows.length > safeLimit,
-    };
+
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    const now = Date.now();
+
+    if (preIncrementLoadMoreAttempt(ip, now)) {
+        return { images: [], hasMore: false };
+    }
+
+    try {
+        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS);
+        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS);
+        if (isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
+            await rollbackLoadMoreAttempt(ip);
+            return { images: [], hasMore: false };
+        }
+    } catch {
+        // DB unavailable — rely on the in-memory pre-increment fallback.
+    }
+
+    try {
+        const rows = await getImagesLite(topicSlug, safeTags, safeLimit + 1, safeOffset);
+        return {
+            images: rows.slice(0, safeLimit),
+            hasMore: rows.length > safeLimit,
+        };
+    } catch (err) {
+        await rollbackLoadMoreAttempt(ip);
+        throw err;
+    }
 }
 
 export async function searchImagesAction(query: string) {

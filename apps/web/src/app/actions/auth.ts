@@ -359,27 +359,35 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         }
 
         const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+        const newSessionToken = await generateSessionToken();
+        const newSessionId = hashSessionToken(newSessionToken);
+        const newSessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-        // Invalidate all sessions except the current one — fetch before the
-        // transaction so getSession() doesn't execute inside the tx boundary.
-        const currentSession = await getSession();
-
-        // Wrap password update + session invalidation in a transaction so that
-        // if session deletion fails, the password change is also rolled back.
-        // This prevents old sessions from surviving a password change on DB error.
+        // Rotate every session on password change, including the currently
+        // presented cookie, then insert one fresh session for this browser.
+        // Preserving the active session lets a stolen cookie survive credential
+        // rotation; doing the delete+insert inside one transaction avoids
+        // stranding the user if session creation fails.
         await db.transaction(async (tx) => {
             await tx.update(adminUsers)
                 .set({ password_hash: newHash })
                 .where(eq(adminUsers.id, currentUser.id));
 
-            if (currentSession) {
-                await tx.delete(sessions).where(and(
-                    eq(sessions.userId, currentUser.id),
-                    sql`${sessions.id} != ${currentSession.id}`
-                ));
-            } else {
-                await tx.delete(sessions).where(eq(sessions.userId, currentUser.id));
-            }
+            await tx.delete(sessions).where(eq(sessions.userId, currentUser.id));
+            await tx.insert(sessions).values({
+                id: newSessionId,
+                userId: currentUser.id,
+                expiresAt: newSessionExpiresAt,
+            });
+        });
+
+        const cookieStore = await cookies();
+        cookieStore.set(COOKIE_NAME, newSessionToken, {
+            httpOnly: true,
+            secure: getTrustedRequestProtocol(requestHeaders) === 'https' || process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 24 * 60 * 60,
+            path: '/',
         });
 
         // Only clear the rate-limit bucket AFTER the password/session

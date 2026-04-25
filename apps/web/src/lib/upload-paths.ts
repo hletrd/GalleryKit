@@ -6,7 +6,7 @@
  */
 
 import path from 'path';
-import fs from 'fs/promises';
+import * as fs from 'fs/promises';
 
 /** Root directory for all uploaded files. Derived from UPLOAD_ROOT env var or cwd. */
 export const UPLOAD_ROOT = (() => {
@@ -44,6 +44,15 @@ export const UPLOAD_DIR_WEBP = path.join(UPLOAD_ROOT, 'webp');
 export const UPLOAD_DIR_AVIF = path.join(UPLOAD_ROOT, 'avif');
 /** Directory for processed JPEG files. */
 export const UPLOAD_DIR_JPEG = path.join(UPLOAD_ROOT, 'jpeg');
+
+export async function ensureUploadDirectories() {
+    await Promise.all([
+        UPLOAD_DIR_ORIGINAL,
+        UPLOAD_DIR_WEBP,
+        UPLOAD_DIR_AVIF,
+        UPLOAD_DIR_JPEG,
+    ].map((dir) => fs.mkdir(dir, { recursive: true })));
+}
 
 export async function resolveOriginalUploadPath(filename: string) {
     const candidates = [

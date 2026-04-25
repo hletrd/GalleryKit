@@ -291,6 +291,9 @@ export function UploadDropzone({
             filesRef.current = remainingFiles;
             setFiles(remainingFiles);
             setProgress(0);
+            if (successCount > 0) {
+                router.refresh();
+            }
         }
         } catch {
             toast.error(t('upload.failed'));

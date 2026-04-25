@@ -141,6 +141,29 @@ describe('getClientIp', () => {
         expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.9');
     });
 
+    it('does not trust the left-most forwarded IP when the chain is shorter than TRUSTED_PROXY_HOPS', () => {
+        process.env.TRUST_PROXY = 'true';
+        process.env.TRUSTED_PROXY_HOPS = '2';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('unknown');
+    });
+
+    it('falls back to x-real-ip when the forwarded chain is shorter than TRUSTED_PROXY_HOPS', () => {
+        process.env.TRUST_PROXY = 'true';
+        process.env.TRUSTED_PROXY_HOPS = '2';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10'],
+            ['x-real-ip', '203.0.113.9'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.9');
+    });
+
     it('returns unknown when proxy headers are not trusted', () => {
         delete process.env.TRUST_PROXY;
 

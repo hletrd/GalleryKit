@@ -15,6 +15,7 @@ import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 // Tag Management
 
+/** @action-origin-exempt: read-only admin getter */
 export async function getAdminTags() {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) return { error: t('unauthorized') };
