@@ -1,35 +1,44 @@
-# Test Engineer — Cycle 7 (review-plan-fix loop, 2026-04-25)
+# Test Engineer — Cycle 10 (review-plan-fix loop, 2026-04-25)
 
 ## Lens
 
 Test coverage, missing assertions, flakiness, contract drift.
 
-## Inventory
+**HEAD:** `24c0df1`
+**Cycle:** 10/100
 
-- 59 test files in `apps/web/src/__tests__/`
-- E2E in `apps/web/e2e/`
-- `containsUnicodeFormatting` has explicit unit coverage in `validation.test.ts:204-234`
-- `images-actions.test.ts` mocks `settleUploadTrackerClaim` (good — isolates tracker logic).
+## Test-surface delta
+
+Cycle 9 commit (`24c0df1`) does not add or remove tests. The
+`safe-json-ld.test.ts` (cycle 8) already covers the escaping primitive
+the noindex-skip continues to rely on for the indexed branch.
+
+`apps/web/src/__tests__/` has 30+ vitest files covering: auth
+rate-limit (basic + ordering), action guards, action-origin linter,
+api-auth linter, admin-users CRUD, backup download, csv escape,
+db-pool/restore/health, gallery-config, image-queue/bootstrap,
+image-url/title/exif/histogram, content-security-policy, etc.
 
 ## Findings
 
-### C7L-TE-01 — No test for `images.ts:141-149` tag count-mismatch path
-- File: `apps/web/src/app/actions/images.ts:141-149` and `__tests__/images-actions.test.ts`
-- Severity: LOW
-- Confidence: Medium
-- Issue: The branch `tagsString && tagNames.length !== tagsString.split(',').filter(...)` (count-mismatch check) does not appear to have a dedicated test. A regression that loosens `isValidTagName` would silently widen the accepted set without breaking any test.
-- Suggested fix: Add a test where one tag in the batch fails `isValidTagName` and assert `error: 'invalidTagNames'`.
+**Zero new MEDIUM or HIGH findings.**
 
-### C7L-TE-02 — Confirm `settleUploadTrackerClaim` not double-called in success path
-- File: `apps/web/src/__tests__/images-actions.test.ts`
-- Severity: INFO
-- Confidence: High
-- Issue: Existing test mocks the function; an assertion that `settleUploadTrackerClaimMock` is called exactly once per `uploadImages` invocation would lock in the AGG7R-21 deferred concern (now confirmed not a bug).
-- Suggested fix: Add `expect(settleUploadTrackerClaimMock).toHaveBeenCalledTimes(1)`.
+### LOW informational
 
-### C7L-TE-03 — Bootstrap continuation reentrancy
-- File: `apps/web/src/lib/image-queue.ts:366-380` and `__tests__/image-queue.test.ts`
-- Severity: INFO
-- Confidence: Medium
-- Issue: The cursor-paginated bootstrap with `scheduleBootstrapContinuation` has subtle reentrancy guarantees. A test that simulates ≥2 batches (more than `BOOTSTRAP_BATCH_SIZE=500` rows) would lock in the pagination contract.
-- Suggested fix: Defer; nontrivial mock setup.
+- **T10-INFO-01** — A page-level integration test asserting JSON-LD
+  is *omitted* on `?tags=foo` and *present* on the unfiltered home
+  page would close the cycle 9 fix with a regression seatbelt.
+  Severity LOW because the gate is a 1-token boolean, the existing
+  `safe-json-ld.test.ts` covers escape-correctness, and Playwright
+  e2e currently has no SEO-tag suite (deferred by convention). Re-
+  open criterion: a future change reintroduces JSON-LD on the
+  filtered view (e.g., refactor that reuses `galleryLd` outside the
+  guard) and a reviewer flags it.
+
+## Confidence
+
+High.
+
+## Recommendation
+
+No new tests required this cycle. Defer T10-INFO-01.

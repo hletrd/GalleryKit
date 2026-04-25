@@ -1,32 +1,40 @@
-# Tracer — Cycle 7 (review-plan-fix loop, 2026-04-25)
+# Tracer — Cycle 10 (review-plan-fix loop, 2026-04-25)
 
 ## Lens
 
 Cross-file data flow, lifecycle, callsite invariants.
 
+**HEAD:** `24c0df1`
+**Cycle:** 10/100
+
+## Trace targets
+
+1. **JSON-LD emit path on `/` and `/{topic}` for filtered vs
+   unfiltered tag views.** Confirmed via `(public)/page.tsx` and
+   `(public)/[topic]/page.tsx`: `shouldEmitJsonLd = tagSlugs.length
+   === 0` mirrors `robots: tagSlugs.length > 0 ? { index: false,
+   follow: true } : undefined`. Both `<script
+   type="application/ld+json">` blocks are now gated.
+2. **JSON-LD on photo page (`p/[id]`).** Always emits, no `noindex`
+   path, no parity issue.
+3. **Shared pages (`s/[key]`, `g/[key]`).** Both call
+   `sharePageRobots` and emit no JSON-LD; no parity issue.
+
 ## Findings
 
-### C7L-TRACE-01 — `settleUploadTrackerClaim` call sites
-- Files: `apps/web/src/app/actions/images.ts:391-397`
-- Severity: INFO
-- Confidence: High
-- Trace: Two call sites are mutually exclusive (line 391 returns before reaching 397). Deferred plan AGG7R-21 (claiming double-settle) is closed by inspection.
+**Zero new MEDIUM or HIGH findings.**
 
-### C7L-TRACE-02 — `tagsString.split(',')` flow
-- Files: `apps/web/src/app/actions/images.ts:141-149`
-- Severity: LOW
-- Confidence: High
-- Trace: `tagsString` is sanitized once via `stripControlChars(...)`. Then split twice — once for filtering, once for counting. The second split is unreachable for `tagsString === ''` because of the truthiness guard at line 147. Functionally correct, but allocation and maintenance smell.
+### LOW
 
-### C7L-TRACE-03 — Upload tracker key `${userId}:${ip}` round-trip
-- Files: `apps/web/src/app/actions/images.ts:174` ↔ `upload-tracker.ts:12-26`
-- Severity: INFO
-- Confidence: High
-- Trace: `images.ts` uses `${currentUser.id}:${uploadIp}` as the tracker key. `settleUploadTrackerClaim(tracker, ip, ...)` parameter is named `ip` but accepts any string key. Name divergence is cosmetic; behavior is correct.
-- Suggested fix: Rename parameter `ip` → `key` in `upload-tracker.ts:14-19`.
+- **TR10-INFO-01** — The reserved-segment short-circuit in
+  `[topic]/page.tsx` (`isReservedTopicSegment`) returns a blank-title
+  noindex metadata object. Since it's also `notFound()` in the page
+  body, no JSON-LD is reachable. No action.
 
-### C7L-TRACE-04 — `containsUnicodeFormatting` lineage call sites
-- Files: 7 production call sites in actions; consolidated through `validation.ts:50-52`
-- Severity: NONE
-- Confidence: High
-- Trace: Single helper, used everywhere. Lineage comment in `validation.ts:21-32` lists C3L through C6L. All known surfaces covered.
+## Confidence
+
+High.
+
+## Recommendation
+
+No tracer action this cycle.

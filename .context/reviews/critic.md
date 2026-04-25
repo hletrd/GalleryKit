@@ -1,36 +1,41 @@
-# Critic — Cycle 7 (review-plan-fix loop, 2026-04-25)
+# Critic — Cycle 10 (review-plan-fix loop, 2026-04-25)
 
 ## Lens
 
 What's wrong, what's missing, what's brittle.
 
+**HEAD:** `24c0df1`
+**Cycle:** 10/100
+
+## Stance
+
+Cycle 9 closed cleanly: the only outstanding scheduled item from cycle
+8 (plan-238 JSON-LD noindex skip) was implemented in commit `24c0df1`,
+and plan-237 (`safe-json-ld.test.ts`) was already landed earlier. No
+new MEDIUM/HIGH was surfaced by any reviewer in cycle 9, and the diff
+since that baseline is a single LOW-impact 35-line change.
+
+## Critique
+
+- **Convergence indicator firing.** Cycles 8 and 9 both ended at the
+  zero-MEDIUM/HIGH boundary. Cycle 10 inherits a clean tree.
+- **No invented work.** Per orchestrator guidance, cycle 10 should
+  return zero findings rather than fabricate non-issues. The 25-item
+  cycle-8 deferred backlog remains correctly classified and is
+  separate from "this cycle's findings".
+- **Plan registry is healthy.** Plan-238 archived to `done/`. Plan
+  number now at 241. No housekeeping needed.
+
 ## Findings
 
-### C7L-CRIT-01 — `images.ts:147` count comparison is brittle
-- File: `apps/web/src/app/actions/images.ts:141-149`
-- Severity: LOW
-- Confidence: High
-- Issue: `tagNames.length !== tagsString.split(',').filter(t => t.trim().length > 0).length` will fire on any tag that fails ANY of the three filters in line 142 (`length>0 && isValidTagName && isValidTagSlug`). One legitimate failure (e.g. one tag with `<`) means the entire upload returns `invalidTagNames`, even if other tags were valid.
-- Failure scenario: Admin uploads with five tags, one bad → entire batch aborts with no signal which tag was bad.
-- Fix: Optionally collect rejected names into an error or warning. Or simply note the design rationale next to the check (defense-in-depth strict mode).
+**Zero new MEDIUM or HIGH findings.**
 
-### C7L-CRIT-02 — Mutating-action boilerplate cleaved across files
-- File: Many (every mutating action)
-- Severity: INFO
-- Confidence: High
-- Issue: Every mutating action duplicates 3-4 lines: `getTranslations`, `getRestoreMaintenanceMessage`, `isAdmin`, `requireSameOriginAdmin`. Correct under lint gates but generates 200+ lines of repeated boilerplate. A `withAdminMutation()` wrapper would cut ~40% of the boilerplate.
-- Fix: Defer; refactor candidate.
+### LOW
 
-### C7L-CRIT-03 — `image-queue.ts:382-459` bootstrap state-flag combinatorial complexity
-- File: `apps/web/src/lib/image-queue.ts:384`
-- Severity: INFO
-- Confidence: Medium
-- Issue: Early-return condition is `bootstrapped || shuttingDown || isRestoreMaintenanceActive() || bootstrapContinuationScheduled`. Each has its own meaning, and order matters: if `shuttingDown` becomes true mid-bootstrap, the loop short-circuits. Combination is correct but hard to reason about; one more flag would push it over the edge.
-- Fix: Document the invariant; consider a single `isBootstrapEligible()` predicate.
+- **CRIT10-01** — Continue periodically triaging the 25-item cycle-8
+  deferred backlog. Not a cycle-10 action item.
 
-### C7L-CRIT-04 — Upload partial-success messaging buries `failedFiles`
-- File: `apps/web/src/app/actions/images.ts:410-415`
-- Severity: INFO
-- Confidence: Medium
-- Issue: Returning `success: true` with a `failed` array can mislead UI to show a cheerful success toast even when half the batch failed.
-- Status: Pre-existing UX concern. No change this cycle without a UI audit.
+## Recommendation
+
+Report convergence: `NEW_FINDINGS: 0`, `COMMITS: 0`, `DEPLOY:
+none-no-commits`.
