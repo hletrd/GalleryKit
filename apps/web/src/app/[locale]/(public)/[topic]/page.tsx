@@ -160,6 +160,12 @@ export default async function TopicPage({
 
   const baseUrl = seo.url;
   const nonce = await getCspNonce();
+  // AGG8F-19 / plan-238: skip JSON-LD on `noindex` page variants. Filtered
+  // tag-slug views set `robots: { index: false, follow: true }` (see
+  // `generateMetadata`), so search engines do not index them; emitting
+  // JSON-LD here is dead weight. The unfiltered topic view still emits
+  // the gallery structured data.
+  const shouldEmitJsonLd = tagSlugs.length === 0;
   const galleryLd = images.length > 0 ? {
     '@context': 'https://schema.org',
     '@type': 'ImageGallery',
@@ -175,7 +181,7 @@ export default async function TopicPage({
 
   return (
     <>
-      {galleryLd && (
+      {shouldEmitJsonLd && galleryLd && (
         <script
           type="application/ld+json"
           nonce={nonce}

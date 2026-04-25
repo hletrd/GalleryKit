@@ -134,6 +134,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
   const filterTags = tagSlugs.length > 0 ? tagSlugs : undefined;
   const { images, totalCount, hasMore } = await getImagesLitePage(undefined, filterTags, PAGE_SIZE, 0);
 
+  // AGG8F-19 / plan-238: skip JSON-LD on `noindex` page variants. Filtered
+  // tag-slug views set `robots: { index: false, follow: true }`, so search
+  // engines won't index the page; emitting JSON-LD on those views wastes
+  // bandwidth and DOM bytes for no SEO gain. The unfiltered view continues
+  // to emit the website + gallery structured data.
+  const shouldEmitJsonLd = tagSlugs.length === 0;
+
   const websiteLd = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
@@ -157,14 +164,16 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        nonce={nonce}
-        dangerouslySetInnerHTML={{
-          __html: safeJsonLd(websiteLd)
-        }}
-      />
-      {galleryLd && (
+      {shouldEmitJsonLd && (
+        <script
+          type="application/ld+json"
+          nonce={nonce}
+          dangerouslySetInnerHTML={{
+            __html: safeJsonLd(websiteLd)
+          }}
+        />
+      )}
+      {shouldEmitJsonLd && galleryLd && (
         <script
           type="application/ld+json"
           nonce={nonce}
