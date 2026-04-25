@@ -243,12 +243,19 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             {showDocumentHeading && (
                 <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
             )}
-            <p className="mb-2 text-xs text-muted-foreground" id="photo-viewer-shortcuts">
+            {/* F-9: the keyboard-shortcut hint is irrelevant on touch
+                devices (no arrow keys, no `F`); hide it below the `md`
+                breakpoint to stop wasting precious vertical space above
+                the photo on phones. */}
+            <p className="mb-2 text-xs text-muted-foreground hidden md:block" id="photo-viewer-shortcuts">
                 {t('viewer.shortcutsHint')}
             </p>
             <div className="flex items-center justify-between mb-4 photo-viewer-toolbar">
                 {!isSharedView && (
-                    <Button asChild variant="ghost" className="pl-0 gap-2">
+                    // F-20: explicit `h-11` (44 px) on the Back button so the
+                    // mobile primary navigation action clears the touch
+                    // target floor; the default ghost-Button height was 32 px.
+                    <Button asChild variant="ghost" className="pl-0 gap-2 h-11">
                         <Link href={localizePath(locale, `/${image.topic}`)}>
                             <ArrowLeft className="h-4 w-4" />
                             {t('viewer.backTo', { topic: image.topic_label || image.topic })}
@@ -263,7 +270,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         variant="outline"
                         size="sm"
                         onClick={() => setShowBottomSheet(true)}
-                        className="gap-2 lg:hidden"
+                        // F-20: bump to 44 px on mobile; the toolbar is
+                        // touch-primary on the `lg:hidden` breakpoint.
+                        className="gap-2 lg:hidden h-11"
                     >
                         <Info className="h-4 w-4" />
                         {t('viewer.info')}
@@ -324,7 +333,17 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 "grid gap-8 flex-1 transition-all duration-500 ease-in-out photo-viewer-grid",
                 showInfo ? "grid-cols-1 lg:grid-cols-[1fr_350px]" : "grid-cols-1"
             )}>
-                <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[500px] group">
+                {/* F-10: collapse `min-h-[500px]` on mobile to `40vh` so a
+                    landscape photo on a 390 px phone is visible above the
+                    fold instead of forcing the user to scroll past a tall
+                    empty dark box. Desktop keeps the 500 px floor so the
+                    image doesn't collapse to a tiny strip on widescreens.
+                    F-23: the inner image fades in via the existing
+                    `AnimatePresence` so the empty container shows the muted
+                    background while the image decodes; a soft skeleton
+                    backdrop (`skeleton-shimmer`) gives a "loading" cue
+                    instead of a flat black box. */}
+                <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer">
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
