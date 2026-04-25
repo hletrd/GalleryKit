@@ -1,44 +1,46 @@
-# Aggregate Review — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Aggregate Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
 Review pass executed by a single subagent (the Task fan-out tool is not callable inside this nested subagent context); per-perspective files written for provenance under `.context/reviews/{security-reviewer,code-reviewer,perf-reviewer,architect,critic,test-engineer,tracer,debugger,document-specialist,verifier}.md`.
 
 ## Gate baseline (before fixes)
 
-- ESLint: clean
-- Typecheck: clean
-- lint:api-auth: clean (all admin routes wrap `withAdminAuth`)
-- lint:action-origin: clean (all mutating actions enforce same-origin)
-- Vitest: 372/372 across 59 files
-- Build: clean (exit 0)
+- ESLint: clean (exit 0)
+- Typecheck: clean (exit 0)
+- lint:api-auth: clean (exit 0)
+- lint:action-origin: clean (exit 0)
+- Vitest: 372/372 (exit 0)
+- Build: previously clean (Cycle 3 baseline)
 
 ## New findings (deduplicated)
 
-### C3L-SEC-01 — `isValidTopicAlias` permits invisible/Unicode-spoofing characters [LOW] [Medium confidence]
+### C4L-SEC-01 — `isValidTagName` permits Unicode bidi/invisible formatting characters [LOW] [Medium confidence]
 
-**File:** `apps/web/src/lib/validation.ts:28-30`
+**File:** `apps/web/src/lib/validation.ts:43-46`
 
-The alias regex does not reject the high-codepoint formatting characters that the project explicitly hardened against in CSV export (C7R-RPL-11, C8R-RPL-01):
-- U+200B–U+200D, U+2060, U+FEFF (zero-width / invisible formatting)
-- U+202A–U+202E, U+2066–U+2069 (Trojan-Source bidi overrides)
+`isValidTagName` blocks `<>"'&\x00` and commas but does NOT reject the high-codepoint formatting characters that:
+- C3L-SEC-01 closed in `isValidTopicAlias`,
+- CSV export (C7R-RPL-11 / C8R-RPL-01) strips before producing CSV,
+- `getTagSlug` already strips during slug derivation.
 
-`stripControlChars` does not strip these high-codepoint characters, so they survive both filters. Topic aliases become URL path segments and are displayed in admin/SEO UI; the same class of input should match the project's documented hardening posture.
+The stored tag **name** (varchar 255) carries the chars through to admin UI rendering (`/admin/tags`, photo pill chips, image manager). React HTML-escapes special characters but does not strip Unicode bidi / invisible chars, so visual reordering / spoofing is possible in admin UI.
 
-Cross-agent agreement: security-reviewer (SEC-01), critic (CRIT-01), tracer (path 2), test-engineer (recommends test extension).
+Cross-agent agreement: security-reviewer (SEC-01), code-reviewer (CR-01 cleanup), critic (CRIT-01), tracer (path 1), test-engineer (TE-01 coverage gap), architect (ARCH-01 shared-module recommendation), document-specialist (DOC-01 comment update).
 
-**Fix plan:** Extend `isValidTopicAlias` to reject the Unicode-formatting set. Add `validation.test.ts` coverage. Implement in PROMPT 3.
+**Fix plan:**
+1. Export `UNICODE_FORMAT_CHARS` as a shared named constant in `validation.ts`.
+2. Apply it in `isValidTagName`.
+3. Add `validation.test.ts` parallel coverage to the existing `isValidTopicAlias` Unicode-formatting cases.
+4. Update the inline comment to reference C4L-SEC-01.
 
 ### Deferred / informational
 
-- **C3L-CR-01** — Audit log preview slice can split surrogate pair (cosmetic; LOW).
-- **C3L-CR-02 / PERF-01** — `topicRouteSegmentExists` two sequential SELECTs (latency; INFO).
-- **C3L-CR-03** — Settings update revalidates entire app (architectural; INFO).
-- **C3L-PERF-02** — `decrementRateLimit` UPDATE+DELETE round-trips (latency; INFO).
-- **C3L-SEC-02** — `loadMoreImages` `tagSlugs` not pre-sanitized (parity; LOW, already covered by `isValidTagSlug` regex).
+- **C4L-CR-01 / ARCH-01** — folded into the C4L-SEC-01 fix (shared constant).
+- **C4L-CR-02** — case-insensitive tag-name uniqueness is intentional; no action.
+- **C4L-DOC-01** — inline comment update bundled with C4L-SEC-01 fix.
 
 ## Cross-agent agreement
 
-- SEC-01 confirmed by 4 perspectives (security, critic, tracer, test-engineer).
-- All other findings limited to a single perspective (LOW/INFO).
+- C4L-SEC-01 confirmed by 7 perspectives (security, code-reviewer, critic, tracer, test-engineer, architect, document-specialist).
 
 ## AGENT FAILURES
 
@@ -46,9 +48,9 @@ The Task fan-out tool is not available inside this nested subagent context, so a
 
 ## Recommended priority
 
-1. Implement C3L-SEC-01 (defense-in-depth, low risk to land, test coverage easy).
-2. Defer all INFO/LOW items.
+1. Implement C4L-SEC-01 with shared `UNICODE_FORMAT_CHARS` export and test parity.
+2. Defer all INFO/LOW Cycle-3 carry-forwards (already documented in `.context/plans/233-deferred-cycle3-loop.md`).
 
 ## Deferral plan reference
 
-See `.context/plans/232-deferred-cycle3-loop.md` (created in PROMPT 2).
+See `.context/plans/235-deferred-cycle4-loop.md` (created in PROMPT 2).

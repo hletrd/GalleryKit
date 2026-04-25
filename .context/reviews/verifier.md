@@ -1,21 +1,24 @@
-# Verifier — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Verifier Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
-Gate evidence collected at start of cycle:
+## Gate baseline (before fixes)
 
-- `npm run lint --workspace=apps/web` — exit 0
-- `npm run typecheck` — exit 0
-- `npm run lint:api-auth --workspace=apps/web` — OK (all admin API routes wrap withAdminAuth)
-- `npm run lint:action-origin --workspace=apps/web` — OK (all mutating actions enforce same-origin provenance)
-- `npm test --workspace=apps/web` — 59 files, 372 tests, 0 failures
-- `npm run build` — exit 0
+- ESLint: clean (exit 0)
+- Typecheck: clean (exit 0)
+- lint:api-auth: clean (exit 0)
+- lint:action-origin: clean (exit 0)
+- Vitest: 372/372 (exit 0)
+- Build: not re-run pre-fix this cycle (last green per Cycle 3 baseline)
 
-Cycle-46 findings (C46-01, C46-02) confirmed implemented. No regressions detected.
+## Findings
 
-## Verdict for review prompt: clean baseline.
+No verifier-class findings (gates green).
 
-If C3L-SEC-01 is implemented, the verifier-pass criterion is:
-- Updated `isValidTopicAlias` rejects ZWSP/U+202E/U+2066-2069/etc.
-- Added test coverage in `validation.test.ts`.
-- All gates remain green.
-- Build still completes.
-- E2E (test:e2e) remains green.
+## Verifier exit criterion for the C4L-SEC-01 fix
+
+- `isValidTagName` rejects ZWSP/U+202E/U+2066-2069/etc.
+- New tests in `validation.test.ts` covering the rejection.
+- All gates remain green after the fix.
+
+## Confidence
+
+- High that the codebase is in a deployable state.

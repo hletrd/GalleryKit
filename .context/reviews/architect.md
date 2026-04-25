@@ -1,12 +1,28 @@
-# Architect — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Architect Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
-Architecture state: documented constraints (single-node, single-writer, multi-root admin, MySQL advisory locks scoped to MySQL server) hold. CLAUDE.md captures the multi-tenant trap. No new architectural drift detected this cycle.
+## Posture summary
 
-## Observations
+- Single-instance topology preserved (Docker compose, in-process queues, advisory-lock-scoped to MySQL server).
+- Storage abstraction (`@/lib/storage`) intentionally not yet wired end-to-end; documented under CLAUDE.md.
+- Authentication remains multi-root admin (no role/capability split).
+- Admin-server-action provenance: `requireSameOriginAdmin()` centralized; lint gates enforce wiring.
+- Image processing: queue worker + per-image advisory lock + conditional UPDATE remains the correct approach for the single-writer topology.
 
-- The two-bucket rate-limit (in-memory + DB) is consistent across all mutating surfaces.
-- Topic-route lock and admin-delete lock both use bare advisory-lock names tied to the MySQL server; documented in CLAUDE.md.
-- Settings/upload-contract lock correctly serializes upload-shape changes against in-flight uploads.
-- Topic-alias validation is the one place where the documented hardening philosophy (block invisible/bidi-override characters in admin-controlled values) is not consistently applied — see SEC-01.
+## Findings
 
-No new architecture-only findings.
+### C4L-ARCH-01 — Shared Unicode-formatting policy should live in one module
+
+- **File / line:** `apps/web/src/lib/validation.ts:37`, `apps/web/src/lib/csv-escape.ts`
+- **Issue:** As the project hardens more user-controlled surfaces against Trojan-Source / invisible-character spoofing, the regex/character-class is duplicated. A shared constant reduces drift risk.
+- **Severity / confidence:** INFO / Medium.
+- **Suggested fix:** When implementing C4L-SEC-01, factor the regex out as a named export so `isValidTopicAlias` and the new `isValidTagName` share it.
+
+## No other architectural concerns
+
+- No drift from documented topology.
+- No new concurrency primitives needed.
+- Index strategy on `images` matches query patterns.
+
+## Confidence summary
+
+- C4L-ARCH-01 — Medium

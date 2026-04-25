@@ -1,40 +1,31 @@
-# Security Reviewer — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Security Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
-Reviewed surfaces: actions/* (all mutating server actions), lib/sanitize.ts, lib/validation.ts, lib/rate-limit.ts, lib/audit.ts, auth.ts. The codebase carries 46 cycles of accumulated hardening; most surfaces are tight. Below are residual findings.
+## Inventory
 
-## C3L-SEC-01: `isValidTopicAlias` permits invisible/Unicode-spoofing characters in topic aliases [LOW] [Medium confidence]
+Reviewed: `apps/web/src/lib/{validation,sanitize,rate-limit,request-origin,action-guards,csv-escape,session,auth-rate-limit,db-restore,upload-paths,upload-tracker,upload-processing-contract-lock}.ts`, `apps/web/src/app/actions/{auth,topics,tags,images,public,admin-users,seo,sharing,settings}.ts`, `apps/web/src/app/api/admin/**/route.ts`, `apps/web/src/proxy.ts`, `apps/web/src/middleware/*`.
 
-**File:** `apps/web/src/lib/validation.ts:28-30`
+## Findings
 
-The alias regex blocks slashes, dots, whitespace, NUL, `<>"'&`, `?`, `#`. It does NOT exclude:
+### C4L-SEC-01 — `isValidTagName` permits Unicode bidi/invisible formatting characters [LOW] [Medium confidence]
 
-- U+200B–U+200D (ZWSP/ZWNJ/ZWJ)
-- U+2060 (WORD JOINER), U+FEFF (BOM)
-- U+202A–U+202E (LRE/RLE/PDF/LRO/RLO — Trojan-Source bidi overrides)
-- U+2066–U+2069 (LRI/RLI/FSI/PDI)
+- **File / line:** `apps/web/src/lib/validation.ts:43-46`
+- **Issue:** `isValidTagName` rejects only `<>"'&\x00` and commas. It accepts the same high-codepoint formatting characters that the project explicitly hardened against in `isValidTopicAlias` (C3L-SEC-01) and CSV export (C7R-RPL-11 / C8R-RPL-01):
+  - U+200B–U+200D, U+2060, U+FEFF, U+180E, U+FFF9–U+FFFB (zero-width / invisible formatting)
+  - U+202A–U+202E, U+2066–U+2069 (Trojan-Source bidi overrides)
+- **Failure scenario:** An admin saves a tag name containing `U+202E RLO`. The tag is rendered into admin UI lists (`/admin/tags`), photo viewers, and tag-pill components verbatim (React handles entity escaping but does not strip bidi controls), causing visual reordering of subsequent text. The slug derivation in `getTagSlug` (`tag-records.ts:5`) already strips these via `[^\p{Letter}\p{Number}-]+`, so the slug stays safe — but the **stored `name`** does not. This is the same defense-in-depth gap that C3L-SEC-01 closed for topic aliases.
+- **Suggested fix:** Reject the same Unicode-formatting set in `isValidTagName` (factor `UNICODE_FORMAT_CHARS` from `validation.ts:37` into a shared exported constant). Add `validation.test.ts` coverage parallel to the topic-alias parity tests.
+- **Confidence:** Medium (cosmetic-only impact; not a code-execution path. But a documented project-wide hardening posture exists, so the gap should be closed.)
 
-`stripControlChars` only handles 0x00–0x1F, 0x7F–0x9F, so these high-codepoint formatting characters survive both filters. CSV export was hardened against these in C7R-RPL-11 / C8R-RPL-01, but topic aliases — which become URL path segments and are displayed in admin/SEO UI — are not.
+## Cross-cutting checks (no findings)
 
-**Failure scenario:** An admin (admin-only mutation, so impact is bounded) creates an alias containing U+202E. The alias is stored, then displayed in admin alias-management UI and rendered in URLs. Visual reading order can be reversed for downstream readers; defense-in-depth gap that the project has explicitly hardened elsewhere.
+- `withAdminAuth` wrappers and `requireSameOriginAdmin` guards — all admin routes/actions covered (per existing lint gates).
+- Argon2id for password hashing, HMAC-SHA256 with `timingSafeEqual` for sessions.
+- File upload safe-segment whitelisting and `lstat` symlink rejection — unchanged and intact.
+- Rate limit pre-increment ordering (TOCTOU fix) — verified in `auth.ts`, `admin-users.ts`, `public.ts`, `sharing.ts`.
+- CSV export hardening for control / bidi / zero-width characters — verified.
 
-**Fix:** Extend `isValidTopicAlias` to reject the documented Unicode-formatting set. Match the exact set already enumerated in `csv-escape.ts` for consistency.
+## Confidence summary
 
----
+- C4L-SEC-01 — Medium
 
-## C3L-SEC-02: `loadMoreImages` `tagSlugs` not pre-sanitized for parity [LOW] [Medium confidence]
-
-**File:** `apps/web/src/app/actions/public.ts:85-88`
-
-`isValidTagSlug` regex is `/^[\p{Letter}\p{Number}_-]+$/u` which rejects ZWSP and Trojan-Source overrides today, so this is not exploitable. Flagged for parity with the project's documented sanitize-then-validate pattern. Defer.
-
----
-
-## C3L-SEC-03: Search bucket DB rate-limit error swallowed silently [INFO]
-
-**File:** `apps/web/src/app/actions/public.ts:147-153`
-
-Intentional; matches other surfaces. Not a finding.
-
-## Summary
-
-No CRITICAL or HIGH findings. One LOW item (C3L-SEC-01) recommended for fix; one LOW item recommended for defer.
+No security-critical or correctness-critical findings this cycle.

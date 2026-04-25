@@ -1,11 +1,20 @@
-# Critic — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Critic Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
-Skeptical re-examination of the fixes from prior cycles.
+## Cross-cutting concerns
 
-## C3L-CRIT-01: Topic alias permits invisible Unicode (mirror of SEC-01) [LOW]
+### C4L-CRIT-01 — Unicode-formatting hardening posture is partial
 
-The codebase has spent multiple cycles hardening CSV export against ZWSP / Trojan-Source overrides, but the same class of input — admin-controlled, displayed in URLs and admin UI — is permitted in topic aliases. This is the only inconsistency I found between the documented hardening philosophy and the actual surface coverage.
+- **Files:** `apps/web/src/lib/validation.ts:37,43-46`
+- **Issue:** Cycle 3 closed the `isValidTopicAlias` gap and CSV export already strips the same characters, but `isValidTagName` (also user-controlled, also rendered) was not extended in the same pass. This makes the hardening posture inconsistent across user-controlled string surfaces. Adding parity is the second of three known places.
+- **Severity / confidence:** LOW / Medium.
+- **Recommendation:** Schedule the parity fix this cycle and co-locate the regex in a shared module to make further parity expansions one-line.
 
-## No new findings beyond SEC-01.
+## Cycle hygiene
 
-Other surfaces (uploads, share links, settings, password change, admin user create/delete) all consistently sanitize-then-validate-then-pre-increment. Pattern is uniform.
+- `.context/plans/` continues to grow; the deferred-tracker pattern is healthy. No new bookkeeping issues.
+- Aggregate files preserved across cycles (pattern: `_aggregate-cycleN-*.md`) — provenance trail intact.
+- Recent commits are fine-grained, GPG-signed, gitmoji-tagged.
+
+## Confidence summary
+
+- C4L-CRIT-01 — Medium

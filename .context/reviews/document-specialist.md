@@ -1,12 +1,23 @@
-# Document Specialist — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Documentation Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
-CLAUDE.md is comprehensive and accurate against the current codebase:
-- Auth pattern (Argon2 + HMAC-SHA256, dual-bucket rate limit) matches `auth.ts`.
-- Lint gates documented (api-auth, action-origin) match the actual scripts.
-- Race condition list matches actual implementation.
-- Multi-tenant advisory-lock warning (C8R-RPL-06) is accurately documented.
-- CSV escape Unicode formatting list is well documented.
+## Inventory
 
-If C3L-SEC-01 (topic-alias invisible-char hardening) is implemented, the CSV-escape security note should be extended to mention topic aliases.
+Reviewed: `CLAUDE.md`, `AGENTS.md`, `apps/web/README.md`, README, `.context/plans/233-deferred-cycle3-loop.md`, recent commit messages.
 
-No documentation drift detected this cycle.
+## Findings
+
+### C4L-DOC-01 — When implementing C4L-SEC-01, update the validation comment to reference both paths
+
+- **File / line:** `apps/web/src/lib/validation.ts:21-37`
+- **Issue:** The existing comment block above `isValidTopicAlias` cites C3L-SEC-01. After adding parity to `isValidTagName`, the rationale should be either co-located on the new check or factored into a single shared comment block.
+- **Severity / confidence:** INFO / Medium.
+- **Suggested fix:** Add a brief comment to `isValidTagName` referencing C4L-SEC-01 plus the lineage, or co-locate the comment on the shared regex export.
+
+## No other documentation drift
+
+- CLAUDE.md remains accurate (storage backend status, single-writer note, advisory-lock scope, runtime topology).
+- AGENTS.md / commit policy intact.
+
+## Confidence summary
+
+- C4L-DOC-01 — Medium

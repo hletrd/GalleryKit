@@ -1,25 +1,34 @@
-# Code Reviewer — Cycle 3 (review-plan-fix loop, 2026-04-25)
+# Code Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
 
-Reviewed: actions/*.ts, lib/* (audit, rate-limit, sanitize, validation), api/admin routes. Lint gates pass. Vitest 372 tests pass.
+## Inventory
 
-## C3L-CR-01: `audit.ts` truncated metadata "preview" can split UTF-16 surrogate pair [LOW] [Low confidence]
+Same as security-reviewer plus: data layer (`apps/web/src/lib/data.ts`), image queue (`image-queue.ts`), revalidation helpers, sharing actions, `proxy.ts`, validation/sanitize tests.
 
-**File:** `apps/web/src/lib/audit.ts:24-29`
+## Findings
 
-`serializedMetadata.slice(0, 4000)` slices a JSON string at code-unit boundary 4000. JSON.stringify wraps it, producing structurally valid JSON, but the displayed preview can show malformed surrogate pairs to log readers. Cosmetic; defer.
+### C4L-CR-01 — `UNICODE_FORMAT_CHARS` regex is duplicated implicitly between `isValidTopicAlias` and CSV-escape logic [LOW] [Medium confidence]
 
-## C3L-CR-02: `topicRouteSegmentExists` performs two sequential SELECTs [INFO]
+- **File / line:** `apps/web/src/lib/validation.ts:37`, `apps/web/src/lib/csv-escape.ts` (parallel logic).
+- **Issue:** The set of high-codepoint formatting characters the project hardens against is encoded twice — once as a regex in `validation.ts` and once as character-class strips in `csv-escape.ts`. Adding `isValidTagName` parity (C4L-SEC-01) means a third consumer. Without a shared constant, the regex risks drift over time.
+- **Suggested fix:** Export `UNICODE_FORMAT_CHARS` from `validation.ts` (or a new `lib/unicode-format-chars.ts`) and re-use it in both `isValidTopicAlias` and the new `isValidTagName` check.
+- **Confidence:** Medium — cleanup; not a correctness bug.
 
-**File:** `apps/web/src/app/actions/topics.ts:18-35`
+### C4L-CR-02 — `tag-records.ts:33-35` exact-match query case-sensitivity [INFO] [Low confidence]
 
-Could be `Promise.all`. Holds a short advisory lock during this window; minor latency. Defer.
+- **File / line:** `apps/web/src/lib/tag-records.ts:30-44`
+- **Issue:** `selectTagByNameOrSlug` runs `eq(tags.name, cleanName)`. With utf8mb4_*_ci collation, `=` is case-insensitive — that's actually intent: UNIQUE on `name` enforces case-insensitive uniqueness, so concurrent inserts of differently-cased names converge on slug. No issue.
+- **Suggested fix:** None.
+- **Confidence:** Low (verified intentional; logged for completeness).
 
-## C3L-CR-03: Settings update revalidates entire app on every change [INFO]
+## No findings (verified clean)
 
-**File:** `apps/web/src/app/actions/settings.ts:162`
+- Same-origin guard wiring across all `apps/web/src/app/actions/*.ts` mutations.
+- `revalidate = 0` annotations on public photo/topic/shared/home pages.
+- `requireSameOriginAdmin` wired into all mutating exports.
+- Per-image-processing advisory lock + conditional UPDATE remains race-safe.
+- Audit log truncation and `purgeOldAuditLog` retention path correct.
 
-Acceptable until cache scoping infra exists. Defer.
+## Confidence summary
 
-## Summary
-
-No correctness regressions. All findings LOW/INFO and recommended for defer.
+- C4L-CR-01 — Medium (cleanup)
+- C4L-CR-02 — Low (no action)
