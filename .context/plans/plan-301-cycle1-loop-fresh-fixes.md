@@ -1,6 +1,13 @@
 # Plan 301 — Cycle 1 loop fresh fixes (2026-04-25)
 
-## Status: TODO
+## Status: DONE
+
+- 301-A — DONE (commit `3dd50cd`)
+- 301-B — DONE (commit `4026ffc`)
+- 301-C — DONE (commit `21bedb8`, includes 301-D test additions)
+- 301-D — DONE (folded into 301-A and 301-C commits via expanded vitest cases)
+
+Quality gates: lint, lint:api-auth, lint:action-origin, vitest (60 files / 402 tests), tsc, build all green.
 
 ## Source
 
