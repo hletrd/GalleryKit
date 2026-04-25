@@ -158,6 +158,31 @@ describe('isValidTagName', () => {
         expect(isValidTagName("tag'name")).toBe(false);
         expect(isValidTagName('tag&name')).toBe(false);
     });
+
+    // C4L-SEC-01: defense-in-depth parity with topic aliases (C3L-SEC-01)
+    // and CSV export hardening (C7R-RPL-11 / C8R-RPL-01). Tag names are
+    // rendered into admin UI tables and tag-pill chips, so they must
+    // reject Unicode bidi overrides (Trojan Source) and zero-width /
+    // invisible formatting characters.
+    it('rejects Unicode bidi override / isolate characters', () => {
+        expect(isValidTagName('tag‮name')).toBe(false); // RLO
+        expect(isValidTagName('tag‪name')).toBe(false); // LRE
+        expect(isValidTagName('tag‭name')).toBe(false); // LRO
+        expect(isValidTagName('tag⁦name')).toBe(false); // LRI
+        expect(isValidTagName('tag⁩name')).toBe(false); // PDI
+    });
+
+    it('rejects zero-width / invisible formatting characters', () => {
+        expect(isValidTagName('tag​name')).toBe(false); // ZWSP
+        expect(isValidTagName('tag‌name')).toBe(false); // ZWNJ
+        expect(isValidTagName('tag‍name')).toBe(false); // ZWJ
+        expect(isValidTagName('tag‎name')).toBe(false); // LRM
+        expect(isValidTagName('tag‏name')).toBe(false); // RLM
+        expect(isValidTagName('tag⁠name')).toBe(false); // WJ
+        expect(isValidTagName('tag﻿name')).toBe(false); // BOM
+        expect(isValidTagName('tag᠎name')).toBe(false); // MVS
+        expect(isValidTagName('tag￹name')).toBe(false); // interlinear anchor
+    });
 });
 
 describe('isValidTagSlug', () => {
