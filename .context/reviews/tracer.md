@@ -1,25 +1,32 @@
-# Tracer — Cycle 6 (review-plan-fix loop, 2026-04-25)
+# Tracer — Cycle 7 (review-plan-fix loop, 2026-04-25)
 
-## Trace targets
-1. `seo_title` — admin form input → `updateSeoSettings` → `admin_settings.value` row → `<title>` of every public page → SERP snippets, browser-tab text, OG card title, OG image text.
-2. `seo_description` — admin form input → `updateSeoSettings` → `admin_settings.value` → `<meta name="description">` of every public page → search-engine snippets and link-preview body.
-3. `seo_nav_title` — admin form input → `updateSeoSettings` → `admin_settings.value` → top navigation bar (every public page).
-4. `seo_author` — admin form input → `updateSeoSettings` → `admin_settings.value` → `<meta name="author">` and OG-card author byline.
+## Lens
 
-## New findings
+Cross-file data flow, lifecycle, callsite invariants.
 
-### C6L-TRACE-01 — `seo_*` flows reach every public route's HTML head without Unicode-formatting filter [LOW] [Medium confidence]
+## Findings
 
-**Trace path summary:**
-- `apps/web/src/app/actions/seo.ts:75-78` strips control chars, validates length, persists.
-- `apps/web/src/db/schema.ts:82-85` `admin_settings.value` is `text` — accepts arbitrary Unicode formatting characters.
-- Renderers: `apps/web/src/app/[locale]/(public)/{p,s,g}/...`, `apps/web/src/app/api/og/route.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/lib/photo-title.ts`, `apps/web/src/lib/data.ts`.
+### C7L-TRACE-01 — `settleUploadTrackerClaim` call sites
+- Files: `apps/web/src/app/actions/images.ts:391-397`
+- Severity: INFO
+- Confidence: High
+- Trace: Two call sites are mutually exclusive (line 391 returns before reaching 397). Deferred plan AGG7R-21 (claiming double-settle) is closed by inspection.
 
-React HTML-escapes special chars (`<>&"'`) but does **not** strip Unicode bidi/invisible chars. The OG image route writes the strings into an SVG/text path that the renderer respects bidi codepoints when laying out glyphs.
+### C7L-TRACE-02 — `tagsString.split(',')` flow
+- Files: `apps/web/src/app/actions/images.ts:141-149`
+- Severity: LOW
+- Confidence: High
+- Trace: `tagsString` is sanitized once via `stripControlChars(...)`. Then split twice — once for filtering, once for counting. The second split is unreachable for `tagsString === ''` because of the truthiness guard at line 147. Functionally correct, but allocation and maintenance smell.
 
-### C6L-TRACE-02 — No flow from `GALLERY_SETTING_KEYS` to user-facing strings [INFO] [High confidence]
+### C7L-TRACE-03 — Upload tracker key `${userId}:${ip}` round-trip
+- Files: `apps/web/src/app/actions/images.ts:174` ↔ `upload-tracker.ts:12-26`
+- Severity: INFO
+- Confidence: High
+- Trace: `images.ts` uses `${currentUser.id}:${uploadIp}` as the tracker key. `settleUploadTrackerClaim(tracker, ip, ...)` parameter is named `ip` but accepts any string key. Name divergence is cosmetic; behavior is correct.
+- Suggested fix: Rename parameter `ip` → `key` in `upload-tracker.ts:14-19`.
 
-**Trace path:** `gallery-config-shared.ts:10-19` lists only numeric/boolean keys. Confirmed via `gallery-config-shared.ts:52-58` validators (`Number.isFinite`, `'true'|'false'`). No string vector reaches the public render path. Cycle-5 carry-forward conclusion stands for `settings.ts` but not `seo.ts`.
-
-## Cross-agent agreement
-Overlaps with security-reviewer (C6L-SEC-01) and architect (helper extraction).
+### C7L-TRACE-04 — `containsUnicodeFormatting` lineage call sites
+- Files: 7 production call sites in actions; consolidated through `validation.ts:50-52`
+- Severity: NONE
+- Confidence: High
+- Trace: Single helper, used everywhere. Lineage comment in `validation.ts:21-32` lists C3L through C6L. All known surfaces covered.

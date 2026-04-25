@@ -1,33 +1,43 @@
-# Code Reviewer — Cycle 6 (review-plan-fix loop, 2026-04-25)
+# Code Reviewer — Cycle 7 (review-plan-fix loop, 2026-04-25)
 
-## Inventory scope
-- Mutating server actions and their input-sanitization conventions.
-- Cycle-3/4/5 lineage: `UNICODE_FORMAT_CHARS` → `isValidTopicAlias` → `isValidTagName` → `topic.label`/`image.title`/`image.description`. Looking for the next consumer in line.
+## Lens
 
-## New findings
+General code quality, maintainability, idiomatic correctness. Skipping Unicode work per directive.
 
-### C6L-CR-01 — `seo.ts` is the last consistency gap in the admin-string Unicode-formatting policy [LOW] [High confidence]
+## Findings
 
-**File:** `apps/web/src/app/actions/seo.ts:71-101`
+### C7L-CR-01 — Duplicate `tagsString.split(',')` parse in `uploadImages`
+- File: `apps/web/src/app/actions/images.ts:141-149`
+- Severity: LOW
+- Confidence: High
+- Issue: `tagsString.split(',')` runs twice; the second pass only counts the non-empty parts to compare against the validated tag-name count. Aside from cost (small), the divergence creates a maintenance hazard: changing the parse rule in line 142 (e.g. supporting `;` as a separator) requires updating line 147 too.
+- Failure scenario: Future change introduces semicolon as separator in line 142 only — `tagNames` populates but the count check at line 147 silently rejects every batch with `invalidTagNames`.
+- Fix: Single split, derive `rawCandidates` and `tagNames` from one source.
 
-**Why a problem.** `seo.ts` follows the `stripControlChars(value.trim())` + length-check pattern. After C3L/C4L/C5L it stands alone as the last admin-string consumer that doesn't apply the Unicode-formatting policy. A future contributor reading `seo.ts:75-78` will reasonably copy the pattern and inherit the gap.
+### C7L-CR-02 — `images.ts:142` filter chain runs `getTagSlug(t)` for every `t`, then again at line 325
+- File: `apps/web/src/app/actions/images.ts:142,325`
+- Severity: INFO
+- Confidence: Medium
+- Issue: `getTagSlug` runs twice for tags that survive both filters (once in validate, once when persisting). Minor work duplication. Acceptable for now.
+- Fix: Defer.
 
-**Suggested fix.**
-1. Add `UNICODE_FORMAT_CHARS.test(value)` rejection (preferably via the new `containsUnicodeFormatting` helper from C6L-ARCH-01) inline in `updateSeoSettings`, alongside the existing length checks. Return distinct i18n error keys for each field so the UI can highlight the offending input.
-2. Add a brief comment pointing to the C3L/C4L/C5L lineage so the policy reads as one cohesive thread.
+### C7L-CR-03 — `loadMoreImages` reads `loadMoreRateLimit.get(ip)?.count` after just `set`-ing the entry
+- File: `apps/web/src/app/actions/public.ts:64`
+- Severity: INFO
+- Confidence: Medium
+- Issue: After `preIncrementLoadMoreAttempt` modifies the entry, line 64 re-reads via `loadMoreRateLimit.get(ip)?.count ?? 0`. In single-threaded Node this is impossible to mis-read, but the indirect access is needlessly verbose. Reading the entry's `count` directly through the locally-assigned reference would be cleaner.
+- Fix: Use the local `entry` variable directly.
 
-### C6L-CR-02 — Pattern inconsistency between `images.ts:670-675` and `topics.ts:83/185` [INFO] [High confidence]
+### C7L-CR-04 — `console.debug` swallowing audit-log failures
+- File: Multiple (e.g. `topics.ts:133`, `sharing.ts:151,346`, `admin-users.ts:153,243`, `seo.ts:163`, `images.ts:482,594,707`)
+- Severity: LOW
+- Confidence: High
+- Issue: `console.debug` is the level for operational quiet-down. For audit log writes, `console.warn` would be more visible without spamming. Production NODE_ENV=production frequently filters debug.
+- Fix: Defer; promote audit-log catch sites to `console.warn`. Not urgent.
 
-**Files:**
-- `apps/web/src/app/actions/topics.ts:83, 185` — `if (UNICODE_FORMAT_CHARS.test(label)) ...`
-- `apps/web/src/app/actions/images.ts:670-675` — `if (sanitizedTitle && UNICODE_FORMAT_CHARS.test(sanitizedTitle)) ...`
-
-**Why a problem.** Both correct individually; together they invite copy-the-wrong-shape. Factor into `containsUnicodeFormatting`, which encapsulates the truthiness guard.
-
-## Out of scope
-- `tags.ts` / `topic_aliases` already have full Unicode-formatting rejection (C3L/C4L).
-- `auth.ts` and `admin-users.ts` use a regex-bounded username field that excludes Unicode formatting characters.
-- `settings.ts` accepts numeric/boolean values only (`gallery-config-shared.ts:10-19`); `isValidSettingValue` numeric-parses each key. No string vector.
-
-## Cross-agent agreement
-Overlaps with security-reviewer (root issue), critic (piecemeal continuation), architect (shared helper), document-specialist (CLAUDE.md update), test-engineer (coverage).
+### C7L-CR-05 — `topics.ts:185` lineage comment carries C5L/C6L IDs as the lineage extends
+- File: `apps/web/src/app/actions/topics.ts:183-185`
+- Severity: INFO
+- Confidence: Low
+- Issue: Comment cites C5L-SEC-01 / C6L-ARCH-01, but as lineage grows, ID-based comments accumulate. Not a functional issue.
+- Fix: None this cycle.

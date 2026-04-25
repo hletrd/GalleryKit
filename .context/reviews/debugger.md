@@ -1,24 +1,38 @@
-# Debugger — Cycle 6 (review-plan-fix loop, 2026-04-25)
+# Debugger — Cycle 7 (review-plan-fix loop, 2026-04-25)
 
-## Bug-hunt sweep
+## Lens
 
-Re-checked baseline gates (this cycle):
-- `npm run lint --workspace=apps/web`: clean (exit 0)
-- `npm run lint:api-auth --workspace=apps/web`: clean
-- `npm run lint:action-origin --workspace=apps/web`: clean
-- `tsc --noEmit -p apps/web/tsconfig.json`: clean (exit 0)
-- `vitest run`: 379/379 across 59 files
+Bug hunt: latent runtime errors, edge cases, ordering bugs.
 
-Looked for race conditions, dangling resource lifetimes, and error-path regressions in cycle-5 commits.
+## Findings
 
-## New findings
+### C7L-DBG-01 — Duplicate `tagsString.split(',')` is a brittle parallel-parse hazard
+- File: `apps/web/src/app/actions/images.ts:141-149`
+- Severity: LOW
+- Confidence: High
+- Bug class: Brittle parallel parsing
+- Failure scenario: A future edit that changes filter rules in line 142 (e.g. supports `;` as a separator, or relaxes a length bound) but not line 147 creates a count mismatch that erroneously aborts every upload.
+- Repro path: Modify line 142 to permit semicolon. Line 147 still uses `,`. Counts diverge → `invalidTagNames` for every batch with a semicolon-separated tag.
+- Fix: Single split, derive both counts from the same array.
 
-### C6L-DBG-01 — Strip-and-persist (control chars) vs. reject (Unicode formatting) is a deliberate two-layer policy; document inline [INFO] [Low confidence]
+### C7L-DBG-02 — `images.ts:147` filter is consistent with line 142
+- File: `apps/web/src/app/actions/images.ts:147`
+- Severity: INFO
+- Confidence: Medium
+- Issue: `tagsString.split(',').filter(t => t.trim().length > 0)` accepts whitespace-only tags as zero. The line-142 filter applies `.map(t => t.trim())` then checks `t.length > 0`. Both passes are consistent — same set excluded.
+- Status: NOT A BUG.
 
-**File:** `apps/web/src/app/actions/seo.ts:71-78` (vs. the topics/images patterns).
+### C7L-DBG-03 — `getProcessingQueueState` global symbol survives HMR
+- File: `apps/web/src/lib/image-queue.ts:67,113-132`
+- Severity: INFO
+- Confidence: Medium
+- Issue: `processingQueueKey` is `Symbol.for(...)`, persistent across module reloads. In `next dev` HMR, a code change to `image-queue.ts` keeps the running queue alive while new module imports rebuild around the old PQueue instance. PQueue instance survives and is shared. Intentional.
+- Status: NOT A BUG.
 
-**Why a problem.** SEO settings strip-and-persist control characters silently, which is correct for paste workflows. The pending Unicode-formatting check is a *separate* policy that *rejects* (because no admin would intentionally paste an RLO into the gallery title). Without an inline comment recording the two-layer reasoning, a future contributor will eventually try to "harmonise" the patterns into one shape and accidentally reject benign smart-quote/non-breaking-space inputs.
-
-**Suggested fix.** Add a one-line comment in the cycle-6 fix commit explaining the strip-vs-reject layering.
+### C7L-DBG-04 — `cleanOrphanedTmpFiles` swallows non-ENOENT errors at warn level
+- File: `apps/web/src/lib/image-queue.ts:62`
+- Severity: INFO
+- Confidence: High
+- Status: Already handled correctly per C8R-RPL-04 lineage in the comment block. **No bug.**
 
 ## No active runtime regressions detected.

@@ -1,30 +1,26 @@
-# Document Specialist — Cycle 6 (review-plan-fix loop, 2026-04-25)
+# Document Specialist — Cycle 7 (review-plan-fix loop, 2026-04-25)
 
-## Inventory scope
-- `CLAUDE.md` Security Architecture / Database Security bullet (the lineage description).
-- `apps/web/src/lib/validation.ts:30-39` (lineage comment ending at C5L-SEC-01).
-- `apps/web/src/app/actions/seo.ts:71-78` (sanitization comment that does not yet reflect the post-cycle-6 policy).
+## Lens
 
-## New findings
+Doc drift, lineage comments, public-facing docs vs. implementation.
 
-### C6L-DOC-01 — `CLAUDE.md` Database Security bullet still does not enumerate SEO fields [LOW] [Medium confidence]
+## Findings
 
-**File:** `CLAUDE.md` Database Security section.
+### C7L-DOC-01 — `validation.ts:21-32` lineage is comprehensive after C6L
+- File: `apps/web/src/lib/validation.ts:21-32`
+- Severity: INFO
+- Confidence: Low
+- Status: Lineage now lists six entries. Cycle 7 added no new Unicode-policy surface; list does not grow this cycle. **No change needed.**
 
-**Suggested fix.** Update the bullet to read (after the cycle-6 fix lands):
+### C7L-DOC-02 — `CLAUDE.md` accurately documents single-instance topology and AGG8R-05 advisory-lock scoping
+- File: `CLAUDE.md`
+- Severity: INFO
+- Confidence: High
+- Status: Confirmed. No drift this cycle.
 
-> Admin-controlled persistent string fields (`topic.alias`, `tag.name`, `topic.label`, `image.title`, `image.description`, `seo_title`, `seo_description`, `seo_nav_title`, `seo_author`) reject Unicode bidi overrides (U+202A-202E, U+2066-2069) and zero-width / invisible formatting characters at the validation layer (`UNICODE_FORMAT_CHARS` in `apps/web/src/lib/validation.ts`).
-
-### C6L-DOC-02 — `validation.ts` lineage comment stops at C5L-SEC-01 [INFO] [High confidence]
-
-**File:** `apps/web/src/lib/validation.ts:30-39`
-
-**Suggested fix.** Append in the same commit that lands C6L-SEC-01:
-
-> ..., extended to topic.label / image.title / image.description (C5L-SEC-01), and to seo_title / seo_description / seo_nav_title / seo_author (C6L-SEC-01).
-
-### C6L-DOC-03 — `seo.ts:71-74` sanitization comment is not aware of the Unicode-formatting policy [INFO] [Medium confidence]
-
-**File:** `apps/web/src/app/actions/seo.ts:71-74`
-
-**Suggested fix.** Append the lineage reference in the same commit, plus the strip-vs-reject layering note (per C6L-DBG-01).
+### C7L-DOC-03 — `upload-tracker.ts:14` parameter naming
+- File: `apps/web/src/lib/upload-tracker.ts:14-19`
+- Severity: INFO
+- Confidence: Medium
+- Issue: Function signature documents `ip: string` as the third positional parameter, but actual key used by callers is `${userId}:${ip}`. Renaming `ip` → `key` would self-document.
+- Fix: Cosmetic rename if cycle has time; otherwise defer.
