@@ -80,11 +80,13 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                     </Link>
                 </div>
 
-                {/* Mobile Expand Toggle */}
+                {/* Mobile Expand Toggle. Sized to the 44x44 touch-target
+                    minimum (Apple HIG / Google MDN) — F-2; the previous `p-2`
+                    rendered 32x32 which is below WCAG 2.5.5 AAA. */}
                 <button
                     onClick={() => setIsExpanded(!isExpanded)}
                     className={cn(
-                        "ml-auto p-2 hover:bg-accent rounded-full md:hidden shrink-0",
+                        "ml-auto min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0",
                         isExpanded && "mt-1"
                     )}
                     aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
