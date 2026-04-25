@@ -55,10 +55,17 @@ export function normalizeOpenGraphLocale(value: string | null | undefined): stri
 }
 
 export function getOpenGraphLocale(locale: string, configuredLocale?: string | null): string {
+    // F-6 / F-16: when the request is on a recognized route locale (e.g.
+    // `/en/...`), the OG locale MUST match that route locale. Earlier the
+    // admin-configured fallback (`seo.locale`) silently overrode the route
+    // locale, causing English pages to advertise `ko_KR`. The configured
+    // value should only act as the default for unknown / unsupported route
+    // locales.
+    if (isSupportedLocale(locale)) {
+        return OPEN_GRAPH_LOCALE_BY_LOCALE[locale];
+    }
     return normalizeOpenGraphLocale(configuredLocale)
-        ?? (isSupportedLocale(locale)
-            ? OPEN_GRAPH_LOCALE_BY_LOCALE[locale]
-            : OPEN_GRAPH_LOCALE_BY_LOCALE.en);
+        ?? OPEN_GRAPH_LOCALE_BY_LOCALE.en;
 }
 
 export function getAlternateOpenGraphLocales(locale: string, configuredLocale?: string | null): string[] {

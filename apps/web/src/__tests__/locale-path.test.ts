@@ -45,13 +45,27 @@ describe('Open Graph locale helpers', () => {
         expect(getAlternateOpenGraphLocales('ko')).toEqual(['en_US']);
     });
 
-    it('honors a valid configured Open Graph locale override', () => {
-        expect(getOpenGraphLocale('ko', 'en_US')).toBe('en_US');
-        expect(getAlternateOpenGraphLocales('ko', 'en_US')).toEqual(['ko_KR']);
+    it('keeps route locale even when an admin-configured locale differs (F-6/F-16)', () => {
+        // The route locale MUST always win on supported locales so social
+        // unfurls and Google indexing match the URL the user actually
+        // visited. The admin-configured `seo.locale` is the default for
+        // unsupported / unknown route locales only.
+        expect(getOpenGraphLocale('ko', 'en_US')).toBe('ko_KR');
+        expect(getAlternateOpenGraphLocales('ko', 'en_US')).toEqual(['en_US']);
+        expect(getOpenGraphLocale('en', 'ko_KR')).toBe('en_US');
+        expect(getAlternateOpenGraphLocales('en', 'ko_KR')).toEqual(['ko_KR']);
+    });
+
+    it('uses configured Open Graph locale only for unsupported route locales', () => {
+        expect(getOpenGraphLocale('unknown', 'ko_KR')).toBe('ko_KR');
+        expect(getOpenGraphLocale('unknown', null)).toBe('en_US');
     });
 
     it('ignores unsupported Open Graph locale overrides', () => {
+        // Route locale wins; configured fallback ignored entirely.
         expect(getOpenGraphLocale('ko', 'korean')).toBe('ko_KR');
         expect(getOpenGraphLocale('ko', 'fr_FR')).toBe('ko_KR');
+        // Unsupported route locale + invalid override → en default.
+        expect(getOpenGraphLocale('unknown', 'fr_FR')).toBe('en_US');
     });
 });
