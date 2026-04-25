@@ -9,7 +9,7 @@ import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, UNICODE_FORMAT_CHARS } from '@/lib/validation';
+import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, containsUnicodeFormatting } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { stripControlChars } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -74,13 +74,13 @@ export async function createTopic(formData: FormData) {
     const slug = stripControlChars(rawSlug) ?? '';
     if (label !== rawLabel) return { error: t('invalidLabel') };
     if (slug !== rawSlug) return { error: t('invalidSlug') };
-    // C5L-SEC-01: reject Unicode bidi/invisible formatting characters in
+    // C5L-SEC-01 / C6L-ARCH-01: reject Unicode bidi/invisible formatting in
     // admin-controlled labels for parity with topic aliases (C3L-SEC-01) and
     // tag names (C4L-SEC-01). Labels render in admin tables, public navigation,
     // OG images, and SEO previews; React HTML-escapes special chars but does
     // not strip Unicode bidi/invisible chars, leaving a visual-spoofing
-    // surface unless rejected here.
-    if (UNICODE_FORMAT_CHARS.test(label)) return { error: t('invalidLabel') };
+    // surface unless rejected here. Single canonical helper.
+    if (containsUnicodeFormatting(label)) return { error: t('invalidLabel') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
@@ -180,9 +180,9 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     const slug = stripControlChars(rawSlug) ?? '';
     if (label !== rawLabel) return { error: t('invalidLabel') };
     if (slug !== rawSlug) return { error: t('invalidSlug') };
-    // C5L-SEC-01: reject Unicode bidi/invisible formatting in updated labels
-    // (parity with createTopic).
-    if (UNICODE_FORMAT_CHARS.test(label)) return { error: t('invalidLabel') };
+    // C5L-SEC-01 / C6L-ARCH-01: reject Unicode bidi/invisible formatting in
+    // updated labels (parity with createTopic). Single canonical helper.
+    if (containsUnicodeFormatting(label)) return { error: t('invalidLabel') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 

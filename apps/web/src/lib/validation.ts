@@ -27,11 +27,29 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 //   formatting characters used for visual spoofing).
 //
 // Lineage: introduced for CSV export hardening (C7R-RPL-11 / C8R-RPL-01),
-// extended to topic aliases (C3L-SEC-01), tag names (C4L-SEC-01), and
-// topic.label / image.title / image.description (C5L-SEC-01). Exported so
-// all consumers share one source of truth and stay in lock-step when the
-// character set evolves.
+// extended to topic aliases (C3L-SEC-01), tag names (C4L-SEC-01),
+// topic.label / image.title / image.description (C5L-SEC-01), and
+// seo_title / seo_description / seo_nav_title / seo_author (C6L-SEC-01).
+// Exported so all consumers share one source of truth and stay in
+// lock-step when the character set evolves.
 export const UNICODE_FORMAT_CHARS = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/;
+
+/**
+ * Returns true when `value` contains Unicode bidi/invisible formatting
+ * characters that should be rejected at admin-controlled string entry
+ * points. Null/empty inputs are treated as clean — the field-level
+ * required-check decides whether to error on empty separately.
+ *
+ * Single canonical entry point for the C3L/C4L/C5L/C6L policy. Use this
+ * helper at every admin-controlled persistent string write site so the
+ * rejection layer has one implementation. Consumers that already trim
+ * and assert non-empty (`isValidTopicAlias`, `isValidTagName`) may keep
+ * using `UNICODE_FORMAT_CHARS.test(value)` directly without the
+ * truthiness guard, since the guard adds a redundant branch.
+ */
+export function containsUnicodeFormatting(value: string | null | undefined): boolean {
+    return !!value && UNICODE_FORMAT_CHARS.test(value);
+}
 
 // Allow CJK characters, emojis, and most symbols for aliases, but disallow:
 // - Slashes (path separators)

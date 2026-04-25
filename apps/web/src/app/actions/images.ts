@@ -9,7 +9,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, UNICODE_FORMAT_CHARS } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, containsUnicodeFormatting } from '@/lib/validation';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
@@ -667,10 +667,12 @@ export async function updateImageMetadata(id: number, title: string | null, desc
     const sanitizedTitle = stripControlChars(title ? title.trim() : null) || null;
     const sanitizedDescription = stripControlChars(description ? description.trim() : null) || null;
 
-    if (sanitizedTitle && UNICODE_FORMAT_CHARS.test(sanitizedTitle)) {
+    // C5L-SEC-01 / C6L-ARCH-01: single canonical helper for the
+    // Unicode-formatting policy (truthiness guard handled internally).
+    if (containsUnicodeFormatting(sanitizedTitle)) {
         return { error: t('invalidTitle') };
     }
-    if (sanitizedDescription && UNICODE_FORMAT_CHARS.test(sanitizedDescription)) {
+    if (containsUnicodeFormatting(sanitizedDescription)) {
         return { error: t('invalidDescription') };
     }
 

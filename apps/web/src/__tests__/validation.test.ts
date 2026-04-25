@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug } from '@/lib/validation';
+import { containsUnicodeFormatting, hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug } from '@/lib/validation';
 
 describe('isValidSlug', () => {
     it('accepts lowercase alphanumeric with hyphens and underscores', () => {
@@ -195,6 +195,43 @@ describe('isValidTagSlug', () => {
         expect(isValidTagSlug('')).toBe(false);
         expect(isValidTagSlug('bad.slug')).toBe(false);
         expect(isValidTagSlug('bad/tag')).toBe(false);
+    });
+});
+
+// C6L-ARCH-01: single canonical helper for the Unicode-formatting policy.
+// Truthiness branch matters because nullable admin string columns
+// (image.title / image.description / seo_*) reach the helper as null/empty.
+describe('containsUnicodeFormatting', () => {
+    it('treats null/undefined/empty as clean', () => {
+        expect(containsUnicodeFormatting(null)).toBe(false);
+        expect(containsUnicodeFormatting(undefined)).toBe(false);
+        expect(containsUnicodeFormatting('')).toBe(false);
+    });
+
+    it('treats plain ASCII / CJK / emoji text as clean', () => {
+        expect(containsUnicodeFormatting('plain text')).toBe(false);
+        expect(containsUnicodeFormatting('안녕하세요')).toBe(false);
+        expect(containsUnicodeFormatting('🎉 party')).toBe(false);
+    });
+
+    it('detects Unicode bidi override / isolate characters', () => {
+        expect(containsUnicodeFormatting('a‮b')).toBe(true); // RLO
+        expect(containsUnicodeFormatting('a‪b')).toBe(true); // LRE
+        expect(containsUnicodeFormatting('a‭b')).toBe(true); // LRO
+        expect(containsUnicodeFormatting('a⁦b')).toBe(true); // LRI
+        expect(containsUnicodeFormatting('a⁩b')).toBe(true); // PDI
+    });
+
+    it('detects zero-width / invisible formatting characters', () => {
+        expect(containsUnicodeFormatting('a​b')).toBe(true); // ZWSP
+        expect(containsUnicodeFormatting('a‌b')).toBe(true); // ZWNJ
+        expect(containsUnicodeFormatting('a‍b')).toBe(true); // ZWJ
+        expect(containsUnicodeFormatting('a‎b')).toBe(true); // LRM
+        expect(containsUnicodeFormatting('a‏b')).toBe(true); // RLM
+        expect(containsUnicodeFormatting('a⁠b')).toBe(true); // WJ
+        expect(containsUnicodeFormatting('a﻿b')).toBe(true); // BOM
+        expect(containsUnicodeFormatting('a᠎b')).toBe(true); // MVS
+        expect(containsUnicodeFormatting('a￹b')).toBe(true); // interlinear anchor
     });
 });
 

@@ -10,6 +10,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { validateSeoOgImageUrl } from '@/lib/seo-og-url';
 import { normalizeOpenGraphLocale } from '@/lib/locale-path';
 import { stripControlChars } from '@/lib/sanitize';
+import { containsUnicodeFormatting } from '@/lib/validation';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import type { SeoSettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -72,9 +73,42 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // value that will be stored. Without this, control characters pass
     // the length check but are stripped later, causing a mismatch
     // between validated and persisted data (matches settings.ts pattern).
+    //
+    // Two-layer hygiene policy (do not collapse the layers — they have
+    // different intents):
+    //   (1) `stripControlChars` silently strips C0/C1 control codepoints
+    //       so admins can paste from external editors with smart-quote
+    //       and non-breaking-space artifacts without errors.
+    //   (2) `containsUnicodeFormatting` *rejects* Unicode bidi/invisible
+    //       formatting characters (Trojan Source / zero-width spoofing)
+    //       because no admin would intentionally paste those into HTML
+    //       head / OG metadata. Lineage: C7R-RPL-11 / C8R-RPL-01 (CSV)
+    //       → C3L-SEC-01 (topic alias) → C4L-SEC-01 (tag name)
+    //       → C5L-SEC-01 (topic.label / image.title / image.description)
+    //       → C6L-SEC-01 (this surface — SEO settings rendered into every
+    //       public page's <title> / <meta description> / <meta og:*> and
+    //       the OG image SVG).
     const sanitizedSettings: Record<string, string> = {};
     for (const [key, value] of Object.entries(settings)) {
         sanitizedSettings[key] = stripControlChars(value.trim()) ?? '';
+    }
+
+    // C6L-SEC-01: reject Unicode bidi/invisible formatting characters in
+    // the four free-form SEO fields before length checks. `seo_locale`
+    // and `seo_og_image_url` skip this gate because their existing
+    // validators (`normalizeOpenGraphLocale`, `validateSeoOgImageUrl`)
+    // are stricter than the Unicode-formatting filter.
+    if (containsUnicodeFormatting(sanitizedSettings.seo_title)) {
+        return { error: t('seoTitleInvalid') };
+    }
+    if (containsUnicodeFormatting(sanitizedSettings.seo_description)) {
+        return { error: t('seoDescriptionInvalid') };
+    }
+    if (containsUnicodeFormatting(sanitizedSettings.seo_nav_title)) {
+        return { error: t('seoNavTitleInvalid') };
+    }
+    if (containsUnicodeFormatting(sanitizedSettings.seo_author)) {
+        return { error: t('seoAuthorInvalid') };
     }
 
     // Validate individual field lengths (on sanitized values)
