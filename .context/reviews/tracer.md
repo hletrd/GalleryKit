@@ -1,21 +1,27 @@
-# Tracer Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
+# Tracer — Cycle 5 (review-plan-fix loop, 2026-04-25)
 
-## Trace path: tag name input → DB → render
+## Trace targets
+1. `topic.label` — admin form input → `createTopic`/`updateTopic` → `topics.label` column → admin UI tables, masonry grid headers, OG image, navigation.
+2. `image.title`/`image.description` — admin form input → `updateImageMetadata` → `images.title`/`images.description` columns → photo viewer, info bottom sheet, lightbox, OG card.
+3. `image.user_filename` — multipart upload → `uploadImages` → `images.user_filename` column → admin image manager only (not in public selects).
 
-1. Admin POSTs tag name in `addTagToImage` / `updateTag` / `batchAddTags` / `batchUpdateImageTags`.
-2. `stripControlChars` applied (`\x00-\x1F`, `\x7F-\x9F`); ASCII control chars stripped, but **U+200B/U+202E/U+2066/U+FEFF survive** (high codepoints not in the regex).
-3. `isValidTagName` validates length, comma, HTML-special chars — but not Unicode bidi/invisible.
-4. `getTagSlug` derives slug via `[^\p{Letter}\p{Number}-]+` regex which strips the formatting chars: slug is safe.
-5. **Name persists with formatting chars intact** in `tags.name` (varchar 255).
-6. Admin UI (`/admin/tags`) renders the name in tables; image-pill chips on photo cards render the name.
+## New findings
 
-CSV consumer is hardened (C7R-RPL-11 / C8R-RPL-01). UI rendering is not — this is the gap.
+### C5L-TRACE-01 — `topic.label` flows to public route segments and OG image without Unicode-formatting filter [LOW] [Medium confidence]
 
-## Cross-references
+**Trace path:**
+- `apps/web/src/app/actions/topics.ts:73` strips control chars, validates length, persists `label`.
+- `apps/web/src/db/schema.ts:6` `varchar(255)` accepts arbitrary Unicode formatting characters.
+- Renderers: `apps/web/src/components/nav-client.tsx`, masonry grid, OG image at `/api/og`, public topic header at `/[locale]/(public)/[topic]/page.tsx`.
+- React HTML-escapes special chars but does **not** strip Unicode bidi/invisible chars.
 
-- C4L-SEC-01 confirmed.
-- C3L-SEC-01 closed the parallel `isValidTopicAlias` path — same hardening posture should apply.
+### C5L-TRACE-02 — `image.title`/`image.description` flow to public photo viewer and lightbox [LOW] [Medium confidence]
 
-## Confidence
+**Trace path:**
+- `apps/web/src/app/actions/images.ts:642-707` strips control chars, validates length.
+- DB column accepts the Unicode formatting characters.
+- Public surfaces: `photo-viewer.tsx`, `info-bottom-sheet.tsx`, `lightbox.tsx`, `/api/og` route, EXIF panel.
+- Same React-escape behaviour as C5L-TRACE-01.
 
-- High that the gap exists; Medium that the practical risk is low (admin-only input, low blast radius). Net: defense-in-depth fix worth landing.
+## Cross-agent agreement
+Overlaps with security-reviewer (C5L-SEC-01) and architect (C5L-ARCH-01).

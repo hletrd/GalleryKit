@@ -1,34 +1,36 @@
-# Code Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
+# Code Reviewer — Cycle 5 (review-plan-fix loop, 2026-04-25)
 
-## Inventory
+## Inventory scope
+- Mutating server actions and their input-sanitization conventions.
+- Cycle-3/Cycle-4 lineage: `UNICODE_FORMAT_CHARS` → `isValidTopicAlias` → `isValidTagName`. Looking for the next consumers in line.
 
-Same as security-reviewer plus: data layer (`apps/web/src/lib/data.ts`), image queue (`image-queue.ts`), revalidation helpers, sharing actions, `proxy.ts`, validation/sanitize tests.
+## New findings
 
-## Findings
+### C5L-CR-01 — Inconsistent admin-string sanitization policy [LOW] [High confidence]
 
-### C4L-CR-01 — `UNICODE_FORMAT_CHARS` regex is duplicated implicitly between `isValidTopicAlias` and CSV-escape logic [LOW] [Medium confidence]
+**Files:**
+- `apps/web/src/app/actions/topics.ts` (`label` lines 73, 172)
+- `apps/web/src/app/actions/images.ts` (`title`/`description` lines 662-663)
 
-- **File / line:** `apps/web/src/lib/validation.ts:37`, `apps/web/src/lib/csv-escape.ts` (parallel logic).
-- **Issue:** The set of high-codepoint formatting characters the project hardens against is encoded twice — once as a regex in `validation.ts` and once as character-class strips in `csv-escape.ts`. Adding `isValidTagName` parity (C4L-SEC-01) means a third consumer. Without a shared constant, the regex risks drift over time.
-- **Suggested fix:** Export `UNICODE_FORMAT_CHARS` from `validation.ts` (or a new `lib/unicode-format-chars.ts`) and re-use it in both `isValidTopicAlias` and the new `isValidTagName` check.
-- **Confidence:** Medium — cleanup; not a correctness bug.
+**Why a problem.** The codebase has a documented sanitization policy for admin-controlled strings (see comments in `validation.ts` and the C3L/C4L commit history). Two new validator gates were added in Cycles 3 and 4. The remaining admin-controlled long-form string fields — `topic.label` and `image.title`/`image.description` — were skipped, creating a code-review inconsistency: a future contributor cannot easily tell whether the omission is intentional or simply incomplete.
 
-### C4L-CR-02 — `tag-records.ts:33-35` exact-match query case-sensitivity [INFO] [Low confidence]
+**Concrete failure scenario.** A future contributor adds another admin string field, copies the pattern from `topics.ts:73`, and inherits the gap.
 
-- **File / line:** `apps/web/src/lib/tag-records.ts:30-44`
-- **Issue:** `selectTagByNameOrSlug` runs `eq(tags.name, cleanName)`. With utf8mb4_*_ci collation, `=` is case-insensitive — that's actually intent: UNIQUE on `name` enforces case-insensitive uniqueness, so concurrent inserts of differently-cased names converge on slug. No issue.
-- **Suggested fix:** None.
-- **Confidence:** Low (verified intentional; logged for completeness).
+**Suggested fix.** Either:
+(a) extend Unicode-formatting rejection to `topic.label`, `image.title`, `image.description` (preferred — closes C5L-SEC-01 and unifies the rule);
+(b) document in `CLAUDE.md` why `label`/`title`/`description` are intentionally exempted (less preferred — leaves the security gap).
 
-## No findings (verified clean)
+### C5L-CR-02 — `updateImageMetadata` sanitization comment cites pattern parity but the behaviour does not match [INFO] [Medium confidence]
 
-- Same-origin guard wiring across all `apps/web/src/app/actions/*.ts` mutations.
-- `revalidate = 0` annotations on public photo/topic/shared/home pages.
-- `requireSameOriginAdmin` wired into all mutating exports.
-- Per-image-processing advisory lock + conditional UPDATE remains race-safe.
-- Audit log truncation and `purgeOldAuditLog` retention path correct.
+**File:** `apps/web/src/app/actions/images.ts:659-663`
 
-## Confidence summary
+**Why a problem.** Inline comment claims it "matches settings.ts/seo.ts pattern" but `settings.ts:64` uses `stripControlChars(value.trim())` whereas `images.ts:662-663` uses `stripControlChars(title ? title.trim() : null) || null`. The semantic difference is correct (DB nullability) but the comment is misleading.
 
-- C4L-CR-01 — Medium (cleanup)
-- C4L-CR-02 — Low (no action)
+**Suggested fix.** Update the comment to "follows the sanitize-before-validate ordering from settings.ts/seo.ts; null preservation is image-specific".
+
+## Out of scope
+- `tags.ts` / `topic_aliases` already have full Unicode-formatting rejection (C3L/C4L).
+- `auth.ts` and `admin-users.ts` use a regex that already excludes Unicode formatting characters.
+
+## Cross-agent agreement
+Overlaps with security-reviewer (root issue), architect (shared helper), document-specialist (CLAUDE.md update).

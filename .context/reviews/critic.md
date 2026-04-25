@@ -1,20 +1,22 @@
-# Critic Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
+# Critic — Cycle 5 (review-plan-fix loop, 2026-04-25)
 
-## Cross-cutting concerns
+## Critique angle
+The Unicode-formatting hardening lineage (C7R-RPL-11 → C8R-RPL-01 → C3L-SEC-01 → C4L-SEC-01) has been applied piecemeal: one new field per cycle, never the full fanout. Each cycle's plan touches the smallest possible surface. That ratchets up the parity-gap surface area for the next reviewer instead of closing the policy in one motion.
 
-### C4L-CRIT-01 — Unicode-formatting hardening posture is partial
+## New findings
 
-- **Files:** `apps/web/src/lib/validation.ts:37,43-46`
-- **Issue:** Cycle 3 closed the `isValidTopicAlias` gap and CSV export already strips the same characters, but `isValidTagName` (also user-controlled, also rendered) was not extended in the same pass. This makes the hardening posture inconsistent across user-controlled string surfaces. Adding parity is the second of three known places.
-- **Severity / confidence:** LOW / Medium.
-- **Recommendation:** Schedule the parity fix this cycle and co-locate the regex in a shared module to make further parity expansions one-line.
+### C5L-CRIT-01 — Piecemeal application of Unicode-formatting policy is inviting regression [LOW] [High confidence]
 
-## Cycle hygiene
+**Surface:** `validation.ts`, `topics.ts`, `images.ts`, `settings.ts`, `seo.ts`.
 
-- `.context/plans/` continues to grow; the deferred-tracker pattern is healthy. No new bookkeeping issues.
-- Aggregate files preserved across cycles (pattern: `_aggregate-cycleN-*.md`) — provenance trail intact.
-- Recent commits are fine-grained, GPG-signed, gitmoji-tagged.
+**Why a problem.** Three cycles in a row have closed exactly one Unicode-formatting gap. Each commit adds one `if (UNICODE_FORMAT_CHARS.test(value)) return false;` line in a different file. The policy is now scattered across `validation.ts` (constant) plus inline tests in two validator helpers, but three other admin-controlled string surfaces still lack the check (`topics.label`, `images.title`, `images.description`). A reviewer who lands a new admin string field next month is unlikely to discover this scattered policy from reading the code.
 
-## Confidence summary
+**Concrete failure scenario.** Cycle 6 closes `topic.label`. Cycle 7 closes `image.title`. Cycle 8 closes `image.description`. Each commit is "fix(security): bidi/invisible chars in X" with no shared helper or compile-time guard.
 
-- C4L-CRIT-01 — Medium
+**Suggested fix.**
+1. Promote the per-field test into a shared helper in `validation.ts` so future contributors see one canonical entry point.
+2. Apply it in this cycle to `topic.label`, `image.title`, `image.description` together — close the parity gap in one motion rather than three more cycles.
+3. Document the policy in `CLAUDE.md` security architecture so the next contributor reads "every admin-controlled string column passes the Unicode-formatting check" and adds it to new fields by default.
+
+## Cross-agent agreement
+Overlaps with security-reviewer (C5L-SEC-01 root), code-reviewer (C5L-CR-01 inconsistency), architect (shared helper).

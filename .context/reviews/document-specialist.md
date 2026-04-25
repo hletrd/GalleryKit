@@ -1,23 +1,26 @@
-# Documentation Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
+# Document Specialist — Cycle 5 (review-plan-fix loop, 2026-04-25)
 
-## Inventory
+## Inventory scope
+- `CLAUDE.md` security architecture section.
+- `validation.ts` lineage comments.
+- `apps/web/src/lib/sanitize.ts` doc comment.
 
-Reviewed: `CLAUDE.md`, `AGENTS.md`, `apps/web/README.md`, README, `.context/plans/233-deferred-cycle3-loop.md`, recent commit messages.
+## New findings
 
-## Findings
+### C5L-DOC-01 — `CLAUDE.md` enumerates Unicode-formatting hardening only for CSV / aliases / tags, not for the broader policy [LOW] [Medium confidence]
 
-### C4L-DOC-01 — When implementing C4L-SEC-01, update the validation comment to reference both paths
+**File:** `CLAUDE.md` Security Architecture / Database Security bullet that lists "C7R-RPL-01" and "C8R-RPL-01" hardening.
 
-- **File / line:** `apps/web/src/lib/validation.ts:21-37`
-- **Issue:** The existing comment block above `isValidTopicAlias` cites C3L-SEC-01. After adding parity to `isValidTagName`, the rationale should be either co-located on the new check or factored into a single shared comment block.
-- **Severity / confidence:** INFO / Medium.
-- **Suggested fix:** Add a brief comment to `isValidTagName` referencing C4L-SEC-01 plus the lineage, or co-locate the comment on the shared regex export.
+**Why a problem.** The doc describes the CSV escape as the only Unicode-formatting hardening location. After Cycles 3 and 4 it should also describe the validator-level rejection for aliases and tag names. After this cycle (if C5L-SEC-01 lands), the section needs another addition for `topic.label`, `image.title`, `image.description`. Without periodic doc consolidation, the security narrative lags reality.
 
-## No other documentation drift
+**Suggested fix.** Add one summary line under the Database Security bullet:
 
-- CLAUDE.md remains accurate (storage backend status, single-writer note, advisory-lock scope, runtime topology).
-- AGENTS.md / commit policy intact.
+> Admin-controlled persistent string fields (`topic.alias`, `tag.name`, `topic.label`, `image.title`, `image.description`) reject Unicode bidi overrides (U+202A-202E, U+2066-2069) and zero-width / invisible formatting characters at the validation layer (`UNICODE_FORMAT_CHARS` in `apps/web/src/lib/validation.ts`).
 
-## Confidence summary
+### C5L-DOC-02 — `validation.ts` lineage comment stops at C4L-SEC-01 [INFO] [High confidence]
 
-- C4L-DOC-01 — Medium
+**File:** `apps/web/src/lib/validation.ts:30-32`
+
+**Why a problem.** Lineage comment says "extended to tag names (C4L-SEC-01)". When C5L-SEC-01 lands, this comment must be updated to extend the lineage to `topic.label`/`image.title`/`image.description`.
+
+**Suggested fix.** Append the new extension in the same commit that lands C5L-SEC-01.

@@ -1,24 +1,20 @@
-# Verifier Review — Cycle 4 (review-plan-fix loop, 2026-04-25)
+# Verifier — Cycle 5 (review-plan-fix loop, 2026-04-25)
 
-## Gate baseline (before fixes)
+## Gate baseline (before cycle-5 fixes)
 
-- ESLint: clean (exit 0)
-- Typecheck: clean (exit 0)
-- lint:api-auth: clean (exit 0)
-- lint:action-origin: clean (exit 0)
-- Vitest: 372/372 (exit 0)
-- Build: not re-run pre-fix this cycle (last green per Cycle 3 baseline)
+- `npm run lint --workspace=apps/web`: clean (exit 0)
+- typecheck (`tsc --noEmit -p apps/web/tsconfig.json`): clean (exit 0)
+- `npm run lint:api-auth --workspace=apps/web`: clean (exit 0)
+- `npm run lint:action-origin --workspace=apps/web`: clean (exit 0)
+- `vitest run` (apps/web): 376/376 passing across 59 files
 
-## Findings
+## Verification commitments for C5L-SEC-01 fix
 
-No verifier-class findings (gates green).
+When the fix lands, the verifier pass MUST confirm:
+1. `npm run lint`, typecheck, `lint:api-auth`, `lint:action-origin` still clean.
+2. New tests added for `topic.label`, `image.title`, `image.description` Unicode-formatting rejection in matching `*-actions.test.ts` files (per C5L-TE-01).
+3. Vitest count increases by ≥3 net cases (one per surface, including helper unit-test if introduced).
+4. `npm run build` clean (deferred to post-fix).
+5. Manual sanity: hitting the admin photo-edit form with an RLO character in the title returns the expected i18n error.
 
-## Verifier exit criterion for the C4L-SEC-01 fix
-
-- `isValidTagName` rejects ZWSP/U+202E/U+2066-2069/etc.
-- New tests in `validation.test.ts` covering the rejection.
-- All gates remain green after the fix.
-
-## Confidence
-
-- High that the codebase is in a deployable state.
+## No verification regressions detected this cycle
