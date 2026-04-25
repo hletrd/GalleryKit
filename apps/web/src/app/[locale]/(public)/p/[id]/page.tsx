@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { TagInfo } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -72,6 +72,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`;
     const ogImageUrl = absoluteImageUrl(imageUrl, seo.url);
     const pageUrl = localizeUrl(seo.url, locale, `/p/${id}`);
+    const author = seo.author.trim();
+    const metadataDescription = image.description
+        || (author
+            ? t('descriptionByAuthorWithTitle', { author, title: displayTitle })
+            : displayTitle);
+    const openGraphLocale = getOpenGraphLocale(locale);
 
     const ogImages = [{
         url: ogImageUrl,
@@ -82,25 +88,27 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
     return {
         title: displayTitle,
-        description: image.description || t('descriptionByAuthorWithTitle', { author: seo.author, title: displayTitle }),
+        description: metadataDescription,
         keywords: keywords,
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
             title: displayTitle,
-            description: image.description || t('descriptionByAuthor', { author: seo.author }),
+            description: metadataDescription,
             url: pageUrl,
             siteName: seo.title,
             images: ogImages,
             type: 'article',
             publishedTime: toIsoTimestamp(image.created_at),
-            authors: [seo.author],
+            ...(author ? { authors: [author] } : {}),
+            locale: openGraphLocale,
+            alternateLocale: getAlternateOpenGraphLocales(locale),
         },
         twitter: {
             card: 'summary_large_image',
             title: displayTitle,
-            description: image.description || t('descriptionByAuthor', { author: seo.author }),
+            description: metadataDescription,
             images: [ogImageUrl],
         }
     };
@@ -134,6 +142,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
 
     const keywords = image.tags?.map((t: TagInfo) => t.name) || [];
     if (image.topic) keywords.push(image.topic);
+    const author = seo.author.trim();
 
     const jsonLd = {
         '@context': 'https://schema.org',
@@ -141,12 +150,14 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
         contentUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg}`, seo.url),
         thumbnailUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, seo.url),
         encodingFormat: 'image/jpeg',
-        creditText: seo.author,
-        creator: {
-            '@type': 'Person',
-            name: seo.author,
-        },
-        copyrightNotice: seo.author,
+        ...(author ? {
+            creditText: author,
+            creator: {
+                '@type': 'Person',
+                name: author,
+            },
+            copyrightNotice: author,
+        } : {}),
         datePublished: toIsoTimestamp(image.created_at),
         uploadDate: toIsoTimestamp(image.created_at),
         width: {

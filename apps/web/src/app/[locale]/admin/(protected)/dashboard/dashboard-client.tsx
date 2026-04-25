@@ -16,7 +16,7 @@ interface DashboardClientProps {
     totalPages: number;
     imageSizes: number[];
     shareBaseUrl: string;
-    uploadLimits: { maxFiles: number; maxTotalBytes: number };
+    uploadLimits: { maxFiles: number; maxFileBytes: number; maxTotalBytes: number };
 }
 
 export function DashboardClient({ images, topics, tags, page, totalPages, imageSizes, shareBaseUrl, uploadLimits }: DashboardClientProps) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { absoluteUrl, localizePath, localizeUrl, stripLocalePrefix } from '@/lib/locale-path';
+import { absoluteUrl, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl, stripLocalePrefix } from '@/lib/locale-path';
 
 describe('stripLocalePrefix', () => {
     it('removes supported locale prefixes and keeps non-locale paths intact', () => {
@@ -30,5 +30,18 @@ describe('absoluteUrl/localizeUrl', () => {
         expect(absoluteUrl('https://gallery.example.com', '/p/1')).toBe('https://gallery.example.com/p/1');
         expect(localizeUrl('https://gallery.example.com', 'en', '/p/1')).toBe('https://gallery.example.com/en/p/1');
         expect(localizeUrl('https://gallery.example.com', 'ko', '/p/1')).toBe('https://gallery.example.com/ko/p/1');
+    });
+});
+
+describe('Open Graph locale helpers', () => {
+    it('maps route locales to valid Open Graph locale codes', () => {
+        expect(getOpenGraphLocale('en')).toBe('en_US');
+        expect(getOpenGraphLocale('ko')).toBe('ko_KR');
+        expect(getOpenGraphLocale('unknown')).toBe('en_US');
+    });
+
+    it('excludes the current locale from alternate Open Graph locales', () => {
+        expect(getAlternateOpenGraphLocales('en')).toEqual(['ko_KR']);
+        expect(getAlternateOpenGraphLocales('ko')).toEqual(['en_US']);
     });
 });

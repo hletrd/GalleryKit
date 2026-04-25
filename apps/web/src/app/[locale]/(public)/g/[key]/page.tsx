@@ -6,7 +6,7 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
 import { absoluteImageUrl, imageUrl } from '@/lib/image-url';
-import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -47,6 +47,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
 
     const pagePath = selectedImage ? `/g/${key}?photoId=${selectedImage.id}` : `/g/${key}`;
     const pageUrl = localizeUrl(seo.url, locale, pagePath);
+    const openGraphLocale = getOpenGraphLocale(locale);
     const coverImage = selectedImage ?? group.images[0];
     const metadataTitle = selectedImage ? getPhotoDisplayTitle(selectedImage, t('photo')) : t('ogTitle');
     const metadataDescription = selectedImage?.description || (selectedImage ? t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }) : t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }));
@@ -79,6 +80,8 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
             siteName: seo.title,
             type: 'website',
             images: ogImages,
+            locale: openGraphLocale,
+            alternateLocale: getAlternateOpenGraphLocales(locale),
         },
         twitter: {
             card: 'summary_large_image',

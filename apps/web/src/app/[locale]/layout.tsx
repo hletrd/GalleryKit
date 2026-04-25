@@ -6,15 +6,17 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/lib/constants';
-import { localizeUrl } from '@/lib/locale-path';
+import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizeUrl } from '@/lib/locale-path';
 import { getSeoSettings } from '@/lib/data';
 import siteConfig from "@/site-config.json";
 import { getCspNonce } from '@/lib/csp-nonce';
 
 import Script from 'next/script';
 
-export async function generateMetadata(): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params;
   const seo = await getSeoSettings();
+  const openGraphLocale = getOpenGraphLocale(locale);
 
   return {
     metadataBase: new URL(seo.url),
@@ -35,8 +37,8 @@ export async function generateMetadata(): Promise<Metadata> {
       description: seo.description,
       url: seo.url,
       siteName: seo.title,
-      locale: seo.locale,
-      alternateLocale: ['ko_KR', 'en_US'],
+      locale: openGraphLocale,
+      alternateLocale: getAlternateOpenGraphLocales(locale),
       type: "website",
     },
     twitter: {

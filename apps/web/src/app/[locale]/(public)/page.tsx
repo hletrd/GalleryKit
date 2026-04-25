@@ -3,7 +3,7 @@ import { HomeClient } from '@/components/home-client';
 import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { localizeUrl } from '@/lib/locale-path';
+import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
@@ -29,6 +29,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     allTagsPromise,
   ]);
   const pageUrl = localizeUrl(seo.url, locale, '/');
+  const openGraphLocale = getOpenGraphLocale(locale);
   const tagSlugs = requestedTagSlugs.length > 0
     ? filterExistingTagSlugs(requestedTagSlugs, allTags)
     : [];
@@ -56,6 +57,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
         url: pageUrl,
         siteName: seo.title,
         images: ogImages,
+        locale: openGraphLocale,
+        alternateLocale: getAlternateOpenGraphLocales(locale),
         type: 'website',
       },
       twitter: {
@@ -99,6 +102,8 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
       url: pageUrl,
       siteName: seo.title,
       images: ogImages,
+      locale: openGraphLocale,
+      alternateLocale: getAlternateOpenGraphLocales(locale),
       type: 'website',
     },
     twitter: {

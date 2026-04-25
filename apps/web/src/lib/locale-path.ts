@@ -41,3 +41,19 @@ export function absoluteUrl(baseUrl: string, path: string): string {
 export function localizeUrl(baseUrl: string, locale: string, path: string): string {
     return absoluteUrl(baseUrl, localizePath(locale, path));
 }
+
+const OPEN_GRAPH_LOCALE_BY_LOCALE: Record<Locale, string> = {
+    en: 'en_US',
+    ko: 'ko_KR',
+};
+
+export function getOpenGraphLocale(locale: string): string {
+    return isSupportedLocale(locale)
+        ? OPEN_GRAPH_LOCALE_BY_LOCALE[locale]
+        : OPEN_GRAPH_LOCALE_BY_LOCALE.en;
+}
+
+export function getAlternateOpenGraphLocales(locale: string): string[] {
+    const current = getOpenGraphLocale(locale);
+    return Object.values(OPEN_GRAPH_LOCALE_BY_LOCALE).filter((candidate) => candidate !== current);
+}

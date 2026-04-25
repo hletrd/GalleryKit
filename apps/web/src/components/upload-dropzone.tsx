@@ -21,6 +21,7 @@ export interface PendingUploadItem {
 
 interface UploadLimits {
     maxFiles: number;
+    maxFileBytes: number;
     maxTotalBytes: number;
 }
 
@@ -42,7 +43,7 @@ function formatBytes(bytes: number) {
 export function UploadDropzone({
     topics,
     availableTags,
-    uploadLimits = { maxFiles: 100, maxTotalBytes: 2 * 1024 * 1024 * 1024 },
+    uploadLimits = { maxFiles: 100, maxFileBytes: 200 * 1024 * 1024, maxTotalBytes: 2 * 1024 * 1024 * 1024 },
 }: {
     topics: { slug: string, label: string }[];
     availableTags: { id: number, name: string, slug: string }[];
@@ -55,6 +56,7 @@ export function UploadDropzone({
     const [topic, setTopic] = useState<string>(topics[0]?.slug || '');
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [files, setFiles] = useState<PendingUploadItem[]>([]);
+    const filesRef = useRef<PendingUploadItem[]>([]);
     const [perFileTags, setPerFileTags] = useState<Record<string, string[]>>({});
     const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
     const { t } = useTranslation();
@@ -71,6 +73,10 @@ export function UploadDropzone({
     useEffect(() => {
         perFileTagsRef.current = perFileTags;
     }, [perFileTags]);
+
+    useEffect(() => {
+        filesRef.current = files;
+    }, [files]);
 
     // Incremental object URL management — only creates/revoke URLs for
     // added/removed files instead of recreating all URLs on every change.
@@ -117,32 +123,41 @@ export function UploadDropzone({
     const previewUrls = previewVersion >= 0 ? previewUrlsRef.current : previewUrlsRef.current;
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
-        setFiles(prev => {
-            const existingBytes = prev.reduce((sum, item) => sum + item.file.size, 0);
-            const remainingFiles = Math.max(uploadLimits.maxFiles - prev.length, 0);
-            const remainingBytes = Math.max(uploadLimits.maxTotalBytes - existingBytes, 0);
-            const nextFiles: File[] = [];
-            let nextBytes = 0;
+        const currentFiles = filesRef.current;
+        const existingBytes = currentFiles.reduce((sum, item) => sum + item.file.size, 0);
+        const remainingFiles = Math.max(uploadLimits.maxFiles - currentFiles.length, 0);
+        const remainingBytes = Math.max(uploadLimits.maxTotalBytes - existingBytes, 0);
+        const nextFiles: File[] = [];
+        let nextBytes = 0;
 
-            for (const file of acceptedFiles) {
-                if (nextFiles.length >= remainingFiles || nextBytes + file.size > remainingBytes) {
-                    continue;
-                }
-                nextFiles.push(file);
-                nextBytes += file.size;
+        for (const file of acceptedFiles) {
+            if (
+                file.size > uploadLimits.maxFileBytes
+                || nextFiles.length >= remainingFiles
+                || nextBytes + file.size > remainingBytes
+            ) {
+                continue;
             }
+            nextFiles.push(file);
+            nextBytes += file.size;
+        }
 
-            const rejectedCount = acceptedFiles.length - nextFiles.length;
-            if (rejectedCount > 0) {
-                toast.error(t('upload.limitExceeded', {
-                    maxFiles: uploadLimits.maxFiles,
-                    maxSize: formatBytes(uploadLimits.maxTotalBytes),
-                }));
-            }
+        const rejectedCount = acceptedFiles.length - nextFiles.length;
+        if (rejectedCount > 0) {
+            toast.error(t('upload.limitExceeded', {
+                maxFiles: uploadLimits.maxFiles,
+                maxFileSize: formatBytes(uploadLimits.maxFileBytes),
+                maxSize: formatBytes(uploadLimits.maxTotalBytes),
+            }));
+        }
 
-            return [...prev, ...createPendingUploadItems(nextFiles)];
-        });
-    }, [t, uploadLimits.maxFiles, uploadLimits.maxTotalBytes]);
+        if (nextFiles.length > 0) {
+            const pendingItems = createPendingUploadItems(nextFiles);
+            const updatedFiles = [...currentFiles, ...pendingItems];
+            filesRef.current = updatedFiles;
+            setFiles(updatedFiles);
+        }
+    }, [t, uploadLimits.maxFiles, uploadLimits.maxFileBytes, uploadLimits.maxTotalBytes]);
 
     const acceptedImageTypes = useMemo(() => ({
         'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp']
@@ -260,7 +275,9 @@ export function UploadDropzone({
             }
             // Remove uploaded files from the list, keeping any new ones that might have been added
             const uploadedIds = new Set(files.map(({ id }) => id));
-            setFiles(prev => prev.filter(({ id }) => !uploadedIds.has(id)));
+            const remainingFiles = filesRef.current.filter(({ id }) => !uploadedIds.has(id));
+            filesRef.current = remainingFiles;
+            setFiles(remainingFiles);
             setSelectedTags([]);
             setPerFileTags({});
             setFileErrors({});
@@ -270,7 +287,9 @@ export function UploadDropzone({
             // Keep failed files and any new files
             const failedSet = new Set(failedFiles);
             const attemptedIds = new Set(files.map(({ id }) => id));
-            setFiles(prev => prev.filter((item) => failedSet.has(item.file) || !attemptedIds.has(item.id)));
+            const remainingFiles = filesRef.current.filter((item) => failedSet.has(item.file) || !attemptedIds.has(item.id));
+            filesRef.current = remainingFiles;
+            setFiles(remainingFiles);
             setProgress(0);
         }
         } catch {
@@ -283,8 +302,11 @@ export function UploadDropzone({
 
 
     const removeFile = (index: number) => {
-        const fileToRemove = files[index];
-        setFiles(prev => prev.filter((_, i) => i !== index));
+        const fileToRemove = filesRef.current[index];
+        if (!fileToRemove) return;
+        const remainingFiles = filesRef.current.filter((_, i) => i !== index);
+        filesRef.current = remainingFiles;
+        setFiles(remainingFiles);
         // Cleanup perFileTags? Optional, but good practice
         // We can't easily clean up strictly by index if we remove from middle,
         // but using ID handles it.
@@ -354,7 +376,7 @@ export function UploadDropzone({
                     <p className="text-lg font-medium">{t('upload.dragDrop')}</p>
                     <p className="text-sm text-muted-foreground">{t('upload.orClick')}</p>
                     <p className="mt-2 text-xs text-muted-foreground">
-                        {t('upload.limitHint', { maxFiles: uploadLimits.maxFiles, maxSize: formatBytes(uploadLimits.maxTotalBytes) })}
+                        {t('upload.limitHint', { maxFiles: uploadLimits.maxFiles, maxFileSize: formatBytes(uploadLimits.maxFileBytes), maxSize: formatBytes(uploadLimits.maxTotalBytes) })}
                     </p>
                 </div>
 
@@ -365,7 +387,14 @@ export function UploadDropzone({
                             <span>{t('upload.uploadingProgress', { current: completedCount, total: files.length })}</span>
                             <span>{Math.round(progress)}%</span>
                         </div>
-                        <Progress value={progress} />
+                        <Progress
+                            value={progress}
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={Math.round(progress)}
+                            aria-label={t('upload.uploadingProgress', { current: completedCount, total: files.length })}
+                        />
                     </div>
                 )}
 
@@ -374,7 +403,7 @@ export function UploadDropzone({
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
                             <h3 className="font-medium text-sm">{t('upload.filesSelected', { count: files.length })}</h3>
-                            <Button variant="ghost" size="sm" onClick={() => setFiles([])} className="text-destructive h-auto p-0">{t('upload.clearAll')}</Button>
+                            <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="text-destructive h-auto p-0">{t('upload.clearAll')}</Button>
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

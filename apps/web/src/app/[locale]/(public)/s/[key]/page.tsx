@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowLeft } from 'lucide-react';
-import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -45,6 +45,7 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     };
     const title = getPhotoDisplayTitle(image, t('ogTitle'));
     const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
+    const openGraphLocale = getOpenGraphLocale(locale);
     // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
     const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
 
@@ -71,6 +72,8 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
             images: ogImages,
             type: 'article',
             publishedTime: toIsoTimestamp(image.created_at),
+            locale: openGraphLocale,
+            alternateLocale: getAlternateOpenGraphLocales(locale),
         },
         twitter: {
             card: 'summary_large_image',

@@ -298,7 +298,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                     {editingTopic.aliases.length === 0 && <span className="text-sm text-muted-foreground italic">{t('categories.noAliases')}</span>}
                                 </div>
                                 <div className="flex gap-2">
+                                    <label htmlFor="new-topic-alias" className="sr-only">{t('categories.aliasPlaceholder')}</label>
                                     <Input
+                                        id="new-topic-alias"
                                         placeholder={t('categories.aliasPlaceholder')}
                                         value={newAlias}
                                         onChange={(e) => setNewAlias(e.target.value)}

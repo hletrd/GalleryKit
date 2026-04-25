@@ -5,7 +5,7 @@ import { Metadata } from 'next';
 
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
@@ -73,6 +73,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     : t('photosInTopic', { topic: topicData.label });
 
   const pageUrl = localizeUrl(seo.url, locale, `/${topicData.slug}`);
+  const openGraphLocale = getOpenGraphLocale(locale);
 
   // Use custom OG image if configured, otherwise use generated OG image
   const topicOgParams = new URLSearchParams({ topic: topicData.slug });
@@ -101,6 +102,8 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
       url: pageUrl,
       siteName: seo.title,
       images: ogImages,
+      locale: openGraphLocale,
+      alternateLocale: getAlternateOpenGraphLocales(locale),
       type: 'website',
     },
     twitter: {
