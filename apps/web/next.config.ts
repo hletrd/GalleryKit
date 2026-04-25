@@ -42,7 +42,12 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // AGG8F-05 / plan-235: append modern privacy directives. A photo
+          // gallery has clear opt-out intent for Topics API, Attribution
+          // Reporting, Private State Tokens, and Idle Detection. Browsers
+          // treat unknown directives as no-ops, so this is purely additive
+          // hardening. Keep this list aligned with apps/web/nginx/default.conf.
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=(), browsing-topics=(), attribution-reporting=(), private-state-token-redemption=(), private-state-token-issuance=(), idle-detection=()' },
           ...(!isDev ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' }] : []),
           ...(isDev ? [{ key: 'Content-Security-Policy', value: devCspValue }] : []),
         ],
