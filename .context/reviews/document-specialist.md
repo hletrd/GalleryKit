@@ -1,101 +1,71 @@
-# Document Specialist Review — Cycle 4 (Prompt 1)
+# Document Specialist Review — PROMPT 1 / Cycle 5 (2026-04-25)
 
-## Scope
-I reviewed the authoritative docs and config surfaces against current code, focusing on:
+No commits made.
 
-- `CLAUDE.md`
-- `AGENTS.md`
-- `README.md`
-- `apps/web/README.md`
-- `package.json`
-- `apps/web/package.json`
-- `apps/web/Dockerfile`
-- `apps/web/docker-compose.yml`
-- `apps/web/next.config.ts`
-- `apps/web/.env.local.example`
-- `.context/plans/README.md`
-- `.context/plans/plan-112-admin-settings-page.md`
-- `.context/plans/plan-113-minio-s3-storage.md`
-- `.context/reviews/cycle6-r2-critic.md`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/upload-limits.ts`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/storage/index.ts`
-- `apps/web/src/lib/mysql-cli-ssl.ts`
-- `apps/web/scripts/mysql-connection-options.js`
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
+## Inventory and method
 
-Package scripts and Docker config were checked as well; they largely align with the code paths they reference. The issues below are concentrated in stale plan/review artifacts and a few missing operator warnings.
+Reviewed the doc/config/runtime surfaces most likely to drift:
+
+- Top-level docs: `README.md`, `CLAUDE.md`, `AGENTS.md`
+- App docs and examples: `apps/web/README.md`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`, `.env.deploy.example`
+- Deployment/runtime config: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`
+- Package metadata: `package.json`, `apps/web/package.json`
+- Authoritative runtime source: `apps/web/src/lib/{content-security-policy,rate-limit,request-origin,upload-limits,upload-paths,db-restore,mysql-cli-ssl,session}.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/instrumentation.ts`, `apps/web/scripts/ensure-site-config.mjs`
+- Verification tests: `apps/web/src/__tests__/{next-config,request-origin,seo-actions}.test.ts`
+
+Final sweep re-ran targeted searches for `IMAGE_BASE_URL`, `TRUST_PROXY`, `Origin`, `Referer`, `site-config`, deploy env knobs, and proxy/SEO guardrails, then checked the matching code paths before recording findings.
 
 ## Findings summary
 
-| ID | Severity | Status | Summary |
-|---|---|---|---|
-| DS-04-01 | Medium | confirmed | Stale settings-surface docs and locale copy still describe UI controls that no longer exist. |
-| DS-04-02 | Medium | confirmed | Queue concurrency is real code, but the operator-facing docs still do not document the actual `QUEUE_CONCURRENCY` knob. |
-| DS-04-03 | Medium | confirmed | `IMAGE_BASE_URL` docs miss the exact URL-shape constraints enforced by `next.config.ts`. |
-| DS-04-04 | Medium | confirmed | Top-level docs omit the default-TLS / `DB_SSL=false` behavior for non-local MySQL hosts. |
+| ID | Severity | Confidence | Status | Summary |
+|---|---|---|---|---|
+| WDS-01 | LOW | High | Confirmed | `IMAGE_BASE_URL` docs omit hard URL constraints that the build/parser enforces |
+| WDS-02 | MEDIUM | High | Confirmed | `TRUST_PROXY` docs omit the forwarded-hop ordering/rate-limit trust model |
+| WDS-03 | LOW | High | Confirmed | Same-origin docs omit the fail-closed requirement when `Origin`/`Referer` are missing |
 
 ## Detailed findings
 
-### DS-04-01 — Stale settings-surface docs and locale copy describe controls that are no longer present
-**Severity:** Medium
-**Status:** confirmed
-**Confidence:** High
-**Files / regions:** `.context/plans/plan-112-admin-settings-page.md:10-64`, `.context/plans/plan-113-minio-s3-storage.md:10-78`, `.context/reviews/cycle6-r2-critic.md:24-28`, `apps/web/messages/en.json:543-556`, `apps/web/messages/ko.json:543-556` vs `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:89-178`, `apps/web/src/lib/gallery-config-shared.ts:10-19`, `apps/web/src/lib/upload-limits.ts:1-12`, `apps/web/src/lib/storage/index.ts:1-18`
+### WDS-01 — `IMAGE_BASE_URL` docs omit the parser/build constraints that reject query strings, hashes, and credentials
 
-The current settings UI only renders image quality, image sizes, and the GPS privacy toggle. The live setting key list is five entries:
+- **Status:** Confirmed
+- **Severity:** LOW
+- **Confidence:** High
+- **Risk:** Operators can pick a CDN URL that looks valid in prose but fails the build, or can spend time debugging a production-only `IMAGE_BASE_URL` rejection that the docs never warned about.
+- **Doc files/regions:** `README.md:128-145`, `apps/web/README.md:36-38`, `apps/web/.env.local.example:11-15`
+- **Code files/regions:** `apps/web/src/lib/content-security-policy.ts:1-25`, `apps/web/next.config.ts:8-29`, `apps/web/src/__tests__/next-config.test.ts:5-14`
+- **Why this is a problem:** The docs already say `IMAGE_BASE_URL` should be an absolute CDN origin/prefix and that production rejects plaintext `http://`, but the code is stricter: it also rejects any URL with credentials, query strings, or hashes. Those invalid forms are easy to reach if someone copies a signed CDN URL or a pre-authenticated asset URL into the env example.
+- **Failure scenario:** An operator sets `IMAGE_BASE_URL=https://cdn.example.com/gallery?token=...` or uses a credentialed URL. The next production build fails immediately, but the docs only suggest “use HTTPS” and never explain why the URL is still invalid.
+- **Suggested fix:** Add one short constraint note to the env/setup docs: `IMAGE_BASE_URL` must be an absolute HTTPS URL in production and must not include credentials, query strings, or hashes.
 
-- `image_quality_webp`
-- `image_quality_avif`
-- `image_quality_jpeg`
-- `image_sizes`
-- `strip_gps_on_upload`
+### WDS-02 — `TRUST_PROXY` docs describe the flag but not the trusted-hop rule that prevents spoofed forwarded chains
 
-But the plan/review artifacts still describe a much broader settings surface: queue concurrency, upload limits, display columns, and a storage-backend switch. The locale catalogs still contain matching headings and hints for Upload Limits and Storage Backend even though those sections are not rendered by the current settings page and the corresponding values are env-only or experimental.
+- **Status:** Confirmed
+- **Severity:** MEDIUM
+- **Confidence:** High
+- **Risk:** A reverse proxy chain that preserves attacker-controlled leftmost forwarded values can let the wrong client IP or host/proto win, which breaks rate limiting and can undermine same-origin checks.
+- **Doc files/regions:** `README.md:147`, `apps/web/README.md:40`, `apps/web/.env.local.example:42-45`
+- **Code files/regions:** `apps/web/src/lib/rate-limit.ts:61-85`, `apps/web/src/lib/request-origin.ts:19-24, 45-106`, `apps/web/src/__tests__/request-origin.test.ts:95-121`
+- **Why this is a problem:** The docs say `TRUST_PROXY=true` is required behind a proxy and mention `X-Forwarded-For` / `X-Real-IP`, but they do not explain the actual trust rule: the app takes the right-most valid hop from multi-valued forwarded chains and treats that as authoritative when proxy trust is enabled. That matters because a proxy that prepends values, or fails to supply `X-Real-IP`, can leave the app trusting the wrong hop or falling back to `"unknown"`.
+- **Failure scenario:** A deployment sits behind a load balancer plus nginx, but nginx forwards a client-supplied `X-Forwarded-For` chain without appending the trusted hop on the right. Rate limiting and provenance checks then see the wrong address, which can collapse users into one bucket or let spoofed values control the trusted chain.
+- **Suggested fix:** Add one explicit sentence to the proxy docs: the trusted proxy must append the real client hop on the right side of forwarded chains, and the provided nginx pattern (`proxy_add_x_forwarded_for` plus `X-Real-IP`) is intentional.
 
-**Concrete failure scenario:** a maintainer or translator consults the active plan/review docs and expects to find UI controls for queue concurrency or storage backend switching. They spend time debugging a missing setting rather than recognizing that those knobs are not part of the current admin surface.
+### WDS-03 — Same-origin docs omit the deliberate fail-closed behavior when both `Origin` and `Referer` are absent
 
-**Suggested fix:** mark the stale plan/review files as historical or rewrite them to the current contract; remove dead locale copy or wire the UI if those sections are meant to exist; keep the current settings contract documented as only the five live keys above.
+- **Status:** Confirmed
+- **Severity:** LOW
+- **Confidence:** High
+- **Risk:** Some legitimate admin/browser flows can be rejected if a privacy tool, corporate proxy, or custom client strips both source headers; operators may misread that as an auth bug rather than an intentional guardrail.
+- **Doc files/regions:** `README.md:147`, `apps/web/README.md:40`
+- **Code files/regions:** `apps/web/src/lib/request-origin.ts:83-106`, `apps/web/src/app/actions/auth.ts:91-95, 254-256, 283-287`, `apps/web/src/app/api/admin/db/download/route.ts:27-32`, `apps/web/src/__tests__/request-origin.test.ts:124-143`
+- **Why this is a problem:** The docs mention that same-origin validation exists, but they do not say that the check fails closed unless the request provides either `Origin` or `Referer`. The code intentionally blocks the request in that case for login/logout, mutating admin actions, and DB backup download.
+- **Failure scenario:** An operator uses a hardened browser profile or proxy that strips both headers. A normal admin action now returns unauthorized even though `TRUST_PROXY` is set and the session is valid.
+- **Suggested fix:** Add a brief note that the admin same-origin checks require either `Origin` or `Referer`; if both are missing, the request is intentionally rejected.
 
-### DS-04-02 — Queue concurrency is real code, but the operator-facing docs do not document the actual env knob
-**Severity:** Medium
-**Status:** confirmed
-**Confidence:** High
-**Files / regions:** `apps/web/src/lib/image-queue.ts:116-120`, `apps/web/.env.local.example:31-38`, `apps/web/README.md:34-43`, `README.md:118-145`
+## Final sweep
 
-`image-queue.ts` still reads `process.env.QUEUE_CONCURRENCY` and falls back to `2`, but the onboarding docs and env example do not mention that knob. The env example documents `SHARP_CONCURRENCY`, which controls libvips worker threads, but not the queue concurrency that actually determines how many image jobs can run at once.
+After drafting the findings, I rechecked the most likely drift points in the root README, app README, env examples, Docker/nginx config, deploy helpers, site-config bootstrap, and the targeted runtime guards. I did not find any additional documentation/code mismatches that were strong enough to report.
 
-**Concrete failure scenario:** an operator increases `SHARP_CONCURRENCY` expecting uploads to process more quickly, but the queue still runs at the default parallelism because `QUEUE_CONCURRENCY` was never set. Throughput stays unchanged and the person tunes the wrong layer.
+## Verification
 
-**Suggested fix:** add `QUEUE_CONCURRENCY` to `apps/web/.env.local.example` and the app/root README env notes, or explicitly say that queue parallelism is intentionally fixed and not an operator knob.
-
-### DS-04-03 — `IMAGE_BASE_URL` docs miss the exact URL-shape constraints enforced by the build
-**Severity:** Medium
-**Status:** confirmed
-**Confidence:** High
-**Files / regions:** `README.md:140-141`, `apps/web/README.md:37-38`, `apps/web/next.config.ts:7-31`
-
-The docs correctly say `IMAGE_BASE_URL` must be set before build time and should use HTTPS in production. The build, however, is stricter than the text makes clear: it requires an absolute `http(s)` URL and rejects credentials, query strings, and hashes entirely.
-
-**Concrete failure scenario:** a deployer uses a signed CDN URL or a URL with embedded credentials/query params. Local testing may look fine until `next build` fails with a validation error, blocking the image build step.
-
-**Suggested fix:** extend the `IMAGE_BASE_URL` docs with the exact constraints: absolute URL only, `http`/`https` only, HTTPS required in production, and no username/password/query/hash components.
-
-### DS-04-04 — Top-level docs omit the default-TLS / `DB_SSL=false` behavior for non-local MySQL hosts
-**Severity:** Medium
-**Status:** confirmed
-**Confidence:** High
-**Files / regions:** `apps/web/scripts/mysql-connection-options.js:1-23`, `apps/web/.env.local.example:1-7`, `README.md:118-145`, `apps/web/README.md:34-41`
-
-The MySQL connection helper automatically enables TLS for any non-localhost DB host unless `DB_SSL=false` is set. That behavior is only hinted in the env example comment; the higher-level README docs do not call it out.
-
-**Concrete failure scenario:** an operator points the app at a remote MySQL instance and assumes plaintext or self-signed TLS will work the same way local MySQL does. The connection fails because the helper is trying to enforce TLS by default.
-
-**Suggested fix:** add a short top-level note in README/CLAUDE/app README that non-local DB hosts default to TLS and that `DB_SSL=false` is the opt-out when the deployment intentionally uses a non-TLS or self-signed path.
-
-## Reusable takeaway
-The core code/docs contract is mostly aligned, especially for the Docker and script surfaces, but the docs still drift around the settings surface and a few environment-level knobs. The fastest cleanup path is to remove or relabel stale plan/review guidance, then patch the onboarding docs for the real env-only controls and URL/TLS constraints.
+- Targeted tests run: `apps/web/src/__tests__/next-config.test.ts`, `apps/web/src/__tests__/request-origin.test.ts`, `apps/web/src/__tests__/seo-actions.test.ts`
+- Result: 3/3 test files passed, 19/19 tests passed

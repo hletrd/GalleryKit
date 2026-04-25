@@ -1,77 +1,68 @@
-# Verifier Review — Cycle 4 (Prompt 1)
+# Cycle 5 Deep Repository Review — Verifier
 
-## Scope and method
+## Verdict
+PASS (no confirmed correctness defects found against the documented behavior, tests, or gate scripts that were reviewed)
 
-I checked the current repository state against the documented behavior in `README.md`, `apps/web/README.md`, `CLAUDE.md`, and the active config/test surfaces that matter for auth, proxying, uploads, backups, and build invariants.
+## Scope reviewed
+I inspected the primary docs and the code paths they describe:
+- `README.md`
+- `CLAUDE.md`
+- `apps/web/README.md`
+- `package.json`
+- `apps/web/package.json`
+- security gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`
+- proxy / auth / rate-limit / CSP / config: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/content-security-policy.ts`, `apps/web/src/lib/constants.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/session.ts`
+- server actions and routes: `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/app/actions/seo.ts`, `apps/web/src/app/actions/tags.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`
+- app shell / middleware / Docker / nginx: `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`
+- UI surfaces changed in the latest commit: `apps/web/src/components/search.tsx`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/photo-viewer-loading.tsx`, `apps/web/src/components/footer.tsx`, `apps/web/src/app/[locale]/admin/login-form.tsx`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`, `apps/web/src/components/tag-input.tsx`, `apps/web/src/components/ui/dialog.tsx`, `apps/web/src/components/ui/alert-dialog.tsx`, `apps/web/src/components/ui/sheet.tsx`, `apps/web/src/components/ui/switch.tsx`
+- representative tests: `apps/web/src/__tests__/request-origin.test.ts`, `rate-limit.test.ts`, `next-config.test.ts`, `content-security-policy.test.ts`, `check-api-auth.test.ts`, `check-action-origin.test.ts`, `settings-image-sizes-lock.test.ts`, `images-actions.test.ts`, `public-actions.test.ts`, `photo-title.test.ts`, `health-route.test.ts`, `live-route.test.ts`
 
-Inspected surfaces included:
+## Evidence gathered
+### Gate / test commands
+- `npm run lint:api-auth --workspace=apps/web` → passed (`OK: src/app/api/admin/db/download/route.ts`)
+- `npm run lint:action-origin --workspace=apps/web` → passed; all mutating actions reported `OK`, getter exemptions reported `SKIP`
+- `npm exec --workspace=apps/web -- vitest run src/__tests__/request-origin.test.ts src/__tests__/rate-limit.test.ts src/__tests__/next-config.test.ts src/__tests__/content-security-policy.test.ts src/__tests__/check-api-auth.test.ts src/__tests__/check-action-origin.test.ts` → 6 files passed, 65 tests passed
+- `npm run build --workspace=apps/web` → passed; production build completed and route list matched the documented app surface
+- `npm run test --workspace=apps/web` → passed; 58 test files / 341 tests passed
 
-- Docs/config: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/.env.local.example`
-- Auth/proxy/backups: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/app/api/admin/db/download/route.ts`
-- Security gates: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`
-- Tests: `apps/web/src/__tests__/request-origin.test.ts`, `apps/web/src/__tests__/backup-download-route.test.ts`, `apps/web/src/__tests__/rate-limit.test.ts`, `apps/web/src/__tests__/auth-rate-limit.test.ts`, `apps/web/src/__tests__/check-api-auth.test.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`
+### Key behavior checks
+- Proxy / same-origin logic matched docs and tests:
+  - `apps/web/src/lib/request-origin.ts` respects `TRUST_PROXY=true`, prefers right-most forwarded headers, strips default ports, and fails closed when origin metadata is missing.
+  - `apps/web/src/app/actions/auth.ts` uses that trusted-proxy protocol to set Secure cookies and uses same-origin checks before login/logout.
+- Security gates matched documentation:
+  - `check-api-auth.ts` discovered the only admin API route and verified `withAdminAuth(...)` wrapping.
+  - `check-action-origin.ts` recursively scanned mutating actions, exempted getters, and passed every mutating export.
+- CSP and build-time config matched docs:
+  - `next.config.ts` rejects plaintext `IMAGE_BASE_URL` in production, and `content-security-policy.ts` enforces HTTPS in production.
+  - `proxy.ts` applies nonce-bearing production CSP headers.
+- Storage / restore / backup behavior matched docs:
+  - `upload-paths.ts` and `instrumentation.ts` fail closed on legacy public-original uploads in production.
+  - `/api/admin/db/download` is behind `withAdminAuth` and a same-origin check.
+  - `/api/health` is DB-aware and `/api/live` is liveness-only.
+- UI changes in the latest commit were supported by tests and build output:
+  - search / upload / dialog / sheet / switch / loading / footer changes compiled cleanly and did not introduce test regressions.
 
-Verification commands run on the live repo state:
+## Findings
+None confirmed.
 
-- `npm test --workspace=apps/web` → 57 files, 333 tests passing
-- `npm run lint --workspace=apps/web` → clean
-- `npm run typecheck --workspace=apps/web` → clean
-- `npm run build --workspace=apps/web` → succeeds (one expected Next.js edge-runtime warning only)
-- `npm run lint:api-auth --workspace=apps/web` → clean
-- `npm run lint:action-origin --workspace=apps/web` → clean
+## Missed-issues sweep
+I re-checked the highest-risk claims from the docs after the broad pass:
+- reverse-proxy trust and same-origin assumptions
+- admin API and mutating-action security gates
+- backup download / restore hardening
+- upload path isolation and legacy-original fail-closed behavior
+- production CSP / `IMAGE_BASE_URL` rules
+- liveness/readiness route split
+- settings lock behavior and upload limits
 
-## Findings summary
+I did not find a code/doc/test mismatch that rose above confidence threshold for a reportable defect.
 
-| ID | Severity | Status | Confidence | Summary |
-|---|---|---|---|---|
-| C4V-01 | MEDIUM | Confirmed | High | Login session cookies parse `X-Forwarded-Proto` differently than the rest of the proxy-aware code, which can mis-set the `Secure` flag in multi-hop proxy setups |
-| C4V-02 | LOW | Confirmed | High | The README overstates how much `TRUST_PROXY` is required for same-origin validation, which is a docs/config mismatch rather than a runtime bug |
-| C4V-03 | LOW/MEDIUM | Risk | Medium | The same-origin action scanner only walks `.ts` files, so a future `.tsx`/`.js` mutating action could evade the gate |
-
-## Detailed findings
-
-### C4V-01 — Login cookie `Secure` flag uses the wrong forwarded-proto hop
-
-- **Severity:** MEDIUM
-- **Status:** Confirmed
-- **Confidence:** High
-- **Files / code regions:**
-  - `apps/web/src/app/actions/auth.ts:206-214`
-  - contrast: `apps/web/src/lib/request-origin.ts:19-24, 45-64`
-- **Why this is a problem:** The login action determines `secure` via `requestHeaders.get('x-forwarded-proto')?.split(',')[0]`, which takes the *first* comma-separated value. The proxy-aware origin helper elsewhere in the repo explicitly treats the trusted hop as the *right-most* value when `TRUST_PROXY=true`. Those two policies disagree.
-- **Concrete failure scenario:** In a chained proxy deployment, the forwarded proto chain can contain multiple values. If the first value is `http` and the trusted outer proxy’s value is `https`, the login action will set `secure=false` even though the browser is on HTTPS. That weakens session cookies and can also cause inconsistent behavior across proxy layers.
-- **Suggested fix:** Reuse the same trusted-proxy header normalization logic that `request-origin.ts` uses, or centralize proto parsing in a shared helper that explicitly honors `TRUST_PROXY` and the right-most trusted hop.
-
-### C4V-02 — README overstates the `TRUST_PROXY` dependency for same-origin checks
-
-- **Severity:** LOW
-- **Status:** Confirmed
-- **Confidence:** High
-- **Files / code regions:**
-  - `README.md:142-145`
-  - `apps/web/README.md:39-41`
-  - `apps/web/src/lib/request-origin.ts:45-64`
-- **Why this is a problem:** The docs say `TRUST_PROXY=true` is required for same-origin validation and that the proxy must forward Host / X-Forwarded-Proto. The implementation actually falls back to plain `Host` + `Origin`/`Referer` matching when `TRUST_PROXY` is unset, and the shipped nginx config does not set `X-Forwarded-Host` at all. So the documentation is broader than the code.
-- **Concrete failure scenario:** An operator reading the README may assume same-origin checks are proxy-dependent in all deployments, and may over-configure or misdiagnose a working local / direct deployment. The inverse risk is also possible: they may think the nginx config must add headers it does not actually need.
-- **Suggested fix:** Narrow the docs to say `TRUST_PROXY` is required for correct client-IP rate limiting, while same-origin checks only consume forwarded headers when a trusted proxy provides them. If you want to keep the stronger claim, add a test that proves it against the actual nginx header behavior.
-
-### C4V-03 — Same-origin action scanner only covers `.ts` files
-
-- **Severity:** LOW/MEDIUM
-- **Status:** Risk
-- **Confidence:** Medium
-- **Files / code regions:**
-  - `apps/web/scripts/check-action-origin.ts:49-68`
-- **Why this is a problem:** The security scanner only discovers `.ts` descendants under `app/actions/`. That is fine for the current codebase, but Next.js server actions can also be authored in `.tsx` or `.js` variants, and the repo already treats route files more flexibly in the analogous API-auth scanner.
-- **Concrete failure scenario:** A future mutating action is added as `actions/foo.tsx` or `actions/foo.js`. It would compile and ship, but this gate would never inspect it for `requireSameOriginAdmin()`, creating a bypass in the lint coverage.
-- **Suggested fix:** Either codify `.ts`-only as a hard repository rule in docs/tests, or broaden the scanner to the action-file extensions the repo intends to allow.
-
-## Final missed-issues sweep
-
-I did a second pass over the security-sensitive surfaces after the main inspection:
-
-- `npm run lint:api-auth` passed, so the admin API route auth wrapper gate is currently enforced.
-- `npm run lint:action-origin` passed, so the current mutating action set is covered by the same-origin gate.
-- `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` all passed, so there is no current build/test breakage in the inspected state.
-
-I did not find additional confirmed correctness issues beyond the three items above.
+## Files reviewed
+Reviewed directly or via targeted tests/commands:
+- Root docs: `README.md`, `CLAUDE.md`
+- App docs/config: `apps/web/README.md`, `apps/web/package.json`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`
+- Gate scripts: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/ensure-site-config.mjs`
+- Core security/utilities: `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/content-security-policy.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/constants.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`
+- Routes/actions: `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/app/actions/seo.ts`, `apps/web/src/app/actions/tags.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`
+- UI surfaces changed in the latest commit: `apps/web/src/components/search.tsx`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/components/image-manager.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/photo-viewer-loading.tsx`, `apps/web/src/components/footer.tsx`, `apps/web/src/app/[locale]/admin/login-form.tsx`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`, `apps/web/src/components/tag-input.tsx`, `apps/web/src/components/ui/dialog.tsx`, `apps/web/src/components/ui/alert-dialog.tsx`, `apps/web/src/components/ui/sheet.tsx`, `apps/web/src/components/ui/switch.tsx`
+- Representative tests: `apps/web/src/__tests__/request-origin.test.ts`, `rate-limit.test.ts`, `next-config.test.ts`, `content-security-policy.test.ts`, `check-api-auth.test.ts`, `check-action-origin.test.ts`, `settings-image-sizes-lock.test.ts`, `images-actions.test.ts`, `public-actions.test.ts`, `photo-title.test.ts`, `health-route.test.ts`, `live-route.test.ts`

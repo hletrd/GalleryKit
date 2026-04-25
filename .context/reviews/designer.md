@@ -1,117 +1,231 @@
-# UI/UX Designer Review — Cycle 4
+# UI/UX Deep Review — Cycle 5
 
-**Repository:** `/Users/hletrd/flash-shared/gallery`  
-**App:** Next.js App Router web frontend (`apps/web`)  
-**Date:** 2026-04-25  
-**Commit:** not committed, per prompt.
+**Repo:** `/Users/hletrd/flash-shared/gallery`
+**Scope:** Next.js frontend in `apps/web`
+**Outcome:** Review complete; no implementation or commit was performed.
 
-## Method / inventory
+## Method
 
-Review focus: public gallery IA, admin IA, keyboard/focus, WCAG 2.2, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL, and perceived performance.
+I reviewed the UI/UX surface statically and then used the local dev server on `http://127.0.0.1:3001` to validate runtime behavior. Where screenshots were captured, I backed the observations with DOM/HTML text, file references, and selector-level evidence instead of relying on images alone.
 
-Tracked UI surface reviewed:
+## Inventory of UI/UX-relevant files
 
-- Public routes: `apps/web/src/app/[locale]/(public)/layout.tsx`, `page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`
-- App shell/state: `apps/web/src/app/[locale]/layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `global-error.tsx`, `globals.css`
-- Public components: `nav.tsx`, `nav-client.tsx`, `footer.tsx`, `home-client.tsx`, `search.tsx`, `tag-filter.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `image-zoom.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `histogram.tsx`, `optimistic-image.tsx`
-- Admin routes/components: admin layouts/pages, `admin-header.tsx`, `admin-nav.tsx`, `admin/login-form.tsx`, `dashboard/dashboard-client.tsx`, `image-manager.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`
-- UI primitives: `components/ui/*`, especially `button`, `input`, `dialog`, `sheet`, `alert-dialog`, `sonner`
-- i18n/theme/layout: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `components/i18n-provider.tsx`, `components/theme-provider.tsx`, `app/[locale]/layout.tsx`, `app/[locale]/globals.css`
+### Routes and shells
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/globals.css`
+- `apps/web/src/app/[locale]/loading.tsx`
+- `apps/web/src/app/[locale]/error.tsx`
+- `apps/web/src/app/[locale]/not-found.tsx`
+- `apps/web/src/app/global-error.tsx`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/admin/layout.tsx`
+- `apps/web/src/app/[locale]/admin/login-form.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
 
-## Runtime blocker
+### Components and primitives
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/topic-empty-state.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/photo-viewer-loading.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/image-zoom.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/tag-input.tsx`
+- `apps/web/src/components/admin-header.tsx`
+- `apps/web/src/components/admin-nav.tsx`
+- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/components/theme-provider.tsx`
+- UI primitives under `apps/web/src/components/ui/` including `button.tsx`, `input.tsx`, `dialog.tsx`, `alert-dialog.tsx`, `sheet.tsx`, `select.tsx`, `switch.tsx`, `card.tsx`, `table.tsx`, `alert.tsx`, `textarea.tsx`, `badge.tsx`, `sonner.tsx`
 
-Local browser validation was partially blocked because the public gallery cannot read the database in this environment. A live request to `/en` falls through to the public error boundary after `topics` / image queries fail with `ECONNREFUSED 127.0.0.1:3306`. The admin login shell still renders, so I validated that surface in-browser and relied on source inspection for the rest.
+### Messages, config, and tests
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- `apps/web/src/site-config.json`
+- `apps/web/src/lib/constants.ts`
+- `apps/web/src/lib/locale-path.ts`
+- `apps/web/e2e/public.spec.ts`
+- `apps/web/e2e/admin.spec.ts`
+- `apps/web/e2e/nav-visual-check.spec.ts`
+- `apps/web/e2e/test-fixes.spec.ts`
+- Key regression tests under `apps/web/src/__tests__/` including `error-shell.test.ts`, `shared-page-title.test.ts`, `upload-dropzone.test.ts`, `tag-input.test.ts`, and related accessibility/data-flow tests
 
 ## Findings
 
-### UX-01 — Public gallery data failure still drops the whole shell
+### UX-C5-01 — Public gallery chrome is too tightly coupled to DB-backed page data
 
-- **Severity:** MEDIUM
+- **Severity:** High
 - **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/app/[locale]/(public)/page.tsx:113-130`, `apps/web/src/components/nav.tsx:6-13`, `apps/web/src/app/[locale]/error.tsx:7-35`
-- **Failure / user scenario:** When the DB is unavailable, the home page cannot keep the public chrome visible or explain the outage in gallery terms. Browser/curl output for `/en` shows the route failing through the generic error path instead of rendering a branded maintenance or empty state.
-- **Suggested fix:** Catch public chrome/data failures separately, keep the shell visible, and render a localized maintenance/empty state with retry guidance. Reserve the generic error boundary for truly fatal conditions.
+- **Status:** Confirmed
+- **Files:** `apps/web/src/components/nav.tsx:6-13`, `apps/web/src/app/[locale]/(public)/page.tsx:18-30,113-173`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:33-56,115-185`
+- **Selector / surface:** public chrome under `nav[aria-label="Main navigation"]` and `main#main-content`
+- **Evidence:** `Nav()` awaits `getTopicsCached()`, `getSeoSettings()`, and `getGalleryConfig()` in one `Promise.all`. The homepage and topic pages similarly await topics/tags/images before rendering. In the live dev server, `curl http://127.0.0.1:3001/en` returned a Next server error payload showing the failed topics query and MySQL access denial (`Access denied for user ''@'172.17.0.1' (using password: NO)`) instead of a branded gallery shell.
+- **Failure scenario:** Any DB outage, credential issue, or temporary data-layer failure collapses the public site into a generic error boundary. Users lose not just content, but also the nav shell and locale controls.
+- **Suggested fix:** Split the shell from the data fetches. Keep nav/footer/locale/theme chrome renderable from cached or static inputs, and degrade missing content into a branded empty/maintenance state with a retry path.
 
-### UX-02 — Search field hides its focus state
+### UX-C5-02 — Most admin pages have no route-specific metadata, so tabs and bookmarks are indistinguishable
 
-- **Severity:** MEDIUM
+- **Severity:** Medium
 - **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/search.tsx:182-206`
-- **Failure / user scenario:** The search input removes its ring/outline (`focus-visible:ring-0 shadow-none outline-none`) and does not replace it on the dialog shell. Keyboard users can land in the field without a visible cue that focus is there.
-- **Suggested fix:** Restore a visible focus ring on the input, or move the focus treatment to the surrounding header/container so the active element is obvious at a glance.
+- **Status:** Confirmed
+- **Files:** `apps/web/src/app/[locale]/admin/page.tsx:1-16`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:1-38`, `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx:1-15`, `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx:1-14`, `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx:1-25`, `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx:1-22`, `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:1-24`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:1-246`, `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx:3-9`
+- **Selector / surface:** browser tab title / document metadata
+- **Evidence:** Only `password/page.tsx` exports metadata. The other admin pages do not override the root metadata template. Live HTML for `/en/admin` shows `<title>GalleryKit</title>`, which is the same title used across the site rather than a section-specific admin title.
+- **Failure scenario:** An operator opens multiple admin tabs or returns to a bookmark later. Without section-specific titles, it is easy to act in the wrong admin area.
+- **Suggested fix:** Add a shared admin metadata helper or per-route titles such as `Dashboard | GalleryKit`, `Categories | GalleryKit`, `Settings | GalleryKit`, etc.
 
-### UX-03 — Search results/errors are not announced as state changes
+### UX-C5-03 — The localized footer still leaks English brand copy on non-English pages
 
-- **Severity:** LOW-MEDIUM
-- **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/search.tsx:52-76, 219-263`
-- **Failure / user scenario:** Search updates are silent to assistive tech, and the error path just clears the result list. That makes “no results” indistinguishable from “search failed,” and there is no polite live region like the one used in `load-more.tsx`.
-- **Suggested fix:** Add an `aria-live="polite"` status region for “searching,” result counts, and error states. Keep the empty state and failure state visually and semantically distinct.
-
-### UX-04 — Admin dashboard still squeezes upload and management too early
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:30-39`
-- **Failure / user scenario:** The dashboard stays single-column until `xl`, so common laptop/tablet widths force the upload surface and the dense image manager into a cramped two-pane layout. The table becomes hard to scan and interact with.
-- **Suggested fix:** Stack the panes until a wider breakpoint, or let the image manager take the full width on medium screens and demote upload to a secondary panel.
-
-### UX-05 — Login failure feedback is toast-only and not field-linked
-
-- **Severity:** LOW-MEDIUM
+- **Severity:** Low
 - **Confidence:** Medium
-- **Status:** likely
-- **File / region:** `apps/web/src/app/[locale]/admin/login-form.tsx:21-45`, `apps/web/src/app/actions/auth.ts:70-111, 148-206`
-- **Failure / user scenario:** The form has native required fields, but once the request reaches the server the only error path is a toast. There is no inline error region, no `aria-invalid`, and no message tied to the username/password inputs, so keyboard and screen-reader users get little guidance on what to correct.
-- **Suggested fix:** Render a form-level error region inside the card and, if field-specific validation is added later, bind it with `aria-describedby` / `aria-invalid` instead of relying on toasts alone.
+- **Status:** Likely
+- **Files:** `apps/web/src/components/footer.tsx:27-55`, `apps/web/src/site-config.json:10-11`, `apps/web/messages/en.json:572-574`, `apps/web/messages/ko.json:572-574`
+- **Selector / surface:** `footer`, `footer p`, and the GitHub anchor text
+- **Evidence:** The footer renders `siteConfig.footer_text` verbatim (`Powered by GalleryKit`) and hardcodes the visible `GitHub` label. Only the Admin link label is translated. The KO message file localizes `footer.admin`, but not the footer text itself.
+- **Failure scenario:** Korean pages still show mixed-language footer text even though the rest of the shell is localized. It reads as a translation omission rather than an intentional brand choice.
+- **Suggested fix:** Either localize the footer copy and labels or explicitly freeze the footer as brand text and make the rest of the footer consistently localized.
 
-### UX-06 — Shared overlay close controls still announce English in all locales
+### UX-C5-04 — The admin login form is accessible, but the visible labels are hidden behind placeholders
 
-- **Severity:** LOW
+- **Severity:** Low
 - **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/ui/dialog.tsx:69-76`, `apps/web/src/components/ui/sheet.tsx:75-78`
-- **Failure / user scenario:** Korean users can open localized dialogs/sheets, but the close button is still announced as “Close” because the primitives hardcode the label.
-- **Suggested fix:** Thread localized close labels through the primitives or let each localized call site provide the `sr-only` text.
+- **Status:** Confirmed
+- **Files:** `apps/web/src/app/[locale]/admin/login-form.tsx:29-52`
+- **Selector / surface:** login inputs `#login-username` and `#login-password`
+- **Evidence:** The form has `sr-only` labels and placeholder text only. That preserves accessible names, but users never see persistent field labels in the UI.
+- **Failure scenario:** On a small screen or during autofill, users lose the label context once typing begins. That makes the login form slower to scan and a little harder to recover from mistakes.
+- **Suggested fix:** Show visible labels or floating labels above the fields. Keep the `sr-only` labels if you want, but do not depend on placeholders as the only visible affordance.
 
-### UX-07 — RTL is acknowledged but not actually prepared
+## Missed-issues sweep
 
-- **Severity:** LOW
-- **Confidence:** High
-- **Status:** risk
-- **File / region:** `apps/web/src/app/[locale]/layout.tsx:79-84`, plus the many physical `left/right` placements throughout the shell
-- **Failure / user scenario:** If an RTL locale is introduced later, the app will need a broad layout pass because the root element is locked to `dir="ltr"` and many components use physical positioning rather than logical start/end.
-- **Suggested fix:** Add a locale-to-direction map and migrate the highest-traffic layouts/components to logical spacing/placement before introducing RTL content.
+I rechecked the areas that previously looked risky and did **not** flag them as current issues:
 
-### UX-08 — Photo-viewer shortcuts remain hidden behind titles only
+- Dialog and sheet close labels are localized through `closeLabel`
+- Dialog/sheet panels now cap height and allow internal scrolling
+- The switch control is no longer undersized on touch screens
+- Upload failures are now surfaced inline per file with alert semantics
+- `TagInput` accepts contextual accessible labels and callers provide them
+- Shared-view photo navigation no longer duplicates the back button in the shared route
+- The mobile info sheet now focuses a visible control when opened
+- `global-error.tsx` already supports both `en` and `ko` copy, so it is not an English-only fallback
+- Reduced-motion support is present in `apps/web/src/app/[locale]/globals.css`
+- RTL is not a current product requirement here; the app intentionally ships LTR locales only (`en`, `ko`)
 
-- **Severity:** LOW-MEDIUM
-- **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/lightbox.tsx:38-44, 179-202`; `apps/web/src/components/photo-viewer.tsx:165-177`
-- **Failure / user scenario:** The viewer supports `F`, arrow keys, and Escape, but the only discoverability is a `title` attribute and `aria-keyshortcuts`. First-time users do not see a visible keyboard hint, so the richer navigation feels less polished than it is.
-- **Suggested fix:** Add a compact on-screen shortcut hint or a help affordance near the toolbar / lightbox trigger.
+## Files reviewed
 
-### UX-09 — The blur placeholder still does almost nothing
+### App shell, locale shell, and global styles
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/globals.css`
+- `apps/web/src/app/[locale]/loading.tsx`
+- `apps/web/src/app/[locale]/error.tsx`
+- `apps/web/src/app/[locale]/not-found.tsx`
+- `apps/web/src/app/global-error.tsx`
 
-- **Severity:** LOW
-- **Confidence:** High
-- **Status:** confirmed
-- **File / region:** `apps/web/src/components/home-client.tsx:219-228`
-- **Failure / user scenario:** The fallback uses a 1×1 transparent PNG, so slow-loading cards still pop in abruptly instead of fading from a meaningful blurred preview.
-- **Suggested fix:** Generate a real low-res blur or dominant-color placeholder at ingest time and persist it with the image metadata.
+### Public routes and UI
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/topic-empty-state.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/photo-viewer-loading.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/image-zoom.tsx`
 
-## Overall assessment
+### Admin routes and UI
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/admin/layout.tsx`
+- `apps/web/src/app/[locale]/admin/login-form.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+- `apps/web/src/components/admin-header.tsx`
+- `apps/web/src/components/admin-nav.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/components/tag-input.tsx`
 
-The UI is structurally strong: the app shell, viewer, and admin toolset are coherent and mostly accessible. The remaining UX debt is concentrated in four places:
+### UI primitives, config, messages, and tests
+- `apps/web/src/components/theme-provider.tsx`
+- `apps/web/src/components/ui/button.tsx`
+- `apps/web/src/components/ui/input.tsx`
+- `apps/web/src/components/ui/badge.tsx`
+- `apps/web/src/components/ui/dialog.tsx`
+- `apps/web/src/components/ui/alert-dialog.tsx`
+- `apps/web/src/components/ui/sheet.tsx`
+- `apps/web/src/components/ui/select.tsx`
+- `apps/web/src/components/ui/switch.tsx`
+- `apps/web/src/components/ui/card.tsx`
+- `apps/web/src/components/ui/table.tsx`
+- `apps/web/src/components/ui/alert.tsx`
+- `apps/web/src/components/ui/textarea.tsx`
+- `apps/web/src/components/ui/sonner.tsx`
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- `apps/web/src/site-config.json`
+- `apps/web/src/lib/constants.ts`
+- `apps/web/src/lib/locale-path.ts`
+- `apps/web/e2e/public.spec.ts`
+- `apps/web/e2e/admin.spec.ts`
+- `apps/web/e2e/nav-visual-check.spec.ts`
+- `apps/web/e2e/test-fixes.spec.ts`
+- `apps/web/src/__tests__/error-shell.test.ts`
+- `apps/web/src/__tests__/shared-page-title.test.ts`
+- `apps/web/src/__tests__/upload-dropzone.test.ts`
+- `apps/web/src/__tests__/tag-input.test.ts`
+- plus the rest of the existing UI/data regression tests under `apps/web/src/__tests__/`
 
-1. **Resilience** — the public gallery still collapses to a generic error shell when the DB is unavailable.
-2. **Interaction feedback** — search focus, search results, and login failures need clearer state handling.
-3. **Responsive admin ergonomics** — the dashboard still compresses too much before it reaches a wide breakpoint.
-4. **Polish / internationalization** — close labels, RTL readiness, shortcut discoverability, and blur placeholders still need refinement.
+## Bottom line
 
-No code was changed in this review pass.
+The app’s accessible primitives and responsive affordances are in good shape, but the biggest remaining UX risks are still **error resilience**, **wayfinding in admin tabs**, and **localized recovery/brand copy**. The public gallery should not collapse into a generic error shell when the data layer has a bad day.
