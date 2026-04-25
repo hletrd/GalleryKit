@@ -109,7 +109,7 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
         expect(report.failed[0]).toContain('deleteFoo');
     });
 
-    it('passes when a mutating arrow-function export calls requireSameOriginAdmin', () => {
+    it('passes when a mutating arrow-function export returns on the requireSameOriginAdmin result', () => {
         const src = `
             export const deleteFoo = async (id) => {
                 const originError = await requireSameOriginAdmin();
@@ -120,6 +120,20 @@ describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)',
         const report = checkActionSource(src, 'actions/fixture.ts');
         expect(report.failed).toEqual([]);
         expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
+    });
+
+    it('fails when a mutating arrow-function export ignores the requireSameOriginAdmin result', () => {
+        const src = `
+            export const deleteFoo = async (id) => {
+                const originError = await requireSameOriginAdmin();
+                return { success: true };
+            };
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+        expect(report.failed[0]).toContain('deleteFoo');
     });
 
     it('requires explicit exemptions for getter-style arrow-function exports', () => {
@@ -244,7 +258,8 @@ describe('checkActionSource — mixed file', () => {
                 return { success: true };
             };
             export const createFoo = async (data) => {
-                await requireSameOriginAdmin();
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
                 return { success: true };
             };
         `;

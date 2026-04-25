@@ -74,6 +74,41 @@ function resolveAdminE2EPassword(origin: string) {
 }
 
 
+
+const LOCAL_DB_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+type E2EMysqlConnectionOptions = {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+  ssl?: { rejectUnauthorized: true };
+};
+
+function requiredDbEnv(name: 'DB_USER' | 'DB_PASSWORD' | 'DB_NAME') {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function getE2EMysqlConnectionOptions(): E2EMysqlConnectionOptions {
+  const host = process.env.DB_HOST?.trim() || '127.0.0.1';
+  const sslDisabled = process.env.DB_SSL === 'false';
+  const useTls = !LOCAL_DB_HOSTS.has(host) && !sslDisabled;
+
+  return {
+    host,
+    port: Number(process.env.DB_PORT || '3306'),
+    user: requiredDbEnv('DB_USER'),
+    password: requiredDbEnv('DB_PASSWORD'),
+    database: requiredDbEnv('DB_NAME'),
+    ...(useTls ? { ssl: { rejectUnauthorized: true } } : {}),
+  };
+}
+
 function generateE2ESessionToken(secret: string): string {
   const timestamp = Date.now().toString();
   const random = randomBytes(16).toString('hex');
@@ -89,13 +124,7 @@ export async function createAdminSessionCookie() {
   }
 
   const mysql = await import('mysql2/promise');
-  const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || '127.0.0.1',
-    port: Number(process.env.DB_PORT || '3306'),
-    user: process.env.DB_USER || 'gallery',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'gallery',
-  });
+  const connection = await mysql.createConnection(getE2EMysqlConnectionOptions());
 
   try {
     const [queryRows] = await connection.execute('SELECT id FROM admin_users WHERE username = ? LIMIT 1', ['admin']);
@@ -121,13 +150,7 @@ export async function createAdminSessionCookie() {
 
 export async function waitForImageProcessed(userFilename: string, timeoutMs = 30_000) {
   const mysql = await import('mysql2/promise');
-  const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || '127.0.0.1',
-    port: Number(process.env.DB_PORT || '3306'),
-    user: process.env.DB_USER || 'gallery',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'gallery',
-  });
+  const connection = await mysql.createConnection(getE2EMysqlConnectionOptions());
 
   const startedAt = Date.now();
   try {

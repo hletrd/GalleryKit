@@ -157,6 +157,7 @@ git values must be treated as compromised and must not be reused.
 ### Runtime topology
 - The shipped Docker Compose deployment is a **single web-instance / single-writer** topology. Restore maintenance flags, upload quota tracking, and image queue state are process-local; do not horizontally scale the web service unless those coordination states are moved to a shared store.
 - Admin accounts are multiple root admins. The current schema has no role/capability model, so any admin can upload, edit, export/restore DB backups, change settings, and manage other admins.
+- Shared-group `view_count` is best-effort approximate analytics: increments are buffered in process memory and flushed asynchronously, so a crash, process kill, or extended DB outage can undercount delivered views. Do not treat it as billing/audit-grade state unless it is moved to durable storage.
 
 ## Database Indexes
 
@@ -239,13 +240,13 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
   - Requires each HTTP-method export (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS) to wrap `withAdminAuth(...)`. Function-declaration and aliased exports are rejected — use the direct variable-export form so the wrapper is explicit.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-api-auth.test.ts`.
 - `npm run lint:action-origin --workspace=apps/web`
-  - Scans `apps/web/src/app/actions/*.ts` (auto-discovered via glob, excluding `auth.ts` and `public.ts`) plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
-  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to call `requireSameOriginAdmin()`. Aliased exports are rejected so the scanner can inspect the committed implementation body.
-  - Auto-exempts read-only getters (name matches `^get[A-Z]`) and exports carrying a `/** @action-origin-exempt: <reason> */` leading comment.
+  - Scans `apps/web/src/app/actions/` recursively for server-action-capable extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`), excluding basenames `auth` and `public`, plus `apps/web/src/app/[locale]/admin/db-actions.ts`.
+  - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to store the `requireSameOriginAdmin()` result and return early when that result is present. A bare call or ignored result is rejected. Aliased exports are rejected so the scanner can inspect the committed implementation body.
+  - Read-only exports must carry an explicit `/** @action-origin-exempt: <reason> */` leading comment; getter-style names are not automatically exempt because names are not proof of read-only behavior.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
-**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must call `requireSameOriginAdmin()` (or carry an explicit exempt comment). `auth.ts` and `public.ts` are intentionally excluded by name because they own their own same-origin/unauthenticated-surface handling.
+**Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` and `public.ts` are intentionally excluded by name because they own their own same-origin/unauthenticated-surface handling.
 
 ## Deployment Checklist
 

@@ -113,30 +113,89 @@ function isRequireSameOriginAdminExpression(node: ts.Node): boolean {
     );
 }
 
-function statementCallsRequireSameOriginAdmin(statement: ts.Statement): boolean {
-    if (ts.isExpressionStatement(statement)) {
-        return isRequireSameOriginAdminExpression(statement.expression);
+function sameOriginGuardVariableName(statement: ts.Statement): string | null {
+    if (!ts.isVariableStatement(statement)) {
+        return null;
     }
 
-    if (ts.isVariableStatement(statement)) {
-        return statement.declarationList.declarations.some((declaration) => (
-            !!declaration.initializer
+    for (const declaration of statement.declarationList.declarations) {
+        if (
+            ts.isIdentifier(declaration.name)
+            && declaration.initializer
             && isRequireSameOriginAdminExpression(declaration.initializer)
-        ));
+        ) {
+            return declaration.name.text;
+        }
+    }
+
+    return null;
+}
+
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) {
+        current = current.expression;
+    }
+    return current;
+}
+
+function conditionChecksGuardVariable(expression: ts.Expression, guardName: string): boolean {
+    const unwrapped = unwrapExpression(expression);
+    if (ts.isIdentifier(unwrapped)) {
+        return unwrapped.text === guardName;
+    }
+
+    if (ts.isBinaryExpression(unwrapped)) {
+        const left = unwrapExpression(unwrapped.left);
+        const right = unwrapExpression(unwrapped.right);
+        return (ts.isIdentifier(left) && left.text === guardName)
+            || (ts.isIdentifier(right) && right.text === guardName);
+    }
+
+    return false;
+}
+
+function statementReturnsOnGuard(statement: ts.Statement, guardName: string): boolean {
+    if (!ts.isIfStatement(statement) || !conditionChecksGuardVariable(statement.expression, guardName)) {
+        return false;
+    }
+
+    if (ts.isReturnStatement(statement.thenStatement)) {
+        return true;
+    }
+
+    if (ts.isBlock(statement.thenStatement)) {
+        return statement.thenStatement.statements.some(ts.isReturnStatement);
     }
 
     return false;
 }
 
 function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
-    // Only accept an effective guard call in the exported action's own top-level
-    // body. Recursive AST search let dead branches and uncalled nested helpers
-    // satisfy the gate even though the real action path had no provenance check.
+    // Only accept an effective guard in the exported action's own top-level
+    // body. The guard function returns a localized error string; merely
+    // calling it is not sufficient because callers must return early on that
+    // value before mutating state. Recursive AST search let dead branches,
+    // uncalled nested helpers, and ignored guard results satisfy the gate even
+    // though the real action path had no provenance enforcement.
     if (!ts.isBlock(body)) {
         return false;
     }
 
-    return body.statements.some(statementCallsRequireSameOriginAdmin);
+    for (let index = 0; index < body.statements.length; index++) {
+        const guardName = sameOriginGuardVariableName(body.statements[index]);
+        if (!guardName) continue;
+
+        for (const followingStatement of body.statements.slice(index + 1)) {
+            if (statementReturnsOnGuard(followingStatement, guardName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    return false;
 }
 
 type CheckReport = {
@@ -179,7 +238,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
 
         if (!functionCallsRequireSameOriginAdmin(body)) {
             report.failed.push(
-                `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must call requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
+                `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must return early on requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
             );
             return;
         }
@@ -277,7 +336,7 @@ if (isCliEntry) {
 
     if (failed) {
         console.error('\nOne or more mutating server actions are missing the same-origin provenance check.');
-        console.error('Fix by calling `requireSameOriginAdmin()` or documenting an explicit exemption.');
+        console.error('Fix by returning early on `requireSameOriginAdmin()` or documenting an explicit exemption.');
         process.exit(1);
     }
 
