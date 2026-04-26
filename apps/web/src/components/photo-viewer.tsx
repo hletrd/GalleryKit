@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,27 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             )
             : null
     ), [image, t, untitledFallbackTitle]);
+
+    /**
+     * Cycle 1 RPF loop AGG1-L06 / PR1-LOW-02 / DSGN1-LOW-01:
+     * memoize the blur backgroundImage style so the inline style
+     * object identity is stable across re-renders for a given
+     * image. The previous shape rebuilt the literal each render,
+     * forcing React to reassign `style.backgroundImage` on every
+     * parent re-render and triggering a style-recalc even when the
+     * underlying value hadn't changed. The validated value flows
+     * through `isSafeBlurDataUrl()` exactly as before.
+     */
+    const blurStyle = useMemo<CSSProperties | undefined>(() => {
+        const value = image?.blur_data_url;
+        if (!isSafeBlurDataUrl(value)) return undefined;
+        return {
+            backgroundImage: `url(${value})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+        };
+    }, [image?.blur_data_url]);
 
     useEffect(() => {
         document.title = getPhotoDocumentTitle(
@@ -372,12 +393,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             exit={prefersReducedMotion ? undefined : { opacity: 0, x: -20 }}
                             transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
                             className="w-full h-full flex items-center justify-center relative"
-                            style={isSafeBlurDataUrl(image.blur_data_url) ? {
-                                backgroundImage: `url(${image.blur_data_url})`,
-                                backgroundSize: 'cover',
-                                backgroundPosition: 'center',
-                                backgroundRepeat: 'no-repeat',
-                            } : undefined}
+                            style={blurStyle}
                         >
                             <div className="w-full h-full flex items-center justify-center">
                                 <ImageZoom className="w-full h-full flex items-center justify-center">
