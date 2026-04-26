@@ -81,7 +81,7 @@ export function LoginForm() {
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword((prev) => !prev)}
-                                    className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-9 h-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-11 h-11 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
                                     aria-label={showPassword ? t('hidePassword') : t('showPassword')}
                                     aria-pressed={showPassword}
                                     tabIndex={0}
@@ -99,7 +99,7 @@ export function LoginForm() {
                                 {state.error}
                             </p>
                         )}
-                        <Button type="submit" className="w-full" disabled={isPending}>
+                        <Button type="submit" className="w-full h-11" disabled={isPending}>
                             {isPending ? t('submitting') : t('submit')}
                         </Button>
                     </form>
