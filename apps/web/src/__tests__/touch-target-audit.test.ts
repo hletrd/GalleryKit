@@ -169,9 +169,11 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     'app/[locale]/admin/(protected)/settings/settings-client.tsx': 1,
     // seo-client.tsx: single back-arrow `size="icon"`.
     'app/[locale]/admin/(protected)/seo/seo-client.tsx': 1,
-    // login-form.tsx is keyboard-primary AND already audited via
-    // the dedicated `it()` block below; the wider scan also covers
-    // it. Listed as 0 to make it explicit that no exemption applies.
+    // login-form.tsx is keyboard-primary AND audited via the
+    // dedicated `it()` block below (cycle 2 RPF loop AGG2-M01 fixed
+    // a path-resolution bug that previously silently no-op'd the
+    // dedicated assertion); the wider scan also covers it. Listed
+    // as 0 to make it explicit that no exemption applies.
     'app/[locale]/admin/login-form.tsx': 0,
 };
 
@@ -327,8 +329,21 @@ describe('touch-target audit (44 px floor)', () => {
     });
 
     it('finds no < 44 px touch targets in admin login form', () => {
-        const loginForm = path.resolve(adminDir, '[locale]', 'admin', 'login-form.tsx');
-        if (!fs.existsSync(loginForm)) return;
+        // Cycle 2 RPF loop AGG2-M01 / TE2-MED-01 / V2-MED-01 / D2-MED-01 /
+        // CR2-MED-01: resolve from `srcRoot`, NOT `adminDir`. `adminDir`
+        // already terminates in `app/[locale]/admin`, so the previous
+        // `path.resolve(adminDir, '[locale]', 'admin', 'login-form.tsx')`
+        // produced `…/app/[locale]/admin/[locale]/admin/login-form.tsx`,
+        // which has never existed. The silent `if (!exists) return;`
+        // turned the assertion into a no-op so the test passed vacuously
+        // even though it was the dedicated belt-and-braces guard for the
+        // highest-traffic admin entry point.
+        //
+        // Replaced the silent skip with an explicit `expect(...).toBe(true)`
+        // so a future move/rename of `login-form.tsx` is a hard failure
+        // rather than a silent revert to vacuity.
+        const loginForm = path.resolve(srcRoot, 'app', '[locale]', 'admin', 'login-form.tsx');
+        expect(fs.existsSync(loginForm), `Login form must exist at ${loginForm}`).toBe(true);
         const issues = scanFile(loginForm);
         expect(issues, `Login form should clear 44 px floor: ${JSON.stringify(issues, null, 2)}`).toEqual([]);
     });
