@@ -338,11 +338,22 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     empty dark box. Desktop keeps the 500 px floor so the
                     image doesn't collapse to a tiny strip on widescreens.
                     F-23: the inner image fades in via the existing
-                    `AnimatePresence` so the empty container shows the muted
-                    background while the image decodes; a soft skeleton
-                    backdrop (`skeleton-shimmer`) gives a "loading" cue
-                    instead of a flat black box. */}
-                <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer">
+                    `AnimatePresence`. When the image record carries a
+                    `blur_data_url` (16 px blurred preview computed during
+                    upload, see CLAUDE.md "Image Processing Pipeline"), use
+                    it as a background-image so users see an instant
+                    color-accurate preview while the AVIF/WebP/JPEG decodes.
+                    The `skeleton-shimmer` class still provides a fallback
+                    loading cue when no blur data is available. */}
+                <div
+                    className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer"
+                    style={image.blur_data_url ? {
+                        backgroundImage: `url(${image.blur_data_url})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        backgroundRepeat: 'no-repeat',
+                    } : undefined}
+                >
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
