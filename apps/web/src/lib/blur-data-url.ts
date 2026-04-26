@@ -51,22 +51,67 @@ export function isSafeBlurDataUrl(value: unknown): value is string {
 }
 
 /**
+ * Cycle 3 RPF loop AGG3-L02 / SR3-LOW-01 / CR3-LOW-01 / PR3-LOW-01:
+ * throttle the rejection warn so a poisoned `blur_data_url` row that
+ * survives a DB restore does not flood stderr on every page load
+ * (route is `revalidate = 0`, so a single bad row could otherwise log
+ * once per request indefinitely).
+ *
+ * Strategy: bounded LRU keyed by `(typeof, length, head)` tuple. The
+ * tuple is coarse enough that two rejections of the same poisoned
+ * value collapse to one entry, and it intentionally does NOT include
+ * any of the rejected payload past the first 8 chars (the head is what
+ * we already log in the warn line, so no new information is revealed).
+ * Cap is enforced by oldest-entry eviction (Map iteration order is
+ * insertion order in modern JS engines).
+ */
+const REJECTION_LOG_CAP = 256;
+const rejectionLog = new Map<string, number>();
+
+function rejectionTuple(value: unknown): string {
+    if (typeof value !== 'string') return `nonstring:${typeof value}`;
+    return `s:${value.length}:${value.slice(0, 8)}`;
+}
+
+function shouldEmitRejectionWarn(value: unknown): boolean {
+    const key = rejectionTuple(value);
+    const count = rejectionLog.get(key) ?? 0;
+    rejectionLog.set(key, count + 1);
+    if (rejectionLog.size > REJECTION_LOG_CAP) {
+        const oldestKey = rejectionLog.keys().next().value;
+        if (oldestKey !== undefined) rejectionLog.delete(oldestKey);
+    }
+    // Emit the first sighting; emit again every 1000 hits so a sustained
+    // poisoning is observable but not spammy.
+    return count === 0 || count % 1000 === 0;
+}
+
+/**
+ * Test-only: reset the throttle bookkeeping. Used by the unit test so
+ * a sequence of rejection assertions runs deterministically without
+ * inheriting state from prior tests.
+ */
+export function _resetBlurDataUrlRejectionLogForTests(): void {
+    rejectionLog.clear();
+}
+
+/**
  * Server-side write barrier. Returns the value if it conforms to the
  * contract, or `null` otherwise. Logs a warning on rejection so an
- * upstream regression is observable.
+ * upstream regression is observable, but throttles the warn so a
+ * single poisoned row cannot flood stderr.
  */
 export function assertBlurDataUrl(value: unknown): string | null {
     if (value == null) return null;
     if (isSafeBlurDataUrl(value)) return value;
+    if (!shouldEmitRejectionWarn(value)) return null;
     // Cycle 1 RPF loop AGG1-L01 / CR1-LOW-02 / SR1-LOW-01: redact the
     // rejected-value preview. The previous `slice(0, 24)` could leak
     // arbitrary URL contents (tokens, query params) when a non-`data:`
     // URL is rejected — for example a malicious DB-restore loading
     // `https://attacker.example/?token=...` would copy the first 24
     // chars including the token prefix into the warn log. Restrict the
-    // preview to typeof + length + the first 8 chars (enough to tell
-    // `data:image/...` from a non-`data:` URL or garbage without
-    // leaking sensitive contents).
+    // preview to typeof + length + the first 8 chars.
     const summary = typeof value === 'string'
         ? `string(len=${value.length}, head="${value.slice(0, 8)}")`
         : `${typeof value}`;

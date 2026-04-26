@@ -1,9 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     assertBlurDataUrl,
     isSafeBlurDataUrl,
     MAX_BLUR_DATA_URL_LENGTH,
+    _resetBlurDataUrlRejectionLogForTests,
 } from '@/lib/blur-data-url';
+
+beforeEach(() => {
+    // Cycle 3 RPF loop AGG3-L02: throttle has process-lifetime state.
+    // Reset between tests so warn-count assertions are deterministic
+    // regardless of test ordering.
+    _resetBlurDataUrlRejectionLogForTests();
+});
 
 /**
  * Cycle 2 RPF loop AGG2-M01 / SR2-MED-01 / AGG2-L03 / SR2-LOW-01.
@@ -139,6 +147,43 @@ describe('assertBlurDataUrl', () => {
      * 8 chars. A malicious DB-restore payload could carry a token in
      * the query string; the log line must not echo it.
      */
+    /**
+     * Cycle 3 RPF loop AGG3-L02 / SR3-LOW-01 / CR3-LOW-01: a poisoned
+     * value rejected on every page load (route is `revalidate = 0`)
+     * must not flood stderr. The throttle collapses repeated
+     * rejections of the same `(typeof,len,head)` tuple to a single
+     * warn per 1000 hits.
+     */
+    it('throttles repeated rejections of the same value', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const poisoned = 'http://attacker.example/x.png';
+            assertBlurDataUrl(poisoned);
+            assertBlurDataUrl(poisoned);
+            assertBlurDataUrl(poisoned);
+            assertBlurDataUrl(poisoned);
+            assertBlurDataUrl(poisoned);
+            // First sighting emits one warn; subsequent same-tuple
+            // hits collapse until the 1000th call.
+            expect(warn).toHaveBeenCalledOnce();
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('emits a fresh warn for a different rejected tuple', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            assertBlurDataUrl('http://evil1.example/x.png');
+            assertBlurDataUrl('http://evil1.example/x.png');
+            assertBlurDataUrl('https://evil2.example/y.png');
+            // Different head ('http' vs 'https') = different tuple = 2 warns.
+            expect(warn).toHaveBeenCalledTimes(2);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
     it('warn preview redacts past the first 8 chars of a rejected string', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
