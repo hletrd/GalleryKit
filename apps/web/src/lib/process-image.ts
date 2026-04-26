@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
+import { assertBlurDataUrl } from '@/lib/blur-data-url';
 
 const cpuCount = typeof os.availableParallelism === 'function'
     ? os.availableParallelism()
@@ -283,7 +284,21 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
             .jpeg({ quality: 40 })
             .toBuffer();
         if (blurBuffer.length > 0) {
-            blurDataUrl = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
+            // Cycle 4 RPF loop AGG4-L01: route the producer-side
+            // literal through the central `assertBlurDataUrl` contract
+            // so producer + consumer + reader all consult the same
+            // validator. Without this the consumer-side wrap at
+            // `actions/images.ts:307` was the only validator in the
+            // pipeline, which created a one-direction information
+            // flow: a future MIME drift in this producer (e.g. to
+            // AVIF/WebP) would silently write NULL `blur_data_url`
+            // for every upload while the cycle-3 throttle masked the
+            // breakage. Wrapping here closes the symmetry — the
+            // happy path (16x16 q40 JPEG ~270-680 base64 chars) sits
+            // comfortably inside MAX_BLUR_DATA_URL_LENGTH (4096), so
+            // this is a no-op for valid producer output.
+            const candidate = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
+            blurDataUrl = assertBlurDataUrl(candidate);
         }
     } catch {
         // Non-critical
