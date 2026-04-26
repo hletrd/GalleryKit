@@ -99,7 +99,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         <>
             {hasMore && (
                 <div ref={setSentinelRef} className="flex justify-center py-8">
-                    <Button type="button" variant="outline" onClick={loadMore} disabled={loading}>
+                    <Button type="button" variant="outline" onClick={loadMore} disabled={loading} className="h-11">
                         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         {loading ? t('home.loadingMore') : t('home.loadMore')}
                     </Button>
