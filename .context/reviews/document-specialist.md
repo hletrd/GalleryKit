@@ -1,29 +1,18 @@
-# document-specialist — Cycle 3 (HEAD `839d98c`, 2026-04-26)
+# Document Specialist — Cycle 5/100 RPF loop (HEAD `be53b44`, 2026-04-26)
+
+## Scope
+
+- CLAUDE.md "Image Processing Pipeline" step 9 alignment with code at `lib/process-image.ts:301`.
+- Cross-references in `lib/blur-data-url.ts` doc block.
 
 ## Findings
 
-### DS3-LOW-01 — CLAUDE.md does not document the touch-target audit
+**No new findings.**
 
-- **File:** `CLAUDE.md` Testing / Lint Gates section
-- **Confidence:** High / **Severity:** Low
+`be53b44 docs(claude-md): record producer-side blur contract call site` updated CLAUDE.md to mention both write-time and read-time validators routed through `lib/blur-data-url.ts`. Matches code at HEAD. Closes cycle-4 AGG4-I04.
 
-The doc describes the three lint scripts but does not mention the
-touch-target audit (which is a vitest test, not a lint script). After
-CR3-MED-01 fix lands, a "Touch-Target Audit" subsection should document:
-- Files scanned (`SCAN_ROOTS` = components/ + admin route group).
-- Pattern coverage (shadcn `<Button>`, HTML `<button>`, multi-line normalize).
-- How to add a documented exemption (raise `KNOWN_VIOLATIONS` + comment).
+`lib/blur-data-url.ts` doc-block cross-references (SR2-MED-01, SR2-LOW-01, AGG2-M01, AGG2-L03, AGG3-L02, SR3-LOW-01, CR3-LOW-01, PR3-LOW-01, AGG1-L01, CR1-LOW-02, SR1-LOW-01) trace back to historical aggregate files in `.context/reviews/_aggregate-cycle*-rpf*.md` — all resolvable, no stale references.
 
-### DS3-INFO-01 — `lib/blur-data-url.ts` cross-refs are archaeology, not API contract
+## Confidence
 
-- **File:** `apps/web/src/lib/blur-data-url.ts:30`
-- **Confidence:** Medium / **Severity:** Informational
-
-Cross-refs (`SR2-MED-01, SR2-LOW-01, AGG2-M01, AGG2-L03`) are useful for
-archaeology but a one-line API contract in CLAUDE.md (under "Image
-Processing Pipeline") would help future contributors. Already partially
-covered by existing `blur_data_url` notes; just add a pointer.
-
-## Verdict
-
-1 NEW LOW, 1 NEW INFO.
+High.

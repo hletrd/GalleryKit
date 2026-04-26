@@ -1,24 +1,33 @@
-# architect — Cycle 3 (HEAD `839d98c`, 2026-04-26)
+# Architect — Cycle 5/100 RPF loop (HEAD `be53b44`, 2026-04-26)
+
+## Scope
+
+- Three-point validator symmetry for `images.blur_data_url`.
+- Producer/consumer/reader contract durability.
 
 ## Findings
 
-### A3-LOW-01 — touch-target audit conflates "scanner shape" and "violation count"
+**No new findings.**
 
-- **File:** `apps/web/src/__tests__/touch-target-audit.test.ts`
-- **Confidence:** High / **Severity:** Low
+The cycle-4 fix (AGG4-L01) put `assertBlurDataUrl()` at the producer in `lib/process-image.ts:301`, completing the validator triangle:
 
-Architecturally the audit fuses (1) FORBIDDEN regex set, (2) per-file
-violation budget, (3) file walker. After CR3-MED-01 lands the natural
-split is:
-- `lib/touch-target-scan.ts` exporting `scanSource(string): FoundIssue[]`
-  (no fs, no walker — pure function on source text post multi-line
-  normalize).
-- The vitest file calls `scanSource()` per file and asserts.
+```
+Sharp pipeline -> assertBlurDataUrl() -> ProcessedImageData.blurDataUrl
+                  (producer, :301)
+                                                 |
+                                                 v
+                                       assertBlurDataUrl() -> images.blur_data_url
+                                          (consumer, :307)
+                                                                       |
+                                                                       v
+                                                              isSafeBlurDataUrl()
+                                                              (reader, :105)
+```
 
-The split lets the meta-test (TE3-MED-01) exercise the scanner against
-in-memory fixtures without touching disk. Filed LOW because the
-monolith works once the regex blind spot is fixed.
+This is the recommended shape for a CSS-injection write barrier: validate at every store/transmit boundary, never trust the layer below.
 
-## Verdict
+CLAUDE.md "Image Processing Pipeline" step 9 was updated in `be53b44` to record the producer-side call site (closes AGG4-I04).
 
-1 NEW LOW. No new architectural risks introduced by cycle 2.
+## Confidence
+
+High.

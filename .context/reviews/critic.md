@@ -1,32 +1,21 @@
-# critic — Cycle 3 (HEAD `839d98c`, 2026-04-26)
+# Critic — Cycle 5/100 RPF loop (HEAD `be53b44`, 2026-04-26)
 
-## Cross-perspective critique
+## Skeptical sweep
 
-The cycle-2 RPF loop closed AGG2-M02/M03 with a per-file `KNOWN_VIOLATIONS`
-map and an extended FORBIDDEN regex. Both moves are correct — and both
-are defeated by the same blind spot: the scanner walks lines
-independently, but every multi-prop `<Button>` in the codebase is
-formatted across 4-7 lines (Prettier default).
+1. **Is the AGG4-L01 fix actually load-bearing?** The producer writes `data:image/jpeg;base64,${buffer.toString('base64')}`. Today this always matches `ALLOWED_PREFIXES[0]`. The fix is purely speculative defense. Accepted: this is documented in the comment block at `process-image.ts:287-299` as a regression guard for "future MIME drift". Symmetry-with-consumer is itself a maintainability win.
 
-The audit currently produces a green result not because the codebase
-clears the 44 px floor, but because the regex sees almost nothing on the
-files that matter (admin tables, viewer toolbars, search dialog, upload
-dropzone). Cycle 2 added a fixture-style assertion that the regex catches
-single-line synthetic snippets — that meta-test is correct, but it
-silently does not exercise the real-world multi-line shape. Same shape
-as AGG1-NF3 (correlated subquery returning NULL while passing in unit
-tests): a seatbelt that looks correct in isolation but fails on the
-actual production input.
+2. **Could the throttle's first-8-char head ever leak more than the warn line already does?** No. The warn line at `:118` prints the same `slice(0,8)`. Throttle key cannot be more leaky than the visible log.
 
-## Aggregate critique
+3. **Is the rejection-log Map a memory leak surface for an attacker who crafts varying first-8-char prefixes?** Cap 256 + LRU eviction. Bounded. Worst-case attacker fills the Map with 256 distinct prefixes; each replaces the oldest. No unbounded growth.
 
-- CR3-MED-01 / TE3-MED-01 / V3-MED-01 / D3-MED-01 / DSGN3-MED-01 are
-  the same root cause: line-bounded scanner. One fix, one re-baseline.
-- CR3-LOW-02 / TE3-LOW-01 / V3-LOW-01 (`.toSQL()` no-op) — same fix.
-- SR3-LOW-01 / CR3-LOW-01 (warn flooding) — same throttle covers both.
+4. **Are there other DB columns that flow into CSS `url()` without a similar contract?** Searched `grep -rn 'style.*url('` and found no other CSS url() injections from DB-sourced values. The `<picture>`/`<img src>` paths use Next/Image which rejects non-allowlisted hosts.
 
-## Verdict
+5. **Tests deterministic across run order?** `_resetBlurDataUrlRejectionLogForTests()` is invoked in `beforeEach`. Yes.
 
-Convergence plausible at cycle 4 if CR3-MED-01 lands the multi-line
-normalization + re-baselined `KNOWN_VIOLATIONS`, plus the warn throttle
-and no-op test cleanup.
+## Findings
+
+**No new findings.** Convergence prediction from cycle 4 confirmed.
+
+## Confidence
+
+High.

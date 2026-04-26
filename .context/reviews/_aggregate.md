@@ -1,77 +1,56 @@
-# Aggregate — Cycle 3/100 RPF loop (HEAD `839d98c`, 2026-04-26)
+# Aggregate — Cycle 5/100 RPF loop (HEAD `be53b44`, 2026-04-26)
 
 ## Run context
 
-- **HEAD:** `839d98c fix(test): unbreak admin login-form touch-target audit (silent no-op)`
-- **Cycle:** 3/100
-- **Reviewers run inline (Task spawn-agent unavailable in catalog):**
-  code-reviewer, perf-reviewer, security-reviewer, critic, verifier,
-  test-engineer, tracer, architect, debugger, document-specialist, designer
-- **Reviewer files:** `<lens>.md` (overwriting prior cycle's content; cycle-2 versions remain in git history).
+- **HEAD:** `be53b44 docs(claude-md): record producer-side blur contract call site`
+- **Cycle:** 5/100
+- **Predecessor verdict:** cycle-4 AGG4-L01 (LOW, 9/11 agreement) closed by commits `616f92a` (producer fix), `933a8c7` (producer test), `be53b44` (CLAUDE.md doc).
 
 ## Aggregate verdict
 
-**1 NEW MEDIUM (5x cross-agent agreement), 4 NEW LOW, 2 NEW INFO.**
+**0 NEW FINDINGS at any severity.** Convergence prediction from cycle-4 aggregate confirmed.
 
-### MEDIUM (1 finding, high cross-agent consensus)
+| Severity | Count |
+|---|---|
+| High | 0 |
+| Medium | 0 |
+| Low | 0 |
+| Info | 0 |
 
-| ID | Severity | Confidence | Reviewer agreement | Files | Summary |
-|---|---|---|---|---|---|
-| **AGG3-M01 = CR3-MED-01 / TE3-MED-01 / V3-MED-01 / D3-MED-01 / DSGN3-MED-01** | Medium | High | 5/11 (code-reviewer, test-engineer, verifier, debugger, designer) | `apps/web/src/__tests__/touch-target-audit.test.ts:191-272` and the multi-line `<Button size="icon">` call sites in `components/upload-dropzone.tsx:404-413`, `components/admin-user-manager.tsx:142-150`, `app/[locale]/admin/(protected)/categories/topic-manager.tsx`, `tags/tag-manager.tsx`, `settings/settings-client.tsx`, `seo/seo-client.tsx`, `components/search.tsx`, `components/photo-navigation.tsx` | Touch-target audit FORBIDDEN regex is line-bounded; misses every multi-line `<Button size="icon">`. The cycle-2 `KNOWN_VIOLATIONS` map matches scanned counts only because the scanner sees nothing on those files. Real violation: `upload-dropzone.tsx:408` ships a 24 px destructive REMOVE button on every uploaded preview unaudited. |
+All 11 reviewer lenses (code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer) independently produced "no new findings". Cross-agent agreement on convergence: 11/11.
 
-### LOW (4 findings)
+## Quality-gate baseline (HEAD `be53b44`)
 
-| ID | Severity | Confidence | Reviewers | Summary |
-|---|---|---|---|---|
-| AGG3-L01 = CR3-LOW-02 / TE3-LOW-01 / V3-LOW-01 | Low | High | code-reviewer, test-engineer, verifier | `data-tag-names-sql.test.ts` "Drizzle .toSQL() output" sub-test does not actually verify SQL — only asserts `typeof === 'function'`. |
-| AGG3-L02 = CR3-LOW-01 / SR3-LOW-01 / PR3-LOW-01 | Low | Medium | code-reviewer, security, perf | `assertBlurDataUrl` warn fires unbounded on poisoned DB rows; per-tuple LRU throttle would address. |
-| AGG3-L03 = TE3-LOW-02 | Low | Medium | test-engineer | No test asserts `assertBlurDataUrl` is called from upload action; grep-style fixture test would lock it. |
-| AGG3-L04 = A3-LOW-01 / DS3-LOW-01 / DSGN3-LOW-01 | Low | High | architect, document-specialist, designer | After AGG3-M01 fix lands: extract `scanSource()` for testability; document touch-target audit in CLAUDE.md; `photo-navigation.tsx` will pass cleanly. |
+| Gate | Result |
+|---|---|
+| `npm run lint --workspace=apps/web` | exit 0 |
+| `npm run lint:api-auth --workspace=apps/web` | exit 0 |
+| `npm run lint:action-origin --workspace=apps/web` | exit 0 |
+| `npm test --workspace=apps/web` | 66 files / 450 tests passed (14.39 s) |
 
-### INFO (2 findings)
+`npm run build` not re-run inside this prompt-1: zero source changes since `be53b44`. Build will be re-run inside prompt 3 deploy gate.
 
-| ID | Severity | Confidence | Summary |
-|---|---|---|---|
-| AGG3-I01 = SR3-INFO-01 | Info | High | Optional MySQL CHECK constraint on `blur_data_url` column for defense-in-depth at write time. Both write paths are admin-only. |
-| AGG3-I02 = DS3-INFO-01 / PR3-INFO-01 | Info | Medium | CLAUDE.md cross-reference for `lib/blur-data-url.ts` API; touch-target audit is sync-fs (~30 ms) and acceptable. |
+## Three-point validator triangle (current state)
 
-## Cross-agent agreement on fix paths
+```
+Sharp pipeline -> assertBlurDataUrl() -> ProcessedImageData.blurDataUrl
+                  (lib/process-image.ts:301)
+                          |
+                          v
+                  assertBlurDataUrl() -> images.blur_data_url
+                  (app/actions/images.ts:307)
+                                              |
+                                              v
+                                     isSafeBlurDataUrl()
+                                     (components/photo-viewer.tsx:105)
+```
 
-- **AGG3-M01 (multi-line audit blind spot):** Path 1 — pre-process source
-  by joining lines inside `<Button>` / `<button>` JSX opening tags to
-  collapse multi-line tags into a single logical line before scanning.
-  Cheapest implementation:
-  `source.replace(/<(Button|button)\b([^>]*?)>/gs, m => m.replace(/\s+/g, ' '))`
-  applied before `lines = text.split('\n')`. Then re-baseline
-  `KNOWN_VIOLATIONS` with the new true-positive set (raise the
-  upload-dropzone REMOVE button to `h-11 w-11` rather than document it).
-  Add a meta-test fixture asserting the scanner produces a non-zero match
-  against a known multi-line `h-6 w-6` snippet.
-- **AGG3-L01 (.toSQL() no-op):** Either implement `.toSQL()` inspection
-  (Drizzle's `db.select(...).leftJoin(...).toSQL()` is sync) or drop the
-  placeholder.
-- **AGG3-L02 (warn flooding):** small LRU keyed by
-  `(typeof,len,head)` tuple, warn at most once per tuple.
-- **AGG3-L03 (upload-action coverage):** grep-style fixture test on
-  `apps/web/src/app/actions/images.ts` similar to
-  `data-tag-names-sql.test.ts`.
-
-## Quality-gate baseline (pre-fix at HEAD `839d98c`)
-
-- `npm run lint --workspace=apps/web` → exit 0
-- `npm run lint:api-auth --workspace=apps/web` → exit 0
-- `npm run lint:action-origin --workspace=apps/web` → exit 0
-- `npm test --workspace=apps/web` → 64 files / 438 tests passed
+All three sites have fixture coverage (`__tests__/{blur-data-url,process-image-blur-wiring,images-action-blur-wiring}.test.ts`).
 
 ## Agent failures
 
-None — all 11 reviewer lenses produced files. Task spawn-agent and
-agent-browser tools unavailable in this catalog; reviewers ran inline
-with file evidence.
+None.
 
-## Convergence prediction
+## Convergence assessment
 
-1 MEDIUM + 4 LOW + 2 INFO = 7 NEW findings, all rooted in 3 distinct
-fix surfaces (audit scanner + warn throttle + .toSQL() cleanup). Cycle
-3 will land 4-5 fine-grained commits. Convergence (zero MEDIUM/HIGH
-new findings) plausible at cycle 4.
+The cycle 1->5 RPF loop has driven the `blur_data_url` defense-in-depth contract from one validator (reader-only) to three (producer + consumer + reader), with throttled rejection logging, redacted preview, bounded LRU log cap, three test fixtures, and CLAUDE.md documentation. There is no visible next reduction. Subsequent cycles should focus on other surfaces or terminate the loop.

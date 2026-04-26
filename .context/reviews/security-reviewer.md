@@ -1,38 +1,22 @@
-# security-reviewer — Cycle 3 (HEAD `839d98c`, 2026-04-26)
+# Security Reviewer — Cycle 5/100 RPF loop (HEAD `be53b44`, 2026-04-26)
 
-## Inventory
+## Scope
 
-Walked auth (`lib/auth.ts`, session, rate-limit), upload
-(`lib/process-image.ts`, `actions/images.ts`), CSV/Trojan-Source
-(`lib/csv-escape.ts`, `lib/validation.ts`), CSP, DB restore, and the
-cycle-2 blur-data-url validator.
+Audited the cycle-4 closure of AGG4-L01 (producer-side blur contract):
+- CSS `url()` injection surface (`photo-viewer.tsx:105`).
+- Throttle log information leak (`blur-data-url.ts:115-118`).
+- Three-point validator symmetry (producer to DB write to SSR read).
 
 ## Findings
 
-### SR3-LOW-01 — `assertBlurDataUrl` warn output is not rate-limited
+**No new findings.**
 
-- **File:** `apps/web/src/lib/blur-data-url.ts:58-75`
-- **Confidence:** Medium / **Severity:** Low
+The AGG4-L01 fix is a defensive no-op for the happy path (16x16 q40 JPEG ~270-680 base64 chars, well under MAX_BLUR_DATA_URL_LENGTH=4096). It only matters if a future contributor switches the producer MIME (e.g. AVIF) without updating `ALLOWED_PREFIXES` — at that point the validator now rejects at write time, surfacing the regression instead of silently masking it.
 
-Warn line is correctly redacted (cycle-1 SR1-LOW-01 fix), but no per-id
-throttle. A poisoned `blur_data_url` that survives a DB restore would
-log on every page load. Recommendation: LRU-cache "already warned" tuples
-(typeof,len,head) for the process lifetime, warn at most once per tuple.
+CSP `img-src` already enumerates `data:` and `blob:`. The contract limits `data:image/{jpeg,png,webp};base64,...` only, so CSP scanners will not flag unexpected MIME types on the public surface.
 
-### SR3-INFO-01 — no production write-time enforcement that the column holds `data:image/...`
+Rejection-log preview (`head=value.slice(0,8)`) leaks at most 8 chars of any poisoned value. For `data:image/jpeg;base64,...` this is the literal MIME prefix; for an attacker-injected `https://evil.example/?token=...` it leaks `https://`. No new info beyond what the existing warn line already prints.
 
-- **File:** `apps/web/src/db/schema.ts:51`
-- **Confidence:** High / **Severity:** Informational
+## Confidence
 
-Column is `text('blur_data_url')` with no DB-level constraint. We rely
-on `assertBlurDataUrl()` at the producer (`actions/images.ts:307`) and
-the consumer (`photo-viewer.tsx`). A direct SQL UPDATE or DB restore can
-seed arbitrary content. A CHECK constraint
-`CHECK (blur_data_url IS NULL OR blur_data_url LIKE 'data:image/%;base64,%')`
-would close the residual gap (MySQL 8.0.16+ enforces CHECK). Filed
-informational because both write paths are admin-only and existing
-guards block the common attack surface.
-
-## Verdict
-
-1 NEW LOW, 1 NEW INFO. No new HIGH/MEDIUM security findings.
+High. No new attack surface introduced; symmetry now closed.

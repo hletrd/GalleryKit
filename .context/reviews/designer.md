@@ -1,46 +1,22 @@
-# designer — Cycle 3 (HEAD `839d98c`, 2026-04-26)
+# Designer — Cycle 5/100 RPF loop (HEAD `be53b44`, 2026-04-26)
 
-## UI/UX findings (text-evidence based; agent-browser unavailable)
+## Scope
 
-### DSGN3-MED-01 — sub-44 px destructive controls present on real surfaces, masked by audit blind spot
+- Visual fallback path when `blur_data_url` is rejected (`null`).
+- Photo viewer skeleton-shimmer behavior.
 
-- **Files:**
-  - `apps/web/src/components/upload-dropzone.tsx:405-413` — per-preview
-    REMOVE button at `h-6 w-6` (24 px). Primary destructive affordance
-    for "I uploaded the wrong file."
-  - `apps/web/src/components/admin-user-manager.tsx:142-150` — per-row
-    DELETE USER icon, default `size="icon"` (h-9 = 36 px), no override.
-  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:156, 221, 224`
-    — back arrow + per-row edit/delete, all default `size="icon"`.
-  - `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:88, 109, 112`
-    — same shape.
-  - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:77`
-  - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:76`
-- **Confidence:** High / **Severity:** Medium
+## Findings
 
-Per WCAG 2.5.5 AAA / Apple HIG / Google MDN. The cycle-2 audit was
-supposed to enforce 44 px floor; the regex blind spot masks every
-multi-line Button. Designer concern is the upload-dropzone REMOVE button
-specifically: 24 px destructive action with no confirm dialog, sitting
-close to the preview itself, is both an a11y miss and a "fat-finger
-destruction" UX risk.
+**No new findings.**
 
-**Fix path:** raise the upload-dropzone REMOVE button to `h-11 w-11` (or
-keep visual size and add a 44 px hit zone via padded wrapper). Admin
-table icons are keyboard-primary on desktop — keeping the existing
-`size="icon"` h-9 is acceptable but should be DOCUMENTED in
-`KNOWN_VIOLATIONS` after CR3-MED-01 fix lands so the audit truly
-reflects them.
+The reader-side guard at `photo-viewer.tsx:105` returns `undefined` from the memoized `blurStyle`. Downstream the inner `motion.div` renders without `backgroundImage`, so the skeleton-shimmer placeholder shows during AVIF/WebP/JPEG decode. UX is correct: a poisoned row degrades gracefully to "no preview" rather than throwing or rendering an attacker-controlled URL.
 
-### DSGN3-LOW-01 — `photo-navigation.tsx` size="icon" + h-12 w-12 multi-line is COMPLIANT but invisible to audit
+Touch-target audit fixture (cycle 4) remains green at 44 px floor across `app/[locale]/**` and `app/[locale]/admin/**` patterns — no regressions from the producer wiring change.
 
-- **File:** `apps/web/src/components/photo-navigation.tsx:208-216, 222-230`
-- **Confidence:** High / **Severity:** Low
+## Confidence
 
-These render at h-12 (48 px), correctly above 44 px floor. After
-CR3-MED-01 lands the multi-line normalization will let override
-detection work and the file will pass cleanly.
+High. No visual regression introduced; fallback path verified via memo logic.
 
-## Verdict
+## Note
 
-1 NEW MEDIUM (real-world UX miss), 1 NEW LOW (post-fix compliance check).
+Browser tools (`agent-browser*`) not invoked this cycle: the AGG4-L01 fix is a server-side validator wrapper with no DOM/style-system surface change. Visual evidence from prior designer reviews (`designer-cycle*-rpl.md`) remains current.
