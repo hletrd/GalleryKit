@@ -23,6 +23,7 @@ import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime'
 import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, humanizeTagLabel } from '@/lib/photo-title';
+import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -344,16 +345,17 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     it as a background-image so users see an instant
                     color-accurate preview while the AVIF/WebP/JPEG decodes.
                     The `skeleton-shimmer` class still provides a fallback
-                    loading cue when no blur data is available. */}
-                <div
-                    className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer"
-                    style={image.blur_data_url ? {
-                        backgroundImage: `url(${image.blur_data_url})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                        backgroundRepeat: 'no-repeat',
-                    } : undefined}
-                >
+                    loading cue when no blur data is available.
+                    AGG2-M01 / SR2-MED-01: the value is run through
+                    `isSafeBlurDataUrl()` to enforce the
+                    `data:image/{jpeg,png,webp};base64,…` contract before
+                    it ever reaches a CSS `url()` invocation.
+                    AGG2-M08 / DSGN2-MED-02: the blur lives on the inner
+                    `motion.div` so it fades in with the image during
+                    navigation transitions instead of swapping
+                    instantaneously underneath the still-fading-out
+                    previous photo. */}
+                <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer">
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
@@ -370,6 +372,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             exit={prefersReducedMotion ? undefined : { opacity: 0, x: -20 }}
                             transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
                             className="w-full h-full flex items-center justify-center relative"
+                            style={isSafeBlurDataUrl(image.blur_data_url) ? {
+                                backgroundImage: `url(${image.blur_data_url})`,
+                                backgroundSize: 'cover',
+                                backgroundPosition: 'center',
+                                backgroundRepeat: 'no-repeat',
+                            } : undefined}
                         >
                             <div className="w-full h-full flex items-center justify-center">
                                 <ImageZoom className="w-full h-full flex items-center justify-center">

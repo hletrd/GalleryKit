@@ -23,6 +23,7 @@ import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
 import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired } from '@/lib/upload-tracker-state';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
+import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { headers } from 'next/headers';
 
 type ImageCleanupFailure = {
@@ -298,7 +299,12 @@ export async function uploadImages(formData: FormData) {
                 title: null, // Title is null by default, showing tags or user_filename
                 description: '',
                 user_filename: originalFilename,
-                blur_data_url: data.blurDataUrl,
+                // AGG2-L03 / SR2-LOW-01: defense-in-depth write barrier.
+                // The single producer is `process-image.ts`, but cap the
+                // value at 4 KB and assert the `data:image/{jpeg,png,webp}`
+                // shape so a future regression cannot land an oversized or
+                // off-MIME blob in the column.
+                blur_data_url: assertBlurDataUrl(data.blurDataUrl),
                 processed: false,
                 ...exifDb,
                 color_space: data.iccProfileName || exifDb.color_space,
