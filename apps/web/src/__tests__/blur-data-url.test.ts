@@ -132,4 +132,31 @@ describe('assertBlurDataUrl', () => {
             warn.mockRestore();
         }
     });
+
+    /**
+     * Cycle 1 RPF loop AGG1-L01 / CR1-LOW-02 / SR1-LOW-01: the warn
+     * preview must NOT include arbitrary URL contents past the first
+     * 8 chars. A malicious DB-restore payload could carry a token in
+     * the query string; the log line must not echo it.
+     */
+    it('warn preview redacts past the first 8 chars of a rejected string', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const secret = 'https://attacker.example/?token=eyJhbGciOiJIUzI1NiJ9.aabbccdd.eeff';
+            assertBlurDataUrl(secret);
+            expect(warn).toHaveBeenCalledOnce();
+            const callArg = warn.mock.calls[0]?.[0];
+            expect(typeof callArg).toBe('string');
+            const message = callArg as string;
+            // Length is fine to leak (it's coarse).
+            expect(message).toContain(`len=${secret.length}`);
+            // First 8 chars are the head — `https://` here.
+            expect(message).toContain('head="https://"');
+            // The token MUST NOT appear anywhere in the warn line.
+            expect(message).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+            expect(message).not.toContain('attacker.example');
+        } finally {
+            warn.mockRestore();
+        }
+    });
 });

@@ -58,9 +58,18 @@ export function isSafeBlurDataUrl(value: unknown): value is string {
 export function assertBlurDataUrl(value: unknown): string | null {
     if (value == null) return null;
     if (isSafeBlurDataUrl(value)) return value;
-    const preview = typeof value === 'string'
-        ? `${value.slice(0, 24)}…`
-        : typeof value;
-    console.warn(`[blur-data-url] Rejecting non-conforming value: ${preview}`);
+    // Cycle 1 RPF loop AGG1-L01 / CR1-LOW-02 / SR1-LOW-01: redact the
+    // rejected-value preview. The previous `slice(0, 24)` could leak
+    // arbitrary URL contents (tokens, query params) when a non-`data:`
+    // URL is rejected — for example a malicious DB-restore loading
+    // `https://attacker.example/?token=...` would copy the first 24
+    // chars including the token prefix into the warn log. Restrict the
+    // preview to typeof + length + the first 8 chars (enough to tell
+    // `data:image/...` from a non-`data:` URL or garbage without
+    // leaking sensitive contents).
+    const summary = typeof value === 'string'
+        ? `string(len=${value.length}, head="${value.slice(0, 8)}")`
+        : `${typeof value}`;
+    console.warn(`[blur-data-url] Rejecting non-conforming value: ${summary}`);
     return null;
 }
