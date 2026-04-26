@@ -313,7 +313,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
                     <Button
                         variant={isPinned ? "default" : "outline"}
-                        size="sm"
                         onClick={() => {
                             if (isPinned) {
                                 setIsPinned(false);
@@ -321,7 +320,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 setIsPinned(true);
                             }
                         }}
-                        className="gap-2 transition-all hidden lg:flex"
+                        className="gap-2 transition-all hidden lg:flex h-11"
                     >
                         {isPinned ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
                         {isPinned ? t('viewer.infoPinned') : t('viewer.info')}
