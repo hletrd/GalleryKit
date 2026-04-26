@@ -128,11 +128,26 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // a code-review checkpoint.
     // image-manager: the inline-edit and per-row delete buttons all
     // use size="sm" or size="icon"; admin table flow is keyboard-primary.
-    // Re-open: when admin becomes mobile-priority, drop these to h-11.
-    'components/image-manager.tsx': 4,
-    // admin-user-manager: single "Add admin" button with size="sm".
-    // Re-open: same as image-manager.
-    'components/admin-user-manager.tsx': 1,
+    // Cycle 3 RPF loop AGG3-M01: count raised from 4 → 5 because the
+    // multi-line `<Button … size="sm" onClick={handleShare}>` Share
+    // button at line ~303 is now visible to the scanner after the
+    // multi-line normalizer landed. The five violations are:
+    //   - bulk add tag (`size="sm"`) at the toolbar
+    //   - share toolbar button (`size="sm"`)
+    //   - delete-selected toolbar (`size="sm"`)
+    //   - per-row inline edit (`size="icon"`)
+    //   - per-row inline delete (`size="icon"`)
+    // All of these sit on the desktop admin dashboard; the table is
+    // keyboard-primary and the icons render at 36 px which is the
+    // shadcn default. Re-open: when admin becomes mobile-priority,
+    // drop these to h-11.
+    'components/image-manager.tsx': 5,
+    // admin-user-manager: "Add admin" header button (`size="sm"`)
+    // and the per-row delete-user icon (`size="icon"`). Cycle 3 RPF
+    // loop AGG3-M01: count raised from 1 → 2 because the multi-line
+    // delete-user button is now visible to the scanner. Re-open: same
+    // as image-manager (admin keyboard-primary on desktop).
+    'components/admin-user-manager.tsx': 2,
     // upload-dropzone: "Clear all" link-style ghost button with
     // h-auto p-0 (deliberately compact). Re-open if upload UI becomes
     // mobile-primary.
@@ -189,8 +204,12 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
  *   - HTML `<button className="...h-8...">` and `...h-9...` literals
  */
 const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
+    // Cycle 3 RPF loop AGG3-M01: allow `h-11`/`h-12`/`min-h-11`/`size-11`
+    // override for `size="sm"` mirror of the size="icon" pattern. After
+    // the multi-line normalizer collapses tags, common toolbar buttons
+    // (e.g. photo-viewer.tsx mobile Info / Share at h-11) no longer trip.
     {
-        pattern: /<Button\b[^>]*\bsize=["']sm["']/,
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bsize=["']sm["']/,
         description: 'shadcn <Button size="sm"> renders h-8 (32 px) — below 44 px floor',
     },
     // <Button size="icon"> defaults to size-9 (36 px). Allow if an
@@ -251,24 +270,136 @@ function relPathFromSrc(absPath: string): string {
     return path.relative(srcRoot, absPath).replace(/\\/g, '/');
 }
 
-function scanFile(absPath: string): FoundIssue[] {
+/**
+ * Cycle 3 RPF loop AGG3-M01 / CR3-MED-01 / TE3-MED-01 / V3-MED-01 /
+ * D3-MED-01 / DSGN3-MED-01: collapse multi-line `<Button …>` /
+ * `<button …>` JSX opening tags into a single logical line BEFORE
+ * the per-line FORBIDDEN regex runs. Without this, every
+ * Prettier-formatted multi-line Button (most of the codebase) was
+ * invisible to the scanner — `KNOWN_VIOLATIONS` matched scanned counts
+ * only because the scanner saw nothing on those files.
+ *
+ * Approach: regex-replace any `<Button …>` / `<button …>` opening tag
+ * (matched lazily) with its inner whitespace collapsed to single
+ * spaces. This keeps line offsets approximately correct (the opening
+ * `<` keeps its line; the closing `>` shifts) while letting the
+ * single-line regex set match attributes that previously spanned
+ * multiple lines. The `s` flag (dotAll) lets `[^>]*?` cross `\n`.
+ */
+/**
+ * Find the end of a JSX opening tag starting at `<Button`/`<button` at
+ * `start`. Walks character-by-character, tracking string/template/brace
+ * depth so that `>` inside JS expressions (e.g. `() => ...`,
+ * `{a > b ? x : y}`) is not mistaken for the tag's closing `>`. Returns
+ * the index of the closing `>` (inclusive) or -1 if no balanced close
+ * is found.
+ */
+function findJsxTagEnd(source: string, start: number): number {
+    let braceDepth = 0;
+    let stringChar: '"' | "'" | '`' | null = null;
+    for (let i = start; i < source.length; i++) {
+        const ch = source[i];
+        const prev = i > 0 ? source[i - 1] : '';
+        if (stringChar) {
+            // Skip escaped chars in strings
+            if (ch === '\\') {
+                i++;
+                continue;
+            }
+            if (ch === stringChar) stringChar = null;
+            continue;
+        }
+        // Strip line/block comments by skipping to their end so a `>`
+        // inside `// foo > bar` does not close the tag.
+        if (ch === '/' && source[i + 1] === '/') {
+            const nl = source.indexOf('\n', i);
+            i = nl === -1 ? source.length - 1 : nl;
+            continue;
+        }
+        if (ch === '/' && source[i + 1] === '*') {
+            const end = source.indexOf('*/', i + 2);
+            i = end === -1 ? source.length - 1 : end + 1;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') {
+            stringChar = ch as '"' | "'" | '`';
+            continue;
+        }
+        if (ch === '{') {
+            braceDepth++;
+            continue;
+        }
+        if (ch === '}') {
+            braceDepth--;
+            continue;
+        }
+        if (ch === '>' && braceDepth === 0 && prev !== '=') {
+            // `prev !== '='` rejects `=>` arrow operator (which is only
+            // ever inside an expression at brace depth 0 if the JSX is
+            // malformed; keep as belt-and-braces). The arrow operator
+            // ALWAYS appears inside `{ ... }` (event handler callbacks)
+            // so this is doubly defensive.
+            return i;
+        }
+    }
+    return -1;
+}
+
+export function normalizeMultilineButtonTags(source: string): string {
+    let out = '';
+    let cursor = 0;
+    const re = /<(Button|button)\b/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source)) !== null) {
+        const tagStart = m.index;
+        const end = findJsxTagEnd(source, tagStart);
+        if (end === -1) break;
+        out += source.slice(cursor, tagStart);
+        const tag = source.slice(tagStart, end + 1);
+        // Strip JS line + JSX block comments so collapsing whitespace
+        // does not extend a `// comment` over the rest of the tag and
+        // hide a className override.
+        const stripped = tag
+            .replace(/\/\/[^\n]*/g, '')
+            .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '');
+        out += stripped.replace(/\s+/g, ' ');
+        cursor = end + 1;
+        re.lastIndex = end + 1;
+    }
+    out += source.slice(cursor);
+    return out;
+}
+
+export function scanSource(relPath: string, source: string): FoundIssue[] {
     const issues: FoundIssue[] = [];
-    const text = fs.readFileSync(absPath, 'utf8');
-    const lines = text.split('\n');
+    // Cycle 3 RPF loop AGG3-M01: also replace `=>` with a sentinel
+    // (`=ARROW`) so the FORBIDDEN regex's `[^>]*` lookahead does not stop
+    // at the `>` of arrow-function event handlers (`onClick={() => …}`).
+    // Without this, a tag like `<Button size="icon" onClick={() => x}
+    // className="h-11">` matches FORBIDDEN because the lookahead
+    // `(?![^>]*\bh-1[12]\b)` can only see up to the `>` of `=>`, which
+    // misses the `h-11` className that appears later in the same tag.
+    const normalized = normalizeMultilineButtonTags(source).replace(/=>/g, '=ARROW');
+    const lines = normalized.split('\n');
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         for (const { pattern, description } of FORBIDDEN) {
             if (pattern.test(line)) {
                 issues.push({
-                    file: relPathFromSrc(absPath),
+                    file: relPath,
                     line: i + 1,
                     pattern: description,
-                    snippet: line.trim(),
+                    snippet: line.trim().slice(0, 240),
                 });
             }
         }
     }
     return issues;
+}
+
+function scanFile(absPath: string): FoundIssue[] {
+    const text = fs.readFileSync(absPath, 'utf8');
+    return scanSource(relPathFromSrc(absPath), text);
 }
 
 describe('touch-target audit (44 px floor)', () => {
@@ -375,6 +506,75 @@ describe('touch-target audit (44 px floor)', () => {
      * AGG2-M03: assert that legitimate 44 px+ snippets do NOT trip
      * the FORBIDDEN regex. False positives waste reviewer time.
      */
+    /**
+     * Cycle 3 RPF loop AGG3-M01 / CR3-MED-01 / TE3-MED-01: lock that
+     * the scanner sees multi-line `<Button>` JSX. Without the
+     * multi-line normalizer, the per-line regex never saw a Button
+     * formatted across multiple lines (Prettier default for any tag
+     * with 3+ props), and `KNOWN_VIOLATIONS` matched scanned counts
+     * only because the scanner saw nothing.
+     */
+    it('scanSource catches multi-line <Button size="icon"> with sub-44px className', () => {
+        const multilineSnippet = [
+            '<Button',
+            '    variant="ghost"',
+            '    size="icon"',
+            '    className="absolute h-6 w-6 rounded-full"',
+            '    onClick={() => removeFile(i)}',
+            '>',
+            '    <X className="h-4 w-4" />',
+            '</Button>',
+        ].join('\n');
+        const issues = scanSource('fixture/multiline.tsx', multilineSnippet);
+        expect(issues.length, `Expected at least one issue, got: ${JSON.stringify(issues)}`).toBeGreaterThan(0);
+        expect(issues.some((i) => i.pattern.includes('size="icon"'))).toBe(true);
+    });
+
+    it('scanSource catches multi-line <Button size="sm"> without h-11 override', () => {
+        const multilineSnippet = [
+            '<Button',
+            '    variant="destructive"',
+            '    size="sm"',
+            '    disabled={isBulkDeleting}',
+            '>',
+            '    Delete',
+            '</Button>',
+        ].join('\n');
+        const issues = scanSource('fixture/multiline-sm.tsx', multilineSnippet);
+        expect(issues.length).toBeGreaterThan(0);
+    });
+
+    it('scanSource accepts multi-line <Button size="icon"> with h-11 override', () => {
+        const multilineSnippet = [
+            '<Button',
+            '    variant="ghost"',
+            '    size="icon"',
+            '    onClick={() => doStuff()}',
+            '    className="h-11 w-11"',
+            '>',
+            '    <X className="h-4 w-4" />',
+            '</Button>',
+        ].join('\n');
+        const issues = scanSource('fixture/multiline-ok.tsx', multilineSnippet);
+        expect(issues, `Multi-line h-11 override should pass: ${JSON.stringify(issues)}`).toEqual([]);
+    });
+
+    it('scanSource accepts multi-line <Button size="sm"> with h-11 override', () => {
+        const multilineSnippet = [
+            '<Button',
+            '    variant="outline"',
+            '    size="sm"',
+            '    onClick={() => setShowBottomSheet(true)}',
+            '    // touch target floor',
+            '    className="gap-2 lg:hidden h-11"',
+            '>',
+            '    Info',
+            '</Button>',
+        ].join('\n');
+        const issues = scanSource('fixture/multiline-sm-ok.tsx', multilineSnippet);
+        expect(issues, `Multi-line size="sm" + h-11 should pass: ${JSON.stringify(issues)}`).toEqual([]);
+    });
+
     it('FORBIDDEN regex does not flag valid h-11 / size-11 / overridden size="icon"', () => {
         const fixtures: Array<{ name: string; snippet: string }> = [
             { name: '<Button className="h-11">', snippet: `<Button className="h-11">x</Button>` },

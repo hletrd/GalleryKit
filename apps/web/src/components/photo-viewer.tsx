@@ -326,7 +326,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 setIsSharingPhoto(false);
                             }
                         }}
-                        className="gap-2"
+                        // AGG3-M01: 44 px touch-target floor, mirrors the
+                        // adjacent Info button. The toolbar is touch-primary.
+                        className="gap-2 h-11"
                     >
                         <Share2 className="h-4 w-4" />
                         {isSharingPhoto ? t('viewer.sharing') : t('viewer.share')}

@@ -402,10 +402,15 @@ export function UploadDropzone({
 
                                 return (
                                 <Card key={fileId} className="relative group border bg-muted/30">
+                                    {/* AGG3-M01 / DSGN3-MED-01: raise the per-preview
+                                        REMOVE button to a 44 px touch target (was h-6 w-6
+                                        = 24 px, a fat-finger destruction risk on mobile).
+                                        The visible icon stays small via the inner `h-4 w-4`
+                                        SVG; the button itself clears WCAG 2.5.5. */}
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="absolute top-1 right-1 h-6 w-6 z-10 bg-background/50 hover:bg-destructive hover:text-white rounded-full sm:opacity-0 sm:group-hover:opacity-100 opacity-100 focus:opacity-100 transition-opacity"
+                                        className="absolute top-1 right-1 h-11 w-11 z-10 bg-background/50 hover:bg-destructive hover:text-white rounded-full sm:opacity-0 sm:group-hover:opacity-100 opacity-100 focus:opacity-100 transition-opacity"
                                         aria-label={t('aria.removeFile')}
                                         onClick={() => removeFile(i)}
                                     >
