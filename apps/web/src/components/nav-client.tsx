@@ -75,7 +75,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
             )}>
                 {/* Title */}
                 <div className={cn("flex items-center mr-6 gap-4 shrink-0", isExpanded && "pt-1")}>
-                    <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0">
+                    <Link href={localizedHomeHref} className="flex items-center space-x-2 shrink-0 min-h-[44px]">
                         <span className="font-bold text-xl tracking-tight">{navTitle}</span>
                     </Link>
                 </div>
@@ -116,7 +116,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                                 href={href}
                                 aria-current={isActive ? "page" : undefined}
                                 className={cn(
-                                    "transition-all duration-200 flex items-center gap-2 px-3 py-1.5 rounded-full whitespace-nowrap shrink-0",
+                                    "transition-all duration-200 flex items-center gap-2 px-3 py-1.5 min-h-[44px] rounded-full whitespace-nowrap shrink-0",
                                     isActive
                                         ? "bg-foreground text-background font-semibold"
                                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
