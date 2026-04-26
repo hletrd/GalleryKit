@@ -307,10 +307,16 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
 }
 
 /**
- * Lightweight image listing — uses a scalar subquery for tag_names instead
- * of LEFT JOIN + GROUP BY. Avoids the expensive GROUP_CONCAT that requires
- * grouping the entire result set, while still providing tag names for
- * display titles and alt text in the gallery grid.
+ * Lightweight image listing — uses LEFT JOIN + GROUP BY on images.id with
+ * Drizzle column references inside GROUP_CONCAT so tag_names reliably
+ * aggregates per row. The earlier scalar-subquery shape (with raw `it` /
+ * `t` SQL aliases) returned NULL for every row in production, defeating
+ * the gallery aria-labels that depend on tag_names.
+ *
+ * Perf: groupBy(images.id) re-introduces a sort/group step. On
+ * personal-gallery scale (a few thousand images, paginated 30 at a time)
+ * this matches the working pattern in getImages() below and the cost is
+ * acceptable.
  */
 // PRIVACY: `selectFields` intentionally omits latitude, longitude,
 // filename_original, and user_filename for public-facing queries.
@@ -321,9 +327,12 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
 
     const baseQuery = db.select({
         ...publicSelectFields,
-        tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
+        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
     })
         .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = conditions.length > 0
@@ -371,10 +380,13 @@ export async function getImagesLitePage(
     const normalizedPageSize = Math.min(Math.max(pageSize, 1), 101);
     const baseQuery = db.select({
         ...publicSelectFields,
-        tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
+        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
         total_count: sql<number>`COUNT(*) OVER()`,
     })
         .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = conditions.length > 0
@@ -425,9 +437,12 @@ export async function getAdminImagesLite(limit: number = 0, offset: number = 0, 
 
     const baseQuery = db.select({
         ...adminSelectFields,
-        tag_names: sql<string | null>`(SELECT GROUP_CONCAT(DISTINCT t.name ORDER BY t.name) FROM ${imageTags} it JOIN ${tags} t ON it.tag_id = t.id WHERE it.image_id = ${images.id})`,
+        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
     })
         .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
     const query = conditions.length > 0
