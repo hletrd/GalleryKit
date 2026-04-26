@@ -199,6 +199,24 @@ type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacyS
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
 
+// Cycle 1 RPF loop AGG1-L07 / A1-LOW-01: compile-time guard against
+// adding large/perf-sensitive payload fields to the public listing
+// select shape. The fixture-style test at
+// `__tests__/data-tag-names-sql.test.ts` checks the literal string
+// `blur_data_url`, but a future contributor who renames the SELECT
+// alias (e.g. `blurDataUrl: images.blur_data_url`) would sidestep the
+// regex. This type guard catches the underlying schema-key add at
+// compile time regardless of the alias used.
+//
+// The masonry listing payload should stay lean — `blur_data_url`
+// values run 200-500 bytes each and would inflate SSR HTML by a
+// noticeable factor on a 30-image page. Individual photo queries
+// fetch the field directly via `images.blur_data_url`.
+type _LargePayloadKeys = 'blur_data_url';
+type _LargePayloadKeysInPublic = Extract<keyof typeof publicSelectFields, _LargePayloadKeys>;
+const _largePayloadGuard: _LargePayloadKeysInPublic extends never ? true : [_LargePayloadKeysInPublic, 'ERROR: large-payload field found in publicSelectFields — fetch in individual queries instead, see CLAUDE.md "Image Processing Pipeline" / "Performance Optimizations"'] = true;
+void _largePayloadGuard;
+
 export async function getTopics() {
     return db.select().from(topics).orderBy(asc(topics.order));
 }
