@@ -3,20 +3,29 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Cycle 1 RPF v3 TE-1 / A-2 seatbelt, hardened in cycle 2:
+ * Cycle 1 RPF v3 TE-1 / A-2 seatbelt, hardened in cycle 2 + cycle 1
+ * (current loop):
  *
  * Codify the WCAG 2.5.5 / Apple HIG / Google MDN 44 px touch-target
  * floor as a fixture-style guard so a future change cannot regress a
  * primary interactive surface to h-8 (32 px), h-9 (36 px), or shadcn
  * size="sm" (32 px) without an explicit, documented exemption.
  *
- * The audit walks `apps/web/src/components/` and a known-touch-primary
- * subset of `apps/web/src/app/` and asserts that the count of
- * violations per file matches the documented `KNOWN_VIOLATIONS` count.
- * Adding a NEW violation in a file with N existing violations causes
- * a hard failure with the offending lines. Removing violations is
- * always allowed (the test still passes; update the count to keep
- * future regressions caught).
+ * The audit walks every directory in `SCAN_ROOTS` recursively for
+ * `.tsx`/`.jsx` files and asserts that the count of violations per
+ * file matches the documented `KNOWN_VIOLATIONS` count. Adding a
+ * NEW violation in a file with N existing violations causes a hard
+ * failure with the offending lines. Removing violations is always
+ * allowed (the test still passes; update the count to keep future
+ * regressions caught).
+ *
+ * Scan roots (cycle 1 RPF loop AGG1-M01 / AGG1-M02 / AGG1-L02 /
+ * AGG1-L10): both the shared `components/` directory AND the admin
+ * route group (`app/[locale]/admin/`) are scanned. The latter
+ * previously had only `login-form.tsx` checked via a single ad-hoc
+ * `scanFile` call, which silently exempted every other admin route
+ * file (dashboard-client, topic-manager, tag-manager, settings-client,
+ * seo-client) from the audit.
  *
  * Cycle 2 RPF loop AGG2-M02 / AGG2-M03 / CR2-MED-01 / CR2-MED-02 /
  * TE2-MED-02 / TE2-MED-03 / DSGN2-MED-01: replaced the binary
@@ -27,8 +36,20 @@ import * as path from 'path';
  * composite literal-string `h-8`/`h-9` patterns.
  */
 
-const componentsDir = path.resolve(__dirname, '..', 'components');
-const adminDir = path.resolve(__dirname, '..', 'app');
+const srcRoot = path.resolve(__dirname, '..');
+const componentsDir = path.resolve(srcRoot, 'components');
+const adminDir = path.resolve(srcRoot, 'app', '[locale]', 'admin');
+
+/**
+ * AGG1-M01 / AGG1-M02 (cycle 1 RPF loop): explicit list of scan roots.
+ * Adding a new root here is the single point of change for widening
+ * the audit. Each entry must be a directory; files within are filtered
+ * by the `.tsx` / `.jsx` extension predicate.
+ */
+const SCAN_ROOTS: ReadonlyArray<string> = [
+    componentsDir,
+    adminDir,
+];
 
 interface FoundIssue {
     file: string;
@@ -46,6 +67,16 @@ interface FoundIssue {
  *
  * Each entry must carry a comment explaining why the violations are
  * acceptable, plus a forward-looking re-open criterion.
+ *
+ * Convention (cycle 1 RPF loop AGG1-L09):
+ *   - Files NOT listed default to 0 (the `?? 0` lookup below).
+ *   - Files listed with count `0` are kept for VISIBILITY so that a
+ *     contributor reading the map sees that the file was considered
+ *     and intentionally has no exempt violations. Do not bulk-delete
+ *     these — they are documentation, not dead code.
+ *   - Files listed with count > 0 are documented exemptions; each
+ *     entry must include a re-open criterion comment immediately
+ *     above so a reviewer knows when the exemption can be retired.
  */
 const KNOWN_VIOLATIONS: Record<string, number> = {
     // The lightbox close/fullscreen/prev/next buttons render at h-10/w-10
@@ -113,6 +144,35 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // these do NOT trip FORBIDDEN. Documented as 0 to keep the file
     // visible in case the override is removed.
     'components/photo-navigation.tsx': 0,
+    //
+    // === Admin route group (cycle 1 RPF loop AGG1-M01) ===
+    //
+    // The admin (protected) route group is keyboard-primary on
+    // desktop; mobile admin is explicitly out of scope per the
+    // designer-v2 review (mirrors the `image-manager.tsx` rationale).
+    // Each violation below is documented so a NEW violation lands
+    // as a hard failure but the documented historical exemptions
+    // pass. Re-open across this group: when admin becomes
+    // mobile-priority OR a fresh violation lands without bumping
+    // the corresponding count.
+    //
+    // dashboard-client.tsx: four `size="sm"` quick-action buttons
+    // ("New upload", "View live", "View admin photos", "View admin
+    // categories"). All on a desktop-priority surface.
+    'app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx': 4,
+    // topic-manager.tsx: back arrow (`size="icon"`) + per-row
+    // edit/delete on each topic row (`size="icon"` x 2).
+    'app/[locale]/admin/(protected)/categories/topic-manager.tsx': 3,
+    // tag-manager.tsx: back arrow + per-row edit/delete.
+    'app/[locale]/admin/(protected)/tags/tag-manager.tsx': 3,
+    // settings-client.tsx: single back-arrow `size="icon"`.
+    'app/[locale]/admin/(protected)/settings/settings-client.tsx': 1,
+    // seo-client.tsx: single back-arrow `size="icon"`.
+    'app/[locale]/admin/(protected)/seo/seo-client.tsx': 1,
+    // login-form.tsx is keyboard-primary AND already audited via
+    // the dedicated `it()` block below; the wider scan also covers
+    // it. Listed as 0 to make it explicit that no exemption applies.
+    'app/[locale]/admin/login-form.tsx': 0,
 };
 
 /**
@@ -186,7 +246,6 @@ function listFilesRecursive(dir: string, predicate: (f: string) => boolean): str
 }
 
 function relPathFromSrc(absPath: string): string {
-    const srcRoot = path.resolve(__dirname, '..');
     return path.relative(srcRoot, absPath).replace(/\\/g, '/');
 }
 
@@ -211,8 +270,17 @@ function scanFile(absPath: string): FoundIssue[] {
 }
 
 describe('touch-target audit (44 px floor)', () => {
-    it('matches the documented per-file violation count for component files', () => {
-        const files = listFilesRecursive(componentsDir, (f) => /\.(tsx|jsx)$/.test(f));
+    it('matches the documented per-file violation count across all SCAN_ROOTS', () => {
+        // AGG1-M01 / AGG1-M02 / AGG1-L02 (cycle 1 RPF loop): walk every
+        // root in `SCAN_ROOTS` (components/ + admin route group) so the
+        // admin (protected) `*-client.tsx` files are no longer silently
+        // exempt. Each root is scanned recursively for .tsx/.jsx; the
+        // per-file `KNOWN_VIOLATIONS` count then locks the historical
+        // exemptions while catching new violations as a hard failure.
+        const files: string[] = [];
+        for (const root of SCAN_ROOTS) {
+            files.push(...listFilesRecursive(root, (f) => /\.(tsx|jsx)$/.test(f)));
+        }
         const violationsByFile: Map<string, FoundIssue[]> = new Map();
         for (const f of files) {
             const rel = relPathFromSrc(f);
