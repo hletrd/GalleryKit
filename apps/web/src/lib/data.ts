@@ -307,6 +307,21 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
 }
 
 /**
+ * Shared `tag_names` aggregation expression for the lite/listing
+ * queries. Returns a comma-separated list of distinct tag names
+ * ordered alphabetically — the consumer (`humanizeTagLabel` in
+ * `photo-title.ts`) splits on `,`.
+ *
+ * Cycle 2 RPF loop AGG2-M06 / A2-MED-01: factored out so the three
+ * call sites (`getImagesLite`, `getImagesLitePage`,
+ * `getAdminImagesLite`) cannot drift independently. The
+ * fixture-style test at
+ * `__tests__/data-tag-names-sql.test.ts` locks the LEFT JOIN +
+ * GROUP BY shape; this constant locks the column expression.
+ */
+const tagNamesAgg = sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`;
+
+/**
  * Lightweight image listing — uses LEFT JOIN + GROUP BY on images.id with
  * Drizzle column references inside GROUP_CONCAT so tag_names reliably
  * aggregates per row. The earlier scalar-subquery shape (with raw `it` /
@@ -316,7 +331,8 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
  * Perf: groupBy(images.id) re-introduces a sort/group step. On
  * personal-gallery scale (a few thousand images, paginated 30 at a time)
  * this matches the working pattern in getImages() below and the cost is
- * acceptable.
+ * acceptable. See CLAUDE.md "Performance Optimizations" for the
+ * `tag_names` SQL shape rationale.
  */
 // PRIVACY: `selectFields` intentionally omits latitude, longitude,
 // filename_original, and user_filename for public-facing queries.
@@ -327,7 +343,7 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
 
     const baseQuery = db.select({
         ...publicSelectFields,
-        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
+        tag_names: tagNamesAgg,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -380,7 +396,7 @@ export async function getImagesLitePage(
     const normalizedPageSize = Math.min(Math.max(pageSize, 1), 101);
     const baseQuery = db.select({
         ...publicSelectFields,
-        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
+        tag_names: tagNamesAgg,
         total_count: sql<number>`COUNT(*) OVER()`,
     })
         .from(images)
@@ -413,7 +429,7 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
 
     const baseQuery = db.select({
         ...publicSelectFields,
-        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`
+        tag_names: tagNamesAgg,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -437,7 +453,7 @@ export async function getAdminImagesLite(limit: number = 0, offset: number = 0, 
 
     const baseQuery = db.select({
         ...adminSelectFields,
-        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
+        tag_names: tagNamesAgg,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))

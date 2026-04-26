@@ -70,11 +70,21 @@ function extractFunctionBody(source: string, fnName: string): string {
 }
 
 describe('getImagesLite tag_names SQL shape', () => {
+    it('module defines a shared tagNamesAgg with the GROUP_CONCAT shape', () => {
+        // AGG2-M06: cycle-2 helper extraction. Verify the shared
+        // expression carries the correct GROUP_CONCAT(DISTINCT) shape.
+        const source = readSource();
+        expect(source).toMatch(
+            /const\s+tagNamesAgg\s*=\s*sql<[^>]+>\s*`GROUP_CONCAT\(DISTINCT \$\{tags\.name\} ORDER BY \$\{tags\.name\}\)`/,
+        );
+    });
+
     it('uses LEFT JOIN + GROUP BY for getImagesLite', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getImagesLite');
-        // Locked invariants:
-        expect(body).toContain('GROUP_CONCAT(DISTINCT ${tags.name}');
+        // Locked invariants — body references the shared helper, not
+        // a duplicated literal.
+        expect(body).toMatch(/tag_names:\s*tagNamesAgg/);
         expect(body).toContain('.leftJoin(imageTags');
         expect(body).toContain('.leftJoin(tags');
         expect(body).toContain('.groupBy(images.id)');
@@ -89,7 +99,7 @@ describe('getImagesLite tag_names SQL shape', () => {
     it('uses LEFT JOIN + GROUP BY for getImagesLitePage and preserves total_count window function', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getImagesLitePage');
-        expect(body).toContain('GROUP_CONCAT(DISTINCT ${tags.name}');
+        expect(body).toMatch(/tag_names:\s*tagNamesAgg/);
         expect(body).toContain('.leftJoin(imageTags');
         expect(body).toContain('.leftJoin(tags');
         expect(body).toContain('.groupBy(images.id)');
@@ -103,7 +113,7 @@ describe('getImagesLite tag_names SQL shape', () => {
     it('uses LEFT JOIN + GROUP BY for getAdminImagesLite', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getAdminImagesLite');
-        expect(body).toContain('GROUP_CONCAT(DISTINCT ${tags.name}');
+        expect(body).toMatch(/tag_names:\s*tagNamesAgg/);
         expect(body).toContain('.leftJoin(imageTags');
         expect(body).toContain('.leftJoin(tags');
         expect(body).toContain('.groupBy(images.id)');
