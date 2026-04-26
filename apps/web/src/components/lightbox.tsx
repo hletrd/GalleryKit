@@ -38,7 +38,7 @@ function getLightboxAutoHidePreference() {
 export function LightboxTrigger({ onClick }: { onClick: () => void }) {
     const { t } = useTranslation();
     return (
-        <Button variant="ghost" size="icon" onClick={onClick} className="h-8 w-8" aria-label={t('aria.openFullscreen')} aria-keyshortcuts="F" title={`${t('aria.openFullscreen')} (F)`}>
+        <Button variant="ghost" size="icon" onClick={onClick} className="h-11 w-11" aria-label={t('aria.openFullscreen')} aria-keyshortcuts="F" title={`${t('aria.openFullscreen')} (F)`}>
             <Maximize className="h-4 w-4" />
         </Button>
     );
