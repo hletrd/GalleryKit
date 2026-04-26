@@ -1,55 +1,77 @@
-# Cycle 7 — Aggregate Review (review-plan-fix loop, 2026-04-25)
+# Aggregate — Cycle 3/100 RPF loop (HEAD `839d98c`, 2026-04-26)
 
-Review pass executed by a single subagent (the Task fan-out tool is not callable inside this nested subagent context). Per-perspective files written for provenance under `.context/reviews/{architect,code-reviewer,perf-reviewer,security-reviewer,critic,test-engineer,tracer,debugger,document-specialist,verifier,designer}.md`.
+## Run context
 
-## Theme
+- **HEAD:** `839d98c fix(test): unbreak admin login-form touch-target audit (silent no-op)`
+- **Cycle:** 3/100
+- **Reviewers run inline (Task spawn-agent unavailable in catalog):**
+  code-reviewer, perf-reviewer, security-reviewer, critic, verifier,
+  test-engineer, tracer, architect, debugger, document-specialist, designer
+- **Reviewer files:** `<lens>.md` (overwriting prior cycle's content; cycle-2 versions remain in git history).
 
-Per-cycle directive: "look beyond Unicode bidi/invisible-character hardening." Reviewers explicitly excluded the Unicode lineage (now consolidated through `containsUnicodeFormatting`) and audited perf, race conditions, auth boundaries, data flow, UX, doc drift, test gaps, and dependency hygiene.
+## Aggregate verdict
 
-## Aggregated findings (deduplicated)
+**1 NEW MEDIUM (5x cross-agent agreement), 4 NEW LOW, 2 NEW INFO.**
 
-| ID | Description | Severity | Confidence | Agreement | Action |
-|----|-------------|----------|------------|-----------|--------|
-| **C7L-FIX-01** | Duplicate `tagsString.split(',')` parse in `images.uploadImages` (lines 141-149). Brittle parallel parsing; duplicate allocation. | LOW | High | code-reviewer + perf-reviewer + critic + debugger + tracer + architect (6 lanes) | IMPLEMENT — single split, derive `tagNames` and count from one source. |
-| C7L-DOC-01 | `upload-tracker.ts:14` parameter named `ip` but real callers pass `${userId}:${ip}`. Cosmetic rename to `key`. | INFO | Medium | tracer + document-specialist | BUNDLE with C7L-FIX-01 if cycle time allows; otherwise defer. |
-| C7L-CR-04 / C7L-SEC-03 | Audit-log catch sites use `console.debug`, swallowing infra failures in production NODE_ENV=production filter sets. | LOW | High | code-reviewer + security-reviewer | DEFER — promote to `console.warn` in a follow-up plan, not this cycle (logging behavior change deserves its own dedicated cycle). |
-| C7L-PERF-02 | `getSharedGroupKeysForImages` always runs JOIN even if no shares. | INFO | Medium | perf-reviewer | DEFER — low priority. |
-| C7L-PERF-03 | Sequential per-file upload loop. | INFO | Low | perf-reviewer | DEFER — out of scope. |
-| C7L-CR-05 | Stale lineage IDs in `topics.ts` comments. | INFO | Low | code-reviewer | DEFER — cosmetic. |
-| C7L-CRIT-02 | `withAdminMutation()` boilerplate-reduction refactor. | INFO | High | critic | DEFER — large refactor, not bug-class. |
-| C7L-CRIT-03 | Bootstrap state-flag combinatorial complexity. | INFO | Medium | critic | DEFER — document; no rewrite. |
-| C7L-CRIT-04 / C7L-UX-02 | Partial-success messaging on uploads. | INFO | Medium | critic + designer | DEFER — pre-existing UX concern. |
-| C7L-UX-01 | Generic `invalidTagNames` error. | LOW | Medium | designer + critic | DEFER — i18n churn risk. |
-| C7L-TE-01 | No test for `images.ts:147` count-mismatch branch. | LOW | Medium | test-engineer | BUNDLE with C7L-FIX-01 (add test that exercises the same code path). |
-| C7L-TE-02 | No `toHaveBeenCalledTimes(1)` assertion for `settleUploadTrackerClaimMock`. | INFO | High | test-engineer | OPTIONAL — small add; bundle with C7L-FIX-01 if useful. |
-| C7L-SEC-02 | `tagsString` 1000-char cap is generous. | LOW | Medium | security-reviewer | DEFER — out of cycle scope. |
-| C7L-SEC-05 | Silent drop on deep-pagination DoS attempt. | INFO | Medium | security-reviewer | DEFER — out of scope. |
-| C7L-CR-03 | `loadMoreImages` re-reads map after set. | INFO | Medium | code-reviewer | DEFER — cosmetic. |
-| C7L-DBG-01 | Same as C7L-FIX-01 from debugger lens. | LOW | High | debugger | COVERED by C7L-FIX-01. |
-| C7L-ARCH-01 | Same as C7L-FIX-01 from architect lens. | LOW | High | architect | COVERED by C7L-FIX-01. |
-| C7L-PERF-01 | Same as C7L-FIX-01 from perf lens. | LOW | High | perf-reviewer | COVERED by C7L-FIX-01. |
+### MEDIUM (1 finding, high cross-agent consensus)
 
-## Closed findings (not bugs)
+| ID | Severity | Confidence | Reviewer agreement | Files | Summary |
+|---|---|---|---|---|---|
+| **AGG3-M01 = CR3-MED-01 / TE3-MED-01 / V3-MED-01 / D3-MED-01 / DSGN3-MED-01** | Medium | High | 5/11 (code-reviewer, test-engineer, verifier, debugger, designer) | `apps/web/src/__tests__/touch-target-audit.test.ts:191-272` and the multi-line `<Button size="icon">` call sites in `components/upload-dropzone.tsx:404-413`, `components/admin-user-manager.tsx:142-150`, `app/[locale]/admin/(protected)/categories/topic-manager.tsx`, `tags/tag-manager.tsx`, `settings/settings-client.tsx`, `seo/seo-client.tsx`, `components/search.tsx`, `components/photo-navigation.tsx` | Touch-target audit FORBIDDEN regex is line-bounded; misses every multi-line `<Button size="icon">`. The cycle-2 `KNOWN_VIOLATIONS` map matches scanned counts only because the scanner sees nothing on those files. Real violation: `upload-dropzone.tsx:408` ships a 24 px destructive REMOVE button on every uploaded preview unaudited. |
 
-- **AGG7R-21** ("double-call" of `settleUploadTrackerClaim`) — re-audited. The two call sites at `images.ts:391` and `:397` are mutually exclusive (the first branch returns at line 393). Verified by verifier lane (V-1). **Recommend closing the deferred plan entry in this cycle's plan.**
+### LOW (4 findings)
 
-## Cross-agent agreement
+| ID | Severity | Confidence | Reviewers | Summary |
+|---|---|---|---|---|
+| AGG3-L01 = CR3-LOW-02 / TE3-LOW-01 / V3-LOW-01 | Low | High | code-reviewer, test-engineer, verifier | `data-tag-names-sql.test.ts` "Drizzle .toSQL() output" sub-test does not actually verify SQL — only asserts `typeof === 'function'`. |
+| AGG3-L02 = CR3-LOW-01 / SR3-LOW-01 / PR3-LOW-01 | Low | Medium | code-reviewer, security, perf | `assertBlurDataUrl` warn fires unbounded on poisoned DB rows; per-tuple LRU throttle would address. |
+| AGG3-L03 = TE3-LOW-02 | Low | Medium | test-engineer | No test asserts `assertBlurDataUrl` is called from upload action; grep-style fixture test would lock it. |
+| AGG3-L04 = A3-LOW-01 / DS3-LOW-01 / DSGN3-LOW-01 | Low | High | architect, document-specialist, designer | After AGG3-M01 fix lands: extract `scanSource()` for testability; document touch-target audit in CLAUDE.md; `photo-navigation.tsx` will pass cleanly. |
 
-- **C7L-FIX-01** is the only finding with six-lane agreement and a concrete, low-risk fix. It's the natural cycle-7 implementation candidate.
-- All other findings are INFO/LOW and either already correctly handled or naturally deferred per repo policy (cosmetic, large refactor, or out of scope).
+### INFO (2 findings)
 
-## Plan
+| ID | Severity | Confidence | Summary |
+|---|---|---|---|
+| AGG3-I01 = SR3-INFO-01 | Info | High | Optional MySQL CHECK constraint on `blur_data_url` column for defense-in-depth at write time. Both write paths are admin-only. |
+| AGG3-I02 = DS3-INFO-01 / PR3-INFO-01 | Info | Medium | CLAUDE.md cross-reference for `lib/blur-data-url.ts` API; touch-target audit is sync-fs (~30 ms) and acceptable. |
 
-- Schedule a single new plan: `plan-100-cycle7-loop-fixes.md` covering C7L-FIX-01 + bundled test (C7L-TE-01) + parameter rename (C7L-DOC-01) + AGG7R-21 closure note.
-- Record all other findings as deferred with citations.
+## Cross-agent agreement on fix paths
 
-## Gate baseline (before fixes)
+- **AGG3-M01 (multi-line audit blind spot):** Path 1 — pre-process source
+  by joining lines inside `<Button>` / `<button>` JSX opening tags to
+  collapse multi-line tags into a single logical line before scanning.
+  Cheapest implementation:
+  `source.replace(/<(Button|button)\b([^>]*?)>/gs, m => m.replace(/\s+/g, ' '))`
+  applied before `lines = text.split('\n')`. Then re-baseline
+  `KNOWN_VIOLATIONS` with the new true-positive set (raise the
+  upload-dropzone REMOVE button to `h-11 w-11` rather than document it).
+  Add a meta-test fixture asserting the scanner produces a non-zero match
+  against a known multi-line `h-6 w-6` snippet.
+- **AGG3-L01 (.toSQL() no-op):** Either implement `.toSQL()` inspection
+  (Drizzle's `db.select(...).leftJoin(...).toSQL()` is sync) or drop the
+  placeholder.
+- **AGG3-L02 (warn flooding):** small LRU keyed by
+  `(typeof,len,head)` tuple, warn at most once per tuple.
+- **AGG3-L03 (upload-action coverage):** grep-style fixture test on
+  `apps/web/src/app/actions/images.ts` similar to
+  `data-tag-names-sql.test.ts`.
 
-- ESLint: previously clean (cycle-6 baseline)
-- Typecheck: previously clean
-- lint:api-auth, lint:action-origin: clean (CI gates)
-- Vitest: passing baseline carried from cycle 6
+## Quality-gate baseline (pre-fix at HEAD `839d98c`)
 
-## AGENT FAILURES
+- `npm run lint --workspace=apps/web` → exit 0
+- `npm run lint:api-auth --workspace=apps/web` → exit 0
+- `npm run lint:action-origin --workspace=apps/web` → exit 0
+- `npm test --workspace=apps/web` → 64 files / 438 tests passed
 
-The Task fan-out tool is not available inside this nested subagent context, so all agent perspectives were authored sequentially by the orchestrating agent. Per-perspective files exist under `.context/reviews/` for full provenance. No agent failures otherwise.
+## Agent failures
+
+None — all 11 reviewer lenses produced files. Task spawn-agent and
+agent-browser tools unavailable in this catalog; reviewers ran inline
+with file evidence.
+
+## Convergence prediction
+
+1 MEDIUM + 4 LOW + 2 INFO = 7 NEW findings, all rooted in 3 distinct
+fix surfaces (audit scanner + warn throttle + .toSQL() cleanup). Cycle
+3 will land 4-5 fine-grained commits. Convergence (zero MEDIUM/HIGH
+new findings) plausible at cycle 4.

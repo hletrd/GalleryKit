@@ -181,7 +181,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
 7. Conditional UPDATE marks as processed; if image was deleted mid-processing, orphaned files are cleaned up
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
-9. Blur placeholder generated at 16px for instant loading
+9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at both write time (upload action) and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4 KB
 
 ## Race Condition Protections
 
@@ -206,6 +206,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **Masonry grid**: `useMemo` for reorder, `requestAnimationFrame` debounced resize
 - **ImageZoom**: Ref-based DOM manipulation (no React re-renders on mousemove)
 - **Histogram**: Canvas capped at 256x256 for fast computation
+- **`tag_names` aggregation**: the masonry-list queries (`getImagesLite`, `getImagesLitePage`, `getAdminImagesLite`, plus the full `getImages`) all use a shared `tagNamesAgg` constant in `apps/web/src/lib/data.ts` that compiles to `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` over a `LEFT JOIN imageTags … LEFT JOIN tags … GROUP BY images.id`. A scalar correlated subquery shape using raw SQL aliases (`it`, `t`) previously returned NULL in production, breaking the gallery aria-labels (cycle 1 RPF v3 NF-3, commit aca754c). The fixture-style test at `apps/web/src/__tests__/data-tag-names-sql.test.ts` locks this contract: do not migrate the queries away from `tagNamesAgg` without updating the test.
 
 ## Permanently Deferred
 - **2FA/WebAuthn**: Not planned. Single-user admin with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.
@@ -249,6 +250,24 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
 **Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` and `public.ts` are intentionally excluded by name because they own their own same-origin/unauthenticated-surface handling.
+
+## Touch-Target Audit
+
+The vitest fixture at `apps/web/src/__tests__/touch-target-audit.test.ts` enforces the WCAG 2.5.5 / Apple HIG / Google MDN 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/`) recursively.
+
+**Pattern coverage** — the FORBIDDEN regex set catches:
+- shadcn `<Button size="sm">` without an `h-11` / `h-12` / `min-h-11` / `size-11` / `size-12` override (default 32 px);
+- shadcn `<Button size="icon">` without an `h-11` / `size-11` override (default 36 px);
+- `<Button className="...h-8...">` / `...h-9...` literals and `cn()` composites;
+- HTML `<button className="...h-8/h-9...">` literals.
+
+**Multi-line tags** — the scanner normalizes multi-line `<Button>` / `<button>` JSX openings into a single logical line (Prettier-default formatting writes any 3+ prop tag across multiple lines). The normalizer balances strings/braces/comments and rewrites `=>` to `=ARROW` so the `[^>]*` lookahead in FORBIDDEN does not stop at arrow operators inside event handlers. See `normalizeMultilineButtonTags` and `scanSource` in the test file. Cycle 3 RPF loop AGG3-M01 added this normalization after the cycle-2 audit was found to silently miss every multi-line Button.
+
+**Adding a documented exemption** — raise the `KNOWN_VIOLATIONS[<rel-path>]` count in the test file by the appropriate delta and add a comment block above the entry that:
+1. Explains why each violation is acceptable (typically: keyboard-primary admin surface, decorative spinner, or larger pointer-events hit-zone wrapping a smaller visible icon).
+2. Provides a concrete re-open criterion (e.g. "when admin becomes mobile-priority OR a fresh violation lands").
+
+Files NOT listed default to 0 violations. Adding a new violation in a file with N existing violations is a hard failure with the offending lines.
 
 ## Deployment Checklist
 
