@@ -5,7 +5,7 @@ import {
     loginRateLimit,
     resetRateLimit,
 } from '@/lib/rate-limit';
-import { BoundedMap, createWindowBoundedMap, type WindowEntry } from '@/lib/bounded-map';
+import { createWindowBoundedMap, type WindowEntry } from '@/lib/bounded-map';
 
 const PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS = 5000;
 

@@ -9,7 +9,7 @@ import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/ta
 import { isValidTagName, isValidTagSlug } from '@/lib/validation';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { logAuditEvent } from '@/lib/audit';
-import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
+import { requireCleanInput } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 

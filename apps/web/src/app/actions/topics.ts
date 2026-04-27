@@ -28,7 +28,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, containsUnicodeFormatting } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
-import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
+import { requireCleanInput } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 

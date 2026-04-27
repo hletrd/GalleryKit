@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { isIP } from 'net';
 import { db, rateLimitBuckets } from '@/db';
 import { and, eq, lt, sql } from 'drizzle-orm';
-import { BoundedMap, createResetAtBoundedMap, createWindowBoundedMap, type ResetAtEntry, type WindowEntry } from '@/lib/bounded-map';
+import { createResetAtBoundedMap, createWindowBoundedMap, type WindowEntry } from '@/lib/bounded-map';
 
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 export const LOGIN_MAX_ATTEMPTS = 5;

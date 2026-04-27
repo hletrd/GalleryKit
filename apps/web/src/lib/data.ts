@@ -17,7 +17,7 @@ let viewCountBuffer = new Map<number, number>();
 // C30-03: track how many times each group's increment has been re-buffered
 // after a failed flush. If the retry count exceeds the cap, the increment
 // is dropped and a warning is logged instead of re-buffering indefinitely.
-let viewCountRetryCount = new Map<number, number>();
+const viewCountRetryCount = new Map<number, number>();
 const VIEW_COUNT_MAX_RETRIES = 3;
 let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_VIEW_COUNT_BUFFER_SIZE = 1000;
