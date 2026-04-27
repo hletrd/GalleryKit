@@ -253,7 +253,9 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
 
 ## Touch-Target Audit
 
-The vitest fixture at `apps/web/src/__tests__/touch-target-audit.test.ts` enforces the WCAG 2.5.5 / Apple HIG / Google MDN 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/`) recursively.
+**Policy: 44x44 px minimum** — all interactive elements (buttons, links, checkboxes, etc.) must present a tappable/clickable area of at least 44x44 px, per WCAG 2.5.5 (Level AAA), Apple HIG, and Google MDN guidelines. This is enforced as a blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts`.
+
+The vitest fixture at that path enforces the 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/`) recursively.
 
 **Pattern coverage** — the FORBIDDEN regex set catches:
 - shadcn `<Button size="sm">` without an `h-11` / `h-12` / `min-h-11` / `size-11` / `size-12` override (default 32 px);
