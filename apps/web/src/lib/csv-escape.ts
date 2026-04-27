@@ -1,3 +1,11 @@
+import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
+
+// Global-flag variant for .replace() usage — the canonical constant in
+// validation.ts intentionally omits the `g` flag to avoid lastIndex state
+// bugs with .test() (alternating true/false across calls). csv-escape.ts
+// needs the global flag to strip ALL formatting chars in a single pass.
+const UNICODE_FORMAT_CHARS_G = new RegExp(UNICODE_FORMAT_CHARS.source, 'g');
+
 /**
  * CSV field escaping with defense-in-depth hygiene:
  * - Strip C0/C1 control characters (0x00–0x1F, 0x7F–0x9F) to prevent
@@ -31,6 +39,8 @@
  * `'use server'` action surface (which prohibits non-async exports).
  */
 export function escapeCsvField(value: string): string {
+    // Strip C0/C1 control characters, preserving LF (0x0A) and CR (0x0D)
+    // which are collapsed to spaces in the [\r\n]+ pass below.
     value = value.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
     // C7R-RPL-11 / AGG7R-05 + C8R-RPL-01 / AGG8R-01: strip Unicode
     // bidi overrides (U+202A-202E LRE/RLE/PDF/LRO/RLO), bidi isolates
@@ -40,7 +50,8 @@ export function escapeCsvField(value: string): string {
     // annotation anchors. Consolidated into a single character class
     // pass for minimal regex work. These cover Trojan-Source-style
     // reordering AND invisible-character formula-injection bypasses.
-    value = value.replace(/[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/g, '');
+    // C3-F06: import the shared regex instead of duplicating the literal.
+    value = value.replace(UNICODE_FORMAT_CHARS_G, '');
     value = value.replace(/[\r\n]+/g, ' ');
     // C7R-RPL-01 / AGG7R-01: tolerate leading whitespace before the
     // formula-start character so CRLF-collapsed inputs cannot bypass
