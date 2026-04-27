@@ -20,7 +20,7 @@ class TopicHasImagesError extends Error {
 }
 
 import { connection, db, images, topics, topicAliases } from '@/db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
 import { revalidateAllAppData } from '@/lib/revalidation';
@@ -33,22 +33,16 @@ import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
+    // C3L-CR-02: combined single query with UNION instead of two sequential
+    // SELECTs. Both tables are checked in one round-trip to the database.
     const normalizedSegment = segment.trim();
-    const [topicMatch] = await db.select({ slug: topics.slug })
-        .from(topics)
-        .where(eq(topics.slug, normalizedSegment))
-        .limit(1);
-
-    if (topicMatch) {
-        return true;
-    }
-
-    const [aliasMatch] = await db.select({ alias: topicAliases.alias })
-        .from(topicAliases)
-        .where(eq(topicAliases.alias, normalizedSegment))
-        .limit(1);
-
-    return !!aliasMatch;
+    const rows = await db.execute(sql`
+        SELECT 1 AS found FROM ${topics} WHERE ${topics.slug} = ${normalizedSegment}
+        UNION ALL
+        SELECT 1 AS found FROM ${topicAliases} WHERE ${topicAliases.alias} = ${normalizedSegment}
+        LIMIT 1
+    `);
+    return rows.length > 0;
 }
 
 async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<T> {

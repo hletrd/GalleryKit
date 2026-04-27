@@ -6,6 +6,7 @@ const {
     updateMock,
     deleteMock,
     transactionMock,
+    executeMock,
     getConnectionMock,
     lockQueryMock,
     releaseLockQueryMock,
@@ -24,6 +25,7 @@ const {
     updateMock: vi.fn(),
     deleteMock: vi.fn(),
     transactionMock: vi.fn(),
+    executeMock: vi.fn(),
     getConnectionMock: vi.fn(),
     lockQueryMock: vi.fn(),
     releaseLockQueryMock: vi.fn(),
@@ -79,6 +81,7 @@ vi.mock('@/db', () => ({
         update: updateMock,
         delete: deleteMock,
         transaction: transactionMock,
+        execute: executeMock,
     },
     connection: {
         getConnection: getConnectionMock,
@@ -138,6 +141,7 @@ describe('topic actions', () => {
         updateMock.mockReset();
         deleteMock.mockReset();
         transactionMock.mockReset();
+        executeMock.mockReset();
         getConnectionMock.mockReset();
         lockQueryMock.mockReset();
         releaseLockQueryMock.mockReset();
@@ -177,9 +181,8 @@ describe('topic actions', () => {
     });
 
     it('rejects createTopic when the requested slug already exists as an alias route', async () => {
-        selectMock
-            .mockReturnValueOnce(makeSelectChain([]))
-            .mockReturnValueOnce(makeSelectChain([{ alias: 'travel' }]));
+        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
+        executeMock.mockResolvedValueOnce([{ found: 1 }]);
 
         const formData = new FormData();
         formData.set('label', 'Travel');
@@ -243,9 +246,11 @@ describe('topic actions', () => {
     it('renames topics by inserting the replacement row before moving child references', async () => {
         const steps: string[] = [];
 
+        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
+        // First call: topicRouteSegmentExists('new-topic') → no conflict (empty array)
+        executeMock.mockResolvedValueOnce([]);
         selectMock
             .mockReturnValueOnce(makeSelectChain([{ image_filename: 'old-topic.webp' }]))
-            .mockReturnValueOnce(makeSelectChain([]))
             .mockReturnValueOnce(makeSelectChain([]));
 
         transactionMock.mockImplementation(async (callback: (tx: {
@@ -299,9 +304,8 @@ describe('topic actions', () => {
     });
 
     it('serializes alias creation behind the shared route lock before inserting', async () => {
-        selectMock
-            .mockReturnValueOnce(makeSelectChain([]))
-            .mockReturnValueOnce(makeSelectChain([]));
+        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
+        executeMock.mockResolvedValueOnce([]);
         insertMock.mockReturnValueOnce(makeWriteChain([{ insertId: 1 }]));
 
         await expect(createTopicAlias('travel', 'night')).resolves.toEqual({ success: true });
