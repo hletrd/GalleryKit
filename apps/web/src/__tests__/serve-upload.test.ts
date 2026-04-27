@@ -37,9 +37,22 @@ describe('serveUploadFile', () => {
 
     it('rejects extension/directory mismatches', async () => {
         const { serveUploadFile } = await import('@/lib/serve-upload');
-        const response = await serveUploadFile(['jpeg', 'photo.webp']);
 
-        expect(response.status).toBe(400);
+        // .webp file in /uploads/jpeg/ — wrong directory for this format
+        const responseJpegDir = await serveUploadFile(['jpeg', 'photo.webp']);
+        expect(responseJpegDir.status).toBe(400);
+
+        // .jpg file in /uploads/webp/ — wrong directory for this format
+        const responseWebpDir = await serveUploadFile(['webp', 'photo.jpg']);
+        expect(responseWebpDir.status).toBe(400);
+
+        // .avif file in /uploads/jpeg/ — wrong directory for this format
+        const responseAvifInJpegDir = await serveUploadFile(['jpeg', 'photo.avif']);
+        expect(responseAvifInJpegDir.status).toBe(400);
+
+        // .jpg file in /uploads/avif/ — wrong directory for this format
+        const responseJpegInAvifDir = await serveUploadFile(['avif', 'photo.jpg']);
+        expect(responseJpegInAvifDir.status).toBe(400);
     });
 
     it('denies requests that traverse through a symlinked parent directory', async () => {
