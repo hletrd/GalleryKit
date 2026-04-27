@@ -45,7 +45,7 @@
     "adminUsers": "Admin Users",
     "add": "Add",
     "createTitle": "Add Admin",
-    "createDesc": "Adds a full-access root administrator. Only create accounts for people you trust to manage users, settings, uploads, backups, and restores.",
+    "createDesc": "Creates a full-access root admin. Only add people you trust with users, settings, uploads, and backups.",
     "username": "Username",
     "password": "Password",
     "createButton": "Create",
@@ -139,7 +139,7 @@
     "addTagPlaceholder": "+ Tag",
     "failed": "Upload failed.",
     "noTopicsTitle": "Create a category before uploading",
-    "noTopicsDescription": "Uploads need a category so photos have a gallery destination.",
+    "noTopicsDescription": "Photos need a category before they can be uploaded.",
     "limitExceeded": "Upload limit exceeded. Add at most {maxFiles} files, {maxFileSize} per file, and {maxSize} per upload window.",
     "limitHint": "Up to {maxFiles} files, {maxFileSize} per file, and {maxSize} per upload window.",
     "tagsForFile": "Tags for {file}",
@@ -213,7 +213,7 @@
     "photosHeading": "Photos",
     "loadMore": "Load more",
     "loadMoreRateLimited": "Too many load requests. Please wait a moment and try again.",
-    "loadMoreMaintenance": "The gallery is temporarily unavailable during maintenance. Please try again shortly."
+    "loadMoreMaintenance": "Gallery is temporarily unavailable for maintenance. Try again shortly."
   },
   "login": {
     "title": "Admin",
@@ -269,7 +269,7 @@
       "default": "Gallery"
     },
     "downloadJpeg": "Download JPEG",
-    "shortcutsHint": "Shortcuts: Left/Right arrows navigate photos, F opens or closes the lightbox."
+    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox."
   },
   "shared": {
     "viewGallery": "View Gallery",
@@ -332,12 +332,12 @@
     "authorPlaceholder": "Your Name",
     "authorHint": "Used in Open Graph and JSON-LD. Leave empty for default.",
     "locale": "OG Locale",
-    "localeHint": "Open Graph locale code (e.g., en_US, ko_KR). Leave empty for default.",
+    "localeHint": "Open Graph locale code (e.g. en_US, ko_KR). Leave empty for default.",
     "ogTitle": "Open Graph Image",
-    "ogDesc": "Custom image for social media link previews. Individual photo pages use the photo itself.",
+    "ogDesc": "Default image for social media link previews. Individual photo pages use the photo itself.",
     "ogImageUrl": "OG Image URL",
     "ogImageUrlPlaceholder": "https://example.com/og-image.jpg",
-    "ogImageUrlHint": "Same-origin URL or path for generic social media previews. Individual photo and share pages use the actual photo image.",
+    "ogImageUrlHint": "Same-origin URL or path. Individual photo and share pages use the photo itself.",
     "loadFailed": "Could not load SEO settings. Please try again before saving changes."
   },
   "serverActions": {
@@ -376,7 +376,7 @@
     "passwordTooLong": "Password is too long (max 1024 characters)",
     "incorrectPassword": "Incorrect current password",
     "failedToUpdatePassword": "Failed to update password",
-    "passwordUpdated": "Password updated successfully.",
+    "passwordUpdated": "Password updated.",
     "invalidImageId": "Invalid image ID",
     "invalidTagId": "Invalid tag ID",
     "tagNameRequired": "Tag name required",
@@ -467,9 +467,9 @@
     "failedToFetchGallerySettings": "Failed to fetch gallery settings",
     "invalidSettingKey": "Invalid setting key",
     "invalidSettingValue": "Invalid value for setting: {key}",
-    "imageSizesLocked": "Output sizes can't be changed after photos have been uploaded. Keep the current sizes or regenerate the library first.",
+    "imageSizesLocked": "Output sizes are locked once photos exist. Regenerate the library to change them.",
     "failedToUpdateGallerySettings": "Failed to update gallery settings",
-    "uploadSettingsLocked": "Upload-processing settings can't be changed while uploads are active or after photos exist. Keep the current privacy/output settings or regenerate the library first.",
+    "uploadSettingsLocked": "Upload-processing settings are locked while uploads are active or after photos exist. Regenerate the library to change them.",
     "tagPersistenceWarning": "Uploaded {file}, but one or more requested tags could not be saved."
   },
   "aria": {
@@ -551,14 +551,14 @@
     "jpegQuality": "JPEG Quality",
     "qualityHint": "1-100. Higher = better quality, larger files.",
     "imageSizes": "Output Sizes",
-    "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096). Values are sorted/deduped automatically, limited to 8 sizes, and can't be changed after photos have been uploaded.",
+    "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096). Auto-sorted and deduped, max 8, locked once photos exist.",
     "privacyTitle": "Privacy",
-    "privacyDesc": "Control what metadata is stored with uploaded images.",
+    "privacyDesc": "Choose what metadata to keep on upload.",
     "stripGps": "Do Not Store GPS Coordinates on Upload",
-    "stripGpsHint": "Do not persist GPS coordinates for newly uploaded images in gallery metadata. Existing images and source-file EXIF are not rewritten.",
+    "stripGpsHint": "New uploads won't store GPS in gallery metadata. Existing images and source EXIF aren't touched.",
     "loadFailed": "Could not load settings. Please try again before saving changes.",
-    "imageSizesLockedHint": "Output sizes are locked because photos already exist. Start from an empty gallery to change derivative sizes.",
-    "uploadContractLocked": "Image size and GPS-stripping settings are write-once for an existing gallery so older uploads stay consistent with new uploads."
+    "imageSizesLockedHint": "Output sizes are locked because photos already exist. Empty the gallery to change them.",
+    "uploadContractLocked": "Image size and GPS settings are write-once for an existing gallery, so old and new uploads stay consistent."
   },
   "footer": {
     "admin": "Admin"
