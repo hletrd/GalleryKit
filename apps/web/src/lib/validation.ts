@@ -32,6 +32,10 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 // seo_title / seo_description / seo_nav_title / seo_author (C6L-SEC-01).
 // Exported so all consumers share one source of truth and stay in
 // lock-step when the character set evolves.
+// Character ranges (U+XXXX notation for editor-invariant readability):
+//   U+180E MVS, U+200B-200F ZWSP/ZWNJ/ZWJ/LRM/RLM,
+//   U+202A-202E LRE/RLE/PDF/LRO/RLO, U+2060 WJ,
+//   U+2066-2069 LRI/RLI/FSI/PDI, U+FEFF BOM, U+FFF9-FFFB interlinear anchors
 export const UNICODE_FORMAT_CHARS = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/;
 
 /**
