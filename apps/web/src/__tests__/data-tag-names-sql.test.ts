@@ -135,8 +135,20 @@ describe('getImagesLite tag_names SQL shape', () => {
      * which was already enforced by TypeScript — a no-op. Cycle 3 RPF
      * loop replaces it with an actual SQL inspection using the mysql-proxy
      * driver to avoid pulling the production connection pool at import.
+     *
+     * Cycle 5 fresh review CYC5-F01: this test dynamically imports
+     * `drizzle-orm`, `drizzle-orm/mysql-proxy`, and `../db/schema`. Under
+     * full-suite parallel test load the cold-import graph occasionally
+     * exceeds the 5000ms default vitest timeout (observed flake on
+     * 2026-04-27 cycle-5 fresh run: import phase clocked 143s aggregate
+     * across the 69-file suite). The test passes consistently in
+     * isolation (~5.2s wall, of which 225ms is import). Bumping the
+     * per-test timeout to 30000ms eliminates the flake without masking
+     * a real regression — the assertions themselves are synchronous
+     * once `.toSQL()` runs, so a slow assertion would still indicate
+     * a real problem.
      */
-    it('Drizzle compiled SQL for the lite query shape emits GROUP_CONCAT + LEFT JOIN + GROUP BY', async () => {
+    it('Drizzle compiled SQL for the lite query shape emits GROUP_CONCAT + LEFT JOIN + GROUP BY', { timeout: 30000 }, async () => {
         const { sql: drizzleSql, eq } = await import('drizzle-orm');
         const { drizzle: drizzleProxy } = await import('drizzle-orm/mysql-proxy');
         const { images, imageTags, tags } = await import('../db/schema');
