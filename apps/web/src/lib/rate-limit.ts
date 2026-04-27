@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { isIP } from 'net';
 import { db, rateLimitBuckets } from '@/db';
 import { and, eq, lt, sql } from 'drizzle-orm';
+import { BoundedMap, createResetAtBoundedMap, createWindowBoundedMap, type ResetAtEntry, type WindowEntry } from '@/lib/bounded-map';
 
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 export const LOGIN_MAX_ATTEMPTS = 5;
@@ -20,9 +21,10 @@ export const SEARCH_RATE_LIMIT_MAX_KEYS = 2000;
 export const OG_WINDOW_MS = 60 * 1000;
 export const OG_MAX_REQUESTS = 30;
 export const OG_RATE_LIMIT_MAX_KEYS = 2000;
-export const ogRateLimit = new Map<string, { count: number; resetAt: number }>();
+export const ogRateLimit = createResetAtBoundedMap<string>(OG_RATE_LIMIT_MAX_KEYS);
 
-export type RateLimitEntry = { count: number; lastAttempt: number };
+// Re-export RateLimitEntry from bounded-map for backward compatibility
+export type RateLimitEntry = WindowEntry;
 
 export type HeaderLike = { get(name: string): string | null };
 
@@ -33,9 +35,9 @@ const DEFAULT_TRUSTED_PROXY_HOPS = 1;
 
 // In-memory Maps kept as fast-path cache. On restart they are empty;
 // the DB is the source of truth.
-export const loginRateLimit = new Map<string, RateLimitEntry>();
+export const loginRateLimit = createWindowBoundedMap<string>(LOGIN_RATE_LIMIT_MAX_KEYS, LOGIN_WINDOW_MS);
 
-export const searchRateLimit = new Map<string, { count: number; resetAt: number }>();
+export const searchRateLimit = createResetAtBoundedMap<string>(SEARCH_RATE_LIMIT_MAX_KEYS);
 const SEARCH_RATE_LIMIT_PRUNE_INTERVAL_MS = 1000;
 let lastSearchRateLimitPruneAt = 0;
 let warnedMissingTrustProxy = false;
@@ -123,23 +125,7 @@ export function shouldWarnMissingTrustProxy(
 }
 
 export function pruneLoginRateLimit(now: number) {
-    // Prune expired entries (O(n) single pass)
-    for (const [key, entry] of loginRateLimit) {
-        if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
-            loginRateLimit.delete(key);
-        }
-    }
-
-    // Hard cap: if still over limit after expiry pruning, evict oldest entries.
-    if (loginRateLimit.size > LOGIN_RATE_LIMIT_MAX_KEYS) {
-        const excess = loginRateLimit.size - LOGIN_RATE_LIMIT_MAX_KEYS;
-        let evicted = 0;
-        for (const key of loginRateLimit.keys()) {
-            if (evicted >= excess) break;
-            loginRateLimit.delete(key);
-            evicted++;
-        }
-    }
+    loginRateLimit.prune(now);
 }
 
 export function pruneSearchRateLimit(now: number, options?: { force?: boolean }) {
@@ -153,23 +139,7 @@ export function pruneSearchRateLimit(now: number, options?: { force?: boolean })
     }
 
     lastSearchRateLimitPruneAt = now;
-
-    for (const [key, entry] of searchRateLimit) {
-        if (entry.resetAt <= now) {
-            searchRateLimit.delete(key);
-        }
-    }
-
-    if (searchRateLimit.size > SEARCH_RATE_LIMIT_MAX_KEYS) {
-        const excess = searchRateLimit.size - SEARCH_RATE_LIMIT_MAX_KEYS;
-        let evicted = 0;
-        for (const key of searchRateLimit.keys()) {
-            if (evicted >= excess) break;
-            searchRateLimit.delete(key);
-            evicted++;
-        }
-    }
-
+    searchRateLimit.prune(now);
     return true;
 }
 
@@ -181,18 +151,7 @@ export function resetSearchRateLimitPruneStateForTests() {
 // Uses the same pattern as `loadMoreImages` in actions/public.ts so the
 // public-unauthenticated rate-limit posture is uniform across surfaces.
 export function pruneOgRateLimit(now: number) {
-    for (const [key, entry] of ogRateLimit) {
-        if (entry.resetAt <= now) ogRateLimit.delete(key);
-    }
-    if (ogRateLimit.size > OG_RATE_LIMIT_MAX_KEYS) {
-        const excess = ogRateLimit.size - OG_RATE_LIMIT_MAX_KEYS;
-        let evicted = 0;
-        for (const key of ogRateLimit.keys()) {
-            if (evicted >= excess) break;
-            ogRateLimit.delete(key);
-            evicted++;
-        }
-    }
+    ogRateLimit.prune(now);
 }
 
 /** Returns `true` when the (pre-incremented) bucket is over the limit. */

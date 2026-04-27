@@ -6,6 +6,7 @@ import { getImagesLite, searchImages } from '@/lib/data';
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit, getRateLimitBucketStart } from '@/lib/rate-limit';
+import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 type PublicImageListItem = Awaited<ReturnType<typeof getImagesLite>>[number];
@@ -35,22 +36,10 @@ async function rollbackSearchAttempt(ip: string, bucketStart: number) {
 const LOAD_MORE_WINDOW_MS = 60 * 1000;
 const LOAD_MORE_MAX_REQUESTS = 120;
 const LOAD_MORE_RATE_LIMIT_MAX_KEYS = 2000;
-const loadMoreRateLimit = new Map<string, { count: number; resetAt: number }>();
+const loadMoreRateLimit = createResetAtBoundedMap<string>(LOAD_MORE_RATE_LIMIT_MAX_KEYS);
 
 function pruneLoadMoreRateLimit(now: number) {
-    for (const [key, entry] of loadMoreRateLimit) {
-        if (entry.resetAt <= now) loadMoreRateLimit.delete(key);
-    }
-
-    if (loadMoreRateLimit.size > LOAD_MORE_RATE_LIMIT_MAX_KEYS) {
-        const excess = loadMoreRateLimit.size - LOAD_MORE_RATE_LIMIT_MAX_KEYS;
-        let evicted = 0;
-        for (const key of loadMoreRateLimit.keys()) {
-            if (evicted >= excess) break;
-            loadMoreRateLimit.delete(key);
-            evicted++;
-        }
-    }
+    loadMoreRateLimit.prune(now);
 }
 
 function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
