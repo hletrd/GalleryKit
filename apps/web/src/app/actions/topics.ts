@@ -6,7 +6,7 @@ import { connection, db, images, topics, topicAliases } from '@/db';
 import { eq, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
-import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
+import { revalidateAllAppData } from '@/lib/revalidation';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, containsUnicodeFormatting } from '@/lib/validation';
@@ -132,7 +132,9 @@ export async function createTopic(formData: FormData) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'topic_create', 'topic', slug).catch(console.debug);
 
-            revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/');
+            // C2-F06: revalidateAllAppData() already covers all locale variants
+            // and admin surfaces; the preceding revalidateLocalizedPaths() was
+            // redundant (revalidatePath('/', 'layout') invalidates the full tree).
             revalidateAllAppData();
             return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
         });
@@ -279,7 +281,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         const currentUser = await getCurrentUser();
         logAuditEvent(currentUser?.id ?? null, 'topic_update', 'topic', slug).catch(console.debug);
 
-        revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/', `/${slug}`, slug !== cleanCurrentSlug ? `/${cleanCurrentSlug}` : '');
+        // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces
         revalidateAllAppData();
         return imageWarning ? { success: true as const, warning: imageWarning } : { success: true as const };
     } catch (e: unknown) {
@@ -350,7 +352,7 @@ export async function deleteTopic(slug: string) {
             logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', cleanSlug).catch(console.debug);
         }
 
-        revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', '/', `/${cleanSlug}`);
+        // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces
         revalidateAllAppData();
 
         return { success: true };
@@ -411,7 +413,7 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'topic_alias_create', 'topic', cleanTopicSlug, undefined, { alias: cleanAlias }).catch(console.debug);
 
-            revalidateLocalizedPaths('/admin/categories', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
+            // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces
             revalidateAllAppData();
             return { success: true };
         });
@@ -481,7 +483,7 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
         return { error: t('failedToDeleteAlias') };
     }
 
-    revalidateLocalizedPaths('/admin/categories', '/admin/tags', '/admin/dashboard', `/${cleanAlias}`, `/${cleanTopicSlug}`);
+    // C2-F06: revalidateAllAppData() covers all locale variants and admin surfaces
     revalidateAllAppData();
     return { success: true };
 }
