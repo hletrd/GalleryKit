@@ -2,6 +2,23 @@
 
 import type { RowDataPacket } from 'mysql2/promise';
 
+// AGG4R2-04: Proper error classes for topic mutation flow control.
+// Replaces string-sentinel error matching (throw new TopicNotFoundError(),
+// catch checking for that string) with typed error classes that are caught
+// by type, eliminating the fragile string-comparison pattern.
+class TopicNotFoundError extends Error {
+    constructor() { super('Topic not found'); this.name = 'TopicNotFoundError'; }
+}
+class SlugConflictsWithRouteError extends Error {
+    constructor() { super('Slug conflicts with existing route'); this.name = 'SlugConflictsWithRouteError'; }
+}
+class TopicRouteLockTimeoutError extends Error {
+    constructor() { super('Topic route lock acquisition timed out'); this.name = 'TopicRouteLockTimeoutError'; }
+}
+class TopicHasImagesError extends Error {
+    constructor() { super('Topic still has associated images'); this.name = 'TopicHasImagesError'; }
+}
+
 import { connection, db, images, topics, topicAliases } from '@/db';
 import { eq, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
@@ -44,7 +61,7 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
         );
         lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
         if (!lockAcquired) {
-            throw new Error('TOPIC_ROUTE_LOCK_TIMEOUT');
+            throw new TopicRouteLockTimeoutError();
         }
 
         return await action();
@@ -140,7 +157,7 @@ export async function createTopic(formData: FormData) {
         if (imageFilename) {
             await deleteTopicImage(imageFilename);
         }
-        if (e instanceof Error && e.message === 'TOPIC_ROUTE_LOCK_TIMEOUT') {
+        if (e instanceof TopicRouteLockTimeoutError) {
             return { error: t('failedToCreateTopic') };
         }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -220,7 +237,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     try {
         await withTopicRouteMutationLock(async () => {
             if (slug !== cleanCurrentSlug && await topicRouteSegmentExists(slug)) {
-                throw new Error('SLUG_CONFLICTS_WITH_ROUTE');
+                throw new SlugConflictsWithRouteError();
             }
 
             if (slug !== cleanCurrentSlug) {
@@ -232,7 +249,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                         .limit(1);
 
                     if (!transactionTopic) {
-                        throw new Error('TOPIC_NOT_FOUND');
+                        throw new TopicNotFoundError();
                     }
 
                     await tx.insert(topics).values({
@@ -253,7 +270,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     .where(eq(topics.slug, cleanCurrentSlug))
                     .limit(1);
                 if (!existingTopic) {
-                    throw new Error('TOPIC_NOT_FOUND');
+                    throw new TopicNotFoundError();
                 }
 
                 const [updateResult] = await db.update(topics)
@@ -264,7 +281,7 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                     })
                     .where(eq(topics.slug, cleanCurrentSlug));
                 if (updateResult.affectedRows === 0) {
-                    throw new Error('TOPIC_NOT_FOUND');
+                    throw new TopicNotFoundError();
                 }
             }
         });
@@ -284,13 +301,13 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
          if (imageFilename) {
              await deleteTopicImage(imageFilename);
          }
-         if (e instanceof Error && e.message === 'TOPIC_NOT_FOUND') {
+         if (e instanceof TopicNotFoundError) {
              return { error: t('topicNotFound') };
          }
-         if (e instanceof Error && e.message === 'SLUG_CONFLICTS_WITH_ROUTE') {
+         if (e instanceof SlugConflictsWithRouteError) {
              return { error: t('slugConflictsWithRoute') };
          }
-         if (e instanceof Error && e.message === 'TOPIC_ROUTE_LOCK_TIMEOUT') {
+         if (e instanceof TopicRouteLockTimeoutError) {
              return { error: t('failedToUpdateTopic') };
          }
          if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
@@ -328,7 +345,7 @@ export async function deleteTopic(slug: string) {
         await db.transaction(async (tx) => {
             const headerImages = await tx.select({ id: images.id }).from(images).where(eq(images.topic, cleanSlug)).limit(1);
             if (headerImages.length > 0) {
-                throw new Error('HAS_IMAGES');
+                throw new TopicHasImagesError();
             }
             const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanSlug)).limit(1);
             deletedImageFilename = topicRecord?.image_filename ?? null;
@@ -353,7 +370,7 @@ export async function deleteTopic(slug: string) {
 
         return { success: true };
     } catch (e) {
-         if (e instanceof Error && e.message === 'HAS_IMAGES') {
+         if (e instanceof TopicHasImagesError) {
              return { error: t('cannotDeleteCategoryWithImages') };
          }
          console.error('Failed to delete topic', e);
@@ -414,7 +431,7 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
             return { success: true };
         });
     } catch (e: unknown) {
-        if (e instanceof Error && e.message === 'TOPIC_ROUTE_LOCK_TIMEOUT') {
+        if (e instanceof TopicRouteLockTimeoutError) {
             return { error: t('failedToCreateTopic') };
         }
         if (isMySQLError(e) && (e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY')) {
