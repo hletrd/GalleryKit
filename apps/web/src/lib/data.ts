@@ -8,8 +8,12 @@ import { isRestoreMaintenanceActive } from './restore-maintenance';
 import { isValidTagSlug } from './validation';
 import siteConfig from '@/site-config.json';
 
-// Module-level buffer for debounced shared-group view count increments
-const viewCountBuffer = new Map<number, number>();
+// Module-level buffer for debounced shared-group view count increments.
+// `let` (not `const`) so `flushGroupViewCounts` can atomically swap the Map
+// reference before draining it — new increments during a flush go to the
+// fresh Map while the old one is drained chunk-by-chunk. This prevents
+// losing buffered increments if the process crashes mid-flush (C2-F01).
+let viewCountBuffer = new Map<number, number>();
 let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_VIEW_COUNT_BUFFER_SIZE = 1000;
 
@@ -49,8 +53,13 @@ async function flushGroupViewCounts() {
     if (isFlushing) return; // Prevent concurrent flush
     isFlushing = true;
     viewCountFlushTimer = null;
-    const batch = new Map(viewCountBuffer);
-    viewCountBuffer.clear();
+    // C2-F01: swap the Map reference atomically so new increments during the
+    // flush go to a fresh Map. The old Map is drained chunk-by-chunk below.
+    // This prevents losing buffered increments if the process crashes between
+    // the old "new Map(viewCountBuffer) + clear()" pattern where the buffer
+    // was emptied before DB writes completed.
+    const batch = viewCountBuffer;
+    viewCountBuffer = new Map();
     let succeeded = 0;
     try {
         // Process in chunks to avoid creating 1000+ concurrent promises when the
