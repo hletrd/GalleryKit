@@ -55,9 +55,17 @@ export function buildContentSecurityPolicy({
     ].join('; ');
   }
 
-  const scriptSources = ["'self'", 'https://www.googletagmanager.com'];
+  const scriptSources = ["'self'"];
+  if (process.env.NEXT_PUBLIC_GA_ID) {
+    scriptSources.push('https://www.googletagmanager.com');
+  }
   if (nonce) {
     scriptSources.unshift(`'nonce-${nonce}'`);
+  }
+
+  const connectSources = ["'self'"];
+  if (process.env.NEXT_PUBLIC_GA_ID) {
+    connectSources.push('https://www.google-analytics.com');
   }
 
   return [
@@ -66,7 +74,7 @@ export function buildContentSecurityPolicy({
     "style-src 'self' 'unsafe-inline'",
     `img-src ${imgSrc}`,
     "font-src 'self' data:",
-    "connect-src 'self' https://www.google-analytics.com",
+    `connect-src ${connectSources.join(' ')}`,
     "frame-ancestors 'self'",
     "base-uri 'self'",
     "form-action 'self'",
