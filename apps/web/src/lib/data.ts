@@ -340,6 +340,14 @@ function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnproc
 const tagNamesAgg = sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`;
 
 /**
+ * Maximum number of image rows a listing query may return.
+ * Used as a safety cap to prevent unbounded result sets.
+ */
+const LISTING_QUERY_LIMIT = 100;
+/** Limit + 1 for has-more detection (fetch N+1, return first N). */
+const LISTING_QUERY_LIMIT_PLUS_ONE = LISTING_QUERY_LIMIT + 1;
+
+/**
  * Lightweight image listing — uses LEFT JOIN + GROUP BY on images.id with
  * Drizzle column references inside GROUP_CONCAT so tag_names reliably
  * aggregates per row. The earlier scalar-subquery shape (with raw `it` /
@@ -373,7 +381,7 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const effectiveLimit = limit > 0 ? Math.min(limit, 101) : 101;
+    const effectiveLimit = limit > 0 ? Math.min(limit, LISTING_QUERY_LIMIT_PLUS_ONE) : LISTING_QUERY_LIMIT_PLUS_ONE;
     return query.limit(effectiveLimit).offset(offset);
 }
 
@@ -411,7 +419,7 @@ export async function getImagesLitePage(
         return { images: [], totalCount: 0, hasMore: false };
     }
 
-    const normalizedPageSize = Math.min(Math.max(pageSize, 1), 101);
+    const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE);
     const baseQuery = db.select({
         ...publicSelectFields,
         tag_names: tagNamesAgg,
@@ -459,7 +467,7 @@ export async function getImages(topic?: string, tagSlugs?: string[], limit: numb
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const effectiveLimit = limit > 0 ? Math.min(limit, 100) : 100;
+    const effectiveLimit = limit > 0 ? Math.min(limit, LISTING_QUERY_LIMIT) : LISTING_QUERY_LIMIT;
     return query.limit(effectiveLimit).offset(offset);
 }
 
@@ -483,7 +491,7 @@ export async function getAdminImagesLite(limit: number = 0, offset: number = 0, 
         ? baseQuery.where(and(...conditions))
         : baseQuery;
 
-    const effectiveLimit = limit > 0 ? Math.min(limit, 100) : 100;
+    const effectiveLimit = limit > 0 ? Math.min(limit, LISTING_QUERY_LIMIT) : LISTING_QUERY_LIMIT;
     return query.limit(effectiveLimit).offset(offset);
 }
 
