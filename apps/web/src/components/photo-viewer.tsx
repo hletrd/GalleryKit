@@ -592,7 +592,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 {image.filename_jpeg && (
                                     <div className="mt-4 border-t pt-4">
                                         <Histogram
-                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
+                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
                                             className="w-full"
                                         />
                                     </div>

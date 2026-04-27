@@ -111,6 +111,17 @@ export function TagInput({
                  addTag(inputValue);
             }
         } else if (e.key === 'Tab') {
+            // UX-01: Tab should accept the highlighted suggestion (if any)
+            // and then let the browser move focus to the next focusable element.
+            // We intentionally do NOT call preventDefault() so the default
+            // Tab focus-traversal still works and users can Tab out.
+            if (isOpen) {
+                if (filteredTags.length > 0 && highlightedIndex < filteredTags.length) {
+                    addTag(filteredTags[highlightedIndex].name);
+                } else if (showCreateOption && highlightedIndex === filteredTags.length) {
+                    addTag(inputValue);
+                }
+            }
             setIsOpen(false);
         } else if (e.key === 'ArrowDown') {
             e.preventDefault();

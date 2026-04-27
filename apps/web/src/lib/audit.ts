@@ -22,9 +22,14 @@ export async function logAuditEvent(
         }
 
         if (serializedMetadata && serializedMetadata.length > 4096) {
+            // C3L-CR-01: Use array-spread slicing to avoid splitting
+            // UTF-16 surrogate pairs. `[...str]` iterates by code point
+            // (not UTF-16 code unit), so `.slice()` on the resulting
+            // array cannot bisect a surrogate pair.
+            const codePoints = [...serializedMetadata];
             serializedMetadata = JSON.stringify({
                 truncated: true,
-                preview: serializedMetadata.slice(0, 4000),
+                preview: codePoints.slice(0, 4000).join(''),
             });
         }
     }
