@@ -11,9 +11,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 // Mock sharp before importing the module under test
 vi.mock('sharp', () => {
-  const sharp = vi.fn();
-  sharp.concurrency = vi.fn();
-  sharp.limitInputPixels = vi.fn();
+  const sharp = Object.assign(vi.fn(), {
+    concurrency: vi.fn(),
+    limitInputPixels: vi.fn(),
+  });
   return { default: sharp };
 });
 
