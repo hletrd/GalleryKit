@@ -14,6 +14,11 @@ import siteConfig from '@/site-config.json';
 // fresh Map while the old one is drained chunk-by-chunk. This prevents
 // losing buffered increments if the process crashes mid-flush (C2-F01).
 let viewCountBuffer = new Map<number, number>();
+// C30-03: track how many times each group's increment has been re-buffered
+// after a failed flush. If the retry count exceeds the cap, the increment
+// is dropped and a warning is logged instead of re-buffering indefinitely.
+let viewCountRetryCount = new Map<number, number>();
+const VIEW_COUNT_MAX_RETRIES = 3;
 let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_VIEW_COUNT_BUFFER_SIZE = 1000;
 
@@ -73,8 +78,18 @@ async function flushGroupViewCounts() {
                     db.update(sharedGroups)
                         .set({ view_count: sql`${sharedGroups.view_count} + ${count}` })
                         .where(eq(sharedGroups.id, groupId))
-                        .then((result) => { succeeded++; return result; })
+                        .then((result) => { succeeded++; viewCountRetryCount.delete(groupId); return result; })
                         .catch(() => {
+                            // C30-03: check retry count before re-buffering. If an
+                            // increment has been re-buffered more than
+                            // VIEW_COUNT_MAX_RETRIES times, drop it and log a
+                            // warning instead of buffering indefinitely.
+                            const retries = viewCountRetryCount.get(groupId) ?? 0;
+                            if (retries >= VIEW_COUNT_MAX_RETRIES) {
+                                console.warn(`[viewCount] Dropping increment for group ${groupId} after ${VIEW_COUNT_MAX_RETRIES} failed flush attempts`);
+                                viewCountRetryCount.delete(groupId);
+                                return;
+                            }
                             // Re-buffer failed increment in one operation with capacity check.
                             // Using a single Map.set instead of per-increment calls avoids O(n)
                             // overhead when count is large (e.g., accumulated during DB outage).
@@ -83,6 +98,7 @@ async function flushGroupViewCounts() {
                                 return;
                             }
                             viewCountBuffer.set(groupId, (viewCountBuffer.get(groupId) ?? 0) + count);
+                            viewCountRetryCount.set(groupId, retries + 1);
                         })
                 )
             );
