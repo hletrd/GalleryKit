@@ -11,7 +11,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
-import { stripControlChars } from '@/lib/sanitize';
+import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
 import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -99,15 +99,14 @@ export async function createAdminUser(formData: FormData) {
     // Sanitize before validation so length checks operate on the same value
     // that will be hashed (matches uploadImages tagsString pattern, see C46-01).
     // C0 controls in passwords are almost always accidental paste artifacts.
-    const rawUsername = formData.get('username')?.toString() ?? '';
-    const username = stripControlChars(rawUsername) ?? '';
+    const { value: username, rejected: usernameRejected } = requireCleanInput(formData.get('username')?.toString());
     const password = stripControlChars(formData.get('password')?.toString() ?? '') ?? '';
     const confirmPassword = stripControlChars(formData.get('confirmPassword')?.toString() ?? '') ?? '';
 
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed (defense in
     // depth — matches updateTopic/deleteTopic pattern, see C7R2-05).
-    if (username !== rawUsername) return { error: t('invalidUsernameFormat') };
+    if (usernameRejected) return { error: t('invalidUsernameFormat') };
 
     if (!username || username.length < 3) return { error: t('usernameTooShort') };
     if (username.length > 64) return { error: t('usernameTooLong') };

@@ -11,7 +11,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, containsUnicodeFormatting } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
-import { stripControlChars } from '@/lib/sanitize';
+import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
@@ -68,12 +68,10 @@ export async function createTopic(formData: FormData) {
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed (defense in
     // depth — matches updateTopic/deleteTopic pattern, see C7R2-02).
-    const rawLabel = formData.get('label')?.toString() ?? '';
-    const rawSlug = formData.get('slug')?.toString() ?? '';
-    const label = stripControlChars(rawLabel) ?? '';
-    const slug = stripControlChars(rawSlug) ?? '';
-    if (label !== rawLabel) return { error: t('invalidLabel') };
-    if (slug !== rawSlug) return { error: t('invalidSlug') };
+    const { value: label, rejected: labelRejected } = requireCleanInput(formData.get('label')?.toString());
+    const { value: slug, rejected: slugRejected } = requireCleanInput(formData.get('slug')?.toString());
+    if (labelRejected) return { error: t('invalidLabel') };
+    if (slugRejected) return { error: t('invalidSlug') };
     // C5L-SEC-01 / C6L-ARCH-01: reject Unicode bidi/invisible formatting in
     // admin-controlled labels for parity with topic aliases (C3L-SEC-01) and
     // tag names (C4L-SEC-01). Labels render in admin tables, public navigation,
@@ -165,8 +163,8 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and should not silently proceed (defense in
     // depth for destructive operations — matches deleteTopic pattern).
-    const cleanCurrentSlug = stripControlChars(currentSlug) ?? '';
-    if (cleanCurrentSlug !== currentSlug) {
+    const { value: cleanCurrentSlug, rejected: currentSlugRejected } = requireCleanInput(currentSlug);
+    if (currentSlugRejected) {
         return { error: t('invalidCurrentSlug') };
     }
     if (!cleanCurrentSlug || !isValidSlug(cleanCurrentSlug)) {
@@ -176,12 +174,10 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     // Reject malformed label/slug: if sanitization changes the value, the
     // input contained control characters and must not silently proceed
     // (defense in depth — matches createTopic pattern, see C7R2-02).
-    const rawLabel = formData.get('label')?.toString() ?? '';
-    const rawSlug = formData.get('slug')?.toString() ?? '';
-    const label = stripControlChars(rawLabel) ?? '';
-    const slug = stripControlChars(rawSlug) ?? '';
-    if (label !== rawLabel) return { error: t('invalidLabel') };
-    if (slug !== rawSlug) return { error: t('invalidSlug') };
+    const { value: label, rejected: labelRejected } = requireCleanInput(formData.get('label')?.toString());
+    const { value: slug, rejected: slugRejected } = requireCleanInput(formData.get('slug')?.toString());
+    if (labelRejected) return { error: t('invalidLabel') };
+    if (slugRejected) return { error: t('invalidSlug') };
     // C5L-SEC-01 / C6L-ARCH-01: reject Unicode bidi/invisible formatting in
     // updated labels (parity with createTopic). Single canonical helper.
     if (containsUnicodeFormatting(label)) return { error: t('invalidLabel') };
@@ -317,8 +313,8 @@ export async function deleteTopic(slug: string) {
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed on a
     // destructive operation (defense in depth — matches updateTopic pattern).
-    const cleanSlug = stripControlChars(slug) ?? '';
-    if (cleanSlug !== slug) {
+    const { value: cleanSlug, rejected: slugRejected } = requireCleanInput(slug);
+    if (slugRejected) {
         return { error: t('invalidSlug') };
     }
     if (!cleanSlug || !isValidSlug(cleanSlug)) {
@@ -378,8 +374,8 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     // changes the value, the input contained control characters and must not
     // silently proceed (defense in depth — matches deleteTopicAlias pattern,
     // see C7R2-01).
-    const cleanTopicSlug = stripControlChars(topicSlug) ?? '';
-    if (cleanTopicSlug !== topicSlug) {
+    const { value: cleanTopicSlug, rejected: topicSlugRejected } = requireCleanInput(topicSlug);
+    if (topicSlugRejected) {
         return { error: t('invalidTopicSlug') };
     }
     if (!cleanTopicSlug || !isValidSlug(cleanTopicSlug)) {
@@ -388,8 +384,8 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
 
     // Sanitize alias before validation — reject malformed input (defense in
     // depth — matches deleteTopicAlias pattern, see C7R2-01).
-    const cleanAlias = stripControlChars(alias) ?? '';
-    if (cleanAlias !== alias) {
+    const { value: cleanAlias, rejected: aliasRejected } = requireCleanInput(alias);
+    if (aliasRejected) {
         return { error: t('invalidAlias') };
     }
     if (!isValidTopicAlias(cleanAlias)) {
@@ -444,8 +440,8 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     // Reject malformed input: if sanitization changes the value, the input
     // contained control characters and must not silently proceed on a
     // destructive operation (defense in depth — matches updateTopic/deleteTopic pattern).
-    const cleanTopicSlug = stripControlChars(topicSlug) ?? '';
-    if (cleanTopicSlug !== topicSlug) {
+    const { value: cleanTopicSlug, rejected: topicSlugRejected } = requireCleanInput(topicSlug);
+    if (topicSlugRejected) {
         return { error: t('invalidTopicSlug') };
     }
     if (!cleanTopicSlug || !isValidSlug(cleanTopicSlug)) {
@@ -453,8 +449,8 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     }
 
     // Sanitize before validation — reject malformed input (defense in depth)
-    const cleanAlias = stripControlChars(alias) ?? '';
-    if (cleanAlias !== alias) {
+    const { value: cleanAlias, rejected: aliasRejected } = requireCleanInput(alias);
+    if (aliasRejected) {
         return { error: t('invalidAlias') };
     }
     // Permissive check to allow deleting legacy aliases that pre-date newer

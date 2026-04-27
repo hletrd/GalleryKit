@@ -33,7 +33,9 @@ describe('admin-users.ts — createAdminUser validates form fields before rate-l
 
     it('validates control-char rejection (invalidUsernameFormat on sanitize delta) before pre-incrementing user_create', () => {
         const body = createAdminUserMatch![0];
-        const sanitizeGuard = body.indexOf('if (username !== rawUsername)');
+        // AGG4R2-06: requireCleanInput returns { rejected } instead of
+        // comparing raw vs sanitized strings. The guard is now `if (usernameRejected)`.
+        const sanitizeGuard = body.indexOf('if (usernameRejected)');
         const preIncrement = body.indexOf(
             "incrementRateLimit(ip, 'user_create'",
         );
