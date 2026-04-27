@@ -176,256 +176,256 @@ export async function uploadImages(formData: FormData) {
     }
 
     try {
-    const uploadConfig: GalleryConfig = await getGalleryConfig();
-    const requestHeaders = await headers();
-    const uploadIp = getClientIp(requestHeaders);
-    const uploadTrackerKey = `${currentUser.id}:${uploadIp}`;
-    const now = Date.now();
-    const uploadTracker = getUploadTracker();
-    // Prune stale entries unconditionally to prevent unbounded memory growth
-    pruneUploadTracker();
-    // C8R-RPL-02 / AGG8R-02: close the first-insert TOCTOU. Without an
-    // explicit `set()` BEFORE any subsequent `await`, two concurrent
-    // requests from a cold IP each create their own literal and both
-    // pass the cumulative-limit check below. Registering the entry on
-    // the Map up-front makes subsequent mutations share the same object
-    // reference across concurrent invocations.
-    let tracker = uploadTracker.get(uploadTrackerKey);
-    if (!tracker) {
-        tracker = { count: 0, bytes: 0, windowStart: now };
-        uploadTracker.set(uploadTrackerKey, tracker);
-    }
-    resetUploadTrackerWindowIfExpired(tracker, now);
-    if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
-        return { error: t('uploadLimitReached') };
-    }
+        const uploadConfig: GalleryConfig = await getGalleryConfig();
+        const requestHeaders = await headers();
+        const uploadIp = getClientIp(requestHeaders);
+        const uploadTrackerKey = `${currentUser.id}:${uploadIp}`;
+        const now = Date.now();
+        const uploadTracker = getUploadTracker();
+        // Prune stale entries unconditionally to prevent unbounded memory growth
+        pruneUploadTracker();
+        // C8R-RPL-02 / AGG8R-02: close the first-insert TOCTOU. Without an
+        // explicit `set()` BEFORE any subsequent `await`, two concurrent
+        // requests from a cold IP each create their own literal and both
+        // pass the cumulative-limit check below. Registering the entry on
+        // the Map up-front makes subsequent mutations share the same object
+        // reference across concurrent invocations.
+        let tracker = uploadTracker.get(uploadTrackerKey);
+        if (!tracker) {
+            tracker = { count: 0, bytes: 0, windowStart: now };
+            uploadTracker.set(uploadTrackerKey, tracker);
+        }
+        resetUploadTrackerWindowIfExpired(tracker, now);
+        if (tracker.count + files.length > UPLOAD_MAX_FILES_PER_WINDOW) {
+            return { error: t('uploadLimitReached') };
+        }
 
-    // Disk space pre-check: require at least 1GB free before accepting uploads.
-    // Ensure the upload tree exists first so fresh volumes do not map ENOENT
-    // from statfs() to a misleading "insufficient disk space" error.
-    try {
-        await ensureUploadDirectories();
-        const stats = await statfs(UPLOAD_DIR_ORIGINAL);
-        const freeBytes = stats.bfree * stats.bsize;
-        if (freeBytes < 1024 * 1024 * 1024) {
+        // Disk space pre-check: require at least 1GB free before accepting uploads.
+        // Ensure the upload tree exists first so fresh volumes do not map ENOENT
+        // from statfs() to a misleading "insufficient disk space" error.
+        try {
+            await ensureUploadDirectories();
+            const stats = await statfs(UPLOAD_DIR_ORIGINAL);
+            const freeBytes = stats.bfree * stats.bsize;
+            if (freeBytes < 1024 * 1024 * 1024) {
+                return { error: t('insufficientDiskSpace') };
+            }
+        } catch (err) {
+            console.error('Failed to inspect upload disk space', err);
             return { error: t('insufficientDiskSpace') };
         }
-    } catch (err) {
-        console.error('Failed to inspect upload disk space', err);
-        return { error: t('insufficientDiskSpace') };
-    }
 
-    // Validate total upload size (per-call limit)
-    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
-        return { error: t('totalUploadSizeExceeded') };
-    }
+        // Validate total upload size (per-call limit)
+        const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+        if (totalSize > MAX_TOTAL_UPLOAD_BYTES) {
+            return { error: t('totalUploadSizeExceeded') };
+        }
 
-    // Also enforce cumulative byte limit across per-file invocations
-    if (tracker.bytes + totalSize > MAX_TOTAL_UPLOAD_BYTES) {
-        return { error: t('cumulativeUploadSizeExceeded') };
-    }
+        // Also enforce cumulative byte limit across per-file invocations
+        if (tracker.bytes + totalSize > MAX_TOTAL_UPLOAD_BYTES) {
+            return { error: t('cumulativeUploadSizeExceeded') };
+        }
 
-    if (!topic) {
-        return { error: t('topicRequired') };
-    }
+        if (!topic) {
+            return { error: t('topicRequired') };
+        }
 
-    // Validate topic slug format
-    if (!isValidSlug(topic)) {
-        return { error: t('invalidTopicFormat') };
-    }
+        // Validate topic slug format
+        if (!isValidSlug(topic)) {
+            return { error: t('invalidTopicFormat') };
+        }
 
-    // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
-    // the same IP could all read the same tracker state and bypass the limit.
-    // We optimistically claim the bytes now and adjust after processing.
-    // This is placed after all validation checks so no manual rollback is needed.
-    tracker.bytes += totalSize;
-    tracker.count += files.length;
-    uploadTracker.set(uploadTrackerKey, tracker);
+        // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
+        // the same IP could all read the same tracker state and bypass the limit.
+        // We optimistically claim the bytes now and adjust after processing.
+        // This is placed after all validation checks so no manual rollback is needed.
+        tracker.bytes += totalSize;
+        tracker.count += files.length;
+        uploadTracker.set(uploadTrackerKey, tracker);
 
-    let successCount = 0;
-    let uploadedBytes = 0;
-    const failedFiles: string[] = [];
-    const warnings: string[] = [];
+        let successCount = 0;
+        let uploadedBytes = 0;
+        const failedFiles: string[] = [];
+        const warnings: string[] = [];
 
-    for (const file of files) {
-        // Track saved original filename for cleanup on DB insert failure
-        let savedOriginalFilename: string | null = null;
-        try {
-            const originalFilename = userFilenames.get(file) ?? getSafeUserFilename(file.name);
-            if (!originalFilename) {
-                failedFiles.push(file.name);
-                continue;
-            }
-
-            // Phase 1: Save original and get metadata (fast)
-            const data = await saveOriginalAndGetMetadata(file);
-            savedOriginalFilename = data.filenameOriginal;
-
-            // Extract EXIF
-            const exifDb = extractExifForDb(data.exifData);
-
-            // Strip GPS coordinates using the upload-start config snapshot.
-            if (uploadConfig.stripGpsOnUpload) {
-                exifDb.latitude = null;
-                exifDb.longitude = null;
-            }
-
-            if (await cleanupOriginalIfRestoreMaintenanceBegan(savedOriginalFilename, deleteOriginalUploadFile)) {
-                savedOriginalFilename = null;
-                failedFiles.push(file.name);
-                continue;
-            }
-
-            const lateMaintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
-            if (lateMaintenanceError) {
-                await deleteOriginalUploadFile(savedOriginalFilename);
-                savedOriginalFilename = null;
-                failedFiles.push(file.name);
-                continue;
-            }
-
-            // Phase 2: Insert into DB immediately so it shows up in UI
-            const insertValues = {
-                filename_original: data.filenameOriginal,
-                filename_webp: data.filenameWebp,
-                filename_avif: data.filenameAvif,
-                filename_jpeg: data.filenameJpeg,
-                width: data.width,
-                height: data.height,
-                original_width: data.originalWidth,
-                original_height: data.originalHeight,
-                topic,
-                title: null, // Title is null by default, showing tags or user_filename
-                description: '',
-                user_filename: originalFilename,
-                // AGG2-L03 / SR2-LOW-01: defense-in-depth write barrier.
-                // The single producer is `process-image.ts`, but cap the
-                // value at 4 KB and assert the `data:image/{jpeg,png,webp}`
-                // shape so a future regression cannot land an oversized or
-                // off-MIME blob in the column.
-                blur_data_url: assertBlurDataUrl(data.blurDataUrl),
-                processed: false,
-                ...exifDb,
-                color_space: data.iccProfileName || exifDb.color_space,
-                bit_depth: data.bitDepth,
-                original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
-                original_file_size: file.size,
-            };
-
-            const [result] = await db.insert(images).values(insertValues);
-            const insertedId = Number(result.insertId);
-            if (!Number.isFinite(insertedId) || insertedId <= 0) {
-                console.error(`Invalid insertId for file: ${file.name}`);
-                // Clean up saved original file — no DB record references it
-                await deleteOriginalUploadFile(savedOriginalFilename);
-                failedFiles.push(file.name);
-                savedOriginalFilename = null; // Already cleaned up
-                continue;
-            }
-            const insertedImage = { id: insertedId, ...insertValues };
-
-            {
-                // Phase 3: Process Tags (batched)
-                if (tagNames.length > 0) {
-                    try {
-                        const uniqueTagNames = Array.from(new Set(tagNames))
-                            .map(t => t.trim()).filter(Boolean);
-                        const skippedTagNames: string[] = [];
-                        if (uniqueTagNames.length > 0) {
-                            const tagRecords = [];
-                            for (const cleanName of uniqueTagNames) {
-                                const slug = getTagSlug(cleanName);
-                                if (!isValidTagSlug(slug)) {
-                                    console.warn(`Skipping tag with invalid generated slug: "${cleanName}"`);
-                                    skippedTagNames.push(cleanName);
-                                    continue;
-                                }
-                                const resolvedTag = await ensureTagRecord(db, cleanName, slug);
-                                if (resolvedTag.kind === 'collision') {
-                                    console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
-                                    skippedTagNames.push(cleanName);
-                                    continue;
-                                }
-                                if (resolvedTag.kind === 'found') {
-                                    tagRecords.push(resolvedTag.tag);
-                                }
-                            }
-                            if (tagRecords.length > 0) {
-                                // Single batch insert for all imageTags
-                                await db.insert(imageTags).ignore().values(
-                                    tagRecords.map(tagRecord => ({
-                                        imageId: insertedImage.id,
-                                        tagId: tagRecord.id,
-                                    }))
-                                );
-                            }
-                        }
-                        if (skippedTagNames.length > 0) {
-                            warnings.push(t('tagPersistenceWarning', { file: file.name }));
-                        }
-                    } catch (err) {
-                        console.error('Failed to process tags for image', insertedImage.id, err);
-                        warnings.push(t('tagPersistenceWarning', { file: file.name }));
-                    }
+        for (const file of files) {
+            // Track saved original filename for cleanup on DB insert failure
+            let savedOriginalFilename: string | null = null;
+            try {
+                const originalFilename = userFilenames.get(file) ?? getSafeUserFilename(file.name);
+                if (!originalFilename) {
+                    failedFiles.push(file.name);
+                    continue;
                 }
 
-                // Phase 4: Queue heavy processing (Fire and Forget)
-                enqueueImageProcessing({
-                    id: insertedImage.id,
-                    filenameOriginal: data.filenameOriginal,
-                    filenameWebp: data.filenameWebp,
-                    filenameAvif: data.filenameAvif,
-                    filenameJpeg: data.filenameJpeg,
+                // Phase 1: Save original and get metadata (fast)
+                const data = await saveOriginalAndGetMetadata(file);
+                savedOriginalFilename = data.filenameOriginal;
+
+                // Extract EXIF
+                const exifDb = extractExifForDb(data.exifData);
+
+                // Strip GPS coordinates using the upload-start config snapshot.
+                if (uploadConfig.stripGpsOnUpload) {
+                    exifDb.latitude = null;
+                    exifDb.longitude = null;
+                }
+
+                if (await cleanupOriginalIfRestoreMaintenanceBegan(savedOriginalFilename, deleteOriginalUploadFile)) {
+                    savedOriginalFilename = null;
+                    failedFiles.push(file.name);
+                    continue;
+                }
+
+                const lateMaintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+                if (lateMaintenanceError) {
+                    await deleteOriginalUploadFile(savedOriginalFilename);
+                    savedOriginalFilename = null;
+                    failedFiles.push(file.name);
+                    continue;
+                }
+
+                // Phase 2: Insert into DB immediately so it shows up in UI
+                const insertValues = {
+                    filename_original: data.filenameOriginal,
+                    filename_webp: data.filenameWebp,
+                    filename_avif: data.filenameAvif,
+                    filename_jpeg: data.filenameJpeg,
                     width: data.width,
+                    height: data.height,
+                    original_width: data.originalWidth,
+                    original_height: data.originalHeight,
                     topic,
-                    quality: {
-                        webp: uploadConfig.imageQualityWebp,
-                        avif: uploadConfig.imageQualityAvif,
-                        jpeg: uploadConfig.imageQualityJpeg,
-                    },
-                    imageSizes: uploadConfig.imageSizes.length > 0 ? uploadConfig.imageSizes : undefined,
-                });
+                    title: null, // Title is null by default, showing tags or user_filename
+                    description: '',
+                    user_filename: originalFilename,
+                    // AGG2-L03 / SR2-LOW-01: defense-in-depth write barrier.
+                    // The single producer is `process-image.ts`, but cap the
+                    // value at 4 KB and assert the `data:image/{jpeg,png,webp}`
+                    // shape so a future regression cannot land an oversized or
+                    // off-MIME blob in the column.
+                    blur_data_url: assertBlurDataUrl(data.blurDataUrl),
+                    processed: false,
+                    ...exifDb,
+                    color_space: data.iccProfileName || exifDb.color_space,
+                    bit_depth: data.bitDepth,
+                    original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
+                    original_file_size: file.size,
+                };
 
-                successCount++;
-                uploadedBytes += file.size;
+                const [result] = await db.insert(images).values(insertValues);
+                const insertedId = Number(result.insertId);
+                if (!Number.isFinite(insertedId) || insertedId <= 0) {
+                    console.error(`Invalid insertId for file: ${file.name}`);
+                    // Clean up saved original file — no DB record references it
+                    await deleteOriginalUploadFile(savedOriginalFilename);
+                    failedFiles.push(file.name);
+                    savedOriginalFilename = null; // Already cleaned up
+                    continue;
+                }
+                const insertedImage = { id: insertedId, ...insertValues };
+
+                {
+                    // Phase 3: Process Tags (batched)
+                    if (tagNames.length > 0) {
+                        try {
+                            const uniqueTagNames = Array.from(new Set(tagNames))
+                                .map(t => t.trim()).filter(Boolean);
+                            const skippedTagNames: string[] = [];
+                            if (uniqueTagNames.length > 0) {
+                                const tagRecords = [];
+                                for (const cleanName of uniqueTagNames) {
+                                    const slug = getTagSlug(cleanName);
+                                    if (!isValidTagSlug(slug)) {
+                                        console.warn(`Skipping tag with invalid generated slug: "${cleanName}"`);
+                                        skippedTagNames.push(cleanName);
+                                        continue;
+                                    }
+                                    const resolvedTag = await ensureTagRecord(db, cleanName, slug);
+                                    if (resolvedTag.kind === 'collision') {
+                                        console.warn(`Tag slug collision: "${cleanName}" collides with existing "${resolvedTag.existing.name}" on slug "${resolvedTag.slug}"`);
+                                        skippedTagNames.push(cleanName);
+                                        continue;
+                                    }
+                                    if (resolvedTag.kind === 'found') {
+                                        tagRecords.push(resolvedTag.tag);
+                                    }
+                                }
+                                if (tagRecords.length > 0) {
+                                    // Single batch insert for all imageTags
+                                    await db.insert(imageTags).ignore().values(
+                                        tagRecords.map(tagRecord => ({
+                                            imageId: insertedImage.id,
+                                            tagId: tagRecord.id,
+                                        }))
+                                    );
+                                }
+                            }
+                            if (skippedTagNames.length > 0) {
+                                warnings.push(t('tagPersistenceWarning', { file: file.name }));
+                            }
+                        } catch (err) {
+                            console.error('Failed to process tags for image', insertedImage.id, err);
+                            warnings.push(t('tagPersistenceWarning', { file: file.name }));
+                        }
+                    }
+
+                    // Phase 4: Queue heavy processing (Fire and Forget)
+                    enqueueImageProcessing({
+                        id: insertedImage.id,
+                        filenameOriginal: data.filenameOriginal,
+                        filenameWebp: data.filenameWebp,
+                        filenameAvif: data.filenameAvif,
+                        filenameJpeg: data.filenameJpeg,
+                        width: data.width,
+                        topic,
+                        quality: {
+                            webp: uploadConfig.imageQualityWebp,
+                            avif: uploadConfig.imageQualityAvif,
+                            jpeg: uploadConfig.imageQualityJpeg,
+                        },
+                        imageSizes: uploadConfig.imageSizes.length > 0 ? uploadConfig.imageSizes : undefined,
+                    });
+
+                    successCount++;
+                    uploadedBytes += file.size;
+                }
+            } catch (e) {
+                // Log full error server-side; only return filename to client (no internal details)
+                console.error(`Failed to process file ${file.name}:`, e);
+                // Clean up saved original file if it was written but DB insert failed
+                if (savedOriginalFilename) {
+                    await deleteOriginalUploadFile(savedOriginalFilename);
+                }
+                failedFiles.push(file.name);
             }
-        } catch (e) {
-            // Log full error server-side; only return filename to client (no internal details)
-            console.error(`Failed to process file ${file.name}:`, e);
-            // Clean up saved original file if it was written but DB insert failed
-            if (savedOriginalFilename) {
-                await deleteOriginalUploadFile(savedOriginalFilename);
-            }
-            failedFiles.push(file.name);
         }
-    }
 
-    if (failedFiles.length > 0 && successCount === 0) {
+        if (failedFiles.length > 0 && successCount === 0) {
+            settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
+            return { error: t('allUploadsFailed') };
+        }
+
+        // Reconcile the pre-claimed quota with the uploads that actually finished.
         settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
-        return { error: t('allUploadsFailed') };
-    }
 
-    // Reconcile the pre-claimed quota with the uploads that actually finished.
-    settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
+        // Audit log for upload action
+        logAuditEvent(currentUser.id, 'image_upload', 'image', undefined, undefined, {
+            count: successCount,
+            failed: failedFiles.length,
+            topic,
+            tags: tagNames.join(','),
+        }).catch(console.debug);
 
-    // Audit log for upload action
-    logAuditEvent(currentUser.id, 'image_upload', 'image', undefined, undefined, {
-        count: successCount,
-        failed: failedFiles.length,
-        topic,
-        tags: tagNames.join(','),
-    }).catch(console.debug);
+        // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
+        revalidateLocalizedPaths('/', '/admin/dashboard', `/${topic}`);
 
-    // Revalidate so newly uploaded (unprocessed) images appear in admin dashboard
-    revalidateLocalizedPaths('/', '/admin/dashboard', `/${topic}`);
-
-    return {
-        success: true,
-        count: successCount,
-        failed: failedFiles,
-        warnings
-    };
+        return {
+            success: true,
+            count: successCount,
+            failed: failedFiles,
+            warnings
+        };
     } finally {
         await uploadContractLock.release();
     }
