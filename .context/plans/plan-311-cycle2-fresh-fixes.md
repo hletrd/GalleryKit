@@ -2,7 +2,7 @@
 
 **Cycle:** 2/100
 **HEAD at plan creation:** `9ec59dd fix(test): use Object.assign for sharp mock typing (P245-08 follow-up)`
-**Status:** Active
+**Status:** Implemented and pushed
 
 ## Findings to schedule
 

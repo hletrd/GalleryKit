@@ -1,79 +1,42 @@
-# Test Engineer — Cycle 1 Fresh Review (2026-04-27)
+# Test Engineer — Cycle 3 Deep Review (2026-04-27)
+
+**HEAD:** `9958152 docs(reviews): record cycle-2 fresh review findings and plan`
 
 ## Test Surface Inventory
 
-66 test files in `apps/web/src/__tests__/` covering:
-- Auth: `session.test.ts`, `auth-rate-limit.test.ts`, `auth-rethrow.test.ts`
-- Blur data URL: `blur-data-url.test.ts`, `process-image-blur-wiring.test.ts`, `images-action-blur-wiring.test.ts`
-- Data layer: `data-pagination.test.ts`, `data-tag-names-sql.test.ts`, `privacy-fields.test.ts`
-- Image processing: `image-queue.test.ts`, `image-queue-bootstrap.test.ts`, `queue-shutdown.test.ts`
-- Security: `check-api-auth.test.ts`, `check-action-origin.test.ts`, `touch-target-audit.test.ts`, `content-security-policy.test.ts`, `sql-restore-scan.test.ts`, `csv-escape.test.ts`, `validation.test.ts`, `sanitize.test.ts`, `request-origin.test.ts`
-- Upload: `upload-dropzone.test.ts`, `upload-limits.test.ts`, `upload-tracker.test.ts`
-- Rate limiting: `rate-limit.test.ts`, `og-rate-limit.test.ts`
-- Server actions: `images-actions.test.ts`, `public-actions.test.ts`, `seo-actions.test.ts`, `topics-actions.test.ts`, `tags-actions.test.ts`
-- E2E: `apps/web/e2e/` (Playwright)
+35+ test files in `apps/web/src/__tests__/` covering:
+- Core libs: blur-data-url, sanitize, backup-filename, base56, tag-slugs, csv-escape, exif-datetime
+- Auth: auth-rate-limit, session, auth-rethrow
+- Data layer: data-tag-names-sql, data-pagination, privacy-fields
+- Image processing: image-queue, image-queue-bootstrap, process-image-blur-wiring, images-action-blur-wiring, images-delete-revalidation
+- Upload: upload-dropzone, upload-limits, serve-upload, upload-tracker
+- Admin: check-action-origin, check-api-auth, admin-user-create-ordering, auth-rate-limit-ordering
+- Security: sql-restore-scan, mysql-cli-ssl, restore-maintenance
+- UI: touch-target-audit, lightbox, histogram, upload-dropzone, client-source-contracts
+- Settings: settings-image-sizes-lock, gallery-config-shared, seo-actions
+- Other: og-rate-limit, live-route, health-route, error-shell, storage-local, queue-shutdown
 
----
+## Findings (New — Not in Prior Cycles)
 
-## Findings
+### Test Gaps (3)
 
-### C1-TE-01: No test for `width`/`height` fallback behavior in `saveOriginalAndGetMetadata`
-**File:** `apps/web/src/lib/process-image.ts:276-277`
-**Severity:** Medium | **Confidence:** High
+| ID | Finding | File | Confidence |
+|---|---|---|---|
+| C3-TE01 | No test for `deleteImageVariants` with `sizes=[]` (directory scan fallback). The fallback path uses `opendir` + `for await` iteration and `unlink`. A test fixture with a temp directory containing known variant filenames would verify the scan correctly identifies and deletes all matching variants. | `lib/process-image.ts:186-203` | High |
+| C3-TE02 | No test for `exportImagesCsv` at any scale. The function builds a CSV string from DB results with GROUP_CONCAT tag aggregation. A mock-based test verifying correct CSV output for a small dataset (5-10 rows with tags) would guard the escapeCsvField integration and the GROUP_CONCAT column ordering. | `app/[locale]/admin/db-actions.ts:51-99` | Medium |
+| C3-TE03 | No test for the `loadMoreRateLimit` in `public.ts`. While `searchRateLimit` and `ogRateLimit` have dedicated tests, the load-more rate limit (120 req/min) has no coverage. A unit test verifying the pre-increment + rollback pattern would match the parity of other rate-limit tests. | `app/actions/public.ts:35-74` | Medium |
 
-The 2048x2048 fallback when Sharp metadata is unavailable is untested. There is no unit test that verifies this fallback behavior or its downstream impact on aspect-ratio calculations. If the fallback is triggered (rare but possible with corrupt images), the masonry grid and photo viewer would display incorrect proportions.
+### INFO (1)
 
-**Fix:** Add a test that mocks Sharp to return invalid/missing dimensions and verify the fallback values and the resulting DB insert. Alternatively, if C1-CR-03 is fixed (throw instead of fallback), add a test verifying the error is thrown.
+| ID | Finding | File | Confidence |
+|---|---|---|---|
+| C3-TE04 | The `touch-target-audit.test.ts` and `check-action-origin.test.ts` tests use AST-based scanning (not runtime). This is a strong pattern — they catch violations at test time rather than requiring manual review. The pattern could be extended to other architectural invariants (e.g., verifying all API routes use `withAdminAuth`, verifying all public queries use `publicSelectFields`). | `__tests__/touch-target-audit.test.ts`, `__tests__/check-action-origin.test.ts` | Info |
 
----
+## Verified Test Controls
 
-### C1-TE-02: No test for `processImageFormats` base-file atomic rename fallback chain
-**File:** `apps/web/src/lib/process-image.ts:437-452`
-**Severity:** Low | **Confidence:** Medium
-
-The 3-level fallback chain for atomic rename (link+rename, copy+rename, direct copy) is untested. The happy path (link+rename) is implicitly tested through integration tests, but the fallback paths are only exercised when the filesystem is broken.
-
-**Fix:** Add a test that mocks `fs.link` and/or `fs.rename` to fail, verifying the fallback chain. Low priority since the fallback paths are only triggered on broken filesystems.
-
----
-
-### C1-TE-03: No test for `flushGroupViewCounts` backoff behavior during DB outages
-**File:** `apps/web/src/lib/data.ts:16-96`
-**Severity:** Low | **Confidence:** Medium
-
-The view count flush has exponential backoff logic (`consecutiveFlushFailures`, `getNextFlushInterval`) that increases the flush interval after repeated failures. This logic is untested. A test that simulates DB failures would verify:
-1. Backoff increases correctly after failures
-2. Backoff resets after a successful flush
-3. The buffer drops increments when at capacity
-
-**Fix:** Add a unit test for the backoff behavior with mocked DB queries.
-
----
-
-### C1-TE-04: No test for `searchImages` three-query sequential search path
-**File:** `apps/web/src/lib/data.ts:774-880`
-**Severity:** Low | **Confidence:** Medium
-
-The `searchImages` function runs up to 3 sequential DB queries (main, tag, alias). There are tests for the search action (`public-actions.test.ts`), but no direct test for the three-query path in `data.ts`. The tag and alias search branches are only triggered when the main query returns insufficient results, which is harder to test via the action layer.
-
-**Fix:** Add a test for `searchImages` that specifically exercises the tag/alias search branches by mocking the main query to return fewer results than the limit.
-
----
-
-### C1-TE-05: E2E tests may be fragile due to hardcoded selectors
-**File:** `apps/web/e2e/` (not reviewed in detail)
-**Severity:** Low | **Confidence:** Low
-
-The Playwright E2E tests are present but were not reviewed in detail. Common concerns include hardcoded selectors that break on UI changes, missing retry/wait logic for dynamic content, and test isolation issues. These are standard E2E concerns and not specific to this codebase.
-
-**Fix:** Low priority — E2E tests are supplementary to the extensive unit test coverage.
-
----
-
-## Positive Findings
-
-1. **Excellent test coverage** for security-critical surfaces (auth, rate limiting, blur data URL, privacy fields, CSV escaping, validation)
-2. **Fixture-based lint tests** (`check-api-auth.test.ts`, `check-action-origin.test.ts`, `touch-target-audit.test.ts`) enforce architectural invariants at test time
-3. **Wiring tests** for blur data URL lock the three-point validator at import + call site level
-4. **SQL shape tests** (`data-tag-names-sql.test.ts`) prevent ORM query regressions
-5. **Session token verification** tests cover timing-safe comparison
+- Blur data URL contract: producer-side (`process-image-blur-wiring`) + consumer-side (`images-action-blur-wiring`)
+- Tag names SQL: `data-tag-names-sql` locks the GROUP_CONCAT shape
+- API auth lint: `check-api-auth` scans all API route exports
+- Action origin lint: `check-action-origin` scans all mutating server action exports
+- Touch target audit: `touch-target-audit` enforces 44px minimum
+- Privacy fields: `privacy-fields` verifies public/admin field separation

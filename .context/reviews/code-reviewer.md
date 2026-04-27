@@ -1,113 +1,70 @@
-# Code Reviewer — Cycle 1 Fresh Review (2026-04-27)
+# Code Reviewer — Cycle 3 Deep Review (2026-04-27)
 
-## Inventory of Files Reviewed
+**HEAD:** `9958152 docs(reviews): record cycle-2 fresh review findings and plan`
+**Scope:** Full codebase — 222 TypeScript/TSX source files
+**Prior cycles:** Cycle 1 (4 medium, 15 low, 3 info, 4 test gaps), Cycle 2 (3 medium, 8 low, 3 info, 3 test gaps). This cycle focuses on issues prior cycles missed.
 
-All production source files under `apps/web/src/` including:
-- `db/schema.ts`, `db/index.ts`, `db/seed.ts`
-- `lib/data.ts`, `lib/process-image.ts`, `lib/session.ts`, `lib/validation.ts`
-- `lib/blur-data-url.ts`, `lib/rate-limit.ts`, `lib/auth-rate-limit.ts`
-- `lib/image-queue.ts`, `lib/upload-tracker-state.ts`, `lib/content-security-policy.ts`
-- `lib/serve-upload.ts`, `lib/db-restore.ts`, `lib/audit.ts`, `lib/revalidation.ts`
-- `lib/sanitize.ts`, `lib/csv-escape.ts`, `lib/action-guards.ts`, `lib/api-auth.ts`
-- `lib/request-origin.ts`, `lib/upload-paths.ts`, `lib/upload-limits.ts`
-- `lib/upload-processing-contract-lock.ts`, `lib/restore-maintenance.ts`
-- `proxy.ts`, `app/actions/auth.ts`, `app/actions/images.ts`, `app/actions/public.ts`
-- `app/api/admin/db/download/route.ts`, `app/api/health/route.ts`, `app/api/live/route.ts`
-- `components/photo-viewer.tsx`
+## Methodology
 
----
+Read every source file in `apps/web/src/` systematically: all server actions, lib modules, API routes, middleware, components, schema, and tests. Analyzed individual file quality and cross-file interactions. Verified all prior-cycle findings for resolution status.
 
-## Findings
+## Findings (New — Not in Prior Cycles)
 
-### C1-CR-01: Indentation inconsistency in `uploadImages` try/finally block
-**File:** `apps/web/src/app/actions/images.ts:178-431`
-**Severity:** Low | **Confidence:** High
+### MEDIUM Severity (1)
 
-The `try { ... } finally { await uploadContractLock.release(); }` block has the entire try body indented one extra level (4 extra spaces) compared to the surrounding function. The `try` at line 178 and `finally` at line 429 are at the correct column, but the body inside is indented 8 spaces instead of 4 relative to the function. This makes the code harder to read and diffs harder to follow.
+| ID | Finding | File | Confidence |
+|---|---|---|---|
+| C3-F01 | `exportImagesCsv` materializes the entire CSV in memory before returning. The function caps results at 50K rows and builds a `csvLines[]` array, then joins into a single string. For a gallery at the 50K cap with verbose tag lists (GROUP_CONCAT can produce long strings), this can consume ~10-20MB of heap. The incremental approach (building `csvLines` then joining) is better than string concatenation but still materializes the full CSV string plus the DB results array simultaneously. The code releases `results` before joining (`results = [] as typeof results`) which helps, but the csvLines array + final joined string still coexist briefly. A streaming response or chunked building would be more memory-efficient for large galleries. | `app/[locale]/admin/db-actions.ts:51-99` | Medium |
 
-**Fix:** Re-indent the try body to use consistent 4-space indentation relative to the function.
+### LOW Severity (3)
 
----
+| ID | Finding | File | Confidence |
+|---|---|---|---|
+| C3-F02 | `deleteImageVariants` called with `sizes=[]` in `deleteImage` and `deleteImages` triggers a full directory scan via `opendir` + iteration on every delete. For directories with thousands of files (a gallery with 10K+ images generates 10K+ files per format dir), this readdir scan is expensive I/O. The `sizes=[]` path is only needed to catch leftover variants from prior configs, but it runs unconditionally. A per-directory flag or timestamp tracking "last config-era cleanup" would avoid rescanning on every subsequent delete. | `lib/process-image.ts:186-203` | Medium |
+| C3-F03 | `getImage` in `data.ts` prev/next query logic uses `sql\`FALSE\`` literal for undated photos in the next-image query. This is correct (NULLs sort last in DESC, so there are no "older" undated images by capture_date), but the comment explaining the FALSE literal is not prominent enough for a future contributor who doesn't understand the NULLs-sort-last-in-DESC invariant. Replacing `sql\`FALSE\`` with an incorrect NULL-safe comparison would silently break next-image navigation for undated photos. | `lib/data.ts:574-600` | Low |
+| C3-F04 | `buildContentSecurityPolicy` adds `style-src 'self' 'unsafe-inline'` in production. While `'unsafe-inline'` in `style-src` is standard for Tailwind CSS apps (runtime style injection), it reduces the CSP's ability to block style-based exfiltration attacks. This is a known trade-off. | `lib/content-security-policy.ts:74` | Info |
 
-### C1-CR-02: `deleteImageVariants` called with `[]` for sizes — intent ambiguous
-**File:** `apps/web/src/lib/process-image.ts:186` and `apps/web/src/app/actions/images.ts:503-505`
-**Severity:** Low | **Confidence:** High
+### INFO (2)
 
-`deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, [])` triggers the `!sizes || sizes.length === 0` branch, which runs the expensive `opendir`+scan path. This is intentional (to clean up variants from prior size configs), but passing `[]` makes the intent ambiguous. A reader could interpret this as "no sizes" rather than "scan all variants". An explicit `undefined` or a named constant would be clearer.
+| ID | Finding | File | Confidence |
+|---|---|---|---|
+| C3-F05 | `createGroupShareLink` uses `Number(linkResult.affectedRows ?? 0) !== uniqueImageIds.length` to verify all link inserts. This check can never trigger under normal operation because the uniqueIndex on `(groupId, imageId)` would cause an ER_DUP_ENTRY before the affectedRows check could differ. The check adds defense-in-depth but no practical benefit — it's a code clarity concern, not a bug. | `app/actions/sharing.ts:261-271` | Info |
+| C3-F06 | `escapeCsvField` strips C0 controls but intentionally preserves LF (0x0A) and CR (0x0D) for the subsequent collapse pass. The character class `[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]` is hard to audit because it lists disjoint ranges without a comment explaining which codepoints are excluded and why. | `lib/csv-escape.ts:34` | Medium |
 
-**Fix:** Pass `undefined` instead of `[]`, or add a named constant like `SCAN_ALL_VARIANTS = undefined as unknown as number[]`.
+### Test Gaps (2)
 
----
+| ID | Finding | File | Confidence |
+|---|---|---|---|
+| C3-TG01 | No test for `deleteImageVariants` with `sizes=[]` (directory scan fallback path). A regression in the scan logic could silently fail to delete leftover variants from prior configs. | `lib/process-image.ts:186-203` | Medium |
+| C3-TG02 | No test for `exportImagesCsv` at moderate scale (e.g., 1000 rows). While the function has clear logic, an integration test verifying it completes without errors would guard against regressions in the CSV builder. | `app/[locale]/admin/db-actions.ts:51-99` | Low |
 
-### C1-CR-03: `width` fallback to 2048 in `saveOriginalAndGetMetadata` stores misleading dimensions
-**File:** `apps/web/src/lib/process-image.ts:276-277`
-**Severity:** Medium | **Confidence:** Medium
+## Prior Cycle Findings — Resolution Status
 
-```ts
-const width = (metadata.width && metadata.width > 0) ? metadata.width : 2048;
-const height = (metadata.height && metadata.height > 0) ? metadata.height : width;
-```
+| Prior ID | Status | Notes |
+|---|---|---|
+| C1-CR-03 (width fallback to 2048) | **Fixed** | Code now throws an error instead of defaulting to 2048 (`data.ts:278-280`) |
+| C1-CR-04 (GA domains unconditional) | **Fixed** | CSP now conditional on `NEXT_PUBLIC_GA_ID` |
+| C1-CR-01 (indentation) | **Fixed** | Try/finally indentation corrected |
+| C2-F01 (view count buffer loss) | **Fixed** | Atomic Map swap pattern implemented |
+| C2-F06 (redundant revalidation) | **Fixed** | Redundant `revalidateLocalizedPaths` calls removed |
+| C1-CR-02 (deleteImageVariants sizes=[] intent) | **Open** | Still uses `sizes=[]` — documenting the intent would help (C3-F02 above) |
+| C2-F02 (locale cookie SameSite) | **Open** | Cookie now has explicit `SameSite=Lax` — resolved |
 
-When Sharp cannot determine dimensions, the function falls back to 2048x2048. This synthetic dimension is stored in the database and used for aspect-ratio calculations in the masonry grid and photo viewer. A 2048x2048 fallback for a non-square image produces incorrect aspect ratios and visual layout artifacts (stretched/squished images). The `original_width`/`original_height` fields correctly preserve the actual values when available, but `width`/`height` are the primary fields used for layout.
+## Verified Controls (No New Issues)
 
-**Fix:** Throw an error when Sharp cannot determine dimensions rather than storing a misleading fallback. At minimum, log a warning when the fallback is triggered.
-
----
-
-### C1-CR-04: `buildContentSecurityPolicy` includes Google Analytics domains unconditionally in production
-**File:** `apps/web/src/lib/content-security-policy.ts:58-59`
-**Severity:** Low | **Confidence:** High
-
-The production CSP always includes `https://www.googletagmanager.com` in `script-src` and `https://www.google-analytics.com` in `connect-src`. Sites that don't use Google Analytics have unnecessary CSP allowlist entries that weaken the policy. These should be conditional on a configuration flag.
-
-**Fix:** Make GA domains conditional on an environment variable like `NEXT_PUBLIC_GA_ID` or a site-config flag.
-
----
-
-### C1-CR-05: `photo-viewer.tsx` — keyboard shortcut `F` conflicts with browser search
-**File:** `apps/web/src/components/photo-viewer.tsx:197-198`
-**Severity:** Low | **Confidence:** Medium
-
-```ts
-} else if (e.key === 'f' || e.key === 'F') {
-    setShowLightbox(prev => !prev);
-}
-```
-
-The `F` key shortcut to toggle the lightbox could conflict with the browser's built-in Ctrl+F / Cmd+F find shortcut on some browsers or screen readers. The code correctly skips editable targets (`isEditableTarget`), but the bare `F` key (without modifier) is unusual for web apps. This is a minor UX concern rather than a bug since the `isEditableTarget` guard prevents interference with text input.
-
-**Fix:** Consider documenting this in the shortcuts hint or adding a modifier key requirement. Low priority since the current implementation is functional.
-
----
-
-### C1-CR-06: Session `expiresAt` comparison may be timezone-sensitive
-**File:** `apps/web/src/lib/session.ts:139`
-**Severity:** Low | **Confidence:** Low
-
-```ts
-if (session.expiresAt < new Date()) {
-```
-
-The `expiresAt` column is a `timestamp` in MySQL (timezone-aware, stored in UTC). Drizzle reads it as a JavaScript Date. Comparing against `new Date()` (which uses the Node.js process timezone) could be incorrect if the MySQL connection timezone differs from the Node.js process timezone. In practice, both typically use UTC in Docker deployments, but this is an implicit assumption.
-
-**Fix:** Consider using `sql\`NOW()\`` for the comparison, or document the timezone assumption explicitly in the session module.
-
----
-
-### C1-CR-07: `searchImages` in `data.ts` does not escape LIKE wildcards in tag/alias search
-**File:** `apps/web/src/lib/data.ts:820,846`
-**Severity:** Low | **Confidence:** High (false positive on closer inspection)
-
-The `searchImages` function at line 780 escapes LIKE wildcards for the main query (`%` and `_`), but the tag search (line 820) and alias search (line 846) also use `like(tags.name, searchTerm)` and `like(topicAliases.alias, searchTerm)`. However, on closer inspection, the `like()` function from Drizzle ORM parameterizes the value, and the wildcards `%${escaped}%` are added around the already-escaped search term. So this is correctly handled — the `escaped` variable at line 780 already has wildcards stripped, and the same variable is reused for tag/alias searches.
-
-**Status:** Not a real issue — LIKE escaping is correctly applied.
-
----
-
-### C1-CR-08: `original_format`/`original_file_size` in `adminSelectFields` inflate listing queries
-**File:** `apps/web/src/lib/data.ts:466-488`
-**Severity:** Low | **Confidence:** Medium
-
-`getAdminImagesLite()` uses `...adminSelectFields` which includes `original_format` and `original_file_size`. These are VARCHAR/BIGINT columns. While not as large as `blur_data_url`, they are not displayed in the admin dashboard card layout — they're only shown in the individual photo viewer info panel. The same concern applies to the public listing queries which correctly exclude them via `publicSelectFields`.
-
-**Fix:** Consider whether these fields should be fetched only in `getImage()` (individual query) rather than in the listing query, similar to `blur_data_url`.
+All controls from prior cycles remain intact. No regressions found in:
+1. Argon2id + timing-safe comparison for auth
+2. Path traversal prevention (SAFE_SEGMENT + realpath containment)
+3. Privacy guard (compile-time + separate field sets)
+4. Blur data URL contract (3-point validation with producer-side assert)
+5. Rate limit TOCTOU fix (pre-increment pattern)
+6. Advisory locks for concurrent operations
+7. Unicode bidi/formatting rejection
+8. CSV formula injection prevention
+9. Touch-target audit fixture
+10. Reduced-motion support
+11. `safeJsonLd()` properly sanitizes JSON-LD output
+12. `serveUploadFile` has extension-to-directory mismatch protection
+13. `requireSameOriginAdmin()` on all mutating server actions
+14. Upload tracker TOCTOU closed with pre-claim pattern
+15. View count buffer swap (C2-F01 fix)
