@@ -435,6 +435,13 @@ export async function processImageFormats(
             // The largest configured size serves as the "base" filename to satisfy existing schema.
             // Use atomic rename via .tmp file to eliminate the window where the base
             // filename doesn't exist (prevents 404s during concurrent reads).
+            //
+            // Fallback chain:
+            //   1. hard link + rename (atomic, zero-copy on same filesystem)
+            //   2. copyFile + rename (atomic if rename succeeds; covers cross-device link failure)
+            //   3. direct copyFile (non-atomic — re-introduces the brief window where
+            //      basePath is partially written; only reached on severely broken filesystems
+            //      where both link and rename fail)
             if (size === sortedSizes[sortedSizes.length - 1]) {
                 const basePath = path.join(dir, baseFilename);
                 const tmpPath = basePath + '.tmp';
