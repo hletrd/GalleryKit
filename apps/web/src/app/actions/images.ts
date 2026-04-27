@@ -500,6 +500,8 @@ export async function deleteImage(id: number) {
     // removed too, not only variants from the current config.
     const cleanupFailures = await collectImageCleanupFailures([
         { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
+        // Pass empty sizes [] to trigger directory scan and remove ALL
+        // size variants, including those from prior image-size configs.
         { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
         { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
         { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
@@ -610,6 +612,8 @@ export async function deleteImages(ids: number[]) {
     // Clean up files concurrently. Use prefix scanning for derivatives so
     // historical size variants are removed after image-size config changes.
     const cleanupFailures = (await Promise.all(imageRecords.map(async (image) => {
+        // Pass empty sizes [] to scan directory and remove ALL size variants,
+        // including those from prior image-size configs.
         const failures = await collectImageCleanupFailures([
             { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
             { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
