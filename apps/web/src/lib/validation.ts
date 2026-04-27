@@ -80,7 +80,11 @@ export function isValidTagName(tagName: string): boolean {
 }
 
 export function isValidTagSlug(slug: string): boolean {
-    return /^[\p{Letter}\p{Number}_-]+$/u.test(slug) && slug.length > 0 && slug.length <= 100;
+    // C30-06: underscores removed from allowed chars to match getTagSlug(),
+    // which always replaces underscores with hyphens before producing a slug.
+    // Keeping these consistent prevents confusion where a slug passes
+    // validation but would never be produced by the slug generator.
+    return /^[\p{Letter}\p{Number}-]+$/u.test(slug) && slug.length > 0 && slug.length <= 100;
 }
 
 // Validate filename (no path traversal, only safe characters)

@@ -196,6 +196,12 @@ describe('isValidTagSlug', () => {
         expect(isValidTagSlug('bad.slug')).toBe(false);
         expect(isValidTagSlug('bad/tag')).toBe(false);
     });
+
+    // C30-06: underscores rejected to match getTagSlug(), which always
+    // replaces underscores with hyphens before producing a slug.
+    it('rejects underscores (getTagSlug always converts them to hyphens)', () => {
+        expect(isValidTagSlug('bad_slug')).toBe(false);
+    });
 });
 
 // C6L-ARCH-01: single canonical helper for the Unicode-formatting policy.
