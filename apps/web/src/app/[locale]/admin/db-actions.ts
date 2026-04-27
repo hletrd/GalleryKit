@@ -31,6 +31,11 @@ import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { escapeCsvField } from "@/lib/csv-escape";
 
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
+    // C3-F01: Memory profile — materializes up to 50K rows as a CSV string
+    // (~15-25MB peak heap). The DB results array is released before the final
+    // join, but the csvLines array and joined string coexist briefly. For
+    // galleries approaching the 50K row cap, consider a streaming API route
+    // instead of the current in-memory builder.
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
