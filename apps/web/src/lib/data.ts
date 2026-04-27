@@ -569,8 +569,11 @@ export async function getImage(id: number) {
             .limit(1),
 
         // Next: Older image by (capture_date, created_at, id) — matches gallery grid sort order.
-        // When capture_date is NULL, FALSE is intentional: in MySQL DESC sort, NULLs sort last,
-        // so there are no "older" images by capture_date — only created_at/id tiebreakers apply.
+        // IMPORTANT: sql`FALSE` is correct for the capture_date < current branch when
+        // capture_date is NULL because NULLs sort last in DESC order, meaning there are
+        // no "older" undated images by capture_date. Only created_at/id tiebreakers apply.
+        // Do NOT replace with a NULL-safe comparison like `lt(images.capture_date, null)`
+        // — that would incorrectly return all undated images as "next" images.
         db.select({ id: images.id })
             .from(images)
             .where(
