@@ -273,8 +273,12 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         }
     }
 
-    const width = (metadata.width && metadata.width > 0) ? metadata.width : 2048;
-    const height = (metadata.height && metadata.height > 0) ? metadata.height : width;
+    const width = (metadata.width && metadata.width > 0) ? metadata.width : undefined;
+    const height = (metadata.height && metadata.height > 0) ? metadata.height : undefined;
+    if (!width || !height) {
+        await fs.unlink(originalPath).catch(() => {});
+        throw new Error('Image dimensions could not be determined — the file may be corrupt or in an unsupported format');
+    }
 
     let blurDataUrl: string | null = null;
     try {
@@ -361,8 +365,8 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         filenameJpeg,
         width,
         height,
-        originalWidth: (metadata.width && metadata.width > 0) ? metadata.width : width,
-        originalHeight: (metadata.height && metadata.height > 0) ? metadata.height : height,
+        originalWidth: width,
+        originalHeight: height,
         exifData,
         blurDataUrl,
         iccProfileName,
