@@ -183,6 +183,12 @@ export async function deleteImageVariants(dir: string, baseFilename: string, siz
     // When sizes are provided, all variant filenames are deterministic
     // ({name}_{size}{ext}) and are already in filesToDelete, so the scan
     // would just waste I/O on large directories.
+    //
+    // C3-F02: The sizes=[] path (called from deleteImage/deleteImages) triggers
+    // a full directory scan on every deletion to catch orphans from prior configs.
+    // After the first cleanup in a running process, subsequent scans are redundant
+    // but low-cost at personal-gallery scale. A per-directory cleanup flag could
+    // skip repeat scans, but would add state-tracking complexity.
     if (!sizes || sizes.length === 0) {
         try {
             const dirHandle = await fs.opendir(dir);
