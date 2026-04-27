@@ -70,7 +70,15 @@ const BOOTSTRAP_BATCH_SIZE = 500;
 const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
 
-/** Prune retry Maps to prevent unbounded growth from abandoned jobs. */
+/** Prune retry Maps to prevent unbounded growth from abandoned jobs.
+ *
+ *  Eviction is FIFO (insertion-order via Map.keys() iteration), not LRU.
+ *  This is acceptable for a single-writer topology: recently-accessed
+ *  entries are not moved to the end of iteration order, so a frequently-
+ *  retried low-id job at the head of the Map is evicted first. For the
+ *  bounded sizes used here (MAX_RETRY_MAP_SIZE = 10000) and a personal-
+ *  gallery scale, FIFO is sufficient — the Maps rarely approach capacity.
+ */
 function pruneRetryMaps(state: ProcessingQueueState) {
     for (const map of [state.retryCounts, state.claimRetryCounts] as const) {
         if (map.size <= MAX_RETRY_MAP_SIZE) continue;
