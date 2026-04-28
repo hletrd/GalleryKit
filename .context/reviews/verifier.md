@@ -1,39 +1,39 @@
-# Verifier — Cycle 3 Deep Review (2026-04-27)
+# Verifier review — prompt 1
 
-**HEAD:** `9958152 docs(reviews): record cycle-2 fresh review findings and plan`
+## Verdict
+PARTIAL
 
-## Verification Matrix
+## Inventory
+- Policy/docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.agent/rules/commit-and-push.md`.
+- Runtime/config surfaces: `apps/web/playwright.config.ts`, `apps/web/vitest.config.ts`, `apps/web/next.config.ts`, `apps/web/src/lib/content-security-policy.ts`, `apps/web/src/app/[locale]/layout.tsx`.
+- Touched UI/audit surfaces: `apps/web/src/components/lightbox.tsx`, `apps/web/src/__tests__/touch-target-audit.test.ts`.
+- Hygiene/build-context surfaces: `.gitignore`, root `.dockerignore`, `apps/web/.dockerignore`.
+- Read-only evidence checks: `git status --short`, `file apps/web/._data apps/web/public/._uploads`, `git check-ignore -v apps/web/._data apps/web/public/._uploads`, direct reads of the files above.
 
-Verified all claimed behaviors in CLAUDE.md against actual code.
+## Findings
 
-| Claim | Verified | Notes |
-|---|---|---|
-| Argon2id password hashing | Yes | `auth.ts:144`, `admin-users.ts:144` use `argon2.argon2id` |
-| HMAC-SHA256 session tokens | Yes | `session.ts:87` uses `createHmac('sha256', secret)` |
-| timingSafeEqual verification | Yes | `session.ts:117` uses `timingSafeEqual` |
-| Cookie httpOnly + secure + sameSite | Yes | `auth.ts:214-220`, `auth.ts:387-393` |
-| SESSION_SECRET required in production | Yes | `session.ts:30-36` throws if missing |
-| Path traversal prevention | Yes | `serve-upload.ts:8,54-60,82-84` |
-| Symlink rejection | Yes | `serve-upload.ts:77` rejects `isSymbolicLink()` |
-| UUID filenames (no user-controlled names) | Yes | `process-image.ts:239` uses `randomUUID()` |
-| Privacy guard compile-time | Yes | `data.ts:206-209` type assertion |
-| publicSelectFields separate reference | Yes | `data.ts:170-190` destructuring + new object |
-| Blur data URL 3-point validation | Yes | Producer (`process-image.ts:305`), write (`images.ts:307`), read (`blur-data-url.ts:104`) |
-| Rate limit pre-increment pattern | Yes | All 7 rate-limit surfaces verified |
-| Advisory locks | Yes | 5 advisory locks verified (db_restore, topic_route_segments, admin_delete, upload_processing_contract, image-processing) |
-| Unicode bidi/formatting rejection | Yes | `validation.ts:35`, applied in topics, tags, images, seo, csv |
-| CSV formula injection prevention | Yes | `csv-escape.ts:49` prefixes `=`, `+`, `-`, `@` |
-| Touch-target audit fixture | Yes | `touch-target-audit.test.ts` |
-| Reduced-motion support | Yes | CSS transitions use `duration-300` (not instant), not verified via runtime |
-| View count buffer swap | Yes | `data.ts:61-62` atomically swaps Map reference |
-| CSP GA conditional | Yes | `content-security-policy.ts:59,67` conditional on `NEXT_PUBLIC_GA_ID` |
-| Upload tracker TOCTOU pre-claim | Yes | `images.ts:193-197` creates entry before check |
-| SQL restore scanner | Yes | `sql-restore-scan.ts` blocks DROP DATABASE, etc. |
-| Image queue claim check | Yes | `image-queue.ts:237-241` verifies row exists and is unprocessed |
-| `safeJsonLd()` escaping | Yes | `safe-json-ld.ts` escapes `<`, U+2028, U+2029 |
-| `requireSameOriginAdmin()` on all mutating actions | Yes | Every mutating action in `app/actions/` calls it |
-| `withAdminAuth` on all API admin routes | Yes | Verified via `check-api-auth.test.ts` |
+### V1 — AppleDouble metadata files are still present and only partially ignored
+- **Severity:** Low
+- **Confidence:** High
+- **Status:** confirmed
+- **Files/regions:** `apps/web/._data` (file), `apps/web/public/._uploads` (file), `.gitignore:4`, `.dockerignore:1-16`, `apps/web/.dockerignore:1-11`
+- **Problem:** the new git ignore rule hides AppleDouble metadata from `git status`, but the files still exist in the worktree and are still included by both Docker build contexts because neither `.dockerignore` excludes `._*`.
+- **Failure scenario:** a future image build or repository export carries the metadata blobs into a container context, and future reviewers keep seeing noisy filesystem artifacts instead of real source changes.
+- **Suggested fix:** delete the two AppleDouble files and add `._*` to the Docker ignore files as well, or ensure all build contexts explicitly exclude Finder metadata.
 
-## Findings (New)
+### V2 — Google Analytics is split across two configuration sources that can diverge
+- **Severity:** Low
+- **Confidence:** High
+- **Status:** confirmed
+- **Files/regions:** `apps/web/src/app/[locale]/layout.tsx:118-128`, `apps/web/src/lib/content-security-policy.ts:58-69`, `apps/web/src/site-config.example.json:10`, `apps/web/README.md:36-39`, `README.md:128-145`
+- **Problem:** the layout injects GA scripts from `siteConfig.google_analytics_id`, but production CSP only allows Google domains when `NEXT_PUBLIC_GA_ID` is set. The render decision and the security allow-list are driven by different knobs.
+- **Failure scenario:** an operator sets `google_analytics_id` in `site-config.json` and deploys without the matching env var; the scripts render, CSP blocks them, and analytics silently fails with no explicit app-level error.
+- **Suggested fix:** derive CSP from the same resolved analytics setting used by the layout, or make analytics env-only and remove the file-backed key so there is one source of truth.
 
-No new verification failures found. All documented behaviors match the code implementation.
+## Non-findings / verified controls
+- `apps/web/src/components/lightbox.tsx:307-329` now uses `h-11 w-11` for the close/fullscreen controls, matching the updated audit note in `apps/web/src/__tests__/touch-target-audit.test.ts:81-88`.
+- The current lightbox change is compliant with the repo’s 44 px touch-target rule; I did not find a correctness regression in that fixed path.
+
+## Summary counts
+- Findings: 2 (2 confirmed)
+- Residual risks: AppleDouble cleanup still depends on manual deletion; analytics still depends on aligned JSON + env configuration.

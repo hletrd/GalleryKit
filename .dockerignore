@@ -1,6 +1,12 @@
 node_modules
 .next
 .git
+.context
+.omx
+.omc
+.agent
+._*
+*.tsbuildinfo
 .github
 .vscode
 **/.env*

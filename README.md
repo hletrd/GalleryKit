@@ -128,7 +128,7 @@ BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix
 # IMAGE_BASE_URL=https://cdn.example.com
 # DB_SSL=false  # TLS is enabled automatically for non-localhost DB_HOST values; set false only behind a trusted private link.
-# QUEUE_CONCURRENCY=2
+# QUEUE_CONCURRENCY=1
 # UPLOAD_MAX_TOTAL_BYTES=2147483648
 # UPLOAD_MAX_FILES_PER_WINDOW=100
 # TRUST_PROXY=true
@@ -141,7 +141,7 @@ git values must be treated as compromised and must not be reused.
 
 Production builds require a real absolute public URL: set `BASE_URL` or replace `site-config.json.url` with a non-placeholder origin before `next build` / Docker build. The example values (`https://example.com`, localhost) are development placeholders and are rejected by the production build guard.
 If you set `IMAGE_BASE_URL`, do it **before** running `next build` / `docker compose ... --build` so Next.js can allow that remote host for optimized images and CSP. The shipped compose file forwards `IMAGE_BASE_URL` and `UPLOAD_MAX_TOTAL_BYTES` as Docker build args when they are present in the shell/Compose environment; export them before `docker compose ... --build` if you rely on non-default build-time values. Use `https://` for production asset origins; plaintext `http://` is only acceptable for local development. `IMAGE_BASE_URL` must be an absolute URL without credentials, query strings, or hashes.
-`DB_SSL` defaults to TLS for non-localhost database hosts and plaintext for loopback/private local development; set `DB_SSL=false` only when the database connection is protected by a trusted private network. `QUEUE_CONCURRENCY` controls the in-process `PQueue` image conversion workers (default `2`); raise it only after confirming CPU and memory headroom.
+`DB_SSL` defaults to TLS for non-localhost database hosts and plaintext for loopback/private local development; set `DB_SSL=false` only when the database connection is protected by a trusted private network. `QUEUE_CONCURRENCY` controls the in-process `PQueue` image conversion workers (default `1`); raise it only after confirming CPU and memory headroom alongside `SHARP_CONCURRENCY`.
 If you raise `UPLOAD_MAX_TOTAL_BYTES`, make sure your reverse proxy, temp storage, and container memory can safely handle that batch size. The shipped nginx config now caps general requests at **2 GiB** and `/admin/db` restore requests at **250 MB** to match the app-side limits; keep those layers aligned if you customize either side.
 The shipped `apps/web/docker-compose.yml` already forces `TRUST_PROXY=true` and binds the standalone server to `127.0.0.1` when you use the documented host-network + nginx deployment. It is intended as a single web-instance/single-writer deployment; restore maintenance, upload quotas, and image queue state are process-local. Keep those protections if you adapt the compose file, and do not scale the web service horizontally without moving those coordination states into shared storage.
 
@@ -176,7 +176,9 @@ docker compose -f apps/web/docker-compose.yml up -d --build
 The application listens on port 3000 on localhost; publish it through your reverse proxy rather than exposing the host-network process directly. New original uploads are kept in the private data volume, while processed JPEG/WebP/AVIF derivatives remain under `public/uploads/`.
 
 Legacy originals must not remain under `public/uploads/original/`. The startup path now fails closed in production if that legacy public-original directory still contains files.
-The container liveness probe now uses `/api/live`, while `/api/health` remains the DB-aware readiness signal for diagnostics and external monitoring.
+The container liveness probe now uses `/api/live`. `/api/health` is liveness-only by default; set `HEALTH_CHECK_DB=true` only on private monitoring paths that intentionally need a DB readiness probe.
+
+If you serve `/uploads/*` directly from nginx, make the filesystem path match the layer where nginx runs. The checked-in `apps/web/nginx/default.conf` uses the container-internal path (`/app/apps/web/public`) for an nginx process in the app image; a host-side reverse proxy must instead point at the host bind mount (for example `apps/web/public`) or proxy `/uploads` back to the app/container. Do not copy the container path into a host nginx config unchanged.
 
 ## Tech Stack
 

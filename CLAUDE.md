@@ -175,7 +175,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
 1. Files uploaded via `uploadImages()` server action
 2. Original saved to the private upload store under `data/uploads/original/`
-3. Enqueued to `PQueue` (default concurrency: 2; override with `QUEUE_CONCURRENCY`) for background processing
+3. Enqueued to `PQueue` (default concurrency: 1; override with `QUEUE_CONCURRENCY`) for background processing
 4. Queue job **claims** image (conditional `WHERE processed = false`) before processing
 5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at configurable sizes each (default: 640, 1536, 2048, 4096; admin-configurable up to 8 sizes)
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
@@ -219,7 +219,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 GiB** for general requests and **250 MB** for `/admin/db` restore requests
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
-- Docker liveness should probe `/api/live`; `/api/health` is DB-aware readiness/diagnostics and can legitimately return `503` during DB outages or restore work
+- Docker liveness should probe `/api/live`; `/api/health` is liveness-only by default and performs a DB readiness probe only when `HEALTH_CHECK_DB=true`
 
 ## Git Workflow (from AGENTS.md)
 

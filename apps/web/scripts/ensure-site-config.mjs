@@ -25,15 +25,19 @@ if (isProductionBuild && !configuredUrl) {
   process.exit(1);
 }
 
-if (isProductionBuild && !process.env.BASE_URL) {
+if (isProductionBuild) {
   try {
     const parsed = new URL(configuredUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      console.error('Production base URL must use http or https.');
+      process.exit(1);
+    }
     if (placeholderHosts.has(parsed.hostname)) {
-      console.error('Refusing to build production assets with the placeholder site-config URL. Set BASE_URL or customize src/site-config.json.');
+      console.error('Refusing to build production assets with a placeholder base URL. Set BASE_URL or customize src/site-config.json.');
       process.exit(1);
     }
   } catch {
-    console.error('site-config.json url must be an absolute URL, or set BASE_URL to an absolute URL.');
+    console.error('Production base URL must be absolute. Set BASE_URL to an absolute URL or customize src/site-config.json.');
     process.exit(1);
   }
 }
