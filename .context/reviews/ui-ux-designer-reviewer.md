@@ -1,160 +1,186 @@
-# UI/UX Designer Reviewer — PROMPT 1 / Cycle 5
+# UI/UX Review — ui-ux-designer-reviewer
 
-**Repo:** `/Users/hletrd/flash-shared/gallery`
-**Scope:** GalleryKit web UI (`apps/web`) — public gallery, photo viewer/lightbox, admin dashboard/settings/content management, shared routes, i18n/messages, styles, and UI tests.
-**Mode:** Review only. No implementation. No commit.
-**Date:** 2026-04-25 KST
-**Status:** REVIEW_COMPLETE — source-led with limited browser confirmation.
+Date: 2026-04-29 (Asia/Seoul)
+Repo: `/Users/hletrd/flash-shared/gallery`
+Scope: independent UI/UX review of navigation, keyboard/focus behavior, WCAG 2.2, responsive breakpoints, form UX, loading/empty/error states, i18n, dark/light support, and perceived performance.
 
-## Inventory and runtime check
+Runtime note: I attempted to use browser/runtime evidence, but there was no active local app on `127.0.0.1:3000`/`3100`, and required runtime env such as `DB_*`, `SESSION_SECRET`, and admin credentials was unset in the shell. I therefore used source inspection plus targeted test/static evidence. I did not implement fixes.
 
-### Relevant surfaces inventoried
+## Inventory reviewed first
 
-- **Public routes/layouts:** `apps/web/src/app/[locale]/(public)/layout.tsx`, `page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `g/[key]/page.tsx`, `s/[key]/page.tsx`.
-- **Global states/styles:** `apps/web/src/app/[locale]/layout.tsx`, `globals.css`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `global-error.tsx`.
-- **Public UI components:** `nav.tsx`, `nav-client.tsx`, `footer.tsx`, `home-client.tsx`, `search.tsx`, `tag-filter.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `image-zoom.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `histogram.tsx`, `optimistic-image.tsx`, `photo-viewer-loading.tsx`.
-- **Admin UI:** admin layouts/pages plus `admin-header.tsx`, `admin-nav.tsx`, `dashboard-client.tsx`, `image-manager.tsx`, `upload-dropzone.tsx`, `tag-input.tsx`, `admin-user-manager.tsx`, topic/tag/password/seo/settings/db clients.
-- **Design primitives:** `components/ui/*` used by dialogs, tables, controls, inputs, progress, switch, toasts.
-- **i18n/RTL:** `messages/en.json`, `messages/ko.json`, `lib/constants.ts`, `lib/locale-path.ts`, `i18n/request.ts`.
-- **Tests/artifacts:** `apps/web/e2e/public.spec.ts`, `admin.spec.ts`, `nav-visual-check.spec.ts`, `test-fixes.spec.ts`, `e2e/helpers.ts`, and UI-related unit tests (`lightbox`, `tag-input`, `upload-dropzone`, `photo-title`, `shared-page-title`, `settings-image-sizes-lock`, `error-shell`).
+Excluded: `node_modules`, `.git`, `.next`, `test-results`, generated/build artifacts.
 
-### Browser/CLI check
+### Route/layout/error/loading surfaces
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/globals.css`
+- `apps/web/src/app/[locale]/loading.tsx`
+- `apps/web/src/app/[locale]/error.tsx`
+- `apps/web/src/app/[locale]/not-found.tsx`
+- `apps/web/src/app/global-error.tsx`
+- `apps/web/src/app/icon.tsx`, `apps/web/src/app/apple-icon.tsx`, `apps/web/src/app/manifest.ts`, `apps/web/src/app/robots.ts`, `apps/web/src/app/sitemap.ts`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+- `apps/web/src/app/[locale]/admin/layout.tsx`
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/admin/login-form.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+- UI-adjacent admin DB/action files were skimmed for user-facing result states: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/actions*.ts`, `apps/web/src/app/actions/*.ts`.
 
-Used `agent-browser` against `npm run dev` at `http://localhost:3000/en`. The app server started, but DB-backed pages rendered only the localized error boundary because no local MySQL credentials/database were configured. DOM snapshot exposed `button "Try again"`, `link "Return to Gallery"`, and the Next dev server logged `ER_ACCESS_DENIED_ERROR` from `Home` at `apps/web/src/app/[locale]/(public)/page.tsx:115`. Therefore protected admin/public interactions were reviewed through DOM/source/test evidence rather than live DB-backed journeys.
+### Components and primitives
+- `apps/web/src/components/admin-header.tsx`
+- `apps/web/src/components/admin-nav.tsx`
+- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/histogram.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/i18n-provider.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/components/image-zoom.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/lazy-focus-trap.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/optimistic-image.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/photo-viewer-loading.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/tag-input.tsx`
+- `apps/web/src/components/theme-provider.tsx`
+- `apps/web/src/components/topic-empty-state.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/ui/alert-dialog.tsx`
+- `apps/web/src/components/ui/alert.tsx`
+- `apps/web/src/components/ui/aspect-ratio.tsx`
+- `apps/web/src/components/ui/badge.tsx`
+- `apps/web/src/components/ui/button.tsx`
+- `apps/web/src/components/ui/card.tsx`
+- `apps/web/src/components/ui/dialog.tsx`
+- `apps/web/src/components/ui/dropdown-menu.tsx`
+- `apps/web/src/components/ui/input.tsx`
+- `apps/web/src/components/ui/label.tsx`
+- `apps/web/src/components/ui/progress.tsx`
+- `apps/web/src/components/ui/scroll-area.tsx`
+- `apps/web/src/components/ui/select.tsx`
+- `apps/web/src/components/ui/separator.tsx`
+- `apps/web/src/components/ui/sheet.tsx`
+- `apps/web/src/components/ui/skeleton.tsx`
+- `apps/web/src/components/ui/sonner.tsx`
+- `apps/web/src/components/ui/switch.tsx`
+- `apps/web/src/components/ui/table.tsx`
+- `apps/web/src/components/ui/textarea.tsx`
+
+### i18n and UI tests
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- E2E: `apps/web/e2e/admin.spec.ts`, `apps/web/e2e/helpers.ts`, `apps/web/e2e/nav-visual-check.spec.ts`, `apps/web/e2e/origin-guard.spec.ts`, `apps/web/e2e/public.spec.ts`, `apps/web/e2e/test-fixes.spec.ts`
+- Targeted UI/unit tests reviewed and run where useful: `src/__tests__/touch-target-audit.test.ts`, `error-shell.test.ts`, `tag-input.test.ts`, `upload-dropzone.test.ts`, `lightbox.test.ts`, plus related UI coverage (`histogram`, `photo-title`, `shared-page-title`, `clipboard`, etc.).
 
 ## Findings
 
-### UX-C5-01 — Keyboard focus on the zoomable photo has no visible indicator
+### F1 — Dialog close buttons are effectively 16×16 targets across admin modals
 
+- **Category:** confirmed
 - **Severity:** High
 - **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** photo page zoom container, `role="button"` from `ImageZoom`.
-- **Evidence:** `apps/web/src/components/image-zoom.tsx:117-132` makes the image container keyboard-focusable (`role="button"`, `tabIndex={0}`) and handles Enter/Space, but its class list only sets `overflow-hidden` and cursor state; there is no `focus-visible:*` ring/outline. It is rendered around the primary image at `apps/web/src/components/photo-viewer.tsx:342-345`.
-- **Failure scenario:** A keyboard user tabs from the toolbar into the zoom control and cannot see where focus landed before pressing Space/Enter, violating focus visibility expectations on the main photo interaction.
-- **Fix:** Add a visible focus treatment to the zoom container, e.g. `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`, and verify it remains visible over dark/light photo backgrounds.
+- **File/region:** `apps/web/src/components/ui/dialog.tsx:71-78`; consumers include `apps/web/src/components/admin-user-manager.tsx:92`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:168` and `:253`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:148`, `apps/web/src/components/image-manager.tsx:273` and `:482`.
+- **Evidence:** The shared `DialogContent` always renders `DialogPrimitive.Close` when `showCloseButton` is true, but its class only positions it and sizes the SVG to `size-4`; it does not add `h-*`, `w-*`, `p-*`, or `min-*`. That leaves the clickable close affordance at roughly the 16px icon size. The audit explicitly exempts `components/ui/dialog.tsx` as a primitive (`touch-target-audit.test.ts`), so this is not protected at the primitive layer.
+- **Failure scenario:** On touch or low-precision pointer devices, closing create/edit dialogs for users, tags, categories, batch tags, and image metadata requires tapping a tiny top-right icon. This conflicts with WCAG 2.2 target-size intent, and likely fails 2.5.8 (24×24 minimum) for a non-inline control; it is also below the repo’s own 44px touch-target design floor used elsewhere.
+- **Suggested fix:** Size the primitive close button directly, for example `h-11 w-11 inline-flex items-center justify-center rounded-md`, preserving the visible icon at `size-4`. Add this primitive to the touch-target audit rather than exempting it wholesale, or add a regression case that renders a dialog and measures the close target.
 
-### UX-C5-02 — Upload progress is visual-only rather than a real progressbar
+### F2 — Admin skip link scrolls to `#admin-content` but the target is not focusable
 
+- **Category:** confirmed
 - **Severity:** Medium
 - **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** admin dashboard upload progress (`#admin-content` upload form).
-- **Evidence:** `apps/web/src/components/upload-dropzone.tsx:361-369` renders progress text plus `<Progress value={progress} />`, but `apps/web/src/components/ui/progress.tsx:10-21` outputs plain `<div>` elements with no `role="progressbar"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, or accessible label.
-- **Failure scenario:** During a long multi-file upload, sighted users see a percentage bar, while screen-reader users only encounter a generic div and may not receive meaningful progress updates.
-- **Fix:** Give `Progress` progressbar semantics by default or pass them at call sites: `role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label={t('upload.uploadingProgress', ...)}`. Keep the existing textual status in a polite live region.
+- **File/region:** `apps/web/src/app/[locale]/admin/layout.tsx:19-25`; contrast with the fixed public pattern in `apps/web/src/app/[locale]/(public)/layout.tsx:14-18`.
+- **Evidence:** The admin layout renders a skip link to `#admin-content` and a `<main id="admin-content">`, but the main element lacks `tabIndex={-1}`. The public layout carries a comment documenting the exact browser behavior: without `tabIndex={-1}`, browsers scroll but do not move focus.
+- **Failure scenario:** A keyboard user activates “Skip to content” on authenticated admin pages. Visual scroll may move, but focus remains on the skip link/header area, so the next Tab can still traverse admin nav/logout instead of landing inside the admin main region.
+- **Suggested fix:** Mirror the public layout: add `tabIndex={-1}` and `focus:outline-none` to the admin main target. Add a Playwright assertion equivalent to the public skip-link behavior once admin runtime credentials are available.
 
-### UX-C5-03 — Database page uses one pending state for backup, restore, and CSV export
+### F3 — Several chip/destructive controls are below WCAG 2.2 target-size guidance
 
+- **Category:** confirmed
 - **Severity:** Medium
 - **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** `/admin/db` action cards.
-- **Evidence:** `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:28` creates one shared `isPending` via `useTransition()`. Backup uses it at `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:143-149`, restore uses the same flag at `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:195-202`, and CSV export uses it at `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:233-240`.
-- **Failure scenario:** If an admin clicks “Download Backup”, the restore and export buttons are also disabled and can display “Restoring...” / “Exporting...” even though no restore/export is running. This is especially alarming because restore is destructive.
-- **Fix:** Track an explicit pending action (`'backup' | 'restore' | 'export' | null`) or separate transitions/states so each card announces and disables only its own operation; keep destructive restore feedback isolated.
+- **File/region:** `apps/web/src/components/tag-input.tsx:171-180`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:286-295`, `apps/web/src/components/upload-dropzone.tsx:384-386`; audit documentation at `apps/web/src/__tests__/touch-target-audit.test.ts:149-152`.
+- **Evidence:** `TagInput` selected-tag remove buttons are `p-0.5` around a `h-3 w-3` icon; topic alias deletion uses a naked text button with a `h-3 w-3` icon; upload “Clear all” deliberately overrides the small button to `h-auto p-0`, and the touch-target audit lists it as a known violation.
+- **Failure scenario:** Users managing tags, aliases, or pending upload batches can accidentally miss or hit adjacent controls, especially on mobile/tablet or with motor impairment. These controls are destructive/remove actions, so mis-taps have higher UX cost than passive links.
+- **Suggested fix:** Give chip remove buttons and alias delete buttons an explicit `min-h-6 min-w-6` at minimum for WCAG 2.5.8, preferably `h-11 w-11` or an expanded invisible hit area to match the repo’s 44px target convention. For “Clear all,” use a normal-height button (`h-11 px-3`) or move it into a full-width secondary/destructive action row on narrow screens.
 
-### UX-C5-04 — Category alias input is unlabeled
+### F4 — Add-admin password mismatch is toast-only and not associated with the confirm field
 
+- **Category:** confirmed
 - **Severity:** Medium
 - **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** category edit dialog alias field (`input[placeholder="Add new alias"]`).
-- **Evidence:** The edit dialog’s alias section has a heading at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:282-284`, but the actual alias input at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:300-312` has only `placeholder={t('categories.aliasPlaceholder')}` and no `<label>`, `aria-label`, or `aria-labelledby`.
-- **Failure scenario:** Screen-reader users tabbing through the category edit dialog land on an edit field whose purpose is only placeholder-derived/unclear, and placeholder text can disappear once typed.
-- **Fix:** Add a real label or `aria-label={t('categories.aliasPlaceholder')}`; better, connect it with a visible label like “New alias” and include validation/help text for allowed alias formats.
+- **File/region:** `apps/web/src/components/admin-user-manager.tsx:35-42` and `:99-113`.
+- **Evidence:** `handleCreate` checks `password !== confirmPassword`, calls `toast.error(t('password.mismatch'))`, and returns. The form fields have no mismatch state, no inline error element, no `aria-invalid`, no `aria-describedby`, and no focus transfer to the offending confirmation field.
+- **Failure scenario:** A screen-reader or keyboard user submits mismatched passwords in the Add Admin dialog. The only feedback is a transient toast, while focus remains wherever the submit occurred and the confirm field is not marked invalid. If the toast is missed, the form appears to do nothing.
+- **Suggested fix:** Store a local `confirmError` like `PasswordForm` does, render an inline error under `create-confirm-password`, set `aria-invalid="true"` and `aria-describedby`, and move focus to the confirm field or error summary on mismatch. Keep the toast as supplemental feedback only.
 
-### UX-C5-05 — Collapsed mobile info sheet can leave off-screen controls in tab order
+### F5 — Masonry adds a 5-column 2xl breakpoint but image `sizes` still caps at `25vw`
 
-- **Severity:** Medium
-- **Confidence:** Medium-high
-- **Classification:** likely
-- **Selector/surface:** mobile photo info bottom sheet (`role="dialog"`, label `viewer.bottomSheet`).
-- **Evidence:** The sheet has a `collapsed` transform of `calc(100% - 28px)` at `apps/web/src/components/info-bottom-sheet.tsx:45-50`. Focus trapping is active only when expanded at `apps/web/src/components/info-bottom-sheet.tsx:155`, but the close button is always rendered as a normal focusable button at `apps/web/src/components/info-bottom-sheet.tsx:199-207` even when the sheet is collapsed/peeked. The dialog itself remains mounted at `apps/web/src/components/info-bottom-sheet.tsx:156-172`.
-- **Failure scenario:** After swiping the info sheet down to the collapsed 28px handle, a keyboard/switch user can tab into a close button/content that is visually off-screen or mostly hidden, creating a focus trap-like dead zone without the modal affordance.
-- **Fix:** When `sheetState === 'collapsed'`, set non-handle controls to `tabIndex={-1}`/`aria-hidden`, or fully close the sheet. Keep only the visible drag handle focusable and expose state via `aria-expanded`/`aria-controls`.
-
-### UX-C5-06 — Lightbox alt text falls back to raw filenames
-
-- **Severity:** Medium
-- **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** lightbox image (`dialog[aria-label="Photo lightbox"] img`).
-- **Evidence:** `apps/web/src/components/lightbox.tsx:288-295` uses `alt={image.title ?? image.filename_jpeg ?? ''}`. The rest of the photo UI already avoids filename-like titles via `getConcisePhotoAltText` / `getPhotoDisplayTitle` (`apps/web/src/components/photo-viewer.tsx:184-196`, `apps/web/src/lib/photo-title.ts:67-72`).
-- **Failure scenario:** Untitled uploads or camera filenames cause screen readers to hear UUID/technical filenames in fullscreen instead of the same concise title/tag fallback used by the page.
-- **Fix:** Use the shared title/alt helpers in the lightbox as well, e.g. `getConcisePhotoAltText(image, t('common.photo'))`, with tag/title fallback parity across grid, detail, and lightbox.
-
-### UX-C5-07 — Admin action columns have empty header text
-
-- **Severity:** Low-medium
-- **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** admin tables action columns.
-- **Evidence:** Both locales define empty action labels: `apps/web/messages/en.json:54`, `apps/web/messages/en.json:165`, `apps/web/messages/ko.json:54`, and `apps/web/messages/ko.json:165`. These are rendered as table headers in user/image/tag/topic tables, e.g. `apps/web/src/components/admin-user-manager.tsx:127-130`, `apps/web/src/components/image-manager.tsx:352-359`, `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:98-101`, and `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:198-203`.
-- **Failure scenario:** Screen-reader table navigation reaches edit/delete/share cells with a blank associated column header, reducing context even though individual buttons have labels.
-- **Fix:** Provide localized visible or `sr-only` “Actions” text in the header. If visual minimalism is desired, keep the header visually hidden but programmatically present.
-
-### UX-C5-08 — Public shortcut hint contradicts lightbox keyboard behavior
-
-- **Severity:** Low-medium
-- **Confidence:** High
-- **Classification:** confirmed
-- **Selector/surface:** photo page shortcut hint (`#photo-viewer-shortcuts`).
-- **Evidence:** `apps/web/src/components/photo-viewer.tsx:243-245` displays `viewer.shortcutsHint`; English and Korean messages say F opens/closes the lightbox (`apps/web/messages/en.json:269`, `apps/web/messages/ko.json:269`). Outside the lightbox, F opens it (`apps/web/src/components/photo-viewer.tsx:174-176`), but inside the lightbox, F toggles browser fullscreen (`apps/web/src/components/lightbox.tsx:185-187`) and Escape closes (`apps/web/src/components/lightbox.tsx:192-195`).
-- **Failure scenario:** A keyboard user opens the lightbox with F, follows the visible hint, presses F again expecting close, and is instead moved into fullscreen mode.
-- **Fix:** Either change lightbox F behavior to close when already open, or update the hint to “F opens fullscreen view; inside fullscreen, F toggles browser fullscreen and Esc closes.” Also consider exposing `aria-keyshortcuts` on the visible hint/controls.
-
-### UX-C5-09 — Admin navigation links are small text targets on touch screens
-
-- **Severity:** Low-medium
-- **Confidence:** Medium-high
-- **Classification:** risk
-- **Selector/surface:** admin header nav (`nav[aria-label="Admin navigation"] a`).
-- **Evidence:** `apps/web/src/components/admin-nav.tsx:26-39` renders the links as bare text with `transition-colors` and no padding/min-height. The header wraps at small widths (`apps/web/src/components/admin-header.tsx:13-24`), but link hit areas remain the glyph box plus line height.
-- **Failure scenario:** On mobile/tablet admin, route links like “DB 관리” or “SEO” can be hard to tap accurately, especially in a wrapped two-line header.
-- **Fix:** Add touch target sizing (`inline-flex min-h-9/10 items-center rounded-md px-2`) and a focus-visible ring/background consistent with public nav pills.
-
-### UX-C5-10 — Future RTL support is blocked by hard-coded `dir="ltr"`
-
+- **Category:** likely
 - **Severity:** Low
 - **Confidence:** High
-- **Classification:** risk
-- **Selector/surface:** root HTML element.
-- **Evidence:** Supported locales are currently only English/Korean at `apps/web/src/lib/constants.ts:1-4`, but root layout hard-codes `dir="ltr"` at `apps/web/src/app/[locale]/layout.tsx:81-87` with a comment about future RTL locales.
-- **Failure scenario:** If an RTL locale is added to `LOCALES`, the document direction remains LTR. Navigation order, text alignment defaults, sheets, and left/right navigation controls will be wrong until every component is revisited.
-- **Fix:** Introduce a locale-direction map now (`{ en: 'ltr', ko: 'ltr' }`) and derive `<html dir={direction}>`; add an RTL smoke test before adding an RTL locale.
+- **File/region:** `apps/web/src/components/home-client.tsx:162-166`, `:202-211`, `:227-234`.
+- **Evidence:** The gallery grid uses `2xl:columns-5` at `1536px+`, but AVIF/WebP sources and `OptimisticImage` still declare final `sizes` as `25vw` after `1280px`. In a five-column layout the ideal slot is closer to `20vw` before container/gap adjustments.
+- **Failure scenario:** On wide displays, the browser may select larger thumbnail variants than needed for each card, increasing bytes and decode work. This hurts perceived performance on the gallery’s primary browsing surface, especially when many images are above or near the fold.
+- **Suggested fix:** Update `sizes` to reflect the 2xl breakpoint, for example `(min-width: 1536px) 20vw, (min-width: 1280px) 25vw, (max-width: 1280px) 33vw, (max-width: 768px) 50vw, 100vw`, adjusted for the container’s actual max width/gaps. Keep `useColumnCount()` and `sizes` in one shared helper so future breakpoint changes stay synchronized.
 
-### UX-C5-11 — Photo swipe navigation is registered globally on `window`
+### F6 — Admin error boundary nests a second `<main>` inside the admin layout `<main>`
 
-- **Severity:** Medium
-- **Confidence:** Medium
-- **Classification:** likely
-- **Selector/surface:** photo detail route touch gestures.
-- **Evidence:** `apps/web/src/components/photo-navigation.tsx:130-132` attaches `touchstart`, `touchmove`, and `touchend` to `window`. The handler prevents default on horizontal movement at `apps/web/src/components/photo-navigation.tsx:53-59` and can navigate at `apps/web/src/components/photo-navigation.tsx:109-120`, regardless of whether the gesture started on the photo, toolbar, sheet, or another interactive region.
-- **Failure scenario:** A mobile user horizontally swipes over non-photo content (e.g. bottom sheet, toolbar, or browser back-edge gesture area) and the app consumes the gesture or navigates photos unexpectedly.
-- **Fix:** Scope touch listeners to the photo canvas/container via a ref, ignore events originating inside dialogs/sheets/controls, and use pointer events with `touch-action` to limit gesture capture to the intended surface.
+- **Category:** likely
+- **Severity:** Low
+- **Confidence:** Medium-high
+- **File/region:** parent layout `apps/web/src/app/[locale]/admin/layout.tsx:19-25`; protected error boundary `apps/web/src/app/[locale]/admin/(protected)/error.tsx:15-25`.
+- **Evidence:** The admin layout wraps children in `<main id="admin-content">`. The protected route error component also returns `<main role="main">`. Next.js error boundaries render inside parent layouts, so this produces nested main landmarks for protected admin error states.
+- **Failure scenario:** Screen-reader landmark navigation on admin error pages can announce duplicate/nested main regions, making the page structure harder to understand during an already stressful error recovery path.
+- **Suggested fix:** Change the protected admin error component’s outer `<main>` to a `<section>` or `<div role="alert">`/`<section aria-labelledby=...>` because the parent layout already provides the main landmark. Keep the public `[locale]/error.tsx` separate if it is not inside another main.
 
-## Strengths observed
+## Positive observations / covered areas with no blocking finding
 
-- Public and admin skip links are present and localized: `apps/web/src/app/[locale]/(public)/layout.tsx:10-15`, `apps/web/src/app/[locale]/admin/layout.tsx:20-24`.
-- Reduced-motion handling exists globally and in photo transitions: `apps/web/src/app/[locale]/globals.css:156-165`, `apps/web/src/components/photo-viewer.tsx:333-340`.
-- Search dialog has focus trap/restore and live result status: `apps/web/src/components/search.tsx:166-179`, `apps/web/src/components/search.tsx:224-234`.
-- Public nav has named navigation and mobile expand semantics: `apps/web/src/components/nav-client.tsx:70-92`.
-- Public loading states use `role="status"` and localized labels: `apps/web/src/app/[locale]/loading.tsx:7-9`, `apps/web/src/app/[locale]/admin/(protected)/loading.tsx:7-9`.
-- E2E coverage includes public navigation/search/lightbox/heading hierarchy and mobile nav visibility: `apps/web/e2e/public.spec.ts:5-119`, `apps/web/e2e/test-fixes.spec.ts:15-70`.
+- Public skip link, not-found shell, loading status, and photo page heading hierarchy have explicit fixes/tests.
+- Search dialog has autofocus, Escape close, focus restore, body scroll lock, and live status text; public E2E covers focus trap/restore.
+- Locale message keys are synchronized: `en=508`, `ko=508`, no missing keys either direction.
+- Dark/light theme tokens and reduced-motion media handling are present in `globals.css`; theme toggle has an accessible label.
+- Photo viewer/lightbox have keyboard shortcuts, focus trap, Escape handling, reduced-motion handling, and 44px primary controls in most visible viewer locations.
+- Empty/loading/error states exist for home/gallery empty results, upload no-topic state, route loading spinners, image loading/unavailable, and admin/public route errors.
 
-## Final sweep / files reviewed
+## Verification evidence
 
-Final sweep checked for accessibility, responsive behavior, interaction feedback, loading/error/empty states, i18n/RTL, keyboard/focus, motion, and perceived performance across:
+- Ran targeted UI/a11y tests:
+  - `npm run test -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/error-shell.test.ts src/__tests__/tag-input.test.ts src/__tests__/upload-dropzone.test.ts src/__tests__/lightbox.test.ts`
+  - Result: `Test Files 5 passed (5)`, `Tests 17 passed (17)`.
+- Ran i18n key parity check:
+  - Result: `en=508 ko=508 missing_in_ko=[] missing_in_en=[]`.
+- Static inventory sweep found 108 UI/UI-adjacent app/component/message/e2e files under the reviewed roots after exclusions.
 
-- `apps/web/src/app/[locale]/(public)/**`
-- `apps/web/src/app/[locale]/admin/**`
-- `apps/web/src/app/[locale]/layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `globals.css`, `global-error.tsx`
-- `apps/web/src/components/**` including all public/admin components and `components/ui/**`
-- `apps/web/messages/en.json`, `apps/web/messages/ko.json`
-- `apps/web/src/lib/constants.ts`, `locale-path.ts`, `photo-title.ts`, `image-types.ts`, `image-url.ts`, `clipboard.ts`, `error-shell.ts`, `gallery-config-shared.ts`
-- `apps/web/e2e/*.ts`, with emphasis on `public.spec.ts`, `admin.spec.ts`, `nav-visual-check.spec.ts`, `test-fixes.spec.ts`, `helpers.ts`
-- UI-adjacent unit tests under `apps/web/src/__tests__/` (`lightbox`, `upload-dropzone`, `tag-input`, `photo-title`, `shared-page-title`, `settings-image-sizes-lock`, `error-shell`, plus related action/route tests inventoried)
-- `apps/web/tailwind.config.ts`, `apps/web/playwright.config.ts`, `apps/web/package.json`, `apps/web/README.md`
+## Final sweep confirmation
 
-**Runtime limitation:** DB-backed UI could not be fully exercised with `agent-browser` because local MySQL credentials/database were absent; browser use confirmed the app error boundary and server-side DB failure path, while findings above are backed by source selectors/line references.
+I reviewed every file in the inventory above and swept each requested area: navigation, keyboard/focus, WCAG 2.2 target/focus semantics, responsive breakpoints, form UX, loading/empty/error states, i18n, dark/light behavior, and perceived performance. Browser runtime validation was not feasible in this shell due to no running app and missing DB/session/admin env, so findings are backed by exact source regions and targeted tests/static checks.
