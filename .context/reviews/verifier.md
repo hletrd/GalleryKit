@@ -1,39 +1,57 @@
-# Verifier review — prompt 1
+# Verifier Review
 
-## Verdict
-PARTIAL
+## Coverage / inventory
 
-## Inventory
-- Policy/docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.agent/rules/commit-and-push.md`.
-- Runtime/config surfaces: `apps/web/playwright.config.ts`, `apps/web/vitest.config.ts`, `apps/web/next.config.ts`, `apps/web/src/lib/content-security-policy.ts`, `apps/web/src/app/[locale]/layout.tsx`.
-- Touched UI/audit surfaces: `apps/web/src/components/lightbox.tsx`, `apps/web/src/__tests__/touch-target-audit.test.ts`.
-- Hygiene/build-context surfaces: `.gitignore`, root `.dockerignore`, `apps/web/.dockerignore`.
-- Read-only evidence checks: `git status --short`, `file apps/web/._data apps/web/public/._uploads`, `git check-ignore -v apps/web/._data apps/web/public/._uploads`, direct reads of the files above.
+I reviewed the repository at the doc/build/runtime boundaries that actually determine correctness:
+
+- **Docs and top-level contract:** `README.md`, `CLAUDE.md`, `apps/web/README.md`, `AGENTS.md`
+- **Build/deploy entrypoints:** `package.json`, `apps/web/package.json`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `scripts/deploy-remote.sh`
+- **Core runtime surfaces:** `apps/web/src/lib/*` (config, auth, rate limiting, session handling, upload/image processing, storage, restore safety, SEO/CSP, validation, revalidation, queue shutdown, tag/topic helpers, etc.)
+- **Routes/pages/actions:** `apps/web/src/app/**`, `apps/web/src/components/**`, `apps/web/src/proxy.ts`, `apps/web/src/i18n/request.ts`
+- **Tests:** `apps/web/src/__tests__/*.test.ts` plus the checked Playwright E2E specs
+
+I also verified the repository with fresh commands:
+
+- `npm run typecheck --workspace=apps/web` ✅
+- `npm test --workspace=apps/web` ✅ (`71 passed`, `474 passed`)
+- `npm run lint --workspace=apps/web` ✅
+- `npm run lint:api-auth --workspace=apps/web` ✅
+- `npm run lint:action-origin --workspace=apps/web` ✅
+- `npm run build --workspace=apps/web` ✅
 
 ## Findings
 
-### V1 — AppleDouble metadata files are still present and only partially ignored
-- **Severity:** Low
+### 1) Production build guard does not actually protect the normal build path
+
+- **Severity:** Medium
 - **Confidence:** High
-- **Status:** confirmed
-- **Files/regions:** `apps/web/._data` (file), `apps/web/public/._uploads` (file), `.gitignore:4`, `.dockerignore:1-16`, `apps/web/.dockerignore:1-11`
-- **Problem:** the new git ignore rule hides AppleDouble metadata from `git status`, but the files still exist in the worktree and are still included by both Docker build contexts because neither `.dockerignore` excludes `._*`.
-- **Failure scenario:** a future image build or repository export carries the metadata blobs into a container context, and future reviewers keep seeing noisy filesystem artifacts instead of real source changes.
-- **Suggested fix:** delete the two AppleDouble files and add `._*` to the Docker ignore files as well, or ensure all build contexts explicitly exclude Finder metadata.
+- **Category:** Confirmed
 
-### V2 — Google Analytics is split across two configuration sources that can diverge
-- **Severity:** Low
-- **Confidence:** High
-- **Status:** confirmed
-- **Files/regions:** `apps/web/src/app/[locale]/layout.tsx:118-128`, `apps/web/src/lib/content-security-policy.ts:58-69`, `apps/web/src/site-config.example.json:10`, `apps/web/README.md:36-39`, `README.md:128-145`
-- **Problem:** the layout injects GA scripts from `siteConfig.google_analytics_id`, but production CSP only allows Google domains when `NEXT_PUBLIC_GA_ID` is set. The render decision and the security allow-list are driven by different knobs.
-- **Failure scenario:** an operator sets `google_analytics_id` in `site-config.json` and deploys without the matching env var; the scripts render, CSP blocks them, and analytics silently fails with no explicit app-level error.
-- **Suggested fix:** derive CSP from the same resolved analytics setting used by the layout, or make analytics env-only and remove the file-backed key so there is one source of truth.
+**Where**
 
-## Non-findings / verified controls
-- `apps/web/src/components/lightbox.tsx:307-329` now uses `h-11 w-11` for the close/fullscreen controls, matching the updated audit note in `apps/web/src/__tests__/touch-target-audit.test.ts:81-88`.
-- The current lightbox change is compliant with the repo’s 44 px touch-target rule; I did not find a correctness regression in that fixed path.
+- `apps/web/scripts/ensure-site-config.mjs:13-28` — the placeholder/base-URL rejection only runs when `process.env.NODE_ENV === 'production'`
+- `apps/web/package.json:10-11` — `npm run build` invokes the prebuild check without setting `NODE_ENV`
+- `apps/web/Dockerfile:44-48` — the Docker build stage runs `node scripts/ensure-site-config.mjs` before any production-only `NODE_ENV` is established
+- Docs that claim the guard exists: `README.md:41-56` and `apps/web/README.md:34-39`
 
-## Summary counts
-- Findings: 2 (2 confirmed)
-- Residual risks: AppleDouble cleanup still depends on manual deletion; analytics still depends on aligned JSON + env configuration.
+**Problem**
+
+The docs say production builds reject placeholder public URLs, but the actual guard is gated on `NODE_ENV === 'production'`. The normal build entrypoints in this repo do not set that variable before invoking the check, so placeholder URLs such as `http://localhost:3000` are accepted during `npm run build` and Docker image builds.
+
+**Concrete failure scenario**
+
+If a deployment keeps the checked-in placeholder `src/site-config.json.url` (`http://localhost:3000`) or another placeholder host, the build still succeeds. That means the app can ship with bad canonical URLs / sitemap URLs / metadata origins even though the docs say the build should fail fast.
+
+This was confirmed directly:
+
+- `npm run prebuild --workspace=apps/web` exited `0`
+- `npm run build --workspace=apps/web` completed successfully with the placeholder config
+- `NODE_ENV=production node scripts/ensure-site-config.mjs` correctly fails, which proves the guard exists but is not wired to the repo's normal build path
+
+**Suggested fix**
+
+Make the validation unconditional for the build entrypoints, or explicitly set `NODE_ENV=production` before running the check in both the npm build path and the Docker build stage. A dedicated build flag would be even clearer than relying on `NODE_ENV`.
+
+## Final sweep
+
+I did not find additional evidence-backed correctness issues after reviewing the full doc/config/build path, the auth/rate-limit/same-origin guards, the upload/image pipeline, the data layer, the public/admin routes, and the test surface. The repository passes typecheck, lint, unit tests, the auth/origin guard scripts, and a production build; the only confirmed problem I found is the build-guard wiring described above.
