@@ -1,102 +1,110 @@
-# Designer UI/UX Review — Prompt 1
+# UI/UX Review — GalleryKit
 
-Repo: `/Users/hletrd/flash-shared/gallery`  
-Date: 2026-04-28  
-Mode: fan-out subagent F, review-only; no fixes implemented.
+Scope: `apps/web` (Next.js 16 / React 19, Next Intl, Radix, Tailwind, Framer Motion)
 
-## Inventory and coverage
+Runtime checked against a seeded local server at `http://127.0.0.1:3100` after:
+- `npm run build --workspace=apps/web`
+- local standalone server start with the repo’s E2E env
 
-Inventory was built first from the UI-relevant worktree plus `git status --short`, excluding `node_modules`, `.next` output, generated `tsbuildinfo`, and binary/media artifacts unless they were directly relevant to the user-facing experience.
+## Executive summary
 
-Reviewed surfaces:
+The app’s core gallery flow is generally strong: nav, headings, photo cards, admin login labels, and the 404 shell are all present and mostly well-structured.
 
-- App routes/layouts/loading/error/not-found: `apps/web/src/app/[locale]/**`, including public, admin, shared-photo, shared-group, and upload routes.
-- Shared UI components: `apps/web/src/components/**`, especially `nav`, `home-client`, `search`, `tag-filter`, `photo-viewer`, `lightbox`, `info-bottom-sheet`, `upload-dropzone`, `image-manager`, and admin forms/managers.
-- Styling/design tokens: `apps/web/src/app/[locale]/globals.css`, `apps/web/src/components/theme-provider.tsx`, Tailwind primitives.
-- i18n/messages: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/src/i18n/request.ts`, locale helpers.
-- Public assets: `apps/web/public/**` (fonts, upload derivatives, histogram worker).
-- E2E / UI tests: `apps/web/e2e/**`, `apps/web/src/__tests__/**`, including the touch-target audit.
-- Current uncommitted files at review start:
-
-```text
- M .context/reviews/_aggregate.md
- M .context/reviews/architect.md
- M .context/reviews/designer.md
- M .context/reviews/perf-reviewer.md
- M .context/reviews/test-engineer.md
- M .context/reviews/tracer.md
- M .context/reviews/verifier.md
- M .gitignore
- M apps/web/playwright.config.ts
- M apps/web/src/__tests__/touch-target-audit.test.ts
- M apps/web/src/components/lightbox.tsx
- M apps/web/vitest.config.ts
-```
-
-Runtime validation note: I booted the local Next.js dev server and attempted to inspect the live gallery in Chromium, but the app fell into its top-level error shell because the local MySQL credentials were not available in this environment. I therefore validated the actual rendered error state and used the codebase + tests for the rest of the review.
+The main UX issues I found are:
+1. Locale switching resets the user’s scroll position.
+2. The search dialog has no visible empty state when a query returns zero results.
+3. The photo-detail loading fallback is spinner-only and gives very little contextual feedback.
 
 ## Findings
 
-### D1 — The top-level error boundary strips away the site shell, turning transient failures into a dead-end
+### 1) Locale switching drops the user back to the top of the gallery
 
-- **Classification:** Confirmed UX / IA issue
-- **Severity:** High
-- **Confidence:** High
-- **Location:** `apps/web/src/app/[locale]/error.tsx:7-35`, `apps/web/src/app/[locale]/admin/(protected)/error.tsx:7-35`
-- **Problem:** Both error boundaries render a bare centered message and two actions, but they do not preserve the public/admin shell, landmarks, or any broader wayfinding. In the browser, the local `/en` load collapsed into only `Error`, the explanatory copy, `Try again`, and `Return to Gallery`; there was no `nav`, `main`, or `footer` in the DOM.
-- **Runtime evidence:**
-  - Body text on `/en`: `Error / Something went wrong loading this page. / Try again / Return to Gallery`
-  - DOM counts on mobile viewport: `nav: 0`, `main: 0`, `footer: 0`, `h1: 1`, `buttons: 1`, `links: 1`
-  - Accessible controls present: `button` “Try again”, `link` “Return to Gallery”
-- **Failure scenario:** A transient DB outage, slow query, or route exception can strand users on a page with no topic navigation, search, locale switch, or footer recovery path. They have to guess whether to retry or abandon the site.
-- **Suggested fix:** Reuse the public/admin shell around the error state, or at minimum restore the skip link, `main` landmark, and a minimal nav/back-to-gallery path before the retry action. That keeps the error state recoverable instead of terminal.
-
-### D2 — The error-state recovery controls miss the 44 px touch-target floor on mobile
-
-- **Classification:** Confirmed accessibility / affordance issue
 - **Severity:** Medium
 - **Confidence:** High
-- **Location:** `apps/web/src/app/[locale]/error.tsx:16-34`, `apps/web/src/app/[locale]/admin/(protected)/error.tsx:16-34`
-- **Problem:** The recovery actions are visually compact. In a 390×844 viewport, Playwright measured the `Try again` button at `91×38` and the `Return to Gallery` link at `143×38`. Both are below the 44 px hit-target floor the rest of the repo is trying to enforce.
-- **Runtime evidence:**
-  - Selector/role/text: `button` “Try again”; `a[href="/en"]` “Return to Gallery”
-  - Computed boxes: `button` height `38`, link height `38`
-  - Typography/spacing: both use `font-size: 14px` / `line-height: 20px`, so the tappable region is visibly and physically small
-- **Failure scenario:** On a phone, a user recovering from a server error can easily miss the intended action, especially if they are trying to back out quickly after a failed load.
-- **Suggested fix:** Give both actions at least `h-11`/`min-h-11` with comfortable horizontal padding, and make the primary recovery action feel dominant rather than visually equal to the navigation escape hatch.
+- **Category:** Confirmed
+- **Files / lines:** `apps/web/src/components/nav-client.tsx:65-68` and `:155-160`
 
-### D3 — Loading states are spinner-only and provide no visible status context
+**What happens**
+The locale switch writes the cookie and calls `router.push(localeSwitchHref)` without preserving scroll state.
 
-- **Classification:** Likely UX issue
+**Runtime evidence**
+On a scrollable home page at `1280x500`, I scrolled to `scrollY=292`, clicked the locale switch, and the page landed at `scrollY=0` on `/ko`.
+
+**Failure scenario**
+A visitor browsing deep in the masonry grid switches languages and loses their place immediately. On a photo-heavy page, that feels jarring and makes comparison across locales harder.
+
+**Fix**
+Use navigation that preserves scroll state when appropriate, e.g. `router.push(localeSwitchHref, { scroll: false })`, or otherwise restore the previous scroll position after the locale transition.
+
+---
+
+### 2) Zero-result search has no visible empty state
+
+- **Severity:** Medium
+- **Confidence:** High
+- **Category:** Confirmed
+- **Files / lines:** `apps/web/src/components/search.tsx:234-247`
+
+**What happens**
+When search returns no matches, the component only updates an SR-only live region. There is no visible “No results” panel or retry/clear hint in the dialog body.
+
+**Runtime evidence**
+On the seeded app, typing `zzzzzzzzzzzz` into the search dialog produced:
+- `dialog-visible-text`: only the search prompt/help text
+- `dialog-option-count`: `0`
+
+There was no visible empty-state message in the dialog body.
+
+**Failure scenario**
+Sighted users get a blank panel after entering a query, which reads as “the search didn’t work” rather than “there are no matches.”
+
+**Fix**
+Render a visible empty state under the input when `results.length === 0` and `query.trim()` is non-empty. A short message plus a clear/reset action would be enough.
+
+---
+
+### 3) Photo-detail loading feedback is spinner-only
+
 - **Severity:** Low
 - **Confidence:** Medium
-- **Location:** `apps/web/src/app/[locale]/loading.tsx:3-10`, `apps/web/src/app/[locale]/admin/(protected)/loading.tsx:3-10`
-- **Problem:** The global loading boundaries render only a spinning indicator with an `aria-label`. That is enough for assistive tech, but sighted users get no visible explanation of what is loading or how long the wait might be. When reduced-motion is active, the spinner becomes a static ring, which makes the lack of visible copy even more obvious.
-- **Failure scenario:** On slow data loads or navigations, the page can feel blank or broken instead of clearly “loading the gallery” / “loading admin”.
-- **Suggested fix:** Add visible loading copy or a small skeleton/context line next to the spinner so the state remains understandable without relying on motion or screen-reader text.
+- **Category:** Likely / manual-validation
+- **Files / lines:** `apps/web/src/components/photo-viewer-loading.tsx:5-16`
 
-## Final sweep / risks needing manual validation
+**What happens**
+The dynamic photo-viewer fallback is only a centered spinner with an aria-label. There is no skeleton shape, no contextual text, and no indication of what is loading.
 
-### R1 — RTL support is not wired into the current locale model
+**Failure scenario**
+On slow connections or first-load route transitions, the user sees a nearly blank viewport with a tiny spinner. That is easy to misread as stalled UI rather than intentional loading.
 
-- **Classification:** Risk needing manual validation
-- **Severity:** Low
-- **Confidence:** Medium
-- **Location:** `apps/web/src/app/[locale]/layout.tsx:88-95`, `apps/web/src/i18n/request.ts:4-14`
-- **Observation:** The root layout hardcodes `dir="ltr"`, and the locale request layer only accepts `en` / `ko`. That matches today’s shipped locales, so it is not a present bug, but there is no path to render RTL content without code changes.
-- **Why it matters:** If an RTL locale is ever added, the current shell will need a deliberate direction-aware pass; otherwise the typography, icon order, and affordances will all stay left-to-right.
-- **Manual check to keep in mind:** Revisit `dir`, logical spacing utilities, and any arrow/chevron semantics before expanding the locale list beyond LTR languages.
+**Fix**
+Replace the bare spinner with a photo-aware skeleton or at least add short visible copy such as “Loading photo…” and a content-shaped placeholder.
 
-## Verified non-findings / positive controls
+## Coverage sweep
 
-- The current uncommitted lightbox touch-target change looks correct: `apps/web/src/components/lightbox.tsx:307-329` now uses `h-11 w-11` for the close and fullscreen controls, and the updated `apps/web/src/__tests__/touch-target-audit.test.ts:81-88` passes.
-- The public layout already has a skip link and focusable `main` landmark in `apps/web/src/app/[locale]/(public)/layout.tsx:10-20`, and the 404 page intentionally preserves that shell in `apps/web/src/app/[locale]/not-found.tsx:19-52`.
-- The home page heading structure is deliberate: `H1` on the hero, hidden `H2` for the gallery section, and `H3` on cards in `apps/web/src/components/home-client.tsx:137-161`.
-- Desktop/mobile nav, search, photo viewer, and the admin managers already show a lot of good accessibility intent in code: 44 px nav controls, explicit labels, live regions, and modal focus traps.
+I reviewed:
+- App shell and layout: `apps/web/src/app/[locale]/layout.tsx`, `globals.css`, `loading.tsx`, `not-found.tsx`, `error.tsx`, `global-error.tsx`
+- Public navigation and shell: `apps/web/src/components/nav-client.tsx`, `nav.tsx`, `footer.tsx`
+- Core gallery interactions: `home-client.tsx`, `search.tsx`, `tag-filter.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `photo-navigation.tsx`, `info-bottom-sheet.tsx`, `lightbox.tsx`
+- Admin entry points: `apps/web/src/app/[locale]/admin/page.tsx`, `admin/login-form.tsx`, `admin/layout.tsx`
+- Form / upload surfaces: `tag-input.tsx`, `upload-dropzone.tsx`
+- Relevant tests and runtime helpers: Playwright e2e specs, touch-target audit, locale-path tests, error-shell tests, validation tests
 
-## Count
+I also verified:
+- Desktop nav affordances are present and labeled.
+- The 404 shell has a main landmark plus visible nav/footer.
+- The admin login form exposes visible labels and a password toggle.
+- The app is currently configured for `en` / `ko` only, with `dir="ltr"`; no RTL locale is shipped yet.
 
-- Total findings: 3
-- Confirmed: 2
-- Likely: 1
-- Risks needing manual validation: 1
+## Final sweep
+
+- **Information architecture:** reviewed top-level nav, topic chips, search, gallery entry points, 404 shell, and admin entry.
+- **Affordances / keyboard / focus:** reviewed nav controls, search dialog focus trap, lightbox controls, bottom sheet, and admin login toggle.
+- **WCAG / ARIA / contrast:** reviewed labels, landmarks, live regions, `aria-current`, dialog semantics, and touch targets.
+- **Responsive behavior:** reviewed mobile nav collapse/expand, masonry breakpoints, photo-viewer responsive layout, and bottom-sheet behavior.
+- **Loading / empty / error states:** reviewed route loading, photo loading fallback, search empty state, 404 shell, and admin login error presentation.
+- **Forms / validation UX:** reviewed admin login, tag input, upload flow, and file-level error display.
+- **Dark / light mode:** reviewed theme toggle and the global color-token setup in CSS.
+- **i18n / RTL:** reviewed locale switching, localized routes, and the current LTR-only shipping posture.
+- **Perceived performance:** reviewed masonry eager-loading logic, content-visibility usage, and loading fallbacks.
+
+Overall: no blocking accessibility or layout defect was found, but the three issues above are worth addressing to improve the gallery’s polish and usability.
