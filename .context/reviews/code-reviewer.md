@@ -1,70 +1,237 @@
-# Code Reviewer — Cycle 3 Deep Review (2026-04-27)
+# Code Reviewer Deep Review Slice — Prompt 1 fan-out A
 
-**HEAD:** `9958152 docs(reviews): record cycle-2 fresh review findings and plan`
-**Scope:** Full codebase — 222 TypeScript/TSX source files
-**Prior cycles:** Cycle 1 (4 medium, 15 low, 3 info, 4 test gaps), Cycle 2 (3 medium, 8 low, 3 info, 3 test gaps). This cycle focuses on issues prior cycles missed.
+Date: 2026-04-28  
+Repo: `/Users/hletrd/flash-shared/gallery`  
+Role angle: `code-reviewer` — code quality, correctness, maintainability, SOLID, logic edge cases.  
+Mode: review-only. I did not edit source/config/test files; this report replaces stale content in `.context/reviews/code-reviewer.md`.
 
-## Methodology
+## Inventory built before review
 
-Read every source file in `apps/web/src/` systematically: all server actions, lib modules, API routes, middleware, components, schema, and tests. Analyzed individual file quality and cross-file interactions. Verified all prior-cycle findings for resolution status.
+Commands used first: `git status --short`, `git diff --name-status`, `git diff --cached --name-status`, `git ls-files`, and a generated review inventory excluding vendor/build/generated artifacts (`node_modules`, `.next`, `test-results`, `*.tsbuildinfo`, screenshots/binary image fixtures, runtime logs/state unless referenced as artifact evidence).
 
-## Findings (New — Not in Prior Cycles)
+Implementation review inventory: **293 tracked source/config/test/docs files**:
 
-### MEDIUM Severity (1)
+- `apps/web/src/**`: 228 files (app routes/actions, components, lib, db, i18n, tests, proxy/instrumentation, site config contract).
+- App config/deploy/docs: 24 files (`apps/web/package.json`, `next.config.ts`, `playwright.config.ts`, `vitest.config.ts`, Docker/compose/nginx, env examples, README, tsconfig/eslint/tailwind/drizzle config).
+- Root/CI/docs/scripts: 14 files (`package.json`, `README.md`, `AGENTS.md`, `.github/workflows/quality.yml`, `.dockerignore`, `.gitignore`, deployment script, etc.).
+- App scripts: 14 files (`init-db`, migrations, scanners, seed scripts, env helpers).
+- Drizzle SQL/meta: 7 files.
+- E2E specs/helpers: 6 files.
 
-| ID | Finding | File | Confidence |
-|---|---|---|---|
-| C3-F01 | `exportImagesCsv` materializes the entire CSV in memory before returning. The function caps results at 50K rows and builds a `csvLines[]` array, then joins into a single string. For a gallery at the 50K cap with verbose tag lists (GROUP_CONCAT can produce long strings), this can consume ~10-20MB of heap. The incremental approach (building `csvLines` then joining) is better than string concatenation but still materializes the full CSV string plus the DB results array simultaneously. The code releases `results` before joining (`results = [] as typeof results`) which helps, but the csvLines array + final joined string still coexist briefly. A streaming response or chunked building would be more memory-efficient for large galleries. | `app/[locale]/admin/db-actions.ts:51-99` | Medium |
+Uncommitted files included in scope at review start:
 
-### LOW Severity (3)
+- Review artifacts: `.context/reviews/_aggregate.md`, `architect.md`, `code-reviewer.md`, `critic.md`, `designer.md`, `perf-reviewer.md`, staged `security-reviewer.md`, `test-engineer.md`, `tracer.md`, `verifier.md`.
+- Source/config/test changes: `.gitignore`, `apps/web/playwright.config.ts`, `apps/web/vitest.config.ts`, `apps/web/src/__tests__/touch-target-audit.test.ts`, `apps/web/src/components/lightbox.tsx`.
 
-| ID | Finding | File | Confidence |
-|---|---|---|---|
-| C3-F02 | `deleteImageVariants` called with `sizes=[]` in `deleteImage` and `deleteImages` triggers a full directory scan via `opendir` + iteration on every delete. For directories with thousands of files (a gallery with 10K+ images generates 10K+ files per format dir), this readdir scan is expensive I/O. The `sizes=[]` path is only needed to catch leftover variants from prior configs, but it runs unconditionally. A per-directory flag or timestamp tracking "last config-era cleanup" would avoid rescanning on every subsequent delete. | `lib/process-image.ts:186-203` | Medium |
-| C3-F03 | `getImage` in `data.ts` prev/next query logic uses `sql\`FALSE\`` literal for undated photos in the next-image query. This is correct (NULLs sort last in DESC, so there are no "older" undated images by capture_date), but the comment explaining the FALSE literal is not prominent enough for a future contributor who doesn't understand the NULLs-sort-last-in-DESC invariant. Replacing `sql\`FALSE\`` with an incorrect NULL-safe comparison would silently break next-image navigation for undated photos. | `lib/data.ts:574-600` | Low |
-| C3-F04 | `buildContentSecurityPolicy` adds `style-src 'self' 'unsafe-inline'` in production. While `'unsafe-inline'` in `style-src` is standard for Tailwind CSS apps (runtime style injection), it reduces the CSP's ability to block style-based exfiltration attacks. This is a known trade-off. | `lib/content-security-policy.ts:74` | Info |
+Generated/binary/runtime artifacts intentionally excluded from semantic line review: `node_modules/`, `.next/`, build outputs, `*.tsbuildinfo`, screenshots/fixture media, `test-results/`, `.omx/.omc` runtime logs except where artifact leakage is discussed by the critic report.
 
-### INFO (2)
+Verification/checks run during review (read-only):
 
-| ID | Finding | File | Confidence |
-|---|---|---|---|
-| C3-F05 | `createGroupShareLink` uses `Number(linkResult.affectedRows ?? 0) !== uniqueImageIds.length` to verify all link inserts. This check can never trigger under normal operation because the uniqueIndex on `(groupId, imageId)` would cause an ER_DUP_ENTRY before the affectedRows check could differ. The check adds defense-in-depth but no practical benefit — it's a code clarity concern, not a bug. | `app/actions/sharing.ts:261-271` | Info |
-| C3-F06 | `escapeCsvField` strips C0 controls but intentionally preserves LF (0x0A) and CR (0x0D) for the subsequent collapse pass. The character class `[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]` is hard to audit because it lists disjoint ranges without a comment explaining which codepoints are excluded and why. | `lib/csv-escape.ts:34` | Medium |
+- `npm run lint:api-auth --workspace=apps/web` — passed (`OK: src/app/api/admin/db/download/route.ts`).
+- `npm run lint:action-origin --workspace=apps/web` — passed; all mutating server actions reported `OK` or documented read-only exemption.
+- Static sweeps for: `dangerouslySetInnerHTML`, raw SQL, server-action guards, file/path operations, rate limits, CSP/script sources, tag canonicalization, image queue retry paths, Docker/nginx deployment wiring, timeout env parsing, and uncommitted diffs.
 
-### Test Gaps (2)
+## Findings
 
-| ID | Finding | File | Confidence |
-|---|---|---|---|
-| C3-TG01 | No test for `deleteImageVariants` with `sizes=[]` (directory scan fallback path). A regression in the scan logic could silently fail to delete leftover variants from prior configs. | `lib/process-image.ts:186-203` | Medium |
-| C3-TG02 | No test for `exportImagesCsv` at moderate scale (e.g., 1000 rows). While the function has clear logic, an integration test verifying it completes without errors would guard against regressions in the CSV builder. | `app/[locale]/admin/db-actions.ts:51-99` | Low |
+### CR-01 — Production CSP and rendered Google Analytics use different configuration sources
 
-## Prior Cycle Findings — Resolution Status
+- **Location:** `apps/web/src/app/[locale]/layout.tsx:118-126`, `apps/web/src/lib/content-security-policy.ts:58-69`, `apps/web/src/proxy.ts:41-44`, test gap at `apps/web/src/__tests__/content-security-policy.test.ts:6-23`
+- **Severity:** Medium
+- **Confidence:** High
+- **Type:** Confirmed issue
 
-| Prior ID | Status | Notes |
-|---|---|---|
-| C1-CR-03 (width fallback to 2048) | **Fixed** | Code now throws an error instead of defaulting to 2048 (`data.ts:278-280`) |
-| C1-CR-04 (GA domains unconditional) | **Fixed** | CSP now conditional on `NEXT_PUBLIC_GA_ID` |
-| C1-CR-01 (indentation) | **Fixed** | Try/finally indentation corrected |
-| C2-F01 (view count buffer loss) | **Fixed** | Atomic Map swap pattern implemented |
-| C2-F06 (redundant revalidation) | **Fixed** | Redundant `revalidateLocalizedPaths` calls removed |
-| C1-CR-02 (deleteImageVariants sizes=[] intent) | **Open** | Still uses `sizes=[]` — documenting the intent would help (C3-F02 above) |
-| C2-F02 (locale cookie SameSite) | **Open** | Cookie now has explicit `SameSite=Lax` — resolved |
+**Why this is a problem**
 
-## Verified Controls (No New Issues)
+The root layout renders Google Analytics when `siteConfig.google_analytics_id` is configured:
 
-All controls from prior cycles remain intact. No regressions found in:
-1. Argon2id + timing-safe comparison for auth
-2. Path traversal prevention (SAFE_SEGMENT + realpath containment)
-3. Privacy guard (compile-time + separate field sets)
-4. Blur data URL contract (3-point validation with producer-side assert)
-5. Rate limit TOCTOU fix (pre-increment pattern)
-6. Advisory locks for concurrent operations
-7. Unicode bidi/formatting rejection
-8. CSV formula injection prevention
-9. Touch-target audit fixture
-10. Reduced-motion support
-11. `safeJsonLd()` properly sanitizes JSON-LD output
-12. `serveUploadFile` has extension-to-directory mismatch protection
-13. `requireSameOriginAdmin()` on all mutating server actions
-14. Upload tracker TOCTOU closed with pre-claim pattern
-15. View count buffer swap (C2-F01 fix)
+- `layout.tsx:118-120` loads `https://www.googletagmanager.com/gtag/js?id=...`.
+- `layout.tsx:121-126` emits the inline GA bootstrap script with the CSP nonce.
+
+The production CSP is generated independently in `content-security-policy.ts` and only adds GA hosts when `process.env.NEXT_PUBLIC_GA_ID` is set:
+
+- `content-security-policy.ts:58-60` adds `https://www.googletagmanager.com` only from `NEXT_PUBLIC_GA_ID`.
+- `content-security-policy.ts:66-68` adds `https://www.google-analytics.com` only from `NEXT_PUBLIC_GA_ID`.
+- `proxy.ts:41-44` installs that CSP on production requests.
+
+The checked configuration/docs path uses `site-config.json` (`src/site-config.example.json:10`, `README.md:55`), so the renderer and CSP can disagree.
+
+**Concrete failure scenario**
+
+An operator sets `src/site-config.json` to `{ "google_analytics_id": "G-ABC123" }` but does not also export `NEXT_PUBLIC_GA_ID`. Production HTML contains the GA `<Script>` tags with a nonce, but the CSP still has only self script/connect sources, so browsers block `gtag/js` and GA network calls. Analytics silently fails even though the app appears configured.
+
+**Suggested fix**
+
+Use one canonical GA source for both rendering and CSP. Either:
+
+1. Make `buildContentSecurityPolicy` accept an explicit `googleAnalyticsId`/`enableGoogleAnalytics` option and pass the same site-config value used by layout, or
+2. Render GA only from `NEXT_PUBLIC_GA_ID` if the env var is intended to be canonical.
+
+Add a regression test that configures the chosen canonical source and asserts the CSP allows the exact domains required by the rendered script/connect behavior.
+
+---
+
+### CR-02 — Load-more tag handling drifts from SSR canonicalization; duplicate tags can make later pages empty
+
+- **Location:** `apps/web/src/app/actions/public.ts:65-77`, `apps/web/src/lib/data.ts:323-335`, `apps/web/src/lib/tag-slugs.ts:6-27`, `apps/web/src/app/[locale]/(public)/page.tsx:135-140`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:162-166`, current tests at `apps/web/src/__tests__/public-actions.test.ts:87-92`
+- **Severity:** Medium
+- **Confidence:** High for duplicate-tag failure; Medium for invalid-tag broadening
+- **Type:** Confirmed issue / adjacent risk
+
+**Why this is a problem**
+
+Initial SSR page rendering canonicalizes tag query strings:
+
+- `tag-slugs.ts:6-27` trims, drops blanks, caps, and de-duplicates requested slugs.
+- `page.tsx:135-140` and `[topic]/page.tsx:162-166` pass canonical `tagSlugs` to `getImagesLitePage`.
+
+The load-more server action does not reuse that helper. It slices, trims, and filters valid slugs only:
+
+- `public.ts:73-77` builds `safeTags` without de-duplicating and silently drops invalid slugs.
+- `data.ts:323-335` then requires `COUNT(DISTINCT tags.slug) = validTagSlugs.length`.
+
+For `['cat', 'cat']`, the SQL can count at most one distinct matching tag but requires two, so no image can match.
+
+**Concrete failure scenario**
+
+The first page for `/en?tags=cat,cat` works because SSR de-dupes to `['cat']`. A stale client, manual server-action call, or future UI change calls `loadMoreImages(undefined, ['cat', 'cat'], 30, 30)`. The action passes both slugs to the data layer, the `HAVING COUNT(DISTINCT ...) = 2` condition filters out every row, and infinite scroll reports no more images despite matching images existing.
+
+For `['cat', '<bad>']`, the action silently broadens to `['cat']` instead of rejecting the caller's invalid filter, which makes client/server state harder to reason about.
+
+**Suggested fix**
+
+Create a shared server-safe helper for tag-array canonicalization and use it from both SSR parsing and `loadMoreImages`: trim, validate, cap, de-duplicate preserving order, and return an explicit invalid status if any submitted tag is invalid. Also harden `buildTagFilterCondition` by de-duplicating before computing the `HAVING` count so future callers cannot reintroduce this edge case.
+
+---
+
+### CR-03 — Missing original upload files leave images pending without retry or operator-visible failure state
+
+- **Location:** `apps/web/src/lib/image-queue.ts:244-250`, retry branch at `apps/web/src/lib/image-queue.ts:312-326`, cleanup at `apps/web/src/lib/image-queue.ts:331-335`, bootstrap completion at `apps/web/src/lib/image-queue.ts:430-436`
+- **Severity:** Medium
+- **Confidence:** High
+- **Type:** Confirmed issue
+
+**Why this is a problem**
+
+When a queued image row still exists and is unprocessed, the worker resolves the original upload path and checks filesystem access:
+
+- `image-queue.ts:244-250` logs `File not found for job ...` and returns when `fs.access(originalPath)` fails.
+
+That return bypasses the `catch` branch that increments `retryCounts`, marks `state.bootstrapped = false`, and schedules a bootstrap retry:
+
+- Processing errors at `image-queue.ts:312-326` retry or rescan.
+- Missing-original errors return before that path.
+
+The `finally` block then removes the id from in-memory state as if the job were finished/skipped:
+
+- `image-queue.ts:331-335` clears `enqueued`, `retryCounts`, and claim retry state.
+
+If the bootstrap batch was smaller than `BOOTSTRAP_BATCH_SIZE`, the process marks itself fully bootstrapped:
+
+- `image-queue.ts:430-436` sets `state.bootstrapped = true` and resets the cursor.
+
+The DB row remains `processed = false`, but no retry timer or explicit failure state exists.
+
+**Concrete failure scenario**
+
+An upload inserts an image row, then the original file is deleted/moved or temporarily unavailable before background processing runs (volume mount race, operator cleanup, storage hiccup). The queue logs one error and drops the in-memory job. The image remains permanently pending/unpublished in the same running process until restart or an unrelated queue failure happens to reset bootstrap state.
+
+**Suggested fix**
+
+Do not treat missing originals as a successful skip. Route this path through the same failure/retry branch as `processImageFormats` exceptions: increment retry counts, mark bootstrap stale, and schedule a retry scan. Longer term, add an explicit processing failure state or audited cleanup path so operators can remediate permanently missing originals instead of silently carrying pending rows.
+
+---
+
+### CR-04 — Paginated listing helper can exceed its documented 100-row safety cap
+
+- **Location:** `apps/web/src/lib/data.ts:371-373`, `apps/web/src/lib/data.ts:435-464`, coverage gap at `apps/web/src/__tests__/data-pagination.test.ts:1-30`
+- **Severity:** Low
+- **Confidence:** High
+- **Type:** Confirmed latent issue
+
+**Why this is a problem**
+
+The data layer documents a 100-row listing cap:
+
+- `data.ts:371` defines `LISTING_QUERY_LIMIT = 100`.
+- `data.ts:373` defines `LISTING_QUERY_LIMIT_PLUS_ONE = 101` for has-more detection.
+
+`getImagesLitePage` caps the requested visible page size at `LISTING_QUERY_LIMIT_PLUS_ONE` and then queries one additional sentinel row:
+
+- `data.ts:447` allows `normalizedPageSize = 101`.
+- `data.ts:463` executes `limit(normalizedPageSize + 1)`, which can query 102 rows and return 101 visible rows via `normalizePaginatedRows`.
+
+**Concrete failure scenario**
+
+A future admin/public caller passes `pageSize=999` expecting the helper to enforce the documented 100-row cap. The helper returns up to 101 visible rows and asks MySQL for 102 rows. Current public callers pass smaller page sizes, so this is latent, but the helper contract is brittle.
+
+**Suggested fix**
+
+Cap visible page size at `LISTING_QUERY_LIMIT`, then query `effectivePageSize + 1` for has-more detection. Add a regression test that calls `getImagesLitePage(..., 999, ...)` or extracts the query shape to assert the visible cap remains 100.
+
+---
+
+### CR-05 — Client tag creation accepts values the server rejects, causing late whole-upload failures
+
+- **Location:** `apps/web/src/components/tag-input.tsx:24-35`, `apps/web/src/components/tag-input.tsx:67-84`, `apps/web/src/components/upload-dropzone.tsx:212-215`, `apps/web/src/app/actions/images.ts:150-156`, `apps/web/src/lib/validation.ts:76-87`, `apps/web/src/lib/tag-records.ts:5-12`
+- **Severity:** Low
+- **Confidence:** High for rejected-character drift; Medium for locale-sensitive casing drift
+- **Type:** Confirmed issue / adjacent risk
+
+**Why this is a problem**
+
+The client tag input allows any trimmed non-empty tag that does not contain a comma and is not an exact existing tag match:
+
+- `tag-input.tsx:67-71` enables the create option.
+- `tag-input.tsx:79-84` adds it to selected state.
+
+The upload path serializes selected tags into a comma-separated field:
+
+- `upload-dropzone.tsx:212-215` appends `allTags.join(',')`.
+
+The server enforces stricter validation:
+
+- `images.ts:150-156` aborts the upload if any candidate fails `isValidTagName` or `isValidTagSlug(getTagSlug(t))`.
+- `validation.ts:76-87` rejects `<`, `>`, quotes, ampersands, NUL, Unicode formatting, empty slugs, and overlong values.
+- `tag-records.ts:5-12` uses deterministic `toLowerCase()` and slug transformations, while `tag-input.tsx:24-35` uses browser `toLocaleLowerCase()` for comparisons.
+
+**Concrete failure scenario**
+
+An admin selects several files and creates a tag like `family & friends` or `kids <2026>`. The UI accepts and displays it. Every upload call carrying that tag then returns `invalidTagNames`, causing the affected files to fail after the batch has started. In Turkish-locale browsers, locale-sensitive case folding can also make client duplicate detection disagree with server slug/collision handling.
+
+**Suggested fix**
+
+Expose a client-safe copy of tag validation/normalization (or a deliberately duplicated tested helper) and run it before adding a new tag. Show inline errors for characters/lengths the server will reject. Replace `toLocaleLowerCase()` with deterministic `toLowerCase()` unless locale-aware matching is intentionally part of the persisted tag contract.
+
+---
+
+### CR-06 — Drizzle CLI config constructs malformed DB URLs instead of failing fast on missing env
+
+- **Location:** `apps/web/drizzle.config.ts:4-12`, contrast with runtime DB defaults at `apps/web/src/db/index.ts:8-18`
+- **Severity:** Low
+- **Confidence:** High
+- **Type:** Confirmed maintainability/operability issue
+
+**Why this is a problem**
+
+`drizzle.config.ts` loads `.env.local` and constructs a MySQL URL with optional env values:
+
+- `drizzle.config.ts:4` loads `.env.local`.
+- `drizzle.config.ts:11` interpolates `DB_HOST`, `DB_PORT`, and `DB_NAME` directly, and defaults only user/password to empty strings.
+
+If required variables are missing, the config produces URLs like `mysql://:@undefined:undefined/undefined` instead of a clear validation error. Runtime DB setup in `src/db/index.ts:8-18` has different defaults and option handling, so CLI and app behavior can diverge.
+
+**Concrete failure scenario**
+
+A developer runs `npm run db:push --workspace=apps/web` before creating `.env.local`, or CI runs with a partial environment. Drizzle receives a malformed URL and fails with opaque parsing/DNS/connection errors. With inherited shell variables from another project, the CLI can also target an unintended host/database more easily than a fail-fast config would allow.
+
+**Suggested fix**
+
+Add a `requiredEnv(name)` helper in `drizzle.config.ts` and validate `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` before constructing the URL. Prefer reusing the same connection-option helper used by scripts where possible so CLI/runtime semantics stay aligned.
+
+## Final sweep notes
+
+- No critical/high-confidence security exploit was found from this angle.
+- Mutating server actions and the admin DB download API passed the repository scanner gates during this review.
+- `dangerouslySetInnerHTML` call sites reviewed are JSON-LD only and use `safeJsonLd` plus nonces.
+- The uncommitted lightbox touch-target change appears to fix the specific 40 px close/fullscreen control issue: current `lightbox.tsx:310` and `lightbox.tsx:329` use `h-11 w-11`; the audit comment matches.
+- Highest priority code-quality fixes from this slice: CR-01, CR-02, and CR-03.
