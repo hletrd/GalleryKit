@@ -79,13 +79,11 @@ interface FoundIssue {
  *     above so a reviewer knows when the exemption can be retired.
  */
 const KNOWN_VIOLATIONS: Record<string, number> = {
-    // The lightbox close/fullscreen/prev/next buttons render at h-10/w-10
-    // INSIDE a larger pointer-events area (h-full w-16 hit zone for prev/
-    // next; absolute-positioned for close/fullscreen). The visible icon is
-    // smaller but the actual hit target via pointer-events:auto is larger.
-    // Verified via DOM at gallery.atik.kr in designer-v2 review.
-    // Re-open: lightbox.tsx uses HTML <button>, not shadcn <Button>, so
-    // the FORBIDDEN regex does not match anyway. Listed for completeness.
+    // The lightbox close/fullscreen buttons render at h-11/w-11, and prev/
+    // next use full-height w-16 hit zones around smaller visible icons.
+    // Listed for completeness because lightbox.tsx uses HTML <button>, not
+    // shadcn <Button>, so the FORBIDDEN regex does not match every size.
+    // Re-open: any new compact lightbox control must keep a 44 px hit target.
     'components/lightbox.tsx': 0,
     // shadcn ui primitives are decorative wrappers; touch-target rule
     // applies at the consumer site, not the primitive.
@@ -199,9 +197,10 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
  * Pattern shapes covered:
  *   - shadcn `<Button size="sm">` (32 px)
  *   - shadcn `<Button size="icon">` without `h-1[12]` / `size-1[12]` override (36 px default)
- *   - `<Button className="...h-8...">` and `...h-9...` literals
+ *   - `<Button className="...h-8...">`, `...h-9...`, and 40 px
+ *     `h-10`/`w-10`/`size-10` literals
  *   - `<Button className={cn("...h-8...", ...)}>` composites
- *   - HTML `<button className="...h-8...">` and `...h-9...` literals
+ *   - HTML `<button className="...h-8...">`, `...h-9...`, and 40 px literals
  */
 const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // Cycle 3 RPF loop AGG3-M01: allow `h-11`/`h-12`/`min-h-11`/`size-11`
@@ -227,6 +226,10 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<Button\b[^>]*\bclassName=["'][^"']*\bh-9\b/,
         description: '<Button className="...h-9..."> renders 36 px — below 44 px floor',
     },
+    {
+        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\b(?:h-10|w-10|size-10)\b/,
+        description: '<Button className="...h-10/w-10/size-10..."> renders 40 px on one axis — below 44 px floor',
+    },
     // <Button className={cn("...h-8...", ...)}> composites. The cn()
     // helper preserves literal strings that Tailwind emits.
     {
@@ -237,6 +240,10 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bh-9\b/,
         description: '<Button className={cn("...h-9...")}> composite renders 36 px — below 44 px floor',
     },
+    {
+        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-10|w-10|size-10)\b/,
+        description: '<Button className={cn("...h-10/w-10/size-10...")}> composite renders 40 px on one axis — below 44 px floor',
+    },
     // HTML <button> elements (lowercase b) with literal h-8 / h-9.
     // Excludes `<button type="submit"` etc that don't carry a sizing class.
     {
@@ -246,6 +253,10 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     {
         pattern: /<button\b[^>]*\bclassName=["'][^"']*\bh-9\b/,
         description: 'HTML <button className="...h-9..."> renders 36 px — below 44 px floor',
+    },
+    {
+        pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?:h-10|w-10|size-10)\b/,
+        description: 'HTML <button className="...h-10/w-10/size-10..."> renders 40 px on one axis — below 44 px floor',
     },
 ];
 
@@ -491,10 +502,14 @@ describe('touch-target audit (44 px floor)', () => {
             { name: '<Button size="icon"> without h-11', snippet: `<Button size="icon" aria-label="x">x</Button>` },
             { name: '<Button className="h-8">', snippet: `<Button className="h-8 w-8">x</Button>` },
             { name: '<Button className="h-9">', snippet: `<Button className="h-9">x</Button>` },
+            { name: '<Button className="h-10 w-10">', snippet: `<Button className="h-10 w-10">x</Button>` },
+            { name: '<Button className="size-10">', snippet: `<Button className="size-10">x</Button>` },
             { name: '<Button className={cn("h-8", ...)}>', snippet: `<Button className={cn("h-8", "px-3")}>x</Button>` },
             { name: '<Button className={cn("h-9", ...)}>', snippet: `<Button className={cn("h-9", "px-3")}>x</Button>` },
+            { name: '<Button className={cn("size-10", ...)}>', snippet: `<Button className={cn("size-10", "rounded-full")}>x</Button>` },
             { name: 'HTML <button className="h-8">', snippet: `<button className="h-8 w-8" type="button">x</button>` },
             { name: 'HTML <button className="h-9">', snippet: `<button className="h-9 w-9" type="button">x</button>` },
+            { name: 'HTML <button className="h-10 w-10">', snippet: `<button className="h-10 w-10" type="button">x</button>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));

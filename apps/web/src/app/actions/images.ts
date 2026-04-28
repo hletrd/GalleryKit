@@ -609,9 +609,13 @@ export async function deleteImages(ids: number[]) {
         }).catch(console.debug);
     }
 
-    // Clean up files concurrently. Use prefix scanning for derivatives so
-    // historical size variants are removed after image-size config changes.
-    const cleanupFailures = (await Promise.all(imageRecords.map(async (image) => {
+    // Clean up one image record at a time. Each derivative cleanup may scan a
+    // whole upload directory to remove historical size variants, so launching
+    // every selected image concurrently can fan out into hundreds of directory
+    // scans. Keep the per-image format cleanup parallel, but bound the outer
+    // batch to protect the shared filesystem.
+    const cleanupFailures: ImageCleanupFailure[] = [];
+    for (const image of imageRecords) {
         // Pass empty sizes [] to scan directory and remove ALL size variants,
         // including those from prior image-size configs.
         const failures = await collectImageCleanupFailures([
@@ -628,8 +632,8 @@ export async function deleteImages(ids: number[]) {
             });
         }
 
-        return failures;
-    }))).flat();
+        cleanupFailures.push(...failures);
+    }
 
     const successCount = deletedRows;
     const errorCount = notFoundCount + staleCount;

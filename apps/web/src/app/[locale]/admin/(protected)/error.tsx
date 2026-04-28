@@ -13,25 +13,27 @@ export default function AdminError({
     const { t, locale } = useTranslation();
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center">
-            <h1 className="text-7xl font-bold text-muted-foreground/30">{t('error.title')}</h1>
-            <p className="text-lg text-muted-foreground">
-                {t('error.adminDescription')}
-            </p>
-            <div className="flex gap-4">
+        <main className="flex min-h-[60vh] items-center justify-center px-4" role="main">
+            <section className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-card p-6 text-center shadow-sm" aria-labelledby="admin-route-error-title">
+                <h1 id="admin-route-error-title" className="text-7xl font-bold text-muted-foreground/30">{t('error.title')}</h1>
+                <p className="text-lg text-muted-foreground">
+                    {t('error.adminDescription')}
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row">
                 <button
                     onClick={reset}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm"
+                    className="min-h-11 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
                 >
                     {t('error.tryAgain')}
                 </button>
                 <Link
                     href={localizePath(locale, '/admin/dashboard')}
-                    className="px-4 py-2 border rounded-md hover:bg-muted text-sm"
+                    className="flex min-h-11 items-center justify-center rounded-md border px-4 py-2 text-sm hover:bg-muted"
                 >
                     {t('error.backToDashboard')}
                 </Link>
-            </div>
-        </div>
+                </div>
+            </section>
+        </main>
     );
 }

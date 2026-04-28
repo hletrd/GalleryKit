@@ -190,8 +190,6 @@ export function UploadDropzone({
         setFileErrors({});
 
         try {
-            const UPLOAD_CONCURRENCY = 3;
-
             let successCount = 0;
             const failedFiles: File[] = [];
             const uploadWarnings: string[] = [];
@@ -238,20 +236,14 @@ export function UploadDropzone({
                 setProgress(Math.round((completedSoFar / totalFiles) * 100));
             };
 
-            // Process files in parallel with concurrency limit
-            const queue = [...files];
-            const inFlight = new Set<Promise<void>>();
-
-            for (const item of queue) {
-                const promise: Promise<void> = uploadFile(item).finally(() => inFlight.delete(promise));
-                inFlight.add(promise);
-
-                if (inFlight.size >= UPLOAD_CONCURRENCY) {
-                    await Promise.race(inFlight);
-                }
+            // The server serializes uploads against the settings/output-size
+            // contract with one named MySQL lock. Sending sibling files in
+            // parallel makes the client compete with itself and can produce
+            // spurious "upload settings locked" failures, so keep the client
+            // side sequential until the server grows reader/writer semantics.
+            for (const item of files) {
+                await uploadFile(item);
             }
-
-            await Promise.all(inFlight);
 
             if (failedFiles.length === 0) {
                 if (uploadWarnings.length > 0) {

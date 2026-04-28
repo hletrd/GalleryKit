@@ -50,6 +50,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [shouldAutoHideControls, setShouldAutoHideControls] = useState(getLightboxAutoHidePreference);
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastControlRevealRef = useRef(0);
     const [shouldReduceMotion, setShouldReduceMotion] = useState(
         () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     );
@@ -109,7 +110,12 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         }
     }, [prevId, nextId, onNavigate]);
 
-    const showControls = useCallback(() => {
+    const showControls = useCallback((forceReset = false) => {
+        const now = Date.now();
+        if (!forceReset && controlsVisible && now - lastControlRevealRef.current < 500) {
+            return;
+        }
+        lastControlRevealRef.current = now;
         setControlsVisible(true);
         if (!shouldAutoHideControls) {
             if (hideTimer.current) {
@@ -128,7 +134,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
             }
             setControlsVisible(false);
         }, 3000);
-    }, [shouldAutoHideControls]);
+    }, [controlsVisible, shouldAutoHideControls]);
 
     // On mount, controls are already visible (initial state), so just arm the
     // auto-hide timer. Calling setControlsVisible here would trip the
@@ -265,7 +271,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
             className="fixed inset-0 z-50 flex items-center justify-center bg-black"
             onClick={handleBackdropClick}
             onMouseMove={handleMouseMove}
-            onFocusCapture={showControls}
+            onFocusCapture={() => showControls(true)}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
         >
@@ -307,7 +313,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 <button
                     ref={closeButtonRef}
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
                         if (document.fullscreenElement) {
@@ -326,7 +332,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 {/* Fullscreen toggle — top right, second from right */}
                 <button
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
                         toggleFullscreen();

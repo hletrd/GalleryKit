@@ -30,6 +30,18 @@ const localServerUrl = (() => {
 const baseURL = useLocalServer ? localServerUrl : requestedBaseUrl;
 const reuseExistingServer = process.env.E2E_REUSE_SERVER === 'true';
 
+function parsePositiveIntegerEnv(name: string, fallback: number) {
+  const rawValue = process.env[name]?.trim();
+  if (!rawValue) return fallback;
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer number of milliseconds`);
+  }
+  return parsed;
+}
+
+const webServerTimeout = parsePositiveIntegerEnv('E2E_WEB_SERVER_TIMEOUT_MS', 420_000);
+
 if (!useLocalServer && process.env.E2E_ADMIN_ENABLED === 'true' && process.env.E2E_ALLOW_REMOTE_ADMIN !== 'true') {
   throw new Error('Remote admin E2E is disabled by default. Set E2E_ALLOW_REMOTE_ADMIN=true to opt in.');
 }
@@ -63,7 +75,7 @@ export default defineConfig({
         cwd: __dirname,
         url: baseURL,
         reuseExistingServer,
-        timeout: 180_000,
+        timeout: webServerTimeout,
       }
     : undefined,
 });

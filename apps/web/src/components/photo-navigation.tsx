@@ -44,8 +44,8 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
         if (disabled) return;
 
         const handleTouchStart = (e: TouchEvent) => {
-            touchStartX.current = e.changedTouches[0].screenX;
-            touchStartY.current = e.changedTouches[0].screenY;
+            touchStartX.current = e.changedTouches[0].clientX;
+            touchStartY.current = e.changedTouches[0].clientY;
             isSwiping.current = false;
             setIsSnapping(false);
         };
@@ -58,8 +58,8 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 e.preventDefault();
             }
 
-            const deltaX = touch.screenX - touchStartX.current;
-            const deltaY = touch.screenY - touchStartY.current;
+            const deltaX = touch.clientX - touchStartX.current;
+            const deltaY = touch.clientY - touchStartY.current;
 
             // Cancel swipe if movement becomes predominantly vertical
             if (isSwiping.current && Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > VERTICAL_LIMIT) {
@@ -95,8 +95,8 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
         const handleTouchEnd = (e: TouchEvent) => {
             if (!isSwiping.current) return;
 
-            const deltaX = e.changedTouches[0].screenX - touchStartX.current;
-            const deltaY = e.changedTouches[0].screenY - touchStartY.current;
+            const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+            const deltaY = e.changedTouches[0].clientY - touchStartY.current;
 
             // Ignore if vertical movement too large
             if (Math.abs(deltaY) > VERTICAL_LIMIT) {

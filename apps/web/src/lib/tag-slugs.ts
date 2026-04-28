@@ -12,19 +12,26 @@ export function parseRequestedTagSlugs(tagsParam?: string) {
         return [];
     }
 
+    return canonicalizeRequestedTagSlugs(tagsParam.split(','));
+}
+
+export function canonicalizeRequestedTagSlugs(tagSlugs: string[]) {
     const seen = new Set<string>();
-    return tagsParam
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .slice(0, MAX_TAG_COUNT)
-        .filter((slug) => {
-            if (seen.has(slug)) {
-                return false;
-            }
-            seen.add(slug);
-            return true;
-        });
+    const out: string[] = [];
+
+    for (const rawSlug of tagSlugs) {
+        const slug = rawSlug.trim();
+        if (!slug || seen.has(slug)) {
+            continue;
+        }
+        seen.add(slug);
+        out.push(slug);
+        if (out.length >= MAX_TAG_COUNT) {
+            break;
+        }
+    }
+
+    return out;
 }
 
 export function filterExistingTagSlugs<T extends TagLike>(requestedTagSlugs: string[], availableTags: T[]) {

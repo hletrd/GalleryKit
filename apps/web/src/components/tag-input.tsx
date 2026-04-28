@@ -5,6 +5,7 @@ import { X, Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
+import { isValidTagName } from '@/lib/validation';
 
 export interface Tag {
     id: number;
@@ -67,6 +68,7 @@ export function TagInput({
     const cleanInputValue = inputValue.trim();
     const showCreateOption = cleanInputValue.length > 0
         && !cleanInputValue.includes(',')
+        && isValidTagName(cleanInputValue)
         && !exactMatch
         && !hasSelectedTag(selectedTags, cleanInputValue);
 
@@ -78,7 +80,7 @@ export function TagInput({
 
     const addTag = (tag: string) => {
         const clean = tag.trim();
-        if (!clean || clean.includes(',')) return;
+        if (!isValidTagName(clean)) return;
         const nextTag = resolveCanonicalTagName(availableTags, clean);
         if (!hasSelectedTag(selectedTags, nextTag)) {
             onTagsChange([...selectedTags, nextTag]);

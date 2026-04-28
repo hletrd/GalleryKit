@@ -8,6 +8,7 @@ import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit, getRateLimitBucketStart } from '@/lib/rate-limit';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { canonicalizeRequestedTagSlugs } from '@/lib/tag-slugs';
 
 type PublicImageListItem = Awaited<ReturnType<typeof getImagesLite>>[number];
 type PublicSearchItem = Awaited<ReturnType<typeof searchImages>>[number];
@@ -71,9 +72,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     // Cap maximum offset to prevent deep pagination DoS
     if (safeOffset > 10000) return { status: 'invalid', images: [], hasMore: false };
     // Cap tag array and validate format to prevent complex query DoS
-    const safeTags = (tagSlugs || [])
-        .slice(0, 20)
-        .map((slug) => slug.trim())
+    const safeTags = canonicalizeRequestedTagSlugs(tagSlugs || [])
         .filter(isValidTagSlug);
 
     const requestHeaders = await headers();

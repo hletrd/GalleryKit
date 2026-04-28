@@ -91,6 +91,13 @@ describe('searchImagesAction', () => {
         expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울', 'portrait'], 21, 10);
     });
 
+    it('canonicalizes duplicate load-more tag slugs before querying', async () => {
+        const result = await loadMoreImages('seoul', ['서울', ' portrait ', '서울', 'portrait'], 10, 20);
+
+        expect(result).toEqual({ status: 'ok', images: [{ id: 1 }], hasMore: false });
+        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울', 'portrait'], 21, 10);
+    });
+
     it('returns no results for queries that are too short after sanitization', async () => {
         await expect(searchImagesAction('\u0000 ')).resolves.toEqual({ status: 'invalid', results: [] });
         expect(searchImagesMock).not.toHaveBeenCalled();

@@ -125,7 +125,11 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
 
     if (!globalWithQueue[processingQueueKey]) {
         globalWithQueue[processingQueueKey] = {
-            queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 2 }),
+            // One image-processing job can already encode AVIF/WebP/JPEG and
+            // use multiple libvips workers. Default to one foreground-friendly
+            // job per web process; operators can raise QUEUE_CONCURRENCY after
+            // sizing it together with SHARP_CONCURRENCY.
+            queue: new PQueue({ concurrency: Number(process.env.QUEUE_CONCURRENCY) || 1 }),
             enqueued: new Set<number>(),
             retryCounts: new Map<number, number>(),
             claimRetryCounts: new Map<number, number>(),
@@ -245,9 +249,10 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
             try {
                 await fs.access(originalPath);
-            } catch {
-                console.error(`[Queue] File not found for job ${job.id}: ${originalPath}`);
-                return;
+            } catch (err) {
+                throw new Error(`[Queue] Original file not found for job ${job.id}: ${originalPath}`, {
+                    cause: err,
+                });
             }
 
             // Pass file path so Sharp uses native mmap instead of pinning on the heap.

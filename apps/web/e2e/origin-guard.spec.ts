@@ -25,7 +25,12 @@ import { adminE2EEnabled, createAdminSessionCookie } from './helpers';
  */
 
 test.describe('Origin guard — admin API rejects cross-origin requests', () => {
-    test('GET /api/admin/db/download without a trusted Origin returns 401/403', async ({ request, baseURL }) => {
+    test('authenticated origin-guard coverage is configured in CI', () => {
+        test.skip(process.env.CI !== 'true', 'Local runs may omit admin E2E credentials.');
+        expect(adminE2EEnabled).toBe(true);
+    });
+
+    test('unauthenticated cross-origin API smoke returns 401/403 without proving the origin branch', async ({ request, baseURL }) => {
         if (!baseURL) {
             test.skip(true, 'baseURL not configured for this runner');
             return;
