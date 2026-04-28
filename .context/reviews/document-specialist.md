@@ -1,57 +1,127 @@
-# Document Specialist — Cycle 4 Deep Review (2026-04-28)
+# Document Specialist Review — GalleryKit
 
-**HEAD:** `2e98281`
-**No commits made.**
+Scope: repository-wide documentation review focused on README / CLAUDE / AGENTS / deployment docs, configuration examples, and comments that contradict implementation. Generated/runtime artifacts (`node_modules`, `.git`, `.next`, `test-results`, `.omc`, `.omx` temp files) were excluded unless they were needed to verify behavior.
 
-## Inventory and method
+## Findings
 
-Reviewed the repository surfaces most likely to drift out of sync with docs or repo rules:
+### 1) Quick-start docs do not warn that uploads become visible only after background processing completes
 
-- Top-level docs and operating instructions: `README.md`, `CLAUDE.md`, `AGENTS.md`
-- App docs and env examples: `apps/web/README.md`, `apps/web/.env.local.example`, `apps/web/src/site-config.example.json`, `apps/web/src/site-config.json`
-- Deployment scripts/config: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`
-- Build/runtime guards and supporting code: `apps/web/scripts/ensure-site-config.mjs`, `apps/web/src/lib/{content-security-policy,request-origin,rate-limit,process-image,image-queue,db-restore,mysql-cli-ssl}.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`
-- API/auth/readiness surfaces and tests: `apps/web/src/app/api/{live,health,admin/db/download}/route.ts`, `apps/web/src/app/actions/{auth,settings,seo}.ts`, selected tests under `apps/web/src/__tests__/`, and Playwright surfaces in `apps/web/playwright.config.ts` and `apps/web/e2e/**`
-- UI-facing copy/i18n: `apps/web/messages/{en,ko}.json`, admin-facing copy in `apps/web/src/app/[locale]/admin/**`, and related tests
-- Uncommitted worktree files from `git status`: `.context/reviews/{_aggregate,architect,designer,perf-reviewer,test-engineer,tracer,verifier}.md`, `.gitignore`, `apps/web/playwright.config.ts`, `apps/web/src/__tests__/touch-target-audit.test.ts`, `apps/web/src/components/lightbox.tsx`, `apps/web/vitest.config.ts`
+- **Files / regions**
+  - `README.md:101-102`
+  - `apps/web/README.md:21`
+  - Supporting implementation: `apps/web/src/app/[locale]/(public)/page.tsx:14-16`, `apps/web/src/lib/data.ts:435-463`, `apps/web/src/app/actions/images.ts:373-388`
+- **Mismatch**
+  - The quick-start instructions say to upload one photo and then confirm the public homepage renders it, but the implementation only lists `processed=true` images on public pages and enqueues image conversion after the DB insert. A fresh upload is not guaranteed to appear immediately.
+- **Failure scenario**
+  - A new developer uploads a test photo, refreshes the homepage right away, and sees nothing because the Sharp queue has not finished yet. They may assume the upload failed when it only needs a short wait/refresh.
+- **Suggested fix**
+  - Add one sentence to the quick-start steps saying uploads are processed asynchronously and the homepage may take a moment to reflect the new photo.
+- **Severity**
+  - Medium
+- **Confidence**
+  - High
+- **Validation**
+  - Confirmed from source and targeted Vitest coverage.
 
-Final sweep re-ran targeted checks for `BASE_URL`, `IMAGE_BASE_URL`, `SHARP_CONCURRENCY`, `QUEUE_CONCURRENCY`, `TRUST_PROXY`, `E2E_ADMIN_PASSWORD`, `/api/live`, `/api/health`, and the touch-target audit language, then rechecked the deployment/build guards and Playwright helper code against the docs.
+### 2) Upload docs omit the hard 1 GiB free-space precheck
 
-## Findings summary
+- **Files / regions**
+  - `README.md:131-145`
+  - `apps/web/README.md:40-43`
+  - Supporting implementation: `apps/web/src/app/actions/images.ts:203-215`
+  - Supporting test: `apps/web/src/__tests__/images-actions.test.ts:260-272`
+- **Mismatch**
+  - The docs describe file-size and batch-size limits, but they do not mention that `uploadImages()` also rejects uploads when the upload volume has less than 1 GiB free space.
+- **Failure scenario**
+  - An operator sizes the batch limits correctly, but uploads still fail with `insufficientDiskSpace` on a nearly full volume. The failure looks like a mystery because the documented limits were respected.
+- **Suggested fix**
+  - Document the minimum free-space requirement alongside the upload limit settings and deployment notes.
+- **Severity**
+  - Medium
+- **Confidence**
+  - High
+- **Validation**
+  - Confirmed from source and targeted Vitest coverage.
 
-| ID | Severity | Confidence | Status | Summary |
-|---|---|---|---|---|
-| DS-01 | MEDIUM | High | Confirmed | Root/app README overstate production base-URL validation: the build guard only rejects placeholder `site-config.json.url` when `BASE_URL` is unset, so a bad `BASE_URL` still passes. |
-| DS-02 | LOW | High | Confirmed | `.env.local.example` implies `SHARP_CONCURRENCY` is a direct override, but runtime caps it to `cpuCount - 1`, so the example should say it is an upper bound. |
+### 3) Settings docs miss that `image_sizes` and `strip_gps_on_upload` are locked once images exist
 
-## Detailed findings
+- **Files / regions**
+  - `CLAUDE.md:176-180`
+  - `CLAUDE.md:197-198`
+  - Supporting implementation: `apps/web/src/app/actions/settings.ts:75-139`
+  - Supporting test: `apps/web/src/__tests__/settings-image-sizes-lock.test.ts`
+- **Mismatch**
+  - The docs describe image sizes as configurable and call out the upload-processing contract, but they do not say that changing `image_sizes` or `strip_gps_on_upload` is rejected once any image row already exists.
+- **Failure scenario**
+  - A maintainer uploads photos first and later tries to change the derivative sizes or GPS-stripping policy. The settings save fails with `imageSizesLocked` or `uploadSettingsLocked`, which is surprising if the lock was not documented.
+- **Suggested fix**
+  - Add an operational note that these settings must be finalized before the first image is added, or state explicitly that they are locked after the gallery has content.
+- **Severity**
+  - Medium
+- **Confidence**
+  - High
+- **Validation**
+  - Confirmed from source and targeted Vitest coverage.
 
-### DS-01 — Root/app README overstate production base-URL validation
+### 4) SEO docs omit the same-origin / relative-only restriction on OG image URLs
 
-- **Status:** Confirmed
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Files/regions:** `README.md:142-143`, `apps/web/README.md:36-38`, `apps/web/scripts/ensure-site-config.mjs:12-39`
-- **Why this is a problem:** The docs say production builds require a real absolute public URL and that placeholder examples are rejected. The build guard does reject the checked-in placeholder `site-config.json.url` when `BASE_URL` is absent, but it does **not** validate `BASE_URL` itself when that env var is present.
-- **Concrete failure scenario:** A deployer sets `BASE_URL=https://example.com` or even `BASE_URL=foo` in production. `ensure-site-config.mjs` exits 0, so the build proceeds despite the docs claiming placeholder or non-absolute URLs are rejected. The app can then ship with broken canonical/OG URLs and misleading metadata rather than failing fast.
-- **Suggested fix:** Tighten the docs to say the guard only validates the file-backed fallback when `BASE_URL` is unset, or tighten the script so it validates any provided `BASE_URL` before build. If you keep the current code, the docs should explicitly call out that `BASE_URL` itself is trusted as-is.
+- **Files / regions**
+  - `README.md:43-56`
+  - `apps/web/README.md:36-38`
+  - Supporting implementation: `apps/web/src/lib/seo-og-url.ts:3-30`, `apps/web/src/app/actions/seo.ts:130-142`
+  - Supporting test: `apps/web/src/__tests__/seo-actions.test.ts`
+- **Mismatch**
+  - The docs describe the OG image field as editable, but they do not say the value is restricted to either a root-relative path or a same-origin absolute URL.
+- **Failure scenario**
+  - An admin pastes a CDN or third-party URL into the OG image setting, then the save fails with `seoOgImageUrlInvalid`. Without the caveat, this looks like a broken admin form instead of a documented restriction.
+- **Suggested fix**
+  - Add the restriction to the SEO configuration docs and, ideally, to the admin UI helper text as well.
+- **Severity**
+  - Medium
+- **Confidence**
+  - High
+- **Validation**
+  - Confirmed from source and targeted Vitest coverage.
 
-### DS-02 — `SHARP_CONCURRENCY` example reads like a direct override, but runtime caps it
+### 5) Docker deployment docs omit that the container runs migrations before starting the server
 
-- **Status:** Confirmed
-- **Severity:** LOW
-- **Confidence:** High
-- **Files/regions:** `apps/web/.env.local.example:32-34`, `apps/web/src/lib/process-image.ts:17-26`
-- **Why this is a problem:** The env example says `SHARP_CONCURRENCY=10` "override[s] Sharp thread pool size", but the implementation takes `Math.min(envConcurrency, maxConcurrency)` where `maxConcurrency` is `cpuCount - 1`. The env var is therefore only an upper bound, not a direct setting.
-- **Concrete failure scenario:** On a 4-core host, an operator copies the example and expects 10 Sharp workers. The process actually runs with 3 workers, so they may misread the example as ignored or assume the runtime has a separate bug.
-- **Suggested fix:** Reword the example to something like "Upper bound for Sharp thread pool size; runtime caps at CPU parallelism minus one." That keeps the example honest without changing behavior.
+- **Files / regions**
+  - `README.md:165-181`
+  - `apps/web/README.md:34-46`
+  - Supporting implementation: `apps/web/Dockerfile:89-90`
+- **Mismatch**
+  - The deployment docs explain build and run steps, but they do not mention that the production container executes `node apps/web/scripts/migrate.js` every time it starts, before launching `node apps/web/server.js`.
+- **Failure scenario**
+  - An operator restarts the container expecting a quick process restart, but startup stalls or fails in the migration step because the database is unavailable or a migration needs attention.
+- **Suggested fix**
+  - Add a short note to the Docker deployment section that booting the image also runs migrations, so operators know where startup failures can occur.
+- **Severity**
+  - Medium
+- **Confidence**
+  - High
+- **Validation**
+  - Confirmed from source.
+
+### 6) `session.ts` contains a misleading “Dev-only fallback” comment
+
+- **Files / regions**
+  - `apps/web/src/lib/session.ts:40-45`
+- **Mismatch**
+  - The comment says the DB-backed secret path is “Dev-only,” but the code actually uses that fallback in every non-production environment, including test runs.
+- **Failure scenario**
+  - A maintainer reads the comment and assumes tests never touch the fallback path, which can hide accidental DB coupling or secret-handling regressions.
+- **Suggested fix**
+  - Change the comment to “Non-production fallback” or narrow the implementation if the fallback is truly intended only for development.
+- **Severity**
+  - Low
+- **Confidence**
+  - High
+- **Validation**
+  - Confirmed from source.
 
 ## Final sweep
 
-Rechecked the remaining likely drift surfaces after the two findings:
-
-- `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, and `apps/web/docker-compose.yml` still match the deployment instructions.
-- `apps/web/messages/en.json` / `apps/web/messages/ko.json` and the admin-facing copy inspected for this cycle did not expose any new doc/code mismatch.
-- The modified `apps/web/playwright.config.ts`, `apps/web/src/__tests__/touch-target-audit.test.ts`, `apps/web/src/components/lightbox.tsx`, and `apps/web/vitest.config.ts` stayed consistent with the surrounding comments and tests.
-
-No additional high-confidence documentation/code mismatches surfaced in the final sweep.
+- Reviewed the primary docs and deployment surface: `README.md`, `CLAUDE.md`, `AGENTS.md`, `apps/web/README.md`, `.env` examples, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, and `apps/web/Dockerfile`.
+- Reviewed the runtime/config/code paths that those docs describe: `next.config.ts`, `proxy.ts`, `content-security-policy.ts`, `request-origin.ts`, `rate-limit.ts`, `session.ts`, `seo-og-url.ts`, `gallery-config*.ts`, `upload-limits.ts`, `upload-paths.ts`, `settings.ts`, `seo.ts`, `images.ts`, `data.ts`, and the public-page routing files.
+- Verified behavior with targeted Vitest runs covering request origin, rate limiting, health checks, SEO validation, backup downloads, session handling, validation/sanitization, upload settings locking, image queueing, upload limits, restore maintenance, and config guards.
+- Excluded generated/runtime artifacts and temp outputs unless they were needed to verify behavior.
