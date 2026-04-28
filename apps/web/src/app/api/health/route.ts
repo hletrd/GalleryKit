@@ -15,6 +15,15 @@ export async function GET() {
         });
     }
 
+    if (process.env.HEALTH_CHECK_DB !== 'true') {
+        return Response.json({ status: 'ok' }, {
+            headers: {
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+            },
+        });
+    }
+
     let dbOk = false;
     try {
         await db.execute(sql`SELECT 1`);

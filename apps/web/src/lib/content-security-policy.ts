@@ -33,16 +33,23 @@ export function getCspImageSources(imageBaseUrl: URL | null): string[] {
   return sources;
 }
 
+function hasGoogleAnalyticsId(value: string | undefined | null): boolean {
+  return /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(value?.trim() ?? '');
+}
+
 export function buildContentSecurityPolicy({
   nonce,
   isDev = process.env.NODE_ENV === 'development',
   imageBaseUrl = parseCspImageBaseUrl(process.env.IMAGE_BASE_URL?.trim()),
+  googleAnalyticsId = process.env.NEXT_PUBLIC_GA_ID,
 }: {
   nonce?: string;
   isDev?: boolean;
   imageBaseUrl?: URL | null;
+  googleAnalyticsId?: string | null;
 } = {}) {
   const imgSrc = getCspImageSources(imageBaseUrl).join(' ');
+  const includeGoogleAnalytics = hasGoogleAnalyticsId(googleAnalyticsId);
 
   if (isDev) {
     return [
@@ -56,7 +63,7 @@ export function buildContentSecurityPolicy({
   }
 
   const scriptSources = ["'self'"];
-  if (process.env.NEXT_PUBLIC_GA_ID) {
+  if (includeGoogleAnalytics) {
     scriptSources.push('https://www.googletagmanager.com');
   }
   if (nonce) {
@@ -64,7 +71,7 @@ export function buildContentSecurityPolicy({
   }
 
   const connectSources = ["'self'"];
-  if (process.env.NEXT_PUBLIC_GA_ID) {
+  if (includeGoogleAnalytics) {
     connectSources.push('https://www.google-analytics.com');
   }
 

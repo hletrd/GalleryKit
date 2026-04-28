@@ -2,6 +2,7 @@ import createMiddleware from 'next-intl/middleware';
 import { NextRequest, NextResponse } from 'next/server';
 import { LOCALES, DEFAULT_LOCALE } from '@/lib/constants';
 import { buildContentSecurityPolicy } from '@/lib/content-security-policy';
+import siteConfig from '@/site-config.json';
 
 const intlMiddleware = createMiddleware({
   locales: [...LOCALES],
@@ -41,7 +42,11 @@ function withProductionCspRequest(request: NextRequest): NextRequest {
   const nonce = crypto.randomUUID().replace(/-/g, '');
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-nonce', nonce);
-  requestHeaders.set('Content-Security-Policy', buildContentSecurityPolicy({ nonce, isDev: false }));
+  requestHeaders.set('Content-Security-Policy', buildContentSecurityPolicy({
+    nonce,
+    isDev: false,
+    googleAnalyticsId: siteConfig.google_analytics_id,
+  }));
   return getRequestWithHeaders(request, requestHeaders);
 }
 

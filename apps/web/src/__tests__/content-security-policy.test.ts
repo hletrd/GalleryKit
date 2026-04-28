@@ -6,16 +6,28 @@ describe('buildContentSecurityPolicy', () => {
   it('uses nonces instead of unsafe-inline for production scripts', () => {
     const originalGaId = process.env.NEXT_PUBLIC_GA_ID;
     try {
-      // With GA ID set, include GA domains
-      process.env.NEXT_PUBLIC_GA_ID = 'G-TEST123';
-      const cspWithGa = buildContentSecurityPolicy({ nonce: 'abc123', isDev: false, imageBaseUrl: null });
+      // With explicit site-config GA ID, include GA domains even when the env
+      // knob is absent. This mirrors layout.tsx, which renders from
+      // site-config.json rather than NEXT_PUBLIC_GA_ID.
+      delete process.env.NEXT_PUBLIC_GA_ID;
+      const cspWithGa = buildContentSecurityPolicy({
+        nonce: 'abc123',
+        isDev: false,
+        imageBaseUrl: null,
+        googleAnalyticsId: 'G-TEST123',
+      });
       expect(cspWithGa).toContain("script-src 'nonce-abc123' 'self' https://www.googletagmanager.com");
       expect(cspWithGa).toContain("connect-src 'self' https://www.google-analytics.com");
       expect(cspWithGa).not.toContain("script-src 'unsafe-inline'");
 
       // Without GA ID, omit GA domains
       delete process.env.NEXT_PUBLIC_GA_ID;
-      const cspNoGa = buildContentSecurityPolicy({ nonce: 'abc123', isDev: false, imageBaseUrl: null });
+      const cspNoGa = buildContentSecurityPolicy({
+        nonce: 'abc123',
+        isDev: false,
+        imageBaseUrl: null,
+        googleAnalyticsId: '',
+      });
       expect(cspNoGa).toContain("script-src 'nonce-abc123' 'self'");
       expect(cspNoGa).not.toContain('googletagmanager.com');
       expect(cspNoGa).not.toContain('google-analytics.com');

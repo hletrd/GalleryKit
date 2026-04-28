@@ -26,6 +26,12 @@ function buildRemotePattern(
 }
 
 const imageBaseUrl = parseImageBaseUrl(process.env.IMAGE_BASE_URL?.trim());
+const localImagePatterns: NonNullable<NonNullable<NextConfig['images']>['localPatterns']> = [
+  { pathname: '/uploads/**' },
+  { pathname: '/uploads/**', search: '?**' },
+  { pathname: '/resources/**' },
+  { pathname: '/resources/**', search: '?**' },
+];
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -63,15 +69,7 @@ const nextConfig: NextConfig = {
   },
   images: {
     formats: ['image/avif', 'image/webp'],
-    localPatterns: [
-      {
-        pathname: '/**',
-      },
-      {
-        pathname: '/**',
-        search: '?**',
-      },
-    ],
+    localPatterns: localImagePatterns,
     remotePatterns: buildRemotePattern(imageBaseUrl),
   },
 };

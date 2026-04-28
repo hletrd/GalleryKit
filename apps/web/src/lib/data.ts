@@ -636,7 +636,7 @@ export async function getImage(id: number) {
 // unauthenticated visitors. See CLAUDE.md "Privacy" section.
 export async function getImageByShareKey(key: string) {
     const trimmedKey = (key || '').trim();
-    if (!isBase56(trimmedKey, [5, 10])) {
+    if (!isBase56(trimmedKey, 10)) {
         return null;
     }
 
@@ -681,7 +681,7 @@ export async function getSharedGroup(
     options?: { incrementViewCount?: boolean },
 ) {
     const trimmedKey = (key || '').trim();
-    if (!isBase56(trimmedKey, [6, 10])) {
+    if (!isBase56(trimmedKey, 10)) {
         return null;
     }
 
