@@ -1,192 +1,280 @@
-# Product Marketer Reviewer — PROMPT 1 Cycle 5
+# Product Marketing Review — GalleryKit
 
+Reviewer role: `product-marketer-reviewer`
 Repo: `/Users/hletrd/flash-shared/gallery`
-Lane: `product-marketer-reviewer`
-Review date: 2026-04-25 (Asia/Seoul)
-Scope: product-facing copy, docs/onboarding, admin/public user flows, metadata/SEO, i18n, discoverability, and promise-vs-implementation mismatches. No implementation or commits performed.
+Output: `.context/reviews/product-marketer-reviewer.md`
+Scope: product messaging, onboarding, README/SEO/metadata, empty states, user-facing copy, discoverability, trust, and market-positioning consistency. This pass is read-only except for this review artifact.
 
-## Inventory reviewed
+## Review-relevant inventory
 
-- Product docs/onboarding/config: `README.md`, `CLAUDE.md`, `apps/web/README.md`, `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/deploy.sh`.
-- Localized copy/i18n: `apps/web/messages/en.json`, `apps/web/messages/ko.json`; verified both locale files contain 517 leaf keys with no missing keys in either direction.
-- Public routes/flows: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `p/[id]/page.tsx`, `s/[key]/page.tsx`, `g/[key]/page.tsx`, public layout, upload route, and supporting components (`Nav`, `Footer`, `HomeClient`, `Search`, `TagFilter`, `PhotoViewer`, `InfoBottomSheet`).
-- Admin routes/flows: login, dashboard/upload, image manager, categories, tags, SEO, settings, password, users, DB backup/restore, and shared admin components (`AdminHeader`, `AdminNav`, `AdminUserManager`, `UploadDropzone`, `ImageManager`).
-- Metadata/discoverability: localized root metadata, photo/topic/share metadata, JSON-LD, `/api/og`, `manifest.ts`, `robots.ts`, `sitemap.ts`, `seo-og-url.ts`, SEO/admin settings actions.
-- Tests/docs as user-flow specs: `apps/web/e2e/public.spec.ts`, `admin.spec.ts`, `nav-visual-check.spec.ts`, `origin-guard.spec.ts`, `test-fixes.spec.ts`, `helpers.ts`, and SEO/settings/upload-related unit tests discovered during inspection.
+I excluded `node_modules`, `.git`, build/output/generated artifacts, uploaded image derivatives, and prior review/context artifacts. I inspected the following review-relevant docs, configs, routes, metadata generators, UI copy, admin/public components, user-facing actions, deployment files, and tests.
 
-## Findings summary
+<details>
+<summary>Inventory of inspected files (146)</summary>
 
-| ID | Severity | Confidence | Status | Finding |
-| --- | --- | --- | --- | --- |
-| PMR5-01 | HIGH | High | Confirmed | Production builds can ship localhost canonical/OG/sitemap URLs because the committed default config is accepted as production-valid. |
-| PMR5-02 | HIGH | High | Confirmed | The “Add Admin” dialog copy understates that new users receive full root-admin powers. |
-| PMR5-03 | MEDIUM | High | Confirmed | The GPS privacy switch remains interactive even though the server rejects changes once images exist. |
-| PMR5-04 | MEDIUM | High | Confirmed risk | Photo metadata can emit blank-author snippets and JSON-LD when the documented example config is used as-is. |
-| PMR5-05 | MEDIUM | High | Confirmed | One global, free-text OG locale setting is emitted on every localized page, making either English or Korean pages wrong. |
-| PMR5-06 | LOW | High | Confirmed | Upload copy advertises only the 2GB upload-window cap, hiding the hard 200MB per-file cap until after failure. |
-| PMR5-07 | LOW | High | Confirmed | `parent_url` is documented and shipped in config but is unused, creating a false customization promise. |
-| PMR5-08 | MEDIUM | Medium | Risk | The shipped nginx sample contains a real demo domain and a container-root path that conflicts with the documented host-nginx deployment. |
-
-## Detailed findings
-
-### PMR5-01 — Production builds can ship localhost canonical/OG/sitemap URLs because the committed default config is accepted as production-valid
-
-- **Severity:** HIGH
-- **Confidence:** High
-- **Status:** Confirmed
-- **Exact file:line/code region:** `apps/web/src/site-config.json:1-11`; `apps/web/scripts/ensure-site-config.mjs:11-32`; `apps/web/src/lib/data.ts:883-890`; `apps/web/src/app/[locale]/layout.tsx:16-40`; `apps/web/src/app/sitemap.ts:10-57`; onboarding reminder at `README.md:166-175`.
-- **Evidence:** The checked-in `site-config.json` uses `url: "http://localhost:3000"` and `parent_url: "http://localhost:3000"`. The production guard only rejects missing URLs, invalid URLs, and `example.com`/`www.example.com` placeholders; `localhost`, `127.0.0.1`, and private/internal hosts pass. Runtime SEO then uses `process.env.BASE_URL || siteConfig.url` for metadata, OG, and sitemap URL generation.
-- **Concrete user/business failure scenario:** A self-hoster follows Docker deployment, forgets `BASE_URL`, and leaves the committed config in place. The site deploys successfully, but canonical URLs, Open Graph URLs, sitemap entries, and localized alternates point crawlers/social unfurlers at `http://localhost:3000`, causing broken previews, poor indexing, and avoidable support/debugging for a production gallery.
-- **Suggested fix:** Make production/deploy builds reject loopback, `.local`, private-network, and plaintext non-development origins unless explicitly allowed. Prefer requiring `BASE_URL` in production or replacing the committed real config with a generated/gitignored file plus example. Add a build/test assertion that `NODE_ENV=production` with `site-config.url=http://localhost:3000` fails.
-
-### PMR5-02 — The “Add Admin” dialog copy understates that new users receive full root-admin powers
-
-- **Severity:** HIGH
-- **Confidence:** High
-- **Status:** Confirmed
-- **Exact file:line/code region:** `apps/web/messages/en.json:43-49`; `apps/web/messages/ko.json:43-49`; `apps/web/src/components/admin-user-manager.tsx:92-99`; full admin surface listed in `apps/web/src/components/admin-nav.tsx:15-23`; product/schema note at `README.md:37` and `CLAUDE.md:157-160`.
-- **Evidence:** The user-creation dialog says “Add Admin” / “Adds dashboard access.” Korean copy says “대시보드 접근 권한 부여.” The docs and schema notes clarify there is no role/capability model and every admin can upload/edit, change settings, export/restore DB backups, and manage other admins. The admin nav exposes those areas to all admins.
-- **Concrete user/business failure scenario:** A gallery owner creates an account for a helper, translator, or uploader believing it grants limited dashboard access. That account can restore/overwrite the database, export private data, change SEO/settings, and manage other admins, turning a copy ambiguity into a trust and operational-risk failure.
-- **Suggested fix:** Change dialog/help copy in both locales to state “Creates a full root admin with access to uploads, settings, users, and database backup/restore; roles are not supported yet.” Consider adding a confirmation step for new admins until role separation exists.
-
-### PMR5-03 — The GPS privacy switch remains interactive even though the server rejects changes once images exist
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** Confirmed
-- **Exact file:line/code region:** `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:8-23`; `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:142-185`; `apps/web/src/app/actions/settings.ts:112-129`; copy at `apps/web/messages/en.json:550-570` and `apps/web/messages/ko.json:550-570`.
-- **Evidence:** The settings page passes `hasExistingImages={imageCount > 0}`. Output sizes are disabled when images exist and show a locked hint, but the `strip-gps` switch remains enabled. The server action later rejects a changed `strip_gps_on_upload` value when any image exists and returns `uploadSettingsLocked`.
-- **Concrete user/business failure scenario:** An admin realizes after initial uploads that GPS should not be stored. The visible privacy control appears changeable, they toggle it and save, then receive a rejection only after submission. For a privacy-sensitive setting, this feels like the product is either broken or hiding state, and it delays remediation of a location-data concern.
-- **Suggested fix:** Disable the GPS switch whenever `hasExistingImages` is true and pair it with the same locked-state affordance as output sizes. If post-upload privacy changes are a supported product goal, implement and document a migration/delete-GPS workflow instead of showing an interactive but rejected switch.
-
-### PMR5-04 — Photo metadata can emit blank-author snippets and JSON-LD when the documented example config is used as-is
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** Confirmed risk
-- **Exact file:line/code region:** `README.md:93-97`; `apps/web/src/site-config.example.json:1-12`; `apps/web/src/app/actions/seo.ts:35-43`; `apps/web/src/lib/data.ts:883-890`; `apps/web/messages/en.json:505-511`; `apps/web/messages/ko.json:505-511`; `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:83-105` and `138-149`; SEO admin copy at `apps/web/messages/en.json:325-329` / `ko.json:325-329`.
-- **Evidence:** Quick start instructs copying `site-config.example.json` to `site-config.json`; that example leaves `author` empty. Admin SEO settings return an empty `seo_author` by default, and runtime falls back to `siteConfig.author`. Photo pages use `seo.author` in meta descriptions, OG/Twitter descriptions, `authors`, `creditText`, `creator.name`, and `copyrightNotice` when a photo has no description.
-- **Concrete user/business failure scenario:** A photographer launches with the example config and does not fill in Author because the UI says leaving it empty uses the default. Public photo cards/search snippets can render awkward strings such as “View photo by  (Sunset)”, while JSON-LD contains empty creator/copyright fields. That weakens attribution, professional polish, and rich-result trust.
-- **Suggested fix:** Make author either explicitly required for photo attribution or safe when blank. If blank, omit `authors`, `creditText`, `creator`, and `copyrightNotice`, and use neutral copy such as “View photo {title}.” Alternatively, fall back to site title/owner and make the example author a clear placeholder that production validation rejects until changed.
-
-### PMR5-05 — One global, free-text OG locale setting is emitted on every localized page, making either English or Korean pages wrong
-
-- **Severity:** MEDIUM
-- **Confidence:** High
-- **Status:** Confirmed
-- **Exact file:line/code region:** SEO setting key at `apps/web/src/lib/gallery-config-shared.ts:25-31`; default locale at `apps/web/src/site-config.json:6` and `apps/web/src/site-config.example.json:6`; global metadata at `apps/web/src/app/[locale]/layout.tsx:16-40`; admin UI at `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:144-153`; validation at `apps/web/src/app/actions/seo.ts:91-93`; copy at `apps/web/messages/en.json:328-329` and `apps/web/messages/ko.json:328-329`.
-- **Evidence:** The app has localized `/en` and `/ko` routes, but root metadata ignores route params and emits one `seo.locale` value for every localized page. The admin field is free text, with only a max-length check, so invalid values such as `ko-KR` or `Korean` can be saved and emitted. If the admin changes the global setting to `ko_KR`, English pages become wrong; if left at default `en_US`, Korean pages are wrong.
-- **Concrete user/business failure scenario:** Korean pages shared into Kakao/Facebook/Open Graph consumers declare `og:locale=en_US`, or English pages declare `ko_KR` after a Korean-focused admin change. Social platforms and crawlers receive inconsistent language signals, hurting localized preview quality and discoverability.
-- **Suggested fix:** Derive Open Graph locale from the current route locale (`en -> en_US`, `ko -> ko_KR`) and keep `alternateLocale` route-aware. If admins need customization, expose a validated per-locale mapping/dropdown rather than one global free-text field.
-
-### PMR5-06 — Upload copy advertises only the 2GB upload-window cap, hiding the hard 200MB per-file cap until after failure
-
-- **Severity:** LOW
-- **Confidence:** High
-- **Status:** Confirmed
-- **Exact file:line/code region:** Visible upload hint at `apps/web/src/components/upload-dropzone.tsx:344-358`; localized copy at `apps/web/messages/en.json:141-148` and `apps/web/messages/ko.json:141-148`; exposed upload-window limits at `apps/web/src/lib/upload-limits.ts:1-24`; hidden hard cap at `apps/web/src/lib/process-image.ts:39-43` and `224-227`; generic all-failed response at `apps/web/src/app/actions/images.ts:317-330` plus `apps/web/messages/en.json:401-405` / `ko.json:401-405`.
-- **Evidence:** The dropzone tells admins “Up to 100 files and 2GB per upload window.” The client-facing upload limits module exposes total/window caps only. Actual processing rejects any single file larger than 200MB, then the action suppresses the specific error and returns the generic “All uploads failed” if no file succeeds.
-- **Concrete user/business failure scenario:** A photographer with a 300MB TIFF/RAW-adjacent image sees the 2GB window promise, selects the file, waits for upload/processing, and receives a generic failure. The product appears unreliable and the admin cannot tell whether compression, format, network, or size caused the failure.
-- **Suggested fix:** Export the per-file cap as a shared constant, pass it to the dropzone as `maxSize`, and update copy to “up to 200MB per file, 2GB total per upload window.” Preserve and localize per-file rejection reasons where safe.
-
-### PMR5-07 — `parent_url` is documented and shipped in config but is unused, creating a false customization promise
-
-- **Severity:** LOW
-- **Confidence:** High
-- **Status:** Confirmed
-- **Exact file:line/code region:** `README.md:43-57`; `apps/web/src/site-config.json:1-11`; `apps/web/src/site-config.example.json:1-12`; repository-wide search only finds `parent_url` in those docs/config files.
-- **Evidence:** Product configuration documentation lists `parent_url` alongside visible settings like title, description, URL, nav title, footer text, and analytics ID. The field is also present in shipped config files, but no application source reads it.
-- **Concrete user/business failure scenario:** A site owner configures `parent_url` expecting a backlink, canonical parent, portfolio-home link, or licensing page relationship. Nothing changes in the UI or metadata, so onboarding teaches a setting that does not exist as product behavior.
-- **Suggested fix:** Remove `parent_url` from the documented/shipped config until it has a supported purpose, or wire it to a named product feature with explicit copy (for example “portfolio home URL” or “license page URL”) and tests.
-
-### PMR5-08 — The shipped nginx sample contains a real demo domain and a container-root path that conflicts with the documented host-nginx deployment
-
-- **Severity:** MEDIUM
-- **Confidence:** Medium
-- **Status:** Risk
-- **Exact file:line/code region:** Docker/host-nginx guidance at `README.md:142-145` and `README.md:164-175`; host-network comments/volumes at `apps/web/docker-compose.yml:13-25`; sample nginx config at `apps/web/nginx/default.conf:12-20` and `93-99`; deploy output at `apps/web/deploy.sh:27-34`.
-- **Evidence:** The README and Compose comments describe a Linux host-network app with nginx running on the host. The shipped nginx sample hard-codes `server_name gallery.atik.kr` and serves processed uploads from `root /app/apps/web/public`, a path that exists in the container mount but not necessarily on the host. The deploy script only says the app is at localhost and data is under `apps/web/data`/`apps/web/public`.
-- **Concrete user/business failure scenario:** A self-hoster copies the included nginx config as the obvious production reverse-proxy template. Their domain does not match `gallery.atik.kr`, and direct upload serving may 404 because the host nginx cannot find `/app/apps/web/public`. The first production deployment looks broken even though the app container is healthy.
-- **Suggested fix:** Turn `default.conf` into a template with placeholders (`YOUR_DOMAIN`, absolute host path to `apps/web/public`) and add replacement instructions to Docker deployment docs, or ship a containerized nginx service whose paths match the compose mounts. The deploy script should warn that the nginx file is not copy-paste-ready until customized.
-
-## Final missed-issues sweep
-
-- Revalidated the Cycle 4 product findings before carrying anything forward. The CC BY-NC JSON-LD license, global OG override for photo/share pages, `/api/og` static branding, robots share-route disallow, broad OG URL hint, and visible processing-concurrency promise are no longer open in the same form, so they are not repeated as Cycle 5 findings.
-- Searched for locale-copy drift and verified `en.json`/`ko.json` key parity: 517 leaf keys each, no missing keys.
-- Searched product promises around `parent_url`, `seo_locale`, upload limits, GPS stripping, admin roles, sitemap/metadata, manifest, share/photo/topic metadata, and deployment/nginx docs.
-- Reviewed existing test coverage as product-flow documentation; no tests were run because this was a read-only markdown review and no code behavior was changed.
-- No implementation, dependency changes, commits, or pushes were performed.
-
-## Files reviewed
-
+- `.github/assets/logo.svg`
+- `.github/workflows/quality.yml`
 - `README.md`
-- `CLAUDE.md`
-- `apps/web/README.md`
-- `.env.deploy.example`
+- `package.json`
 - `apps/web/.env.local.example`
-- `apps/web/src/site-config.json`
-- `apps/web/src/site-config.example.json`
-- `apps/web/scripts/ensure-site-config.mjs`
+- `apps/web/Dockerfile`
+- `apps/web/README.md`
 - `apps/web/docker-compose.yml`
-- `apps/web/nginx/default.conf`
-- `apps/web/deploy.sh`
+- `apps/web/e2e/admin.spec.ts`
+- `apps/web/e2e/helpers.ts`
+- `apps/web/e2e/nav-visual-check.spec.ts`
+- `apps/web/e2e/origin-guard.spec.ts`
+- `apps/web/e2e/public.spec.ts`
+- `apps/web/e2e/test-fixes.spec.ts`
 - `apps/web/messages/en.json`
 - `apps/web/messages/ko.json`
-- `apps/web/src/lib/constants.ts`
-- `apps/web/src/lib/locale-path.ts`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/gallery-config.ts`
-- `apps/web/src/lib/seo-og-url.ts`
-- `apps/web/src/lib/upload-limits.ts`
-- `apps/web/src/lib/process-image.ts`
-- `apps/web/src/app/[locale]/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/next.config.ts`
+- `apps/web/package.json`
+- `apps/web/src/__tests__/client-source-contracts.test.ts`
+- `apps/web/src/__tests__/data-tag-names-sql.test.ts`
+- `apps/web/src/__tests__/error-shell.test.ts`
+- `apps/web/src/__tests__/gallery-config-shared.test.ts`
+- `apps/web/src/__tests__/locale-path.test.ts`
+- `apps/web/src/__tests__/next-config.test.ts`
+- `apps/web/src/__tests__/photo-title.test.ts`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/public-actions.test.ts`
+- `apps/web/src/__tests__/safe-json-ld.test.ts`
+- `apps/web/src/__tests__/seo-actions.test.ts`
+- `apps/web/src/__tests__/shared-page-title.test.ts`
+- `apps/web/src/__tests__/touch-target-audit.test.ts`
 - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
 - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
 - `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
-- `apps/web/src/app/[locale]/admin/page.tsx`
-- `apps/web/src/app/[locale]/admin/login-form.tsx`
-- `apps/web/src/app/[locale]/admin/layout.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
 - `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/app/[locale]/admin/layout.tsx`
+- `apps/web/src/app/[locale]/admin/login-form.tsx`
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/error.tsx`
+- `apps/web/src/app/[locale]/globals.css`
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/loading.tsx`
+- `apps/web/src/app/[locale]/not-found.tsx`
+- `apps/web/src/app/actions.ts`
+- `apps/web/src/app/actions/admin-users.ts`
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/public.ts`
 - `apps/web/src/app/actions/seo.ts`
 - `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/app/api/health/route.ts`
+- `apps/web/src/app/api/live/route.ts`
 - `apps/web/src/app/api/og/route.tsx`
+- `apps/web/src/app/apple-icon.tsx`
+- `apps/web/src/app/global-error.tsx`
+- `apps/web/src/app/icon.tsx`
 - `apps/web/src/app/manifest.ts`
 - `apps/web/src/app/robots.ts`
 - `apps/web/src/app/sitemap.ts`
-- `apps/web/src/proxy.ts`
-- `apps/web/src/components/nav.tsx`
-- `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/home-client.tsx`
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/tag-filter.tsx`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/app/uploads/[...path]/route.ts`
 - `apps/web/src/components/admin-header.tsx`
 - `apps/web/src/components/admin-nav.tsx`
 - `apps/web/src/components/admin-user-manager.tsx`
-- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/histogram.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/i18n-provider.tsx`
 - `apps/web/src/components/image-manager.tsx`
-- `apps/web/e2e/public.spec.ts`
-- `apps/web/e2e/admin.spec.ts`
-- `apps/web/e2e/nav-visual-check.spec.ts`
-- `apps/web/e2e/origin-guard.spec.ts`
-- `apps/web/e2e/test-fixes.spec.ts`
-- `apps/web/e2e/helpers.ts`
+- `apps/web/src/components/image-zoom.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/lazy-focus-trap.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/optimistic-image.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/photo-viewer-loading.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/tag-input.tsx`
+- `apps/web/src/components/theme-provider.tsx`
+- `apps/web/src/components/topic-empty-state.tsx`
+- `apps/web/src/components/ui/alert-dialog.tsx`
+- `apps/web/src/components/ui/alert.tsx`
+- `apps/web/src/components/ui/aspect-ratio.tsx`
+- `apps/web/src/components/ui/badge.tsx`
+- `apps/web/src/components/ui/button.tsx`
+- `apps/web/src/components/ui/card.tsx`
+- `apps/web/src/components/ui/dialog.tsx`
+- `apps/web/src/components/ui/dropdown-menu.tsx`
+- `apps/web/src/components/ui/input.tsx`
+- `apps/web/src/components/ui/label.tsx`
+- `apps/web/src/components/ui/progress.tsx`
+- `apps/web/src/components/ui/scroll-area.tsx`
+- `apps/web/src/components/ui/select.tsx`
+- `apps/web/src/components/ui/separator.tsx`
+- `apps/web/src/components/ui/sheet.tsx`
+- `apps/web/src/components/ui/skeleton.tsx`
+- `apps/web/src/components/ui/sonner.tsx`
+- `apps/web/src/components/ui/switch.tsx`
+- `apps/web/src/components/ui/table.tsx`
+- `apps/web/src/components/ui/textarea.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/lib/constants.ts`
+- `apps/web/src/lib/content-security-policy.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/error-shell.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/image-url.ts`
+- `apps/web/src/lib/locale-path.ts`
+- `apps/web/src/lib/photo-title.ts`
+- `apps/web/src/lib/safe-json-ld.ts`
+- `apps/web/src/lib/sanitize.ts`
+- `apps/web/src/lib/seo-og-url.ts`
+- `apps/web/src/lib/validation.ts`
+- `apps/web/src/site-config.example.json`
+- `apps/web/src/site-config.json`
+
+</details>
+
+## Findings
+
+### 1. Quickstart promises “upload one photo” before the product has a category to upload into
+
+- **Severity:** High
+- **Confidence:** High
+- **Category:** Confirmed
+- **Evidence:**
+  - `README.md:97-101` runs `npm run init --workspace=apps/web`, starts dev, then tells the owner to “log in at `/en/admin`, upload one photo”.
+  - `apps/web/README.md:17-21` repeats the same `npm run init` / `npm run dev` path and “upload one photo” instruction.
+  - `apps/web/package.json:17-18` defines `db:seed` as admin-only seeding and `init` as `tsx scripts/init-db.ts`.
+  - `apps/web/scripts/init-db.ts:24-31` only executes `node scripts/migrate.js`.
+  - `apps/web/scripts/migrate.js:502-522` seeds only the default `admin` user; `apps/web/scripts/migrate.js:540-542` then calls that admin seed after migrations.
+  - `apps/web/src/components/upload-dropzone.tsx:178-183` disables the dropzone when `!hasTopics`, and `apps/web/src/components/upload-dropzone.tsx:312-316` renders “Create a category before uploading”.
+  - `apps/web/messages/en.json:141-142` confirms the no-category state: “Create a category before uploading” and “Photos need a category before they can be uploaded.”
+  - `apps/web/e2e/admin.spec.ts:66-81` uploads into a pre-existing `e2e-smoke` category, so the documented fresh-install path is not protected by the current E2E happy path.
+- **Problem:** The README onboarding path is not actually executable on a fresh database. The install docs skip the required “create a category” step, but the upload UI hard-blocks uploads until a category exists.
+- **User/business failure scenario:** A self-hosting evaluator follows the quickstart, signs in, tries to validate the app by uploading a first photo, and hits a disabled upload area. The first-run moment looks broken rather than guided, which can cause churn before the product demonstrates its core value.
+- **Suggested fix:** Update both READMEs to insert “create a category” before “upload one photo”; add an obvious CTA from the no-category upload state to `/admin/categories`; and/or seed a default “Gallery” category during `init` if that is acceptable for new installs. Add a first-run E2E test that starts with only the admin user and verifies the owner can discover the category prerequisite.
+
+### 2. The public first-run empty state is a dead end for owners and visitors
+
+- **Severity:** Medium
+- **Confidence:** High
+- **Category:** Confirmed
+- **Evidence:**
+  - `apps/web/src/components/home-client.tsx:270-284` renders the empty gallery state as only an icon plus `home.noImages`; the clear-filter hint appears only when tag filters are active.
+  - `apps/web/messages/en.json:200-216` defines the empty state as “No photos.”, with “Try fewer filters” only for filtered empty results.
+  - `apps/web/messages/ko.json:200-216` mirrors the same compact empty-state structure for Korean.
+  - `apps/web/src/components/footer.tsx:49-50` includes an `Admin` link, but it is a small footer link and is not connected to the empty-state recovery path.
+- **Problem:** The same sparse empty state is used for a genuinely empty new gallery and for a filtered result with no matches. It does not explain whether the site is newly set up, whether the visitor should come back later, or how the owner can add the first photo.
+- **User/business failure scenario:** A gallery owner shares the new public URL before adding content, or opens it after deployment to validate the install. Visitors see “No photos.” and may assume the app, database, or upload pipeline is broken. The owner has no contextual next step in the main content area.
+- **Suggested fix:** Split the copy and UI into two cases: zero-library and filtered-empty. For zero-library, use a warmer message such as “No photos yet” plus an owner-oriented CTA (“Sign in to add photos” or “Open admin”) where appropriate. For filtered-empty, keep the current “Try fewer filters” / “Clear” recovery path.
+
+### 3. Core taxonomy drifts across “Topics”, “Albums”, “Categories”, “Shared Album”, and “Shared Photos”
+
+- **Severity:** Medium
+- **Confidence:** High
+- **Category:** Confirmed
+- **Evidence:**
+  - `README.md:31-37` markets the feature as “Topics & Albums” while explaining that photos are organized into “categories”.
+  - `apps/web/messages/en.json:64-98` uses `manageTopics` internally but exposes the admin concept as “Categories”, with fields “Name” and “Slug”.
+  - `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:161-183` presents the management UI as “Categories”.
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:67-73` builds topic/category page metadata from `topicData.label` and the translation key `photosInTopic`.
+  - `apps/web/messages/en.json:274-281` labels a shared collection as “Shared Album”.
+  - `apps/web/messages/en.json:299-311` labels the group-share route as “Shared Photos”, while its not-found copy says “Shared album not found” and its not-found description says “shared collection”.
+- **Problem:** The product’s information architecture is not stable. The README sells “topics and albums”; the admin UI asks users to create “categories”; the route code and internal naming still say “topic”; share pages alternate between “album”, “photos”, and “collection”.
+- **User/business failure scenario:** A prospective user reads the README expecting album management, then lands in an admin UI with categories and no album primitive. When they send a “Shared Album” link, recipients may expect a persistent album page, but the product is actually a generated share collection. This weakens product positioning and increases support/documentation friction.
+- **Suggested fix:** Choose a single public taxonomy and apply it consistently. If the target buyer is photographers/families, “Albums” may be more intuitive than “Categories”; if the technical structure should remain categories, then remove “Albums” from marketing copy and call share links “shared collections” or “shared links”. Keep internal `topic` names if desired, but align all visible README, admin, route metadata, and share copy.
+
+### 4. Filtered-page SEO uses raw tag slugs while the visible UI uses humanized tag labels
+
+- **Severity:** Medium
+- **Confidence:** High
+- **Category:** Confirmed
+- **Evidence:**
+  - `apps/web/src/app/[locale]/(public)/page.tsx:33-43` generates filtered home-page metadata from `tagSlugs`, producing titles like `#music_festival | Site` and descriptions from raw slug strings.
+  - `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:63-73` does the same on topic/category pages.
+  - `apps/web/src/components/home-client.tsx:125-145` maps active tag chips through `humanizeTagLabel` before rendering them in the page heading.
+  - `apps/web/src/components/tag-filter.tsx:59-99` explicitly documents and applies humanized display names for tag pills.
+  - `apps/web/messages/en.json:211` and `apps/web/messages/en.json:529` use the supplied `{tags}` value in SEO-facing “Browse {tags} photos…” messages.
+- **Problem:** The visible interface has been polished to show human-readable tags, but browser titles, meta descriptions, and social/search snippets for filtered URLs still use raw canonical slugs.
+- **User/business failure scenario:** A filtered gallery URL shared in Slack, Messages, or a search result can show `#family_trip_2026` instead of `#Family Trip 2026`. That makes the gallery look less curated and can reduce trust/discoverability even though the in-page UI looks correct.
+- **Suggested fix:** Build filtered metadata from the matched tag records (`allTags`) and pass `humanizeTagLabel(tag.name)` or another display label into title/description generation. Keep slug-based canonical routing and current `noindex` behavior for filtered pages, but make snippets match the UI copy.
+
+### 5. The default upload flow creates public photos with no useful title/description, causing “Untitled” and “Photo {id}” to leak into cards and metadata
+
+- **Severity:** Medium
+- **Confidence:** High
+- **Category:** Confirmed
+- **Evidence:**
+  - `apps/web/src/app/actions/images.ts:288-301` inserts uploaded images with `title: null`, `description: ''`, and the original filename stored only as `user_filename`.
+  - `apps/web/src/lib/data.ts:179-206` defines public fields by deliberately omitting `user_filename`; `apps/web/src/lib/data.ts:388-390` warns not to add original/user filenames to public queries for privacy.
+  - `apps/web/src/components/home-client.tsx:172-173` falls back to `image.user_filename || t('common.untitled')` when building the card display title; public listing data does not include `user_filename`.
+  - `apps/web/messages/en.json:510-524` defines the public fallbacks “Untitled”, “Photo”, and “Photo {id}”.
+  - `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:61-79` uses `Photo {id}` as the metadata fallback title and then falls back to that display title for description when no photo description exists.
+  - `apps/web/src/__tests__/data-tag-names-sql.test.ts:8-13` explicitly guards against a previous regression where every card became “View photo: Untitled” / alt “Photo”.
+- **Problem:** The privacy decision not to expose original filenames is sound, but the product has no compensating first-run/content-quality nudge. A normal batch upload can create a public gallery full of generic titles and weak SEO/social metadata unless the admin later edits every photo or adds tags.
+- **User/business failure scenario:** A photographer uploads an event set without manually adding per-photo titles. The public grid and photo pages show generic labels like “Untitled” or “Photo 42”, making the gallery feel unfinished and less searchable/shareable.
+- **Suggested fix:** Add a lightweight title/description step to upload or post-upload editing; surface an admin checklist/warning for untitled photos; or derive a safe public default from non-sensitive context such as category label, capture date, and humanized tags. Keep `user_filename` private unless the owner explicitly opts into using cleaned filenames.
+
+### 6. Branding controls are split between admin SEO settings and file/static defaults, so rebranding remains visibly incomplete
+
+- **Severity:** Low to Medium
+- **Confidence:** High
+- **Category:** Confirmed
+- **Evidence:**
+  - `README.md:43-55` says admins can edit `title`, `description`, `nav_title`, `author`, `locale`, and OG image URL in the dashboard while static links and analytics remain file-backed.
+  - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:91-155` exposes title, nav title, description, author, and locale; `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:158-174` exposes only the Open Graph image URL in the second card.
+  - `apps/web/src/site-config.json:2-10` still defaults `footer_text` to “Powered by GalleryKit”.
+  - `apps/web/src/components/footer.tsx:36-49` always renders the file-backed footer text plus a hard-coded GitHub link to `https://github.com/hletrd/gallerykit`.
+  - `apps/web/src/app/manifest.ts:9-28` uses dynamic SEO names but fixed `/icon` and `/apple-icon` assets.
+  - `apps/web/src/app/icon.tsx:12-38` and `apps/web/src/app/apple-icon.tsx:10-33` generate a static GalleryKit-style image mark.
+- **Problem:** The dashboard makes the product feel rebrandable, but several public brand surfaces remain static or file-only. Owners can change the nav/site metadata and still show “Powered by GalleryKit”, an upstream GitHub link, and generic app icons.
+- **User/business failure scenario:** A user deploys a private client/family archive and changes the site title to their own brand. On the public page footer and installed-web-app icon, the site still reads as a GalleryKit template. That may be fine for open-source attribution, but it is inconsistent with the admin promise of SEO/branding control.
+- **Suggested fix:** Decide whether visible GalleryKit attribution is a product requirement. If yes, state that clearly in the SEO/branding UI and README. If no, move footer text/link and app icon/brand mark into a single Branding area or document the file-edit path next to the dashboard SEO settings.
+
+### 7. The OG image setting says relative paths are allowed, but the input is typed as an absolute URL field
+
+- **Severity:** Low
+- **Confidence:** Medium
+- **Category:** Likely; manual browser validation recommended
+- **Evidence:**
+  - `apps/web/messages/en.json:338-340` labels the field “OG Image URL” and says the value may be a “Same-origin URL or path.”
+  - `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:164-173` renders the field as `<Input ... type="url" />`.
+  - `apps/web/src/lib/seo-og-url.ts:9-10` accepts relative paths beginning with `/`.
+  - `apps/web/src/__tests__/seo-actions.test.ts:5-20` verifies that `/uploads/og.jpg` is accepted and cross-origin URLs are rejected.
+- **Problem:** The backend and helper copy permit `/uploads/og.jpg`, but `type="url"` communicates absolute-URL semantics to browsers, mobile keyboards, password/form managers, and native validity states.
+- **User/business failure scenario:** An admin follows the hint and enters `/uploads/og.jpg`. Depending on browser interaction and validation timing, the field can look invalid or behave like a URL-only input, making the documented relative-path option feel unsupported.
+- **Suggested fix:** Change the input to `type="text"` with explicit same-origin/path helper text and server-side validation, or update copy and validation to require a full same-origin URL.
+
+## Final sweep / coverage confirmation
+
+- I inspected the full inventory above across root docs, app docs, site config examples/defaults, translations, public/admin routes, SEO metadata generators, share routes, upload/search/gallery components, admin settings, server actions, deployment files, and user-facing tests.
+- I intentionally did not inspect or cite generated/runtime outputs, uploaded derivatives, `node_modules`, `.git`, or prior `.context` review artifacts.
+- I found no additional high-confidence product-marketing issues in the public route wrappers, localized root error/loading/not-found shells, health/live APIs, UI primitive components, action-origin helpers, or deployment scripts beyond the onboarding/branding trust points listed above.
+- I did not implement fixes. The only intended repository write from this pass is this markdown review file.
