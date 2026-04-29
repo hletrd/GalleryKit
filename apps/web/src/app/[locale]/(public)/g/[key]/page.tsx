@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
+import { headers } from 'next/headers';
 import { ArrowLeft } from 'lucide-react';
 import { absoluteImageUrl, imageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
@@ -11,6 +12,7 @@ import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
+import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 
 export const revalidate = 0;
 
@@ -99,6 +101,14 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
 export default async function SharedGroupPage({ params, searchParams }: { params: Promise<{ key: string, locale: string }>, searchParams: Promise<{ photoId?: string }> }) {
     const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
+
+    // Rate-limit share-key lookups to prevent automated key enumeration
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    if (preIncrementShareAttempt(ip, Date.now())) {
+        return notFound();
+    }
+
     const [group, seo, t, config] = await Promise.all([
         getSharedGroupCached(key, { incrementViewCount: !photoIdParam }),
         getSeoSettings(),

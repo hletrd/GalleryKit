@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
+import { headers } from 'next/headers';
 import { ArrowLeft } from 'lucide-react';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
@@ -10,6 +11,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
+import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 
 export const revalidate = 0;
 
@@ -88,6 +90,14 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
 
 export default async function SharedPhotoPage({ params }: { params: Promise<{ key: string }> }) {
     const { key } = await params;
+
+    // Rate-limit share-key lookups to prevent automated key enumeration
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    if (preIncrementShareAttempt(ip, Date.now())) {
+        return notFound();
+    }
+
     const [locale, t, image, seo, config] = await Promise.all([
         getLocale(),
         getTranslations('shared'),

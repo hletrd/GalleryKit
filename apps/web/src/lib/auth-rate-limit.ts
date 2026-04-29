@@ -2,6 +2,7 @@ import {
     decrementRateLimit,
     incrementRateLimit,
     LOGIN_WINDOW_MS,
+    LOGIN_RATE_LIMIT_MAX_KEYS,
     loginRateLimit,
     resetRateLimit,
 } from '@/lib/rate-limit';
@@ -9,8 +10,26 @@ import { createWindowBoundedMap, type WindowEntry } from '@/lib/bounded-map';
 
 const PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS = 5000;
 
+// Account-scoped in-memory rate limit map, keyed by buildAccountRateLimitKey().
+// Mirrors the IP-scoped loginRateLimit but throttles per-username, preventing
+// distributed brute-force where each IP gets a fresh budget but all target
+// the same account. The DB-backed 'login_account' bucket remains the source
+// of truth across restarts; this map is the fast-path fallback when the DB
+// rate-limit table is unavailable (matches the IP map pattern).
+export const accountLoginRateLimit = createWindowBoundedMap<string>(LOGIN_RATE_LIMIT_MAX_KEYS, LOGIN_WINDOW_MS);
+
 export function getLoginRateLimitEntry(ip: string, now: number): WindowEntry {
     const entry = loginRateLimit.get(ip) ?? { count: 0, lastAttempt: 0 };
+
+    if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
+        entry.count = 0;
+    }
+
+    return entry;
+}
+
+export function getAccountLoginRateLimitEntry(accountKey: string, now: number): WindowEntry {
+    const entry = accountLoginRateLimit.get(accountKey) ?? { count: 0, lastAttempt: 0 };
 
     if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
         entry.count = 0;
@@ -33,6 +52,10 @@ export async function clearSuccessfulLoginAttempts(ip: string, bucketStart?: num
     loginRateLimit.delete(ip);
 }
 
+export function clearSuccessfulAccountLoginAttempt(accountKey: string) {
+    accountLoginRateLimit.delete(accountKey);
+}
+
 /**
  * Decrement (not delete) the login rate limit counter for rollback scenarios.
  * On unexpected infrastructure errors, the user didn't fail auth — so the
@@ -47,6 +70,25 @@ export async function rollbackLoginRateLimit(ip: string, bucketStart?: number) {
         loginRateLimit.delete(ip);
     }
     await decrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, bucketStart);
+}
+
+/**
+ * Roll back the account-scoped in-memory rate limit counter.
+ * Same rationale as rollbackLoginRateLimit — for error scenarios where
+ * the pre-increment should not count against the user.
+ */
+export function rollbackAccountLoginRateLimit(accountKey: string) {
+    const entry = accountLoginRateLimit.get(accountKey);
+    if (entry && entry.count > 1) {
+        entry.count -= 1;
+    } else if (entry) {
+        accountLoginRateLimit.delete(accountKey);
+    }
+}
+
+/** Prune expired entries from the account-scoped login rate-limit map. */
+export function pruneAccountLoginRateLimit(now: number) {
+    accountLoginRateLimit.prune(now);
 }
 
 // Separate in-memory Map for password change rate limiting.

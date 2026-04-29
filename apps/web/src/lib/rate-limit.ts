@@ -23,6 +23,16 @@ export const OG_MAX_REQUESTS = 30;
 export const OG_RATE_LIMIT_MAX_KEYS = 2000;
 export const ogRateLimit = createResetAtBoundedMap<string>(OG_RATE_LIMIT_MAX_KEYS);
 
+// In-memory rate limit for public share-key lookup routes (/s/[key] and /g/[key]).
+// These routes are unauthenticated and each lookup hits the DB. Without rate
+// limiting, bots can probe random share keys causing unnecessary DB pressure.
+// Budget: 60 requests per minute per IP — generous for legitimate browsing,
+// restrictive enough to throttle automated key enumeration.
+export const SHARE_WINDOW_MS = 60 * 1000;
+export const SHARE_MAX_REQUESTS = 60;
+export const SHARE_RATE_LIMIT_MAX_KEYS = 2000;
+export const shareRateLimit = createResetAtBoundedMap<string>(SHARE_RATE_LIMIT_MAX_KEYS);
+
 // Re-export RateLimitEntry from bounded-map for backward compatibility
 export type RateLimitEntry = WindowEntry;
 
@@ -168,6 +178,28 @@ export function preIncrementOgAttempt(ip: string, now: number): boolean {
 
 export function resetOgRateLimitForTests() {
     ogRateLimit.clear();
+}
+
+// ── Share-key rate-limit helpers ────────────────────────────────────
+
+export function pruneShareRateLimit(now: number) {
+    shareRateLimit.prune(now);
+}
+
+/** Returns `true` when the (pre-incremented) bucket is over the limit. */
+export function preIncrementShareAttempt(ip: string, now: number): boolean {
+    pruneShareRateLimit(now);
+    const entry = shareRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        shareRateLimit.set(ip, { count: 1, resetAt: now + SHARE_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    return (shareRateLimit.get(ip)?.count ?? 0) > SHARE_MAX_REQUESTS;
+}
+
+export function resetShareRateLimitForTests() {
+    shareRateLimit.clear();
 }
 
 // ── MySQL-backed persistent rate limiting ──────────────────────────────

@@ -12,7 +12,7 @@ import { getTranslations } from 'next-intl/server';
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
 import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey, isRateLimitExceeded, getRateLimitBucketStart } from '@/lib/rate-limit';
-import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackLoginRateLimit, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, getAccountLoginRateLimitEntry, clearSuccessfulAccountLoginAttempt, accountLoginRateLimit, rollbackLoginRateLimit, rollbackAccountLoginRateLimit, pruneAccountLoginRateLimit, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -98,6 +98,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
     const loginBucketStart = getRateLimitBucketStart(now, LOGIN_WINDOW_MS);
 
     pruneLoginRateLimit(now);
+    pruneAccountLoginRateLimit(now);
 
     const limitData = getLoginRateLimitEntry(ip, now);
 
@@ -111,6 +112,12 @@ export async function login(prevState: { error?: string } | null, formData: Form
     // budget but all target the same account. The bucket key is prefixed with
     // "acct:" to avoid collisions with IP-based buckets.
     const accountRateLimitKey = buildAccountRateLimitKey(username);
+    const accountLimitData = getAccountLoginRateLimitEntry(accountRateLimitKey, now);
+
+    // Fast-path check from in-memory account Map
+    if (accountLimitData.count >= LOGIN_MAX_ATTEMPTS) {
+        return { error: t('tooManyAttempts') };
+    }
 
     // ── Increment rate limit BEFORE the expensive Argon2 verify (TOCTOU fix) ──
     // Without this, concurrent requests all pass the check before any of them
@@ -120,7 +127,10 @@ export async function login(prevState: { error?: string } | null, formData: Form
         limitData.lastAttempt = now;
         loginRateLimit.set(ip, limitData);
         await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, loginBucketStart);
-        // Also increment account-scoped bucket
+        // Also increment account-scoped bucket (both in-memory and DB)
+        accountLimitData.count += 1;
+        accountLimitData.lastAttempt = now;
+        accountLoginRateLimit.set(accountRateLimitKey, accountLimitData);
         await incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
     } catch (err) {
         console.debug('Failed to pre-increment login rate limit:', err);
@@ -140,10 +150,16 @@ export async function login(prevState: { error?: string } | null, formData: Form
                 rollbackLoginRateLimit(ip, loginBucketStart),
                 decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart),
             ]);
+            rollbackAccountLoginRateLimit(accountRateLimitKey);
             return { error: t('tooManyAttempts') };
         }
     } catch {
-        // DB unavailable — rely on in-memory Map
+        // DB unavailable — rely on in-memory Maps (both IP and account)
+        if (limitData.count > LOGIN_MAX_ATTEMPTS || accountLimitData.count > LOGIN_MAX_ATTEMPTS) {
+            rollbackLoginRateLimit(ip, loginBucketStart).catch(() => {});
+            rollbackAccountLoginRateLimit(accountRateLimitKey);
+            return { error: t('tooManyAttempts') };
+        }
     }
 
     try {
@@ -178,6 +194,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
         } catch (err) {
             console.debug('Failed to reset account-scoped login rate limit:', err);
         }
+        clearSuccessfulAccountLoginAttempt(accountRateLimitKey);
         await logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
         try {
