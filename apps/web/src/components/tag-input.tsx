@@ -173,7 +173,7 @@ export function TagInput({
                         <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); removeTag(tag); }}
-                            className="ml-1 rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground focus:ring-2 focus:ring-ring focus:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
+                            className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground focus:ring-2 focus:ring-ring focus:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
                             aria-label={t('aria.removeTag', { tag })}
                         >
                             <X className="h-3 w-3" />

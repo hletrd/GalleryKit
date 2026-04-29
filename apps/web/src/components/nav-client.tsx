@@ -64,7 +64,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
 
     const handleLocaleSwitch = useCallback(() => {
         document.cookie = `NEXT_LOCALE=${otherLocale};path=/;SameSite=Lax;max-age=${60 * 60 * 24 * 365}${window.location.protocol === 'https:' ? ';Secure' : ''}`;
-        router.push(localeSwitchHref);
+        router.push(localeSwitchHref, { scroll: false });
     }, [otherLocale, localeSwitchHref, router]);
 
     return (

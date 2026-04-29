@@ -2,7 +2,7 @@
 
 import { useTranslation } from "@/components/i18n-provider";
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +29,8 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
     const [open, setOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<{ id: number; username: string } | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [confirmError, setConfirmError] = useState<string | null>(null);
+    const confirmPasswordRef = useRef<HTMLInputElement>(null);
     const { t, locale } = useTranslation();
     const router = useRouter();
 
@@ -38,9 +40,13 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
         const password = formData.get('password')?.toString() ?? '';
         const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
         if (password !== confirmPassword) {
-            toast.error(t('password.mismatch'));
+            const message = t('password.mismatch');
+            setConfirmError(message);
+            toast.error(message);
+            confirmPasswordRef.current?.focus();
             return;
         }
+        setConfirmError(null);
         setIsCreating(true);
         try {
             const result = await createAdminUser(formData);
@@ -82,7 +88,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                 <div>
                     <CardTitle>{t('users.adminUsers')}</CardTitle>
                 </div>
-                <Dialog open={open} onOpenChange={setOpen}>
+                <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setConfirmError(null); }}>
                     <DialogTrigger asChild>
                         <Button size="sm">
                             <UserPlus className="mr-2 h-4 w-4" />
@@ -103,12 +109,17 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                             </div>
                             <div className="space-y-2">
                                 <label htmlFor="create-password" className="text-sm font-medium">{t('users.password')}</label>
-                                <Input id="create-password" name="password" type="password" placeholder={t('users.password')} required minLength={12} maxLength={1024} autoComplete="new-password" />
+                                <Input id="create-password" name="password" type="password" placeholder={t('users.password')} required minLength={12} maxLength={1024} autoComplete="new-password" onChange={() => setConfirmError(null)} />
                                 <p className="text-xs text-muted-foreground">{t('password.minLength')}</p>
                             </div>
                             <div className="space-y-2">
                                 <label htmlFor="create-confirm-password" className="text-sm font-medium">{t('password.confirm')}</label>
-                                <Input id="create-confirm-password" name="confirmPassword" type="password" placeholder={t('password.confirm')} required minLength={12} maxLength={1024} autoComplete="new-password" />
+                                <Input id="create-confirm-password" ref={confirmPasswordRef} name="confirmPassword" type="password" placeholder={t('password.confirm')} required minLength={12} maxLength={1024} autoComplete="new-password" aria-invalid={!!confirmError} aria-describedby={confirmError ? "create-confirm-password-error" : undefined} onChange={() => setConfirmError(null)} />
+                                {confirmError && (
+                                    <p id="create-confirm-password-error" className="text-sm text-destructive" role="alert">
+                                        {confirmError}
+                                    </p>
+                                )}
                             </div>
                             <DialogFooter>
                                 <Button type="submit" disabled={isCreating}>

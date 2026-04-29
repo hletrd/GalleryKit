@@ -521,7 +521,8 @@
     "untitled": "제목 없음",
     "titleWithId": "사진 {id}",
     "descriptionByAuthor": "{author}의 사진 보기",
-    "descriptionByAuthorWithTitle": "{author}의 사진 보기 ({title})"
+    "descriptionByAuthorWithTitle": "{author}의 사진 보기 ({title})",
+    "loading": "사진을 불러오는 중…"
   },
   "topic": {
     "notFoundTitle": "찾을 수 없음",

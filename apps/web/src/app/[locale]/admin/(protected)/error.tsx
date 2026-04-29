@@ -13,7 +13,7 @@ export default function AdminError({
     const { t, locale } = useTranslation();
 
     return (
-        <main className="flex min-h-[60vh] items-center justify-center px-4" role="main">
+        <section className="flex min-h-[60vh] items-center justify-center px-4" aria-labelledby="admin-route-error-title">
             <section className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-card p-6 text-center shadow-sm" aria-labelledby="admin-route-error-title">
                 <h1 id="admin-route-error-title" className="text-7xl font-bold text-muted-foreground/30">{t('error.title')}</h1>
                 <p className="text-lg text-muted-foreground">
@@ -34,6 +34,6 @@ export default function AdminError({
                 </Link>
                 </div>
             </section>
-        </main>
+        </section>
     );
 }

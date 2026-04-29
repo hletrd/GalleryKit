@@ -21,7 +21,7 @@ export default async function AdminLayout({
                 {t('skipToContent')}
             </a>
             {currentUser ? <AdminHeader /> : null}
-            <main id="admin-content" className="flex-1 w-full py-6 px-4 overflow-auto">
+            <main id="admin-content" tabIndex={-1} className="flex-1 w-full py-6 px-4 overflow-auto focus:outline-none">
                 {children}
             </main>
         </div>

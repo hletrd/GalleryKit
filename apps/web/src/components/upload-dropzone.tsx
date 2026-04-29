@@ -383,7 +383,7 @@ export function UploadDropzone({
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
                             <h3 className="font-medium text-sm">{t('upload.filesSelected', { count: files.length })}</h3>
-                            <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="text-destructive h-auto p-0">{t('upload.clearAll')}</Button>
+                            <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive">{t('upload.clearAll')}</Button>
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

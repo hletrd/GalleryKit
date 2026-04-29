@@ -521,7 +521,8 @@
     "untitled": "Untitled",
     "titleWithId": "Photo {id}",
     "descriptionByAuthor": "View photo by {author}",
-    "descriptionByAuthorWithTitle": "View photo by {author} ({title})"
+    "descriptionByAuthorWithTitle": "View photo by {author} ({title})",
+    "loading": "Loading photo…"
   },
   "topic": {
     "notFoundTitle": "Not Found",
