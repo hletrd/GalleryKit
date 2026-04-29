@@ -1,142 +1,100 @@
-# Critic review — gate reliability change surface
+# Cycle 1 critic review — whole repo change surface
 
 Repo: `/Users/hletrd/flash-shared/gallery`  
-Mode: read-only review except writing this file. No fixes were implemented and no gate commands that generate artifacts were run. I did run read-only/static commands (`git diff`, `nl`, `rg`, `git check-ignore`, `npx next typegen --help`) and inspected current generated-file ownership where it was directly relevant to the changed gate.
+Scope: critic-only review. I wrote only this report and did not intentionally modify source files. Existing concurrent edits in other review files were left untouched.
 
-## Review-relevant inventory built first
+## Inventory first
 
-### Changed / untracked files in the current change surface
-- `apps/web/next.config.ts` — changed to set `typescript.ignoreBuildErrors: true`.
-- `apps/web/package.json` — changed `build` to run `npm run typecheck && next build`; changed `typecheck` to run `next typegen && tsc -p tsconfig.typecheck.json --noEmit`.
-- `apps/web/tsconfig.typecheck.json` — changed to override `compilerOptions.incremental=false`.
-- `plan/plan-249-cycle2-fresh-gate-fix.md` — untracked plan/evidence file for this gate reliability change.
+Reviewed the repo as a Next.js 16 / React 19 gallery app with MySQL/Drizzle, server actions, background image processing, public share routes, Docker/nginx deployment, and CI gates.
 
-### Adjacent files examined because they define or consume the same invariant
-- Root scripts and workspace wiring: `package.json`, `package-lock.json`.
-- CI and E2E build orchestration: `.github/workflows/quality.yml`, `apps/web/playwright.config.ts`.
-- Docker/deploy path: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/scripts/ensure-site-config.mjs`.
-- TypeScript/Next generated-type contract: `apps/web/tsconfig.json`, `apps/web/tsconfig.scripts.json`, `apps/web/next-env.d.ts` (ignored/generated local file), `apps/web/.next/types/routes.d.ts`, `apps/web/.next/types/validator.ts` (generated artifacts inspected only for this gate issue), `.gitignore`, `apps/web/.gitignore`, `.dockerignore`, `apps/web/.dockerignore`.
-- Existing tests and config assertions: `apps/web/src/__tests__/next-config.test.ts`, `apps/web/vitest.config.ts`, `apps/web/eslint.config.mjs`.
-- Documentation and prior current fan-out reviews for missed/cross-review checks: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `.context/reviews/{code-reviewer,security-reviewer,perf-reviewer,test-engineer,debugger-tracer,document-specialist,designer}.md`, `.context/reviews/_aggregate.md`, `.context/gate-logs/{lint,typecheck,build,test,test-e2e}.log`.
-
-Generated/vendor/runtime artifacts (`node_modules`, `.git`, `.next` generally, upload data, screenshots, test results, `.omx`, `.omc`) were excluded except for the targeted `.next/types` ownership/read-only check above because the change explicitly depends on `.next/types` generation.
+Key files/docs inspected:
+- Root/app scripts and CI: `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`.
+- Public route/data path: `apps/web/src/app/[locale]/(public)/**`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/lib/data.ts`.
+- Admin mutation path: `apps/web/src/app/actions/*`, `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- Auth/provenance/rate limiting: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/action-guards.ts`.
+- Upload/image processing: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-limits.ts`.
+- Deployment/docs: `README.md`, `apps/web/README.md`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/ensure-site-config.mjs`.
+- Verification artifacts: `.context/gate-logs/{lint,typecheck,test,build,test-e2e}.log`.
 
 ## Findings summary
 
-| ID | Severity | Confidence | Category | Finding |
+| ID | Severity | Confidence | Perspective | Finding |
 | --- | --- | --- | --- | --- |
-| CRIT-01 | High | High | Confirmed process gap / manual validation required | Build/typecheck gate was made safety-critical while the plan still records `npm run build` as pending. |
-| CRIT-02 | High | High | Confirmed | `next build` can now bypass TypeScript validation unless the wrapper script is used. |
-| CRIT-03 | Medium-High | High | Confirmed | CI/E2E now multiplies the previously flaky typecheck path, increasing timeout risk. |
-| CRIT-04 | Medium | Medium-High | Likely / manual validation | The fix still depends on writable, sane `.next/types` generated state, so it only partially addresses the stated stale/foreign-owned artifact class. |
-| CRIT-05 | Medium | High | Confirmed maintainability risk | No regression test locks the new `ignoreBuildErrors` ↔ wrapper-typecheck invariant. |
-| CRIT-06 | Medium | High | Confirmed pre-existing gap amplified by this change | The promoted typecheck gate still excludes operational TypeScript scripts. |
+| C1-CRIT-01 | High | High | Correctness | Photo prev/next navigation is wrong across `capture_date IS NULL` boundaries. |
+| C1-CRIT-02 | High | High | Deployment/security | Shipped nginx config breaks admin origin checks behind a TLS-terminating edge. |
+| C1-CRIT-03 | High | High | CI/deployment | CI prepares a placeholder/localhost production URL that the production prebuild guard rejects. |
+| C1-CRIT-04 | Medium | Medium-High | Product/SEO | Sitemap swallows DB failures and can cache a homepage-only sitemap for an hour. |
+| C1-CRIT-05 | Medium | High | Security/ops | nginx admin rate limiting omits `/admin/seo` and `/admin/settings`. |
+| C1-CRIT-06 | Medium | High | Tests/gates | Current gate evidence has lint timed out and E2E with no completion result. |
+| C1-CRIT-07 | Low-Medium | High | Docs/product | Checked-in `site-config.json` points to the maintainer domain, so self-hosters can ship wrong canonical URLs. |
 
-## Detailed findings
+## Detailed critique
 
-### CRIT-01 — Build/typecheck gate was made safety-critical while `npm run build` evidence is still pending
-
-- **Severity:** High
-- **Confidence:** High
-- **Category:** Confirmed process gap / manual validation required
-- **Files / regions:**
-  - `apps/web/next.config.ts:38-44` disables Next's internal build-time TypeScript failure (`ignoreBuildErrors: true`).
-  - `apps/web/package.json:11` makes the wrapper build responsible for invoking `npm run typecheck` before `next build`.
-  - `apps/web/package.json:15` changes the explicit type gate to `next typegen && tsc -p tsconfig.typecheck.json --noEmit`.
-  - `plan/plan-249-cycle2-fresh-gate-fix.md:20-24` lists `npm run build` as “pending rerun with explicit typecheck + skipped duplicate internal Next validation”.
-- **Problem:** The change intentionally shifts the release-blocking TypeScript gate out of Next's build step and into the npm wrapper, but the plan file still records the target build path as unverified. That is not just missing paperwork: the modified path is the one Docker, Playwright web-server startup, root workspace build, and CI build now depend on.
-- **Concrete failure scenario:** The change is committed with the pending build evidence unchanged. CI or production Docker then runs the new wrapper path for the first time from a different generated-artifact state. If `next typegen`, `tsc`, or the now typecheck-skipping `next build` still hangs/fails, the deployment is blocked; if an alternate path runs `next build` directly, TypeScript errors are no longer build-blocking.
-- **Suggested fix:** Do not merge/push this gate change until a clean generated-artifact run proves at least `npm run typecheck` and `npm run build` from `apps/web` (or root equivalents) after removing stale `.next` and `*.tsbuildinfo`. Update the plan/evidence file to replace the pending build line with the actual result and duration. If the build still needs an unchecked Next pass, make that bypass conditional on the explicit typecheck having just succeeded (see CRIT-02).
-- **Prior-review comparison:** Prior reviews noted build-safety and gate-shape risks. This review adds that the current plan itself still marks the new critical build path as pending.
-
-### CRIT-02 — Direct `next build` now bypasses TypeScript validation
+### C1-CRIT-01 — Photo prev/next navigation is wrong across `capture_date IS NULL` boundaries
 
 - **Severity:** High
 - **Confidence:** High
-- **Category:** Confirmed
-- **Files / regions:**
-  - `apps/web/next.config.ts:38-44` globally sets `typescript.ignoreBuildErrors: true`.
-  - `apps/web/package.json:11-15` keeps type validation only in npm scripts.
-  - `README.md:142-143` and `apps/web/README.md:38` still discuss configuration “before `next build`”, which can normalize direct framework builds for operators/contributors.
-  - `apps/web/Dockerfile:48` is safe today because it uses `npm run build`, but this is convention rather than a framework-enforced invariant.
-- **Problem:** `ignoreBuildErrors` is a global Next config switch. Once enabled, any direct `next build` / `npx next build` / future automation that skips `npm run build` can produce build output despite TypeScript errors. The package script wrapper is necessary but not sufficient as a safety boundary because it is easy to bypass and not enforced by Next itself.
-- **Concrete failure scenario:** A maintainer reproduces a production build by running `cd apps/web && npx next build`, or a future deploy optimization changes Docker/CI to call `next build` directly. A route/component TypeScript error exists. The build proceeds because Next's internal check is disabled, and the broken code can be shipped or only fail later at runtime.
-- **Suggested fix:** Make the bypass conditional rather than global. For example, have the wrapper set a marker only after the explicit typecheck succeeds (`npm run typecheck && GALLERY_TYPECHECKED=1 next build`) and configure `ignoreBuildErrors: process.env.GALLERY_TYPECHECKED === '1'`. Direct `next build` would then keep Next's native type gate enabled. Also update docs/comments to say the supported production command is `npm run build`, not raw `next build`, unless an explicit typecheck has already succeeded.
-- **Prior-review comparison:** `.context/reviews/debugger-tracer.md` already raised this as a build-safety risk. I confirm it and would treat it as higher severity because the config-level switch is global while the guard is only script-level.
+- **Files/lines:** `apps/web/src/lib/data.ts:655-683`, `apps/web/src/lib/data.ts:686-718`; listing/cursor sort contract is `capture_date DESC, created_at DESC, id DESC` at `apps/web/src/lib/data.ts:494-495` and `apps/web/src/lib/data.ts:555-556`.
+- **Problem:** `getImage()` handles adjacent-photo queries differently from listing pagination. For an undated current image, the prev query includes *all* dated images (`capture_date IS NOT NULL`) and then orders them descending, so it picks the newest dated photo rather than the immediate predecessor before the undated block. For the oldest dated image, the next query does not include `capture_date IS NULL`, so navigation stops instead of moving into undated images.
+- **Failure scenario:** Gallery order is `2026 photo`, `2025 photo`, `undated A`, `undated B`. Opening `undated B` and pressing previous can jump to `2026 photo`, skipping `undated A`; opening `2025 photo` and pressing next may fail to reach `undated A`.
+- **Suggested fix:** Centralize the ordering comparator for listing and adjacency. Model sort explicitly as `(capture_date IS NULL) ASC, capture_date DESC, created_at DESC, id DESC`; for prev, filter rows that come before the current row and order by the reverse tuple to get the nearest predecessor; for next, filter rows that come after and order by the normal tuple. Add unit/integration coverage for dated-to-null and null-to-null transitions.
 
-### CRIT-03 — CI/E2E now multiplies the previously flaky typecheck path
+### C1-CRIT-02 — Shipped nginx config breaks admin origin checks behind a TLS-terminating edge
 
-- **Severity:** Medium-High
+- **Severity:** High
 - **Confidence:** High
-- **Category:** Confirmed
-- **Files / regions:**
-  - `plan/plan-249-cycle2-fresh-gate-fix.md:4` says `npm run typecheck` had already run for more than 30 minutes before this fix attempt.
-  - `.github/workflows/quality.yml:57-58` runs `npm run typecheck` as its own CI step.
-  - `apps/web/playwright.config.ts:72-79` starts the local E2E server by running `npm run build`.
-  - `.github/workflows/quality.yml:75-79` runs E2E, then runs another `npm run build` step.
-  - `apps/web/package.json:11-15` means every `npm run build` now runs `next typegen && tsc` before `next build`.
-- **Problem:** The changed package scripts turn the workflow into up to three explicit typecheck passes and two Next production builds in one CI job: the standalone Typecheck step, the Playwright webServer build, and the final Build step. This worsens the exact failure mode the change is trying to fix: a gate that can hang or exceed the 30-minute job timeout.
-- **Concrete failure scenario:** CI starts with a clean checkout and MySQL service. Typecheck passes once, E2E then invokes `npm run build` and repeats `next typegen && tsc`, and the final build repeats it again. A typegen/tsc pass that is slow but no longer hung can still push the job over `.github/workflows/quality.yml:11`'s 30-minute timeout; a pass that intermittently hangs now has three chances to hang.
-- **Suggested fix:** Collapse the gate plan so CI validates each expensive operation once. Options: remove the final build if the E2E webServer build already proves standalone output, reuse a previously built standalone server for E2E, or introduce an internal unchecked build script used only immediately after a successful CI typecheck while keeping the public/deploy `npm run build` wrapper safe. If using an unchecked internal script, pair it with the conditional env guard from CRIT-02 so direct/accidental framework builds remain protected.
-- **Prior-review comparison:** Earlier performance/test reviews noted duplicate CI builds. This change makes the duplicate-build issue more severe by adding duplicate explicit typechecks to each build invocation.
+- **Files/lines:** nginx says it is intended behind a TLS-terminating edge at `apps/web/nginx/default.conf:16-19`, but forwards `$scheme` as proto at `apps/web/nginx/default.conf:57`, `apps/web/nginx/default.conf:74`, `apps/web/nginx/default.conf:89`, and `apps/web/nginx/default.conf:124`. The app trusts `x-forwarded-proto` first at `apps/web/src/lib/request-origin.ts:45-52` and compares Origin/Referer to that expected origin at `apps/web/src/lib/request-origin.ts:96-106`; login enforces this at `apps/web/src/app/actions/auth.ts:91-95`.
+- **Problem:** If TLS terminates before nginx and nginx receives plain HTTP, `$scheme` is `http`. Browser `Origin` is `https://...`, but the app computes expected origin as `http://...`, causing login/admin actions/downloads to fail closed.
+- **Failure scenario:** Production is deployed as documented: CDN/LB terminates TLS → nginx on port 80 → Next app. Every admin login POST returns the generic auth failure because same-origin validation sees `https` origin versus trusted forwarded proto `http`.
+- **Suggested fix:** Either terminate TLS at this nginx server, or preserve a trusted upstream proto with a `map` such as `$http_x_forwarded_proto` fallback to `$scheme`, and document the exact trusted-hop topology. Add a regression test for `hasTrustedSameOrigin()` with `Origin: https://site` and forwarded proto from a TLS edge.
 
-### CRIT-04 — The stale/generated artifact fix still depends on `.next/types` being writable and correct
+### C1-CRIT-03 — CI prepares a production URL that the prebuild guard rejects
+
+- **Severity:** High
+- **Confidence:** High
+- **Files/lines:** CI sets `BASE_URL: http://127.0.0.1:3100` at `.github/workflows/quality.yml:27-35`, copies the example site config at `.github/workflows/quality.yml:51-52`, then runs build at `.github/workflows/quality.yml:78-79`. The app `prebuild` runs with `NODE_ENV=production` at `apps/web/package.json:8-11`. The guard rejects placeholder hosts including `127.0.0.1` at `apps/web/scripts/ensure-site-config.mjs:13-21` and `apps/web/scripts/ensure-site-config.mjs:28-37`; the example config is `https://example.com` at `apps/web/src/site-config.example.json:1-5`.
+- **Problem:** The official CI build path appears self-contradictory: it supplies a placeholder/localhost base URL while the production prebuild guard refuses placeholder production URLs.
+- **Failure scenario:** A push/PR reaches the final Build step. `npm run build` invokes `prebuild`, sees `BASE_URL=http://127.0.0.1:3100`, and exits before Next build. CI fails even though app code may be valid.
+- **Suggested fix:** Use a non-placeholder CI URL such as `https://ci.example.invalid` only if the guard permits reserved TLDs intentionally, or introduce an explicit `ALLOW_PLACEHOLDER_BASE_URL_FOR_CI=true` escape hatch scoped to CI. Alternatively set CI `BASE_URL` to a real staging origin. Add a workflow smoke check for `npm run prebuild` to catch this earlier.
+
+### C1-CRIT-04 — Sitemap fallback can cache a homepage-only sitemap for real runtime outages
 
 - **Severity:** Medium
 - **Confidence:** Medium-High
-- **Category:** Likely / manual validation
-- **Files / regions:**
-  - `plan/plan-249-cycle2-fresh-gate-fix.md:4-10` identifies stale/foreign-owned `.next` and `tsconfig.typecheck.tsbuildinfo` artifacts as the root failure class.
-  - `apps/web/package.json:15` now starts typecheck with `next typegen`, which writes generated route/type files under `.next`.
-  - `apps/web/next-env.d.ts:3` imports `./.next/types/routes.d.ts`.
-  - `apps/web/tsconfig.typecheck.json:3-8` includes `.next/types/**/*.ts` in the explicit compiler pass.
-  - `apps/web/tsconfig.typecheck.json:15-17` disables TypeScript incremental state, but does not address `.next/types` ownership or stale validator output.
-  - `apps/web/.gitignore:41-42` ignores `*.tsbuildinfo` and `next-env.d.ts`; `.next/` is also ignored at the repo level (`.gitignore:2`).
-- **Problem:** Disabling incremental mode removes one cache file from the failure class, but the new gate still needs Next to write and then TypeScript to read `.next/types`. If the local failure was caused by mixed UID ownership or stale generated `.next` state, `next typegen` can fail/hang before `tsc` ever benefits from `incremental:false`. The mitigation is therefore environment-sensitive rather than a complete fresh-gate guarantee.
-- **Concrete failure scenario:** A prior Docker/root/container run leaves `apps/web/.next/types` owned by another UID or otherwise stale/unwritable. A developer runs `npm run typecheck`. The first command (`next typegen`) tries to update `.next/types/routes.d.ts` / `validator.ts`; it blocks or fails on the same generated state family that caused the original incident. The absence of `tsconfig.typecheck.tsbuildinfo` does not help because the failure occurs earlier.
-- **Suggested fix:** Add an explicit fail-fast generated-state preflight to the typecheck path: verify `.next`/`.next/types` is writable or remove only the generated type subtree before `next typegen`, and print a clear remediation command when ownership is wrong. Also document the local recovery path (`rm -rf apps/web/.next apps/web/*.tsbuildinfo` or ownership repair) and avoid mixing host/container/root UIDs for local builds. If `next typegen` has no alternate output directory, make that limitation explicit in the plan and verification criteria.
-- **Prior-review comparison:** This appears not to be fully covered by the existing current reviews; they identify wrapper bypass and test/deploy gaps, but not that the fix still relies on the same `.next` generated-state class.
+- **Files/lines:** sitemap is ISR for one hour at `apps/web/src/app/sitemap.ts:4-12`; it catches all DB errors and empties topics/images at `apps/web/src/app/sitemap.ts:24-46`; it then returns only homepage/topic/image entries from those arrays at `apps/web/src/app/sitemap.ts:48-76`. Existing build evidence shows this fallback on DB connection failure at `.context/gate-logs/build.log:23-31`, with `/sitemap.xml` prerendered for 1h at `.context/gate-logs/build.log:70-72`.
+- **Problem:** The fallback was added to tolerate build-time DB unavailability, but it also applies at runtime. A transient DB outage during sitemap revalidation can replace the full sitemap with a minimal homepage-only sitemap for the ISR window.
+- **Failure scenario:** Googlebot hits `/sitemap.xml` during a short MySQL restart. The route catches the error, emits only localized homepages, and that incomplete sitemap remains cached for up to 3600 seconds.
+- **Suggested fix:** Split build-time tolerance from runtime behavior. For example, make the sitemap dynamic and return `503`/`no-store` from a route handler on runtime DB failure, or detect build phase explicitly and only use the minimal fallback during static generation. At minimum, do not update the ISR cache with fallback content on runtime failures.
 
-### CRIT-05 — The new safety invariant is not locked by tests
+### C1-CRIT-05 — nginx admin rate limiting omits settings and SEO mutation pages
 
 - **Severity:** Medium
 - **Confidence:** High
-- **Category:** Confirmed maintainability risk
-- **Files / regions:**
-  - `apps/web/next.config.ts:38-44` adds the risky `ignoreBuildErrors` setting with an explanatory comment.
-  - `apps/web/package.json:11-15` is the only place that currently keeps type errors blocking the public build command.
-  - `apps/web/src/__tests__/next-config.test.ts:19-26` checks image localPatterns only; it does not assert build/typecheck invariants.
-  - `apps/web/vitest.config.ts:10-12` scopes tests to `src/__tests__/**/*.test.ts`, so no package/config invariant test exists elsewhere in the current test inventory.
-- **Problem:** The correctness of the build now depends on two separate files staying aligned: Next config must skip internal type validation only when the package build script runs the explicit type gate first. There is no regression test or static guard to catch future edits that remove `npm run typecheck`, simplify the build script, or change the typecheck script to omit `next typegen` while leaving `ignoreBuildErrors` enabled.
-- **Concrete failure scenario:** A future cleanup changes `apps/web/package.json` back to `"build": "next build"` to reduce duplicate CI time, not noticing the global `ignoreBuildErrors` setting. Unit tests pass because no test reads the scripts/config invariant. Production builds then stop blocking TypeScript errors.
-- **Suggested fix:** Add a focused source-contract test or custom lint check that reads `apps/web/package.json` and `apps/web/next.config.ts` and enforces: if `ignoreBuildErrors` is enabled/conditional, the public `build` script must run `npm run typecheck` first; the `typecheck` script must run `next typegen` before `tsc -p tsconfig.typecheck.json`; and direct unchecked build scripts must be clearly named/internal.
-- **Prior-review comparison:** Test reviews flagged broader source-contract and operational-gate gaps. This is the specific new invariant created by this change.
+- **Files/lines:** nginx admin mutation regex includes only `dashboard|db|categories|tags|users|password` at `apps/web/nginx/default.conf:77-90`. The app exposes `/admin/settings` at `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:1-23` and `/admin/seo` at `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx:1-22`; their mutating actions are `updateGallerySettings()` at `apps/web/src/app/actions/settings.ts:40-47` and `updateSeoSettings()` at `apps/web/src/app/actions/seo.ts:55-62`.
+- **Problem:** The comment says this location rate-limits admin mutation routes, but two privileged mutation surfaces fall through to the generic `location /` without the `admin` limiter.
+- **Failure scenario:** An authenticated-but-buggy browser session or automation loop repeatedly submits SEO/settings changes. App-level auth/origin checks pass, but nginx does not apply the admin request budget for those paths, increasing DB writes/revalidation churn.
+- **Suggested fix:** Include `seo|settings` in the admin mutation regex, or use a broader `^(/[a-z]{2})?/admin/` location with specific exceptions only where needed. Consider lightweight app-level rate limits for global settings mutations too.
 
-### CRIT-06 — The promoted typecheck gate still excludes operational TypeScript scripts
+### C1-CRIT-06 — Gate evidence is incomplete: lint timed out and E2E has no result
 
 - **Severity:** Medium
 - **Confidence:** High
-- **Category:** Confirmed pre-existing gap amplified by this change
-- **Files / regions:**
-  - `apps/web/tsconfig.typecheck.json:10-13` excludes `scripts`.
-  - `apps/web/package.json:15` promotes this config as the explicit type gate that must pass before `next build`.
-  - `apps/web/package.json:10,17-22` exposes operational script entrypoints (`prebuild`, `db:seed`, `init`, E2E seed, custom lint checks).
-  - `apps/web/tsconfig.scripts.json:6-14` exists for scripts but is not invoked by `apps/web/package.json` or `.github/workflows/quality.yml:57-66`.
-  - `apps/web/Dockerfile:89-90` runs `node apps/web/scripts/migrate.js` before the server at container startup.
-- **Problem:** The change's comments and plan position `npm run typecheck` as the build-blocking substitute for Next's internal TypeScript pass, but that gate still excludes a set of live operational scripts. This was already a gap; it becomes more important when the explicit typecheck is the main advertised build safety net.
-- **Concrete failure scenario:** A type error lands in `scripts/seed-e2e.ts`, `scripts/init-db.ts`, or another TypeScript operational script. `npm run typecheck` passes because `scripts` are excluded. CI may catch only the narrow scripts it happens to execute, while deploy-only or maintenance scripts can remain broken until an operator needs them.
-- **Suggested fix:** Add `typecheck:scripts` (`tsc -p tsconfig.scripts.json --noEmit`, after ensuring the config does not exclude its own `.next/types` include) and either run it from `npm run typecheck` or as a separate CI gate. Keep the app build gate fast if needed, but do not describe it as covering all operational TypeScript.
-- **Prior-review comparison:** `.context/reviews/test-engineer.md` already found the broader script/deployment gate mismatch. I agree and note that the current build-safety change raises its priority.
+- **Files/lines:** lint log is only `[TIMEOUT after 240s]` at `.context/gate-logs/lint.log:1-2`; E2E log stops immediately after starting Playwright at `.context/gate-logs/test-e2e.log:1-8`; unit tests did pass at `.context/gate-logs/test.log:13-16`; typecheck log has no success summary beyond command echo at `.context/gate-logs/typecheck.log:1-8`.
+- **Problem:** The current verification artifact set does not establish the full repo gate. This is especially risky because the repo has custom static checks (`lint:api-auth`, `lint:action-origin`) and browser flows around admin/login/upload.
+- **Failure scenario:** A source change that only ESLint, action-origin lint, or Playwright would catch is treated as reviewed because unit tests passed, while the actual lint/E2E evidence is absent or timed out.
+- **Suggested fix:** Re-run and capture clean `npm run lint`, `npm run lint:api-auth`, `npm run lint:action-origin`, and `npm run test:e2e` logs. If lint regularly exceeds 240s, profile rule/file hotspots or split lint into app/scripts/tests jobs.
 
-## Prior-review sweep: what was confirmed vs. newly added
+### C1-CRIT-07 — Checked-in site config can ship the maintainer's canonical domain
 
-- Confirmed from prior reviews: direct `next build` bypass after `ignoreBuildErrors`, operational script gate mismatch, and duplicate CI build concerns.
-- Added / sharpened here: the pending build evidence in `plan/plan-249-cycle2-fresh-gate-fix.md`, the CI triple-typecheck interaction created by the changed `build` script, the incomplete handling of `.next/types` generated-state ownership, and the absence of a test locking the new cross-file safety invariant.
-- I did not re-report unrelated current full-repo findings (queue retry, rate-limit unknown bucket, SQL restore scanner, public search/count performance, UI/UX gaps, docs mismatches) unless they directly affected this build/typecheck change surface.
+- **Severity:** Low-Medium
+- **Confidence:** High
+- **Files/lines:** checked-in `apps/web/src/site-config.json` uses `https://gallery.atik.kr` at `apps/web/src/site-config.json:1-10`. The README tells users to copy/edit the example at `README.md:92-97`, but because the real file already exists, `ensure-site-config` only checks existence at `apps/web/scripts/ensure-site-config.mjs:4-9` and placeholder hosts at `apps/web/scripts/ensure-site-config.mjs:14-21`, not whether the domain is project-specific.
+- **Problem:** A fork/self-hosted deployment can build successfully without editing `site-config.json`, producing canonical URLs, robots sitemap URL, OG URLs, and JSON-LD that point to the maintainer domain.
+- **Failure scenario:** A user clones, sets DB/admin env, runs Docker build, and skips editing `site-config.json` because it already exists. Search/social metadata on their site advertises `gallery.atik.kr`.
+- **Suggested fix:** Do not commit an instance-specific `site-config.json`; commit only the example and generate/copy during setup, or add a production guard that rejects known maintainer/demo domains unless explicitly allowed.
 
-## Final sweep / coverage confirmation
+## Final sweep
 
-- Built the inventory from `git status`, `git diff`, tracked file searches, and current fan-out artifacts before writing findings.
-- Examined every file I identified as relevant to the current build/typecheck change surface: changed files, the untracked plan, root/workspace package wiring, CI, E2E server startup, Docker/deploy scripts, TypeScript configs, generated-type imports, targeted generated type artifacts, ignore files, existing config tests, docs mentioning build commands, and current prior reviews.
-- Excluded only vendor/generated/runtime/binary artifacts except for the targeted read-only `.next/types` check required by the stated failure mode.
-- No implementation changes were made; only this review file was written.
+- No source fixes were implemented in this review.
+- Concurrent uncommitted edits outside my ownership (`.context/reviews/code-reviewer.md`, `.context/reviews/perf-reviewer.md`) were observed and left untouched.
+- Highest-priority fixes: C1-CRIT-01, C1-CRIT-02, C1-CRIT-03.

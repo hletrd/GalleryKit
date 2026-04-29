@@ -1,289 +1,227 @@
-# Architect Review — Prompt 1 Fan-out
+# Architect Review — Cycle 1 Fan-out Continuation
 
-Date: 2026-04-29 (Asia/Seoul)
-Repository: `/Users/hletrd/flash-shared/gallery`
-Role: architect
-Mode: read-only architecture/design review; only this review artifact was written.
+Date: 2026-04-29 (Asia/Seoul)  
+Repository: `/Users/hletrd/flash-shared/gallery`  
+Role: architect  
+Write scope honored: only `.context/reviews/architect.md` was edited.
 
-## Scope and inventory
+## Inventory first
 
-I built the review inventory from tracked files plus deployment/runtime configuration using `git ls-files`, targeted `find`/`rg` sweeps, and direct file reads. I excluded `.git`, `node_modules`, build/cache artifacts, uploaded media, and historical/generated review-plan artifacts unless they shaped current architecture. This review is based on the current worktree; pre-existing local changes were left untouched.
+I treated this as a full-repo architecture/design pass focused on boundaries, coupling, runtime/deployment topology, and hidden shared-state hazards. The worktree already contained edits by other review agents under `.context/reviews/*`; I did not touch them.
 
-### Review-relevant file groups examined
+Reviewed inventory:
 
-- Root/project contract: `AGENTS.md`, `CLAUDE.md`, `README.md`, `.gitignore`, `.dockerignore`, `.nvmrc`, root `package.json`.
-- CI/deployment/process topology: `.github/workflows/quality.yml`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/drizzle.config.ts`, `apps/web/scripts/*`.
-- Next/app configuration: `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/eslint.config.mjs`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `apps/web/tsconfig*.json`, `apps/web/site-config.example.json`, `apps/web/messages/*.json`.
-- App router and actions: all files under `apps/web/src/app/**`, including admin/public routes, server actions, API routes, metadata/sitemap, proxy, instrumentation, and locale layout.
-- UI/components: all files under `apps/web/src/components/**`, including admin forms, public gallery views, shell/navigation, UI primitives, and SEO/analytics components.
-- Data/domain/runtime libraries: all files under `apps/web/src/lib/**`, including auth/session, CSRF/origin, data access, upload validation, queue, restore maintenance, locks, upload paths, storage abstraction, config/site-config, CSP, observability, and rate limiting.
-- Database/migrations: `apps/web/src/db/**`, `apps/web/drizzle/**`.
-- Tests and gates: all unit/integration files under `apps/web/src/__tests__/**`, e2e specs under `apps/web/e2e/**`, and guard scripts under `apps/web/scripts/**`.
+- Project/runtime contract: `README.md`, `CLAUDE.md`, root `package.json`, `apps/web/package.json`.
+- Deployment topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `apps/web/scripts/migrate.js`.
+- Next/runtime config: `apps/web/next.config.ts`, `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`, health/live/OG/upload/API routes.
+- Core app boundaries: `apps/web/src/app/**`, especially public/admin route groups and server actions.
+- Data/runtime libraries: `apps/web/src/lib/data.ts`, `image-queue.ts`, `process-image.ts`, `upload-paths.ts`, `restore-maintenance.ts`, `upload-processing-contract-lock.ts`, `rate-limit.ts`, `storage/**`, `session.ts`, `request-origin.ts`, `content-security-policy.ts`.
+- Persistence: `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, Drizzle migrations.
+- Architecture guardrails/tests were sampled where they described enforced invariants.
 
 ## Architecture map observed
 
-- Public/admin UI is a Next.js App Router app. Admin pages authenticate via session helpers and delegate mutation to server actions in `src/app/actions/**` plus admin DB actions under `src/app/[locale]/admin/(protected)/db/db-actions.ts`.
-- Persistence is MySQL through Drizzle (`src/db/schema.ts`, `src/lib/db.ts`, `src/lib/data.ts`). Upload/image metadata rows reference filesystem filenames; original files live outside public web roots and derivatives/resources live under public upload paths.
-- Image upload flow crosses several boundaries: admin action validation/origin/auth (`app/actions/images.ts`) → disk write (`lib/upload-paths.ts`) → DB row insert (`db/schema.ts`/Drizzle) → process-local queue (`lib/image-queue.ts`) → sharp conversion → public derivative files → DB `processed` update.
-- Restore/backup flow is DB-centric: admin DB action shells out to `mysqldump`/`mysql`, flips process-local restore maintenance, quiesces the local image queue, and imports SQL. It does not own filesystem asset state.
-- Runtime state is intentionally single-process in several places: restore maintenance flag, upload tracker, view-count buffer, queue scheduling/retry maps. README documents the single-writer expectation, but the running app does not enforce it.
-- Deployment assumes a standalone Next container plus MySQL, host networking, bind-mounted `data/`, bind-mounted `public/`, and optional nginx static serving/rate limiting in front of Next.
+- Single Next.js app under `apps/web`; App Router serves localized public pages, protected admin pages, server actions, and a few API routes.
+- MySQL/Drizzle is the relational source of truth for metadata, auth/session, sharing, settings, audit log, and persistent rate-limit buckets.
+- Image ownership is split: DB rows store filenames; originals are private files under `data/uploads/original`; public derivatives live under `public/uploads/{jpeg,webp,avif}`.
+- Upload flow crosses auth/origin checks → process-local quota tracker → filesystem original write → DB insert → process-local queue → Sharp derivative writes → DB `processed` update.
+- Restore flow is SQL-only: it shells out to `mysql`, toggles process-local maintenance, quiesces the local queue, imports DB state, and revalidates app data.
+- Several runtime states are intentionally process-local. `CLAUDE.md` documents the shipped topology as single web-instance/single-writer (`CLAUDE.md:158-161`).
 
 ## Findings
 
-### A1. Restore and upload critical sections use disjoint locks, allowing DB/filesystem interleaving
+### A1. Shipped nginx forwards spoofable `X-Forwarded-For`, defeating the trusted-proxy boundary
 
 - Severity: High
 - Confidence: High
-- Category: Confirmed
-- Primary files/regions:
-  - `apps/web/src/app/actions/images.ts:116-128` — upload checks process-local restore maintenance before doing work.
-  - `apps/web/src/app/actions/images.ts:171-245` — upload acquires `acquireUploadProcessingContractLock()` and begins disk/config/tracker work.
-  - `apps/web/src/app/actions/images.ts:274-317` — upload performs late maintenance cleanup then inserts the image DB row.
-  - `apps/web/src/app/actions/images.ts:373-388` — upload enqueues processing after commit.
-  - `apps/web/src/app/[locale]/admin/(protected)/db/db-actions.ts:274-347` — restore uses a MySQL restore advisory lock, process-local maintenance, queue quiesce, then SQL import.
-  - `apps/web/src/lib/restore-maintenance.ts:1-56` — maintenance state is a `globalThis` boolean/counter.
-  - `apps/web/src/lib/upload-processing-contract-lock.ts:4-10` — upload/settings lock is a separate DB advisory lock named `gallerykit_upload_processing_contract`.
+- Category: Confirmed deployment/runtime boundary bug
+- Evidence:
+  - `apps/web/src/lib/rate-limit.ts:82-105` trusts `X-Forwarded-For` when `TRUST_PROXY=true` and selects the client address before the trusted suffix.
+  - `apps/web/docker-compose.yml:18-20` sets `TRUST_PROXY: "true"` for the documented deployment.
+  - `apps/web/nginx/default.conf:53-57`, `70-74`, `85-89`, and `120-124` proxy client IP headers; each uses `$proxy_add_x_forwarded_for` rather than overwriting the header.
+  - README explicitly says trusted proxies must overwrite forwarded headers (`README.md:146-148`).
 
 Problem:
 
-The restore flow and upload flow do not share one authoritative critical section. Uploads acquire the upload-processing contract lock, while restore acquires a different MySQL advisory lock (`gallerykit_db_restore`) and toggles a process-local maintenance flag. Uploads check the maintenance flag before work and again after saving originals, but that flag is not DB-backed, not cross-process, and not held as the same lock that restore uses. There is also a race inside one process: a restore can start after the upload's late maintenance check but before or during the upload DB insert/enqueue sequence.
+The app's trusted-proxy algorithm assumes the reverse proxy supplies a trustworthy forwarding chain. The shipped nginx config appends to any client-supplied `X-Forwarded-For`. With a direct client request containing `X-Forwarded-For: 1.2.3.4`, nginx forwards `1.2.3.4, <real-client-ip>`. With `TRUSTED_PROXY_HOPS=1`, the app selects the spoofed first address instead of the real client.
 
-Concrete failure scenario:
+Failure scenario:
 
-1. Admin A starts an upload. The action passes the initial maintenance check and writes an original file.
-2. Admin B starts restore on the same host after the upload's late cleanup check, acquiring the restore lock and importing an older dump.
-3. The upload inserts or returns a row that the restore import then removes, or the queue skips/enqueues during maintenance while the filesystem already contains a new original.
-4. Result: the UI may report upload success for a row that no longer exists, an original file is orphaned, or pending/processed state diverges from the restored DB. In a multi-container deployment, a different process can accept uploads during restore because the maintenance flag is not shared.
+A scripted client spoofs a new `X-Forwarded-For` value on every request. Login/search/share/OG/load-more buckets are keyed to attacker-chosen IPs, so per-IP limits and audit IP attribution become unreliable behind the documented nginx deployment.
 
 Suggested fix:
 
-Make DB restore, upload, delete, and settings/image-processing contract changes use one DB-backed mutation barrier or a deterministic lock hierarchy. For example, restore should acquire the upload-processing contract lock before entering maintenance, and uploads should acquire/check the same restore barrier immediately before the DB insert and queue enqueue. If keeping two locks, document and enforce lock ordering to avoid deadlocks. Add a regression test that simulates restore beginning between original-file save and DB insert/enqueue.
+Change nginx to overwrite rather than append untrusted forwarding headers at the trust boundary, e.g. `proxy_set_header X-Forwarded-For $remote_addr;` in every proxy location, and keep `X-Real-IP $remote_addr`. Add an integration/fixture test for `getClientIp()` using the exact shipped nginx header shape, including a spoofed inbound XFF case. Consider failing startup when `TRUST_PROXY=true` and a deploy template still contains `$proxy_add_x_forwarded_for`.
 
 ---
 
-### A2. Backup/restore owns SQL only, while image data ownership spans private and public volumes
+### A2. Single-writer/process-local topology is documented but not enforced by the runtime
 
 - Severity: Medium-High
 - Confidence: High
-- Category: Confirmed
-- Primary files/regions:
-  - `apps/web/src/app/[locale]/admin/(protected)/db/db-actions.ts:127-250` — `dumpDatabase()` shells out to `mysqldump`, writes a SQL file, and returns a download URL.
-  - `apps/web/src/app/[locale]/admin/(protected)/db/db-actions.ts:350-490` — `runRestore()` validates/imports SQL only.
-  - `apps/web/src/db/schema.ts:16-30` — image rows store filenames and topic/share metadata, not asset blobs.
-  - `apps/web/src/lib/upload-paths.ts:11-46` — originals and derivatives/resources live in separate filesystem roots.
-  - `apps/web/src/lib/serve-upload.ts:63-82` — public derivative/resource serving is filesystem-backed.
-  - `apps/web/src/lib/image-queue.ts:248-255` — processing fails if the DB row references a missing original file.
-  - `apps/web/docker-compose.yml:22-25` — runtime binds `./data` and `./public` as separate persistent volumes.
-  - `README.md:176-181` — deployment notes distinguish private originals and public derivatives.
+- Category: Confirmed architectural invariant
+- Evidence:
+  - `CLAUDE.md:158-161` documents single web-instance/single-writer and process-local restore/upload/queue/view-count state.
+  - `README.md:146` repeats that restore maintenance, upload quotas, and queue state are process-local and should not be horizontally scaled.
+  - `apps/web/src/lib/restore-maintenance.ts:1-56` stores maintenance state in `globalThis`.
+  - `apps/web/src/lib/upload-tracker-state.ts:7-20` stores upload quota state in a process-local `Map`.
+  - `apps/web/src/lib/image-queue.ts:121-140` stores queue/enqueued/retry/bootstrap state in process memory.
+  - `apps/web/src/lib/data.ts:11-23` buffers shared-group view counts in module-local state.
+  - `apps/web/src/app/api/health/route.ts:7-15` reports only the local process' maintenance flag.
 
 Problem:
 
-The admin backup/restore feature presents an operationally important recovery path, but it captures only the relational database. The gallery's source-of-truth is split: database rows reference filenames, originals live under private upload roots, derivatives/resources live under public upload roots, and topic/resource images are plain files. SQL restore has no manifest, checksum, asset copy, or reconciliation pass.
+The application relies on a single writer for correctness, but deployment only documents that constraint. A second container, PM2 cluster, Kubernetes replica, or parallel `next start` process can boot successfully against the same DB/uploads. Some advisory locks protect individual image jobs or restore operations, but they do not make maintenance, quota, health, and buffered counters globally consistent.
 
-Concrete failure scenario:
+Failure scenario:
 
-- Restoring a database dump on a fresh host recreates image rows whose derivative URLs point to files that do not exist; public galleries render broken images.
-- Restoring an older dump onto newer volumes leaves orphaned public/private files that are no longer referenced by DB rows.
-- Rows with `processed = false` can become permanently stuck if their originals are absent, because the queue can only process from existing originals.
+Instance A starts DB restore and flips its local maintenance flag. Instance B continues accepting uploads and public actions because its flag is false. Upload quota budgets split per process, health checks can pass against B, and DB/filesystem state can diverge while A imports SQL.
 
 Suggested fix:
 
-Clarify the UI and docs that the current feature is a database-only backup/restore, then add a full gallery backup/restore path for operational recovery. A complete backup should bundle SQL, private originals, public derivatives/resources, and a manifest with checksums. At minimum, add a post-restore reconciliation job that reports missing originals/derivatives, optionally regenerates derivatives from originals, and can sweep orphaned files after operator confirmation.
+Pick and enforce one topology:
+
+1. Keep single-writer: acquire a DB-backed instance lease at boot, fail fast if another writer is active, and expose writer identity/lease state in health/readiness; or
+2. Support scale-out: move restore maintenance, upload quotas, queue scheduling, and view-count buffering into DB/Redis/shared storage.
+
+Until enforced, expand deployment docs with concrete prohibited topologies and add a startup warning/error path for known cluster modes.
 
 ---
 
-### A3. Single-writer/process-local topology is documented but not enforced at runtime
+### A3. Admin DB backup/restore is SQL-only while gallery state spans DB plus filesystem assets
+
+- Severity: Medium-High
+- Confidence: High
+- Category: Confirmed recovery-boundary gap
+- Evidence:
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:128-251` creates DB dumps with `mysqldump` and returns a SQL download URL.
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:369-521` restore validates/imports a SQL file only.
+  - `apps/web/src/db/schema.ts:16-30` image rows store filenames, not image blobs.
+  - `apps/web/src/lib/upload-paths.ts:11-46` separates public upload root from private original root.
+  - `apps/web/src/lib/image-queue.ts:248-255` cannot process a pending row if the referenced original file is absent.
+  - `apps/web/docker-compose.yml:22-25` persists `./data` and `./public` as separate mounted filesystem trees.
+  - `README.md:176-181` says originals and derivatives live in those volumes.
+
+Problem:
+
+The admin-facing backup/restore path protects only relational state, but operational recovery requires matching filesystem state. SQL restore can create rows that point to missing derivatives/originals, or leave newer volume files orphaned after restoring an older dump.
+
+Failure scenario:
+
+An operator restores a SQL dump onto a fresh host. Public pages contain processed image rows whose `/uploads/...` files do not exist, and any `processed=false` rows cannot be repaired because their private originals are also missing. Conversely, restoring an older dump onto existing volumes leaves unreferenced files indefinitely.
+
+Suggested fix:
+
+Make the UI/docs label the feature as database-only. Add a full gallery backup format that bundles SQL, private originals, public derivatives/resources, and a checksum manifest. At minimum, add a post-restore reconciliation job that reports missing originals/derivatives, regenerates derivatives from originals where possible, and optionally sweeps orphaned files after operator confirmation.
+
+---
+
+### A4. Experimental storage abstraction has drifted from the live private/public storage boundary
 
 - Severity: Medium
 - Confidence: High
-- Category: Confirmed
-- Primary files/regions:
-  - `README.md:146` — documentation says queue processing, upload quota tracking, and restore maintenance assume a single web instance/single writer.
-  - `apps/web/src/lib/restore-maintenance.ts:1-56` — restore maintenance lives in process memory.
-  - `apps/web/src/lib/upload-tracker-state.ts:7-20` — upload-byte tracker is a process-local `globalThis` map.
-  - `apps/web/src/lib/data.ts:11-23` — view-count buffering is process-local state and timer.
-  - `apps/web/src/lib/image-queue.ts:121-140` — queue, retry sets, processing sets, and processed job state are process-local.
-  - `apps/web/src/app/api/health/route.ts:7-9` — health reports only the local process' restore-maintenance flag.
+- Category: Confirmed design drift / future footgun
+- Evidence:
+  - `CLAUDE.md:97-100` says storage is not integrated and must not be exposed as S3/MinIO switching.
+  - `apps/web/src/lib/storage/types.ts:1-15` says the storage interface is experimental and not used by every upload/serve path.
+  - `apps/web/src/lib/storage/index.ts:1-12` says live uploads, processing, and serving still use direct filesystem code.
+  - `apps/web/src/lib/process-image.ts:233-256` writes originals directly to `UPLOAD_DIR_ORIGINAL`.
+  - `apps/web/src/lib/process-image.ts:389-478` writes derivatives directly to `UPLOAD_DIR_WEBP/AVIF/JPEG`.
+  - `apps/web/src/lib/serve-upload.ts:63-99` serves public files directly from the filesystem.
+  - `apps/web/src/lib/upload-paths.ts:24-46` keeps originals private and derivatives public.
 
 Problem:
 
-The architecture has a real single-writer invariant, but it is enforced only by documentation. Multiple Node processes, PM2 clustering, Kubernetes replicas, or two Compose stacks pointed at the same DB/volumes would all boot normally. Some DB advisory locks reduce duplicate image processing, but they do not centralize all mutable runtime state.
+The repository contains two storage models: a partially built generic `StorageBackend` and the actual local filesystem pipeline. Because the abstraction is not wired end-to-end, future backend work can easily update one side and leave the other side writing/reading local paths. The live security boundary is data-class based (private originals vs public derivatives), not just a generic object-key namespace.
 
-Concrete failure scenario:
+Failure scenario:
 
-- Instance A enters restore maintenance while instance B continues accepting uploads and admin mutations.
-- Upload quota/size tracking splits per process, allowing aggregate uploads above the intended cap.
-- View-count buffers flush independently or are lost when one process restarts.
-- Health checks against instance B report normal while instance A is in restore maintenance.
+A future change adds S3/MinIO support through `getStorage()` and assumes uploads now use it, but `process-image.ts` and `serve-upload.ts` continue using local paths. Originals land in one backend, derivatives in another, public pages 404, and private-original assumptions may be broken if generic URL methods are used for original keys.
 
 Suggested fix:
 
-Choose one of two explicit architectures:
-
-1. Enforce single-writer deployment at boot with a DB-backed lease/instance guard and clear failure when another writer is active; expose that invariant in health/readiness.
-2. Move process-local state to shared infrastructure (DB tables or Redis) and make restore maintenance, upload quotas, queue state, and view-count buffering cross-instance.
-
-Until then, document concrete prohibited topologies (`next start` cluster mode, PM2 cluster, multiple containers against the same DB/uploads) in deployment docs and CI/deploy templates.
+Either remove/quarantine the unused abstraction or finish the migration behind a single storage port used by upload, processing, deletion, and serving. Model visibility explicitly, e.g. `PrivateOriginalStore` and `PublicDerivativeStore`, so private originals cannot accidentally acquire public URLs. Add contract tests proving all live image paths use the same backend boundary.
 
 ---
 
-### A4. `IMAGE_BASE_URL` splits build-time image policy from runtime URL generation
+### A5. Build-time and runtime asset-origin policy share one mutable `IMAGE_BASE_URL`
 
 - Severity: Medium
 - Confidence: High
-- Category: Confirmed
-- Primary files/regions:
-  - `apps/web/next.config.ts:8-28` — parses `IMAGE_BASE_URL` during build/config evaluation.
-  - `apps/web/next.config.ts:77-80` — Next image `remotePatterns` are derived from that build-time value.
-  - `apps/web/src/lib/constants.ts:6-7` — runtime `IMAGE_BASE_URL` is read from `process.env`.
-  - `apps/web/src/lib/image-url.ts:4-9` — rendered image URLs prepend the runtime value.
-  - `apps/web/Dockerfile:35-38` — `IMAGE_BASE_URL` is a build argument.
-  - `apps/web/docker-compose.yml:7-20` — Compose forwards `IMAGE_BASE_URL` to both build and runtime.
-  - `README.md:142-144` — docs warn `IMAGE_BASE_URL` must be set before building.
+- Category: Confirmed phase-boundary risk
+- Evidence:
+  - `apps/web/next.config.ts:8-28` parses `IMAGE_BASE_URL` during config/build evaluation.
+  - `apps/web/next.config.ts:79-83` derives Next image allowlists from that parsed value.
+  - `apps/web/Dockerfile:35-38` passes `IMAGE_BASE_URL` as a build arg.
+  - `apps/web/docker-compose.yml:7-20` forwards `IMAGE_BASE_URL` through build args and runtime environment.
+  - `README.md:142-144` warns it must be set before build.
 
 Problem:
 
-The app uses one environment variable for two different phases: build-time Next image optimizer allowlisting and runtime URL generation. The docs warn about this, but the container can still be run with a runtime `IMAGE_BASE_URL` that differs from the value used when the standalone app was built.
+One variable controls two phases: build-time optimizer/CSP allowlisting and runtime URL generation. The docs warn operators, but the container does not enforce that runtime `IMAGE_BASE_URL` matches the value used to build the standalone app.
 
-Concrete failure scenario:
+Failure scenario:
 
-An image is built with `IMAGE_BASE_URL=https://cdn-a.example.com`, then deployed with runtime `IMAGE_BASE_URL=https://cdn-b.example.com`. The UI emits `cdn-b` image URLs, but Next's optimizer remote allowlist still contains `cdn-a`. Depending on route/component behavior, images can fail optimization or be rejected even though the runtime env appears correct.
-
-Suggested fix:
-
-Make the phase boundary explicit and machine-enforced. Options:
-
-- Generate a build manifest containing the build-time `IMAGE_BASE_URL` and fail startup if runtime differs.
-- Split variables, e.g. `NEXT_IMAGE_REMOTE_BASE_URL` for build-time optimizer policy and `PUBLIC_ASSET_BASE_URL` for runtime rendering, with explicit docs about rebuild requirements.
-- If uploads are always served by a CDN/static origin, avoid relying on Next optimizer remote policy for those URLs.
-
----
-
-### A5. Experimental storage abstraction conflicts with the current private-original/public-derivative boundary
-
-- Severity: Medium
-- Confidence: High
-- Category: Confirmed
-- Primary files/regions:
-  - `apps/web/src/lib/storage/types.ts:1-15` — storage layer is explicitly experimental and not wired through all paths.
-  - `apps/web/src/lib/storage/index.ts:1-12` — current implementation is a local-only scaffold, not the live upload pipeline.
-  - `apps/web/src/lib/storage/local.ts:20` — local storage creates an `original` directory under the storage root.
-  - `apps/web/src/lib/storage/local.ts:123-126` — `getUrl()` returns `/uploads/${key}` for every key, including original keys.
-  - `apps/web/src/lib/upload-paths.ts:24-40` — live pipeline keeps originals in `UPLOAD_ORIGINAL_ROOT` and public derivatives under `UPLOAD_ROOT`.
-  - `apps/web/src/lib/upload-paths.ts:82-103` — production fails if legacy public originals are present.
-
-Problem:
-
-The live pipeline has a clear security/ownership boundary: originals are private, derivatives/resources are public. The experimental storage abstraction encodes a different model by putting `original/...` under the same root as public keys and returning a public URL for any key. That drift is currently contained because the abstraction is not wired into the live pipeline, but it is an architectural footgun for future storage/backend work.
-
-Concrete failure scenario:
-
-A future S3/local-storage migration switches original writes to `storage.put('original/<file>')` and displays or logs `storage.getUrl('original/<file>')`. With the current local adapter contract, originals become web-addressable under `/uploads/original/...`, undoing the private-original migration and potentially triggering the production legacy-original guard.
+An image is built with `IMAGE_BASE_URL=https://cdn-a.example.com` and then run with `IMAGE_BASE_URL=https://cdn-b.example.com`. Rendered URLs point at `cdn-b`, while Next's built image policy may still allow only `cdn-a`, leading to optimization failures or inconsistent CSP/image behavior that is hard to diagnose from runtime env alone.
 
 Suggested fix:
 
-Redesign the storage interface around visibility/data class. For example, split `PrivateObjectStore` for originals from `PublicAssetStore` for derivatives/resources, or require `{ visibility: 'private' | 'public' }` in keys/operations and make `getUrl()` unavailable for private objects. Remove or quarantine `original` from the public local storage root until the abstraction is fully integrated and covered by security tests.
+Persist a small build manifest containing the build-time asset origin and fail startup if the runtime value differs. Alternatively split variables by phase, e.g. `NEXT_IMAGE_REMOTE_BASE_URL` for build policy and `PUBLIC_ASSET_BASE_URL` for runtime rendering, with explicit rebuild requirements.
 
 ---
 
-### A6. nginx admin mutation rate-limit topology omits settings and SEO routes
+### A6. Edge admin mutation throttling does not cover all protected mutation pages
 
 - Severity: Low-Medium
 - Confidence: High
-- Category: Confirmed
-- Primary files/regions:
-  - `apps/web/nginx/default.conf:77-90` — admin mutation rate-limit location covers `dashboard|db|categories|tags|users|password` only.
-  - `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx` — settings is a protected admin mutation surface.
-  - `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx` — SEO is a protected admin mutation surface.
-  - `apps/web/src/app/actions/settings.ts:40-47` — `updateGallerySettings()` mutates gallery settings.
-  - `apps/web/src/app/actions/seo.ts:55-62` — `updateSeoSettings()` mutates SEO settings.
-  - `apps/web/nginx/default.conf:115-129` — generic fallback proxy has no equivalent admin mutation `limit_req`.
+- Category: Confirmed deployment-policy drift
+- Evidence:
+  - `apps/web/nginx/default.conf:77-90` rate-limits only `dashboard|db|categories|tags|users|password` admin subpaths.
+  - `apps/web/nginx/default.conf:115-129` generic fallback proxy has no equivalent `limit_req`.
+  - `apps/web/src/app/actions/settings.ts:40-47` exposes a protected settings mutation action.
+  - `apps/web/src/app/actions/seo.ts:55-62` exposes a protected SEO mutation action.
+  - `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:1-6` and `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx:1-5` are protected dynamic admin pages.
 
 Problem:
 
-The app-level auth/origin checks still protect these actions, so this is not an authentication bypass. The architectural issue is deployment-policy drift: nginx defines an admin mutation throttling zone for some protected admin pages, but settings and SEO mutations are outside the regex and fall through to the generic proxy location.
+App-level auth and same-origin checks still exist, so this is not an auth bypass. The architecture issue is that nginx's edge policy encodes a partial route inventory, and settings/SEO mutation pages fall through to the generic proxy path instead of the stricter admin mutation throttle.
 
-Concrete failure scenario:
+Failure scenario:
 
-A compromised admin browser session, automated client, or accidental repeated submission can hammer settings/SEO server actions without the stricter admin mutation rate limit applied to the other admin mutation pages. That can amplify DB writes, cache invalidations, and operational noise relative to the intended edge policy.
-
-Suggested fix:
-
-Make nginx routing derive from the same protected-admin route inventory as the app, or broaden the protected mutation location to include all admin subpaths except explicit safe/static exceptions. At minimum add `settings|seo` to the regex and add a CI guard that compares protected admin route directories with nginx admin rate-limit coverage.
-
----
-
-### A7. Topic image resources can orphan on crash between final file write and DB commit
-
-- Severity: Low
-- Confidence: Medium-High
-- Category: Likely
-- Primary files/regions:
-  - `apps/web/src/lib/process-topic-image.ts:42-80` — topic image conversion writes a final `resources/<uuid>.webp` file before the caller's DB transaction completes.
-  - `apps/web/src/lib/process-topic-image.ts:95-102` — cleanup removes `tmp-*` resources, not already-final orphan resources.
-  - `apps/web/src/app/actions/topics.ts:112-121` — create flow processes the image before the route/DB write is complete.
-  - `apps/web/src/app/actions/topics.ts:124-139` and `151-153` — conflict/error cleanup handles normal failures.
-  - `apps/web/src/app/actions/topics.ts:214-229` — update flow processes the replacement image before transaction completion.
-  - `apps/web/src/app/actions/topics.ts:283-286` — previous image is deleted only after a successful update.
-
-Problem:
-
-The normal error paths clean up processed topic images well, but crash consistency is not atomic. A final public resource file can be written before the DB row that references it is committed. If the process exits after final write and before cleanup/commit, the file has no owner.
-
-Concrete failure scenario:
-
-During topic creation/update, the process writes `public/uploads/resources/<uuid>.webp` and then crashes before the DB transaction commits or before the catch/finally cleanup path runs. The topic row never references that filename, but the public file remains indefinitely. Repeated crashes or abandoned admin sessions can grow unreferenced resources and complicate backup/migration.
+A compromised admin browser session or accidental automation hammers SEO/settings forms. Those requests still hit DB writes and broad `revalidateAllAppData()` invalidations, but they bypass the nginx admin mutation budget applied to neighboring admin pages.
 
 Suggested fix:
 
-Introduce a staged resource lifecycle: write to a private/temp key, commit the DB row with intended filename, then promote/rename after commit; or store a pending asset record and finalize it transactionally. Add a startup/admin sweeper that compares `resources/*.webp` against `topics.image_filename` and reports/removes unreferenced resources after an age threshold.
+Broaden the nginx admin throttling location to all protected admin subpaths except explicit safe exceptions, or at least add `settings|seo`. Add a CI check that compares protected admin route directories against nginx rate-limit coverage.
 
 ---
 
-### A8. Server-action origin guard lint is topology-scoped, not all-`use server` scoped
+### A7. Topic image resources can orphan on crash between file finalization and DB ownership
 
 - Severity: Low
 - Confidence: Medium
-- Category: Likely
-- Primary files/regions:
-  - `apps/web/scripts/check-action-origin.ts:13-21` — scanner documents its limited file topology and hard-coded exclusions.
-  - `apps/web/scripts/check-action-origin.ts:86-97` — discovery scans `src/app/actions/**` plus a hard-coded admin DB actions file.
-  - `apps/web/src/proxy.ts:101-107` — proxy intentionally excludes API routes and notes admin API routes must authenticate themselves.
-  - Current `rg '^use server' apps/web/src/app` sweep shows existing server-action files are covered by today's scanner shape, aside from intentional public/auth exclusions.
+- Category: Likely crash-consistency gap
+- Evidence:
+  - `apps/web/src/lib/process-topic-image.ts:42-80` writes a final public `public/resources/<uuid>.webp` file.
+  - `apps/web/src/lib/process-topic-image.ts:95-102` cleanup targets temporary `tmp-*` files, not already-final orphan resources.
+  - `apps/web/src/app/actions/topics.ts:112-121` topic create processes the image before the DB write completes.
+  - `apps/web/src/app/actions/topics.ts:214-229` topic update processes a replacement image before the update completes.
+  - `apps/web/src/app/actions/topics.ts:283-286` deletes the previous image only after successful update.
 
 Problem:
 
-The current codebase appears to satisfy the guard's topology, but the guarantee is brittle. Next allows colocated route-segment server action files, and a future admin feature could add `src/app/[locale]/admin/(protected)/foo/actions.ts` or another `use server` file outside `src/app/actions/**`. That file would not be scanned unless manually added to the hard-coded list.
+Normal error paths clean up, but there is no durable owner record for a finalized topic image until the DB mutation commits. A process crash after file finalization and before commit/catch cleanup leaves an unreferenced public file.
 
-Concrete failure scenario:
+Failure scenario:
 
-A developer adds a new protected admin mutation in a route-local `actions.ts` file and forgets `requireSameOriginAdmin()`. The action is outside the scanner's discovery set, so CI passes even though the architectural origin-guard invariant has been broken.
+During topic create/update, Sharp writes `public/resources/<uuid>.webp`; the process exits before the topic row references that filename. The public file remains forever and is not removed by tmp cleanup.
 
 Suggested fix:
 
-Invert the guard: scan all `src/app/**` files containing `'use server'`, then require explicit allowlist annotations/exemptions for public/auth-only actions. If the repository wants to ban colocated server actions, enforce that with a test that fails whenever a new `use server` file appears outside approved locations.
+Use a staged lifecycle: write to private/temp, commit the DB owner, then promote/rename after commit; or persist a pending asset record and finalize transactionally. Add a sweeper that compares `public/resources/*.webp` with `topics.image_filename` and reports/removes aged orphans.
 
----
+## Final sweep
 
-## Positive controls observed
-
-- Private originals are separated from public derivatives in the live path (`upload-paths.ts`) and production startup rejects legacy public originals.
-- Image deletion paths attempt to coordinate queue state and filesystem cleanup after DB deletion.
-- Public/admin data query shapes intentionally separate public-safe fields from admin fields, with compile-time privacy checks around image selections.
-- API auth and server-action origin checks have dedicated guard scripts, even though one scanner should be widened as noted above.
-- README now documents important deployment assumptions, including single-writer behavior, image base URL build-time handling, and nginx/static upload path caveats.
-
-## Final sweep and coverage confirmation
-
-- Inventory source: tracked repository files and runtime config; generated/build/cache/media artifacts excluded.
-- App actions reviewed: image, topic, tag, category, user, password, SEO, settings, auth, public/group loading, and admin DB backup/restore actions.
-- Data layer reviewed: Drizzle schema, database connection, query/read models, view-count buffering, upload metadata, and privacy field selection.
-- Image queue reviewed: process-local queue topology, MySQL per-image locks, pending bootstrap, restore quiesce/resume, filesystem derivative generation, and cleanup behavior.
-- Restore reviewed: maintenance flag, DB advisory lock, mysqldump/mysql shell execution, SQL validation/import, queue quiesce, and backup-download serving.
-- Auth/boundary reviewed: session helpers, CSRF/origin helpers, admin proxy/CSP behavior, API route auth guard script, and server-action origin guard script.
-- UI reviewed: admin/public route organization, settings/SEO mutation surfaces, analytics/CSP integration, and component ownership boundaries at an architectural level.
-- Tests reviewed: unit/integration/e2e coverage and guard scripts relevant to the findings above.
-- Deployment reviewed: Dockerfile, Compose topology, nginx static/proxy/rate-limit config, environment examples, README deployment/runbook notes, and CI quality workflow.
-
-No implementation changes were made. The only file intentionally written by this review pass is `./.context/reviews/architect.md`.
+- Confirmed existing unrelated worktree changes are in other review artifacts and were not modified by this pass.
+- This review intentionally did not change source code, tests, configs, or generated assets.
+- No commit was created because the user explicitly requested `no source changes/commits` for this fan-out continuation.

@@ -1,68 +1,95 @@
-# code-reviewer Review — Cycle 2
+# Code Review Report — code-reviewer
 
-## Inventory
+Repository: `/Users/hletrd/flash-shared/gallery`  
+Date: 2026-04-29  
+Scope: whole repository, focusing on code quality, logic, SOLID boundaries, and maintainability.  
+Verification: `npm run lint --workspace=apps/web` passed.
 
-- Prompt read first: `.omx/context/cycle2-review-prompt.md`.
-- Current uncommitted input state reviewed:
-  - Modified review aggregate: `.context/reviews/_aggregate.md`.
-  - Modified app/config files: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/next.config.ts`, `apps/web/package.json`, `apps/web/tsconfig.scripts.json`, `apps/web/tsconfig.typecheck.json`.
-  - Modified app source: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/[locale]/admin/layout.tsx`, `apps/web/src/app/[locale]/admin/(protected)/error.tsx`, `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`, `apps/web/src/components/admin-user-manager.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/nav-client.tsx`, `apps/web/src/components/photo-viewer-loading.tsx`, `apps/web/src/components/tag-input.tsx`, `apps/web/src/components/ui/dialog.tsx`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/storage/local.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/validation.ts`.
-  - Untracked review/input files: `apps/web/scripts/prepare-next-typegen.mjs`, `plan/plan-249-cycle2-fresh-gate-fix.md`, `plan/plan-250-cycle1-implementation.md`, `plan/plan-251-cycle1-deferred.md`.
-- Repository inventory built before analysis:
-  - Root docs/scripts/config: `README.md`, `CLAUDE.md`, `AGENTS.md`, `.dockerignore`, `.gitignore`, `.env.deploy.example`, root `package.json` / `package-lock.json`, `scripts/deploy-remote.sh`, `plan/**`.
-  - App configs/deploy: `apps/web/package.json`, `next.config.ts`, `eslint.config.mjs`, `playwright.config.ts`, `vitest.config.ts`, `tsconfig*.json`, `drizzle.config.ts`, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, `.env.local.example`, `.dockerignore`.
-  - App source: 227 tracked TS/TSX files under `apps/web/src` spanning App Router pages/routes/actions, components, db, i18n, proxy, and libraries.
-  - Tests: 71 unit tests under `apps/web/src/__tests__` and 8 Playwright/e2e helper/spec files under `apps/web/e2e`.
-  - Scripts/migrations/assets: 15 top-level app scripts under `apps/web/scripts`, Drizzle SQL/meta files, message JSON files, `public/histogram-worker.js`, font/static upload fixtures.
-- Skipped from line-by-line semantic review: `node_modules`, `.next`, `apps/web/test-results`, `playwright-report`, generated screenshots/logs, binary image/font/upload artifacts, `.omc`/`.omx` runtime state except the required prompt file. These were inventoried or deliberately excluded as generated/runtime/binary artifacts.
+## Inventory reviewed
+
+Primary application inventory was built from `apps/web/src`, `apps/web/scripts`, config, docs, and tests. Relevant inspected areas:
+
+- App router pages/routes: `apps/web/src/app/[locale]/**`, `apps/web/src/app/api/**`, upload routes, metadata routes, middleware/proxy.
+- Server actions: `apps/web/src/app/actions/*.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- Data/auth/storage core: `apps/web/src/lib/*.ts`, `apps/web/src/lib/storage/*`, `apps/web/src/db/*`.
+- Client components: `apps/web/src/components/**/*.tsx` and admin protected client pages.
+- Operational scripts/config: `apps/web/scripts/*`, `apps/web/next.config.ts`, `apps/web/playwright.config.ts`, package scripts.
+- Tests/docs: `apps/web/src/__tests__/*`, root `README.md`, `apps/web/README.md`.
+
+## Summary
+
+- Critical: 0
+- High: 0
+- Medium: 4
+- Low: 0
+- Recommendation: **COMMENT / address medium issues before further hardening cycles**
 
 ## Findings
 
-- [CR2-CQ-01] Severity: High Confidence: High Classification: confirmed Cross-agent hint: debugger/test-engineer should add a two-page infinite-scroll regression test.
-  - Location: `apps/web/src/components/home-client.tsx:82-88`, `apps/web/src/components/home-client.tsx:271-277`, `apps/web/src/components/load-more.tsx:80-87`
-  - Problem: `HomeClient` creates a fresh cursor object every render with `getClientImageListCursor(images.at(-1))` and passes it as `initialCursor`. `LoadMore` treats `initialCursor` as a reset dependency. After a successful page append, `setAllImages` re-renders `HomeClient`, the cursor prop gets a new object identity, and the `LoadMore` reset effect restores `cursor` back to the first-page cursor.
-  - Failure scenario: A gallery with more than 60 images loads page 2 successfully. The parent re-renders after `onLoadMore`; `LoadMore` resets to the original cursor; the next sentinel intersection fetches page 2 again, duplicating images and potentially keeping the user in a repeated-page loop.
-  - Suggested fix: Memoize the initial cursor in `HomeClient` using scalar dependencies from the last initial image, or pass a primitive cursor key and reset only when the query changes. In `LoadMore`, avoid depending on object identity for reset; compare cursor fields or reset from `queryKey`/`initialOffset` only. Add a component/e2e regression that loads two consecutive pages and asserts no duplicate IDs.
+### MEDIUM 1. Shared-group view counts are incremented for intra-share photo navigation
 
-- [CR2-CQ-02] Severity: High Confidence: High Classification: confirmed Cross-agent hint: build-fixer should run the app typecheck after the cursor type is repaired.
-  - Location: `apps/web/src/components/home-client.tsx:55-67`, `apps/web/src/components/home-client.tsx:82-88`, `apps/web/src/components/home-client.tsx:275-276`
-  - Problem: `GalleryImage` omits `capture_date` and `created_at`, but `getClientImageListCursor` requires an object with `capture_date`, `created_at`, and `id`. Inside `HomeClient`, `images.at(-1)` is typed as `GalleryImage | undefined`, so the new cursor call is not type-correct even though the database query currently selects those fields.
-  - Failure scenario: Once the new typecheck wrapper reaches this file, TypeScript rejects the build because the client prop type no longer matches the cursor helper's required shape. If someone papers over the type error with a cast, future refactors can remove the fields from the server query without a compile-time guard and silently break cursor pagination.
-  - Suggested fix: Add `capture_date: string | null` and `created_at: string | Date` to the `GalleryImage` contract, preferably by deriving the prop image type from `getImagesLitePage`/`getImagesLite` instead of duplicating a partial row shape. Reuse the exported `getImageListCursor` helper or keep one cursor-builder type source to avoid future drift.
+- Location: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:99-107`, `apps/web/src/lib/data.ts:844-848`
+- Severity: Medium
+- Confidence: High
 
-- [CR2-CQ-03] Severity: Medium Confidence: High Classification: confirmed Cross-agent hint: verifier/test-engineer should lock restore/upload body-limit invariants.
-  - Location: `apps/web/src/lib/upload-limits.ts:1-4`, `apps/web/src/lib/upload-limits.ts:15-27`, `apps/web/next.config.ts:69-77`, `apps/web/src/lib/db-restore.ts:1`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:61-63`, `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:185`, `apps/web/src/app/[locale]/admin/db-actions.ts:267-270`, `apps/web/src/app/[locale]/admin/db-actions.ts:357-358`
-  - Problem: The new global Server Action/proxy transport cap defaults to `MAX_UPLOAD_FILE_BYTES + 16 MiB` (216 MiB), but the DB restore UI, action, comments, and nginx route still advertise/allow 250 MB restore files. Because `restoreDatabase` is invoked as a Server Action, Next can reject a 217-250 MB restore body before the action's own `MAX_RESTORE_SIZE_BYTES` check runs.
-  - Failure scenario: An admin selects a 230 MB SQL dump. The client accepts it because it is below `MAX_RESTORE_SIZE_BYTES`, nginx accepts it because `/admin/db` is capped at 250M, but Next rejects the Server Action request at the smaller 216 MiB transport cap. The user gets the generic restore failure path instead of the documented 250 MB behavior.
-  - Suggested fix: Make the framework body cap the maximum of all Server Action upload surfaces plus multipart overhead, or move DB restore upload to a dedicated route with route-specific body handling. Document and test `NEXT_UPLOAD_BODY_MAX_BYTES` if it remains an override. Add a config/unit invariant asserting the default Server Action cap is greater than or equal to `MAX_RESTORE_SIZE_BYTES` plus overhead while app-level per-surface validation remains stricter.
+`SharedGroupPage` calls `getSharedGroupCached(key)` without options for both the gallery view and `?photoId=` detail view. `getSharedGroup()` increments the view counter by default after every successful fetch. A single visitor who opens a shared group and browses 10 photos can therefore record roughly 10+ views, because each selected-photo URL render re-fetches the group and reaches the default increment path.
 
-- [CR2-CQ-04] Severity: Medium Confidence: High Classification: confirmed Cross-agent hint: qa-tester/build-fixer should validate e2e env loading with shell-special secrets.
-  - Location: `apps/web/playwright.config.ts:10-14`, `apps/web/playwright.config.ts:72-74`
-  - Problem: The config first loads `.env.local` with Node's dotenv-compatible `process.loadEnvFile`, but the webServer command then prepends `. ${JSON.stringify(envPath)} &&` before every command. `.env.local` is a dotenv file, not guaranteed to be valid or safe POSIX shell syntax.
-  - Failure scenario: A local `DB_PASSWORD` or `ADMIN_PASSWORD` containing `$`, backticks, quotes, whitespace, `#`, or command-substitution syntax is parsed correctly by `process.loadEnvFile` but expanded/truncated/executed by the shell `.` command. E2E init/build/server startup can fail with wrong credentials, or a developer-controlled env file can execute arbitrary shell while tests start.
-  - Suggested fix: Stop shell-sourcing dotenv files. Use a small Node webServer runner that calls `process.loadEnvFile(envPath)` and spawns `npm run init`, `npm run e2e:seed`, `npm run build`, and `node .../server.js` with an explicit `env` object; or use Playwright's supported `webServer.env`/wrapper-script pattern. Keep all command arguments structured instead of concatenated shell strings.
+Concrete failure scenario: an owner sends one group share link to one person. That person clicks the first thumbnail, then uses next/previous through the shared photo viewer. The admin dashboard reports many group views even though there was only one external visit.
 
-- [CR2-CQ-05] Severity: Medium Confidence: High Classification: confirmed Cross-agent hint: test-engineer/build-fixer should broaden script-gate coverage.
-  - Location: `apps/web/package.json:16-21`, `apps/web/tsconfig.scripts.json:7-10`, `apps/web/scripts/prepare-next-typegen.mjs:1-31`
-  - Problem: The new `typecheck:scripts` gate compiles only `scripts/**/*.ts`; it excludes every JS/MJS script, including the new `prepare-next-typegen.mjs` that is now on the critical `typecheck:app` path, plus `ensure-site-config.mjs`, `migrate.js`, `migrate-capture-date.js`, and `mysql-connection-options.js`.
-  - Failure scenario: A typo or API misuse in `prepare-next-typegen.mjs` (or a deploy/migration JS script) passes `npm run typecheck:scripts` and is caught only when `npm run typecheck`, Docker build, init, or deployment actually executes that script. This undermines the cycle's stated goal of making the build/typecheck gate deterministic and comprehensive.
-  - Suggested fix: Convert critical JS/MJS scripts to TypeScript, or enable `allowJs` + `checkJs` for a dedicated scripts config that includes `scripts/**/*.{ts,js,mjs}`. If full JS typechecking is too noisy, at least add a `node --check` syntax gate for JS/MJS scripts and focused unit tests for `prepare-next-typegen.mjs` behavior.
+Suggested fix: separate “share opened” counting from “photo selected” rendering. For example, pass `{ incrementViewCount: !photoIdParam }` from `SharedGroupPage`, or add a small cookie/session-based once-per-key counter. Keep `generateMetadata()` on `{ incrementViewCount: false }` as it already does.
 
-- [CR2-CQ-06] Severity: Low Confidence: High Classification: likely Cross-agent hint: architect/security-reviewer should decide whether the experimental storage abstraction remains live API or should be removed.
-  - Location: `apps/web/src/lib/storage/local.ts:22-37`, `apps/web/src/lib/storage/local.ts:122-131`
-  - Problem: `LocalStorageBackend` validates keys through `resolve()` for read/write/delete/copy, but `getUrl()` implements a separate normalization path that only trims, swaps backslashes, and blocks `original/`. It does not reject empty keys, `..` segments, leading slashes, or other shapes that `resolve()` would reject.
-  - Failure scenario: A future caller uses `getUrl()` with a key that came from admin/database state rather than a hardcoded derivative filename. Keys like `../x`, `/jpeg/a.jpg`, or `jpeg/../../x` produce malformed public URLs instead of failing fast, creating hard-to-debug broken links and a validation split between URL generation and filesystem access. The current live upload pipeline mostly bypasses this abstraction, which lowers immediate severity.
-  - Suggested fix: Factor a shared `normalizeStorageKey()` used by both `resolve()` and `getUrl()`, reject the same invalid key shapes everywhere, then URL-encode individual path segments. If the abstraction is intentionally dormant, mark it internal/dead or remove it to avoid future callers assuming it is production-ready.
+---
 
-## Final Sweep
+### MEDIUM 2. File-serving routes validate one path but stream another raceable path
 
-- Static/manual sweep covered the uncommitted diff, app source/actions/components/libs, auth/session/rate-limit/restore/upload paths, storage abstraction, build/typecheck scripts, Docker/nginx/deploy config, Playwright config, public/admin route interactions, unit/e2e tests, and docs/plans relevant to current changes.
-- Pattern sweeps included server-action/auth/origin checks, global/process state, raw SQL and restore scanning, file upload/restore limits, cursor pagination, shell/env handling, and changed UI/client state flows.
-- Findings above are limited to code quality, logic bugs, SOLID/maintainability, and cross-file correctness. Security-only, performance-only, and UI-only issues were noted only where they directly intersected code correctness/maintainability.
-- No fixes were implemented and no application code was edited.
+- Location: `apps/web/src/lib/serve-upload.ts:75-92`, `apps/web/src/app/api/admin/db/download/route.ts:60-83`
+- Severity: Medium
+- Confidence: Medium
 
-## Skipped/Limitations
+Both handlers perform `lstat()` and `realpath()` containment checks, but then call `createReadStream()` on the original path (`absolutePath` / `filePath`) instead of the already-resolved path. That leaves a time-of-check/time-of-use gap: the file can be swapped after validation and before open.
 
-- Skipped generated/runtime/binary artifacts: `node_modules`, `.next`, `.omc`, `.omx` runtime state beyond the required prompt, `apps/web/test-results`, Playwright reports, screenshots, uploaded image derivatives, fonts, and logs.
-- Historical `.context/plans/**` and `.context/reviews/**` were not line-reviewed beyond current aggregate/provenance because the requested output was a current repository/code review, not a historical review audit.
-- Verification commands were intentionally limited. A read-only `npx tsc -p tsconfig.typecheck.json --noEmit --pretty false --incremental false` attempt produced no output for roughly 25 seconds and was terminated to avoid spending the review window on a known gate-hang surface; no lint/test/e2e/build gates were run to completion.
+Concrete failure scenario: in a compromised or mis-permissioned upload/backup directory, an attacker replaces the checked regular file with a symlink between `realpath()` and `createReadStream()`. The route can stream content that was not the file previously validated. The current extension/path validation reduces remote exploitability, but the handler structure is fragile and easy to regress.
+
+Suggested fix: stream from `resolvedPath` / `resolvedFilePath` after validation, or stronger, open a file descriptor with no-follow semantics where available, `fstat()` that fd, then create the stream from the fd. Keep the descriptor-bound identity through validation and streaming.
+
+---
+
+### MEDIUM 3. Settings actions trust `Record<string, string>` at runtime and can throw 500s on malformed Server Action payloads
+
+- Location: `apps/web/src/app/actions/settings.ts:40-65`, `apps/web/src/app/actions/seo.ts:55-94`
+- Severity: Medium
+- Confidence: High
+
+`updateGallerySettings()` and `updateSeoSettings()` accept `Record<string, string>`, then call `value.trim()` for every entry. TypeScript only protects first-party callers; Server Action payloads can still be malformed at runtime. A non-string value such as `null`, a number, or an array causes a `TypeError` before the action reaches its structured validation/error return path.
+
+Concrete failure scenario: an admin browser extension, stale client bundle, or malicious same-origin script calls the Server Action with `{ seo_title: null }`. Instead of returning a localized validation error, the action throws and the UI receives a generic failure/500. This makes the action surface less robust and complicates incident triage.
+
+Suggested fix: add a shared `normalizeStringRecord(input, allowedKeys)` helper that verifies a plain object, rejects non-string values before trimming, caps total keys/length, and returns `{ error }` rather than throwing. Reuse it for gallery and SEO settings to reduce duplication.
+
+---
+
+### MEDIUM 4. Batch tag update assumes arrays and can treat a string as many one-character tags
+
+- Location: `apps/web/src/app/actions/tags.ts:338-357`, `apps/web/src/app/actions/tags.ts:375-408`
+- Severity: Medium
+- Confidence: High
+
+`batchUpdateImageTags()` checks `addTagNames.length` and `removeTagNames.length`, but never verifies `Array.isArray()` or that each element is a string. Strings are iterable, so a malformed call like `addTagNames = "travel"` passes the length check and then iterates `t`, `r`, `a`, `v`, `e`, `l` as separate tags. Since one-character tag names are valid, this can create unintended tags and attach them to the image.
+
+Concrete failure scenario: a stale/custom admin client sends `batchUpdateImageTags(42, "travel" as any, [])`. The action may create six tags instead of rejecting the payload, then returns success and refreshes admin state.
+
+Suggested fix: fail closed before the length check:
+
+```ts
+if (!Array.isArray(addTagNames) || !Array.isArray(removeTagNames)) { ... }
+if (!addTagNames.every((v) => typeof v === 'string') || !removeTagNames.every((v) => typeof v === 'string')) { ... }
+```
+
+Then trim/canonicalize/dedupe the arrays once before entering the transaction.
+
+## Final sweep notes
+
+- Auth guards and same-origin checks are consistently applied to mutating Server Actions and admin API routes.
+- Public image data selection has explicit privacy boundaries for GPS/original filenames.
+- Lint passed with no findings.
+- No source files were modified during this review; only this report was written.

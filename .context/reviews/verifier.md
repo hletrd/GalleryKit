@@ -1,57 +1,63 @@
-# Verifier Review
+# Verifier Review — Cycle 1 Deep Review Fan-out
 
-## Coverage / inventory
+## Inventory first
 
-I reviewed the repository at the doc/build/runtime boundaries that actually determine correctness:
+- Repo: `/Users/hletrd/flash-shared/gallery`
+- Branch/status at start: `master...origin/master`; working tree already had other-agent edits in `.context/reviews/code-reviewer.md`, `.context/reviews/critic.md`, and `.context/reviews/perf-reviewer.md`. I did not read/write those files after noticing they were modified.
+- Owned write scope honored: this report writes only `.context/reviews/verifier.md`.
+- Primary contract sources inspected: `README.md`, `CLAUDE.md`, `apps/web/README.md`, `package.json`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`, `apps/web/src/db/schema.ts`, auth/session/rate-limit code, server actions, image upload/queue/serving code, public data queries, DB backup/restore code, and the unit/lint guard surface.
 
-- **Docs and top-level contract:** `README.md`, `CLAUDE.md`, `apps/web/README.md`, `AGENTS.md`
-- **Build/deploy entrypoints:** `package.json`, `apps/web/package.json`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `scripts/deploy-remote.sh`
-- **Core runtime surfaces:** `apps/web/src/lib/*` (config, auth, rate limiting, session handling, upload/image processing, storage, restore safety, SEO/CSP, validation, revalidation, queue shutdown, tag/topic helpers, etc.)
-- **Routes/pages/actions:** `apps/web/src/app/**`, `apps/web/src/components/**`, `apps/web/src/proxy.ts`, `apps/web/src/i18n/request.ts`
-- **Tests:** `apps/web/src/__tests__/*.test.ts` plus the checked Playwright E2E specs
+## Verification commands
 
-I also verified the repository with fresh commands:
-
-- `npm run typecheck --workspace=apps/web` ✅
-- `npm test --workspace=apps/web` ✅ (`71 passed`, `474 passed`)
-- `npm run lint --workspace=apps/web` ✅
 - `npm run lint:api-auth --workspace=apps/web` ✅
 - `npm run lint:action-origin --workspace=apps/web` ✅
-- `npm run build --workspace=apps/web` ✅
+- `npm test --workspace=apps/web` ✅ — 72 files / 479 tests passed
+- `npm run typecheck --workspace=apps/web` ✅
+- `npm run lint --workspace=apps/web` ✅
+- `BASE_URL=http://localhost:3000 npm run prebuild --workspace=apps/web` ✅ expected failure — confirmed the production placeholder-URL build guard is currently wired through the normal `prebuild` script.
+
+Note: an initial `npm test --workspace=apps/web -- --runInBand` attempt failed because Vitest does not support Jest's `--runInBand`; the correct Vitest command above passed.
+
+## Positive verifications
+
+- Production URL guard is now active on normal builds: `apps/web/package.json:10` runs `NODE_ENV=production node scripts/ensure-site-config.mjs`, and the guard rejects placeholder hosts when `NODE_ENV=production` in `apps/web/scripts/ensure-site-config.mjs:13-42`.
+- API admin route auth lint is green; the only admin API route is wrapped by `withAdminAuth`.
+- Mutating server-action origin lint is green; the scanner reports every mutating action stores and returns early on `requireSameOriginAdmin()`.
+- Public privacy select shape still omits GPS/original filename/user filename in `apps/web/src/lib/data.ts:179-224`.
+- Upload originals are private by default and public serving remains whitelisted to `jpeg`, `webp`, and `avif` via `apps/web/src/lib/upload-paths.ts:24-46` and `apps/web/src/lib/serve-upload.ts:37-49`.
 
 ## Findings
 
-### 1) Production build guard does not actually protect the normal build path
+### VER-C1-01 — Login per-account rate-limit is DB-backed only, but the security contract says both login buckets use bounded Maps
 
-- **Severity:** Medium
+- **Severity:** Low-Medium
 - **Confidence:** High
-- **Category:** Confirmed
+- **Category:** Documentation / implementation mismatch with a narrow security fallback gap
 
-**Where**
+**Evidence**
 
-- `apps/web/scripts/ensure-site-config.mjs:13-28` — the placeholder/base-URL rejection only runs when `process.env.NODE_ENV === 'production'`
-- `apps/web/package.json:10-11` — `npm run build` invokes the prebuild check without setting `NODE_ENV`
-- `apps/web/Dockerfile:44-48` — the Docker build stage runs `node scripts/ensure-site-config.mjs` before any production-only `NODE_ENV` is established
-- Docs that claim the guard exists: `README.md:41-56` and `apps/web/README.md:34-39`
+- `CLAUDE.md:125` states login rate limiting has two buckets — per-IP and per-account — and that “Both buckets use bounded Maps with oldest-entry eviction when caps are exceeded.”
+- The implementation has a bounded in-memory map only for the IP bucket: `apps/web/src/lib/rate-limit.ts:36-40` exports `loginRateLimit`, while `buildAccountRateLimitKey()` only constructs the account DB key at `apps/web/src/lib/rate-limit.ts:69-72`.
+- In `login()`, the per-IP fast path reads and writes the in-memory map at `apps/web/src/app/actions/auth.ts:100-122`. The account bucket is only persisted/checked through `incrementRateLimit(accountRateLimitKey, 'login_account', ...)` and `checkRateLimit(accountRateLimitKey, 'login_account', ...)` at `apps/web/src/app/actions/auth.ts:123-145`.
+- A repo-wide search for `login_account` / `acct:` shows no account-scoped bounded map; it only appears in DB-backed increment/check/reset/decrement paths.
 
-**Problem**
+**Why it matters**
 
-The docs say production builds reject placeholder public URLs, but the actual guard is gated on `NODE_ENV === 'production'`. The normal build entrypoints in this repo do not set that variable before invoking the check, so placeholder URLs such as `http://localhost:3000` are accepted during `npm run build` and Docker image builds.
+The code does enforce account-scoped throttling when the `rate_limit_buckets` DB path is healthy, so the normal path is protected. The mismatch is in the fallback and the documentation: if the rate-limit table/operations fail while the rest of auth DB access still works, `auth.ts:145-147` falls back to the in-memory limiter, but that limiter is only per-IP. A distributed attacker could then keep each IP under 5 attempts while targeting the same username, contrary to the documented account-bucket fallback behavior.
 
 **Concrete failure scenario**
 
-If a deployment keeps the checked-in placeholder `src/site-config.json.url` (`http://localhost:3000`) or another placeholder host, the build still succeeds. That means the app can ship with bad canonical URLs / sitemap URLs / metadata origins even though the docs say the build should fail fast.
-
-This was confirmed directly:
-
-- `npm run prebuild --workspace=apps/web` exited `0`
-- `npm run build --workspace=apps/web` completed successfully with the placeholder config
-- `NODE_ENV=production node scripts/ensure-site-config.mjs` correctly fails, which proves the guard exists but is not wired to the repo's normal build path
+A migration/permission issue or table-level failure affects `rate_limit_buckets` but not `admin_users`. Login still reaches Argon2 verification, but the account bucket check throws and is swallowed. The per-IP map remains effective, but many low-volume IPs can collectively attempt more than 5 guesses against one username inside 15 minutes.
 
 **Suggested fix**
 
-Make the validation unconditional for the build entrypoints, or explicitly set `NODE_ENV=production` before running the check in both the npm build path and the Docker build stage. A dedicated build flag would be even clearer than relying on `NODE_ENV`.
+Choose one of these and align docs/tests accordingly:
+
+1. Add an account-scoped bounded in-memory map keyed by `buildAccountRateLimitKey(username)` and update it/check it alongside `loginRateLimit` before Argon2 verification; or
+2. Change `CLAUDE.md` to state the account bucket is DB-backed only and that DB-unavailable fallback is per-IP only.
+
+If option 1 is chosen, add a unit test that simulates DB rate-limit failures while `admin_users` lookup still works and verifies the account map blocks distributed attempts.
 
 ## Final sweep
 
-I did not find additional evidence-backed correctness issues after reviewing the full doc/config/build path, the auth/rate-limit/same-origin guards, the upload/image pipeline, the data layer, the public/admin routes, and the test surface. The repository passes typecheck, lint, unit tests, the auth/origin guard scripts, and a production build; the only confirmed problem I found is the build-guard wiring described above.
+After the finding above, I rechecked the surrounding auth/session code, action-origin/API-auth lint gates, upload/private-original serving boundary, image queue processing contract, backup/restore path, docs for build/deploy setup, and current test output. I did not find another evidence-backed correctness failure strong enough to report in this pass.
