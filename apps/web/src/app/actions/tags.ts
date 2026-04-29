@@ -352,6 +352,15 @@ export async function batchUpdateImageTags(
         return { success: false, added: 0, removed: 0, warnings: [t('invalidImageId')] };
     }
 
+    // Validate array types before accessing .length — strings are iterable and would
+    // be iterated character-by-character, creating unintended one-character tags.
+    if (!Array.isArray(addTagNames) || !Array.isArray(removeTagNames)) {
+        return { success: false, added: 0, removed: 0, warnings: [t('invalidInput')] };
+    }
+    if (!addTagNames.every(v => typeof v === 'string') || !removeTagNames.every(v => typeof v === 'string')) {
+        return { success: false, added: 0, removed: 0, warnings: [t('invalidInput')] };
+    }
+
     // Limit tag array sizes to prevent DoS (matching batchAddTags pattern)
     if (addTagNames.length > 100 || removeTagNames.length > 100) {
         return { success: false, added: 0, removed: 0, warnings: [t('tooManyTags')] };

@@ -377,6 +377,7 @@
     "incorrectPassword": "현재 비밀번호가 올바르지 않습니다",
     "failedToUpdatePassword": "비밀번호 변경에 실패했습니다",
     "passwordUpdated": "비밀번호를 변경했습니다.",
+    "invalidInput": "잘못된 입력입니다",
     "invalidImageId": "잘못된 이미지 ID입니다",
     "invalidTagId": "잘못된 태그 ID입니다",
     "tagNameRequired": "태그명을 입력해 주세요",

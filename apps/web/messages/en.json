@@ -377,6 +377,7 @@
     "incorrectPassword": "Incorrect current password",
     "failedToUpdatePassword": "Failed to update password",
     "passwordUpdated": "Password updated.",
+    "invalidInput": "Invalid input",
     "invalidImageId": "Invalid image ID",
     "invalidTagId": "Invalid tag ID",
     "tagNameRequired": "Tag name required",
