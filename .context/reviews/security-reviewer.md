@@ -1,188 +1,65 @@
-# Security Review — `security-reviewer`
+# security-reviewer Review — Cycle 2
 
-Repo: `/Users/hletrd/flash-shared/gallery`  
-Review timestamp: `2026-04-29T01:16:28+09:00`  
-Mode: read-only repository review except this report file.
+## Inventory
 
-## 1. Review-relevant inventory built first
+Reviewed the full repository surface requested in `.omx/context/cycle2-review-prompt.md`, including the current uncommitted diff and security-sensitive unchanged code.
 
-I excluded vendor/build/runtime artifacts unless security-relevant: `.git/**`, `node_modules/**`, `.next/**`, `dist/**`, `build/**`, `coverage/**`, generated screenshots/logs, uploaded media/data directories, and historical agent/runtime state under `.omx/**`, `.omc/**`, `.context/**` (other than this output). I did inspect the untracked, gitignored deploy env file for inline secret material without copying its values into this report.
+- Current uncommitted changes reviewed: `.context/reviews/_aggregate.md`, `.context/reviews/code-reviewer.md`, `apps/web/messages/{en,ko}.json`, `apps/web/next.config.ts`, `apps/web/package.json`, admin layout/error/category UI, `apps/web/src/app/actions/public.ts`, multiple client components, `apps/web/src/lib/{data,sql-restore-scan,storage/local,upload-limits,validation}.ts`, split tsconfig files, new `apps/web/scripts/prepare-next-typegen.mjs`, and new plan files `plan/plan-249-cycle2-fresh-gate-fix.md`, `plan/plan-250-cycle1-implementation.md`, `plan/plan-251-cycle1-deferred.md`.
+- App security areas reviewed: auth/session/password flow, admin guards, same-origin/CSRF checks, public/admin Server Actions, admin DB dump/restore, upload pipeline, storage path handling, upload serving, SQL restore scanner, CSP/security headers, nginx proxy limits, Docker/deploy scripts, package manifests/lockfile, tests/scripts/config.
+- Evidence commands run: `git status --short`, `git diff --stat`, targeted `git diff` inspection, `rg` sweeps for auth/origin/action/upload/path/secret patterns, `npm run lint:api-auth --workspace=apps/web`, `npm run lint:action-origin --workspace=apps/web`, `npm audit --json`, and line-numbered source inspection with `nl -ba`.
+- Positive controls observed: API auth lint passed for `src/app/api/admin/db/download/route.ts`; action-origin lint passed and reported all mutating Server Actions either enforce same-origin provenance or are read-only skipped; DB download route uses admin auth, fail-closed origin validation, backup filename validation, `lstat`/`realpath` containment, no-store headers, and audit logging; SQL restore scanning now checks chunk tails for `DEFINER` and `SQL SECURITY DEFINER`; public `/uploads` serving is constrained to allowed public top-level directories/extensions and verifies realpath containment.
 
-Review-relevant inventory examined:
+## Findings
 
-- **Root, CI, dependency, and repo policy files**: `AGENTS.md`, `CLAUDE.md`, `README.md`, `.agent/rules/commit-and-push.md`, `.dockerignore`, `.env.deploy.example`, `.gitignore`, `.github/dependabot.yml`, `.github/workflows/quality.yml`, `.nvmrc`, `package.json`, `package-lock.json`, `tsconfig*.json` where present.
-- **Deployment / runtime / reverse proxy**: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `scripts/deploy-remote.sh`, `apps/web/scripts/entrypoint.sh`, `apps/web/.dockerignore`, `apps/web/.env.local.example`, `apps/web/.gitignore`.
-- **Next/app configuration**: `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/playwright.config.ts`, `apps/web/drizzle.config.ts`, `apps/web/eslint.config.mjs`, `apps/web/postcss.config.mjs`, `apps/web/tailwind.config.ts`, `apps/web/tsconfig*.json`, `apps/web/src/site-config.example.json`, `apps/web/src/site-config.json` when available.
-- **API routes**: `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`, `apps/web/src/app/api/og/route.tsx`.
-- **Public/admin pages and route handlers**: all files under `apps/web/src/app/**`, including localized public pages, admin pages, upload routes, auth pages, DB admin UI, layout metadata, error/not-found handling, and server/client component boundaries.
-- **Server actions**: `apps/web/src/app/actions/admin-users.ts`, `auth.ts`, `images.ts`, `public.ts`, `seo.ts`, `settings.ts`, `sharing.ts`, `tags.ts`, `topics.ts`.
-- **Security/data libraries**: all `apps/web/src/lib/**` files, with particular focus on `action-guards.ts`, `api-auth.ts`, `audit.ts`, `backup-filename.ts`, `content-security-policy.ts`, `csp-nonce.ts`, `data.ts`, `db-restore.ts`, `image-url.ts`, `mysql-ssl.ts`, `process-image.ts`, `process-topic-image.ts`, `rate-limit.ts`, `request-origin.ts`, `safe-json-ld.ts`, `sanitize.ts`, `serve-upload.ts`, `session.ts`, `settings-validation.ts`, `sharing.ts`, `sql-restore-scan.ts`, `storage/local.ts`, `upload-limits.ts`, `upload-paths.ts`, `upload-tracker.ts`, `validation.ts`.
-- **Database schema/migrations**: `apps/web/src/db/**`, `apps/web/drizzle/**`, and migration scripts under `apps/web/scripts/**` (`migrate.js`, `mysql-connection-options.js`, `init-db.ts`, `seed-admin.ts`, `check-action-origin.mjs`, `check-api-auth.mjs`, etc.).
-- **Components and client-side flows**: all `apps/web/src/components/**`, `apps/web/src/hooks/**`, `apps/web/src/i18n/**`, `apps/web/src/messages/**`, `apps/web/public/histogram-worker.js`, and static/public non-media assets.
-- **Tests relevant to security claims**: unit and e2e tests covering auth, origin checks, upload path serving, DB restore scan/download, CSP, sessions, validation/sanitization, sharing, and route guards (`apps/web/src/__tests__/**`, `apps/web/*.spec.ts`, `apps/web/tests/**`). Tests/comments were used only as secondary evidence after tracing implementation flows.
+- [SEC2-01] Severity: High. Confidence: Medium-High. Classification: OWASP A05 Security Misconfiguration / A04 Insecure Design / availability DoS. Cross-agent hint: backend/architecture should split large bodies out of global Server Actions.
+  - Location: `apps/web/next.config.ts:69-77`; `apps/web/src/lib/upload-limits.ts:1-6,13-27`; `apps/web/src/lib/db-restore.ts:1`; `apps/web/src/app/[locale]/admin/db-actions.ts:350-358`; `apps/web/nginx/default.conf:20,60-64`; `apps/web/src/app/actions/images.ts:116-129`.
+  - Problem: The global Next Server Action and proxy body cap is now derived from the per-file upload cap: default `MAX_UPLOAD_FILE_BYTES` is 200 MiB plus 16 MiB multipart overhead, so `NEXT_SERVER_ACTION_BODY_SIZE_LIMIT` becomes `216mb`. That cap applies process-wide to Server Action request parsing before action-level controls such as `getCurrentUser()`, `requireSameOriginAdmin()`, per-IP upload tracking, or admin checks can execute. The comment correctly notes the former 2 GiB value was dangerous, but the remaining 216 MiB global pre-auth budget is still large enough for unauthenticated or invalid action requests to consume substantial bandwidth/parser work. It also conflicts with the documented restore path: `MAX_RESTORE_SIZE_BYTES` is 250 MiB and nginx allows `/admin/db` bodies up to 250M, but the global action transport cap can reject dumps above roughly 216 MiB before `runRestore()` reaches its own `file.size > MAX_RESTORE_SIZE_BYTES` validation.
+  - Failure scenario: An attacker who can discover or reuse a Server Action endpoint repeatedly posts 216 MiB multipart bodies to public or admin action IDs. Next parses or buffers up to the global transport limit before the application returns unauthorized/origin failure, creating a cheap bandwidth, temporary-storage, or CPU pressure path. Separately, an admin with a legitimate 230 MiB SQL dump sees nginx and app copy promise a 250 MiB restore, but the framework rejects the request at the transport layer before the app can validate, audit, or return the intended restore error.
+  - Suggested fix: Do not make every Server Action accept near-upload-sized bodies. Keep the global Server Action cap small and move large upload/restore flows to dedicated route handlers or upload endpoints where auth, same-origin, method, rate-limit, and route-specific body limits can be enforced before reading the full body. If Server Actions must remain, add a startup/test invariant that the restore cap, nginx cap, and Next action cap are intentionally aligned, and add reverse-proxy rate/body limits for Server Action posts.
 
-No security-sensitive review-relevant file was intentionally skipped.
+- [SEC2-02] Severity: High. Confidence: High. Classification: OWASP A04 Insecure Design / A01 Broken Access Control boundary between restore maintenance and upload mutation / data integrity. Cross-agent hint: backend/test-engineer should add a concurrency regression around restore vs upload.
+  - Location: `apps/web/src/app/actions/images.ts:116-129,171-176,261-288,316-317,373-388,429-430`; `apps/web/src/app/[locale]/admin/db-actions.ts:274-332`; `apps/web/src/lib/restore-maintenance.ts:21-56`; `apps/web/src/lib/upload-processing-contract-lock.ts:4-10,27-56`; `apps/web/src/lib/image-queue.ts:193-198,474-503`.
+  - Problem: Uploads and DB restores do not share a single cross-process critical section. `uploadImages()` checks process-local restore maintenance at entry and again after saving the original, then holds the separate `gallerykit_upload_processing_contract` advisory lock while inserting rows and enqueueing processing. `restoreDatabase()` holds only `gallerykit_db_restore`, flips a process-local maintenance flag, and quiesces the image queue; it never acquires the upload contract lock. The upload path therefore has a TOCTOU window after the late maintenance check and before/around DB insert and queue enqueue where a restore can start and import/drop data concurrently. The queue also ignores jobs while restore maintenance is active, so a racing upload can persist inconsistent DB/filesystem state without a reliable enqueue signal.
+  - Failure scenario: An authenticated admin starts an upload. The original file is written, `cleanupOriginalIfRestoreMaintenanceBegan()` and `getRestoreMaintenanceMessage()` both pass, and then a restore starts before `db.insert(images)`. The restore imports a backup while the upload inserts a fresh image row and calls `enqueueImageProcessing()`. Depending on import ordering, the restore can drop/replace the row while the original file remains orphaned, or the row can survive while the queue ignores the job during maintenance. In multi-process/serverless deployments, the process-local maintenance flag does not cover other workers at all.
+  - Suggested fix: Use one DB-backed lock/maintenance primitive for all writers that can mutate upload-related DB/filesystem state. Have restore acquire the upload processing contract lock before beginning maintenance, or replace both locks with a single named advisory lock and DB-backed maintenance row visible to every process. Re-check the global maintenance/lock immediately before DB insert and after the insert/enqueue boundary, clean up originals when enqueue is refused, and add a deterministic test that pauses upload between late maintenance check and insert while restore attempts to begin.
 
-## 2. Executive summary
+- [SEC2-03] Severity: Medium. Confidence: High. Classification: CWE-78 command injection risk in local/CI tooling; secrets handling. Cross-agent hint: build/test tooling owner should replace shell sourcing with a Node wrapper.
+  - Location: `apps/web/playwright.config.ts:5-14,72-74`.
+  - Problem: The Playwright config loads the chosen env file as data via `process.loadEnvFile()`, but then constructs `sourceEnvFile = '. <envPath> && '` and prefixes every `webServer.command` segment with that shell source. Dotenv files are not shell scripts. Secret values containing `$`, backticks, quotes, spaces, `#`, command substitution, or shell metacharacters can be expanded, truncated, or executed when `npm run test:e2e` starts the web server. The default external path under `$HOME/.gallerykit-secrets/gallery-web.env.local` reduces repo leakage, but it does not make shell evaluation safe.
+  - Failure scenario: A developer or CI runner receives an env file with a value like a password containing `$TOKEN` or backticks. During E2E startup, the shell sources the file; variables expand incorrectly, comments truncate values, or command substitution runs arbitrary local commands under the developer/CI account. A poisoned env file in a shared checkout turns an otherwise data-only secret file into executable input.
+  - Suggested fix: Treat env files strictly as data. Remove shell `.` sourcing and use a small Node runner that calls `process.loadEnvFile(envPath)` once, then `spawn()`/`execFile()` the init/seed/build/server commands with an explicit `env` object and `shell: false` where possible. Alternatively, use Playwright `webServer.env` plus separate npm scripts that do not shell-source dotenv. Add a regression with shell-special characters in `E2E_ENV_FILE`.
 
-Findings:
+- [SEC2-04] Severity: Medium. Confidence: High. Classification: OWASP A02 Cryptographic Failures / secrets management / operational exposure. Cross-agent hint: ops/owner action required; code agent should not rotate or print secret values.
+  - Location: `.env.deploy` (gitignored local file present in the repository checkout; values intentionally not copied here); `.gitignore:18`; `.dockerignore:12`; `plan/plan-232-cycle1-deferred.md:10-14`.
+  - Problem: A live deploy env file remains inside the repo working tree. It is ignored by git and excluded from Docker contexts, and tracked examples/placeholders did not expose production secrets in this review. However, keeping operational deploy material such as host/user/key/path variables in the checkout still creates a leakage surface for agent transcripts, debug bundles, broad archive/copy commands, local backups, or future reports. The prior plan already records this as a deferred credential-owner item, but it remains present in the current workspace state.
+  - Failure scenario: A future troubleshooting command archives the repository directory, attaches ignored files, or asks an agent to inspect env state. The deploy host/user/key/path values can be copied into logs or prompts even though they are not tracked by git. If those values are real, this becomes an infrastructure access leak.
+  - Suggested fix: Move live deploy env files outside the repository, for example under `$HOME/.gallerykit-secrets/`, an OS secret manager, or CI secret storage, and keep only `.env.deploy.example` with placeholders in the repo. Support an explicit `DEPLOY_ENV_FILE` path if the deploy scripts need to load a non-repo location. Rotate any values that have ever been exposed in transcripts or shared archives. Do not include real secret values in review artifacts.
 
-| ID | Severity | Category | Finding |
-| --- | --- | --- | --- |
-| SEC-01 | High | Likely / manual runtime validation recommended | Global 2 GiB Server Actions/proxy body limit can be reached before action-level auth/origin checks, creating an unauthenticated large-body DoS risk. |
-| SEC-02 | Medium | Confirmed | SQL restore denylist misses `CREATE DEFINER ... TRIGGER|VIEW|FUNCTION|PROCEDURE|EVENT`, including MySQL conditional-comment forms. |
-| SEC-03 | Medium | Confirmed | Production dependency tree still contains vulnerable `postcss@8.4.31` nested below Next; `npm audit` reports a moderate XSS advisory. |
-| SEC-04 | Low | Likely hardening issue | Production CSP keeps `style-src 'unsafe-inline'`, weakening XSS/UI-redress blast-radius containment. |
+- [SEC2-05] Severity: Low. Confidence: High. Classification: CWE-22/CWE-116 path and URL normalization inconsistency; dormant storage API hazard. Cross-agent hint: storage owner can either harden or delete the unused abstraction.
+  - Location: `apps/web/src/lib/storage/local.ts:25-40,55-77,103-130`; `apps/web/src/lib/storage/types.ts:95-99`.
+  - Problem: `LocalStorageBackend.resolve()` rejects empty, dot, dot-dot, and any `..` path segment before resolving under `UPLOAD_ROOT`, but `getUrl()` uses a separate weaker normalization path: trim, replace backslashes with slashes, block only `original`/`original/`, and return `/uploads/${normalizedKey}`. That means keys such as empty strings, leading slashes, `../x`, `jpeg/../../x`, or query/hash-shaped strings can produce public URL strings that the read/write/delete path would reject. Current live upload serving has stronger route-level validation and this storage abstraction appears dormant in the active upload pipeline, but the public API contract says callers can ask it for a public URL.
+  - Failure scenario: A future storage migration or component reuses `getUrl()` for a key derived from DB/user input, assumes it is as safe as `writeBuffer()`/`readBuffer()`, and emits `/uploads/../...` or `/uploads//...` links. Browsers, proxies, or framework routing can normalize those strings differently than the app expects, causing broken access-control assumptions or public URL confusion around private/original objects.
+  - Suggested fix: Centralize storage key validation. Have `getUrl()` call the same key normalizer used by `resolve()` before constructing a URL, reject the same invalid shapes, keep the private `original` denylist, and URL-encode each path segment. If the storage abstraction is not part of the supported app surface, delete it or mark it internal with tests proving it cannot generate traversal-like URLs.
 
-Positive controls observed: admin sessions are HMAC-signed and production requires `SESSION_SECRET`; mutating Server Actions use same-origin admin guards; admin API download route has auth + same-origin checks; public data selectors omit original filenames/GPS/admin fields; upload-serving paths validate segments, extensions, symlinks, and containment; JSON-LD output escapes `<`, U+2028, and U+2029; health endpoints avoid secret leakage; real secrets were not found by targeted scan.
+- [SEC2-06] Severity: Medium. Confidence: High. Classification: OWASP A06 Vulnerable and Outdated Components / supply-chain XSS advisory. Cross-agent hint: dependency owner should resolve lockfile/install drift and rerun audit.
+  - Location: `package.json:7-10`; `apps/web/package.json:47-48,63-68`; `package-lock.json:8116-8119,8566-8569`.
+  - Problem: `npm audit --json` reports three moderate findings rooted in PostCSS advisory `GHSA-qx2v-qp2m-jg93` / CWE-79. The root override and app dev dependency request `postcss` `^8.5.10`, and the root lock entry is `node_modules/postcss@8.5.10`, but the lockfile still contains `node_modules/next/node_modules/postcss@8.4.31` under Next. `npm ls postcss next next-intl --workspace=apps/web --all` also reported an invalid installed root `postcss@8.5.9` against the `^8.5.10` requirement, showing the current install is stale/drifted as well as audit-failing.
+  - Failure scenario: CI or production installs from the current lockfile and retains the vulnerable nested PostCSS copy. If a relevant Next/PostCSS build or rendering path stringifies attacker-influenced CSS containing a closing style tag, the advisory's XSS condition can be reachable. Even if the reachable app path is low likelihood, the audit gate remains red and future dependency work can accidentally rely on the wrong PostCSS instance.
+  - Suggested fix: Update the lockfile/install so every PostCSS copy is `>=8.5.10`, ideally by moving to a patched Next release or an npm override that actually dedupes the nested dependency. Then run `npm ci`, `npm audit --json`, and `npm ls postcss next next-intl --workspace=apps/web --all` from a clean install. If Next cannot yet consume the patched PostCSS, document a time-bound advisory deferral with compensating evidence.
 
-## 3. Findings
+## Final Sweep
 
-### SEC-01 — Global 2 GiB Server Actions/proxy body limit permits pre-auth large-body DoS
+- Auth/session/admin boundary: no new high-confidence finding. `SESSION_SECRET` is required in production, cookies are `httpOnly`/`sameSite=lax`/secure in production, login/update-password/logout enforce same-origin checks, login has IP/account throttling, and admin layout redirects unauthenticated users.
+- CSRF/origin: the repository's origin guard helper is fail-closed when no trusted source is present, and the dedicated lint gate reported all mutating Server Actions enforce same-origin provenance or are explicitly read-only skipped.
+- Admin DB download/restore: download route has admin auth, fail-closed origin validation, strict backup filename handling, realpath containment, no-store, and audit logging. Restore avoids DB password exposure in argv, writes temp SQL with `0600`, scans chunks for dangerous SQL, and sanitizes restore stderr. The remaining restore finding is the upload/restore concurrency boundary above, not missing admin/origin checks.
+- Upload/file serving: direct public upload serving is constrained by allowed top-level directories/extensions and realpath checks. The storage abstraction URL issue is lower severity because the active serving route is stronger and the abstraction appears unused by the live upload path.
+- CSP: production CSP still includes `style-src 'self' 'unsafe-inline'` in `apps/web/src/lib/content-security-policy.ts:78-90`; this is already recorded as an active deferred item in `plan/plan-232-cycle1-deferred.md:16-20` and `plan/cycle3-rpl-deferred.md:70-76`, so I did not re-open it as a new cycle-2 finding.
+- Secrets: I did not find tracked production secret values in source files. I intentionally did not copy ignored local secret values into this report.
 
-- **Severity:** High
-- **Confidence:** Medium-high
-- **Category:** Likely; manual runtime validation recommended against a production-like Next/nginx deployment.
-- **OWASP:** A05 Security Misconfiguration, A04 Insecure Design, A01 Broken Access Control impact on availability controls.
-- **Files / regions:**
-  - `apps/web/src/lib/upload-limits.ts:1-3` sets `DEFAULT_MAX_TOTAL_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024` and per-file upload cap at 200 MiB.
-  - `apps/web/src/lib/upload-limits.ts:12-25` maps `UPLOAD_MAX_TOTAL_BYTES` to `NEXT_UPLOAD_BODY_SIZE_LIMIT`.
-  - `apps/web/next.config.ts:70-75` applies that large value globally to `experimental.serverActions.bodySizeLimit` and `proxyClientMaxBodySize`.
-  - `apps/web/nginx/default.conf:20-25` allows `client_max_body_size 2G` and 20 concurrent connections per IP at the front proxy.
-  - `apps/web/src/app/actions/images.ts:116-129` performs admin/session and same-origin checks inside `uploadImages`, after the framework has accepted enough request data to dispatch the Server Action.
-  - `apps/web/src/app/actions/auth.ts:70-95` similarly performs same-origin/rate-limit logic inside the action body for login.
-- **Problem:** The application intentionally supports very large image batches, but the limit is wired into the global Server Actions parser/proxy instead of being scoped to the authenticated upload endpoint. In the Server Actions model, the request body must be accepted and parsed enough for Next to route/dispatch the action before application code can reject unauthenticated or cross-origin callers. This means the high global limit protects user experience for uploads at the cost of broad pre-auth resource exposure.
-- **Concrete attack / failure scenario:** An unauthenticated client sends repeated large multipart/action POSTs up to the 2 GiB nginx/Next cap to any discoverable Server Action endpoint or action route. Even if the action eventually returns `unauthorized` or fails same-origin validation, the reverse proxy and Node process have already spent connection slots, bandwidth, request parsing, temp buffering, and/or memory/CPU budget on very large bodies. With the shipped `limit_conn connlimit 20` and 2 GiB per request, a small number of concurrent clients can create severe availability pressure before app-level upload trackers (`MAX_TOTAL_UPLOAD_BYTES`, rate limits, admin checks) run.
-- **Suggested fix:**
-  1. Lower the **global** Server Actions and nginx default body size to a small value appropriate for non-upload actions (for example, a few MiB).
-  2. Move large image/topic/database uploads to dedicated route handlers that authenticate the session and validate same-origin before streaming large request bodies to disk.
-  3. Add nginx location-specific `client_max_body_size` only for authenticated upload/restore routes, with stricter connection/request-rate limits on those locations.
-  4. Add an integration test or deployment smoke test that unauthenticated oversized requests are rejected before large body acceptance.
-- **Notes:** `apps/web/src/lib/db-restore.ts:1` separately caps restore files at 250 MiB inside application logic; this finding is about the global framework/proxy cap being reached before those app-level checks.
+## Skipped/Limitations
 
-### SEC-02 — SQL restore scanner misses `CREATE DEFINER ...` routine/object syntax
-
-- **Severity:** Medium
-- **Confidence:** High
-- **Category:** Confirmed.
-- **OWASP:** A03 Injection, A08 Software and Data Integrity Failures.
-- **Files / regions:**
-  - `apps/web/src/lib/sql-restore-scan.ts:23-81` defines the restore denylist.
-  - `apps/web/src/lib/sql-restore-scan.ts:63-73` blocks `CREATE TRIGGER`, `CREATE FUNCTION`, `CREATE PROCEDURE`, `CREATE EVENT`, and `CREATE VIEW` only when the object keyword immediately follows `CREATE` or `CREATE OR REPLACE`.
-  - `apps/web/src/lib/sql-restore-scan.ts:89-98` extracts executable content from MySQL conditional comments before scanning.
-  - `apps/web/src/lib/sql-restore-scan.ts:111-113` returns dangerous status by testing only the configured regex list.
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:395-420` relies on `containsDangerousSql()` while scanning the uploaded restore file before execution.
-  - `apps/web/src/app/[locale]/admin/db-actions.ts:437-443` then invokes `mysql --one-database` with the uploaded SQL stream.
-- **Problem:** MySQL permits `CREATE DEFINER = ... TRIGGER`, `CREATE DEFINER = ... VIEW`, and similar syntax. The denylist regexes miss that valid form because they do not allow a `DEFINER = ...` clause between `CREATE` and the object kind. Because the scanner expands executable conditional comments, mysqldump-style forms such as `/*!50003 CREATE*/ /*!50017 DEFINER=...*/ /*!50003 TRIGGER ...*/` normalize to an equivalent missed `CREATE DEFINER ... TRIGGER` sequence.
-- **Confirmed reproduction:** A local scanner check showed:
-  - `containsDangerousSql('CREATE TRIGGER ...') === true`
-  - ``containsDangerousSql('CREATE DEFINER=`root`@`%` TRIGGER ...') === false``
-  - ``containsDangerousSql('/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`%`*/ /*!50003 TRIGGER ...*/;') === false``
-- **Concrete attack / failure scenario:** Restore is admin-only, but the scanner is explicitly intended to prevent dangerous SQL in uploaded backups. A malicious backup or compromised admin account can upload a dump that passes the scanner and installs a trigger, view, routine, or event if the DB account has the relevant privileges. That object can persist hidden database behavior, mutate future image/admin/session records, reintroduce data after deletion, or run with definer semantics that differ from the app's intended table-only backup model. `--one-database` limits cross-database writes but does not neutralize in-database triggers/routines/views.
-- **Suggested fix:** Replace the narrow denylist entries with patterns that tolerate allowed MySQL modifiers, for example scanning normalized SQL for ``CREATE\s+(?:OR\s+REPLACE\s+)?(?:DEFINER\s*=\s*(?:CURRENT_USER|`[^`]+`(?:@`[^`]+`)?|[^\s]+)\s+)?(?:TRIGGER|FUNCTION|PROCEDURE|EVENT|VIEW)\b``, and consider also flagging `SQL SECURITY DEFINER`. Prefer an allowlist restore parser/validator for the known application dump shape (`DROP TABLE IF EXISTS` only for known tables, `CREATE TABLE`, `INSERT`, safe session settings) over expanding the denylist. Add regression tests for both plain and conditional-comment `CREATE DEFINER` samples.
-
-### SEC-03 — `npm audit` reports vulnerable nested PostCSS in the production dependency tree
-
-- **Severity:** Medium
-- **Confidence:** High
-- **Category:** Confirmed dependency finding.
-- **OWASP:** A06 Vulnerable and Outdated Components, A03/XSS when affected stringify paths are reachable.
-- **Files / regions:**
-  - `package.json:7-10` attempts a root override for `postcss` to `^8.5.10`.
-  - `apps/web/package.json:61-66` declares top-level `postcss` `^8.5.10` for the web workspace.
-  - `package-lock.json:8116-8138` still contains `node_modules/next/node_modules/postcss` at version `8.4.31`.
-- **Problem:** The repository has attempted to move PostCSS to a patched version, but the lockfile still includes a nested `postcss@8.4.31` below Next. `npm audit --workspace=apps/web --omit=dev --json` reports a moderate advisory for PostCSS `<8.5.10`: unescaped `</style>` in CSS stringify output can produce XSS if attacker-controlled CSS reaches that stringify path. Audit also flags `next` and `next-intl` through that nested dependency.
-- **Concrete attack / failure scenario:** This app does not appear to accept arbitrary user CSS, so immediate exploitability looks limited. However, if any current or future build/runtime path stringifies user-influenced CSS (theme settings, imported metadata, admin-supplied style content, third-party content transformed through PostCSS), a crafted CSS payload containing `</style>` can break out of a style context and execute script in a browser. The vulnerable dependency remains in the production dependency graph, so this is a supply-chain/dependency hygiene issue even if direct app reachability is currently low.
-- **Suggested fix:** Refresh the lockfile/dependency tree so no production path installs PostCSS `<8.5.10`. If the nested copy is pinned by Next, upgrade Next to a release that pulls a patched PostCSS or use an override/resolution that actually applies to the nested dependency, then run `npm ci`, `npm ls postcss --workspace=apps/web --all`, and `npm audit --workspace=apps/web --omit=dev` to verify zero remaining advisory hits. Also reconcile local `node_modules` because `npm ls` showed an invalid/stale installed top-level PostCSS despite the lockfile containing `8.5.10` at the root.
-
-### SEC-04 — Production CSP allows inline styles
-
-- **Severity:** Low
-- **Confidence:** High
-- **Category:** Likely hardening issue.
-- **OWASP:** A05 Security Misconfiguration, XSS defense-in-depth.
-- **Files / regions:**
-  - `apps/web/src/lib/content-security-policy.ts:78-88` builds production CSP.
-  - `apps/web/src/lib/content-security-policy.ts:81` sets `style-src 'self' 'unsafe-inline'`.
-  - `apps/web/src/proxy.ts:21-50` applies nonce-backed production CSP headers, but that nonce is only used for scripts.
-- **Problem:** The production CSP is strong for scripts (`script-src` uses `'self'`, nonce, and no `unsafe-inline`), but style injection remains globally allowed. Inline styles are not equivalent to script execution in modern browsers, but allowing them weakens CSP as a containment layer: injected markup can perform visual deception, clickjacking-like overlays within the page, history-sniffing-style CSS tricks where browser behavior permits, or prepare UI-redress attacks if any HTML injection bug appears later.
-- **Concrete attack / failure scenario:** A future low-grade HTML injection in a title, tag, SEO setting, translated string, or admin-rendered field may not execute JavaScript due to script CSP, but it can still inject inline CSS that hides security-relevant controls, overlays fake login/admin UI, or exfiltrates limited state through CSS-controlled network requests if another directive later permits it. This increases blast radius for otherwise-contained markup bugs.
-- **Suggested fix:** Inventory which framework/components require inline styles. Prefer moving inline styles to static CSS modules/Tailwind classes where possible. If inline style attributes are unavoidable, evaluate CSP nonce/hash support for style blocks and remove `'unsafe-inline'` from `style-src`; at minimum add tests that production CSP remains nonce-backed for scripts and document why inline styles remain necessary.
-
-## 4. Cross-file security sweep
-
-### Auth/authz and sessions
-
-- Admin session cookies are signed with HMAC and stored hashed in the DB (`apps/web/src/lib/session.ts:8-24`, `session.ts:82-110`). Production refuses to fall back to a DB-stored session secret when `SESSION_SECRET` is missing or short (`apps/web/src/lib/session.ts:26-35`).
-- Mutating Server Actions consistently call `requireSameOriginAdmin()` after admin/session checks. Static guard scripts passed for all mutating actions.
-- Admin API route `apps/web/src/app/api/admin/db/download/route.ts:13-32` wraps the handler in `withAdminAuth()` and enforces same-origin on GET downloads.
-- `apps/web/src/proxy.ts:53-99` protects admin pages at the routing layer, but this is correctly treated as UX/early-deny only because individual actions and API routes perform their own auth.
-- No confirmed broken-access-control issue found beyond the body-size pre-auth availability risk in SEC-01.
-
-### CSRF / origin checks
-
-- Origin checks are centralized in `apps/web/src/lib/request-origin.ts` and fail closed for missing source on protected admin API downloads (`apps/web/src/app/api/admin/db/download/route.ts:27`).
-- `TRUST_PROXY=true` causes expected origin construction to trust `x-forwarded-proto` and `x-forwarded-host` (`apps/web/src/lib/request-origin.ts:45-68`). This is appropriate for the documented nginx deployment where the app binds to localhost (`apps/web/docker-compose.yml:13-20`), but it is operationally sensitive: if the Node app is exposed directly to untrusted clients with `TRUST_PROXY=true`, forged forwarded headers can change the expected-origin calculation. I did not raise this as a standalone finding because the shipped compose file sets `HOSTNAME: 127.0.0.1` and nginx is documented as the trusted edge.
-
-### XSS / output encoding
-
-- JSON-LD uses `safeJsonLd()` to escape `<`, U+2028, and U+2029 before `dangerouslySetInnerHTML` (`apps/web/src/lib/safe-json-ld.ts:14-18`), and page usages were limited to structured data.
-- React text rendering is used for user-controlled labels/tags in public and OG surfaces (`apps/web/src/app/api/og/route.tsx:68-80`, `og/route.tsx:135-179`) after slug/tag validation.
-- Production script CSP is nonce-backed through middleware/proxy; inline style allowance is tracked as SEC-04.
-
-### SSRF and remote fetches
-
-- I did not find user-controlled server-side fetch to arbitrary URLs. The public OG endpoint renders from validated topic/tag inputs and DB/site config, not remote user URLs (`apps/web/src/app/api/og/route.tsx:26-90`).
-- `IMAGE_BASE_URL` is config-controlled and validated as HTTPS/no credentials/query/hash for production CSP/image patterns (`apps/web/src/lib/content-security-policy.ts:1-25`, `apps/web/next.config.ts:77-80`). No SSRF finding.
-
-### SQL injection / database integrity
-
-- Application SQL through Drizzle/mysql2 uses parameterization for user-influenced inputs in reviewed flows.
-- Public search escapes LIKE wildcards before querying.
-- The significant issue is restore-file SQL grammar validation (SEC-02), not ordinary query construction.
-
-### File/image handling and path traversal
-
-- Processed public upload serving restricts top-level dirs, segment characters, extensions, symlinks, and realpath containment (`apps/web/src/lib/serve-upload.ts:7-17`, `serve-upload.ts:54-84`). It sets `nosniff` and immutable cache headers (`serve-upload.ts:95-101`).
-- Original uploads are stored outside the public tree by default and written with restrictive file modes (`apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/storage/local.ts`).
-- Image processing validates extensions and relies on Sharp metadata/pixel limits. Topic images have separate, smaller limits.
-- Backup download validates filenames and realpath containment (`apps/web/src/app/api/admin/db/download/route.ts:34-74`). There is a narrow TOCTOU class between `lstat`/`realpath` and `createReadStream` in both upload serving and backup download, but practical exploitation would require local filesystem write/race capability inside protected directories; I did not elevate it to a finding for remote threat models.
-
-### Secrets and environment leakage
-
-- Targeted secret scan found no real AWS/GitHub/OpenAI/private-key style secrets in tracked source. `.env.local.example` uses placeholders and explicitly warns to rotate historical/example secrets (`apps/web/.env.local.example:18-30`).
-- `.github/workflows/quality.yml:27-37` uses test-only DB/admin/session values in CI.
-- The untracked `.env.deploy` file exists locally and was inspected for inline private key material or obvious token/secret values; values were not copied into this report. It appears to contain operational deploy coordinates/key path, not embedded key material. It remains gitignored.
-- Health endpoints return only status and no DB error detail (`apps/web/src/app/api/health/route.ts:18-42`, `apps/web/src/app/api/live/route.ts:3-9`).
-
-### Headers and browser isolation
-
-- `apps/web/next.config.ts:47-66` sets `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, broad `Permissions-Policy`, HSTS in production, and dev CSP.
-- `apps/web/nginx/default.conf` also disables server tokens and adds security headers. Production CSP is generated in middleware/proxy. Style CSP is the only header hardening finding (SEC-04).
-
-### Dependency and supply chain
-
-- Dependabot is configured weekly for npm and Docker (`.github/dependabot.yml:1-19`).
-- CI runs lint, typecheck, security guard scripts, unit tests, e2e, and build (`.github/workflows/quality.yml:54-79`).
-- `npm audit` still reports the PostCSS issue in SEC-03.
-- Deployment scripts source operator-controlled env files and execute configured remote commands (`scripts/deploy-remote.sh:52-63`). This is powerful by design and should remain limited to trusted operators/filesystem permissions; no repository-remote exploit path was identified.
-
-## 5. Verification performed
-
-Read-only commands and checks run during review:
-
-- Inventory and targeted code search over tracked source, configs, scripts, migrations, tests, and public non-media assets, excluding vendor/build/runtime artifacts as described above.
-- Secret scan with regexes for private keys, common cloud/API tokens, and hardcoded password/secret/token assignments. Result: no real secrets found in tracked source; only dummy/test strings/log message words appeared.
-- `npm audit --workspace=apps/web --omit=dev --json` — completed with **3 moderate** findings rooted in nested PostCSS/Next/next-intl (SEC-03).
-- `npm run lint:api-auth --workspace=apps/web` — passed; admin API route auth coverage OK.
-- `npm run lint:action-origin --workspace=apps/web` — passed; mutating Server Actions have same-origin guards.
-- `npm run test --workspace=apps/web -- action-guards request-origin check-action-origin check-api-auth sql-restore-scan content-security-policy backup-download-route serve-upload upload-limits` — passed **9 test files / 73 tests**.
-- Manual scanner validation with `containsDangerousSql()` confirmed the `CREATE DEFINER ... TRIGGER` bypass described in SEC-02.
-
-## 6. Final sweep and skipped files
-
-Final sweep covered OWASP Top 10 areas requested: auth/authz, origin/CSRF, secrets, SSRF, XSS/CSP, SQL injection/restore integrity, path traversal, upload/image handling, unsafe headers, dependency advisories, and environment leakage.
-
-Security-sensitive files skipped: **none known**.
-
-Excluded as non-review inputs: vendor dependencies, generated build/cache/coverage output, uploaded media and database runtime data, screenshots/log archives, and historical agent/workflow state. Those were excluded to avoid treating generated/runtime artifacts as source of truth; security-relevant examples, deploy configs, CI configs, source, migrations, and tests were included.
+- Did not implement fixes, edit app code, commit, push, or run destructive operations.
+- Did not inspect dependency source under `node_modules` beyond `npm audit`, `npm ls` output, and lockfile evidence.
+- Did not run the full unit/e2e suite; verification was limited to security lint gates, audit, diff review, and targeted static inspection.
+- Ignored/generated or bulky artifacts were not line-reviewed: `.git/`, `.next/`, build outputs, screenshots, fonts, binary assets, test result artifacts, and uploaded media directories.
+- Live ignored env file values were deliberately not reproduced; only the existence and secret-management risk were recorded.
