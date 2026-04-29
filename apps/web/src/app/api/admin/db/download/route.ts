@@ -79,7 +79,10 @@ export const GET = withAdminAuth(async function GET(request: NextRequest) {
             size: stats.size,
         }).catch(console.debug);
 
-        const stream = createReadStream(filePath);
+        // Stream from the resolved (realpath) path, not the original path, to
+        // close the TOCTOU gap where a file could be replaced by a symlink
+        // between realpath() validation and createReadStream().
+        const stream = createReadStream(resolvedFilePath);
         const webStream = Readable.toWeb(stream) as ReadableStream;
 
         return new NextResponse(webStream, {

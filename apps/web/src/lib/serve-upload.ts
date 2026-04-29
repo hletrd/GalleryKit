@@ -89,7 +89,10 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
         }
 
         // Create stream and convert to web ReadableStream for proper lifecycle management
-        fileStream = createReadStream(absolutePath);
+        // Stream from the resolved (realpath) path, not the original path, to
+        // close the TOCTOU gap where a file could be replaced by a symlink
+        // between realpath() validation and createReadStream().
+        fileStream = createReadStream(resolvedPath);
         const webStream = Readable.toWeb(fileStream) as ReadableStream;
 
         return new NextResponse(webStream, {
