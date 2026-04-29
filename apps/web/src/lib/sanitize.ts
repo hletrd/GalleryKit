@@ -9,6 +9,40 @@ export function stripControlChars(s: string | null): string | null {
 }
 
 /**
+ * Validate and normalize a Record<string, string> payload from a Server Action.
+ * TypeScript only protects first-party callers; runtime Server Action payloads
+ * can contain non-string values (null, number, array) that would cause a
+ * TypeError when .trim() is called. This helper validates the input shape
+ * and returns a structured error instead of throwing.
+ *
+ * @param input    The raw payload from the Server Action call.
+ * @param allowedKeys  If provided, only these keys are permitted; others cause rejection.
+ * @returns On success: `{ ok: true, record: Record<string, string> }` with trimmed+stripped values.
+ *          On failure: `{ ok: false, error: string }` with a descriptive error key.
+ */
+export function normalizeStringRecord(
+    input: unknown,
+    allowedKeys?: Set<string>,
+): { ok: true; record: Record<string, string> } | { ok: false; error: string } {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        return { ok: false, error: 'invalidInput' };
+    }
+    const raw = input as Record<string, unknown>;
+    const result: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(raw)) {
+        if (allowedKeys && !allowedKeys.has(key)) {
+            return { ok: false, error: 'invalidSettingKey' };
+        }
+        if (typeof value !== 'string') {
+            return { ok: false, error: 'invalidInput' };
+        }
+        result[key] = stripControlChars(value.trim()) ?? '';
+    }
+    return { ok: true, record: result };
+}
+
+/**
  * AGG4R2-06: Combines stripControlChars + reject-if-changed into one call.
  * Returns `{ value, rejected }` where `value` is the sanitized string and
  * `rejected` is true when sanitization changed the input (meaning it

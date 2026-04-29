@@ -7,7 +7,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData } from '@/lib/revalidation';
-import { stripControlChars } from '@/lib/sanitize';
+import { normalizeStringRecord } from '@/lib/sanitize';
 import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -47,22 +47,15 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     if (originError) return { error: originError };
     const defaults = getSettingDefaults();
 
-    // Validate all provided keys are allowed
+    // Validate all provided keys are allowed and all values are strings.
+    // normalizeStringRecord guards against non-string runtime payloads
+    // (null, number, array) that would cause TypeError on .trim().
     const allowedKeys = new Set<string>(GALLERY_SETTING_KEYS);
-    for (const key of Object.keys(settings)) {
-        if (!allowedKeys.has(key)) {
-            return { error: t('invalidSettingKey') };
-        }
+    const normalized = normalizeStringRecord(settings, allowedKeys);
+    if (!normalized.ok) {
+        return { error: t(normalized.error) };
     }
-
-    // Sanitize before validation so length/format checks operate on the same
-    // value that will be stored. Without this, control characters pass
-    // validation but are stripped later, causing a mismatch between validated
-    // and persisted data (same pattern as seo.ts C29-09 fix).
-    const sanitizedSettings: Record<string, string> = {};
-    for (const [key, value] of Object.entries(settings)) {
-        sanitizedSettings[key] = stripControlChars(value.trim()) ?? '';
-    }
+    const sanitizedSettings = normalized.record;
 
     // Validate individual setting values (on sanitized values)
     for (const [key, value] of Object.entries(sanitizedSettings)) {
