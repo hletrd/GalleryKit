@@ -85,6 +85,7 @@ describe('enqueueImageProcessing filename guard', () => {
         vi.useFakeTimers();
         const state = getProcessingQueueState();
         state.bootstrapped = true;
+        state.bootstrapCursorId = 500;
 
         enqueueImageProcessing({
             id: 8,
@@ -102,6 +103,7 @@ describe('enqueueImageProcessing filename guard', () => {
         }
 
         expect(state.bootstrapped).toBe(false);
+        expect(state.bootstrapCursorId).toBeNull();
         expect(state.bootstrapRetryTimer).toBeDefined();
         if (state.bootstrapRetryTimer) {
             clearTimeout(state.bootstrapRetryTimer);

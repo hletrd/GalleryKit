@@ -175,4 +175,20 @@ describe('tag actions', () => {
         expect(result.added).toBe(0);
         expect(result.warnings.join(' ')).toContain('tagSlugCollision');
     });
+
+    it('rejects malformed batchUpdateImageTags payloads before starting a transaction', async () => {
+        const result = await batchUpdateImageTags(
+            5,
+            'not-an-array' as unknown as string[],
+            ['valid'],
+        );
+
+        expect(result).toEqual({
+            success: false,
+            added: 0,
+            removed: 0,
+            warnings: ['invalidInput'],
+        });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
 });

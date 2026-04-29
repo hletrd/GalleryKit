@@ -6,9 +6,13 @@ import {
     normalizeIp,
     getRateLimitBucketStart,
     isRateLimitExceeded,
+    preIncrementShareAttempt,
     pruneSearchRateLimit,
     resetSearchRateLimitPruneStateForTests,
+    resetShareRateLimitForTests,
     searchRateLimit,
+    SHARE_MAX_REQUESTS,
+    SHARE_WINDOW_MS,
     shouldWarnMissingTrustProxy,
 } from '@/lib/rate-limit';
 
@@ -28,6 +32,7 @@ afterEach(() => {
     }
 
     searchRateLimit.clear();
+    resetShareRateLimitForTests();
     resetSearchRateLimitPruneStateForTests();
 });
 
@@ -233,5 +238,25 @@ describe('pruneSearchRateLimit', () => {
 
         expect(pruneSearchRateLimit(1_001)).toBe(true);
         expect(searchRateLimit.size).toBeLessThanOrEqual(2_000);
+    });
+});
+
+describe('preIncrementShareAttempt', () => {
+    it('allows the configured share-key lookup budget and rejects the next request', () => {
+        const now = 1_000;
+        for (let i = 0; i < SHARE_MAX_REQUESTS; i++) {
+            expect(preIncrementShareAttempt('203.0.113.50', now)).toBe(false);
+        }
+
+        expect(preIncrementShareAttempt('203.0.113.50', now)).toBe(true);
+    });
+
+    it('starts a fresh share-key lookup bucket after the window resets', () => {
+        const now = 1_000;
+        for (let i = 0; i <= SHARE_MAX_REQUESTS; i++) {
+            preIncrementShareAttempt('203.0.113.51', now);
+        }
+
+        expect(preIncrementShareAttempt('203.0.113.51', now + SHARE_WINDOW_MS + 1)).toBe(false);
     });
 });

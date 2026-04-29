@@ -9,6 +9,9 @@ const {
     getSharedGroupCachedMock,
     getSeoSettingsMock,
     getGalleryConfigMock,
+    headersMock,
+    getClientIpMock,
+    preIncrementShareAttemptMock,
 } = vi.hoisted(() => ({
     getLocaleMock: vi.fn(),
     getTranslationsMock: vi.fn(),
@@ -16,6 +19,9 @@ const {
     getSharedGroupCachedMock: vi.fn(),
     getSeoSettingsMock: vi.fn(),
     getGalleryConfigMock: vi.fn(),
+    headersMock: vi.fn(),
+    getClientIpMock: vi.fn(),
+    preIncrementShareAttemptMock: vi.fn(),
 }));
 
 vi.mock('next-intl/server', () => ({
@@ -43,6 +49,15 @@ vi.mock('next/navigation', () => ({
     },
 }));
 
+vi.mock('next/headers', () => ({
+    headers: headersMock,
+}));
+
+vi.mock('@/lib/rate-limit', () => ({
+    getClientIp: getClientIpMock,
+    preIncrementShareAttempt: preIncrementShareAttemptMock,
+}));
+
 vi.mock('@/components/photo-viewer', () => ({
     default: ({ untitledFallbackTitle }: { untitledFallbackTitle?: string }) => React.createElement('div', { 'data-fallback': untitledFallbackTitle ?? '' }),
 }));
@@ -58,6 +73,9 @@ describe('shared page display titles', () => {
         getSharedGroupCachedMock.mockReset();
         getSeoSettingsMock.mockReset();
         getGalleryConfigMock.mockReset();
+        headersMock.mockReset();
+        getClientIpMock.mockReset();
+        preIncrementShareAttemptMock.mockReset();
 
         getLocaleMock.mockResolvedValue('en');
         getTranslationsMock.mockImplementation(async () => (key: string, values?: Record<string, string | number>) => {
@@ -76,6 +94,9 @@ describe('shared page display titles', () => {
         getGalleryConfigMock.mockResolvedValue({
             imageSizes: [640, 1536, 2048, 4096],
         });
+        headersMock.mockResolvedValue(new Map());
+        getClientIpMock.mockReturnValue('203.0.113.77');
+        preIncrementShareAttemptMock.mockReturnValue(false);
     });
 
     it('renders shared photo headings from tag-derived titles when the image has no meaningful title', async () => {

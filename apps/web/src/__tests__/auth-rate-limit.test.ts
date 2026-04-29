@@ -9,6 +9,7 @@ const { decrementRateLimit, incrementRateLimit, resetRateLimit, loginRateLimit }
 
 vi.mock('@/lib/rate-limit', () => ({
     LOGIN_WINDOW_MS: 15 * 60 * 1000,
+    LOGIN_RATE_LIMIT_MAX_KEYS: 5000,
     decrementRateLimit,
     incrementRateLimit,
     resetRateLimit,
@@ -16,11 +17,15 @@ vi.mock('@/lib/rate-limit', () => ({
 }));
 
 import {
+    accountLoginRateLimit,
+    clearSuccessfulAccountLoginAttempts,
     clearSuccessfulPasswordAttempts,
     clearSuccessfulLoginAttempts,
+    getAccountLoginRateLimitEntry,
     getLoginRateLimitEntry,
     passwordChangeRateLimit,
     recordFailedLoginAttempt,
+    rollbackAccountLoginRateLimit,
 } from '@/lib/auth-rate-limit';
 
 describe('auth-rate-limit helpers', () => {
@@ -29,6 +34,7 @@ describe('auth-rate-limit helpers', () => {
         incrementRateLimit.mockReset();
         resetRateLimit.mockReset();
         loginRateLimit.clear();
+        accountLoginRateLimit.clear();
         passwordChangeRateLimit.clear();
     });
 
@@ -99,5 +105,46 @@ describe('auth-rate-limit helpers', () => {
         await expect(clearSuccessfulPasswordAttempts('203.0.113.5')).rejects.toThrow('db down');
 
         expect(passwordChangeRateLimit.has('203.0.113.5')).toBe(true);
+    });
+
+    it('resets expired in-memory account login counts independently of IP counts', () => {
+        accountLoginRateLimit.set('acct:abc', {
+            count: 4,
+            lastAttempt: 1,
+        });
+
+        expect(getAccountLoginRateLimitEntry('acct:abc', 15 * 60 * 1000 + 2)).toEqual({
+            count: 0,
+            lastAttempt: 1,
+        });
+    });
+
+    it('clears successful account login state from memory and the DB bucket', async () => {
+        resetRateLimit.mockResolvedValue(undefined);
+        accountLoginRateLimit.set('acct:def', {
+            count: 3,
+            lastAttempt: 654_321,
+        });
+
+        await clearSuccessfulAccountLoginAttempts('acct:def', 123_000);
+
+        expect(accountLoginRateLimit.has('acct:def')).toBe(false);
+        expect(resetRateLimit).toHaveBeenCalledWith('acct:def', 'login_account', 15 * 60 * 1000, 123_000);
+    });
+
+    it('rolls back account login counters in memory and the DB bucket', async () => {
+        decrementRateLimit.mockResolvedValue(undefined);
+        accountLoginRateLimit.set('acct:ghi', {
+            count: 2,
+            lastAttempt: 654_321,
+        });
+
+        await rollbackAccountLoginRateLimit('acct:ghi', 123_000);
+
+        expect(accountLoginRateLimit.get('acct:ghi')).toEqual({
+            count: 1,
+            lastAttempt: 654_321,
+        });
+        expect(decrementRateLimit).toHaveBeenCalledWith('acct:ghi', 'login_account', 15 * 60 * 1000, 123_000);
     });
 });

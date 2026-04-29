@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripControlChars } from '@/lib/sanitize';
+import { normalizeStringRecord, stripControlChars } from '@/lib/sanitize';
 
 describe('stripControlChars', () => {
     it('should return null for null input', () => {
@@ -69,5 +69,31 @@ describe('stripControlChars', () => {
 
     it('should handle string with embedded control chars between normal text', () => {
         expect(stripControlChars('hel\x00lo\x01wo\x7Frld')).toBe('helloworld');
+    });
+});
+
+describe('normalizeStringRecord', () => {
+    it('rejects non-object and array payloads before callers trim values', () => {
+        expect(normalizeStringRecord(null)).toEqual({ ok: false, error: 'invalidInput' });
+        expect(normalizeStringRecord(['seo_title'])).toEqual({ ok: false, error: 'invalidInput' });
+    });
+
+    it('rejects non-string values in otherwise valid records', () => {
+        expect(normalizeStringRecord({ seo_title: 42 })).toEqual({ ok: false, error: 'invalidInput' });
+        expect(normalizeStringRecord({ seo_title: null })).toEqual({ ok: false, error: 'invalidInput' });
+    });
+
+    it('rejects keys outside the allowed set', () => {
+        expect(normalizeStringRecord({ unexpected: 'value' }, new Set(['seo_title']))).toEqual({
+            ok: false,
+            error: 'invalidSettingKey',
+        });
+    });
+
+    it('trims and strips control characters from valid string values', () => {
+        expect(normalizeStringRecord({ seo_title: ' Hello\x00 ' }, new Set(['seo_title']))).toEqual({
+            ok: true,
+            record: { seo_title: 'Hello' },
+        });
     });
 });

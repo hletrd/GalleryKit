@@ -134,6 +134,6 @@ describe('auth.ts — login DB-backed rate limits include the current request', 
         expect(body).toContain('isRateLimitExceeded(dbLimit.count, LOGIN_MAX_ATTEMPTS, true)');
         expect(body).toContain('isRateLimitExceeded(accountLimit.count, LOGIN_MAX_ATTEMPTS, true)');
         expect(body).toContain('rollbackLoginRateLimit(ip, loginBucketStart)');
-        expect(body).toContain("decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart)");
+        expect(body).toContain('rollbackAccountLoginRateLimit(accountRateLimitKey');
     });
 });
