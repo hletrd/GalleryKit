@@ -7,19 +7,22 @@
   },
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/ensure-site-config.mjs",
-    "build": "next build",
+    "prebuild": "NODE_ENV=production node scripts/ensure-site-config.mjs",
+    "build": "npm run typecheck && GALLERYKIT_TYPECHECKED=1 next build",
     "start": "next start",
     "test": "vitest run",
     "lint": "eslint",
-    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "typecheck": "npm run typecheck:app && npm run typecheck:scripts",
+    "check:js-scripts": "node scripts/check-js-scripts.mjs",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed-admin.ts",
     "init": "tsx scripts/init-db.ts",
     "test:e2e": "env -u NO_COLOR npx playwright test",
     "e2e:seed": "tsx scripts/seed-e2e.ts",
     "lint:api-auth": "tsx scripts/check-api-auth.ts",
-    "lint:action-origin": "tsx scripts/check-action-origin.ts"
+    "lint:action-origin": "tsx scripts/check-action-origin.ts",
+    "typecheck:app": "node scripts/prepare-next-typegen.mjs && next typegen && tsc -p tsconfig.typecheck.json --noEmit",
+    "typecheck:scripts": "npm run check:js-scripts && tsc -p tsconfig.scripts.json --noEmit"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",

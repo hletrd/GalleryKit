@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${DEPLOY_ENV_FILE:-$ROOT_DIR/.env.deploy}"
+DEFAULT_DEPLOY_ENV_FILE="$HOME/.gallerykit-secrets/gallery-deploy.env"
+ENV_FILE="${DEPLOY_ENV_FILE:-$DEFAULT_DEPLOY_ENV_FILE}"
 
 expand_tilde_path() {
   local value="${1:-}"
@@ -45,7 +46,7 @@ build_deploy_command() {
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing deploy env file: $ENV_FILE" >&2
-  echo "Copy .env.deploy.example to .env.deploy and customize DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH (or DEPLOY_CMD) first." >&2
+  echo "Copy .env.deploy.example to $DEFAULT_DEPLOY_ENV_FILE (or set DEPLOY_ENV_FILE) and customize DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH (or DEPLOY_CMD) first." >&2
   exit 1
 fi
 

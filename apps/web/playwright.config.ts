@@ -11,7 +11,6 @@ const loadEnvFile = (process as NodeJS.Process & { loadEnvFile?: (path: string) 
 if (existsSync(envPath) && typeof loadEnvFile === 'function') {
   loadEnvFile(envPath);
 }
-const sourceEnvFile = existsSync(envPath) ? `. ${JSON.stringify(envPath)} && ` : '';
 
 const port = Number(process.env.E2E_PORT || 3100);
 const host = '127.0.0.1';
@@ -40,7 +39,7 @@ function parsePositiveIntegerEnv(name: string, fallback: number) {
   return parsed;
 }
 
-const webServerTimeout = parsePositiveIntegerEnv('E2E_WEB_SERVER_TIMEOUT_MS', 420_000);
+const webServerTimeout = parsePositiveIntegerEnv('E2E_WEB_SERVER_TIMEOUT_MS', 900_000);
 
 if (!useLocalServer && process.env.E2E_ADMIN_ENABLED === 'true' && process.env.E2E_ALLOW_REMOTE_ADMIN !== 'true') {
   throw new Error('Remote admin E2E is disabled by default. Set E2E_ALLOW_REMOTE_ADMIN=true to opt in.');
@@ -71,7 +70,7 @@ export default defineConfig({
   ],
   webServer: useLocalServer
     ? {
-        command: `${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run init && ${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run e2e:seed && ${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true npm run build && rm -rf .next/standalone/apps/web/.next/static && cp -R .next/static .next/standalone/apps/web/.next/static && ${sourceEnvFile}env -u NO_COLOR -u FORCE_COLOR TRUST_PROXY=true HOSTNAME=${host} PORT=${localPort} node .next/standalone/apps/web/server.js`,
+        command: `node scripts/run-e2e-server.mjs --host=${host} --port=${localPort}`,
         cwd: __dirname,
         url: baseURL,
         reuseExistingServer,

@@ -6,7 +6,7 @@
     ],
     "overrides": {
         "esbuild": "^0.25.4",
-        "postcss": "^8.5.10"
+        "postcss": "8.5.10"
     },
     "scripts": {
         "dev": "npm run dev --workspace=apps/web",

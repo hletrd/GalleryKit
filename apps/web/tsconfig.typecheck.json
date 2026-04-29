@@ -11,5 +11,8 @@
     "node_modules",
     "scripts",
     ".next/dev"
-  ]
+  ],
+  "compilerOptions": {
+    "incremental": false
+  }
 }
