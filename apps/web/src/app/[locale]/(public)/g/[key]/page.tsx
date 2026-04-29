@@ -100,7 +100,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     const { key, locale } = await params;
     const { photoId: photoIdParam } = await searchParams;
     const [group, seo, t, config] = await Promise.all([
-        getSharedGroupCached(key),
+        getSharedGroupCached(key, { incrementViewCount: !photoIdParam }),
         getSeoSettings(),
         getTranslations('sharedGroup'),
         getGalleryConfig(),
