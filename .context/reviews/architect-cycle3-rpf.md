@@ -1,0 +1,465 @@
+# Architect Review — Cycle 3 RPF (Prompt 1)
+
+Date: 2026-04-29  
+Scope: `/Users/hletrd/flash-shared/gallery`  
+Role: architect review for architectural/design risk, coupling, layering, boundaries, runtime topology, DB/schema/data model, deployment assumptions, and maintainability.  
+Implementation files changed: none (report-only output).
+
+## Inventory first
+
+I inventoried the current tracked source/config/test/docs surface before reviewing interactions. The inventory below excludes historical `.context/**` review artifacts and binary/media/build outputs, but includes root/app config, DB schema and migrations, runtime source, scripts, e2e/unit tests, deployment files, and planning docs that can encode architectural assumptions.
+
+Inventory count: **355 tracked non-binary files**.
+
+<details>
+<summary>Full review inventory</summary>
+
+- `.dockerignore`
+- `.env.deploy.example`
+- `.github/dependabot.yml`
+- `.github/workflows/quality.yml`
+- `.gitignore`
+- `.nvmrc`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `LICENSE`
+- `README.md`
+- `apps/web/.dockerignore`
+- `apps/web/.env.local.example`
+- `apps/web/.gitignore`
+- `apps/web/Dockerfile`
+- `apps/web/README.md`
+- `apps/web/components.json`
+- `apps/web/deploy.sh`
+- `apps/web/docker-compose.yml`
+- `apps/web/drizzle.config.ts`
+- `apps/web/drizzle/0000_nappy_madelyne_pryor.sql`
+- `apps/web/drizzle/0001_sync_current_schema.sql`
+- `apps/web/drizzle/0002_fix_processed_default.sql`
+- `apps/web/drizzle/0003_audit_created_at_index.sql`
+- `apps/web/drizzle/meta/0000_snapshot.json`
+- `apps/web/drizzle/meta/0001_snapshot.json`
+- `apps/web/drizzle/meta/_journal.json`
+- `apps/web/e2e/admin.spec.ts`
+- `apps/web/e2e/helpers.ts`
+- `apps/web/e2e/nav-visual-check.spec.ts`
+- `apps/web/e2e/origin-guard.spec.ts`
+- `apps/web/e2e/public.spec.ts`
+- `apps/web/e2e/test-fixes.spec.ts`
+- `apps/web/eslint.config.mjs`
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- `apps/web/next.config.ts`
+- `apps/web/nginx/default.conf`
+- `apps/web/package.json`
+- `apps/web/playwright.config.ts`
+- `apps/web/postcss.config.mjs`
+- `apps/web/public/.gitkeep`
+- `apps/web/public/histogram-worker.js`
+- `apps/web/scripts/check-action-origin.ts`
+- `apps/web/scripts/check-api-auth.ts`
+- `apps/web/scripts/check-js-scripts.mjs`
+- `apps/web/scripts/ensure-site-config.mjs`
+- `apps/web/scripts/entrypoint.sh`
+- `apps/web/scripts/init-db.ts`
+- `apps/web/scripts/migrate-admin-auth.ts`
+- `apps/web/scripts/migrate-aliases.ts`
+- `apps/web/scripts/migrate-capture-date.js`
+- `apps/web/scripts/migrate-titles.ts`
+- `apps/web/scripts/migrate.js`
+- `apps/web/scripts/migration-add-column.ts`
+- `apps/web/scripts/mysql-connection-options.js`
+- `apps/web/scripts/prepare-next-typegen.mjs`
+- `apps/web/scripts/run-e2e-server.mjs`
+- `apps/web/scripts/seed-admin.ts`
+- `apps/web/scripts/seed-e2e.ts`
+- `apps/web/src/__tests__/action-guards.test.ts`
+- `apps/web/src/__tests__/admin-user-create-ordering.test.ts`
+- `apps/web/src/__tests__/admin-users.test.ts`
+- `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts`
+- `apps/web/src/__tests__/auth-rate-limit.test.ts`
+- `apps/web/src/__tests__/auth-rethrow.test.ts`
+- `apps/web/src/__tests__/backup-download-route.test.ts`
+- `apps/web/src/__tests__/backup-filename.test.ts`
+- `apps/web/src/__tests__/base56.test.ts`
+- `apps/web/src/__tests__/blur-data-url.test.ts`
+- `apps/web/src/__tests__/check-action-origin.test.ts`
+- `apps/web/src/__tests__/check-api-auth.test.ts`
+- `apps/web/src/__tests__/client-source-contracts.test.ts`
+- `apps/web/src/__tests__/clipboard.test.ts`
+- `apps/web/src/__tests__/content-security-policy.test.ts`
+- `apps/web/src/__tests__/csv-escape.test.ts`
+- `apps/web/src/__tests__/data-pagination.test.ts`
+- `apps/web/src/__tests__/data-tag-names-sql.test.ts`
+- `apps/web/src/__tests__/data-view-count-flush.test.ts`
+- `apps/web/src/__tests__/db-pool-connection-handler.test.ts`
+- `apps/web/src/__tests__/db-restore.test.ts`
+- `apps/web/src/__tests__/error-shell.test.ts`
+- `apps/web/src/__tests__/exif-datetime.test.ts`
+- `apps/web/src/__tests__/gallery-config-shared.test.ts`
+- `apps/web/src/__tests__/health-route.test.ts`
+- `apps/web/src/__tests__/histogram.test.ts`
+- `apps/web/src/__tests__/image-queue-bootstrap.test.ts`
+- `apps/web/src/__tests__/image-queue.test.ts`
+- `apps/web/src/__tests__/image-url.test.ts`
+- `apps/web/src/__tests__/images-action-blur-wiring.test.ts`
+- `apps/web/src/__tests__/images-actions.test.ts`
+- `apps/web/src/__tests__/images-delete-revalidation.test.ts`
+- `apps/web/src/__tests__/lightbox.test.ts`
+- `apps/web/src/__tests__/live-route.test.ts`
+- `apps/web/src/__tests__/load-more-rate-limit.test.ts`
+- `apps/web/src/__tests__/locale-path.test.ts`
+- `apps/web/src/__tests__/mysql-cli-ssl.test.ts`
+- `apps/web/src/__tests__/next-config.test.ts`
+- `apps/web/src/__tests__/og-rate-limit.test.ts`
+- `apps/web/src/__tests__/photo-title.test.ts`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/process-image-blur-wiring.test.ts`
+- `apps/web/src/__tests__/process-image-dimensions.test.ts`
+- `apps/web/src/__tests__/process-image-variant-scan.test.ts`
+- `apps/web/src/__tests__/public-actions.test.ts`
+- `apps/web/src/__tests__/queue-shutdown.test.ts`
+- `apps/web/src/__tests__/rate-limit.test.ts`
+- `apps/web/src/__tests__/request-origin.test.ts`
+- `apps/web/src/__tests__/restore-maintenance.test.ts`
+- `apps/web/src/__tests__/restore-upload-lock.test.ts`
+- `apps/web/src/__tests__/revalidation.test.ts`
+- `apps/web/src/__tests__/safe-json-ld.test.ts`
+- `apps/web/src/__tests__/sanitize.test.ts`
+- `apps/web/src/__tests__/seo-actions.test.ts`
+- `apps/web/src/__tests__/serve-upload.test.ts`
+- `apps/web/src/__tests__/session.test.ts`
+- `apps/web/src/__tests__/settings-image-sizes-lock.test.ts`
+- `apps/web/src/__tests__/share-key-length.test.ts`
+- `apps/web/src/__tests__/shared-page-title.test.ts`
+- `apps/web/src/__tests__/sql-restore-scan.test.ts`
+- `apps/web/src/__tests__/storage-local.test.ts`
+- `apps/web/src/__tests__/tag-input.test.ts`
+- `apps/web/src/__tests__/tag-label-consolidation.test.ts`
+- `apps/web/src/__tests__/tag-records.test.ts`
+- `apps/web/src/__tests__/tag-slugs.test.ts`
+- `apps/web/src/__tests__/tags-actions.test.ts`
+- `apps/web/src/__tests__/topics-actions.test.ts`
+- `apps/web/src/__tests__/touch-target-audit.test.ts`
+- `apps/web/src/__tests__/upload-dropzone.test.ts`
+- `apps/web/src/__tests__/upload-limits.test.ts`
+- `apps/web/src/__tests__/upload-tracker.test.ts`
+- `apps/web/src/__tests__/validation.test.ts`
+- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/page.tsx`
+- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`
+- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/error.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/loading.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/page.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
+- `apps/web/src/app/[locale]/admin/db-actions.ts`
+- `apps/web/src/app/[locale]/admin/layout.tsx`
+- `apps/web/src/app/[locale]/admin/login-form.tsx`
+- `apps/web/src/app/[locale]/admin/page.tsx`
+- `apps/web/src/app/[locale]/error.tsx`
+- `apps/web/src/app/[locale]/globals.css`
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/loading.tsx`
+- `apps/web/src/app/[locale]/not-found.tsx`
+- `apps/web/src/app/actions.ts`
+- `apps/web/src/app/actions/admin-users.ts`
+- `apps/web/src/app/actions/auth.ts`
+- `apps/web/src/app/actions/images.ts`
+- `apps/web/src/app/actions/public.ts`
+- `apps/web/src/app/actions/seo.ts`
+- `apps/web/src/app/actions/settings.ts`
+- `apps/web/src/app/actions/sharing.ts`
+- `apps/web/src/app/actions/tags.ts`
+- `apps/web/src/app/actions/topics.ts`
+- `apps/web/src/app/api/admin/db/download/route.ts`
+- `apps/web/src/app/api/health/route.ts`
+- `apps/web/src/app/api/live/route.ts`
+- `apps/web/src/app/api/og/route.tsx`
+- `apps/web/src/app/apple-icon.tsx`
+- `apps/web/src/app/global-error.tsx`
+- `apps/web/src/app/icon.tsx`
+- `apps/web/src/app/manifest.ts`
+- `apps/web/src/app/robots.ts`
+- `apps/web/src/app/sitemap.ts`
+- `apps/web/src/app/uploads/[...path]/route.ts`
+- `apps/web/src/components/admin-header.tsx`
+- `apps/web/src/components/admin-nav.tsx`
+- `apps/web/src/components/admin-user-manager.tsx`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/histogram.tsx`
+- `apps/web/src/components/home-client.tsx`
+- `apps/web/src/components/i18n-provider.tsx`
+- `apps/web/src/components/image-manager.tsx`
+- `apps/web/src/components/image-zoom.tsx`
+- `apps/web/src/components/info-bottom-sheet.tsx`
+- `apps/web/src/components/lazy-focus-trap.tsx`
+- `apps/web/src/components/lightbox.tsx`
+- `apps/web/src/components/load-more.tsx`
+- `apps/web/src/components/nav-client.tsx`
+- `apps/web/src/components/nav.tsx`
+- `apps/web/src/components/optimistic-image.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/photo-viewer-loading.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/tag-filter.tsx`
+- `apps/web/src/components/tag-input.tsx`
+- `apps/web/src/components/theme-provider.tsx`
+- `apps/web/src/components/topic-empty-state.tsx`
+- `apps/web/src/components/ui/alert-dialog.tsx`
+- `apps/web/src/components/ui/alert.tsx`
+- `apps/web/src/components/ui/aspect-ratio.tsx`
+- `apps/web/src/components/ui/badge.tsx`
+- `apps/web/src/components/ui/button.tsx`
+- `apps/web/src/components/ui/card.tsx`
+- `apps/web/src/components/ui/dialog.tsx`
+- `apps/web/src/components/ui/dropdown-menu.tsx`
+- `apps/web/src/components/ui/input.tsx`
+- `apps/web/src/components/ui/label.tsx`
+- `apps/web/src/components/ui/progress.tsx`
+- `apps/web/src/components/ui/scroll-area.tsx`
+- `apps/web/src/components/ui/select.tsx`
+- `apps/web/src/components/ui/separator.tsx`
+- `apps/web/src/components/ui/sheet.tsx`
+- `apps/web/src/components/ui/skeleton.tsx`
+- `apps/web/src/components/ui/sonner.tsx`
+- `apps/web/src/components/ui/switch.tsx`
+- `apps/web/src/components/ui/table.tsx`
+- `apps/web/src/components/ui/textarea.tsx`
+- `apps/web/src/components/upload-dropzone.tsx`
+- `apps/web/src/db/index.ts`
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/db/seed.ts`
+- `apps/web/src/i18n/request.ts`
+- `apps/web/src/instrumentation.ts`
+- `apps/web/src/lib/action-guards.ts`
+- `apps/web/src/lib/action-result.ts`
+- `apps/web/src/lib/api-auth.ts`
+- `apps/web/src/lib/audit.ts`
+- `apps/web/src/lib/auth-rate-limit.ts`
+- `apps/web/src/lib/backup-filename.ts`
+- `apps/web/src/lib/base56.ts`
+- `apps/web/src/lib/blur-data-url.ts`
+- `apps/web/src/lib/bounded-map.ts`
+- `apps/web/src/lib/clipboard.ts`
+- `apps/web/src/lib/constants.ts`
+- `apps/web/src/lib/content-security-policy.ts`
+- `apps/web/src/lib/csp-nonce.ts`
+- `apps/web/src/lib/csv-escape.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/lib/db-restore.ts`
+- `apps/web/src/lib/error-shell.ts`
+- `apps/web/src/lib/exif-datetime.ts`
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/gallery-config.ts`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/image-types.ts`
+- `apps/web/src/lib/image-url.ts`
+- `apps/web/src/lib/locale-path.ts`
+- `apps/web/src/lib/mysql-cli-ssl.ts`
+- `apps/web/src/lib/photo-title.ts`
+- `apps/web/src/lib/process-image.ts`
+- `apps/web/src/lib/process-topic-image.ts`
+- `apps/web/src/lib/queue-shutdown.ts`
+- `apps/web/src/lib/rate-limit.ts`
+- `apps/web/src/lib/request-origin.ts`
+- `apps/web/src/lib/restore-maintenance.ts`
+- `apps/web/src/lib/revalidation.ts`
+- `apps/web/src/lib/safe-json-ld.ts`
+- `apps/web/src/lib/sanitize.ts`
+- `apps/web/src/lib/seo-og-url.ts`
+- `apps/web/src/lib/serve-upload.ts`
+- `apps/web/src/lib/session.ts`
+- `apps/web/src/lib/sql-restore-scan.ts`
+- `apps/web/src/lib/storage/index.ts`
+- `apps/web/src/lib/storage/local.ts`
+- `apps/web/src/lib/storage/types.ts`
+- `apps/web/src/lib/tag-records.ts`
+- `apps/web/src/lib/tag-slugs.ts`
+- `apps/web/src/lib/upload-limits.ts`
+- `apps/web/src/lib/upload-paths.ts`
+- `apps/web/src/lib/upload-processing-contract-lock.ts`
+- `apps/web/src/lib/upload-tracker-state.ts`
+- `apps/web/src/lib/upload-tracker.ts`
+- `apps/web/src/lib/utils.ts`
+- `apps/web/src/lib/validation.ts`
+- `apps/web/src/proxy.ts`
+- `apps/web/src/site-config.example.json`
+- `apps/web/tailwind.config.ts`
+- `apps/web/tsconfig.json`
+- `apps/web/tsconfig.scripts.json`
+- `apps/web/tsconfig.typecheck.json`
+- `apps/web/vitest.config.ts`
+- `package-lock.json`
+- `package.json`
+- `plan/cycle1-rpf-deferred.md`
+- `plan/cycle1-rpl-deferred.md`
+- `plan/cycle2-recovery-deferred.md`
+- `plan/cycle2-rpl-deferred.md`
+- `plan/cycle3-gate-warnings.md`
+- `plan/cycle3-rpl-deferred.md`
+- `plan/cycle4-gate-warnings.md`
+- `plan/done/cycle1-review-fixes.md`
+- `plan/done/cycle1-rpf-review-fixes.md`
+- `plan/done/cycle1-rpl-review-fixes.md`
+- `plan/done/cycle2-recovery-review-fixes.md`
+- `plan/done/cycle2-review-fixes.md`
+- `plan/done/cycle2-review-triage.md`
+- `plan/done/cycle2-rpl-review-fixes.md`
+- `plan/done/cycle3-review-triage.md`
+- `plan/done/cycle3-rpl-review-fixes.md`
+- `plan/done/cycle4-review-triage.md`
+- `plan/done/cycle6-review-fixes.md`
+- `plan/done/cycle6-review-triage.md`
+- `plan/done/plan-217-cycle5-rpl-lint-gate-hardening.md`
+- `plan/done/plan-221-cycle7-rpl-polish.md`
+- `plan/done/plan-223-cycle8-rpl-polish.md`
+- `plan/done/plan-231-cycle1-core-fixes.md`
+- `plan/done/plan-233-cycle3-rpf-fixes.md`
+- `plan/done/plan-235-cycle4-rpf-core-correctness.md`
+- `plan/done/plan-235-cycle5-rpf-fixes.md`
+- `plan/done/plan-236-cycle4-rpf-ui-ux-perf-docs.md`
+- `plan/done/plan-237-cycle6-rpf-fixes.md`
+- `plan/done/plan-239-cycle7-rpf-fixes.md`
+- `plan/done/plan-241-cycle8-rpf-fixes.md`
+- `plan/done/plan-247-cycle2-rpf-review-fixes.md`
+- `plan/plan-218-cycle5-rpl-deferred.md`
+- `plan/plan-219-cycle6-rpl-polish.md`
+- `plan/plan-220-cycle6-rpl-deferred.md`
+- `plan/plan-222-cycle7-rpl-deferred.md`
+- `plan/plan-224-cycle8-rpl-deferred.md`
+- `plan/plan-230-cycle14-deferred.md`
+- `plan/plan-232-cycle1-deferred.md`
+- `plan/plan-234-cycle3-rpf-deferred.md`
+- `plan/plan-236-cycle5-rpf-deferred.md`
+- `plan/plan-237-cycle4-rpf-deferred.md`
+- `plan/plan-238-cycle6-rpf-deferred.md`
+- `plan/plan-240-cycle7-rpf-deferred.md`
+- `plan/plan-242-cycle8-rpf-deferred.md`
+- `plan/plan-243-cycle2-rpf2-fixes.md`
+- `plan/plan-244-cycle2-rpf2-deferred.md`
+- `plan/plan-245-cycle1-fresh-fixes.md`
+- `plan/plan-246-cycle1-fresh-deferred.md`
+- `plan/plan-248-cycle2-rpf-deferred.md`
+- `plan/plan-249-cycle2-fresh-gate-fix.md`
+- `plan/plan-250-cycle1-implementation.md`
+- `plan/plan-251-cycle1-deferred.md`
+- `plan/plan-252-cycle2-review-fixes.md`
+- `plan/plan-253-cycle2-deferred.md`
+- `plan/plan-254-cycle2-gate-warnings.md`
+- `plan/user-injected/done/cycle3-ui-ux.md`
+- `plan/user-injected/pending-next-cycle.md`
+- `scripts/deploy-remote.sh`
+- `test-results/.last-run.json`
+
+</details>
+
+## Cross-file review map
+
+Reviewed these interaction seams without sampling:
+
+- Runtime topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/src/instrumentation.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- DB/data model: `apps/web/src/db/schema.ts`, all `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/*`, `apps/web/scripts/migrate.js`, DB export/restore scripts/actions, data/query helpers, and schema-focused tests.
+- Upload/storage boundary: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/process-topic-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/image-url.ts`, `apps/web/src/lib/storage/*`, nginx upload serving, Docker bind mounts, and storage/upload tests.
+- Auth/admin/action boundaries: proxy routing, sessions, action guards, origin checks, auth/rate-limit/audit libs, admin/user/topic/tag/image/sharing/seo/settings actions, and API auth checks/tests.
+- Public/SEO/i18n boundary: locale routes, sitemap/robots/manifest/OG route, gallery config, site config, messages, navigation/photo components, and JSON-LD/CSP helpers.
+- Quality/deployment assumptions: root and app `package.json`, TypeScript/ESLint/Playwright/Vitest config, GitHub Actions workflow, deploy scripts, README/CLAUDE/AGENTS docs.
+
+## Findings
+
+### C3-ARCH-01 — Legacy schema reconciliation can baseline past the processed-default migration
+
+- Severity: **High**
+- Confidence: **High**
+- Files/regions:
+  - `apps/web/drizzle/0000_nappy_madelyne_pryor.sql:34-40` creates `images.processed boolean DEFAULT true`.
+  - `apps/web/drizzle/0002_fix_processed_default.sql:1` later fixes that default to `false`.
+  - `apps/web/src/db/schema.ts:53-64` models the current default as `processed: boolean(...).default(false)` and indexes processed rows.
+  - `apps/web/scripts/migrate.js:291-331` creates a missing legacy `images` table with `processed boolean DEFAULT false`, but `apps/web/scripts/migrate.js:334-358` only reconciles added/type-changed columns for an existing table and never validates an existing `processed` default.
+  - `apps/web/scripts/migrate.js:466-478` records only the latest migration, and `apps/web/scripts/migrate.js:480-494` calls reconciliation plus latest-baseline before Drizzle migrate runs.
+- Failure scenario: an installed gallery DB that already has `images` from the 0000-era schema and either no `__drizzle_migrations` table or a recorded migration older than 0002 still has `processed DEFAULT true`. On startup, `prepareLegacyDatabaseIfNeeded()` reconciles the legacy schema, inserts a baseline row for the latest migration (`0003`), and Drizzle sees no need to apply `0002_fix_processed_default.sql`. Normal upload code explicitly writes `processed: false` (`apps/web/src/app/actions/images.ts:288-316`), but any import, manual repair, maintenance script, or future code path that omits the column will create rows that look processed before derivatives exist. Those rows can appear in public queries, skip the queue's `processed=false` bootstrap scan, or produce broken image URLs.
+- Concrete fix: in `reconcileLegacySchema()`, inspect `INFORMATION_SCHEMA.COLUMNS.COLUMN_DEFAULT` for `images.processed` and run `ALTER TABLE images ALTER COLUMN processed SET DEFAULT false` when it is not false before baselining. Add a regression/integration test that builds a 0000-era schema, runs `scripts/migrate.js`, and asserts both the column default and the migration table outcome. Safer alternative: do not latest-baseline a partially migrated DB; apply or record each migration in order after verifying its state change.
+
+### C3-ARCH-02 — Drizzle journal and snapshots disagree after manual migrations
+
+- Severity: **Medium**
+- Confidence: **High**
+- Files/regions:
+  - `apps/web/drizzle/meta/_journal.json:19-31` lists `0002_fix_processed_default` and `0003_audit_created_at_index`.
+  - `apps/web/drizzle/meta/` contains only `0000_snapshot.json`, `0001_snapshot.json`, and `_journal.json`; there are no `0002_snapshot.json` or `0003_snapshot.json` files.
+  - `apps/web/drizzle/meta/0001_snapshot.json:514-520` still records `images.processed` default as `true`.
+  - `apps/web/drizzle/meta/0001_snapshot.json:152-168` lists only `audit_user_idx` and `audit_action_idx`, while the current schema declares `audit_created_at_idx` in `apps/web/src/db/schema.ts:113-126` and migration `apps/web/drizzle/0003_audit_created_at_index.sql:1` creates it.
+- Failure scenario: a future `drizzle-kit generate` or schema diff uses stale snapshot state as its previous baseline. It can generate duplicate `ALTER TABLE images ALTER COLUMN processed SET DEFAULT false`, duplicate `audit_created_at_idx`, or hide a real drift because maintainers cannot tell which source of truth to trust. This is a schema-history maintainability risk even if runtime migration currently applies the SQL files.
+- Concrete fix: regenerate and commit matching snapshots for the manual `0002` and `0003` migrations, or squash/regenerate the migration baseline so `_journal.json`, snapshots, SQL migrations, and `src/db/schema.ts` agree. Add a CI guard that fails when `_journal.json` has a migration tag without a matching snapshot or when `drizzle-kit check/generate` reports drift.
+
+### C3-ARCH-03 — The experimental storage abstraction violates the current private-originals boundary if adopted
+
+- Severity: **Medium**
+- Confidence: **High**
+- Files/regions:
+  - `apps/web/src/lib/upload-paths.ts:11-22` defines public `UPLOAD_ROOT`; `apps/web/src/lib/upload-paths.ts:24-40` separates legacy public originals from private `UPLOAD_ORIGINAL_ROOT`/`UPLOAD_DIR_ORIGINAL`.
+  - `apps/web/src/lib/storage/types.ts:4-14` documents the experimental storage interface and says keys such as `original/abc.jpg` map to `UPLOAD_ROOT/<key>`.
+  - `apps/web/src/lib/storage/local.ts:20` includes `original` in required directories; `apps/web/src/lib/storage/local.ts:40-47` resolves every key under `UPLOAD_ROOT`; `apps/web/src/lib/storage/local.ts:50-54` creates `UPLOAD_ROOT/original`.
+  - `apps/web/src/lib/storage/local.ts:130-137` refuses public URLs for `original/*`, but that only blocks URL generation and does not preserve the filesystem/privacy boundary.
+  - `apps/web/src/lib/storage/index.ts:4-12` states this abstraction is not wired into the live upload/processing/serving pipeline yet.
+- Failure scenario: a future refactor follows the storage interface and writes `original/<name>` through `getStorage().writeStream()` or `writeBuffer()`. The original image lands under the public upload root instead of the private original root. If nginx or another static server serves the bind-mounted `public/uploads` tree, originals become easier to expose or back up with public derivatives. This also splits cleanup/legacy migration assumptions because `upload-paths.ts` treats `UPLOAD_ROOT/original` as legacy public storage while `storage/local.ts` treats it as current storage.
+- Concrete fix: before wiring `storage/*` into production paths, make the local backend route key prefixes explicitly: `original/*` to `UPLOAD_ORIGINAL_ROOT`, derivative/resource prefixes to `UPLOAD_ROOT`, and reject unknown prefixes. Update `StorageBackend` docs to describe private-vs-public roots, and add a unit test that mocks both roots and verifies `original/foo.jpg` never resolves under `UPLOAD_ROOT`.
+
+### C3-ARCH-04 — Queue/restore maintenance is process-local while deployment assumptions are easy to scale past
+
+- Severity: **Medium**
+- Confidence: **Medium-High**
+- Files/regions:
+  - `apps/web/docker-compose.yml:13-25` documents a single host-networked web container with host bind mounts for `data`, `public`, and `src/site-config.json`.
+  - `apps/web/src/app/actions/images.ts:261-316` saves originals to local filesystem paths and inserts DB rows; `apps/web/src/app/actions/images.ts:373-388` enqueues local in-process image work.
+  - `apps/web/src/instrumentation.ts:1-6` bootstraps the image queue in every Node runtime process.
+  - `apps/web/src/lib/image-queue.ts:67-144` stores queue state in `globalThis`, and `apps/web/src/lib/image-queue.ts:73-80` explicitly calls the retry-map behavior acceptable for a `single-writer topology`.
+  - `apps/web/src/lib/image-queue.ts:157-184` uses per-image MySQL `GET_LOCK()` claims, but `apps/web/src/lib/image-queue.ts:248-255` still requires the original file on that process's filesystem.
+  - `apps/web/src/lib/image-queue.ts:395-472` scans DB pending rows and enqueues them from whichever process bootstraps.
+  - `apps/web/src/lib/restore-maintenance.ts:1-22` stores restore maintenance state only in process memory; `apps/web/src/app/[locale]/admin/db-actions.ts:318-353` and `apps/web/src/lib/image-queue.ts:474-503` quiesce/resume only the current process's queue.
+- Failure scenario: an operator scales to two web replicas, moves to a load balancer, or starts a second container without a shared upload volume. Replica A accepts an upload and writes the original locally; replica B bootstraps or wins the per-image DB lock for that pending row and fails at `fs.access(originalPath)`, leaving the job retrying/pending. During DB restore, process A sets in-memory maintenance and pauses its queue, but process B does not observe that flag and can continue processing image jobs against a database being restored. The upload contract lock blocks uploads that try to acquire it, but queue workers do not acquire that restore/upload contract lock.
+- Concrete fix: either enforce and document single-replica/single-writer operation at startup (for example an explicit `GALLERYKIT_SINGLE_WRITER=true` guard and deployment docs) or move the boundary to a distributed design: shared object storage for originals/derivatives, an external durable queue/worker, and a DB-backed maintenance/restore flag or advisory lock checked by every queue worker before processing. If multi-process same-host remains supported, require a shared upload root and have queue processing acquire/observe the restore contract lock.
+
+### C3-ARCH-05 — Shipped nginx static-upload path is container-internal despite host-nginx deployment docs
+
+- Severity: **Low**
+- Confidence: **High**
+- Files/regions:
+  - `apps/web/docker-compose.yml:13-15` says host networking is used and host nginx handles the reverse proxy.
+  - `apps/web/nginx/default.conf:96-113` serves uploads directly with `root /app/apps/web/public`.
+  - `apps/web/README.md:43-44` warns that this root is container-internal and a host-side nginx must point at the host bind mount or proxy to the container.
+  - Root deployment docs at `README.md:165-174` tell operators to adapt the compose topology but do not provide a generated nginx path for the host mount.
+- Failure scenario: an operator copies the checked-in nginx config to the host because the compose topology says host nginx is responsible for proxying/static serving. The host likely does not have `/app/apps/web/public`, so `/uploads/...` returns 404 or serves a wrong directory while the application continues generating `/uploads/...` URLs. Operators may then disable the static block or accidentally expose a broader path while debugging.
+- Concrete fix: parameterize the nginx upload root (for example template `${UPLOAD_PUBLIC_ROOT}` to the host bind mount such as `/srv/gallery/apps/web/public`), ship separate `nginx.container.conf` and `nginx.host.conf`, or remove direct static serving from the host config and proxy `/uploads` to the app route unless an explicit host path is configured.
+
+## Final missed-issues sweep
+
+- Re-ran tracked-file inventory after review to ensure the report was based on the full current source/config/test surface.
+- Ran targeted grep sweeps for `TODO|FIXME|HACK|XXX|@todo`; hits were example placeholder text (`G-XXXXXXXXXX`) and Unicode notation (`U+XXXX`), not architectural defects.
+- Ran targeted sweeps for `process.env`, `GET_LOCK`, upload roots, `site-config`, `network_mode`, nginx roots, queue bootstrap, and restore maintenance to catch hidden deployment/topology seams.
+- Rechecked the DB migration path and storage/upload path with line-numbered reads after forming findings.
+- No additional higher-severity architectural issues were found in the final sweep.
+
+## Non-findings / preserved boundaries
+
+- Auth/session boundary is layered: proxy only performs a cheap cookie-shape gate, server actions call `isAdmin()`/`getCurrentUser()`, mutating actions use same-origin guards, and production requires `SESSION_SECRET`.
+- Public upload serving rejects `original` paths in both nginx and app route layers, and current live upload code writes originals to `UPLOAD_ORIGINAL_ROOT`; the storage finding is about the not-yet-wired abstraction.
+- Current single-container compose topology is internally consistent when run as documented with host-mounted `public` and `data` directories; the topology finding is about scaling past that assumption.
