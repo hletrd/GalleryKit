@@ -1,76 +1,114 @@
-# Tracer review — causal flow slice
+# Cycle 1 Deep Review — Tracer
 
-Reviewer role: `tracer`
-Scope: causal tracing across admin auth/session, server-action origin checks, upload → processing → serving, restore/maintenance, shared analytics/config, and navigation/lightbox flows.
-Constraint followed: source/tests/config left untouched; this report is the only written file.
+Scope: `/Users/hletrd/flash-shared/gallery`  
+Role: trace suspicious cross-file flows only. No source edits.
 
-## Flow inventory
-- Upload / lock flow: `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/app/actions/settings.ts`.
-- Origin-gate flow: `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/e2e/origin-guard.spec.ts`, `apps/web/e2e/helpers.ts`.
-- Navigation flow: `apps/web/src/components/photo-navigation.tsx`, `apps/web/src/components/info-bottom-sheet.tsx`, `apps/web/src/components/lightbox.tsx`.
-- Config/gate flow: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/lib/content-security-policy.ts`, `apps/web/src/site-config.example.json`.
-- Recovery flow: `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/data.ts`, `README.md:146-148`.
+## Inventory / flow map
+
+- **Upload → processing → DB → UI**
+  - Client: `apps/web/src/components/upload-dropzone.tsx:199-246` builds one-file `FormData` and calls `uploadImages` sequentially.
+  - Action: `apps/web/src/app/actions/images.ts:116-244` authenticates, origin-checks, validates topic/tags/files, acquires upload-processing contract lock, and pre-claims upload quota.
+  - Disk/metadata: `apps/web/src/lib/process-image.ts:233-380` streams original to private storage, validates with Sharp, extracts EXIF/blur/ICC metadata.
+  - DB enqueue: `apps/web/src/app/actions/images.ts:288-388` inserts an unprocessed `images` row, persists tags, then calls `enqueueImageProcessing`.
+  - Queue: `apps/web/src/lib/image-queue.ts:193-345` takes a per-image MySQL advisory lock, renders variants via `processImageFormats`, verifies output files, then flips `processed=true` at `apps/web/src/lib/image-queue.ts:300-303`.
+  - Public reads filter to processed rows: `apps/web/src/lib/data.ts:344-346`, `apps/web/src/lib/data.ts:627-640`, `apps/web/src/lib/data.ts:747-750`, `apps/web/src/lib/data.ts:807-811`.
+  - Admin dashboard intentionally includes unprocessed rows: `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:15-20`.
+- **Auth/session**
+  - Middleware only checks protected admin cookie shape: `apps/web/src/proxy.ts:77-95`; actions/API still verify sessions in depth.
+  - Login creates a hashed DB session + `admin_session` cookie: `apps/web/src/app/actions/auth.ts:183-222`.
+  - Session verifier validates HMAC, token age, DB session, and expiry: `apps/web/src/lib/session.ts:94-144`.
+  - Password change rotates all sessions and inserts a fresh one in a transaction: `apps/web/src/app/actions/auth.ts:363-393`.
+- **Server actions / mutation guard**
+  - Mutating action modules consistently call `isAdmin()`/`getCurrentUser()` plus `requireSameOriginAdmin()`; helper is `apps/web/src/lib/action-guards.ts:37-43` using request-origin policy from `apps/web/src/lib/request-origin.ts:83-107`.
+- **Sharing**
+  - Single photo share: `apps/web/src/app/actions/sharing.ts:92-188` writes `images.share_key`.
+  - Group share: `apps/web/src/app/actions/sharing.ts:190-308` inserts `shared_groups` and `shared_group_images` in a transaction.
+  - Public share reads: `apps/web/src/lib/data.ts:736-772` and `apps/web/src/lib/data.ts:778-853`.
+- **Admin DB/deployment**
+  - Backup/export/restore actions: `apps/web/src/app/[locale]/admin/db-actions.ts:54-521`.
+  - Backup download API route: `apps/web/src/app/api/admin/db/download/route.ts:13-108`.
+  - Queue bootstrap/shutdown: `apps/web/src/instrumentation.ts:1-35`.
+  - Container/deploy topology: `apps/web/Dockerfile:60-90`, `apps/web/docker-compose.yml:22-25`, `apps/web/deploy.sh:27-34`.
 
 ## Findings
 
-### T-01 — Upload concurrency and the exclusive lock form a self-starving causal chain
+### T1 — Large backlog bootstrap can strand failed low-id processing jobs
+
 - **Severity:** High
-- **Confidence:** High
-- **Status:** confirmed
-- **Files/regions:** `apps/web/src/components/upload-dropzone.tsx:193-251`, `apps/web/src/app/actions/images.ts:171-176`, `apps/web/src/lib/upload-processing-contract-lock.ts:10-57`, `apps/web/src/app/actions/settings.ts:75-86`
-- **Causal chain:** the client deliberately fans out three parallel `uploadImages()` requests. Each request tries to obtain the same exclusive MySQL lock, and the lock is held for the whole request while the server reads config, writes the original, extracts metadata, inserts the DB row, and enqueues processing. That means upload traffic is not just protected from settings changes; it can be blocked by itself.
-- **Competing hypotheses:**
-  - *Hypothesis A:* the lock is merely a safe guardrail around settings changes.
-  - *Hypothesis B:* the lock also serializes uploads and can reject them under load.
-- **Why B is stronger:** the client code and the server code together show real concurrent upload requests, while the lock helper only offers a single exclusive `GET_LOCK` with a 5s timeout. Under slow I/O, the second and third requests can time out even though the settings never changed.
-- **Suggested fix:** move to read/write coordination or remove the lock from the upload path until it can differentiate settings edits from parallel uploads.
+- **Confidence:** Medium-high
+- **Flow:** upload → pending DB row → bootstrap cursor → queue retry → UI never sees processed image
+- **Evidence:**
+  - Bootstrap resumes with `id > bootstrapCursorId`: `apps/web/src/lib/image-queue.ts:407-422`.
+  - It advances the cursor to the last scanned pending row and marks bootstrapped once a later pass returns fewer than the batch size: `apps/web/src/lib/image-queue.ts:435-443`.
+  - When a job exhausts processing retries, the queue sets `state.bootstrapped = false` and schedules a bootstrap retry, but does **not** reset `bootstrapCursorId`: `apps/web/src/lib/image-queue.ts:328-331`.
+  - Future bootstrap calls can also return early if `state.bootstrapped` becomes true: `apps/web/src/lib/image-queue.ts:395-398`.
+- **Competing hypotheses checked:**
+  - The cursor was likely added to avoid permanently failing low IDs starving later rows. That part works while scanning forward, but once the end is reached and `bootstrapped` flips true, a still-pending low ID below the cursor may no longer be revisited.
+  - Small queues with fewer than 500 pending rows are less affected because `bootstrapCursorId` is reset to `null` in the same bootstrap pass.
+- **Failure scenario:** Import/restore or bulk upload creates at least `BOOTSTRAP_BATCH_SIZE` pending images. Image `id=1` fails all queue retries due to a transient filesystem/Sharp error. Bootstrap continues past cursor 500 to process later IDs, then reaches the end and marks itself bootstrapped. The failed low-id row remains `processed=false`; public routes filter it out, and the scheduled retry can be skipped by the `state.bootstrapped` early return.
+- **Suggested fix:** On max-retry failure, reset `state.bootstrapCursorId = null` before scheduling bootstrap retry, or add a two-phase bootstrap that wraps to the beginning before setting `bootstrapped=true`. Add a regression test with `BOOTSTRAP_BATCH_SIZE + 1` pending rows where the first row fails max retries and is later reselected.
 
-### T-02 — The origin-guard E2E only proves the guard in one branch
+### T2 — Concurrent photo-share loser consumes rate-limit quota while returning an existing key
+
 - **Severity:** Medium
 - **Confidence:** High
-- **Status:** confirmed
-- **Files/regions:** `apps/web/src/lib/api-auth.ts:14-26`, `apps/web/src/app/api/admin/db/download/route.ts:13-32`, `apps/web/e2e/origin-guard.spec.ts:28-67`, `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/helpers.ts:28-45`
-- **Causal chain:** the API route is wrapped by `withAdminAuth`, so an unauthenticated request can stop at 401 before the origin check is exercised. The unauthenticated E2E accepts either 401 or 403, and the authenticated E2E branch is skipped when admin credentials are absent.
-- **Competing hypotheses:**
-  - *Hypothesis A:* the E2E reliably proves same-origin rejection.
-  - *Hypothesis B:* the E2E only proves that either auth or the origin guard rejected the request, depending on credentials.
-- **Why B is stronger:** the test itself allows 401 and explicitly skips the stronger authenticated branch when credentials are missing. That makes the unauthenticated case a useful smoke test, but not a definitive origin-guard proof.
-- **Suggested fix:** require the authenticated branch in protected lanes or fail the spec when credentials are absent so the causal chain actually reaches the same-origin guard.
+- **Flow:** admin share action → rate-limit DB/in-memory counters → conditional share-key update
+- **Evidence:**
+  - `createPhotoShareLink` pre-increments in-memory and DB share limits before the conditional update: `apps/web/src/app/actions/sharing.ts:118-130`.
+  - If another request already set the key, the loser re-fetches and returns the existing key without rolling either counter back: `apps/web/src/app/actions/sharing.ts:156-168`.
+  - A full rollback helper already exists for non-executed share attempts: `apps/web/src/app/actions/sharing.ts:85-90`.
+- **Competing hypotheses checked:**
+  - If the image already has a key before rate limiting, the function returns at `apps/web/src/app/actions/sharing.ts:114-116` and does not charge quota. The leak is specifically the race window after pre-increment and before the conditional `UPDATE` sees `affectedRows=0`.
+- **Failure scenario:** An admin double-clicks share or two tabs share the same unshared image. One request creates the key; the other returns the key too, but still burns one of the 20/min share attempts. Repeating this across selections can trigger `tooManyShareRequests` even though most attempts were idempotent reads.
+- **Suggested fix:** In the `refreshedImage.share_key` branch, call `rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart)` before returning the key, because this request did not create a new share link.
 
-### T-03 — Swipe math has an inconsistent coordinate origin, which is the most plausible source of gesture bugs
+### T3 — Deleting all images from a group share leaves a live empty share URL
+
 - **Severity:** Medium
 - **Confidence:** High
-- **Status:** confirmed
-- **Files/regions:** `apps/web/src/components/photo-navigation.tsx:46-99`, compared with `apps/web/src/components/info-bottom-sheet.tsx:56-98`
-- **Causal chain:** the gesture begins with `screenX/screenY`, the early `preventDefault` decision uses `clientX/clientY` against those screen-origin values, and the final swipe decision uses screen-origin thresholds again. That makes the gesture sensitive to coordinate-space differences that should not matter.
-- **Competing hypotheses:**
-  - *Hypothesis A:* the mixed coordinate spaces are harmless because the values happen to stay close enough on most desktops.
-  - *Hypothesis B:* the mixed coordinate spaces produce misclassification on some mobile/zoomed/browser states.
-- **Why B is stronger:** the neighboring `info-bottom-sheet.tsx` gesture handler uses client coordinates consistently, which is the cleaner control case. The divergence here is not a deliberate pattern; it looks like a copy-paste drift.
-- **Suggested fix:** standardize the gesture on client coordinates or screen coordinates everywhere, then add a regression test that would fail if the spaces are mixed again.
+- **Flow:** sharing → image deletion → FK cascade → public group UI
+- **Evidence:**
+  - Group links are stored in `shared_groups`; membership rows cascade from images through `shared_group_images.imageId`: `apps/web/src/db/schema.ts:87-104`.
+  - Single and batch image deletes remove `images` rows but do not remove now-empty `shared_groups`: `apps/web/src/app/actions/images.ts:486-490`, `apps/web/src/app/actions/images.ts:592-596`.
+  - `getSharedGroup` returns a group even when `groupImages` is empty: `apps/web/src/lib/data.ts:801-853`.
+  - The public group page renders an empty-state for a live group URL: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:195-199`.
+- **Competing hypotheses checked:**
+  - Revalidation of affected group keys is present (`apps/web/src/app/actions/images.ts:475-477`, `apps/web/src/app/actions/images.ts:577-580`), so this is not stale cache. It is persisted orphan group state.
+- **Failure scenario:** Admin creates a group share with photos A/B, sends the link, then deletes A/B. The share key remains valid and shows an empty shared page rather than revoking/404ing. There is also no active admin listing using `deleteGroupShareLink`, so orphan groups can accumulate.
+- **Suggested fix:** After image deletes, delete any affected `shared_groups` with zero remaining `shared_group_images`, or make `getSharedGroup` return `null` when `groupImages.length === 0`. Prefer deleting or expiring empty groups so view-count buffering does not keep touching dead shares.
 
-### T-04 — Analytics rendering and CSP are driven by different sources, so one can silently block the other
-- **Severity:** Low
+### T4 — Upload tracker conflates quota usage with active upload claims and can falsely lock settings after cleanup
+
+- **Severity:** Low-medium
 - **Confidence:** High
-- **Status:** confirmed
-- **Files/regions:** `apps/web/src/app/[locale]/layout.tsx:118-128`, `apps/web/src/lib/content-security-policy.ts:58-69`, `apps/web/src/site-config.example.json:10`, `apps/web/README.md:36-39`
-- **Causal chain:** the layout decides whether to render Google Analytics scripts from `siteConfig.google_analytics_id`, while CSP decides whether Google domains are allowed from `NEXT_PUBLIC_GA_ID`. The user-facing rendering path and the security allow-list are not tied together.
-- **Competing hypotheses:**
-  - *Hypothesis A:* the two knobs are intentionally independent.
-  - *Hypothesis B:* the split is accidental and will produce silent analytics failures when only one is configured.
-- **Why B is stronger:** the docs expose the file-backed `google_analytics_id`, but CSP has its own env-only branch. That creates a realistic deployment path where scripts are injected but blocked without any explicit app error.
-- **Suggested fix:** unify the analytics configuration source or add a startup/validation check that ensures the render path and CSP branch agree.
+- **Flow:** upload quota → settings mutation lock
+- **Evidence:**
+  - Upload action pre-claims count/bytes after validation: `apps/web/src/app/actions/images.ts:238-244`.
+  - `settleUploadTrackerClaim` leaves successful upload count/bytes in the tracker for quota enforcement: `apps/web/src/lib/upload-tracker.ts:19-32`.
+  - `hasActiveUploadClaims` treats any positive count/bytes as an active in-flight upload: `apps/web/src/lib/upload-tracker-state.ts:52-60`.
+  - Settings changes that affect the upload-processing contract are blocked when `hasActiveUploadClaims()` is true: `apps/web/src/app/actions/settings.ts:75-79`.
+- **Competing hypotheses checked:**
+  - Settings also lock `image_sizes` and `strip_gps_on_upload` when any image exists: `apps/web/src/app/actions/settings.ts:110-138`. That permanent image-existence lock masks the tracker bug during normal operation, but not after all images are deleted inside the one-hour upload window.
+- **Failure scenario:** Admin uploads one image, then deletes it, leaving the gallery empty. For the remainder of the upload tracker window, changing `image_sizes` or `strip_gps_on_upload` can still return `uploadSettingsLocked` even though no upload is running and no image exists.
+- **Suggested fix:** Split tracker state into (a) rolling quota counters and (b) active in-flight claims. Decrement active claims on every settled request, but leave quota counters for rate limiting. Make `hasActiveUploadClaims()` consult only the in-flight counter.
 
-## Hypotheses validated/refuted during trace
-- Confirmed: `requireSameOriginAdmin()` is used as defense in depth on mutating admin actions, and the backup-download route enforces same-origin independently.
-- Confirmed: restore maintenance and queue state are process-local, which is fine only if the documented single-writer topology remains true.
-- Refuted for current code: the lightbox touch-target fix is not a current bug; the controls now satisfy the 44 px floor.
+### T5 — Docker image relies on compose-mounted `public/`; standalone image lacks static public assets
 
-## Final sweep notes
-- I traced the current upload, origin, navigation, and analytics flows against the code and the existing tests rather than trusting the historical review notes.
-- No source edits were made.
-- The strongest unresolved runtime risk remains the upload lock / concurrency path.
+- **Severity:** Medium
+- **Confidence:** Medium
+- **Flow:** deployment → static assets → UI/runtime behavior
+- **Evidence:**
+  - Dockerfile copies standalone server, `.next/static`, drizzle, and scripts, but not `apps/web/public` assets; it only creates `apps/web/public/uploads`: `apps/web/Dockerfile:60-73`.
+  - Compose mounts host `./public` over `/app/apps/web/public`: `apps/web/docker-compose.yml:22-25`.
+  - The image start command is otherwise a normal standalone server: `apps/web/Dockerfile:86-90`.
+- **Competing hypotheses checked:**
+  - The current `apps/web/deploy.sh` path uses compose (`apps/web/deploy.sh:27-34`), so production via that script probably gets the mount. The hidden bug is image portability: `docker run`, Kubernetes, or any deploy path that does not mount the source `public/` tree loses fonts, workers, and other public assets.
+- **Failure scenario:** Operator builds/pushes the Docker image and runs it outside this compose file. Next serves pages, but `/fonts/PretendardVariable.woff2`, `/histogram-worker.js`, and other public assets are absent, producing degraded typography/features and 404 noise.
+- **Suggested fix:** Copy `apps/web/public` into the runner image, then mount only persistent upload/data subdirectories (`public/uploads` and `/app/data`) at runtime. If compose-only deployment is intentional, document the image as non-standalone and add a health/startup check for required public assets.
 
-## Summary counts
-- Findings: 4 (1 high, 1 medium, 1 medium, 1 low)
-- Report file written: `.context/reviews/tracer.md`
+## Final sweep / notable non-findings
+
+- Same-origin checks are centralized and broadly applied to mutating admin server actions through `requireSameOriginAdmin()`; read-only admin getters are explicitly annotated as origin-exempt.
+- Original uploads are private by default (`UPLOAD_ORIGINAL_ROOT`) and the public upload serving helper only allows `jpeg`, `webp`, and `avif` directories with filename/realpath checks: `apps/web/src/lib/serve-upload.ts:32-102`.
+- Lack of queue-side revalidation after `processed=true` looked suspicious, but public gallery/topic/share pages use `revalidate = 0` (`apps/web/src/app/[locale]/(public)/page.tsx:14-16`, `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:14`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:15`), and admin dashboard is dynamic (`apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:6`). I did not classify it as a current stale-cache bug.
+- Backup download route has both auth wrapper and same-origin/source enforcement plus filename and realpath containment checks: `apps/web/src/app/api/admin/db/download/route.ts:13-108`.
