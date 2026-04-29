@@ -652,9 +652,11 @@ export async function getImage(id: number) {
             .innerJoin(tags, eq(imageTags.tagId, tags.id))
             .where(eq(imageTags.imageId, id)),
 
-        // Prev: Newer image by (capture_date, created_at, id) — matches gallery grid sort order
-        // When capture_date is NULL, all dated images are "newer" (NULLs sort last in DESC).
-        // Using DESC ordering picks the LATEST-dated image (closest newer), not the earliest.
+        // Prev: the nearest row before this image in gallery grid order
+        // (capture_date DESC NULLS LAST, created_at DESC, id DESC). The
+        // candidate predicate finds all rows that sort before the current one;
+        // the ASC order then picks the closest predecessor instead of jumping
+        // to the newest dated row when the current image is undated.
         db.select({ id: images.id })
             .from(images)
             .where(
@@ -680,15 +682,12 @@ export async function getImage(id: number) {
                     eq(images.processed, true)
                 )
             )
-            .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
+            .orderBy(asc(images.capture_date), asc(images.created_at), asc(images.id))
             .limit(1),
 
-        // Next: Older image by (capture_date, created_at, id) — matches gallery grid sort order.
-        // IMPORTANT: sql`FALSE` is correct for the capture_date < current branch when
-        // capture_date is NULL because NULLs sort last in DESC order, meaning there are
-        // no "older" undated images by capture_date. Only created_at/id tiebreakers apply.
-        // Do NOT replace with a NULL-safe comparison like `lt(images.capture_date, null)`
-        // — that would incorrectly return all undated images as "next" images.
+        // Next: the nearest row after this image in the same grid order. Dated
+        // images are followed by older dated rows and then the first undated row;
+        // undated images are followed only by older undated rows.
         db.select({ id: images.id })
             .from(images)
             .where(
@@ -696,6 +695,9 @@ export async function getImage(id: number) {
                     or(
                         image.capture_date
                             ? lt(images.capture_date, image.capture_date)
+                            : sql`FALSE`,
+                        image.capture_date
+                            ? isNull(images.capture_date)
                             : sql`FALSE`,
                         and(
                             image.capture_date
@@ -839,6 +841,10 @@ export async function getSharedGroup(
         }));
     } else {
         imagesWithTags = [];
+    }
+
+    if (imagesWithTags.length === 0) {
+        return null;
     }
 
     // Increment view count only after the image fetch succeeds — avoids

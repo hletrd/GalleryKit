@@ -223,6 +223,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     state.enqueued.delete(job.id);
                     console.error(`[Queue] Job ${job.id} failed to acquire claim ${claimRetries} times, giving up`);
                     state.bootstrapped = false;
+                    state.bootstrapCursorId = null;
                     scheduleBootstrapRetry(state, `[Queue] Job ${job.id} could not acquire a processing claim after ${claimRetries} attempts.`);
                     return;
                 }
@@ -328,6 +329,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             state.retryCounts.delete(job.id);
             console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up`);
             state.bootstrapped = false;
+            state.bootstrapCursorId = null;
             scheduleBootstrapRetry(state, `[Queue] Job ${job.id} remains pending after ${MAX_RETRIES} processing attempts.`);
         } finally {
             await releaseImageProcessingClaim(job.id, lockConnection).catch((err) => {

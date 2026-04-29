@@ -230,6 +230,102 @@ export interface ImageProcessingResult {
     bitDepth?: number | null;
 }
 
+const MAX_DB_VARCHAR_BYTES = 255;
+
+function clampUtf8Bytes(value: string, maxBytes: number = MAX_DB_VARCHAR_BYTES): string {
+    if (Buffer.byteLength(value, 'utf8') <= maxBytes) {
+        return value;
+    }
+
+    let output = '';
+    let bytes = 0;
+    for (const char of value) {
+        const charBytes = Buffer.byteLength(char, 'utf8');
+        if (bytes + charBytes > maxBytes) break;
+        output += char;
+        bytes += charBytes;
+    }
+    return output.trim();
+}
+
+function decodeUtf16BE(buffer: Buffer): string {
+    const codeUnits: number[] = [];
+    for (let i = 0; i + 1 < buffer.length; i += 2) {
+        codeUnits.push(buffer.readUInt16BE(i));
+    }
+    return String.fromCharCode(...codeUnits);
+}
+
+function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_BYTES): string | null {
+    if (value === undefined || value === null) return null;
+    const s = String(value).replace(/\0/g, '').trim();
+    if (s.length === 0) return null;
+    // Only reject literal 'undefined'/'null' strings when the input was not
+    // already a string — prevents dropping legitimate EXIF metadata that
+    // happens to be the word "null" or "undefined".
+    if (typeof value !== 'string' && (s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null')) return null;
+    return clampUtf8Bytes(s, maxBytes) || null;
+}
+
+export function extractIccProfileName(icc?: Buffer | null): string | null {
+    if (!icc || icc.length <= 132) return null;
+
+    try {
+        const iccLen = icc.length;
+        // ICC profile structure: 128-byte header, then tag table. Bound the
+        // tag count so malformed profiles cannot force large loops.
+        const tagCount = Math.min(icc.readUInt32BE(128), 100);
+        for (let i = 0; i < tagCount; i++) {
+            const tagOffset = 132 + i * 12;
+            if (tagOffset + 12 > iccLen) break;
+            const tagSig = icc.subarray(tagOffset, tagOffset + 4).toString('ascii');
+            if (tagSig !== 'desc') continue;
+
+            const dataOffset = icc.readUInt32BE(tagOffset + 4);
+            const dataSize = icc.readUInt32BE(tagOffset + 8);
+            if (dataOffset + 12 > iccLen || dataSize < 12 || dataOffset + dataSize > iccLen) break;
+
+            const descType = icc.subarray(dataOffset, dataOffset + 4).toString('ascii');
+            if (descType === 'desc') {
+                const declaredLength = icc.readUInt32BE(dataOffset + 8);
+                if (declaredLength === 0) break;
+                const strLen = Math.min(declaredLength, dataSize - 12, 1024);
+                const strStart = dataOffset + 12;
+                const strEnd = strStart + Math.max(0, strLen - 1);
+                if (strEnd > iccLen || strStart >= strEnd) break;
+                return cleanMetadataString(icc.subarray(strStart, strEnd).toString('ascii'));
+            }
+
+            if (descType === 'mluc') {
+                // Multi-localized Unicode: type/reserved, record count, record
+                // size, then records. Text is UTF-16BE per ICC, not UTF-16LE.
+                const numRecords = Math.min(icc.readUInt32BE(dataOffset + 8), 100);
+                const recordSize = icc.readUInt32BE(dataOffset + 12);
+                if (recordSize < 12) break;
+                const recordsStart = dataOffset + 16;
+                for (let recordIndex = 0; recordIndex < numRecords; recordIndex++) {
+                    const recOffset = recordsStart + recordIndex * recordSize;
+                    if (recOffset + 12 > iccLen || recOffset + 12 > dataOffset + dataSize) break;
+                    const recLen = Math.min(icc.readUInt32BE(recOffset + 4), 1024);
+                    const recTextOffset = icc.readUInt32BE(recOffset + 8);
+                    const strStart = dataOffset + recTextOffset;
+                    const strEnd = strStart + recLen;
+                    if (strEnd > iccLen || strEnd > dataOffset + dataSize || strStart >= strEnd) continue;
+                    const decoded = decodeUtf16BE(icc.subarray(strStart, strEnd));
+                    const cleaned = cleanMetadataString(decoded);
+                    if (cleaned) return cleaned;
+                }
+            }
+
+            break;
+        }
+    } catch {
+        // ICC parsing is best-effort.
+    }
+
+    return null;
+}
+
 export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProcessingResult> {
     if (file.size > MAX_FILE_SIZE) {
         throw new Error(`File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`);
@@ -314,51 +410,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         // Non-critical
     }
 
-    let iccProfileName: string | null = null;
-    if (metadata.icc && metadata.icc.length > 132) {
-        try {
-            const icc = metadata.icc;
-            const iccLen = icc.length;
-            // ICC profile structure: 128-byte header, then tag table
-            // Tag count at offset 128 (4 bytes, big-endian)
-            const tagCount = Math.min(icc.readUInt32BE(128), 100);
-            for (let i = 0; i < tagCount; i++) {
-                const tagOffset = 132 + i * 12;
-                if (tagOffset + 12 > iccLen) break;
-                const tagSig = icc.subarray(tagOffset, tagOffset + 4).toString('ascii');
-                if (tagSig === 'desc') {
-                    const dataOffset = icc.readUInt32BE(tagOffset + 4);
-                    if (dataOffset + 12 > iccLen) break;
-                    // 'desc' type: 4 bytes type sig, 4 bytes reserved, 4 bytes count, then ASCII string
-                    const descType = icc.subarray(dataOffset, dataOffset + 4).toString('ascii');
-                    if (descType === 'desc') {
-                        const strLen = Math.min(icc.readUInt32BE(dataOffset + 8), 1024);
-                        const strStart = dataOffset + 12;
-                        const strEnd = strStart + strLen - 1;
-                        if (strEnd > iccLen || strStart >= strEnd) break;
-                        const str = icc.subarray(strStart, strEnd).toString('ascii');
-                        iccProfileName = str.trim();
-                    } else if (descType === 'mluc') {
-                        // Multi-localized Unicode: 4 bytes type, 4 bytes reserved, 4 bytes number of records
-                        const numRecords = icc.readUInt32BE(dataOffset + 8);
-                        if (numRecords > 0) {
-                            if (dataOffset + 24 > iccLen) break;
-                            const recOffset = icc.readUInt32BE(dataOffset + 16 + 4);
-                            const recLen = Math.min(icc.readUInt32BE(dataOffset + 16), 1024);
-                            const strStart = dataOffset + recOffset;
-                            const strEnd = strStart + recLen;
-                            if (strEnd > iccLen || strStart >= strEnd) break;
-                            const str = icc.subarray(strStart, strEnd).toString('utf16le');
-                            iccProfileName = str.replace(/\0/g, '').trim();
-                        }
-                    }
-                    break;
-                }
-            }
-        } catch {
-            // ICC parsing is best-effort
-        }
-    }
+    const iccProfileName = extractIccProfileName(metadata.icc);
 
     const rawBitDepth = metadata.depth ? (typeof metadata.depth === 'string' ? parseInt(metadata.depth, 10) : metadata.depth) : null;
     const bitDepth = (rawBitDepth !== null && Number.isFinite(rawBitDepth)) ? rawBitDepth : null;
@@ -494,14 +546,7 @@ export async function processImageFormats(
 }
 
 function cleanString(val: unknown): string | null {
-    if (val === undefined || val === null) return null;
-    const s = String(val).trim();
-    if (s.length === 0) return null;
-    // Only reject literal 'undefined'/'null' strings when the input was not
-    // already a string — prevents dropping legitimate EXIF metadata that
-    // happens to be the word "null" or "undefined".
-    if (typeof val !== 'string' && (s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null')) return null;
-    return s;
+    return cleanMetadataString(val);
 }
 
 function cleanNumber(val: unknown): number | null {
