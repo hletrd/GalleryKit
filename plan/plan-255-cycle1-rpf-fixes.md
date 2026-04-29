@@ -36,15 +36,15 @@ Cycle 1 Prompt 1 fanned out across 11 reviewer perspectives and produced `.conte
 ### Test / gate work
 - [x] Add targeted tests for fixed behavior where practical: image queue bootstrap reset, auth account limiter, tag payload validation, ICC `mluc`, nginx config/static source contracts, share route limiter/rollback, and file-stream resolved-path contract.
 - [x] Run all configured gates from orchestrator: `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test`, `npm run test:e2e`, `npm run lint:api-auth`, `npm run lint:action-origin`.
-- [ ] Commit and push with signed gitmoji commits.
-- [ ] Deploy with `npm run deploy` after gates are green.
+- [x] Commit and push with signed gitmoji commits.
+- [x] Deploy with `npm run deploy` after gates are green (attempted; failed because the required deploy env file is absent).
 
 ## Progress log
 - [x] Prompt 2 plan authored from aggregate reviews; implementation not started in Prompt 2.
 - [x] Prompt 3 implementation complete.
 - [x] Gates green.
-- [ ] Commits pushed.
-- [ ] Per-cycle deploy completed.
+- [x] Commits pushed.
+- [x] Per-cycle deploy attempted; failed because `/Users/hletrd/.gallerykit-secrets/gallery-deploy.env` is missing and no alternate deploy env file was present.
 
 
 ## Implementation notes (2026-04-29)
@@ -60,3 +60,7 @@ Cycle 1 Prompt 1 fanned out across 11 reviewer perspectives and produced `.conte
 - `npm run test:e2e` ✅ (20 passed / 2 CI-only checks skipped) using a disposable local MySQL container on port 3307 for the required DB environment.
 - `npm run lint:api-auth` ✅
 - `npm run lint:action-origin` ✅
+
+## Deploy log
+- `npm run deploy` ❌ failed: missing `/Users/hletrd/.gallerykit-secrets/gallery-deploy.env`.
+- Recovery attempted: searched for an alternate deploy env/config under the repo, `~/.gallerykit-secrets`, `~/.config`, and SSH-adjacent locations; no deploy env was present. No further deploy attempts were made.
