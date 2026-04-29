@@ -32,6 +32,20 @@ vi.mock('next/headers', () => ({
 
 vi.mock('@/lib/data', () => ({
     getImagesLite: getImagesLiteMock,
+    normalizeImageListCursor: (value: unknown) => {
+        if (!value || typeof value !== 'object') return null;
+        const candidate = value as { id?: unknown; capture_date?: unknown; created_at?: unknown };
+        if (typeof candidate.id !== 'number' || !Number.isInteger(candidate.id) || candidate.id <= 0) return null;
+        if (!(candidate.capture_date === null || typeof candidate.capture_date === 'string')) return null;
+        if (!(typeof candidate.created_at === 'string' || candidate.created_at instanceof Date)) return null;
+        if (typeof candidate.capture_date === 'string' && candidate.capture_date.length > 32) return null;
+        if (typeof candidate.created_at === 'string' && candidate.created_at.length > 32) return null;
+        return {
+            id: candidate.id,
+            capture_date: candidate.capture_date,
+            created_at: candidate.created_at instanceof Date ? candidate.created_at : new Date(candidate.created_at),
+        };
+    },
     searchImages: searchImagesMock,
 }));
 
@@ -96,6 +110,26 @@ describe('searchImagesAction', () => {
 
         expect(result).toEqual({ status: 'ok', images: [{ id: 1 }], hasMore: false });
         expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['서울', 'portrait'], 21, 10);
+    });
+
+    it('passes a validated cursor through to the image listing query', async () => {
+        const cursor = { id: 42, capture_date: '2026-04-29 10:00:00', created_at: '2026-04-29 10:01:00' };
+
+        const result = await loadMoreImages('seoul', ['portrait'], cursor, 20);
+
+        expect(result).toEqual({ status: 'ok', images: [{ id: 1 }], hasMore: false });
+        expect(getImagesLiteMock).toHaveBeenCalledWith('seoul', ['portrait'], 21, {
+            ...cursor,
+            created_at: new Date(cursor.created_at),
+        });
+    });
+
+    it('rejects oversized cursor date strings before querying', async () => {
+        const cursor = { id: 42, capture_date: 'x'.repeat(64), created_at: '2026-04-29 10:01:00' };
+
+        await expect(loadMoreImages('seoul', ['portrait'], cursor, 20)).resolves.toEqual({ status: 'invalid', images: [], hasMore: false });
+
+        expect(getImagesLiteMock).not.toHaveBeenCalled();
     });
 
     it('returns no results for queries that are too short after sanitization', async () => {

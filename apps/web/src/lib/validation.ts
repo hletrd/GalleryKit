@@ -6,6 +6,15 @@ const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
     'p',
     's',
     'uploads',
+    // Public file/metadata routes handled outside the dynamic topic route.
+    // Keep this list in sync with app/[locale]/(public)/[topic]/page.tsx.
+    'apple-icon',
+    'favicon.ico',
+    'icon',
+    'manifest',
+    'manifest.webmanifest',
+    'robots.txt',
+    'sitemap.xml',
     ...LOCALES,
 ]);
 

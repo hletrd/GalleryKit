@@ -1,7 +1,7 @@
 'use server';
 
 import { headers } from 'next/headers';
-import { getImagesLite, searchImages } from '@/lib/data';
+import { getImagesLite, normalizeImageListCursor, searchImages, type ImageListCursorInput } from '@/lib/data';
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
@@ -63,14 +63,20 @@ function rollbackLoadMoreAttempt(ip: string) {
     }
 }
 
-export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offset: number = 0, limit: number = 30): Promise<LoadMoreImagesResult> {
+export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], offsetOrCursor: number | ImageListCursorInput = 0, limit: number = 30): Promise<LoadMoreImagesResult> {
     if (isRestoreMaintenanceActive()) return { status: 'maintenance', images: [], hasMore: true };
     // Validate slug format before passing to data layer (defense in depth)
     if (topicSlug && (!isValidSlug(topicSlug))) return { status: 'invalid', images: [], hasMore: false };
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
-    const safeOffset = Math.max(Math.floor(Number(offset)) || 0, 0);
-    // Cap maximum offset to prevent deep pagination DoS
-    if (safeOffset > 10000) return { status: 'invalid', images: [], hasMore: false };
+    const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
+    if (!normalizedCursor && typeof offsetOrCursor === 'object' && offsetOrCursor !== null) {
+        return { status: 'invalid', images: [], hasMore: false };
+    }
+    const usesCursor = normalizedCursor !== null;
+    const safeOffset = normalizedCursor ?? Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0);
+    // Cap legacy offset pagination to prevent deep pagination DoS. Cursor-based
+    // calls are preferred because they stay stable when new photos arrive.
+    if (!usesCursor && typeof safeOffset === 'number' && safeOffset > 10000) return { status: 'invalid', images: [], hasMore: false };
     // Cap tag array and validate format to prevent complex query DoS
     const safeTags = canonicalizeRequestedTagSlugs(tagSlugs || [])
         .filter(isValidTagSlug);

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { loadMoreImages } from '@/app/actions';
 import type { LoadMoreImagesResult } from '@/app/actions/public';
+import type { ImageListCursorInput } from '@/lib/data';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -12,16 +13,18 @@ interface LoadMoreProps {
     topicSlug?: string;
     tagSlugs?: string[];
     initialOffset: number;
+    initialCursor?: ImageListCursorInput | null;
     hasMore: boolean;
     limit?: number;
     onLoadMore: (images: Extract<LoadMoreImagesResult, { status: 'ok' }>['images']) => void;
 }
 
-export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
+export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = null, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
     const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [hasMore, setHasMore] = useState(initialHasMore);
     const [offset, setOffset] = useState(initialOffset);
+    const [cursor, setCursor] = useState<ImageListCursorInput | null>(initialCursor);
     const observerRef = useRef<IntersectionObserver | null>(null);
     const loadingRef = useRef(false);
     const queryVersionRef = useRef(0);
@@ -32,13 +35,21 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         setLoading(true);
         const version = queryVersionRef.current;
         try {
-            const page = await loadMoreImages(topicSlug, tagSlugs, offset, limit);
+            const page = await loadMoreImages(topicSlug, tagSlugs, cursor ?? offset, limit);
             if (version !== queryVersionRef.current) return;
             if (page.status === 'ok') {
                 setHasMore(page.hasMore);
                 if (page.images.length > 0) {
                     onLoadMore(page.images);
                     setOffset(prev => prev + page.images.length);
+                    const lastImage = page.images.at(-1);
+                    if (lastImage) {
+                        setCursor({
+                            id: lastImage.id,
+                            capture_date: lastImage.capture_date ?? null,
+                            created_at: lastImage.created_at,
+                        });
+                    }
                 }
                 return;
             }
@@ -58,7 +69,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
                 setLoading(false);
             }
         }
-    }, [hasMore, offset, limit, topicSlug, tagSlugs, onLoadMore, t]);
+    }, [hasMore, cursor, offset, limit, topicSlug, tagSlugs, onLoadMore, t]);
 
     // Use a ref for the loadMore callback to avoid re-creating the observer
     // on every state change (loading/offset updates cause callback churn).
@@ -71,8 +82,9 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, hasMore: initialH
         loadingRef.current = false;
         setLoading(false);
         setOffset(initialOffset);
+        setCursor(initialCursor);
         setHasMore(initialHasMore);
-    }, [initialHasMore, initialOffset, queryKey]);
+    }, [initialHasMore, initialOffset, initialCursor, queryKey]);
 
     const setSentinelRef = useCallback((node: HTMLDivElement | null) => {
         observerRef.current?.disconnect();

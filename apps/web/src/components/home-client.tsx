@@ -9,6 +9,7 @@ import { LoadMore } from '@/components/load-more';
 import { cn } from '@/lib/utils';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
+import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames, humanizeTagLabel } from '@/lib/photo-title';
 
@@ -53,6 +54,8 @@ function useColumnCount() {
 
 interface GalleryImage {
     id: number;
+    capture_date: string | null;
+    created_at: string | Date;
     filename_avif: string;
     filename_webp: string;
     filename_jpeg: string;
@@ -75,6 +78,16 @@ interface GalleryTag {
 interface GalleryTopic {
     slug: string;
     label: string;
+}
+
+
+function getClientImageListCursor(image: Pick<ImageListCursorInput, 'capture_date' | 'created_at' | 'id'> | null | undefined): ImageListCursorInput | null {
+    if (!image) return null;
+    return {
+        id: image.id,
+        capture_date: image.capture_date ?? null,
+        created_at: image.created_at,
+    };
 }
 
 interface HomeClientProps {
@@ -132,6 +145,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
             return humanizeTagLabel(match?.name ?? tag);
         });
     }, [currentTags, tags]);
+    const initialLoadMoreCursor = useMemo(() => getClientImageListCursor(images.at(-1)), [images]);
 
     return (
         <div className="space-y-8">
@@ -202,12 +216,12 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                                                         <source
                                                             type="image/avif"
                                                             srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`}
-                                                            sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                                                            sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
                                                         <source
                                                             type="image/webp"
                                                             srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
-                                                            sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                                                            sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                         />
                                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                                         <img
@@ -231,7 +245,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                                                     width={image.width}
                                                     height={image.height}
                                                     className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                                    sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                                                    sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                     blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
                                                     placeholder="blur"
                                                 />
@@ -262,6 +276,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                     topicSlug={topicSlug}
                     tagSlugs={currentTags}
                     initialOffset={images.length}
+                    initialCursor={initialLoadMoreCursor}
                     hasMore={hasMore}
                     onLoadMore={handleLoadMore}
                 />

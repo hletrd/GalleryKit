@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings } from '@/db';
-import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like } from 'drizzle-orm';
+import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
@@ -372,6 +372,98 @@ const LISTING_QUERY_LIMIT = 100;
 /** Limit + 1 for has-more detection (fetch N+1, return first N). */
 const LISTING_QUERY_LIMIT_PLUS_ONE = LISTING_QUERY_LIMIT + 1;
 
+export type ImageListCursor = {
+    capture_date: string | null;
+    created_at: Date;
+    id: number;
+};
+
+export type ImageListCursorInput = {
+    capture_date: string | null;
+    created_at: string | Date;
+    id: number;
+};
+
+const MYSQL_DATETIME_CURSOR_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/;
+const ISO_DATETIME_CURSOR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const MAX_CURSOR_DATETIME_LENGTH = 32;
+
+export function getImageListCursor(image: Pick<ImageListCursorInput, 'capture_date' | 'created_at' | 'id'> | null | undefined): ImageListCursorInput | null {
+    if (!image) return null;
+    return {
+        capture_date: image.capture_date ?? null,
+        created_at: image.created_at,
+        id: image.id,
+    };
+}
+
+function normalizeCaptureDateString(value: string): string | null {
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || trimmed.length > MAX_CURSOR_DATETIME_LENGTH) return null;
+    if (MYSQL_DATETIME_CURSOR_RE.test(trimmed)) return trimmed;
+    return null;
+}
+
+function normalizeCreatedAt(value: string | Date): Date | null {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || trimmed.length > MAX_CURSOR_DATETIME_LENGTH) return null;
+    if (ISO_DATETIME_CURSOR_RE.test(trimmed) || MYSQL_DATETIME_CURSOR_RE.test(trimmed)) {
+        const date = new Date(trimmed);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+    return null;
+}
+
+export function normalizeImageListCursor(value: unknown): ImageListCursor | null {
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value as Partial<ImageListCursorInput>;
+    if (
+        typeof candidate.id !== 'number'
+        || !Number.isInteger(candidate.id)
+        || candidate.id <= 0
+    ) {
+        return null;
+    }
+    const captureDate = candidate.capture_date === null
+        ? null
+        : (typeof candidate.capture_date === 'string' ? normalizeCaptureDateString(candidate.capture_date) : null);
+    if (candidate.capture_date !== null && captureDate === null) return null;
+
+    const createdAt = typeof candidate.created_at === 'string' || candidate.created_at instanceof Date
+        ? normalizeCreatedAt(candidate.created_at)
+        : null;
+    if (!createdAt) return null;
+
+    return {
+        id: candidate.id,
+        capture_date: captureDate,
+        created_at: createdAt,
+    };
+}
+
+function buildCursorCondition(cursor: ImageListCursor) {
+    const createdAt = cursor.created_at;
+    if (cursor.capture_date === null) {
+        return and(
+            isNull(images.capture_date),
+            or(
+                lt(images.created_at, createdAt),
+                and(eq(images.created_at, createdAt), lt(images.id, cursor.id)),
+            ),
+        );
+    }
+
+    return or(
+        isNull(images.capture_date),
+        lt(images.capture_date, cursor.capture_date),
+        and(eq(images.capture_date, cursor.capture_date), lt(images.created_at, createdAt)),
+        and(eq(images.capture_date, cursor.capture_date), eq(images.created_at, createdAt), lt(images.id, cursor.id)),
+    );
+}
+
 /**
  * Lightweight image listing — uses LEFT JOIN + GROUP BY on images.id with
  * Drizzle column references inside GROUP_CONCAT so tag_names reliably
@@ -388,7 +480,7 @@ const LISTING_QUERY_LIMIT_PLUS_ONE = LISTING_QUERY_LIMIT + 1;
 // PRIVACY: `selectFields` intentionally omits latitude, longitude,
 // filename_original, and user_filename for public-facing queries.
 // Do NOT add those fields. See CLAUDE.md "Privacy" section.
-export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offset: number = 0, includeUnprocessed: boolean = false) {
+export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: number = 0, offsetOrCursor: number | ImageListCursorInput = 0, includeUnprocessed: boolean = false) {
     const conditions = buildImageConditions(topic, tagSlugs, includeUnprocessed);
     if (conditions === null) return [];
 
@@ -402,11 +494,18 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
         .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
-    const query = conditions.length > 0
-        ? baseQuery.where(and(...conditions))
+    const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
+    const cursorCondition = normalizedCursor ? buildCursorCondition(normalizedCursor) : null;
+    const allConditions = cursorCondition ? [...conditions, cursorCondition] : conditions;
+    const query = allConditions.length > 0
+        ? baseQuery.where(and(...allConditions))
         : baseQuery;
 
     const effectiveLimit = limit > 0 ? Math.min(limit, LISTING_QUERY_LIMIT_PLUS_ONE) : LISTING_QUERY_LIMIT_PLUS_ONE;
+    if (normalizedCursor) {
+        return query.limit(effectiveLimit);
+    }
+    const offset = Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0);
     return query.limit(effectiveLimit).offset(offset);
 }
 

@@ -29,6 +29,18 @@ vi.mock('next/headers', () => ({
 
 vi.mock('@/lib/data', () => ({
     getImagesLite: getImagesLiteMock,
+    normalizeImageListCursor: (value: unknown) => {
+        if (!value || typeof value !== 'object') return null;
+        const candidate = value as { id?: unknown; capture_date?: unknown; created_at?: unknown };
+        if (typeof candidate.id !== 'number' || !Number.isInteger(candidate.id) || candidate.id <= 0) return null;
+        if (!(candidate.capture_date === null || typeof candidate.capture_date === 'string')) return null;
+        if (!(typeof candidate.created_at === 'string' || candidate.created_at instanceof Date)) return null;
+        return {
+            id: candidate.id,
+            capture_date: candidate.capture_date,
+            created_at: candidate.created_at instanceof Date ? candidate.created_at : new Date(candidate.created_at),
+        };
+    },
     searchImages: vi.fn(),
 }));
 

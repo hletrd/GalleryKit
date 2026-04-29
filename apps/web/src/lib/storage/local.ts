@@ -19,19 +19,26 @@ let dirsPromise: Promise<void> | null = null;
 
 const REQUIRED_DIRS = ['original', 'webp', 'avif', 'jpeg', 'resources'];
 
+function normalizeStorageKey(key: string): string {
+    const normalizedKey = key.trim().replace(/\\/g, '/');
+    const segments = normalizedKey.split('/');
+    if (
+        normalizedKey.length === 0
+        || normalizedKey.startsWith('/')
+        || normalizedKey === '.'
+        || normalizedKey === '..'
+        || segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..')
+    ) {
+        throw new Error(`Invalid storage key: ${key}`);
+    }
+    return segments.join('/');
+}
+
 export class LocalStorageBackend implements StorageBackend {
     readonly name = 'local';
 
     private resolve(key: string): string {
-        const normalizedKey = key.trim();
-        if (
-            normalizedKey.length === 0
-            || normalizedKey === '.'
-            || normalizedKey === '..'
-            || normalizedKey.split(/[\\/]+/).some((segment) => segment === '..')
-        ) {
-            throw new Error(`Invalid storage key: ${key}`);
-        }
+        const normalizedKey = normalizeStorageKey(key);
         // Prevent path traversal: normalize and ensure result stays within UPLOAD_ROOT
         const resolved = path.resolve(UPLOAD_ROOT, normalizedKey);
         if (!resolved.startsWith(path.resolve(UPLOAD_ROOT) + path.sep)) {
@@ -122,7 +129,11 @@ export class LocalStorageBackend implements StorageBackend {
 
     async getUrl(key: string, options?: PresignedUrlOptions): Promise<string> {
         void options;
-        // Local files are served via the /uploads/[...path] route
-        return `/uploads/${key}`;
+        const normalizedKey = normalizeStorageKey(key);
+        if (normalizedKey === 'original' || normalizedKey.startsWith('original/')) {
+            throw new Error('Private original uploads do not have public URLs');
+        }
+        // Local public files are served via the /uploads/[...path] route.
+        return `/uploads/${normalizedKey.split('/').map(encodeURIComponent).join('/')}`;
     }
 }

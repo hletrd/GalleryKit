@@ -24,6 +24,7 @@ import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterR
 import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
+import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 
 /**
  * C12R2-03: Sanitize stderr from mysqldump/mysql child processes before
@@ -289,6 +290,7 @@ export async function restoreDatabase(formData: FormData) {
     // with pooled connections, GET_LOCK and RELEASE_LOCK may run on
     // different connections, making the lock unreliable.
     const conn = await connection.getConnection();
+    let uploadContractLock: Awaited<ReturnType<typeof acquireUploadProcessingContractLock>> = null;
     try {
         // C2R-03: name the column via `AS acquired` and read it by name
         // instead of relying on `Object.values(lockRow)[0]` iteration order.
@@ -298,6 +300,18 @@ export async function restoreDatabase(formData: FormData) {
         );
         const acquired = lockRows[0]?.acquired;
         if (acquired !== 1 && acquired !== BigInt(1)) {
+            return { success: false, error: t('restoreInProgress') };
+        }
+
+        // Restore rewrites the same database/filesystem contract that uploads
+        // depend on. Hold the upload-processing contract lock for the whole
+        // restore window so an upload cannot pass its maintenance checks and
+        // then insert/enqueue while the DB import is dropping/recreating rows.
+        uploadContractLock = await acquireUploadProcessingContractLock(0);
+        if (!uploadContractLock) {
+            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
+                console.debug('RELEASE_LOCK (upload-contract early-return) failed:', err);
+            });
             return { success: false, error: t('restoreInProgress') };
         }
 
@@ -317,6 +331,8 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
                 console.debug('RELEASE_LOCK (maintenance-begin early-return) failed:', err);
             });
+            await uploadContractLock.release();
+            uploadContractLock = null;
             return { success: false, error: t('restoreInProgress') };
         }
 
@@ -341,8 +357,11 @@ export async function restoreDatabase(formData: FormData) {
             await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
                 console.debug('RELEASE_LOCK (restore finally) failed:', err);
             });
+            await uploadContractLock?.release();
+            uploadContractLock = null;
         }
     } finally {
+        await uploadContractLock?.release();
         conn.release();
     }
 }

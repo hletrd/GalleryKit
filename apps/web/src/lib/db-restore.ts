@@ -1,4 +1,6 @@
-export const MAX_RESTORE_SIZE_BYTES = 250 * 1024 * 1024; // 250 MB
+import { MAX_RESTORE_FILE_BYTES } from '@/lib/upload-limits';
+
+export const MAX_RESTORE_SIZE_BYTES = MAX_RESTORE_FILE_BYTES;
 
 export function formatBinarySize(bytes: number): string {
     const gib = 1024 * 1024 * 1024;

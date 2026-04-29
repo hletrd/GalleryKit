@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from 'next-intl/plugin';
-import { NEXT_UPLOAD_BODY_SIZE_LIMIT } from './src/lib/upload-limits';
+import { NEXT_SERVER_ACTION_BODY_SIZE_LIMIT } from './src/lib/upload-limits';
 import { buildContentSecurityPolicy, parseCspImageBaseUrl } from './src/lib/content-security-policy';
 
 const withNextIntl = createNextIntlPlugin();
@@ -35,6 +35,12 @@ const localImagePatterns: NonNullable<NonNullable<NextConfig['images']>['localPa
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  typescript: {
+    // The public `npm run build` wrapper sets this marker only after the
+    // explicit typecheck gate passes. Direct `next build` keeps Next's native
+    // TypeScript validation enabled so contributors cannot bypass type safety.
+    ignoreBuildErrors: process.env.GALLERYKIT_TYPECHECKED === '1',
+  },
   poweredByHeader: false,
   serverExternalPackages: ['drizzle-orm', 'sharp'],
   async headers() {
@@ -62,10 +68,13 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      // Keep framework-level request parsing aligned with the app-level total batch cap.
-      bodySizeLimit: NEXT_UPLOAD_BODY_SIZE_LIMIT,
+      // Keep the framework parser aligned with the largest Server Action body
+      // surface (currently DB restore at 250 MiB plus multipart overhead), not
+      // the 2 GiB rolling upload batch budget. App-level checks still enforce
+      // the smaller per-file upload cap and restore cap after auth/origin.
+      bodySizeLimit: NEXT_SERVER_ACTION_BODY_SIZE_LIMIT,
     },
-    proxyClientMaxBodySize: NEXT_UPLOAD_BODY_SIZE_LIMIT,
+    proxyClientMaxBodySize: NEXT_SERVER_ACTION_BODY_SIZE_LIMIT,
   },
   images: {
     formats: ['image/avif', 'image/webp'],
