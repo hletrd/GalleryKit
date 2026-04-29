@@ -33,8 +33,8 @@ export function AdminNav() {
                         href={href}
                         aria-current={isActive ? "page" : undefined}
                         className={cn(
-                            "transition-colors hover:text-foreground/80",
-                            isActive ? "text-foreground font-bold" : "text-foreground/60"
+                            "inline-flex min-h-10 items-center rounded-md px-3 py-2 transition-colors hover:bg-accent hover:text-accent-foreground",
+                            isActive ? "bg-accent text-foreground font-bold" : "text-foreground/70"
                         )}
                     >
                         {label}
