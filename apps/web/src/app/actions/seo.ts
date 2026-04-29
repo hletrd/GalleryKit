@@ -12,7 +12,6 @@ import { normalizeOpenGraphLocale } from '@/lib/locale-path';
 import { normalizeStringRecord } from '@/lib/sanitize';
 import { containsUnicodeFormatting } from '@/lib/validation';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
-import type { SeoSettingKey } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 

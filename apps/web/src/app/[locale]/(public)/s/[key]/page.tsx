@@ -33,15 +33,29 @@ function toIsoTimestamp(value: string | Date | null | undefined) {
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+async function isShareLookupRateLimited() {
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    return preIncrementShareAttempt(ip);
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
-    const [locale, t, seo, config, image] = await Promise.all([
+    // Rate-limit metadata lookups before touching the DB so share-key
+    // enumeration cannot bypass throttling via head/meta requests.
+    const lookupLimited = await isShareLookupRateLimited();
+    const [locale, t, seo, config] = await Promise.all([
         getLocale(),
         getTranslations('shared'),
         getSeoSettings(),
         getGalleryConfig(),
-        getImageByShareKeyCached(key),
     ]);
+    if (lookupLimited) return {
+        title: t('ogNotFoundTitle'),
+        description: t('ogNotFoundDescription'),
+        robots: sharePageRobots,
+    };
+    const image = await getImageByShareKeyCached(key);
     if (!image) return {
         title: t('ogNotFoundTitle'),
         description: t('ogNotFoundDescription'),
@@ -92,9 +106,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     const { key } = await params;
 
     // Rate-limit share-key lookups to prevent automated key enumeration
-    const requestHeaders = await headers();
-    const ip = getClientIp(requestHeaders);
-    if (preIncrementShareAttempt(ip, Date.now())) {
+    if (await isShareLookupRateLimited()) {
         return notFound();
     }
 

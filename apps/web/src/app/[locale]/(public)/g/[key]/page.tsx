@@ -28,16 +28,30 @@ const sharePageRobots = {
     },
 } as const;
 
+async function isShareLookupRateLimited() {
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    return preIncrementShareAttempt(ip);
+}
+
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }): Promise<Metadata> {
     const { key } = await params;
     const { photoId: photoIdParam } = await searchParams;
-    const [locale, t, seo, config, group] = await Promise.all([
+    // Rate-limit metadata lookups before touching the DB so share-key
+    // enumeration cannot bypass throttling via head/meta requests.
+    const lookupLimited = await isShareLookupRateLimited();
+    const [locale, t, seo, config] = await Promise.all([
         getLocale(),
         getTranslations('sharedGroup'),
         getSeoSettings(),
         getGalleryConfig(),
-        getSharedGroupCached(key, { incrementViewCount: false }),
     ]);
+    if (lookupLimited) return {
+        title: t('notFoundTitle'),
+        description: t('notFoundDescription'),
+        robots: sharePageRobots,
+    };
+    const group = await getSharedGroupCached(key, { incrementViewCount: false });
     if (!group) return {
         title: t('notFoundTitle'),
         description: t('notFoundDescription'),
@@ -103,9 +117,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     const { photoId: photoIdParam } = await searchParams;
 
     // Rate-limit share-key lookups to prevent automated key enumeration
-    const requestHeaders = await headers();
-    const ip = getClientIp(requestHeaders);
-    if (preIncrementShareAttempt(ip, Date.now())) {
+    if (await isShareLookupRateLimited()) {
         return notFound();
     }
 

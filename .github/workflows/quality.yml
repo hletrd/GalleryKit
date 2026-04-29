@@ -31,7 +31,7 @@ jobs:
       DB_PASSWORD: gallery_password
       DB_NAME: gallery
       DB_SSL: "false"
-      BASE_URL: http://127.0.0.1:3100
+      BASE_URL: https://gallerykit-ci.invalid
       ADMIN_PASSWORD: correct-horse-battery-staple
       E2E_ADMIN_PASSWORD: correct-horse-battery-staple
       SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

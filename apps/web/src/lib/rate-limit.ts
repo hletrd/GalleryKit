@@ -187,7 +187,7 @@ export function pruneShareRateLimit(now: number) {
 }
 
 /** Returns `true` when the (pre-incremented) bucket is over the limit. */
-export function preIncrementShareAttempt(ip: string, now: number): boolean {
+export function preIncrementShareAttempt(ip: string, now: number = Date.now()): boolean {
     pruneShareRateLimit(now);
     const entry = shareRateLimit.get(ip);
     if (!entry || entry.resetAt <= now) {

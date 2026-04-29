@@ -52,7 +52,8 @@ export async function clearSuccessfulLoginAttempts(ip: string, bucketStart?: num
     loginRateLimit.delete(ip);
 }
 
-export function clearSuccessfulAccountLoginAttempt(accountKey: string) {
+export async function clearSuccessfulAccountLoginAttempts(accountKey: string, bucketStart?: number) {
+    await resetRateLimit(accountKey, 'login_account', LOGIN_WINDOW_MS, bucketStart);
     accountLoginRateLimit.delete(accountKey);
 }
 
@@ -77,13 +78,14 @@ export async function rollbackLoginRateLimit(ip: string, bucketStart?: number) {
  * Same rationale as rollbackLoginRateLimit — for error scenarios where
  * the pre-increment should not count against the user.
  */
-export function rollbackAccountLoginRateLimit(accountKey: string) {
+export async function rollbackAccountLoginRateLimit(accountKey: string, bucketStart?: number) {
     const entry = accountLoginRateLimit.get(accountKey);
     if (entry && entry.count > 1) {
         entry.count -= 1;
     } else if (entry) {
         accountLoginRateLimit.delete(accountKey);
     }
+    await decrementRateLimit(accountKey, 'login_account', LOGIN_WINDOW_MS, bucketStart);
 }
 
 /** Prune expired entries from the account-scoped login rate-limit map. */

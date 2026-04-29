@@ -11,8 +11,8 @@ import { getTranslations } from 'next-intl/server';
 
 import { COOKIE_NAME, hashSessionToken, generateSessionToken, verifySessionToken } from '@/lib/session';
 import { stripControlChars } from '@/lib/sanitize';
-import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, resetRateLimit, decrementRateLimit, loginRateLimit, buildAccountRateLimitKey, isRateLimitExceeded, getRateLimitBucketStart } from '@/lib/rate-limit';
-import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, getAccountLoginRateLimitEntry, clearSuccessfulAccountLoginAttempt, accountLoginRateLimit, rollbackLoginRateLimit, rollbackAccountLoginRateLimit, pruneAccountLoginRateLimit, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
+import { getClientIp, pruneLoginRateLimit, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS, checkRateLimit, incrementRateLimit, loginRateLimit, buildAccountRateLimitKey, isRateLimitExceeded, getRateLimitBucketStart } from '@/lib/rate-limit';
+import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, getAccountLoginRateLimitEntry, clearSuccessfulAccountLoginAttempts, accountLoginRateLimit, rollbackLoginRateLimit, rollbackAccountLoginRateLimit, pruneAccountLoginRateLimit, clearSuccessfulPasswordAttempts, getPasswordChangeRateLimitEntry, passwordChangeRateLimit, prunePasswordChangeRateLimit, PASSWORD_CHANGE_MAX_ATTEMPTS, rollbackPasswordChangeRateLimit } from '@/lib/auth-rate-limit';
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -148,16 +148,15 @@ export async function login(prevState: { error?: string } | null, formData: Form
         ) {
             await Promise.allSettled([
                 rollbackLoginRateLimit(ip, loginBucketStart),
-                decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart),
+                rollbackAccountLoginRateLimit(accountRateLimitKey, loginBucketStart),
             ]);
-            rollbackAccountLoginRateLimit(accountRateLimitKey);
             return { error: t('tooManyAttempts') };
         }
     } catch {
         // DB unavailable — rely on in-memory Maps (both IP and account)
         if (limitData.count > LOGIN_MAX_ATTEMPTS || accountLimitData.count > LOGIN_MAX_ATTEMPTS) {
             rollbackLoginRateLimit(ip, loginBucketStart).catch(() => {});
-            rollbackAccountLoginRateLimit(accountRateLimitKey);
+            rollbackAccountLoginRateLimit(accountRateLimitKey, loginBucketStart).catch(() => {});
             return { error: t('tooManyAttempts') };
         }
     }
@@ -190,11 +189,10 @@ export async function login(prevState: { error?: string } | null, formData: Form
             console.error('Failed to reset login rate limit for IP:', ip, err);
         }
         try {
-            await resetRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
+            await clearSuccessfulAccountLoginAttempts(accountRateLimitKey, loginBucketStart);
         } catch (err) {
             console.debug('Failed to reset account-scoped login rate limit:', err);
         }
-        clearSuccessfulAccountLoginAttempt(accountRateLimitKey);
         await logAuditEvent(user.id, 'login_success', 'user', String(user.id), ip).catch(console.debug);
 
         try {
@@ -254,7 +252,7 @@ export async function login(prevState: { error?: string } | null, formData: Form
             console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
         }
         try {
-            await decrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
+            await rollbackAccountLoginRateLimit(accountRateLimitKey, loginBucketStart);
         } catch (rollbackErr) {
             console.debug('Failed to roll back account-scoped login rate limit after unexpected error:', rollbackErr);
         }

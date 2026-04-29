@@ -165,6 +165,7 @@ export async function createPhotoShareLink(imageId: number) {
             }
 
             if (refreshedImage.share_key) {
+                await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
                 return { success: true, key: refreshedImage.share_key };
             }
 
