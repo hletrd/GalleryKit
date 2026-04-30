@@ -445,7 +445,9 @@ export async function batchUpdateImageTags(
             return { success: false, added: 0, removed: 0, warnings: [t('imageNotFound')] };
         }
         console.error('batchUpdateImageTags transaction failed:', err);
-        return { success: false, added: 0, removed: 0, warnings: [t('failedToAddTag')] };
+        // C17-LOW-10: use generic tag-update error key instead of add-specific key,
+        // since the failure could have occurred during either add or remove phase.
+        return { success: false, added: 0, removed: 0, warnings: [t('failedToUpdateTag')] };
     }
 
     // AGG13-01: only log the audit event when tags were actually added or
