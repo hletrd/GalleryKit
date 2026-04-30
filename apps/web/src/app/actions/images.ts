@@ -615,8 +615,10 @@ export async function deleteImages(ids: number[]) {
     // directory scans. Process a small chunk of images at a time (concurrency 5)
     // so filesystem I/O pressure stays bounded while wall-clock time is
     // significantly reduced compared to the prior fully-sequential for-of loop.
-    // C2-AGG-02 / plan-257.
-    const CLEANUP_CONCURRENCY = 5;
+    // C2-AGG-02 / plan-257. C6-AGG6R-05: env-configurable via
+    // IMAGE_CLEANUP_CONCURRENCY (default 5) so NAS-backed deployments
+    // with higher I/O latency can tune this without code changes.
+    const CLEANUP_CONCURRENCY = Math.max(1, Number.parseInt(process.env.IMAGE_CLEANUP_CONCURRENCY ?? '', 10) || 5);
     const cleanupFailures: ImageCleanupFailure[] = [];
     for (let i = 0; i < imageRecords.length; i += CLEANUP_CONCURRENCY) {
         const chunk = imageRecords.slice(i, i + CLEANUP_CONCURRENCY);
