@@ -81,15 +81,21 @@ const MAX_PERMANENTLY_FAILED_IDS = 1000;
  *  bounded sizes used here (MAX_RETRY_MAP_SIZE = 10000) and a personal-
  *  gallery scale, FIFO is sufficient — the Maps rarely approach capacity.
  */
+// C9-MED-02: collect-then-delete pattern (matching BoundedMap.prune()
+// and C8-MED-01) for consistency with the project convention. ES6
+// guarantees Map deletion during for-of iteration is safe, but the
+// explicit collect-then-delete pattern is clearer for reviewers.
 function pruneRetryMaps(state: ProcessingQueueState) {
     for (const map of [state.retryCounts, state.claimRetryCounts] as const) {
         if (map.size <= MAX_RETRY_MAP_SIZE) continue;
         const excess = map.size - MAX_RETRY_MAP_SIZE;
-        let evicted = 0;
+        const evictKeys: number[] = [];
         for (const key of map.keys()) {
-            if (evicted >= excess) break;
+            if (evictKeys.length >= excess) break;
+            evictKeys.push(key);
+        }
+        for (const key of evictKeys) {
             map.delete(key);
-            evicted++;
         }
     }
 }

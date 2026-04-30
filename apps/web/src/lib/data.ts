@@ -149,13 +149,19 @@ async function flushGroupViewCounts() {
         // sustained DB outage where the buffer never empties, the
         // pruning-at-empty-buffer path above never fires. Evict oldest
         // entries (FIFO) to keep the Map bounded.
+        // C9-MED-01: collect-then-delete pattern (matching BoundedMap.prune()
+        // and C8-MED-01) for consistency with the project convention. ES6
+        // guarantees Map deletion during for-of iteration is safe, but the
+        // explicit collect-then-delete pattern is clearer for reviewers.
         if (viewCountRetryCount.size > MAX_VIEW_COUNT_RETRY_SIZE) {
             const excess = viewCountRetryCount.size - MAX_VIEW_COUNT_RETRY_SIZE;
-            let evicted = 0;
+            const evictKeys: number[] = [];
             for (const key of viewCountRetryCount.keys()) {
-                if (evicted >= excess) break;
+                if (evictKeys.length >= excess) break;
+                evictKeys.push(key);
+            }
+            for (const key of evictKeys) {
                 viewCountRetryCount.delete(key);
-                evicted++;
             }
         }
     }
