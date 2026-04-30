@@ -29,6 +29,7 @@ import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
+import { countCodePoints } from '@/lib/utils';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
@@ -100,7 +101,10 @@ export async function createTopic(formData: FormData) {
     if (isReservedTopicRouteSegment(slug)) {
         return { error: t('reservedRouteSegment') };
     }
-    if (label.length > 100) {
+    // C8-AGG8R-02: use countCodePoints for MySQL-compatible varchar length
+    // comparison so supplementary characters (emoji, rare CJK) count as
+    // one character each, matching MySQL's utf8mb4 varchar semantics.
+    if (countCodePoints(label) > 100) {
         return { error: t('labelTooLong') };
     }
 
@@ -199,7 +203,8 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
     if (isReservedTopicRouteSegment(slug)) {
         return { error: t('reservedRouteSegment') };
     }
-    if (label.length > 100) {
+    // C8-AGG8R-02: use countCodePoints for MySQL-compatible varchar length
+    if (countCodePoints(label) > 100) {
         return { error: t('labelTooLong') };
     }
 

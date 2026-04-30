@@ -10,6 +10,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { validateSeoOgImageUrl } from '@/lib/seo-og-url';
 import { normalizeOpenGraphLocale } from '@/lib/locale-path';
 import { normalizeStringRecord, sanitizeAdminString } from '@/lib/sanitize';
+import { countCodePoints } from '@/lib/utils';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -90,26 +91,28 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     }
     const sanitizedSettings = normalized.record;
 
-    // Validate individual field lengths (on sanitized values)
-    if (sanitizedSettings.seo_title && sanitizedSettings.seo_title.length > MAX_TITLE_LENGTH) {
+    // C8-AGG8R-02: use countCodePoints for MySQL-compatible varchar length
+    // comparison so supplementary characters (emoji, rare CJK) count as
+    // one character each, matching MySQL's utf8mb4 varchar semantics.
+    if (sanitizedSettings.seo_title && countCodePoints(sanitizedSettings.seo_title) > MAX_TITLE_LENGTH) {
         return { error: t('seoTitleTooLong') };
     }
-    if (sanitizedSettings.seo_description && sanitizedSettings.seo_description.length > MAX_DESCRIPTION_LENGTH) {
+    if (sanitizedSettings.seo_description && countCodePoints(sanitizedSettings.seo_description) > MAX_DESCRIPTION_LENGTH) {
         return { error: t('seoDescriptionTooLong') };
     }
-    if (sanitizedSettings.seo_nav_title && sanitizedSettings.seo_nav_title.length > MAX_NAV_TITLE_LENGTH) {
+    if (sanitizedSettings.seo_nav_title && countCodePoints(sanitizedSettings.seo_nav_title) > MAX_NAV_TITLE_LENGTH) {
         return { error: t('seoNavTitleTooLong') };
     }
-    if (sanitizedSettings.seo_author && sanitizedSettings.seo_author.length > MAX_AUTHOR_LENGTH) {
+    if (sanitizedSettings.seo_author && countCodePoints(sanitizedSettings.seo_author) > MAX_AUTHOR_LENGTH) {
         return { error: t('seoAuthorTooLong') };
     }
-    if (sanitizedSettings.seo_locale && sanitizedSettings.seo_locale.length > MAX_LOCALE_LENGTH) {
+    if (sanitizedSettings.seo_locale && countCodePoints(sanitizedSettings.seo_locale) > MAX_LOCALE_LENGTH) {
         return { error: t('seoLocaleTooLong') };
     }
     if (sanitizedSettings.seo_locale && !normalizeOpenGraphLocale(sanitizedSettings.seo_locale)) {
         return { error: t('seoLocaleInvalid') };
     }
-    if (sanitizedSettings.seo_og_image_url && sanitizedSettings.seo_og_image_url.length > MAX_OG_IMAGE_URL_LENGTH) {
+    if (sanitizedSettings.seo_og_image_url && countCodePoints(sanitizedSettings.seo_og_image_url) > MAX_OG_IMAGE_URL_LENGTH) {
         return { error: t('seoOgImageUrlTooLong') };
     }
 
