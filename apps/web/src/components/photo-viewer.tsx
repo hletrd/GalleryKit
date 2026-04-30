@@ -139,6 +139,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         // currentImageId has not yet been recalculated — currentIndex would be
         // -1 (not found), making navigation compute incorrect newIndex.
         if (currentIndex === -1) return;
+        // C8-MED-03: belt-and-suspenders check that the derived currentIndex
+        // actually points to the current image. When images prop changes (e.g.
+        // router.push to a new photo page), the useEffect that updates
+        // currentImageId runs asynchronously. Between the images update and the
+        // effect firing, currentIndex could point to the wrong image. This guard
+        // catches that theoretical race.
+        if (images[currentIndex]?.id !== currentImageId) return;
         const newIndex = currentIndex + direction;
         if (newIndex >= 0 && newIndex < images.length) {
             setCurrentImageId(images[newIndex].id);
