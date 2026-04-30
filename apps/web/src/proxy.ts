@@ -64,6 +64,10 @@ function isProtectedAdminRoute(pathname: string): boolean {
     }
   }
   // Default locale (no prefix): /admin/...
+  // Note: /admin exactly (no trailing slash, no subpath) is the default-locale
+  // login page and is intentionally NOT protected here — it falls through because
+  // !pathname.startsWith('/admin/') when pathname is '/admin'. This mirrors the
+  // locale-prefixed branch above where pathname === `/${locale}/admin` is excluded.
   if (pathname.startsWith('/admin/')) {
     return true;
   }
