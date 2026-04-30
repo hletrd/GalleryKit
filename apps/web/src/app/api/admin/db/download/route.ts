@@ -8,28 +8,13 @@ import { isValidBackupFilename } from '@/lib/backup-filename';
 import { getCurrentUser } from '@/app/actions/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
-import { hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
+
+// AGG9R-02: origin verification is now enforced by `withAdminAuth`
+// in api-auth.ts. The previous inline `hasTrustedSameOriginWithOptions`
+// check was redundant after the wrapper was updated. Removed to avoid
+// duplicated origin checks on every request.
 
 export const GET = withAdminAuth(async function GET(request: NextRequest) {
-    const requestHeaders = {
-        get(name: string) {
-            const normalized = name.toLowerCase();
-            if (normalized === 'host') {
-                return request.headers.get(name) ?? request.nextUrl.host;
-            }
-            if (normalized === 'x-forwarded-proto') {
-                return request.headers.get(name) ?? request.nextUrl.protocol.replace(/:$/, '');
-            }
-            return request.headers.get(name);
-        },
-    };
-
-    if (!hasTrustedSameOriginWithOptions(requestHeaders, { allowMissingSource: false })) {
-        return new NextResponse('Unauthorized', {
-            status: 403,
-            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
-        });
-    }
 
     const file = request.nextUrl.searchParams.get('file');
     if (!file || !isValidBackupFilename(file)) {

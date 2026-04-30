@@ -122,7 +122,8 @@ describe('backup download route', () => {
         }));
 
         expect(response.status).toBe(403);
-        expect(await response.text()).toBe('Unauthorized');
+        // AGG9R-02: origin check now enforced by withAdminAuth (JSON response)
+        await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' });
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });
 
@@ -133,7 +134,8 @@ describe('backup download route', () => {
         const response = await GET(new NextRequest(`http://localhost/api/admin/db/download?file=${VALID_BACKUP_FILE}`));
 
         expect(response.status).toBe(403);
-        expect(await response.text()).toBe('Unauthorized');
+        // AGG9R-02: origin check now enforced by withAdminAuth (JSON response)
+        await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' });
         expect(logAuditEventMock).not.toHaveBeenCalled();
     });
 
