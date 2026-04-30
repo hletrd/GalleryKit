@@ -513,6 +513,10 @@ export async function processImageFormats(
                         await fs.rename(tmpPath, basePath);
                     } catch {
                         // Final fallback: direct copy if rename fails
+                        // C6-AGG6R-11: warn so operators know the filesystem
+                        // cannot do atomic rename — signals a severely broken
+                        // filesystem that may need attention.
+                        console.warn(`[process-image] Atomic rename fallback reached for ${basePath} — using non-atomic copyFile`);
                         await fs.copyFile(outputPath, basePath);
                     }
                 } finally {
