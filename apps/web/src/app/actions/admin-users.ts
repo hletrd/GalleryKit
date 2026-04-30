@@ -16,6 +16,7 @@ import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStar
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
+import { getAdminDeleteLockName } from '@/lib/advisory-locks';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -206,7 +207,7 @@ export async function deleteAdminUser(id: number) {
     // deletions of different users do not serialize on a single global lock.
     // The lock name includes the user ID so only concurrent attempts to delete
     // the same user are serialized (e.g., double-click protection).
-    const lockName = `gallerykit_admin_delete:${id}`;
+    const lockName = getAdminDeleteLockName(id);
 
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(

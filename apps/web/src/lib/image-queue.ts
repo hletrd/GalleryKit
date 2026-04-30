@@ -15,6 +15,7 @@ import { purgeOldAuditLog } from '@/lib/audit';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename } from '@/lib/validation';
+import { getImageProcessingLockName } from '@/lib/advisory-locks';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -156,7 +157,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
 };
 
 function getProcessingLockName(jobId: number) {
-    return `gallerykit:image-processing:${jobId}`;
+    return getImageProcessingLockName(jobId);
 }
 
 function hasValidJobFilenames(job: ImageProcessingJob) {

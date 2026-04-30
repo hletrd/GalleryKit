@@ -26,6 +26,7 @@ import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SI
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
+import { LOCK_DB_RESTORE } from "@/lib/advisory-locks";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
@@ -277,7 +278,8 @@ export async function restoreDatabase(formData: FormData) {
         // instead of relying on `Object.values(lockRow)[0]` iteration order.
         // Matches the admin-user delete pattern at admin-users.ts:186-189.
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
-            "SELECT GET_LOCK('gallerykit_db_restore', 0) AS acquired"
+            "SELECT GET_LOCK(?, 0) AS acquired",
+            [LOCK_DB_RESTORE]
         );
         const acquired = lockRows[0]?.acquired;
         if (acquired !== 1 && acquired !== BigInt(1)) {
@@ -290,7 +292,7 @@ export async function restoreDatabase(formData: FormData) {
         // then insert/enqueue while the DB import is dropping/recreating rows.
         uploadContractLock = await acquireUploadProcessingContractLock(0);
         if (!uploadContractLock) {
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (upload-contract early-return) failed:', err);
             });
             return { success: false, error: t('restoreInProgress') };
@@ -309,7 +311,7 @@ export async function restoreDatabase(formData: FormData) {
             // when the release itself fails (connection kill, DB
             // outage, etc.). Matches the sibling pattern at the outer
             // finally below.
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (maintenance-begin early-return) failed:', err);
             });
             await uploadContractLock.release();
@@ -335,7 +337,7 @@ export async function restoreDatabase(formData: FormData) {
             // C8R-RPL-09 / AGG8R-03: log release failure at debug
             // instead of silencing so the operator has a signal if
             // the release round-trip errors.
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_db_restore')").catch((err) => {
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_DB_RESTORE]).catch((err) => {
                 console.debug('RELEASE_LOCK (restore finally) failed:', err);
             });
             await uploadContractLock?.release();

@@ -32,6 +32,7 @@ import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
+import { LOCK_TOPIC_ROUTE_SEGMENTS } from '@/lib/advisory-locks';
 
 async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     // C3L-CR-02: combined single query with UNION instead of two sequential
@@ -52,7 +53,8 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
 
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
-            "SELECT GET_LOCK('gallerykit_topic_route_segments', 5) AS acquired"
+            "SELECT GET_LOCK(?, 5) AS acquired",
+            [LOCK_TOPIC_ROUTE_SEGMENTS]
         );
         lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
         if (!lockAcquired) {
@@ -62,7 +64,7 @@ async function withTopicRouteMutationLock<T>(action: () => Promise<T>): Promise<
         return await action();
     } finally {
         if (lockAcquired) {
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_topic_route_segments')").catch(() => {});
+            await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_TOPIC_ROUTE_SEGMENTS]).catch(() => {});
         }
         conn.release();
     }

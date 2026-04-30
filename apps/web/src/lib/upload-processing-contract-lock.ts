@@ -1,7 +1,6 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { connection } from '@/db';
-
-const UPLOAD_PROCESSING_CONTRACT_LOCK = 'gallerykit_upload_processing_contract';
+import { LOCK_UPLOAD_PROCESSING_CONTRACT } from '@/lib/advisory-locks';
 
 type UploadProcessingContractLock = {
     release: () => Promise<void>;
@@ -27,7 +26,7 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
             'SELECT GET_LOCK(?, ?) AS acquired',
-            [UPLOAD_PROCESSING_CONTRACT_LOCK, timeoutSeconds],
+            [LOCK_UPLOAD_PROCESSING_CONTRACT, timeoutSeconds],
         );
         const acquired = lockRows[0]?.acquired;
         lockAcquired = acquired === 1 || acquired === BigInt(1);
@@ -47,7 +46,7 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
                 if (released) return;
                 released = true;
                 try {
-                    await conn.query('SELECT RELEASE_LOCK(?)', [UPLOAD_PROCESSING_CONTRACT_LOCK]);
+                    await conn.query('SELECT RELEASE_LOCK(?)', [LOCK_UPLOAD_PROCESSING_CONTRACT]);
                 } catch (err) {
                     console.debug('RELEASE_LOCK (upload processing contract) failed:', err);
                 } finally {
@@ -61,7 +60,7 @@ export async function acquireUploadProcessingContractLock(timeoutSeconds = 5): P
         // caller surfaces a friendly toast instead of a 500.
         console.debug('GET_LOCK (upload processing contract) query failed:', err);
         if (lockAcquired && !released) {
-            await conn.query('SELECT RELEASE_LOCK(?)', [UPLOAD_PROCESSING_CONTRACT_LOCK]).catch(() => {});
+            await conn.query('SELECT RELEASE_LOCK(?)', [LOCK_UPLOAD_PROCESSING_CONTRACT]).catch(() => {});
         }
         if (!released) {
             try {
