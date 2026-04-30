@@ -93,9 +93,9 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
 
     // Swipe navigation for mobile
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
-        setControlsVisible(true);
+        showControls(true);
         touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: Date.now() };
-    }, []);
+    }, [showControls]);
 
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         if (!touchStartRef.current) return;
@@ -172,6 +172,17 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         };
     }, []);
 
+    // Reset auto-hide timer on scroll/wheel events
+    useEffect(() => {
+        const handleWheel = () => {
+            showControls(true);
+        };
+        window.addEventListener('wheel', handleWheel, { passive: true });
+        return () => {
+            window.removeEventListener('wheel', handleWheel);
+        };
+    }, [showControls]);
+
     const toggleFullscreen = useCallback(() => {
         if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(() => {
@@ -184,6 +195,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            // Any key interaction resets the auto-hide timer
+            showControls(true);
             // Only stop propagation for keys we handle
             if (['f', 'F', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) {
                 e.stopPropagation();
@@ -205,7 +218,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
         };
-    }, [prevId, nextId, onNavigate, onClose, toggleFullscreen]);
+    }, [prevId, nextId, onNavigate, onClose, toggleFullscreen, showControls]);
 
     const handleBackdropClick = useCallback(() => {
         onClose();
