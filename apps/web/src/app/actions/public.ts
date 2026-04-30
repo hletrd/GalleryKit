@@ -201,10 +201,12 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
         // DB unavailable — rely on in-memory Map
     }
 
-    // sanitizedQuery already has stripControlChars applied — belt-and-suspenders slice
-    const safeQuery = sanitizedQuery.slice(0, 200);
+    // C21-AGG-01: pass sanitizedQuery directly instead of slicing with
+    // .slice(0, 200) which can split a surrogate pair (UTF-16 boundary).
+    // The caller already validates length with countCodePoints() above,
+    // and searchImages in data.ts also guards with countCodePoints(query) > 200.
     try {
-        return { status: 'ok', results: await searchImages(safeQuery, 20) };
+        return { status: 'ok', results: await searchImages(sanitizedQuery, 20) };
     } catch (err) {
         await rollbackSearchAttempt(ip, bucketStart);
         // C18-MED-01: return a structured error response instead of throwing.
