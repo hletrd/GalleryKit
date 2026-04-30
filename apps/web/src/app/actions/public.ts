@@ -5,6 +5,7 @@ import { getImagesLite, normalizeImageListCursor, searchImages, type ImageListCu
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
+import { countCodePoints } from '@/lib/utils';
 import { getClientIp, searchRateLimit, SEARCH_WINDOW_MS, SEARCH_MAX_REQUESTS, checkRateLimit, decrementRateLimit, incrementRateLimit, isRateLimitExceeded, pruneSearchRateLimit, getRateLimitBucketStart } from '@/lib/rate-limit';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
@@ -113,7 +114,7 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     // Sanitize before validation so length checks operate on the same value
     // that will be stored (matches uploadImages/settings.ts pattern, see C46-02).
     const sanitizedQuery = stripControlChars(query.trim()) ?? '';
-    if (sanitizedQuery.length > 200 || sanitizedQuery.length < 2) return { status: 'invalid', results: [] };
+    if (countCodePoints(sanitizedQuery) > 200 || sanitizedQuery.length < 2) return { status: 'invalid', results: [] };
 
     // Server-side rate limiting for search (LIKE queries are expensive)
     const requestHeaders = await headers();

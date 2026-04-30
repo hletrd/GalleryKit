@@ -136,7 +136,7 @@ export async function uploadImages(formData: FormData) {
     // and persisted data (matches topic/label/seo pattern, see C46-01).
     const tagsString = stripControlChars(formData.get('tags')?.toString() ?? '') ?? '';
 
-    if (tagsString && tagsString.length > 1000) {
+    if (tagsString && countCodePoints(tagsString) > 1000) {
         return { error: t('tagsStringTooLong') };
     }
 
