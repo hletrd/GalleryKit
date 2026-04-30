@@ -49,7 +49,17 @@ export function normalizeStringRecord(
         if (typeof value !== 'string') {
             return { ok: false, error: 'invalidInput' };
         }
-        result[key] = stripControlChars(value.trim()) ?? '';
+        // C2-MED-01: reject Unicode bidi/invisible formatting characters at the
+        // validation boundary, matching the sanitizeAdminString rejection policy
+        // (C7R-RPL-11 / C3L-SEC-01). Without this check, bidi overrides and
+        // zero-width characters are silently stripped rather than rejected,
+        // creating a gap in the defense-in-depth chain for admin SEO settings.
+        // Check BEFORE trim() because BOM (U+FEFF) is stripped by trim().
+        if (UNICODE_FORMAT_CHARS.test(value)) {
+            return { ok: false, error: 'invalidInput' };
+        }
+        const trimmed = value.trim();
+        result[key] = stripControlChars(trimmed) ?? '';
     }
     return { ok: true, record: result };
 }
