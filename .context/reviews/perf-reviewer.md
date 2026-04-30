@@ -1,7 +1,7 @@
-# Performance Reviewer — Cycle 20
+# Performance Reviewer — Cycle 21
 
 ## Review method
-Direct review of all performance-critical modules: data.ts (1280 lines),
+Direct review of all performance-critical modules: data.ts (1282 lines),
 image-queue.ts, bounded-map.ts, rate-limit.ts, upload-tracker-state.ts,
 public.ts actions, process-image.ts, serve-upload.ts.
 

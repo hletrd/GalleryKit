@@ -1,30 +1,22 @@
-# Verifier — Cycle 20
+# Verifier — Cycle 21
 
 ## Verification of Prior Cycle Fixes
 
-### C19-AGG-01: getImageByShareKeyCached cache caveat documented
-**File**: `apps/web/src/lib/data.ts:1231-1237`
-**Status**: VERIFIED. Comment added at definition site documenting the cache() caveat with incrementViewCount. The comment explains the current safety (one call site) and the migration path (use getImageByShareKey directly for different incrementViewCount values).
+### C20-AGG-01: Password length validation uses countCodePoints
+**File**: `apps/web/src/app/actions/auth.ts:326,330`
+**Status**: VERIFIED. Both `< 12` and `> 1024` checks now use `countCodePoints(newPassword)`.
 
-### C19-AGG-02: Duplicated topic-slug regex replaced with isValidSlug()
-**File**: `apps/web/src/lib/data.ts:404,441`
-**Status**: VERIFIED. Both inline regex checks at `getImageCount` (line 404) and `buildImageConditions` (line 441) now use `!isValidSlug(topic)` instead of the inline `/^[a-z0-9_-]+$/.test(topic) || topic.length > 100` pattern.
+### C20-AGG-02: getTopicBySlug uses isValidSlug() instead of inline regex
+**File**: `apps/web/src/lib/data.ts:1028`
+**Status**: VERIFIED. Uses `if (isValidSlug(slug))` guard before the direct topic query.
 
-### C17-LOW-10: batchUpdateImageTags generic error key
-**File**: `apps/web/src/app/actions/tags.ts:450`
-**Status**: VERIFIED. Error key is `t('failedToUpdateTag')` (generic) instead of add-specific key.
+### C20-AGG-03: updateImageMetadata redundant updated_at removed
+**File**: `apps/web/src/app/actions/images.ts:752-756`
+**Status**: VERIFIED. The `.set()` call now only contains `title` and `description`. Comment at line 750-751 explains `onUpdateNow()` handles it.
 
-### C17-LOW-09: Upload tracker prune 2x grace period documented
-**File**: `apps/web/src/lib/upload-tracker-state.ts`
-**Status**: VERIFIED. Comment explains the 2x grace period.
-
-### C17-LOW-06: Rate-limit counter rollback on 404 topic-not-found
-**File**: `apps/web/src/app/actions/public.ts`
-**Status**: VERIFIED. Rollback applied for loadMoreImages on invalid topic.
-
-### C17-LOW-04: X-Content-Type-Options nosniff on successful admin API responses
-**File**: `apps/web/src/lib/api-auth.ts:51-53`
-**Status**: VERIFIED. Response headers checked and nosniff added if missing.
+### C20-AGG-04/05: tags.ts catch blocks include error object
+**File**: `apps/web/src/app/actions/tags.ts:95,136`
+**Status**: VERIFIED. Both `updateTag` and `deleteTag` catch blocks now log the error object as the second argument to `console.error`.
 
 ## New Findings
 
