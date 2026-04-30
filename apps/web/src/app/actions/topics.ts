@@ -399,7 +399,7 @@ export async function createTopicAlias(topicSlug: string, alias: string) {
     if (aliasRejected) {
         return { error: t('invalidAlias') };
     }
-    if (!isValidTopicAlias(cleanAlias)) {
+    if (!cleanAlias || !isValidTopicAlias(cleanAlias)) {
         return { error: t('invalidAliasFormat') };
     }
     if (isReservedTopicRouteSegment(cleanAlias)) {

@@ -79,10 +79,17 @@ export function normalizeStringRecord(
  * @param raw  The raw user input (may be null/undefined).
  * @param trim Whether to trim whitespace before sanitizing (default: true).
  */
-export function requireCleanInput(raw: string | null | undefined, trim = true): { value: string; rejected: boolean } {
+export function requireCleanInput(raw: string | null | undefined, trim = true): { value: string | null; rejected: boolean } {
     const input = trim ? (raw?.trim() ?? '') : (raw ?? '');
     const sanitized = stripControlChars(input) ?? '';
-    return { value: sanitized, rejected: sanitized !== input };
+    const rejected = sanitized !== input;
+    // C15-MED-01: return null when rejected=true to match sanitizeAdminString's
+    // contract (C1F-CR-08 / C1F-TE-05). Returning the stripped value alongside
+    // rejected:true could lead to a future caller persisting a visually-identical
+    // string. Returning null forces explicit handling on every rejection path.
+    // All current callers check `rejected` first and return/continue on rejection,
+    // so this is backward-compatible.
+    return { value: rejected ? null : sanitized, rejected };
 }
 
 /**
