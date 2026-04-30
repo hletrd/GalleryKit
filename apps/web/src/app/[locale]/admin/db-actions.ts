@@ -40,8 +40,8 @@ function sanitizeStderr(data: Buffer | string, pwd?: string): string {
         const escaped = pwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         text = text.replace(new RegExp(escaped, 'g'), '[REDACTED]');
     }
-    // Redact common credential patterns regardless
-    text = text.replace(/(password\s*=\s*)[^\s;'"`]*/gi, '$1[REDACTED]');
+    // Redact common credential patterns regardless (matches both = and : separators)
+    text = text.replace(/(password\s*[:=]\s*)[^\s;'"`]*/gi, '$1[REDACTED]');
     text = text.replace(/(using password:\s*)\S+/gi, '$1[REDACTED]');
     return text;
 }
