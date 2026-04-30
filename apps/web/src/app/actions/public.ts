@@ -55,12 +55,20 @@ function preIncrementLoadMoreAttempt(ip: string, now: number): boolean {
     return (loadMoreRateLimit.get(ip)?.count ?? 0) > LOAD_MORE_MAX_REQUESTS;
 }
 
-function rollbackLoadMoreAttempt(ip: string) {
+function rollbackLoadMoreAttempt(ip: string, bucketStart?: number) {
     const currentEntry = loadMoreRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {
         currentEntry.count--;
     } else {
         loadMoreRateLimit.delete(ip);
+    }
+    // C16-MED-01: symmetric rollback of in-memory and DB counters, matching
+    // the searchImagesAction rollback pattern. The DB decrement is best-effort
+    // so a transient DB failure does not prevent the in-memory rollback.
+    if (bucketStart !== undefined) {
+        decrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart).catch((err) => {
+            console.debug('Failed to roll back load_more DB rate limit:', err);
+        });
     }
 }
 
@@ -85,14 +93,31 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
+    const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
 
-    // Intentionally in-memory only: load-more is a high-frequency, low-risk
-    // public read path where DB write latency would degrade scroll responsiveness.
-    // Do not add DB-backed checking without evaluating the UX impact on scroll
-    // performance. See searchImagesAction for the DB-backed rate-limit pattern
-    // used on higher-risk surfaces.
+    // In-memory pre-increment for fast-path rejection
     if (preIncrementLoadMoreAttempt(ip, now)) {
         return { status: 'rateLimited', images: [], hasMore: true };
+    }
+
+    // C16-MED-01: DB-backed increment and check for accuracy across restarts.
+    // Matches the searchImagesAction pattern. The DB round-trip is ~1ms and
+    // does not materially impact scroll responsiveness at 120 req/min.
+    try {
+        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart);
+    } catch {
+        // DB unavailable — keep the in-memory pre-increment so the in-memory
+        // rate limit remains effective during DB outages.
+    }
+
+    try {
+        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
+        if (isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'rateLimited', images: [], hasMore: true };
+        }
+    } catch {
+        // DB unavailable — rely on in-memory BoundedMap
     }
 
     try {
@@ -103,7 +128,7 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
             hasMore: rows.length > safeLimit,
         };
     } catch (err) {
-        rollbackLoadMoreAttempt(ip);
+        rollbackLoadMoreAttempt(ip, bucketStart);
         // C2-MED-02: return a structured error response instead of throwing.
         // Throwing from a server action sends a generic error to the client
         // and can leave the Load More button in a broken state. Returning a
