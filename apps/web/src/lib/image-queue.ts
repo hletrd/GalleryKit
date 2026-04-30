@@ -343,10 +343,12 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 const oldest = state.permanentlyFailedIds.values().next().value;
                 if (oldest !== undefined) state.permanentlyFailedIds.delete(oldest);
             }
-            // Do NOT reset bootstrapped / scheduleBootstrapRetry here — that
-            // was the old pattern that caused infinite re-enqueue. The
-            // permanently-failed ID will be excluded from the next bootstrap
-            // scan, and other pending jobs can still be discovered.
+            // Reschedule bootstrap to discover other pending images. The
+            // permanently-failed ID is excluded from the bootstrap query
+            // (notInArray on permanentlyFailedIds), so this does NOT cause
+            // infinite re-enqueue of the same failed job — only other
+            // unprocessed images that are not in the permanently-failed set
+            // will be discovered on the next scan (C16-AGG-01).
             state.bootstrapped = false;
             state.bootstrapCursorId = null;
             scheduleBootstrapRetry(state, `[Queue] Job ${job.id} remains pending after ${MAX_RETRIES} processing attempts.`);

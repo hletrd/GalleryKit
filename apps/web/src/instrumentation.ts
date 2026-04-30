@@ -6,7 +6,7 @@ export async function register() {
         await bootstrapImageProcessingQueue();
 
         const gracefulShutdown = async (signal: string) => {
-            console.log(`[Shutdown] ${signal} received, draining queue...`);
+            console.debug(`[Shutdown] ${signal} received, draining queue...`);
             const shutdownTimeout = new Promise<void>((resolve) => {
                 setTimeout(() => {
                     console.warn('[Shutdown] Timed out after 15s, forcing exit with queued jobs remaining');
@@ -23,7 +23,7 @@ export async function register() {
                     ]).then(() => undefined),
                     shutdownTimeout,
                 ]);
-                console.log('[Shutdown] In-flight queue work drained, exiting.');
+                console.debug('[Shutdown] In-flight queue work drained, exiting.');
             } catch (e) {
                 console.error('[Shutdown] Failed to drain queue:', e);
             }
