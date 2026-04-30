@@ -840,10 +840,17 @@ export async function getImageByShareKey(key: string) {
         return null;
     }
 
+    // C4F-08 / C4F-09: include blur_data_url and topic_label for
+    // consistency with getSharedGroup (blur placeholder) and getImage
+    // (topic display label). Without blur_data_url the shared photo
+    // page (/s/[key]) falls back to a shimmer skeleton during decode.
     const result = await db.select({
         ...publicSelectFields,
+        blur_data_url: images.blur_data_url,
+        topic_label: topics.label,
     })
         .from(images)
+        .leftJoin(topics, eq(images.topic, topics.slug))
         .where(
             and(
                 eq(images.share_key, trimmedKey),
