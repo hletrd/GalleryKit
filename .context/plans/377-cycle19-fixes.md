@@ -1,7 +1,7 @@
 # Plan 377 — Cycle 19 Fixes
 
 **Created:** 2026-04-29 (Cycle 19)
-**Status:** In Progress
+**Status:** Done
 
 ## Findings to Address
 
@@ -35,7 +35,7 @@
 
 ## Progress
 
-- [ ] C19-AGG-02: Replace duplicated regex with isValidSlug()
-- [ ] C19-AGG-01: Add caching caveat documentation
-- [ ] Commit uncommitted schema.ts and api-auth.ts changes
-- [ ] Run all gates (eslint, tsc, build, vitest, lint:api-auth, lint:action-origin)
+- [x] C19-AGG-02: Replace duplicated regex with isValidSlug() — DONE (commit a4f1587)
+- [x] C19-AGG-01: Add caching caveat documentation — DONE (commit a4f1587)
+- [x] Commit uncommitted schema.ts and api-auth.ts changes — DONE (commits 3b36eb1, 547b486)
+- [x] Run all gates (eslint, tsc, build, vitest, lint:api-auth, lint:action-origin) — ALL GREEN
