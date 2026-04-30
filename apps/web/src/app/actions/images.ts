@@ -479,8 +479,11 @@ export async function deleteImage(id: number) {
     const currentUser = await getCurrentUser();
 
     // US-001: Remove from processing queue so the queue detects deletion
+    // C2-HIGH-01: also remove from permanentlyFailedIds so stale IDs don't
+    // exclude future images with the same auto-increment ID after a DB restore.
     const queueState = getProcessingQueueState();
     queueState.enqueued.delete(id);
+    queueState.permanentlyFailedIds.delete(id);
 
     // US-008: Delete DB records in a transaction for consistency
     let deletedRows = 0;
@@ -582,9 +585,12 @@ export async function deleteImages(ids: number[]) {
     );
 
     // Remove from processing queue so queue detects deletion (matches deleteImage behavior)
+    // C2-HIGH-01: also remove from permanentlyFailedIds so stale IDs don't
+    // exclude future images with the same auto-increment ID after a DB restore.
     const queueState = getProcessingQueueState();
     for (const id of foundIds) {
         queueState.enqueued.delete(id);
+        queueState.permanentlyFailedIds.delete(id);
     }
 
     // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
