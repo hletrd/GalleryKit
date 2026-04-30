@@ -85,9 +85,11 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     const ip = getClientIp(requestHeaders);
     const now = Date.now();
 
-    // Load-more is an automatically triggered, low-risk public read path. Keep
-    // it on the in-memory limiter fast path so every scroll batch does not pay
-    // persistent DB write/read latency before the actual image query.
+    // Intentionally in-memory only: load-more is a high-frequency, low-risk
+    // public read path where DB write latency would degrade scroll responsiveness.
+    // Do not add DB-backed checking without evaluating the UX impact on scroll
+    // performance. See searchImagesAction for the DB-backed rate-limit pattern
+    // used on higher-risk surfaces.
     if (preIncrementLoadMoreAttempt(ip, now)) {
         return { status: 'rateLimited', images: [], hasMore: true };
     }
