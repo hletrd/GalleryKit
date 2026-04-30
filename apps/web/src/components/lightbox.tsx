@@ -91,25 +91,6 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         };
     }, []);
 
-    // Swipe navigation for mobile
-    const handleTouchStart = useCallback((e: React.TouchEvent) => {
-        showControls(true);
-        touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: Date.now() };
-    }, [showControls]);
-
-    const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-        if (!touchStartRef.current) return;
-        const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
-        const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
-        const dt = Date.now() - touchStartRef.current.time;
-        touchStartRef.current = null;
-        // Only trigger on horizontal swipe (dx > dy) with enough distance or velocity
-        if (Math.abs(dx) > Math.abs(dy) && (Math.abs(dx) > 50 || Math.abs(dx) / dt > 0.3)) {
-            if (dx > 0 && prevId !== null) onNavigate(-1);
-            else if (dx < 0 && nextId !== null) onNavigate(1);
-        }
-    }, [prevId, nextId, onNavigate]);
-
     const showControls = useCallback((forceReset = false) => {
         const now = Date.now();
         if (!forceReset && controlsVisible && now - lastControlRevealRef.current < 500) {
@@ -135,6 +116,25 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
             setControlsVisible(false);
         }, 3000);
     }, [controlsVisible, shouldAutoHideControls]);
+
+    // Swipe navigation for mobile
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        showControls(true);
+        touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, time: Date.now() };
+    }, [showControls]);
+
+    const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+        if (!touchStartRef.current) return;
+        const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+        const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+        const dt = Date.now() - touchStartRef.current.time;
+        touchStartRef.current = null;
+        // Only trigger on horizontal swipe (dx > dy) with enough distance or velocity
+        if (Math.abs(dx) > Math.abs(dy) && (Math.abs(dx) > 50 || Math.abs(dx) / dt > 0.3)) {
+            if (dx > 0 && prevId !== null) onNavigate(-1);
+            else if (dx < 0 && nextId !== null) onNavigate(1);
+        }
+    }, [prevId, nextId, onNavigate]);
 
     // On mount, controls are already visible (initial state), so just arm the
     // auto-hide timer. Calling setControlsVisible here would trip the

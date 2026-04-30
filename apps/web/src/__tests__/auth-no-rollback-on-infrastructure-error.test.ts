@@ -17,7 +17,6 @@ const AUTH_FILE = path.join(__dirname, '..', 'app', 'actions', 'auth.ts');
 
 describe('auth rate-limit rollback on infrastructure errors', () => {
   const source = fs.readFileSync(AUTH_FILE, 'utf-8');
-  const lines = source.split('\n');
 
   it('should not call rollbackLoginRateLimit in the login infrastructure-error catch', () => {
     // Find the outer catch block in the login function that handles
