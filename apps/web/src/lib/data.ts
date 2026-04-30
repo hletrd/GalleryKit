@@ -5,7 +5,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
 import { isRestoreMaintenanceActive } from './restore-maintenance';
-import { isValidTagSlug } from './validation';
+import { isValidTagSlug, isValidSlug } from './validation';
 import siteConfig from '@/site-config.json';
 
 // Module-level buffer for debounced shared-group view count increments.
@@ -401,7 +401,7 @@ export async function getImageCount(
     const conditions = [];
 
     if (topic !== undefined) {
-        if (!/^[a-z0-9_-]+$/.test(topic) || topic.length > 100) return 0;
+        if (!isValidSlug(topic)) return 0;
         conditions.push(eq(images.topic, topic));
     }
 
@@ -438,7 +438,7 @@ function buildTagFilterCondition(tagSlugs?: string[]) {
 function buildImageConditions(topic?: string, tagSlugs?: string[], includeUnprocessed = false) {
     const conditions = [];
     if (topic !== undefined) {
-        if (!/^[a-z0-9_-]+$/.test(topic) || topic.length > 100) return null;
+        if (!isValidSlug(topic)) return null;
         conditions.push(eq(images.topic, topic));
     }
     if (!includeUnprocessed) {
@@ -1228,6 +1228,12 @@ export const getTopicBySlugCached = cache(getTopicBySlug);
 export const getTopicsCached = cache(getTopics);
 export const getTagsCached = cache(_getTags);
 export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
+// C19-AGG-01: cache() deduplicates calls by arguments within a single request.
+// getImageByShareKey has a conditional side effect (bufferGroupViewCount via
+// incrementViewCount option). This cached wrapper is safe because the only
+// current call site passes incrementViewCount: true once per page render.
+// If a future call site needs a different incrementViewCount value for the
+// same key within one request, use getImageByShareKey directly instead.
 export const getImageByShareKeyCached = cache(getImageByShareKey);
 export const getSharedGroupCached = cache(getSharedGroup);
 
