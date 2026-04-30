@@ -2,6 +2,8 @@
  * Shared sanitization utilities for user-facing input stored in the database.
  */
 
+import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
+
 // C7-AGG7R-03: Unicode bidi overrides, zero-width / invisible formatting
 // characters, and interlinear annotation anchors. Added to stripControlChars
 // so stripping + rejection happen in one place. `containsUnicodeFormatting`
@@ -129,11 +131,14 @@ export function sanitizeAdminString(raw: string | null | undefined, trim = true)
     if (!raw) return { value: raw ?? null, rejected: false };
     const input = trim ? raw.trim() : raw;
 
-    // Check for Unicode formatting characters BEFORE stripping so we can
-    // reject the input (don't silently strip bidi/zero-width chars — the
-    // admin must know their input was rejected). Uses the same regex as
-    // stripControlChars for consistency.
-    if (UNICODE_FORMAT_CHARS_RE.test(input)) {
+    // C8-AGG8R-01: Use UNICODE_FORMAT_CHARS (non-`/g`) for .test()
+    // instead of UNICODE_FORMAT_CHARS_RE (which has `/g` flag). The `/g`
+    // flag makes .test() stateful — it advances lastIndex on each call,
+    // causing the rejected flag to alternate between true and false on
+    // repeated calls with the same input. .replace() is not affected
+    // (it always starts from the beginning), so UNICODE_FORMAT_CHARS_RE
+    // with `/g` is still correct for stripControlChars.
+    if (UNICODE_FORMAT_CHARS.test(input)) {
         const stripped = stripControlChars(input) ?? '';
         return { value: stripped, rejected: true };
     }
