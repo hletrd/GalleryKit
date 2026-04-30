@@ -121,6 +121,37 @@ describe('view-count flush — C2-F01 swap-and-drain + backoff invariants', () =
         // flush — must check `viewCountBuffer.size > 0` AND `!viewCountFlushTimer`.
         expect(fnBody!).toMatch(/viewCountBuffer\.size\s*>\s*0\s*&&\s*!viewCountFlushTimer/);
     });
+
+    it('C1F-DB-01: post-rebuffer cap enforcement evicts oldest entries when buffer exceeds MAX_VIEW_COUNT_BUFFER_SIZE', () => {
+        const fnBody = extractFnBody(dataSource, 'async function flushGroupViewCounts');
+        expect(fnBody).toBeTruthy();
+        // The while loop in the finally block enforces the cap after re-buffering.
+        // Without this, re-buffered entries whose group IDs already exist in the
+        // new buffer bypass the capacity check in the re-buffer path.
+        expect(fnBody!).toMatch(/while\s*\(\s*viewCountBuffer\.size\s*>\s*MAX_VIEW_COUNT_BUFFER_SIZE\s*\)/);
+        // The eviction must use FIFO (keys().next()) matching the viewCountRetryCount pattern.
+        expect(fnBody!).toMatch(/const\s+oldestKey\s*=\s*viewCountBuffer\.keys\(\)\.next\(\)\.value/);
+        expect(fnBody!).toMatch(/viewCountBuffer\.delete\s*\(\s*oldestKey\s*\)/);
+    });
+
+    it('viewCountRetryCount has MAX_VIEW_COUNT_RETRY_SIZE cap with FIFO eviction', () => {
+        // The retry counter cap prevents unbounded growth during sustained DB outages
+        // where the buffer never empties and the pruning-at-empty-buffer path never fires.
+        expect(dataSource).toMatch(/const\s+MAX_VIEW_COUNT_RETRY_SIZE\s*=\s*500\b/);
+        // The eviction must iterate keys() for FIFO order and delete excess entries.
+        const dataFnBody = dataSource; // use full source since pruning is at module level
+        expect(dataFnBody).toMatch(/if\s*\(\s*viewCountRetryCount\.size\s*>\s*MAX_VIEW_COUNT_RETRY_SIZE\s*\)/);
+    });
+
+    it('VIEW_COUNT_MAX_RETRIES = 3: increments drop after 3 failed flush attempts', () => {
+        // The retry counter limits how many times a failed increment is re-buffered.
+        expect(dataSource).toMatch(/const\s+VIEW_COUNT_MAX_RETRIES\s*=\s*3\b/);
+        // The drop logic must check the retry count and log a warning.
+        const fnBody = extractFnBody(dataSource, 'async function flushGroupViewCounts');
+        expect(fnBody).toBeTruthy();
+        expect(fnBody!).toMatch(/if\s*\(\s*retries\s*>=\s*VIEW_COUNT_MAX_RETRIES\s*\)/);
+        expect(fnBody!).toMatch(/Dropping increment for group/);
+    });
 });
 
 /**
