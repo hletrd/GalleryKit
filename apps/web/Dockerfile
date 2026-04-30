@@ -23,11 +23,11 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 
 # Install dependencies (including devDependencies for build).
-# Use npm install instead of npm ci because the lockfile is generated on
-# macOS and lacks Linux platform-specific optional packages (e.g.
-# @parcel/watcher-linux-arm64-glibc). npm ci would fail on those missing
-# entries; npm install resolves them correctly on the target platform.
-RUN npm install --workspace=apps/web
+# The lockfile is generated on macOS and lacks Linux platform-specific
+# optional packages (e.g. @parcel/watcher-linux-arm64-glibc). Explicitly
+# install the missing native binding so next-intl's file watcher resolves.
+RUN npm install --workspace=apps/web && \
+    npm install --workspace=apps/web @parcel/watcher-linux-arm64-glibc --no-save
 
 FROM build-base AS prod-deps
 WORKDIR /app
