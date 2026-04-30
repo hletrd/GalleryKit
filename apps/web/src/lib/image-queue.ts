@@ -213,6 +213,12 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
         console.error(`[Queue] Rejecting job ${job.id} with invalid filename metadata`);
         return;
     }
+    // C11-MED-02: skip permanently-failed images so claim-retry timers
+    // don't re-enqueue a job that already exceeded MAX_RETRIES.
+    if (state.permanentlyFailedIds.has(job.id)) {
+        console.debug(`[Queue] Skipping job ${job.id} — permanently failed`);
+        return;
+    }
     if (state.enqueued.has(job.id)) return;
 
     console.debug(`[Queue] Enqueuing job ${job.id}`);
