@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull } from 'drizzle-orm';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
 import { isRestoreMaintenanceActive } from './restore-maintenance';
@@ -670,6 +670,49 @@ export async function getImage(id: number) {
         return null;
     }
 
+    // C6-AGG6R-01: Build prev/next navigation conditions dynamically
+    // to eliminate dead sql`FALSE` branches that polluted the generated
+    // SQL. Each branch now only includes conditions relevant to the
+    // image's date status (dated vs undated).
+    //
+    // Sort order: capture_date DESC NULLS LAST, created_at DESC, id DESC
+    // Prev: rows that sort BEFORE this image (ASC order → closest predecessor)
+    // Next: rows that sort AFTER this image (DESC order → closest successor)
+
+    const prevConditions: (SQL | undefined)[] = [];
+    const nextConditions: (SQL | undefined)[] = [];
+
+    if (image.capture_date) {
+        // Dated image: predecessor can be a later-dated row, an undated
+        // row (NULL sorts last in DESC → first in ASC), or same-date
+        // with later created_at / id.
+        prevConditions.push(
+            gt(images.capture_date, image.capture_date),
+            isNull(images.capture_date),
+            and(eq(images.capture_date, image.capture_date), gt(images.created_at, image.created_at)),
+            and(eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), gt(images.id, image.id)),
+        );
+        // Successor: older-dated row, or same-date with earlier created_at / id.
+        nextConditions.push(
+            lt(images.capture_date, image.capture_date),
+            and(eq(images.capture_date, image.capture_date), lt(images.created_at, image.created_at)),
+            and(eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id)),
+        );
+    } else {
+        // Undated image: predecessor is undated with later created_at / id.
+        prevConditions.push(
+            sql`${images.capture_date} IS NULL`,
+            and(sql`${images.capture_date} IS NULL`, gt(images.created_at, image.created_at)),
+            and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), gt(images.id, image.id)),
+        );
+        // Successor is undated with earlier created_at / id.
+        nextConditions.push(
+            sql`${images.capture_date} IS NULL`,
+            and(sql`${images.capture_date} IS NULL`, lt(images.created_at, image.created_at)),
+            and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), lt(images.id, image.id)),
+        );
+    }
+
     const [imageTagsResult, prevResult, nextResult] = await Promise.all([
         db.select({
             name: tags.name,
@@ -680,66 +723,23 @@ export async function getImage(id: number) {
             .where(eq(imageTags.imageId, id)),
 
         // Prev: the nearest row before this image in gallery grid order
-        // (capture_date DESC NULLS LAST, created_at DESC, id DESC). The
-        // candidate predicate finds all rows that sort before the current one;
-        // the ASC order then picks the closest predecessor instead of jumping
-        // to the newest dated row when the current image is undated.
         db.select({ id: images.id })
             .from(images)
             .where(
                 and(
-                    or(
-                        image.capture_date
-                            ? gt(images.capture_date, image.capture_date)
-                            : sql`${images.capture_date} IS NOT NULL`,
-                        and(
-                            image.capture_date
-                                ? eq(images.capture_date, image.capture_date)
-                                : sql`${images.capture_date} IS NULL`,
-                            gt(images.created_at, image.created_at)
-                        ),
-                        and(
-                            image.capture_date
-                                ? eq(images.capture_date, image.capture_date)
-                                : sql`${images.capture_date} IS NULL`,
-                            eq(images.created_at, image.created_at),
-                            gt(images.id, image.id)
-                        )
-                    ),
+                    or(...prevConditions.filter(Boolean)),
                     eq(images.processed, true)
                 )
             )
             .orderBy(asc(images.capture_date), asc(images.created_at), asc(images.id))
             .limit(1),
 
-        // Next: the nearest row after this image in the same grid order. Dated
-        // images are followed by older dated rows and then the first undated row;
-        // undated images are followed only by older undated rows.
+        // Next: the nearest row after this image in the same grid order
         db.select({ id: images.id })
             .from(images)
             .where(
                 and(
-                    or(
-                        image.capture_date
-                            ? lt(images.capture_date, image.capture_date)
-                            : sql`FALSE`,
-                        image.capture_date
-                            ? isNull(images.capture_date)
-                            : sql`FALSE`,
-                        and(
-                            image.capture_date
-                                ? eq(images.capture_date, image.capture_date)
-                                : sql`${images.capture_date} IS NULL`,
-                            lt(images.created_at, image.created_at)
-                        ),
-                        and(
-                            image.capture_date
-                                ? eq(images.capture_date, image.capture_date)
-                                : sql`${images.capture_date} IS NULL`,
-                            eq(images.created_at, image.created_at),
-                            lt(images.id, image.id)
-                        )
-                    ),
+                    or(...nextConditions.filter(Boolean)),
                     eq(images.processed, true)
                 )
             )
