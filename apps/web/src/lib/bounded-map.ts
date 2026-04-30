@@ -97,21 +97,30 @@ export class BoundedMap<K, V> {
     prune(now: number): boolean {
         const before = this.map.size;
 
-        // Prune expired entries (O(n) single pass)
+        // C7-MED-01: collect expired keys first, then delete in a separate pass.
+        // ES6 guarantees that Map.prototype.delete() during for...of iteration is
+        // safe (the iterator accounts for deletions), but the collect-then-delete
+        // pattern is clearer for reviewers and avoids any future-spec concerns.
+        const expiredKeys: K[] = [];
         for (const [key, entry] of this.map) {
             if (this.isExpired(entry, now)) {
-                this.map.delete(key);
+                expiredKeys.push(key);
             }
+        }
+        for (const key of expiredKeys) {
+            this.map.delete(key);
         }
 
         // Hard cap: evict oldest entries if still over limit
         if (this.map.size > this.maxKeys) {
             const excess = this.map.size - this.maxKeys;
-            let evicted = 0;
+            const evictKeys: K[] = [];
             for (const key of this.map.keys()) {
-                if (evicted >= excess) break;
+                if (evictKeys.length >= excess) break;
+                evictKeys.push(key);
+            }
+            for (const key of evictKeys) {
                 this.map.delete(key);
-                evicted++;
             }
         }
 
