@@ -1,4 +1,5 @@
 import { LOCALES } from '@/lib/constants';
+import { countCodePoints } from '@/lib/utils';
 
 const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
     'admin',
@@ -82,7 +83,10 @@ export function containsUnicodeFormatting(value: string | null | undefined): boo
 // - Unicode bidi/invisible formatting (see `UNICODE_FORMAT_CHARS` lineage).
 export function isValidTopicAlias(alias: string): boolean {
     if (UNICODE_FORMAT_CHARS.test(alias)) return false;
-    return alias.length > 0 && alias.length <= 255 && /^[^./\\\s?\x00#<>"'&]+$/.test(alias);
+    // C21-AGG-02: use countCodePoints for max-length check so CJK/emoji
+    // characters (allowed by the regex) count as one character each,
+    // matching MySQL's utf8mb4 varchar semantics.
+    return alias.length > 0 && countCodePoints(alias) <= 255 && /^[^./\\\s?\x00#<>"'&]+$/.test(alias);
 }
 
 // Tag names are admin-controlled and rendered into admin tables and tag-pill
@@ -93,7 +97,10 @@ export function isValidTopicAlias(alias: string): boolean {
 export function isValidTagName(tagName: string): boolean {
     const trimmed = tagName.trim();
     if (UNICODE_FORMAT_CHARS.test(trimmed)) return false;
-    return trimmed.length > 0 && trimmed.length <= 100 && !trimmed.includes(',') && !/[<>"'&\x00]/.test(trimmed);
+    // C21-AGG-03: use countCodePoints for max-length check so CJK/emoji
+    // characters (allowed by the regex) count as one character each,
+    // matching MySQL's utf8mb4 varchar semantics.
+    return trimmed.length > 0 && countCodePoints(trimmed) <= 100 && !trimmed.includes(',') && !/[<>"'&\x00]/.test(trimmed);
 }
 
 export function isValidTagSlug(slug: string): boolean {
