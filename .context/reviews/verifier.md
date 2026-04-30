@@ -1,40 +1,55 @@
-# Verifier Review — Cycle 2 Fresh
+# Verifier Review — verifier (Cycle 8)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
-## Verification summary
+## Evidence-based correctness check
 
-All configured gates pass on the current HEAD:
+### Gate verification
 
-- `npm run lint --workspace=apps/web`: PASS (clean)
-- `npx tsc --noEmit --project apps/web/tsconfig.json`: PASS (0 errors)
-- `npm test --workspace=apps/web`: PASS (78 test files, 503 tests passing)
-- `npm run lint:api-auth --workspace=apps/web`: PASS
-- `npm run lint:action-origin --workspace=apps/web`: PASS
+| Gate | Status |
+|------|--------|
+| eslint | PASS |
+| tsc --noEmit | PASS |
+| vitest | PASS |
+| lint:api-auth | PASS |
+| lint:action-origin | PASS |
+| npm run build | PASS |
 
-## Verified fixes from Cycle 1
+### Verified behavior
 
-| AGG1 ID | Finding | Status |
-|---------|---------|--------|
-| AGG1-05 | Light destructive button contrast | Verified fixed in globals.css/button.tsx |
-| AGG1-08 | File-serving TOCTOU | Verified fixed: serve-upload.ts streams from resolvedPath |
-| AGG1-09 | Settings Record<string,string> | Verified fixed: normalizeStringRecord used |
-| AGG1-10 | batchUpdateImageTags Array.isArray | Verified fixed: guard present |
-| AGG1-12 | nginx admin throttling | Verified fixed: seo/settings in rate-limited location |
-| AGG1-39 | Share rate limit rollback | Verified fixed: rollbackShareRateLimitFull symmetric |
-| AGG1-21 | Share-key page rate limiting | Verified fixed: preIncrementShareAttempt in rate-limit.ts |
+1. **sanitizeAdminString contract**: Verified that `sanitizeAdminString` correctly combines `stripControlChars` + Unicode formatting rejection in one call. However, discovered a critical flaw (C8-V-01): the `UNICODE_FORMAT_CHARS_RE` regex has the `/g` flag and is used with `.test()`, making the rejection alternately pass/fail for the same input.
 
-## New finding
+2. **countCodePoints adoption**: Verified that `updateImageMetadata` (images.ts:707,711) correctly uses `countCodePoints()` for title/description length checks. However, `topics.ts:103,202` and `seo.ts:94-112` still use `.length` — the fix was not applied consistently.
 
-### C2-VER-01 (Medium / High). Shared-group view count inflation not yet addressed
+3. **Upload flow**: Verified the full upload pipeline from FormData to DB insert to queue enqueue. `assertBlurDataUrl` contract is enforced at both producer and consumer.
 
-- AGG1-07 remains unimplemented. Verified by reading `g/[key]/page.tsx` — the component still calls `getSharedGroupCached(key)` without passing `{ incrementViewCount: false }` for photo detail renders.
-- Evidence: `apps/web/src/lib/data.ts:852` — `if (options?.incrementViewCount !== false)` defaults to true when no options are passed.
+4. **Privacy enforcement**: `publicSelectFields` omits all sensitive fields. Compile-time guard `_SensitiveKeysInPublic` confirms no leakage.
 
-## Behavioral verification spot checks
+5. **Auth flow**: Login rate limiting correctly pre-increments before Argon2 verify. Account-scoped rate limiting is present. Password change validates form fields before consuming rate-limit attempts.
 
-- Login rate limiting (per-IP + per-account): verified both in-memory and DB-backed counters are pre-incremented before check.
-- Session token verification: HMAC-SHA256 with timingSafeEqual confirmed.
-- Upload quota tracking: pre-increment + settle pattern verified in `images.ts:242-244`.
-- Restore advisory lock: `GET_LOCK('gallerykit_db_restore', 0)` + upload-processing contract lock confirmed.
+### Verified fixes from prior cycles
+
+1. C7-V-01 (redundant `IS NULL`): VERIFIED — standalone conditions removed from undated prev/next.
+2. C7-V-02 (`.length` vs code points in images.ts): VERIFIED — `countCodePoints()` used.
+
+### New Findings
+
+#### C8-V-01 (Medium / High). `sanitizeAdminString` uses stateful `/g` regex with `.test()` — bidi rejection alternately passes and fails
+
+- Location: `apps/web/src/lib/sanitize.ts:136`
+- Verified with a Node.js reproduction script: calling `UNICODE_FORMAT_CHARS_RE.test('hello‪world')` alternates between `true` and `false` on consecutive calls because the `/g` flag makes `.test()` stateful. After `stripControlChars` calls `.replace()` with the same regex (advancing `lastIndex`), the subsequent `.test()` in `sanitizeAdminString` can return `false` for a string containing bidi overrides.
+- This is a direct security regression: the `sanitizeAdminString` helper was specifically designed to prevent Trojan-Source bidi overrides, but the stateful regex can allow them through.
+- Verified that `UNICODE_FORMAT_CHARS` in `validation.ts` does NOT have the `/g` flag and is safe for `.test()` use.
+- Suggested fix: Import and use `UNICODE_FORMAT_CHARS` from `validation.ts` for the `.test()` check, or define a separate non-`/g` regex.
+
+#### C8-V-02 (Low / Medium). `topics.ts` and `seo.ts` still use `.length` for MySQL varchar comparisons — `countCodePoints` fix not applied consistently
+
+- Location: `apps/web/src/app/actions/topics.ts:103,202` and `apps/web/src/app/actions/seo.ts:94-112`
+- Verified that `images.ts` uses `countCodePoints()` but the same class of fix was not applied to `topics.ts` (label) or `seo.ts` (all SEO fields). These all compare against MySQL varchar limits.
+- Same false-rejection risk as C7-V-02 / AGG7R-02, just on different fields.
+
+## Carry-forward (unchanged — existing deferred backlog)
+
+- C6-V-02: `bootstrapImageProcessingQueue` cursor continuation path untested.
+- C4-CR-03/C5-CR-03/C6-V-01: NULL `capture_date` navigation integration test gap.

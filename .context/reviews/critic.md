@@ -1,44 +1,37 @@
-# Critic Review — Cycle 2 Fresh
+# Critic Review — critic (Cycle 8)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
-## Multi-perspective critique of the whole change surface
+## Summary
 
-### Verified fixes from Cycle 1
+- One medium finding (stateful regex bypass).
+- One low finding (inconsistent `.length` fix).
 
-The following AGG1-* findings from cycle 1 have been confirmed as fixed in the current codebase:
+## Verified fixes from prior cycles
 
-1. **AGG1-08** (File-serving TOCTOU): `serve-upload.ts` now streams from `resolvedPath` (line 95). Verified.
-2. **AGG1-09** (Settings Record<string,string> runtime safety): `normalizeStringRecord()` introduced and used in both `settings.ts` and `seo.ts`. Verified.
-3. **AGG1-10** (`batchUpdateImageTags` Array.isArray guard): Guard present at tags.ts. Verified.
-4. **AGG1-12** (nginx admin mutation throttling): nginx config includes `/admin/seo` and `/admin/settings`. Verified.
-5. **AGG1-05** (Light destructive button contrast): `globals.css` and `button.tsx` updated. Verified.
-6. **AGG1-39** (Concurrent photo-share rate limit rollback): `rollbackShareRateLimitFull` rolls back both counters. Verified.
+All Cycle 7 critic findings confirmed addressed:
+1. C7-CRIT-01 (separate stripControlChars + containsUnicodeFormatting): FIXED — `sanitizeAdminString` helper.
+2. C7-CRIT-02 (`as const` inconsistency): Acknowledged LOW — cosmetic.
 
-### Still-open findings from Cycle 1
+## New Findings
 
-1. **AGG1-07** (Shared-group view count inflation): Still present. `g/[key]/page.tsx` still calls `getSharedGroupCached(key)` without `incrementViewCount: false` for photo detail views. Severity Medium/High.
-2. **AGG1-01** (Photo prev/next navigation across NULL capture_date): Complex cursor logic in `data.ts:447-465` has subtle edge cases. The implementation uses multi-clause OR conditions for NULL handling. While the logic appears correct for the documented sort order, the complexity makes it fragile.
-3. **AGG1-40** (Deleting all images from a group share leaves live empty share URL): Still present. No cascade cleanup when all images in a shared group are deleted.
+### C8-CRIT-01 (Medium / High). `sanitizeAdminString` reuses the `/g`-flagged `UNICODE_FORMAT_CHARS_RE` with `.test()` — the stateful regex makes Unicode formatting rejection unreliable
 
-### New findings
+- Location: `apps/web/src/lib/sanitize.ts:13,136`
+- The `sanitizeAdminString` function was the key deliverable of the C7-AGG7R-03 fix — it was supposed to close the gap where developers might forget to call `containsUnicodeFormatting` alongside `stripControlChars`. However, the implementation uses `UNICODE_FORMAT_CHARS_RE.test(input)` on a regex that also has the `/g` flag (needed for `.replace()` in `stripControlChars`). This makes `.test()` stateful, alternating between `true` and `false` on the same input.
+- This undermines the entire defense-in-depth purpose of the helper. The irony is that the old two-function pattern (`stripControlChars` + `containsUnicodeFormatting`) was actually more correct because `UNICODE_FORMAT_CHARS` in `validation.ts` is non-`/g`.
+- Concrete scenario: An admin inputs a topic label containing U+202A (LRE). If `stripControlChars` runs first on the same regex instance (which it does, at line 138), `lastIndex` is advanced, and the `.test()` at line 136 returns `false` — the bidi override is accepted.
+- Suggested fix: Use `UNICODE_FORMAT_CHARS` from `validation.ts` for the `.test()` check, or define a local non-`/g` regex variant for `.test()` use.
 
-#### C2-CRIT-01 (Medium / High). `deleteImages` sequential file cleanup is unnecessarily slow
+### C8-CRIT-02 (Low / Low). `countCodePoints()` fix was applied to `images.ts` but not to `topics.ts` or `seo.ts` — inconsistent
 
-- Location: `apps/web/src/app/actions/images.ts:618-636`
-- Same finding as C2-CR-01. The for-of loop serializes cleanup across all images. For batches > 20 this is noticeably slow.
-- The comment mentions bounding the outer batch, but the implementation is fully sequential, not bounded-parallel.
+- Location: `apps/web/src/app/actions/topics.ts:103,202` and `apps/web/src/app/actions/seo.ts:94-112`
+- The C7-AGG7R-02 fix added `countCodePoints()` for image title/description length checks but did not propagate the fix to topic labels or SEO field validations. This inconsistency creates a maintenance hazard: future developers may assume the `.length` pattern is correct because it appears in multiple action files.
+- Suggested fix: Apply `countCodePoints()` consistently to all admin string length validations that compare against MySQL varchar limits.
 
-#### C2-CRIT-02 (Low / Medium). OG route `tags` param allows unvalidated tag names in response
+## Carry-forward (unchanged — existing deferred backlog)
 
-- Location: `apps/web/src/app/api/og/route.tsx:70`
-- The `tags` query parameter is split and filtered through `isValidTagName`, which is correct. However, the tag names are rendered directly into JSX without HTML escaping. Since `@vercel/og` (satori) renders to SVG/PNG, there is no script injection risk. But extremely long or special-character tag names could cause layout issues in the OG image. The existing `clampDisplayText` is only applied to `topicLabel`, not to individual tag names.
-- Concrete scenario: an attacker crafts a URL with `?topic=photos&tags=` containing a 100-character tag name. The OG image renders with that tag name consuming all horizontal space.
-- Suggested fix: apply `clampDisplayText` (or a shorter clamp) to each tag in `tagList.map()`.
-
-#### C2-CRIT-03 (Low / Low). `restoreDatabase` has double `uploadContractLock?.release()` in finally blocks
-
-- Location: `apps/web/src/app/[locale]/admin/db-actions.ts:360-366`
-- The inner `finally` block at line 360 calls `await uploadContractLock?.release()` and sets `uploadContractLock = null`. The outer `finally` at line 364 calls `await uploadContractLock?.release()` again. Since the inner finally already nulls `uploadContractLock`, the outer call is a no-op. This is not a bug, but the double-release pattern is confusing and could mislead future maintainers into thinking there's a leak if they see the outer release without realizing the inner one already ran.
-- Suggested fix: Remove the redundant outer `uploadContractLock?.release()` since the inner finally already handles it, or add a comment explaining the redundancy is intentional defense-in-depth.
+- AGG6R-06: Restore lock complexity is correct but hard to simplify.
+- AGG6R-07: OG tag clamping is cosmetic.
+- AGG6R-09: Preamble repetition is intentional defense-in-depth.
