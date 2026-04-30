@@ -117,6 +117,15 @@ async function flushGroupViewCounts() {
             viewCountFlushTimer = setTimeout(flushGroupViewCounts, getNextFlushInterval());
             viewCountFlushTimer.unref?.();
         }
+
+        // C3-AGG-04: prune stale entries from viewCountRetryCount. Entries
+        // whose group IDs are no longer in the buffer (and are not being
+        // actively re-buffered) are leftover from deleted groups or from
+        // retries that succeeded on a later flush. Pruning prevents
+        // unbounded growth of this Map over time.
+        if (viewCountRetryCount.size > 0 && viewCountBuffer.size === 0) {
+            viewCountRetryCount.clear();
+        }
     }
 }
 
