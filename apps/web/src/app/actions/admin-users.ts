@@ -95,6 +95,9 @@ export async function createAdminUser(formData: FormData) {
     // depth — matches updateTopic/deleteTopic pattern, see C7R2-05).
     if (usernameRejected) return { error: t('invalidUsernameFormat') };
 
+    // AGG9R-03: `.length` is correct for username validation because the
+    // regex below restricts to ASCII characters where `.length` and
+    // `countCodePoints()` always agree. No `countCodePoints()` needed.
     if (!username || username.length < 3) return { error: t('usernameTooShort') };
     if (username.length > 64) return { error: t('usernameTooLong') };
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };
