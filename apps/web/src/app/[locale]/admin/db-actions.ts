@@ -361,7 +361,9 @@ export async function restoreDatabase(formData: FormData) {
             uploadContractLock = null;
         }
     } finally {
-        await uploadContractLock?.release();
+        // C3-AGG-01: uploadContractLock is already released and nulled in the
+        // inner finally block above (line 360-361). No second release needed —
+        // the inner finally guarantees exactly one release on every code path.
         conn.release();
     }
 }
