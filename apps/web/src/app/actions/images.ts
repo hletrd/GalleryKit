@@ -3,7 +3,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
-import { eq, sql, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
@@ -747,11 +747,12 @@ export async function updateImageMetadata(id: number, title: string | null, desc
             return { error: t('imageNotFound') };
         }
 
+        // C20-AGG-01: updated_at omitted from .set() — the schema's
+        // onUpdateNow() annotation auto-updates on every row mutation.
         const [updateResult] = await db.update(images)
             .set({
                 title: sanitizedTitle,
                 description: sanitizedDescription,
-                updated_at: sql`CURRENT_TIMESTAMP`
             })
             .where(eq(images.id, id));
         if (updateResult.affectedRows === 0) {
