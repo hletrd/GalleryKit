@@ -1,0 +1,33 @@
+Cycle 4 requested reviewer agents
+===============================
+Requested & registered in this environment:
+- code-reviewer
+- security-reviewer
+- critic
+- verifier
+- test-engineer
+- architect
+- debugger
+- designer (UI/UX present: Next.js web app under apps/web; local app reachable at http://127.0.0.1:3000)
+
+Requested but NOT registered in this environment:
+- perf-reviewer
+- tracer
+- document-specialist
+
+Other registered specialist roles present but not reviewer-style by default:
+- analyst
+- build-fixer
+- dependency-expert
+- executor
+- git-master
+- planner
+- researcher
+- writer
+- team-executor
+- code-simplifier
+- explorer/explore
+- vision
+
+Custom reviewer agents discovered in repo-local config:
+- none under .claude/ or .agent/

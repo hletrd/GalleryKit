@@ -1,0 +1,478 @@
+{
+  "homeDesktop": {
+    "url": "http://127.0.0.1:3000/en",
+    "title": "GalleryKit | GalleryKit",
+    "bodyText": "Skip to content\nGalleryKit\nE2E Smoke\nKO\nLatest\n\n2 photos\n\nAll\ne2e\n(2)\nlandscape\n(1)\nportrait\n(1)\nE2E Portrait\n\nE2E Smoke\n\nE2E Landscape\n\nE2E Smoke\n\nPowered by GalleryKit\n\nGitHub\nAdmin",
+    "nav": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "text": "GalleryKitE2E SmokeKO"
+    },
+    "buttons": [
+      "Search photos",
+      "Toggle theme",
+      "KO",
+      "All",
+      "e2e(2)",
+      "landscape(1)",
+      "portrait(1)"
+    ]
+  },
+  "homeMobile": {
+    "url": "http://127.0.0.1:3000/en",
+    "navMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "text": "GalleryKitE2E SmokeKO"
+    },
+    "focusablesAfterExpand": [
+      {
+        "tag": "A",
+        "text": "Skip to content",
+        "aria": null,
+        "href": "#main-content"
+      },
+      {
+        "tag": "A",
+        "text": "GalleryKit",
+        "aria": null,
+        "href": "/en"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "",
+        "aria": "Expand menu",
+        "href": null
+      },
+      {
+        "tag": "A",
+        "text": "E2E Smoke",
+        "aria": null,
+        "href": "/en/e2e-smoke"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "",
+        "aria": "Search photos",
+        "href": null
+      },
+      {
+        "tag": "BUTTON",
+        "text": "",
+        "aria": "Toggle theme",
+        "href": null
+      },
+      {
+        "tag": "BUTTON",
+        "text": "KO",
+        "aria": null,
+        "href": null
+      },
+      {
+        "tag": "BUTTON",
+        "text": "All",
+        "aria": null,
+        "href": null
+      },
+      {
+        "tag": "BUTTON",
+        "text": "e2e(2)",
+        "aria": null,
+        "href": null
+      },
+      {
+        "tag": "BUTTON",
+        "text": "landscape(1)",
+        "aria": null,
+        "href": null
+      },
+      {
+        "tag": "BUTTON",
+        "text": "portrait(1)",
+        "aria": null,
+        "href": null
+      },
+      {
+        "tag": "A",
+        "text": "E2E PortraitE2E SmokeE2E PortraitE2E Smoke",
+        "aria": "View photo: E2E Portrait",
+        "href": "/en/p/2"
+      },
+      {
+        "tag": "A",
+        "text": "E2E LandscapeE2E SmokeE2E LandscapeE2E Smoke",
+        "aria": "View photo: E2E Landscape",
+        "href": "/en/p/1"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "",
+        "aria": "Back to top",
+        "href": null
+      },
+      {
+        "tag": "A",
+        "text": "GitHub",
+        "aria": null,
+        "href": "https://github.com/hletrd/gallerykit"
+      },
+      {
+        "tag": "A",
+        "text": "Admin",
+        "aria": null,
+        "href": "/en/admin"
+      },
+      {
+        "tag": "SECTION",
+        "text": "",
+        "aria": "Notifications alt+T",
+        "href": null
+      }
+    ]
+  },
+  "photo": {
+    "url": "http://127.0.0.1:3000/en/p/1",
+    "bodyText": "Skip to content\nGalleryKit\nE2E Smoke\nKO\n\nPowered by GalleryKit\n\nGitHub\nAdmin",
+    "mainHtml": "<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"ImageObject\",\"contentUrl\":\"http://localhost:3000/uploads/jpeg/e2e-landscape.jpg\",\"thumbnailUrl\":\"http://localhost:3000/uploads/jpeg/e2e-landscape_640.jpg\",\"encodingFormat\":\"image/jpeg\",\"license\":\"https://creativecommons.org/licenses/by-nc/4.0/\",\"acquireLicensePage\":\"http://localhost:3000\",\"creditText\":\"GalleryKit\",\"creator\":{\"@type\":\"Person\",\"name\":\"GalleryKit\"},\"copyrightNotice\":\"GalleryKit\",\"datePublished\":\"2025-01-01T09:00:00.000Z\",\"uploadDate\":\"2025-01-01T09:00:00.000Z\",\"width\":{\"@type\":\"QuantitativeValue\",\"value\":1600,\"unitCode\":\"E37\"},\"height\":{\"@type\":\"QuantitativeValue\",\"value\":900,\"unitCode\":\"E37\"},\"name\":\"#e2e #landscape\",\"description\":\"Seeded landscape image for Playwright validation\",\"keywords\":\"e2e, landscape, e2e-smoke\",\"exifData\":[]}</script><script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"BreadcrumbList\",\"itemListElement\":[{\"@type\":\"ListItem\",\"position\":1,\"name\":\"GalleryKit\",\"item\":\"http://localhost:3000/en\"},{\"@type\":\"ListItem\",\"position\":2,\"name\":\"e2e-smoke\",\"item\":\"http://localhost:3000/en/e2e-smoke\"},{\"@type\":\"ListItem\",\"position\":3,\"name\":\"#e2e #landscape\",\"item\":\"http://localhost:3000/en/p/1\"}]}</script><!--$!--><template data-dgst=\"3910018441\" data-msg=\"Switched to client rendering because the server rendering errored:\n\ndocument is not defined\" data-stck=\"Switched to client rendering because the server rendering errored:\n\nReferenceError: document is not defined\n    at PhotoViewer (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/apps_web_src_09e.qit._.js:2452:239)\n    at Object.react_stack_bottom_frame (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:311311)\n    at renderWithHooks (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:118339)\n    at renderElement (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:133011)\n    at renderElement (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:194974)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201940)\n    at renderNodeDestructive (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201175)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:202325)\n    at renderNodeDestructive (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201175)\n    at renderNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:213093)\n    at renderChildrenArray (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:207654)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:202417)\n    at renderNodeDestructive (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201175)\n    at renderNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:213093)\n    at renderElement (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:190130)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201940)\n    at renderNodeDestructive (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201175)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:202325)\n    at renderNodeDestructive (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201175)\n    at renderNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:213093)\n    at renderChildrenArray (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:207654)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:202417)\n    at renderNodeDestructive (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:201175)\n    at retryNode (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:202325)\n    at performWork (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:223847)\n    at Immediate._onImmediate (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:2:103267)\n    at process.processImmediate (node:internal/timers:504:21)\n    at process.callbackTrampoline (node:internal/async_hooks:130:17)\" data-cstck=\"\n    at PhotoViewer (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/apps_web_src_09e.qit._.js:2422:24)\n    at Suspense (&lt;anonymous&gt;)\n    at LoadableComponent [Server] (&lt;anonymous&gt;)\n    at PhotoPage [Server] (&lt;anonymous&gt;)\n    at PhotoPage [Server] (&lt;anonymous&gt;)\n    at SegmentViewNode (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12154:28)\n    at InnerLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12482:34)\n    at RedirectErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2750:9)\n    at RedirectBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2792:29)\n    at HTTPAccessFallbackBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2906:39)\n    at LoadingBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12603:32)\n    at ErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:428:26)\n    at InnerScrollAndFocusHandlerOld (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12317:9)\n    at ScrollAndMaybeFocusHandler (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12465:39)\n    at RenderFromTemplateContext (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12846:238)\n    at SegmentStateProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12170:33)\n    at OuterLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12629:30)\n    at InnerLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12482:34)\n    at RedirectErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2750:9)\n    at RedirectBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2792:29)\n    at HTTPAccessFallbackBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2906:39)\n    at LoadingBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12603:32)\n    at ErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:428:26)\n    at InnerScrollAndFocusHandlerOld (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12317:9)\n    at ScrollAndMaybeFocusHandler (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12465:39)\n    at RenderFromTemplateContext (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12846:238)\n    at SegmentStateProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12170:33)\n    at OuterLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12629:30)\n    at InnerLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12482:34)\n    at RedirectErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2750:9)\n    at RedirectBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2792:29)\n    at HTTPAccessFallbackBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2906:39)\n    at LoadingBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12603:32)\n    at ErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:428:26)\n    at InnerScrollAndFocusHandlerOld (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12317:9)\n    at ScrollAndMaybeFocusHandler (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12465:39)\n    at RenderFromTemplateContext (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12846:238)\n    at SegmentStateProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12170:33)\n    at OuterLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12629:30)\n    at main (&lt;anonymous&gt;)\n    at PublicLayout (about://React/Server/file:///Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/apps_web_src_11yj98r._.js?5:217:293)\n    at SegmentViewNode (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12154:28)\n    at InnerLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12482:34)\n    at RedirectErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2750:9)\n    at RedirectBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2792:29)\n    at HTTPAccessFallbackErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2831:9)\n    at HTTPAccessFallbackBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2906:39)\n    at Suspense (&lt;anonymous&gt;)\n    at LoadingBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12603:32)\n    at ErrorBoundaryHandler (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:356:9)\n    at ErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:428:26)\n    at InnerScrollAndFocusHandlerOld (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12317:9)\n    at ScrollAndMaybeFocusHandler (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12465:39)\n    at RenderFromTemplateContext (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12846:238)\n    at SegmentStateProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12170:33)\n    at OuterLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12629:30)\n    at div (&lt;anonymous&gt;)\n    at V (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_0p4vxxc._.js:82:24)\n    at J (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_0p4vxxc._.js:77:224)\n    at ThemeProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/[root-of-the-server]__047w_33._.js:20:26)\n    at IntlProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_0p4vxxc._.js:6324:25)\n    at NextIntlClientProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_0p4vxxc._.js:6552:35)\n    at NextIntlClientProviderServer [Server] (&lt;anonymous&gt;)\n    at body (&lt;anonymous&gt;)\n    at html (&lt;anonymous&gt;)\n    at RootLayout (about://React/Server/file:///Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0_38bzh._.js?14:1416:268)\n    at RootLayout (about://React/Server/file:///Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0_38bzh._.js?14:1416:268)\n    at SegmentViewNode (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12154:28)\n    at LoadingBoundaryProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12565:36)\n    at InnerLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12482:34)\n    at RedirectErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2750:9)\n    at RedirectBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2792:29)\n    at HTTPAccessFallbackErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2831:9)\n    at HTTPAccessFallbackBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:2906:39)\n    at LoadingBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12603:32)\n    at ErrorBoundary (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:428:26)\n    at InnerScrollAndFocusHandlerOld (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12317:9)\n    at ScrollAndMaybeFocusHandler (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12465:39)\n    at RenderFromTemplateContext (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12846:238)\n    at SegmentStateProvider (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12170:33)\n    at OuterLayoutRouter (/Users/hletrd/flash-shared/gallery/apps/web/.next/dev/server/chunks/ssr/node_modules_next_dist_0yh1sr3._.js:12629:30)\n    at __next_root_layout_boundary__ (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:65313)\n    at RedirectErrorBoundary (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:62844)\n    at RedirectBoundary (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:63479)\n    at AppDevOverlayErrorBoundary (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:52:9992)\n    at HotReload (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:52:22871)\n    at Router (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:67153)\n    at ErrorBoundaryHandler (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:50:7493)\n    at ErrorBoundary (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:50:8657)\n    at RootErrorBoundary (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:64540)\n    at AppRouter (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:74153)\n    at ServerInsertedHTMLProvider (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:65:690)\n    at App (/Users/hletrd/flash-shared/gallery/node_modules/next/dist/compiled/next-server/app-page-turbo.runtime.dev.js:69:46054)\"></template><div class=\"flex items-center justify-center min-h-[60vh]\"><div class=\"animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full\"></div></div><!--/$--><a class=\"hidden\" aria-hidden=\"true\" tabindex=\"-1\" href=\"/en/p/2\">prev</a><!--$--><!--/$-->",
+    "buttons": [
+      "Search photos",
+      "Toggle theme",
+      "KO"
+    ],
+    "logs": [
+      {
+        "type": "info",
+        "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      },
+      {
+        "type": "error",
+        "text": "WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=W5EHnHrE0JnRczBLKYaT4' failed: Error during WebSocket handshake: net::ERR_INVALID_HTTP_RESPONSE"
+      }
+    ]
+  },
+  "sharedGroup": {
+    "url": "http://127.0.0.1:3000/en/g/Abc234Def5",
+    "text": "Skip to content\nGalleryKit\nE2E Smoke\nKO\nShared Photos\nView Gallery\n\nPowered by GalleryKit\n\nGitHub\nAdmin",
+    "photoLinks": 2
+  },
+  "adminLogin": {
+    "url": "http://127.0.0.1:3000/en/admin",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nAdmin\nSign in to manage your gallery\nUsername\nPassword\nSign in",
+    "placeholders": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "Username",
+      "Password"
+    ]
+  },
+  "adminDashboard": {
+    "url": "http://127.0.0.1:3000/en/admin/dashboard",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nDashboard\nUpload Photos\nCategory\nE2E Smoke\nTags (All)\n\nDrop photos here\n\nor click to browse\n\nUpload 0 photos\nRecent Uploads\n\tPreview\tTitle\tFile\tCategory\tTags\tDate\t\n\t\n\t\nE2E Portrait\nSeeded portrait image for Playwright validation\n\te2e-portrait.avif\te2e-smoke\t\ne2e\nRemove\n\tJanuary 2, 2025\t\n\n\t\n\t\nE2E Landscape\nSeeded landscape image for Playwright validation\n\te2e-landscape.avif\te2e-smoke\t\ne2e\nRemove\n\tJanuary 1, 2025\t",
+    "headerMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "text": "AdminDashboardCategoriesTagsSEOSettingsPasswordUsersDatabaseLog out"
+    },
+    "navLinks": [
+      {
+        "text": "Dashboard",
+        "href": "/en/admin/dashboard"
+      },
+      {
+        "text": "Categories",
+        "href": "/en/admin/categories"
+      },
+      {
+        "text": "Tags",
+        "href": "/en/admin/tags"
+      },
+      {
+        "text": "SEO",
+        "href": "/en/admin/seo"
+      },
+      {
+        "text": "Settings",
+        "href": "/en/admin/settings"
+      },
+      {
+        "text": "Password",
+        "href": "/en/admin/password"
+      },
+      {
+        "text": "Users",
+        "href": "/en/admin/users"
+      },
+      {
+        "text": "Database",
+        "href": "/en/admin/db"
+      }
+    ]
+  },
+  "admin_categories": {
+    "url": "http://127.0.0.1:3000/en/admin/categories",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nCategories\nAdd\nOrder\tName\tSlug\tAliases\t\n999\tE2E Smoke\te2e-smoke\t\n\t",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 843
+    },
+    "tables": 1
+  },
+  "admin_tags": {
+    "url": "http://127.0.0.1:3000/en/admin/tags",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nTags\nName\tCount\t\ne2e\t2\t\n\nlandscape\t1\t\n\nportrait\t1\t",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 843
+    },
+    "tables": 1
+  },
+  "admin_users": {
+    "url": "http://127.0.0.1:3000/en/admin/users",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nUsers\nAdmin Users\nAdmin Users\nAdd\nUsername\tCreated\t\nadmin\tApril 20, 2026\t",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 843
+    },
+    "tables": 1
+  },
+  "admin_password": {
+    "url": "http://127.0.0.1:3000/en/admin/password",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nChange Password\nAt least 12 characters\nCurrent Password\nNew Password\n\nAt least 12 characters\n\nConfirm Password\nChange",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 843
+    },
+    "tables": 0
+  },
+  "admin_settings": {
+    "url": "http://127.0.0.1:3000/en/admin/settings",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nSettings\nSave\nImage Processing\nConfigure image quality, output sizes, and processing concurrency.\nWebP Quality\n\n1-100. Higher = better quality, larger files.\n\nAVIF Quality\n\n1-100. Higher = better quality, larger files.\n\nJPEG Quality\n\n1-100. Higher = better quality, larger files.\n\nOutput Sizes\n\nComma-separated pixel widths (e.g. 640,1536,2048,4096). The 2048 size is used as the base.\n\nProcessing Concurrency\n\n1-16. Number of images processed simultaneously. Higher uses more CPU/memory.\n\nGallery Display\nConfigure the masonry grid layout for the public gallery.\nDesktop Columns\nTablet Columns\nMobile Columns\n\nNumber of columns at each breakpoint. Leave empty for defaults (4/3/2).\n\nPrivacy\nControl what metadata is stored with uploaded images.\nStrip GPS on Upload\n\nRemove GPS coordinates from EXIF data when images are uploaded. Existing images are not affected.\n\nUpload Limits\nConfigure file size and batch limits for uploads.\nMax File Size (MB)\n\nMaximum size per uploaded file in megabytes.\n\nMax Files per Batch\n\nMaximum number of files in a single upload batch.\n\nStorage Backend\nConfigure where image files are stored. Changing backends does not migrate existing files.\nStorage Backend\n\nSelect where processed images are stored. 'Local' uses the filesystem. 'MinIO' and 'S3' require additional configuration.",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 1376
+    },
+    "tables": 0
+  },
+  "admin_seo": {
+    "url": "http://127.0.0.1:3000/en/admin/seo",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nSEO Settings\nSave\nGeneral\nSite title and description for search engines and social media previews.\nSite Title\n\nseo.siteTitleHint\n\nNavigation Title\n\nShort title shown in the navigation bar. Leave empty for default.\n\nSite Description\n\nUsed in meta description and Open Graph. Leave empty for default.\n\nAuthor\n\nUsed in Open Graph and JSON-LD. Leave empty for default.\n\nOG Locale\n\nOpen Graph locale code (e.g., en_US, ko_KR). Leave empty for default.\n\nOpen Graph Image\nCustom image for social media link previews. Individual photo pages use the photo itself.\nOG Image URL\n\nFull URL to an image for social media previews. Recommended: 1200x630px. Leave empty to use the latest photo.",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 966
+    },
+    "tables": 0
+  },
+  "admin_db": {
+    "url": "http://127.0.0.1:3000/en/admin/db",
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nDatabase\nBackup\nFull SQL dump, auto-downloads.\nDownload Backup (.sql)\nRestore\nFrom a SQL dump file.\nThis will overwrite existing data.\nChoose .sql file\nDanger Zone\nThis cannot be undone.\nRestore\nExport\nImages and tags as CSV.\nExport CSV",
+    "mainMetrics": {
+      "clientWidth": 1280,
+      "scrollWidth": 1280,
+      "clientHeight": 843,
+      "scrollHeight": 843
+    },
+    "tables": 0
+  },
+  "adminMobileDashboard": {
+    "url": "http://127.0.0.1:3000/en/admin/dashboard",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 773,
+      "text": "AdminDashboardCategoriesTagsSEOSettingsPasswordUsersDatabaseLog out"
+    },
+    "navMetrics": {
+      "clientWidth": 594,
+      "scrollWidth": 594,
+      "rect": {
+        "x": 89.65625,
+        "y": 16,
+        "width": 593.65625,
+        "height": 24,
+        "top": 16,
+        "right": 683.3125,
+        "bottom": 40,
+        "left": 89.65625
+      },
+      "text": "DashboardCategoriesTagsSEOSettingsPasswordUsersDatabase"
+    },
+    "bodyText": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nDashboard\nUpload Photos\nCategory\nE2E Smoke\nTags (All)\n\nDrop photos here\n\nor click to browse\n\nUpload 0 photos\nRecent Uploads\n\tPreview\tTitle\tFile\tCategory\tTags\tDate\t\n\t\n\t\nE2E Portrait\nSeeded portrait image for Playwright validation\n\te2e-portrait.avif\te2e-smoke\t\ne2e\nRemove\n\tJanuary 2, 2025\t\n\n\t\n\t\nE2E Landscape\nSeeded landscape image for Playwright validation\n\te2e-landscape.avif\te2e-smoke\t\ne2e\nRemove\n\tJanuary 1, 2025\t"
+  },
+  "adminMobile_categories": {
+    "url": "http://127.0.0.1:3000/en/admin/categories",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 773
+    },
+    "mainMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "clientHeight": 787,
+      "scrollHeight": 787
+    },
+    "tableMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "rect": {
+        "x": 16,
+        "y": 141,
+        "width": 390.171875,
+        "height": 92.5,
+        "top": 141,
+        "right": 406.171875,
+        "bottom": 233.5,
+        "left": 16
+      }
+    },
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nCategories\nAdd\nOrder\tName\tSlug\tAliases\t\n999\tE2E Smoke\te2e-smoke\t\n\t"
+  },
+  "adminMobile_tags": {
+    "url": "http://127.0.0.1:3000/en/admin/tags",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 771
+    },
+    "mainMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "clientHeight": 787,
+      "scrollHeight": 787
+    },
+    "tableMetrics": {
+      "clientWidth": 358,
+      "scrollWidth": 358,
+      "rect": {
+        "x": 16,
+        "y": 141,
+        "width": 358,
+        "height": 198.5,
+        "top": 141,
+        "right": 374,
+        "bottom": 339.5,
+        "left": 16
+      }
+    },
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nTags\nName\tCount\t\ne2e\t2\t\n\nlandscape\t1\t\n\nportrait\t1\t"
+  },
+  "adminMobile_users": {
+    "url": "http://127.0.0.1:3000/en/admin/users",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 772
+    },
+    "mainMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "clientHeight": 787,
+      "scrollHeight": 787
+    },
+    "tableMetrics": {
+      "clientWidth": 256,
+      "scrollWidth": 256,
+      "rect": {
+        "x": 67,
+        "y": 256,
+        "width": 256,
+        "height": 92.5,
+        "top": 256,
+        "right": 323,
+        "bottom": 348.5,
+        "left": 67
+      }
+    },
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nUsers\nAdmin Users\nAdmin Users\nAdd\nUsername\tCreated\t\nadmin\tApril 20, 2026\t"
+  },
+  "adminMobile_settings": {
+    "url": "http://127.0.0.1:3000/en/admin/settings",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 773
+    },
+    "mainMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "clientHeight": 787,
+      "scrollHeight": 2046
+    },
+    "tableMetrics": null,
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nSettings\nSave\nImage Processing\nConfigure image quality, output sizes, and processing concurrency.\nWebP Quality\n\n1-100. Higher = better quality, larger files.\n\nAVIF Quality\n\n1-100. Higher = better quality, larger files.\n\nJPEG Quality\n\n1-100. Higher = better quality, larger files.\n\nOutput Sizes\n\nComma-separated pixel widths (e.g. 640,1536,2048,4096). The 2048 size is used as the base.\n\nProcessing Concurrency\n\n1-16. Number of images processed simultaneously. Higher uses more CPU/memory.\n\nGallery Display\nConfigure the masonry grid layout for the public gallery.\nDesktop Columns\nTablet Columns\nMobile Columns\n\nNumber of columns at each breakpoint. Leave empty for defaults (4/3/2).\n\nPrivacy\nControl what metadata is stored with uploaded images.\nStrip GPS on Upload\n\nRemove GPS coordinates from EXIF data when images are uploaded. Existing images are not affected.\n\nUpload Limits\nConfigure file size and batch limits for uploads.\nMax File Size (MB)\n\nMaximum size per uploaded file in megabytes.\n\nMax Files per Batch\n\nMaximum number of files in a single upload batch.\n\nStorage Backend\nConfigure where image files are stored. Changing backends does not migrate existing files.\nStorage Backend\n\nSelect where processed images are stored. 'Local' uses the filesystem. 'MinIO' and 'S3' require additional configuration."
+  },
+  "adminMobile_seo": {
+    "url": "http://127.0.0.1:3000/en/admin/seo",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 771
+    },
+    "mainMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "clientHeight": 787,
+      "scrollHeight": 1114
+    },
+    "tableMetrics": null,
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nSEO Settings\nSave\nGeneral\nSite title and description for search engines and social media previews.\nSite Title\n\nseo.siteTitleHint\n\nNavigation Title\n\nShort title shown in the navigation bar. Leave empty for default.\n\nSite Description\n\nUsed in meta description and Open Graph. Leave empty for default.\n\nAuthor\n\nUsed in Open Graph and JSON-LD. Leave empty for default.\n\nOG Locale\n\nOpen Graph locale code (e.g., en_US, ko_KR). Leave empty for default.\n\nOpen Graph Image\nCustom image for social media link previews. Individual photo pages use the photo itself.\nOG Image URL\n\nFull URL to an image for social media previews. Recommended: 1200x630px. Leave empty to use the latest photo."
+  },
+  "adminMobile_db": {
+    "url": "http://127.0.0.1:3000/en/admin/db",
+    "headerMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 773
+    },
+    "mainMetrics": {
+      "clientWidth": 390,
+      "scrollWidth": 390,
+      "clientHeight": 787,
+      "scrollHeight": 802
+    },
+    "tableMetrics": null,
+    "text": "Skip to content\nAdmin\nDashboard\nCategories\nTags\nSEO\nSettings\nPassword\nUsers\nDatabase\nLog out\nDatabase\nBackup\nFull SQL dump, auto-downloads.\nDownload Backup (.sql)\nRestore\nFrom a SQL dump file.\nThis will overwrite existing data.\nChoose .sql file\nDanger Zone\nThis cannot be undone.\nRestore\nExport\nImages and tags as CSV.\nExport CSV"
+  }
+}

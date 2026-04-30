@@ -1,0 +1,17 @@
+apps/web/e2e/admin.spec.ts
+apps/web/e2e/helpers.ts
+apps/web/e2e/nav-visual-check.spec.ts
+apps/web/e2e/public.spec.ts
+apps/web/e2e/test-fixes.spec.ts
+apps/web/src/__tests__/auth-rate-limit.test.ts
+apps/web/src/__tests__/base56.test.ts
+apps/web/src/__tests__/locale-path.test.ts
+apps/web/src/__tests__/privacy-fields.test.ts
+apps/web/src/__tests__/queue-shutdown.test.ts
+apps/web/src/__tests__/rate-limit.test.ts
+apps/web/src/__tests__/revalidation.test.ts
+apps/web/src/__tests__/sanitize.test.ts
+apps/web/src/__tests__/session.test.ts
+apps/web/src/__tests__/sql-restore-scan.test.ts
+apps/web/src/__tests__/upload-tracker.test.ts
+apps/web/src/__tests__/validation.test.ts

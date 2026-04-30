@@ -1,0 +1,17 @@
+Reading additional input from stdin...
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: /Users/hletrd/flash-shared/gallery
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019dd7eb-1266-7942-90fd-e246f5ce7404
+--------
+user
+You are the tracer for Prompt 1 of review-plan-fix cycle 2 in /Users/hletrd/flash-shared/gallery.
+Read .omx/context/cycle2-review-prompt.md first.
+Specialist angle: causal tracing of suspicious flows, competing hypotheses, data/control-flow proofs across server actions, DB, upload/restore, queue, UI pagination
+Review the entire repository and current uncommitted changes from this angle. Do not implement fixes, do not commit, do not push, and do not edit application code. Write exactly one report to .context/reviews/tracer.md. Include inventory, findings with exact file:line, problem, failure scenario, suggested fix, severity, confidence, classification, final sweep, and skipped/limitations.

@@ -1,0 +1,87 @@
+## checkRateLimit callsites
+apps/web/src/app/actions/auth.ts:102:        const dbLimit = await checkRateLimit(ip, 'login', LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+apps/web/src/app/actions/auth.ts:117:        await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+apps/web/src/app/actions/auth.ts:242:        const dbLimit = await checkRateLimit(ip, 'password_change', PASSWORD_CHANGE_MAX_ATTEMPTS, LOGIN_WINDOW_MS);
+apps/web/src/app/actions/auth.ts:258:        await incrementRateLimit(ip, 'password_change', LOGIN_WINDOW_MS);
+apps/web/src/app/actions/public.ts:70:        await incrementRateLimit(ip, 'search', SEARCH_WINDOW_MS);
+apps/web/src/app/actions/public.ts:79:        const dbLimit = await checkRateLimit(ip, 'search', SEARCH_MAX_REQUESTS, SEARCH_WINDOW_MS);
+apps/web/src/app/actions/admin-users.ts:79:        await incrementRateLimit(ip, 'user_create', USER_CREATE_WINDOW_MS);
+apps/web/src/app/actions/admin-users.ts:80:        const dbLimit = await checkRateLimit(ip, 'user_create', USER_CREATE_MAX_ATTEMPTS, USER_CREATE_WINDOW_MS);
+apps/web/src/app/actions/sharing.ts:68:        await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS);
+apps/web/src/app/actions/sharing.ts:69:        const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
+apps/web/src/app/actions/sharing.ts:155:        await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS);
+apps/web/src/app/actions/sharing.ts:156:        const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS);
+apps/web/src/lib/rate-limit.ts:112:export async function checkRateLimit(
+apps/web/src/lib/rate-limit.ts:140:export async function incrementRateLimit(
+apps/web/src/lib/auth-rate-limit.ts:25:    await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS);
+
+## settings consumers
+apps/web/src/app/actions/settings.ts:88:        const newStorageBackend = sanitizedSettings.storage_backend;
+apps/web/src/app/actions/settings.ts:97:                    await db.delete(adminSettings).where(eq(adminSettings.key, 'storage_backend'));
+apps/web/src/app/actions/settings.ts:99:                    console.error('[Settings] Failed to roll back storage_backend setting:', rollbackErr);
+apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:64:    // Use configured image sizes for OG image URLs (avoids 404s if admin changes image_sizes)
+apps/web/src/app/[locale]/(public)/page.tsx:26:  // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
+apps/web/src/lib/storage/index.ts:5: * `storage_backend` admin setting. Re-initializes when the
+apps/web/src/lib/gallery-config-shared.ts:15:    'image_sizes',
+apps/web/src/lib/gallery-config-shared.ts:16:    'queue_concurrency',
+apps/web/src/lib/gallery-config-shared.ts:19:    'grid_columns_desktop',
+apps/web/src/lib/gallery-config-shared.ts:20:    'grid_columns_tablet',
+apps/web/src/lib/gallery-config-shared.ts:21:    'grid_columns_mobile',
+apps/web/src/lib/gallery-config-shared.ts:27:    'max_file_size_mb',
+apps/web/src/lib/gallery-config-shared.ts:28:    'max_files_per_batch',
+apps/web/src/lib/gallery-config-shared.ts:31:    'storage_backend',
+apps/web/src/lib/gallery-config-shared.ts:55:    image_sizes: '640,1536,2048,4096',
+apps/web/src/lib/gallery-config-shared.ts:56:    queue_concurrency: '2',
+apps/web/src/lib/gallery-config-shared.ts:57:    grid_columns_desktop: '4',
+apps/web/src/lib/gallery-config-shared.ts:58:    grid_columns_tablet: '3',
+apps/web/src/lib/gallery-config-shared.ts:59:    grid_columns_mobile: '2',
+apps/web/src/lib/gallery-config-shared.ts:61:    max_file_size_mb: '200',
+apps/web/src/lib/gallery-config-shared.ts:62:    max_files_per_batch: '100',
+apps/web/src/lib/gallery-config-shared.ts:63:    storage_backend: 'local',
+apps/web/src/lib/gallery-config-shared.ts:72:    image_sizes: (v) => { const parts = v.split(',').map(s => Number(s.trim())); return parts.length > 0 && parts.every(n => Number.isFinite(n) && n > 0 && n <= 10000); },
+apps/web/src/lib/gallery-config-shared.ts:73:    queue_concurrency: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 16; },
+apps/web/src/lib/gallery-config-shared.ts:74:    grid_columns_desktop: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 8; },
+apps/web/src/lib/gallery-config-shared.ts:75:    grid_columns_tablet: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 6; },
+apps/web/src/lib/gallery-config-shared.ts:76:    grid_columns_mobile: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 3; },
+apps/web/src/lib/gallery-config-shared.ts:78:    max_file_size_mb: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 1000; },
+apps/web/src/lib/gallery-config-shared.ts:79:    max_files_per_batch: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 500; },
+apps/web/src/lib/gallery-config-shared.ts:80:    storage_backend: (v) => ['local', 'minio', 's3'].includes(v),
+apps/web/src/lib/gallery-config-shared.ts:122: * Parse image_sizes string into sorted number array.
+apps/web/src/lib/gallery-config.ts:87:    const imageSizes = parseImageSizes(getSetting(map, 'image_sizes'));
+apps/web/src/lib/gallery-config.ts:90:    const rawBackend = getSetting(map, 'storage_backend');
+apps/web/src/lib/gallery-config.ts:100:        queueConcurrency: validatedNumber(map, 'queue_concurrency'),
+apps/web/src/lib/gallery-config.ts:101:        gridColumnsDesktop: validatedNumber(map, 'grid_columns_desktop'),
+apps/web/src/lib/gallery-config.ts:102:        gridColumnsTablet: validatedNumber(map, 'grid_columns_tablet'),
+apps/web/src/lib/gallery-config.ts:103:        gridColumnsMobile: validatedNumber(map, 'grid_columns_mobile'),
+apps/web/src/lib/gallery-config.ts:109:        maxFileSizeMb: validatedNumber(map, 'max_file_size_mb'),
+apps/web/src/lib/gallery-config.ts:110:        maxFilesPerBatch: validatedNumber(map, 'max_files_per_batch'),
+apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:25:    // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
+apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:26:    // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:133:                            value={settings.image_sizes || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:134:                            onChange={(e) => handleChange('image_sizes', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:135:                            placeholder={getPlaceholder('image_sizes')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:148:                            value={settings.queue_concurrency || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:149:                            onChange={(e) => handleChange('queue_concurrency', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:150:                            placeholder={getPlaceholder('queue_concurrency')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:175:                                value={settings.grid_columns_desktop || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:176:                                onChange={(e) => handleChange('grid_columns_desktop', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:177:                                placeholder={getPlaceholder('grid_columns_desktop')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:187:                                value={settings.grid_columns_tablet || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:188:                                onChange={(e) => handleChange('grid_columns_tablet', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:189:                                placeholder={getPlaceholder('grid_columns_tablet')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:199:                                value={settings.grid_columns_mobile || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:200:                                onChange={(e) => handleChange('grid_columns_mobile', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:201:                                placeholder={getPlaceholder('grid_columns_mobile')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:252:                                value={settings.max_file_size_mb || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:253:                                onChange={(e) => handleChange('max_file_size_mb', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:254:                                placeholder={getPlaceholder('max_file_size_mb')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:265:                                value={settings.max_files_per_batch || ''}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:266:                                onChange={(e) => handleChange('max_files_per_batch', e.target.value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:267:                                placeholder={getPlaceholder('max_files_per_batch')}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:288:                            value={settings.storage_backend || 'local'}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:289:                            onValueChange={(value) => handleChange('storage_backend', value)}
+apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:302:                    {(settings.storage_backend === 'minio' || settings.storage_backend === 's3') && (
+
+## hard-coded 640 variants
+apps/web/src/components/image-manager.tsx:335:                                            src={`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, '_640.avif')}`}
+apps/web/src/components/search.tsx:210:                                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg?.replace(/\.jpg$/i, '_640.jpg')}`)}

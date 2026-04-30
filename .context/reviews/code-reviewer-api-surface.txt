@@ -1,0 +1,3 @@
+apps/web/src/app/api/admin/db/download/route.ts
+apps/web/src/app/api/health/route.ts
+apps/web/src/app/api/og/route.tsx

@@ -1,0 +1,26 @@
+# Test Reference Coverage
+
+## updateGallerySettings
+
+## switchStorageBackend
+
+## createPhotoShareLink
+
+## createGroupShareLink
+
+## createAdminUser
+
+## searchImagesAction
+
+## loadMoreImages
+
+## queue_concurrency
+
+## max_file_size_mb
+
+## max_files_per_batch
+
+## grid_columns_desktop
+
+## storage_backend
+

@@ -1,0 +1,24 @@
+# Verification Snapshot
+
+## Review Artifacts
+     219 .context/reviews/code-reviewer.md
+     151 .context/reviews/code-reviewer-inventory.txt
+       3 .context/reviews/code-reviewer-api-surface.txt
+      87 .context/reviews/code-reviewer-raw-evidence.txt
+      17 .context/reviews/code-reviewer-test-surface.txt
+       9 .context/reviews/code-reviewer-action-surface.txt
+      28 .context/reviews/code-reviewer-route-surface.txt
+
+## API Surface
+apps/web/src/app/api/admin/db/download/route.ts
+apps/web/src/app/api/health/route.ts
+apps/web/src/app/api/og/route.tsx
+
+## Action Surface Count
+       9 .context/reviews/code-reviewer-action-surface.txt
+
+## Route Surface Count
+      28 .context/reviews/code-reviewer-route-surface.txt
+
+## Test Surface Count
+      17 .context/reviews/code-reviewer-test-surface.txt

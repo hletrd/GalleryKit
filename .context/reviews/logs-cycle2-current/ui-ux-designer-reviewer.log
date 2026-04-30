@@ -1,0 +1,17 @@
+Reading additional input from stdin...
+OpenAI Codex v0.125.0 (research preview)
+--------
+workdir: /Users/hletrd/flash-shared/gallery
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: danger-full-access
+reasoning effort: none
+reasoning summaries: none
+session id: 019dd7eb-1f0d-7c73-b8a1-87dc1591ad21
+--------
+user
+You are the ui-ux-designer-reviewer for Prompt 1 of review-plan-fix cycle 2 in /Users/hletrd/flash-shared/gallery.
+Read .omx/context/cycle2-review-prompt.md first.
+Specialist angle: senior UI/UX/accessibility reviewer for the Next.js web frontend; inspect source and, if feasible, run/browser-query the app; cover information architecture, focus/keyboard, WCAG 2.2, responsive, states, i18n/RTL, perceived performance with textual evidence
+Review the entire repository and current uncommitted changes from this angle. Do not implement fixes, do not commit, do not push, and do not edit application code. Write exactly one report to .context/reviews/ui-ux-designer-reviewer.md. Include inventory, findings with exact file:line, problem, failure scenario, suggested fix, severity, confidence, classification, final sweep, and skipped/limitations.
