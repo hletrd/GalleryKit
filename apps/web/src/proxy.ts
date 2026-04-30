@@ -84,7 +84,24 @@ export default function middleware(request: NextRequest) {
     // Validate cookie presence and basic token format (timestamp:random:signature).
     // Full cryptographic validation happens in verifySessionToken() within server actions.
     const token = sessionCookie?.value;
-    if (!token || token.split(':').length !== 3) {
+    // C16-LOW-05: stricter format check — three colon-separated segments must
+    // each be non-empty, and the total token must be at least 100 chars
+    // (timestamp:32-hex-random:64-hex-signature). Prevents obviously
+    // malformed tokens like "::" from reaching the DB verification path.
+    if (!token || token.length < 100) {
+      let loginUrl: string;
+      const localeMatch = pathname.match(/^\/([a-z]{2})\//);
+      if (localeMatch && (LOCALES as readonly string[]).includes(localeMatch[1])) {
+        loginUrl = `/${localeMatch[1]}/admin`;
+      } else {
+        loginUrl = '/admin';
+      }
+      const url = request.nextUrl.clone();
+      url.pathname = loginUrl;
+      return applyProductionCsp(cspRequest, NextResponse.redirect(url));
+    }
+    const tokenParts = token.split(':');
+    if (tokenParts.length !== 3 || tokenParts.some(p => p.length === 0)) {
       // Determine login page URL based on locale prefix in path
       let loginUrl: string;
       const localeMatch = pathname.match(/^\/([a-z]{2})\//);
