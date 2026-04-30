@@ -6,7 +6,7 @@ C11-MED-01 and C11-MED-02 from cycle 11 aggregate review. Low-severity findings 
 
 ## Status
 
-Pending
+Done. Commits `42c7306` (C11-MED-01), `4a22a98` (C11-MED-02), `31aa530` (test). All gates pass (tsc, eslint, lint:api-auth, lint:action-origin, vitest 577/577, next build).
 
 ## C11-MED-01: Add topic-existence validation to `uploadImages`
 
