@@ -212,7 +212,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             </div>
             {group.images.length === 0 && (
                 <div className="text-center py-20 text-muted-foreground">
-                    {t('empty')}
+                    {t('processing')}
                 </div>
             )}
         </div>
