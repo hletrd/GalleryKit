@@ -158,7 +158,7 @@ git values must be treated as compromised and must not be reused.
 ### Runtime topology
 - The shipped Docker Compose deployment is a **single web-instance / single-writer** topology. Restore maintenance flags, upload quota tracking, and image queue state are process-local; do not horizontally scale the web service unless those coordination states are moved to a shared store.
 - Admin accounts are multiple root admins. The current schema has no role/capability model, so any admin can upload, edit, export/restore DB backups, change settings, and manage other admins.
-- Shared-group `view_count` is best-effort approximate analytics: increments are buffered in process memory and flushed asynchronously, so a crash, process kill, or extended DB outage can undercount delivered views. Do not treat it as billing/audit-grade state unless it is moved to durable storage.
+- Shared-group `view_count` is best-effort approximate analytics: increments are buffered in process memory and flushed asynchronously, so a crash, process kill, or extended DB outage can undercount delivered views. Do not treat it as billing/audit-grade state unless it is moved to durable storage. View counts are only incremented on the initial shared-group page load (when no per-photo query param is present), not on intra-share photo navigation within the same session.
 
 ## Database Indexes
 
