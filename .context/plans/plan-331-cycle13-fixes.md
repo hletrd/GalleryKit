@@ -1,7 +1,7 @@
 # Plan — Cycle 13 Fixes
 
 Date: 2026-04-29
-Status: In Progress
+Status: Completed
 
 ## Findings to address
 
@@ -31,7 +31,7 @@ None new. All carry-forward deferred items from prior cycles remain unchanged.
 
 ## Exit criteria
 
-- [ ] `batchUpdateImageTags` audit log gated on `added > 0 || removed > 0`
-- [ ] Test case added for zero-mutation audit-log gating
-- [ ] All gates pass: eslint, tsc --noEmit, build, vitest, lint:api-auth, lint:action-origin
-- [ ] Changes committed and pushed
+- [x] `batchUpdateImageTags` audit log gated on `added > 0 || removed > 0`
+- [x] Test case added for zero-mutation audit-log gating
+- [x] All gates pass: eslint, tsc --noEmit, build, vitest, lint:api-auth, lint:action-origin
+- [x] Changes committed and pushed
