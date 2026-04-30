@@ -1,12 +1,12 @@
-# Aggregate Review — Cycle 12
+# Aggregate Review — Cycle 13
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
-Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier
+Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer
 
-**HEAD:** `2f8b9ba` (Update cycle 11 plan status to completed)
+**HEAD:** `7f2f5bd` (docs(plans): update cycle 12 plan status to completed)
 
-## Source reviews (5 files)
+## Source reviews (11 files)
 
 | Reviewer | File |
 |---|---|
@@ -15,12 +15,19 @@ Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier
 | Perf Reviewer | `.context/reviews/perf-reviewer.md` |
 | Critic | `.context/reviews/critic.md` |
 | Verifier | `.context/reviews/verifier.md` |
+| Test Engineer | `.context/reviews/test-engineer.md` |
+| Tracer | `.context/reviews/tracer.md` |
+| Architect | `.context/reviews/architect.md` |
+| Debugger | `.context/reviews/debugger.md` |
+| Document Specialist | `.context/reviews/document-specialist.md` |
+| Designer | `.context/reviews/designer.md` |
 
 ## Deduplicated findings (cross-agent agreement noted)
 
 | Unified ID | Source IDs | Description | Severity | Confidence | Cross-Agent |
 |---|---|---|---|---|---|
-| **AGG12-01** | C12-CR-01, C12-SEC-01, C12-CRIT-01, C12-V-01 | `batchAddTags` audit log fires on INSERT IGNORE no-op (all duplicate rows). `db.insert(imageTags).ignore().values(values)` returns `affectedRows === 0` for duplicates, but audit log fires unconditionally with `count: existingIds.size`. The `batchUpdateImageTags` in the same file correctly gates `added++` on `affectedRows > 0`. | LOW | MEDIUM | 4 agents |
+| **AGG13-01** | C13-CR-01, C13-SEC-01, C13-CRIT-01, C13-V-01, C13-TR-01 | `batchUpdateImageTags` audit log fires unconditionally after transaction when `added === 0 && removed === 0`. Unlike the prior AGG10/11/12 findings where count metadata was misleading, here the metadata `{ added: 0, removed: 0 }` is accurate — the event is just unnecessary noise. | LOW | LOW | 5 agents |
+| **AGG13-02** | C13-TE-01 | No unit test for `batchUpdateImageTags` audit-log gating on zero-mutation path | LOW | LOW | 1 agent |
 
 ## Priority remediation order (this cycle)
 
@@ -34,7 +41,9 @@ None.
 
 ### Consider-fix (LOW — batch into polish patch if time permits)
 
-1. **AGG12-01** (4 agents): Gate `batchAddTags` audit log on `affectedRows > 0` from the INSERT IGNORE result. Also update the `count` metadata to reflect actual rows inserted instead of `existingIds.size`. This is the same class as AGG10-01 (fixed cycle 10 for `addTagToImage`) and AGG11-01 (fixed cycle 11 for `removeTagFromImage`), but the batch-add counterpart was missed.
+1. **AGG13-01** (5 agents): Gate `batchUpdateImageTags` audit log on `added > 0 || removed > 0`. This is the same class as AGG10-01/AGG11-01/AGG12-01 but with lower severity because the metadata is accurate (no false positive count). The fix is a one-line guard. This completes the audit-log consistency story across the entire tag management surface.
+
+2. **AGG13-02** (1 agent): Add a test case for `batchUpdateImageTags` where all tag operations are no-ops, verifying no `tags_batch_update` audit event is logged.
 
 ### Defer (LOW — documented for future)
 
@@ -42,7 +51,7 @@ None new this cycle.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
-All prior deferred items from cycles 5-46 remain deferred with no change in status. Full list preserved in `.context/plans/` deferred carry-forward documents and `.omc/plans/plan-deferred-items.md`.
+All prior deferred items from cycles 5-46 remain deferred with no change in status. Full list preserved in `.context/plans/` deferred carry-forward documents.
 
 Key items:
 - C32-03: Insertion-order eviction in Maps (also CRI-38-01 DRY concern)
@@ -64,9 +73,14 @@ Key items:
 - C6-V-02: `bootstrapImageProcessingQueue` cursor continuation path untested
 - AGG6R-06 through AGG6R-15: Restore lock complexity, OG clamping, etc.
 - Validation.ts `.length` for varchar boundaries (plan-326 carry-forward)
+- C8-TE-02: `countCodePoints` test file does not test action usage patterns
+- C7-TE-02 / AGG7R-08: Upload tracker hard-cap eviction path untested
+- AGG7R-05: Blur placeholder quality/cap not documented
+- AGG7R-06: `(user_filename)` index purpose not documented
+- C7-DES-02: Admin settings unsaved-changes protection
 
 ## Convergence assessment
 
-Cycle 12 found only one LOW-severity finding (1 item). No CRITICAL or HIGH findings, and no MEDIUM findings. All prior cycle fixes verified intact. The codebase is in a stable, well-hardened state. The only actionable fix is the audit-log gating in `batchAddTags` (AGG12-01); this completes the trilogy of audit-log consistency fixes across the tag management actions (addTagToImage fixed in cycle 10, removeTagFromImage fixed in cycle 11, batchAddTags identified this cycle).
+Cycle 13 found only two LOW-severity findings (2 items). No CRITICAL or HIGH findings, and no MEDIUM findings. All prior cycle fixes verified intact. The codebase continues in a stable, well-hardened state. The only actionable fix is the audit-log gating in `batchUpdateImageTags` (AGG13-01), which is the final remaining audit-log consistency gap in the tag management actions surface after AGG10-01 (addTagToImage), AGG11-01 (removeTagFromImage), and AGG12-01 (batchAddTags) were fixed in prior cycles.
 
-**Convergence signal**: Finding count and severity continue to decrease. The review is at a near-fixed-point where only one audit-log consistency issue remains in the tag-management action surface.
+**Convergence signal**: Finding count remains at near-fixed-point (1-2 LOW items per cycle). The review is converged — only audit-log consistency polish remains.

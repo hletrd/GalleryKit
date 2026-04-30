@@ -1,4 +1,4 @@
-# Designer Review — designer (Cycle 8)
+# Designer Review — designer (Cycle 13)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
@@ -10,7 +10,7 @@ Date: 2026-04-29
 
 ## Verified fixes from prior cycles
 
-No UI/UX changes in cycle 7 fix surface. All prior designer findings remain deferred:
+No UI/UX changes in the cycle 12-13 fix surface. All prior designer findings remain deferred:
 - C7-DES-01: Emoji-heavy title rejection UX — partially addressed by `countCodePoints` fix in images.ts.
 - C7-DES-02: Admin settings unsaved-changes protection — deferred.
 

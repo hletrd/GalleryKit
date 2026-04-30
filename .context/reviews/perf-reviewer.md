@@ -1,4 +1,4 @@
-# Performance Review — perf-reviewer (Cycle 12)
+# Performance Review — perf-reviewer (Cycle 13)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29

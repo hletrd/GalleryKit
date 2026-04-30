@@ -1,4 +1,4 @@
-# Security Review — security-reviewer (Cycle 12)
+# Security Review — security-reviewer (Cycle 13)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
@@ -6,29 +6,28 @@ Date: 2026-04-29
 ## Summary
 
 - No new critical or high security findings.
-- One low finding (audit-log integrity — same class as AGG10-01/AGG11-01).
+- One low finding (audit-log integrity — same class as AGG10-01/AGG11-01/AGG12-01).
 - All prior security fixes confirmed intact.
 
 ## Verified fixes from prior cycles
 
 All prior security findings confirmed addressed:
 
-1. AGG11-01 (`removeTagFromImage` audit on no-op DELETE): FIXED — gated on `affectedRows > 0`.
-2. AGG10-01 (`addTagFromImage` audit on no-op INSERT IGNORE): FIXED — gated on `affectedRows > 0`.
-3. AGG9R-02 (`withAdminAuth` origin check): FIXED — `hasTrustedSameOrigin` added centrally.
-4. AGG9R-01 (`countCodePoints` for varchar length checks): FIXED — used in all relevant actions.
-5. AGG10-02/AGG10-03 (`.length` documentation): FIXED — comments added.
+1. AGG12-01 (`batchAddTags` audit on INSERT IGNORE no-ops): FIXED — gated on `affectedRows > 0`.
+2. AGG11-01 (`removeTagFromImage` audit on no-op DELETE): FIXED — gated on `affectedRows > 0`.
+3. AGG10-01 (`addTagToImage` audit on no-op INSERT IGNORE): FIXED — gated on `affectedRows > 0`.
+4. AGG9R-02 (`withAdminAuth` origin check): FIXED — `hasTrustedSameOrigin` added centrally.
+5. AGG9R-01 (`countCodePoints` for varchar length checks): FIXED — used in all relevant actions.
 6. C8-AGG8R-01 (stateful `/g` regex in `sanitizeAdminString`): FIXED — uses `UNICODE_FORMAT_CHARS` (non-`/g`) for `.test()`.
-7. `csv-escape.ts` formula injection + bidi/zero-width stripping: Confirmed intact.
 
 ## New Findings
 
-### C12-SEC-01 (Low / Medium). `batchAddTags` audit log fires on INSERT IGNORE no-ops — misleading audit trail
+### C13-SEC-01 (Low / Low). `batchUpdateImageTags` audit log fires when `added === 0 && removed === 0` — unnecessary audit noise
 
-- Location: `apps/web/src/app/actions/tags.ts:327`
-- The `tags_batch_add` audit event is logged unconditionally after `db.insert(imageTags).ignore().values(values)` at line 324. When INSERT IGNORE is a no-op (all rows are duplicates), `affectedRows === 0` but the audit log still fires with `count: existingIds.size`. The standalone `addTagToImage` (AGG10-01, fixed) and `removeTagFromImage` (AGG11-01, fixed) both gate their audit logs on `affectedRows > 0`, but the batch counterpart does not.
-- This is the same class as AGG10-01/AGG11-01 but for the batch-add path. A `tags_batch_add` event that did not actually link any tags is misleading for forensic analysis.
-- Suggested fix: Capture `affectedRows` from the INSERT IGNORE result and gate the audit log on `affectedRows > 0`. Also use the actual affected count in the audit metadata.
+- Location: `apps/web/src/app/actions/tags.ts:452`
+- The `tags_batch_update` audit event fires unconditionally after the transaction, even when no tags were actually added or removed. Unlike the prior AGG10/11/12 findings where the `count` metadata was misleading, here the metadata `{ added: 0, removed: 0 }` is technically accurate. The event is just unnecessary noise — a zero-effect audit event.
+- Severity is Low because the metadata is accurate (no false positive count). The audit trail is not misleading, just noisy.
+- Suggested fix: Gate the audit log on `added > 0 || removed > 0` for consistency with the rest of the tag action surface.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 

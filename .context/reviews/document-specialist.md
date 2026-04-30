@@ -1,4 +1,4 @@
-# Document Specialist Review — document-specialist (Cycle 8)
+# Document Specialist Review — document-specialist (Cycle 13)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29

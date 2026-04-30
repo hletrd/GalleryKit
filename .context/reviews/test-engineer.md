@@ -1,4 +1,4 @@
-# Test Engineer Review — test-engineer (Cycle 8)
+# Test Engineer Review — test-engineer (Cycle 13)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
@@ -6,29 +6,23 @@ Date: 2026-04-29
 ## Summary
 
 - No new critical or high findings.
-- Two medium test-gap findings.
+- One low test-gap finding for the new audit-log pattern.
 
 ## Verified fixes from prior cycles
 
-1. C7-TE-01 / AGG7R-01: Redundant `IS NULL` test — acknowledged as addressed.
-2. C7-TE-02 / AGG7R-08: Upload tracker hard-cap test — carry-forward.
+1. C8-TE-01 / C8-AGG8R-03: `sanitizeAdminString` unit tests — FIXED.
+2. C8-TE-02: `countCodePoints` test file coverage — carry-forward.
 
 ## New Findings
 
-### C8-TE-01 (Medium / Medium). No unit test for `sanitizeAdminString` — the stateful regex bug (C8-CR-01 / C8-SEC-01) was not caught by any existing test
+### C13-TE-01 (Low / Low). No unit test for `batchUpdateImageTags` audit-log gating on `added === 0 && removed === 0`
 
-- Location: `apps/web/src/lib/sanitize.ts` — no test file exists
-- The `sanitizeAdminString` function was added in cycle 7 but no unit tests were written for it. The stateful `/g` regex bug that allows bidi overrides through on alternate calls would have been caught by a simple test calling `sanitizeAdminString` twice on the same input.
-- Concrete scenario: A test that calls `sanitizeAdminString('hello‪world')` twice in succession. The first call returns `{ rejected: true }`, the second returns `{ rejected: false }` due to `lastIndex` state. This is a testable, reproducible bug.
-- Suggested fix: Add `__tests__/sanitize-admin-string.test.ts` with test cases covering: (1) normal string, (2) string with bidi override, (3) same input called twice, (4) null input, (5) string with C0 controls only.
-
-### C8-TE-02 (Low / Low). `countCodePoints` test file does not test the actual action file usage patterns
-
-- Location: `apps/web/src/__tests__/code-point-length.test.ts`
-- The test file verifies `countCodePoints()` works correctly in isolation, but does not test the actual action file validation logic that should use it (topics.ts, seo.ts). Since these files still use `.length`, there is no regression test to catch when a new action file uses `.length` instead of `countCodePoints()`.
-- Suggested fix: Add integration-style tests that submit emoji-heavy topic labels and SEO titles, verifying they are accepted (not falsely rejected).
+- Location: `apps/web/src/__tests__/tags-actions.test.ts`
+- The audit-log gating pattern (gate on `affectedRows > 0` / `added > 0 || removed > 0`) has been fixed in cycles 10-12, but no test verifies that `batchUpdateImageTags` does NOT log a `tags_batch_update` event when all tag operations are no-ops. A test sending only invalid/colliding tag names and asserting no audit event was recorded would catch a regression.
+- Suggested fix: Add a test case where `addTagNames` and `removeTagNames` are all invalid, verify the result has `added: 0, removed: 0`, and assert no `tags_batch_update` audit event was logged.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
+- C8-TE-02: `countCodePoints` test file does not test actual action file usage patterns.
 - C7-TE-02 / AGG7R-08: Upload tracker hard-cap eviction path untested.
 - C6-V-02: `bootstrapImageProcessingQueue` cursor continuation path untested.

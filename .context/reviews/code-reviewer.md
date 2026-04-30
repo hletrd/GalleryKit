@@ -1,39 +1,36 @@
-# Code Review Report — code-reviewer (Cycle 12)
+# Code Review Report — code-reviewer (Cycle 13)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 Scope: whole repository, focusing on code quality, logic, SOLID boundaries, and maintainability.
-Verification: All prior cycle fixes confirmed intact (AGG9R-01, AGG9R-02, AGG10-01, AGG10-02, AGG10-03, AGG11-01).
+Verification: All prior cycle fixes confirmed intact (AGG9R-01, AGG9R-02, AGG10-01 through AGG12-01).
 
 ## Inventory reviewed
 
-All primary source files in `apps/web/src/` (237 files): lib/ (38 files), components/ (30 files), app/ actions and routes (40+ files), db/ (3 files), __tests__/ (79+ files), config files. Focused on post-cycle-11 surface: audit-log gating consistency, sanitization pipeline, action-guard coverage.
+All primary source files in `apps/web/src/` (237 files): lib/ (38 files), components/ (30 files), app/ actions and routes (40+ files), db/ (3 files), __tests__/ (79+ files), config files. Focused on audit-log consistency, sanitization pipeline, action-guard coverage, and cross-file interaction patterns.
 
 ## Verified fixes from prior cycles
 
 All prior fixes confirmed intact:
 
-1. AGG11-01 (`removeTagFromImage` audit log on no-op DELETE): FIXED — `tags.ts:254` gates on `deleteResult.affectedRows > 0`.
-2. AGG10-01 (`addTagFromImage` audit log on no-op INSERT IGNORE): FIXED — `tags.ts:193` gates on `linkResult.affectedRows > 0`.
-3. AGG10-02/AGG10-03 (`.length` documentation): FIXED — comments present in `validation.ts:22-24` and `validation.ts:99-103`.
-4. AGG9R-01 (`countCodePoints` for varchar length checks): FIXED — used in topics, SEO, image metadata actions.
+1. AGG12-01 (`batchAddTags` audit log gated on `affectedRows > 0`): FIXED — `tags.ts:329-332` correctly gates the `tags_batch_add` audit event and uses `batchInsertResult.affectedRows` as the `count` metadata.
+2. AGG11-01 (`removeTagFromImage` audit log on no-op DELETE): FIXED — `tags.ts:254` gates on `deleteResult.affectedRows > 0`.
+3. AGG10-01 (`addTagToImage` audit log on no-op INSERT IGNORE): FIXED — `tags.ts:193` gates on `linkResult.affectedRows > 0`.
+4. AGG9R-01 (`countCodePoints` for DoS-prevention length bounds): FIXED — used in images.ts, topics.ts, seo.ts, public.ts.
 5. AGG9R-02 (`withAdminAuth` origin check): FIXED — `api-auth.ts:31-37` checks `hasTrustedSameOrigin`.
+6. AGG8R-01 (stateful `/g` regex in `sanitizeAdminString`): FIXED — uses `UNICODE_FORMAT_CHARS` (non-`/g`) for `.test()`.
+7. AGG10-02/AGG10-03 (`.length` documentation): FIXED — comments present in `validation.ts`.
 
 ## New Findings
 
-### C12-CR-01 (Low / Medium). `batchAddTags` audit log fires unconditionally after INSERT IGNORE — same class as AGG10-01/AGG11-01
+### C13-CR-01 (Low / Medium). `batchUpdateImageTags` audit log fires unconditionally after transaction — even when `added === 0 && removed === 0`
 
-- Location: `apps/web/src/app/actions/tags.ts:327`
-- The `db.insert(imageTags).ignore().values(values)` at line 324 uses INSERT IGNORE. When all rows are duplicates (tag already linked to all images), `affectedRows === 0` and no tags were actually linked, but the audit log at line 327 fires unconditionally, logging `existingIds.size` as the count. The `batchUpdateImageTags` function (same file, line 414) correctly gates `added++` on `tagInsertResult.affectedRows > 0`, but `batchAddTags` does not gate its audit log.
-- This is the same class of issue as AGG10-01 (addTagToImage, fixed cycle 10) and AGG11-01 (removeTagFromImage, fixed cycle 11), but the batch-add counterpart was missed.
-- The `count` field in the audit metadata is `existingIds.size` (the number of candidate images), not the actual number of rows inserted. This means the audit trail is misleading when some or all INSERT IGNORE operations are no-ops.
-- Severity is low because no data corruption occurs, but the audit trail is inaccurate.
-- Suggested fix: Capture the `affectedRows` from the INSERT IGNORE result and gate the audit log on `affectedRows > 0`. Also change the `count` metadata to reflect actual rows inserted.
-
-### C12-CR-02 (Low / Low). `updateTag` logs audit event even when UPDATE matched 0 rows (concurrent deletion)
-
-- Location: `apps/web/src/app/actions/tags.ts:89`
-- The `db.update(tags).set(...).where(...)` at line 82-84 returns `affectedRows === 0` when the tag was concurrently deleted. The code at line 85-86 checks `affectedRows === 0` and returns an error, so the audit log at line 89 only fires when `affectedRows > 0`. This is correctly gated — no issue. Listed for completeness to confirm the pattern was verified.
+- Location: `apps/web/src/app/actions/tags.ts:452`
+- The `tags_batch_update` audit event at line 452 fires unconditionally after the transaction completes successfully, even when no tags were actually added or removed (`added === 0 && removed === 0`). This can occur when all tag names were invalid, had slug collisions, or were already in the desired state (already linked / already unlinked).
+- This is the same class of issue as AGG10-01 (fixed cycle 10 for `addTagToImage`), AGG11-01 (fixed cycle 11 for `removeTagFromImage`), and AGG12-01 (fixed cycle 12 for `batchAddTags`), but the `batchUpdateImageTags` counterpart was missed.
+- The audit metadata `{ added, removed }` correctly reflects the zero counts, so the audit trail is not *misleading* in the same way as the prior findings. However, an audit event that records zero effective changes is noise — it indicates the action ran but had no effect, which could confuse forensic analysis.
+- Severity is low because the metadata is accurate (no false positive count), but the event itself is unnecessary when no mutation occurred.
+- Suggested fix: Gate the audit log on `added > 0 || removed > 0`.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
