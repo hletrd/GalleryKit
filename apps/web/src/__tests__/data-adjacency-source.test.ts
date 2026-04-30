@@ -30,8 +30,13 @@ describe('getImage gallery adjacency source contract', () => {
         expect(falseInCode).toBeNull();
     });
 
-    it('treats groups with no remaining images as inaccessible', () => {
-        expect(getSharedGroupSource).toContain('if (imagesWithTags.length === 0)');
-        expect(getSharedGroupSource).toMatch(/if \(imagesWithTags\.length === 0\) \{\s*return null;\s*\}/);
+    it('returns group with empty images instead of null (C6F-01)', () => {
+        // C6F-01: getSharedGroup now returns the group even when all images
+        // are still processing (empty imagesWithTags), so the page shows a
+        // meaningful state instead of a 404. The old early-return null was
+        // removed. Verify the "return null" pattern is gone and the group
+        // is always returned with the images array.
+        expect(getSharedGroupSource).not.toMatch(/if \(imagesWithTags\.length === 0\) \{\s*return null;\s*\}/);
+        expect(getSharedGroupSource).toContain('images: imagesWithTags');
     });
 });
