@@ -108,6 +108,8 @@ export const adminUsers = mysqlTable("admin_users", {
     username: varchar("username", { length: 255 }).notNull().unique(),
     password_hash: varchar("password_hash", { length: 512 }).notNull(),
     created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+    // C16-LOW-14: timestamps password changes at column level.
+    updated_at: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).onUpdateNow(),
 });
 
 export const auditLog = mysqlTable("audit_log", {
