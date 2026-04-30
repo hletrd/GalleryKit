@@ -26,9 +26,9 @@ import { deleteTopicImage, processTopicImage } from '@/lib/process-topic-image';
 import { revalidateAllAppData } from '@/lib/revalidation';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, containsUnicodeFormatting } from '@/lib/validation';
+import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
-import { requireCleanInput } from '@/lib/sanitize';
+import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 
@@ -76,20 +76,15 @@ export async function createTopic(formData: FormData) {
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
 
-    // Reject malformed input: if sanitization changes the value, the input
-    // contained control characters and must not silently proceed (defense in
-    // depth — matches updateTopic/deleteTopic pattern, see C7R2-02).
-    const { value: label, rejected: labelRejected } = requireCleanInput(formData.get('label')?.toString());
+    // C7-AGG7R-03: sanitizeAdminString checks Unicode formatting BEFORE
+    // stripping (stripControlChars now removes bidi/zero-width chars, so
+    // calling containsUnicodeFormatting after requireCleanInput would always
+    // pass). Replaces the separate requireCleanInput + containsUnicodeFormatting
+    // pattern (C5L-SEC-01 / C6L-ARCH-01) with a single atomic helper.
+    const { value: label, rejected: labelRejected } = sanitizeAdminString(formData.get('label')?.toString());
     const { value: slug, rejected: slugRejected } = requireCleanInput(formData.get('slug')?.toString());
     if (labelRejected) return { error: t('invalidLabel') };
     if (slugRejected) return { error: t('invalidSlug') };
-    // C5L-SEC-01 / C6L-ARCH-01: reject Unicode bidi/invisible formatting in
-    // admin-controlled labels for parity with topic aliases (C3L-SEC-01) and
-    // tag names (C4L-SEC-01). Labels render in admin tables, public navigation,
-    // OG images, and SEO previews; React HTML-escapes special chars but does
-    // not strip Unicode bidi/invisible chars, leaving a visual-spoofing
-    // surface unless rejected here. Single canonical helper.
-    if (containsUnicodeFormatting(label)) return { error: t('invalidLabel') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
@@ -182,16 +177,13 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
         return { error: t('invalidCurrentSlug') };
     }
 
-    // Reject malformed label/slug: if sanitization changes the value, the
-    // input contained control characters and must not silently proceed
-    // (defense in depth — matches createTopic pattern, see C7R2-02).
-    const { value: label, rejected: labelRejected } = requireCleanInput(formData.get('label')?.toString());
+    // C7-AGG7R-03: sanitizeAdminString checks Unicode formatting BEFORE
+    // stripping (replaces separate requireCleanInput + containsUnicodeFormatting
+    // pattern that was silently passing after stripControlChars was extended).
+    const { value: label, rejected: labelRejected } = sanitizeAdminString(formData.get('label')?.toString());
     const { value: slug, rejected: slugRejected } = requireCleanInput(formData.get('slug')?.toString());
     if (labelRejected) return { error: t('invalidLabel') };
     if (slugRejected) return { error: t('invalidSlug') };
-    // C5L-SEC-01 / C6L-ARCH-01: reject Unicode bidi/invisible formatting in
-    // updated labels (parity with createTopic). Single canonical helper.
-    if (containsUnicodeFormatting(label)) return { error: t('invalidLabel') };
     const orderStr = formData.get('order')?.toString() ?? '';
     const imageFile = (() => { const v = formData.get('image'); return v instanceof File ? v : null; })();
 
