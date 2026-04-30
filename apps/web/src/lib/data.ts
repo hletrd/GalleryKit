@@ -19,6 +19,11 @@ let viewCountBuffer = new Map<number, number>();
 // is dropped and a warning is logged instead of re-buffering indefinitely.
 const viewCountRetryCount = new Map<number, number>();
 const VIEW_COUNT_MAX_RETRIES = 3;
+// C5-AGG-02: explicit size cap for viewCountRetryCount. Entries are bounded
+// by the number of shared groups (admin-controlled, typically < 100). The cap
+// prevents unbounded growth during sustained DB outages where the buffer
+// never empties and the pruning-at-empty-buffer path (line ~128) never fires.
+const MAX_VIEW_COUNT_RETRY_SIZE = 500;
 let viewCountFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_VIEW_COUNT_BUFFER_SIZE = 1000;
 
@@ -125,6 +130,19 @@ async function flushGroupViewCounts() {
         // unbounded growth of this Map over time.
         if (viewCountRetryCount.size > 0 && viewCountBuffer.size === 0) {
             viewCountRetryCount.clear();
+        }
+        // C5-AGG-02: enforce hard cap on viewCountRetryCount. During a
+        // sustained DB outage where the buffer never empties, the
+        // pruning-at-empty-buffer path above never fires. Evict oldest
+        // entries (FIFO) to keep the Map bounded.
+        if (viewCountRetryCount.size > MAX_VIEW_COUNT_RETRY_SIZE) {
+            const excess = viewCountRetryCount.size - MAX_VIEW_COUNT_RETRY_SIZE;
+            let evicted = 0;
+            for (const key of viewCountRetryCount.keys()) {
+                if (evicted >= excess) break;
+                viewCountRetryCount.delete(key);
+                evicted++;
+            }
         }
     }
 }
