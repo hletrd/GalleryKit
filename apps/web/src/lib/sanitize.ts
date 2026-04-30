@@ -133,7 +133,9 @@ export function sanitizeStderr(data: Buffer | string, pwd?: string, sensitiveVal
         }
     }
     // Regex 1: generic password=VALUE and password:VALUE patterns (see doc above)
-    text = text.replace(/(password\s*[:=]\s*)[^\s;'"`)]*/gi, '$1[REDACTED]');
+    // C16-LOW-07: expanded character class to include >, }, ] for broader
+    // coverage of connection-string formats (e.g., password={value}).
+    text = text.replace(/(password\s*[:=]\s*)[^\s;'"`)>}\]]*/gi, '$1[REDACTED]');
     // Regex 2: specific MySQL "using password: YES/NO" format (see doc above)
     text = text.replace(/(using password:\s*)[^\s)]+/gi, '$1[REDACTED]');
     return text;
