@@ -91,4 +91,38 @@ describe('sanitizeStderr', () => {
         const result = sanitizeStderr(input);
         expect(result).toBe("password=[REDACTED]'user");
     });
+
+    // C6-AGG6R-12: test regex-metacharacter password escaping in the pwd parameter.
+    // The pwd value is escaped via pwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // before being used in new RegExp(escaped, 'g'). These tests verify
+    // that metacharacters in the password are treated as literals, not regex.
+
+    it('redacts password containing $ (regex end-of-string)', () => {
+        const input = "Error: connection with pass$word failed";
+        const result = sanitizeStderr(input, 'pass$word');
+        expect(result).not.toContain('pass$word');
+        expect(result).toContain('[REDACTED]');
+    });
+
+    it('redacts password containing . (regex wildcard)', () => {
+        const input = "Error: connection with a.b failed";
+        const result = sanitizeStderr(input, 'a.b');
+        // Must redact the exact "a.b" literal, not "aXb" where X is any char
+        expect(result).not.toContain('a.b');
+        expect(result).toContain('[REDACTED]');
+    });
+
+    it('redacts password containing [] (regex character class)', () => {
+        const input = "Error: connection with x[y]z failed";
+        const result = sanitizeStderr(input, 'x[y]z');
+        expect(result).not.toContain('x[y]z');
+        expect(result).toContain('[REDACTED]');
+    });
+
+    it('redacts password containing ( (regex group)', () => {
+        const input = "Error: connection with abc(def failed";
+        const result = sanitizeStderr(input, 'abc(def');
+        expect(result).not.toContain('abc(def');
+        expect(result).toContain('[REDACTED]');
+    });
 });
