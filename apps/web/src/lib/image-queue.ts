@@ -341,7 +341,15 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             state.permanentlyFailedIds.add(job.id);
             if (state.permanentlyFailedIds.size > MAX_PERMANENTLY_FAILED_IDS) {
                 const oldest = state.permanentlyFailedIds.values().next().value;
-                if (oldest !== undefined) state.permanentlyFailedIds.delete(oldest);
+                if (oldest !== undefined) {
+                    state.permanentlyFailedIds.delete(oldest);
+                    // C7-MED-05: clean up associated retry maps when evicting from
+                    // permanentlyFailedIds, so stale entries don't accumulate in
+                    // claimRetryCounts and retryCounts for IDs that are no longer
+                    // tracked as permanently failed.
+                    state.claimRetryCounts.delete(oldest);
+                    state.retryCounts.delete(oldest);
+                }
             }
             // Reschedule bootstrap to discover other pending images. The
             // permanently-failed ID is excluded from the bootstrap query
