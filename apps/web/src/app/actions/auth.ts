@@ -17,6 +17,7 @@ import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { getTrustedRequestProtocol, hasTrustedSameOrigin } from '@/lib/request-origin';
+import { countCodePoints } from '@/lib/utils';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -316,11 +317,17 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         return { error: t('passwordsDoNotMatch') };
     }
 
-    if (newPassword.length < 12) {
+    // C20-AGG-01: use countCodePoints for password length validation so
+    // supplementary characters (emoji, rare CJK) count as one character
+    // each, matching the countCodePoints pattern used for title, description,
+    // label, and SEO fields. JS `.length` counts UTF-16 code units (2 per
+    // surrogate pair), so a 6-emoji password would pass the 12-char minimum
+    // despite having only 6 actual characters (reduced effective entropy).
+    if (countCodePoints(newPassword) < 12) {
         return { error: t('passwordTooShort') };
     }
 
-    if (newPassword.length > 1024) {
+    if (countCodePoints(newPassword) > 1024) {
         return { error: t('passwordTooLong') };
     }
 

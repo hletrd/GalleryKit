@@ -12,6 +12,7 @@ import { hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
+import { countCodePoints } from '@/lib/utils';
 import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -102,8 +103,11 @@ export async function createAdminUser(formData: FormData) {
     if (!username || username.length < 3) return { error: t('usernameTooShort') };
     if (username.length > 64) return { error: t('usernameTooLong') };
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) return { error: t('invalidUsernameFormat') };
-    if (!password || password.length < 12) return { error: t('passwordTooShortCreate') };
-    if (password.length > 1024) return { error: t('passwordTooLongCreate') };
+    // C20-AGG-01: use countCodePoints for password length validation so
+    // supplementary characters (emoji, rare CJK) count as one character
+    // each, matching the auth.ts password validation pattern.
+    if (!password || countCodePoints(password) < 12) return { error: t('passwordTooShortCreate') };
+    if (countCodePoints(password) > 1024) return { error: t('passwordTooLongCreate') };
     if (password !== confirmPassword) return { error: t('passwordsDoNotMatch') };
 
     // Rate limit admin user creation to prevent brute-force / CPU DoS.
