@@ -1052,6 +1052,12 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     // to minimize internal filename exposure. filename_jpeg is needed for thumbnails.
     // C6F-03: created_at included in SELECT and GROUP BY for strict SQL mode
     // compatibility (ORDER BY references it).
+    // C8-MED-02 / C7-MED-04: MAINTENANCE NOTE — any new column added to
+    // searchFields MUST also be added to BOTH GROUP BY clauses below:
+    //   - Tag search GROUP BY (lines ~1127-1139)
+    //   - Alias search GROUP BY (lines ~1147-1159)
+    // MySQL ONLY_FULL_GROUP_BY mode will reject queries where a selected
+    // column is not in the GROUP BY or an aggregate function.
     const searchFields = {
         id: images.id, title: images.title, description: images.description,
         filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
