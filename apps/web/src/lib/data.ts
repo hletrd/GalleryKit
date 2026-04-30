@@ -1023,7 +1023,9 @@ export async function getSharedGroup(
 
 export async function getTopicBySlug(slug: string) {
     // Direct topic slugs are always ASCII-safe; aliases may contain CJK/emoji
-    if (/^[a-z0-9_-]+$/.test(slug)) {
+    // C20-AGG-02: use isValidSlug() instead of inline regex for consistency
+    // with getImageCount and buildImageConditions (C19-AGG-02 fix).
+    if (isValidSlug(slug)) {
         const [directMatch] = await db
             .select({
                 slug: topics.slug,
