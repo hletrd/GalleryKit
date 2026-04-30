@@ -301,6 +301,7 @@
     "title": "Shared Photos",
     "photo": "Photo",
     "empty": "No photos in this group.",
+    "processing": "Photos are still being processed. Please check back shortly.",
     "notFound": "Shared album not found.",
     "viewCount": "{count} shared photos",
     "viewGallery": "View Gallery",
