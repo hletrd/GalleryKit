@@ -243,19 +243,13 @@ export async function login(prevState: { error?: string } | null, formData: Form
     } catch (e) {
         unstable_rethrow(e);
         console.error("Login verification failed:", e instanceof Error ? e.message : 'Unknown error');
-        // Roll back pre-incremented rate limit on unexpected errors —
-        // the user didn't fail authentication, the infrastructure did.
-        // Use decrement instead of delete so concurrent rollbacks don't lose counts (C1-07).
-        try {
-            await rollbackLoginRateLimit(ip, loginBucketStart);
-        } catch (rollbackErr) {
-            console.debug('Failed to roll back login rate limit after unexpected error:', rollbackErr);
-        }
-        try {
-            await rollbackAccountLoginRateLimit(accountRateLimitKey, loginBucketStart);
-        } catch (rollbackErr) {
-            console.debug('Failed to roll back account-scoped login rate limit after unexpected error:', rollbackErr);
-        }
+        // C1F-CR-04 / C1F-SR-01: do NOT roll back the pre-incremented rate-limit
+        // counters on unexpected infrastructure errors. Rolling back reduces the
+        // failed-attempt budget, giving an attacker extra attempts when they can
+        // trigger infrastructure errors (e.g. by overloading the DB). The user can
+        // simply retry — the 15-minute window is generous. The attempt counts as
+        // a legitimate consumption of the rate-limit budget regardless of whether
+        // the failure was caused by wrong credentials or by infrastructure.
         return { error: t('authFailed') };
     }
 }
@@ -433,14 +427,10 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         // intended redirect.
         unstable_rethrow(e);
         console.error("Failed to update password:", e instanceof Error ? e.message : 'Unknown error');
-        // Roll back pre-incremented rate limit on unexpected errors —
-        // the user didn't fail authentication, the infrastructure did.
-        // Use decrement instead of delete so concurrent rollbacks don't lose counts (C1-07).
-        try {
-            await rollbackPasswordChangeRateLimit(ip, passwordBucketStart);
-        } catch (rollbackErr) {
-            console.debug('Failed to roll back password change rate limit after unexpected error:', rollbackErr);
-        }
+        // C1F-CR-04 / C1F-SR-01: do NOT roll back the pre-incremented rate-limit
+        // counter on unexpected infrastructure errors, matching the login path above.
+        // Rolling back reduces the failed-attempt budget. The attempt counts as
+        // legitimate consumption of the rate-limit budget regardless of the cause.
         return { error: t('failedToUpdatePassword') };
     }
 }
