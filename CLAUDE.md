@@ -92,6 +92,7 @@ git values must be treated as compromised and must not be reused.
 | `apps/web/src/lib/process-image.ts` | Sharp pipeline (parallel AVIF/WebP/JPEG, ICC parsing, bounds checks) |
 | `apps/web/src/lib/data.ts` | Data access layer with React cache() deduplication |
 | `apps/web/src/proxy.ts` | i18n routing + middleware-level admin auth guard |
+| `apps/web/src/lib/auth-rate-limit.ts` | Account-scoped and password-change rate limiting (in-memory Maps with DB backup for login) |
 | `apps/web/src/app/[locale]/admin/db-actions.ts` | DB backup/restore with security hardening |
 | `apps/web/src/app/api/admin/db/download/route.ts` | Authenticated backup file download |
 | `apps/web/src/site-config.json` | File-backed site defaults and static links; DB-backed admin settings override editable SEO/branding fields |
@@ -209,7 +210,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **`tag_names` aggregation**: the masonry-list queries (`getImagesLite`, `getImagesLitePage`, `getAdminImagesLite`, plus the full `getImages`) all use a shared `tagNamesAgg` constant in `apps/web/src/lib/data.ts` that compiles to `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` over a `LEFT JOIN imageTags … LEFT JOIN tags … GROUP BY images.id`. A scalar correlated subquery shape using raw SQL aliases (`it`, `t`) previously returned NULL in production, breaking the gallery aria-labels (cycle 1 RPF v3 NF-3, commit aca754c). The fixture-style test at `apps/web/src/__tests__/data-tag-names-sql.test.ts` locks this contract: do not migrate the queries away from `tagNamesAgg` without updating the test.
 
 ## Permanently Deferred
-- **2FA/WebAuthn**: Not planned. Single-user admin with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.
+- **2FA/WebAuthn**: Not planned. Multiple root admins with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.
 
 ## Important Notes
 

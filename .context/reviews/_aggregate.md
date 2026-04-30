@@ -1,11 +1,11 @@
-# Aggregate Review — Cycle 15
+# Aggregate Review — Cycle 16
 
-Date: 2026-04-30
-Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer
+Date: 2026-04-29
+Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier
 
-**HEAD:** `cb6591e` (docs(plans): update cycle 14 plan status to completed)
+**HEAD:** `bb28118` (feat(ui): sparkles add loading boundary for photo viewer page)
 
-## Source reviews (11 files)
+## Source reviews (5 files)
 
 | Reviewer | File |
 |---|---|
@@ -14,19 +14,13 @@ Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, te
 | Perf Reviewer | `.context/reviews/perf-reviewer.md` |
 | Critic | `.context/reviews/critic.md` |
 | Verifier | `.context/reviews/verifier.md` |
-| Test Engineer | `.context/reviews/test-engineer.md` |
-| Tracer | `.context/reviews/tracer.md` |
-| Architect | `.context/reviews/architect.md` |
-| Debugger | `.context/reviews/debugger.md` |
-| Document Specialist | `.context/reviews/document-specialist.md` |
-| Designer | `.context/reviews/designer.md` |
 
 ## Deduplicated findings (cross-agent agreement noted)
 
 | Unified ID | Source IDs | Description | Severity | Confidence | Cross-Agent |
 |---|---|---|---|---|---|
-| **C15-AGG-01** | C15-CR-01, C15-CRIT-01, C15-V-01 | `deleteTopic` has a redundant `deletedRows > 0` guard around the audit log. After the early return at `deletedRows === 0`, the condition is always true when reached. | LOW | LOW | 3 agents |
-| **C15-AGG-02** | C15-CR-02 (WITHDRAWN) | `loadMoreImages` `typeof safeOffset === 'number'` — NOT redundant; serves as TypeScript type guard narrowing `ImageListCursor \| number` to `number`. Withdrawn. | N/A | N/A | 1 agent (withdrawn) |
+| **C16-AGG-01** | C16-CR-01, C16-CT-01, C16-V-01 | `image-queue.ts` comment contradicts code — says "Do NOT reset bootstrapped / scheduleBootstrapRetry" but code does both. The code IS correct (permanentlyFailedIds prevents re-enqueue of the specific failed job), but the comment is wrong and could mislead future developers into removing necessary bootstrap retry logic. | MEDIUM | MEDIUM | 3 agents |
+| **C16-AGG-02** | C16-CR-02, C16-CT-02 | `instrumentation.ts` uses `console.log` instead of `console.debug` for shutdown messages. Inconsistent with rest of codebase. | LOW | LOW | 2 agents |
 
 ## Priority remediation order (this cycle)
 
@@ -34,19 +28,13 @@ Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, te
 
 None.
 
-### Should-fix (none — no MEDIUM with HIGH confidence)
+### Should-fix
 
-None.
+1. **C16-AGG-01** (3 agents): Fix the contradictory comment in `image-queue.ts:346-352`. Update the comment to accurately explain that the bootstrap retry IS correct because `permanentlyFailedIds` prevents re-enqueue of the specific failed job, and the rescan is needed to discover other pending images.
 
 ### Consider-fix (LOW — batch into polish patch if time permits)
 
-1. **C15-AGG-01** (3 agents): Remove the `if (deletedRows > 0)` guard in `deleteTopic` and add a comment that `deletedRows >= 1` is guaranteed by the early return above. Minor readability improvement.
-
-2. **C15-AGG-02** (WITHDRAWN): Originally suggested removing `typeof safeOffset === 'number'` in `loadMoreImages`, but the check is a required TypeScript type guard narrowing `ImageListCursor | number` to `number`. Not actionable.
-
-### Defer (LOW — documented for future)
-
-None new this cycle.
+2. **C16-AGG-02** (2 agents): Change `console.log` to `console.debug` in `instrumentation.ts:9,26`.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
@@ -79,10 +67,10 @@ Key items:
 
 ## Convergence assessment
 
-Cycle 15 found only two LOW-severity findings (2 items), both of which are minor readability/maintainability polish items rather than correctness bugs. No CRITICAL or HIGH findings, and no MEDIUM findings. All prior cycle fixes verified intact. The codebase continues in a stable, well-hardened state.
+Cycle 16 found 2 findings (1 MEDIUM, 1 LOW), both well-established with 2-3 agent agreement. The MEDIUM finding is a comment-code contradiction that could cause future regression if taken at face value. The LOW finding is a minor logging inconsistency.
 
-**Convergence signal**: Finding count remains at the fixed-point (1-2 LOW items per cycle). The review is fully converged — only minor readability polish items remain.
+**Convergence signal**: Finding count remains at the fixed-point (1-3 items per cycle). The codebase is in a stable, well-hardened state. New findings are narrow and targeted.
 
 ## Agent failures
 
-The spawned team agents (code-reviewer, perf-reviewer, security-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer) did not start executing automatically via the team message-passing mechanism. The lead agent performed all 11 reviews directly as a fallback. No findings were lost — all review angles were covered comprehensively.
+No agent failures this cycle. All 5 review agents completed successfully.
