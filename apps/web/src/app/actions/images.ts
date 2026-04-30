@@ -2,7 +2,7 @@
 
 import path from 'path';
 import { statfs } from 'fs/promises';
-import { db, images, imageTags, sharedGroups, sharedGroupImages } from '@/db';
+import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { eq, sql, inArray } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
@@ -234,6 +234,19 @@ export async function uploadImages(formData: FormData) {
         // Validate topic slug format
         if (!isValidSlug(topic)) {
             return { error: t('invalidTopicFormat') };
+        }
+
+        // C11-MED-01: verify the topic exists in the database before accepting
+        // uploads. Without this, deleting a topic while another admin has the
+        // upload form open results in orphaned images with no topic metadata
+        // (label, order, image_filename). The schema uses varchar without a FK
+        // constraint on images.topic, so the INSERT would otherwise succeed.
+        const [topicRow] = await db.select({ slug: topics.slug })
+            .from(topics)
+            .where(eq(topics.slug, topic))
+            .limit(1);
+        if (!topicRow) {
+            return { error: t('topicNotFound') };
         }
 
         // Pre-increment tracker to prevent TOCTOU race: concurrent uploads from
