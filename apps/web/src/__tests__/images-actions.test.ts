@@ -21,6 +21,7 @@ const {
     ensureTagRecordMock,
     acquireUploadProcessingContractLockMock,
     uploadContractReleaseMock,
+    selectResultMock,
 } = vi.hoisted(() => ({
     statfsMock: vi.fn(),
     mkdirMock: vi.fn(),
@@ -42,6 +43,10 @@ const {
     ensureTagRecordMock: vi.fn(),
     acquireUploadProcessingContractLockMock: vi.fn(),
     uploadContractReleaseMock: vi.fn(),
+    // C11-MED-01: configurable select result for topic-existence check.
+    // Default: topic found (upload proceeds). Individual tests override
+    // to return [] (topic not found).
+    selectResultMock: vi.fn().mockResolvedValue([{ slug: 'travel' }]),
 }));
 
 function makeInsertChain<T>(result: T) {
@@ -58,6 +63,15 @@ vi.mock('fs/promises', () => ({
 vi.mock('@/db', () => ({
     db: {
         insert: insertMock,
+        // C11-MED-01: select mock for topic-existence check in uploadImages.
+        // Uses selectResultMock so individual tests can override the result.
+        select: vi.fn(() => ({
+            from: vi.fn(() => ({
+                where: vi.fn(() => ({
+                    limit: selectResultMock,
+                })),
+            })),
+        })),
     },
     images: {
         id: 'images.id',
@@ -65,6 +79,9 @@ vi.mock('@/db', () => ({
     imageTags: {
         imageId: 'image_tags.image_id',
         tagId: 'image_tags.tag_id',
+    },
+    topics: {
+        slug: 'topics.slug',
     },
 }));
 
@@ -191,6 +208,9 @@ describe('uploadImages', () => {
             kind: 'found',
             tag: { id: 7, name: cleanName, slug },
         }));
+        // C11-MED-01: reset select result to default (topic found)
+        selectResultMock.mockReset();
+        selectResultMock.mockResolvedValue([{ slug: 'travel' }]);
     });
 
     it('revalidates the affected topic path after a successful upload', async () => {
@@ -270,6 +290,20 @@ describe('uploadImages', () => {
         formData.set('tags', '');
 
         await expect(uploadImages(formData)).resolves.toEqual({ error: 'insufficientDiskSpace' });
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects upload when the topic does not exist in the database (C11-MED-01)', async () => {
+        // Override the select result to return an empty array (topic not found)
+        selectResultMock.mockResolvedValue([]);
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'deleted-topic');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'topicNotFound' });
         expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
     });
