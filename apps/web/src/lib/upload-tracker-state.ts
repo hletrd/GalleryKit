@@ -23,20 +23,32 @@ export function getUploadTracker() {
 /** Prune expired upload tracker entries to prevent unbounded memory growth. */
 export function pruneUploadTracker(now: number = Date.now()) {
     const uploadTracker = getUploadTracker();
+
+    // C8-MED-01: collect expired keys first, then delete in a separate pass.
+    // ES6 guarantees that Map.prototype.delete() during for...of iteration is
+    // safe (the iterator accounts for deletions), but the collect-then-delete
+    // pattern is clearer for reviewers and matches BoundedMap.prune() (C7-MED-01).
+    const expiredKeys: string[] = [];
     for (const [key, entry] of uploadTracker) {
         if (now - entry.windowStart > UPLOAD_TRACKING_WINDOW_MS * 2) {
-            uploadTracker.delete(key);
+            expiredKeys.push(key);
         }
+    }
+    for (const key of expiredKeys) {
+        uploadTracker.delete(key);
     }
 
     // Hard cap: evict oldest if still over limit after expiry pruning.
+    // Same collect-then-delete pattern as above.
     if (uploadTracker.size > UPLOAD_TRACKER_MAX_KEYS) {
         const excess = uploadTracker.size - UPLOAD_TRACKER_MAX_KEYS;
-        let evicted = 0;
+        const evictKeys: string[] = [];
         for (const key of uploadTracker.keys()) {
-            if (evicted >= excess) break;
+            if (evictKeys.length >= excess) break;
+            evictKeys.push(key);
+        }
+        for (const key of evictKeys) {
             uploadTracker.delete(key);
-            evicted++;
         }
     }
 }
