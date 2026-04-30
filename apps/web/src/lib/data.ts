@@ -883,12 +883,11 @@ export async function getImageByShareKey(key: string) {
         ...publicSelectFields,
         blur_data_url: images.blur_data_url,
         topic_label: topics.label,
-        // C15-MED-02: both GROUP_CONCATs must ORDER BY the same column (tags.slug)
-        // so that index-based zip produces correctly aligned name-slug pairs.
-        // Using tagNamesAgg here (ORDER BY tags.name) would misalign when name
-        // and slug sort differently (e.g., name="Zebra" slug="alpha-tag").
-        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.slug})`,
-        tag_slugs: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.slug} ORDER BY ${tags.slug})`,
+        // C16-MED-02: combined GROUP_CONCAT with null-byte delimiter eliminates
+        // index-based zip alignment issues. Previously two separate GROUP_CONCATs
+        // were zipped by index — comma-containing tag names (pre-validation rows)
+        // or DISTINCT count mismatches could misalign name/slug pairs.
+        tag_concat: sql<string | null>`GROUP_CONCAT(DISTINCT CONCAT(${tags.slug}, CHAR(0), ${tags.name}) ORDER BY ${tags.slug})`,
     })
         .from(images)
         .leftJoin(topics, eq(images.topic, topics.slug))
@@ -905,19 +904,22 @@ export async function getImageByShareKey(key: string) {
 
     if (!result) return null;
 
-    // Parse GROUP_CONCAT results into structured tag arrays.
+    // C16-MED-02: Parse combined GROUP_CONCAT by splitting on the record
+    // delimiter (comma, added by GROUP_CONCAT between DISTINCT entries), then
+    // splitting each entry on the null byte to extract slug and name.
     // GROUP_CONCAT returns null when no tags exist (LEFT JOIN produced no rows).
-    const parsedTagNames = result.tag_names ? result.tag_names.split(',') : [];
-    const parsedTagSlugs = result.tag_slugs ? result.tag_slugs.split(',') : [];
-
     const imageTagsList: { slug: string; name: string }[] = [];
-    for (let i = 0; i < parsedTagNames.length; i++) {
-        imageTagsList.push({ slug: parsedTagSlugs[i] ?? '', name: parsedTagNames[i] });
+    if (result.tag_concat) {
+        for (const entry of result.tag_concat.split(',')) {
+            const nullIdx = entry.indexOf('\0');
+            if (nullIdx === -1) continue; // skip malformed entries
+            imageTagsList.push({ slug: entry.slice(0, nullIdx), name: entry.slice(nullIdx + 1) });
+        }
     }
 
-    // Destructure to strip tag_names/tag_slugs from the return value
+    // Destructure to strip tag_concat from the return value
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- intentionally stripped from return value
-    const { tag_names: _tagNames, tag_slugs: _tagSlugs, ...imageFields } = result;
+    const { tag_concat: _tagConcat, ...imageFields } = result;
 
     return {
         ...imageFields,
@@ -1115,6 +1117,10 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     ];
 
     // Run main query first; only query tags if we need more results (saves a connection)
+    // C16-LOW-02: GROUP BY is intentionally omitted here because this branch
+    // does not JOIN imageTags or tags. The tag/alias branches below DO use
+    // GROUP BY because they JOIN those tables. If a future refactor adds a
+    // tag JOIN here, GROUP BY must be added to match those branches.
     const results = await db.select(searchFields).from(images)
         .leftJoin(topics, eq(images.topic, topics.slug))
         .where(and(
