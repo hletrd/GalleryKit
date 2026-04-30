@@ -953,61 +953,67 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         return results;
     }
 
-    // Only search tags if main results are insufficient; limit to remaining slots.
-    // Exclude IDs already found by the main query so tag-result slots aren't
-    // wasted on duplicates (especially with small effectiveLimit values).
+    // C3-AGG-03: run tag and alias queries in parallel when the main
+    // query is insufficient. The alias query only needs mainIds for
+    // dedup (not tag results), so both can start simultaneously,
+    // reducing the sequential 3-query worst case to 2 sequential rounds.
     const remainingLimit = effectiveLimit - results.length;
     const mainIds = results.map(r => r.id);
+
     const tagConditions = [eq(images.processed, true), like(tags.name, searchTerm)];
     if (mainIds.length > 0) {
         tagConditions.push(notInArray(images.id, mainIds));
     }
-    const tagResults = remainingLimit <= 0 ? [] : await db.select(searchFields)
-        .from(images)
-        .leftJoin(topics, eq(images.topic, topics.slug))
-        .innerJoin(imageTags, eq(images.id, imageTags.imageId))
-        .innerJoin(tags, eq(imageTags.tagId, tags.id))
-        .where(and(...tagConditions))
-        .groupBy(
-            images.id,
-            images.title,
-            images.description,
-            images.filename_jpeg,
-            images.width,
-            images.height,
-            images.topic,
-            topics.label,
-            images.camera_model,
-            images.capture_date,
-        )
-        .orderBy(desc(images.created_at), desc(images.id))
-        .limit(remainingLimit);
 
-    const seenIds = new Set([...mainIds, ...tagResults.map((result) => result.id)]);
     const aliasConditions = [eq(images.processed, true), like(topicAliases.alias, searchTerm)];
-    if (seenIds.size > 0) {
-        aliasConditions.push(notInArray(images.id, [...seenIds]));
+    if (mainIds.length > 0) {
+        aliasConditions.push(notInArray(images.id, mainIds));
     }
-    const aliasRemainingLimit = effectiveLimit - seenIds.size;
-    const aliasResults = aliasRemainingLimit <= 0 ? [] : await db.select(searchFields)
-        .from(images)
-        .leftJoin(topics, eq(images.topic, topics.slug))
-        .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))
-        .where(and(...aliasConditions))
-        .groupBy(
-            images.id,
-            images.title,
-            images.description,
-            images.filename_jpeg,
-            images.width,
-            images.height,
-            images.topic,
-            topics.label,
-            images.camera_model,
-            images.capture_date,
-        )
-        .orderBy(desc(images.created_at), desc(images.id))
-        .limit(aliasRemainingLimit);
+    const aliasRemainingLimit = effectiveLimit - mainIds.length;
+
+    const [tagResults, aliasResults] = remainingLimit <= 0
+        ? [[], []] as [SearchResult[], SearchResult[]]
+        : await Promise.all([
+            db.select(searchFields)
+                .from(images)
+                .leftJoin(topics, eq(images.topic, topics.slug))
+                .innerJoin(imageTags, eq(images.id, imageTags.imageId))
+                .innerJoin(tags, eq(imageTags.tagId, tags.id))
+                .where(and(...tagConditions))
+                .groupBy(
+                    images.id,
+                    images.title,
+                    images.description,
+                    images.filename_jpeg,
+                    images.width,
+                    images.height,
+                    images.topic,
+                    topics.label,
+                    images.camera_model,
+                    images.capture_date,
+                )
+                .orderBy(desc(images.created_at), desc(images.id))
+                .limit(remainingLimit),
+            aliasRemainingLimit <= 0 ? [] : db.select(searchFields)
+                .from(images)
+                .leftJoin(topics, eq(images.topic, topics.slug))
+                .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))
+                .where(and(...aliasConditions))
+                .groupBy(
+                    images.id,
+                    images.title,
+                    images.description,
+                    images.filename_jpeg,
+                    images.width,
+                    images.height,
+                    images.topic,
+                    topics.label,
+                    images.camera_model,
+                    images.capture_date,
+                )
+                .orderBy(desc(images.created_at), desc(images.id))
+                .limit(aliasRemainingLimit),
+        ]);
 
     const seen = new Set<number>();
     const combined: SearchResult[] = [];
