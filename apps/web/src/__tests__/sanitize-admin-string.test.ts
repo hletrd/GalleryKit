@@ -11,14 +11,16 @@ describe('sanitizeAdminString', () => {
     it('returns rejected: true for a string with a bidi override (U+202A LRE)', () => {
         const result = sanitizeAdminString('hello‪world');
         expect(result.rejected).toBe(true);
-        // The bidi character is stripped from the returned value
-        expect(result.value).toBe('helloworld');
+        // C1F-CR-08: value is null when rejected=true to prevent accidental
+        // persistence of a stripped value that looks visually identical.
+        expect(result.value).toBeNull();
     });
 
     it('returns rejected: true for a string with zero-width space (U+200B)', () => {
         const result = sanitizeAdminString('hello​world');
         expect(result.rejected).toBe(true);
-        expect(result.value).toBe('helloworld');
+        // C1F-CR-08: value is null when rejected=true
+        expect(result.value).toBeNull();
     });
 
     // C8-AGG8R-01: The critical test — calling sanitizeAdminString twice
@@ -63,7 +65,8 @@ describe('sanitizeAdminString', () => {
     it('returns rejected: true for string with BOM (U+FEFF)', () => {
         const result = sanitizeAdminString('hello﻿world');
         expect(result.rejected).toBe(true);
-        expect(result.value).toBe('helloworld');
+        // C1F-CR-08: value is null when rejected=true
+        expect(result.value).toBeNull();
     });
 
     it('returns rejected: false for empty string after trim', () => {

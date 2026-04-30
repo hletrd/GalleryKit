@@ -138,9 +138,13 @@ export function sanitizeAdminString(raw: string | null | undefined, trim = true)
     // repeated calls with the same input. .replace() is not affected
     // (it always starts from the beginning), so UNICODE_FORMAT_CHARS_RE
     // with `/g` is still correct for stripControlChars.
+    // C1F-CR-08 / C1F-TE-05: return null when rejected=true so callers cannot
+    // accidentally persist a stripped value that looks visually identical to
+    // the original (with invisible formatting chars removed). All current
+    // callers already return errors on rejected=true, so this is backward-
+    // compatible. Returning null forces explicit handling of the rejection.
     if (UNICODE_FORMAT_CHARS.test(input)) {
-        const stripped = stripControlChars(input) ?? '';
-        return { value: stripped, rejected: true };
+        return { value: null, rejected: true };
     }
 
     const stripped = stripControlChars(input) ?? '';
