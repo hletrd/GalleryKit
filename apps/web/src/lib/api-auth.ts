@@ -45,6 +45,12 @@ export function withAdminAuth<T extends unknown[]>(
                 headers: NO_STORE_HEADERS,
             });
         }
-        return handler(...args);
+        // C17-LOW-04: add nosniff to successful handler responses if not
+        // already present. Error paths already set it via NO_STORE_HEADERS.
+        const response = await handler(...args);
+        if (!response.headers.has('X-Content-Type-Options')) {
+            response.headers.set('X-Content-Type-Options', 'nosniff');
+        }
+        return response;
     };
 }
