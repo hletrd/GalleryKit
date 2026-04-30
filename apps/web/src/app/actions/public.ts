@@ -95,10 +95,13 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
     const now = Date.now();
     const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
 
-    // In-memory pre-increment for fast-path rejection
-    if (preIncrementLoadMoreAttempt(ip, now)) {
-        return { status: 'rateLimited', images: [], hasMore: true };
-    }
+    // C17-MED-01: in-memory pre-increment happens first (TOCTOU prevention),
+    // then DB increment, THEN combined check. This order matches searchImagesAction
+    // and ensures the DB counter stays in sync even when the in-memory map
+    // catches an over-limit. Previously, the DB increment was skipped when
+    // the in-memory pre-check caught an over-limit, causing the DB counter to
+    // undercount after a process restart.
+    const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
 
     // C16-MED-01: DB-backed increment and check for accuracy across restarts.
     // Matches the searchImagesAction pattern. The DB round-trip is ~1ms and
@@ -110,14 +113,21 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
         // rate limit remains effective during DB outages.
     }
 
+    // Combined check: if either in-memory or DB-backed check shows over-limit,
+    // roll back both counters and return rate-limited. The rollback on the
+    // over-limit branch is symmetric with searchImagesAction.
     try {
         const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
-        if (isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
+        if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
             rollbackLoadMoreAttempt(ip, bucketStart);
             return { status: 'rateLimited', images: [], hasMore: true };
         }
     } catch {
         // DB unavailable — rely on in-memory BoundedMap
+        if (overLimitInMemory) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'rateLimited', images: [], hasMore: true };
+        }
     }
 
     try {
