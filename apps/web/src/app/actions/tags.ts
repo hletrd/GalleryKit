@@ -187,8 +187,13 @@ export async function addTagToImage(imageId: number, tagName: string) {
             }
         }
 
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: resolvedTag.tag.name }).catch(console.debug);
+        // AGG10-01: only log the audit event when the tag was actually linked.
+        // INSERT IGNORE returns affectedRows === 0 for duplicate rows, meaning
+        // the tag was already linked — no tag_add event occurred.
+        if (linkResult.affectedRows > 0) {
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'tag_add', 'image', String(imageId), undefined, { tag: resolvedTag.tag.name }).catch(console.debug);
+        }
         revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', imageRecord.topic ? `/${imageRecord.topic}` : '', '/admin/dashboard');
         revalidateAllAppData();
         return { success: true as const };
