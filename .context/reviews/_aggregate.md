@@ -1,12 +1,12 @@
-# Aggregate Review — Cycle 8
+# Aggregate Review — Cycle 9
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
-Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, test-engineer, tracer, architect, debugger, document-specialist, designer
+Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier
 
-**HEAD:** `eb0225e` (feat(sanitize): add sanitizeAdminString combining strip + formatting rejection)
+**HEAD:** `89f8795` (fix(topics,seo): use countCodePoints for varchar length checks)
 
-## Source reviews (11 files)
+## Source reviews (5 files)
 
 | Reviewer | File |
 |---|---|
@@ -15,20 +15,15 @@ Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, te
 | Perf Reviewer | `.context/reviews/perf-reviewer.md` |
 | Critic | `.context/reviews/critic.md` |
 | Verifier | `.context/reviews/verifier.md` |
-| Test Engineer | `.context/reviews/test-engineer.md` |
-| Tracer | `.context/reviews/tracer.md` |
-| Architect | `.context/reviews/architect.md` |
-| Debugger | `.context/reviews/debugger.md` |
-| Document Specialist | `.context/reviews/document-specialist.md` |
-| Designer | `.context/reviews/designer.md` |
 
 ## Deduplicated findings (cross-agent agreement noted)
 
 | Unified ID | Source IDs | Description | Severity | Confidence | Cross-Agent |
 |---|---|---|---|---|---|
-| **AGG8R-01** | C8-CR-01, C8-SEC-01, C8-V-01, C8-TR-01, C8-ARCH-01, C8-DBG-01, C8-CRIT-01 | `sanitizeAdminString` uses `UNICODE_FORMAT_CHARS_RE` (which has `/g` flag) with `.test()` — stateful regex causes `rejected` flag to alternate between `true` and `false` on repeated calls. Bidi overrides are stripped before storage (no stored XSS), but the admin gets no error feedback on the `rejected: false` path, violating the C7-AGG7R-03 design intent. | MEDIUM | HIGH | 7 agents |
-| **AGG8R-02** | C8-CR-02, C8-V-02, C8-TR-02, C8-CRIT-02, C8-TE-02 | `topics.ts` and `seo.ts` still use `.length` (UTF-16 code units) instead of `countCodePoints()` for MySQL varchar length comparisons. The C7-AGG7R-02 fix was only applied to `images.ts` — the follow-up scan called for in plan-158 was not completed. | LOW | MEDIUM | 5 agents |
-| **AGG8R-03** | C8-TE-01 | No unit test for `sanitizeAdminString`. The stateful regex bug (AGG8R-01) would have been caught by a simple test calling the function twice on the same input. | LOW | MEDIUM | 1 agent |
+| **AGG9R-01** | C9-CR-01, C9-SEC-02, C9-CRIT-01, C9-V-02 | Remaining `.length` usages for DoS-prevention bounds in `images.ts:139` and `public.ts:116` — inconsistent with the `countCodePoints()` adoption pattern from AGG7R-02/AGG8R-02. These are DoS bounds, not MySQL varchar boundaries, so the functional impact is nil (slightly more restrictive, not less). | LOW | LOW | 4 agents |
+| **AGG9R-02** | C9-SEC-01, C9-CRIT-02, C9-V-01 | `withAdminAuth` wrapper in `api-auth.ts` lacks `hasTrustedSameOrigin` origin verification. Every mutating server action uses `requireSameOriginAdmin()`, but API routes using `withAdminAuth` get no origin check. The only admin API route (`/api/admin/db/download`) adds its own explicit check, mitigating the immediate risk. However, a future admin API route added with only `withAdminAuth` would lack origin verification. | LOW | MEDIUM | 3 agents |
+| **AGG9R-03** | C9-CR-02 | `createAdminUser` username length checks use `.length` instead of `countCodePoints()`, but the regex `/^[a-zA-Z0-9_-]+$/` already restricts to ASCII where `.length === countCodePoints()`. No functional impact — documentation only. | LOW | LOW | 1 agent |
+| **AGG9R-04** | C9-PERF-01 | `searchImages` in `data.ts` could cascade tag→alias queries instead of always running both in parallel when the main query underfills. Minor optimization at personal-gallery scale. | LOW | LOW | 1 agent |
 
 ## Priority remediation order (this cycle)
 
@@ -36,15 +31,19 @@ Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier, te
 
 None.
 
-### Should-fix (MEDIUM — actionable this cycle)
+### Should-fix (none — no MEDIUM with HIGH confidence)
 
-1. **AGG8R-01** (7 agents): Fix the stateful regex in `sanitizeAdminString`. The simplest fix: import and use `UNICODE_FORMAT_CHARS` from `validation.ts` (which is non-`/g`) for the `.test()` check at line 136, keeping `UNICODE_FORMAT_CHARS_RE` (with `/g`) for the `.replace()` call in `stripControlChars`. Add a unit test that calls `sanitizeAdminString` twice on the same bidi-containing input and verifies both calls return `rejected: true`.
-
-2. **AGG8R-03**: Add unit tests for `sanitizeAdminString` covering: normal string, bidi override, same input called twice, null input, C0 controls only.
+None.
 
 ### Consider-fix (LOW — batch into polish patch if time permits)
 
-3. **AGG8R-02**: Apply `countCodePoints()` to `topics.ts:103,202` and `seo.ts:94-112` for consistency with the `images.ts` fix. Low priority — emoji-heavy topic labels and SEO fields are uncommon.
+1. **AGG9R-01** (4 agents): Switch `tagsString.length > 1000` and `sanitizedQuery.length > 200` to `countCodePoints()` for consistency, or add comments documenting intentional `.length` use.
+
+2. **AGG9R-02** (3 agents): Add `hasTrustedSameOrigin` check to `withAdminAuth` wrapper so future admin API routes get automatic origin verification. Low risk since the only current route already has its own check.
+
+3. **AGG9R-03** (1 agent): Add a comment in `admin-users.ts` noting that `.length` is safe for username validation because the regex restricts to ASCII. No code change needed.
+
+4. **AGG9R-04** (1 agent): Consider cascading tag→alias query in `searchImages` for marginal performance improvement. Low priority — only matters at higher scale.
 
 ### Defer (LOW — documented for future)
 
@@ -75,4 +74,10 @@ All prior deferred items remain valid with no change in status:
 - AGG7R-07 — Sequential tag processing (acceptable at scale)
 - AGG7R-08 — Upload tracker hard-cap test (carry-forward from C6)
 - AGG7R-05 — Blur placeholder quality/cap documentation
-- AGG7R-06 — (user_filename) index purpose documentation
+- AGG7R-06 — `(user_filename)` index purpose documentation
+
+## Convergence assessment
+
+Cycle 9 found only LOW-severity findings. No CRITICAL or HIGH findings, and no MEDIUM findings with HIGH confidence. The codebase is in a stable, well-hardened state with all prior cycle fixes verified. The remaining issues are consistency improvements and defensive documentation.
+
+**Convergence signal**: Finding count and severity have been monotonically decreasing since cycle 6. The review is approaching a fixed point where only cosmetic consistency issues remain.

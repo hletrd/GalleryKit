@@ -1,4 +1,4 @@
-# Verifier Review — verifier (Cycle 8)
+# Verifier Review — verifier (Cycle 9)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
@@ -9,45 +9,45 @@ Date: 2026-04-29
 
 | Gate | Status |
 |------|--------|
-| eslint | PASS |
-| tsc --noEmit | PASS |
-| vitest | PASS |
+| eslint | Running (background) |
+| tsc --noEmit | Pending |
+| vitest | Running (background) |
 | lint:api-auth | PASS |
 | lint:action-origin | PASS |
-| npm run build | PASS |
 
 ### Verified behavior
 
-1. **sanitizeAdminString contract**: Verified that `sanitizeAdminString` correctly combines `stripControlChars` + Unicode formatting rejection in one call. However, discovered a critical flaw (C8-V-01): the `UNICODE_FORMAT_CHARS_RE` regex has the `/g` flag and is used with `.test()`, making the rejection alternately pass/fail for the same input.
+1. **sanitizeAdminString stateful regex fix (AGG8R-01)**: VERIFIED — `sanitize.ts:141` now uses `UNICODE_FORMAT_CHARS` (imported from `validation.ts`) for `.test()`, which is non-`/g`. The `UNICODE_FORMAT_CHARS_RE` (with `/g`) is still used for `.replace()` in `stripControlChars` at line 20. The import on line 5 confirms the correct source.
 
-2. **countCodePoints adoption**: Verified that `updateImageMetadata` (images.ts:707,711) correctly uses `countCodePoints()` for title/description length checks. However, `topics.ts:103,202` and `seo.ts:94-112` still use `.length` — the fix was not applied consistently.
+2. **countCodePoints adoption (AGG8R-02)**: VERIFIED — `topics.ts:107,207` and `seo.ts:97,100,103,106,109,115` all use `countCodePoints()`. The import is present in both files (`topics.ts:32`, `seo.ts:13`).
 
-3. **Upload flow**: Verified the full upload pipeline from FormData to DB insert to queue enqueue. `assertBlurDataUrl` contract is enforced at both producer and consumer.
+3. **sanitizeAdminString unit test (AGG8R-03)**: VERIFIED — `__tests__/sanitize-admin-string.test.ts` exists and covers the key scenarios including the stateful-regex regression test (calling the function twice on bidi-containing input).
 
-4. **Privacy enforcement**: `publicSelectFields` omits all sensitive fields. Compile-time guard `_SensitiveKeysInPublic` confirms no leakage.
+4. **Privacy enforcement**: `publicSelectFields` still omits all sensitive fields. Compile-time guard `_SensitiveKeysInPublic` still enforces no leakage.
 
-5. **Auth flow**: Login rate limiting correctly pre-increments before Argon2 verify. Account-scoped rate limiting is present. Password change validates form fields before consuming rate-limit attempts.
+5. **Auth flow**: Login rate limiting still pre-increments before Argon2 verify. Password change validates form fields before consuming rate-limit attempts (C9R-RPL-01 fix from a prior cycle is still in place).
+
+6. **Upload flow**: Full pipeline from FormData to DB insert to queue enqueue verified. `assertBlurDataUrl` contract enforced at both producer (`process-image.ts:407`) and consumer (`images.ts:308`).
 
 ### Verified fixes from prior cycles
 
-1. C7-V-01 (redundant `IS NULL`): VERIFIED — standalone conditions removed from undated prev/next.
-2. C7-V-02 (`.length` vs code points in images.ts): VERIFIED — `countCodePoints()` used.
+1. C8-V-01 (stateful regex): VERIFIED — non-`/g` regex now used for `.test()`.
+2. C8-V-02 (`.length` vs code points): VERIFIED — `countCodePoints()` used in topics/seo.
 
 ### New Findings
 
-#### C8-V-01 (Medium / High). `sanitizeAdminString` uses stateful `/g` regex with `.test()` — bidi rejection alternately passes and fails
+#### C9-V-01 (Low / Medium). `withAdminAuth` wrapper lacks origin verification — API route provenance posture weaker than server actions
 
-- Location: `apps/web/src/lib/sanitize.ts:136`
-- Verified with a Node.js reproduction script: calling `UNICODE_FORMAT_CHARS_RE.test('hello‪world')` alternates between `true` and `false` on consecutive calls because the `/g` flag makes `.test()` stateful. After `stripControlChars` calls `.replace()` with the same regex (advancing `lastIndex`), the subsequent `.test()` in `sanitizeAdminString` can return `false` for a string containing bidi overrides.
-- This is a direct security regression: the `sanitizeAdminString` helper was specifically designed to prevent Trojan-Source bidi overrides, but the stateful regex can allow them through.
-- Verified that `UNICODE_FORMAT_CHARS` in `validation.ts` does NOT have the `/g` flag and is safe for `.test()` use.
-- Suggested fix: Import and use `UNICODE_FORMAT_CHARS` from `validation.ts` for the `.test()` check, or define a separate non-`/g` regex.
+- Location: `apps/web/src/lib/api-auth.ts:14-26`
+- Verified that `withAdminAuth` only checks `isAdmin()` (session cookie) and does NOT call `hasTrustedSameOrigin()`. Every mutating server action uses `requireSameOriginAdmin()`, but API routes using `withAdminAuth` get no origin check.
+- The only admin API route (`/api/admin/db/download/route.ts`) adds its own explicit `hasTrustedSameOriginWithOptions` check at line 27, which mitigates the issue for that specific route.
+- However, a future admin API route added with only `withAdminAuth` would lack origin verification.
+- Suggested fix: Add `hasTrustedSameOrigin` check to `withAdminAuth` wrapper.
 
-#### C8-V-02 (Low / Medium). `topics.ts` and `seo.ts` still use `.length` for MySQL varchar comparisons — `countCodePoints` fix not applied consistently
+#### C9-V-02 (Low / Low). Remaining `.length` usages for DoS bounds in `images.ts:139` and `public.ts:116` — inconsistent with `countCodePoints` adoption
 
-- Location: `apps/web/src/app/actions/topics.ts:103,202` and `apps/web/src/app/actions/seo.ts:94-112`
-- Verified that `images.ts` uses `countCodePoints()` but the same class of fix was not applied to `topics.ts` (label) or `seo.ts` (all SEO fields). These all compare against MySQL varchar limits.
-- Same false-rejection risk as C7-V-02 / AGG7R-02, just on different fields.
+- Location: `apps/web/src/app/actions/images.ts:139` and `apps/web/src/app/actions/public.ts:116`
+- These are DoS-prevention bounds, not varchar boundaries. The security impact is nil (more restrictive, not less). Flagged for consistency only.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 

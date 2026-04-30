@@ -1,34 +1,34 @@
-# Critic Review — critic (Cycle 8)
+# Critic Review — critic (Cycle 9)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
 ## Summary
 
-- One medium finding (stateful regex bypass).
-- One low finding (inconsistent `.length` fix).
+- No medium or high findings.
+- Two low findings about consistency.
 
 ## Verified fixes from prior cycles
 
-All Cycle 7 critic findings confirmed addressed:
-1. C7-CRIT-01 (separate stripControlChars + containsUnicodeFormatting): FIXED — `sanitizeAdminString` helper.
-2. C7-CRIT-02 (`as const` inconsistency): Acknowledged LOW — cosmetic.
+All Cycle 8 critic findings confirmed addressed:
+
+1. C8-CRIT-01 (stateful regex bypass): FIXED — `sanitizeAdminString` uses non-`/g` `UNICODE_FORMAT_CHARS` for `.test()`.
+2. C8-CRIT-02 (inconsistent `.length` fix): FIXED — `topics.ts` and `seo.ts` now use `countCodePoints()`.
 
 ## New Findings
 
-### C8-CRIT-01 (Medium / High). `sanitizeAdminString` reuses the `/g`-flagged `UNICODE_FORMAT_CHARS_RE` with `.test()` — the stateful regex makes Unicode formatting rejection unreliable
+### C9-CRIT-01 (Low / Low). `countCodePoints()` fix was applied to topics/seo but not to `images.ts:139` (`tagsString.length > 1000`) or `public.ts:116` (`sanitizedQuery.length > 200`) — remaining inconsistencies
 
-- Location: `apps/web/src/lib/sanitize.ts:13,136`
-- The `sanitizeAdminString` function was the key deliverable of the C7-AGG7R-03 fix — it was supposed to close the gap where developers might forget to call `containsUnicodeFormatting` alongside `stripControlChars`. However, the implementation uses `UNICODE_FORMAT_CHARS_RE.test(input)` on a regex that also has the `/g` flag (needed for `.replace()` in `stripControlChars`). This makes `.test()` stateful, alternating between `true` and `false` on the same input.
-- This undermines the entire defense-in-depth purpose of the helper. The irony is that the old two-function pattern (`stripControlChars` + `containsUnicodeFormatting`) was actually more correct because `UNICODE_FORMAT_CHARS` in `validation.ts` is non-`/g`.
-- Concrete scenario: An admin inputs a topic label containing U+202A (LRE). If `stripControlChars` runs first on the same regex instance (which it does, at line 138), `lastIndex` is advanced, and the `.test()` at line 136 returns `false` — the bidi override is accepted.
-- Suggested fix: Use `UNICODE_FORMAT_CHARS` from `validation.ts` for the `.test()` check, or define a local non-`/g` regex variant for `.test()` use.
+- Location: `apps/web/src/app/actions/images.ts:139` and `apps/web/src/app/actions/public.ts:116`
+- While these are DoS-prevention bounds rather than MySQL varchar boundaries, the inconsistency is a maintenance hazard: a future developer seeing both `countCodePoints()` and `.length` in the same codebase for similar "limit the input size" checks would be unsure which pattern to follow.
+- Suggested fix: Either switch these to `countCodePoints()` for consistency, or add explicit comments documenting the intentional use of `.length` (e.g., "DoS-prevention bound — `.length` intentionally stricter for non-varchar limits").
 
-### C8-CRIT-02 (Low / Low). `countCodePoints()` fix was applied to `images.ts` but not to `topics.ts` or `seo.ts` — inconsistent
+### C9-CRIT-02 (Low / Low). `withAdminAuth` in `api-auth.ts` is a weaker CSRF defense than `requireSameOriginAdmin()` used in server actions — inconsistent provenance posture
 
-- Location: `apps/web/src/app/actions/topics.ts:103,202` and `apps/web/src/app/actions/seo.ts:94-112`
-- The C7-AGG7R-02 fix added `countCodePoints()` for image title/description length checks but did not propagate the fix to topic labels or SEO field validations. This inconsistency creates a maintenance hazard: future developers may assume the `.length` pattern is correct because it appears in multiple action files.
-- Suggested fix: Apply `countCodePoints()` consistently to all admin string length validations that compare against MySQL varchar limits.
+- Location: `apps/web/src/lib/api-auth.ts`
+- Every mutating server action now uses `requireSameOriginAdmin()` for origin verification. But the only admin API route (`/api/admin/db/download`) adds its own explicit `hasTrustedSameOriginWithOptions` check on top of `withAdminAuth`. This means the wrapper itself is insufficient for CSRF defense — the real defense is layered on top by each caller.
+- If a new admin API route is added and the developer only wraps it with `withAdminAuth`, they miss the origin check.
+- Suggested fix: Move the origin check into `withAdminAuth` so every admin API route gets it automatically, matching the server action posture.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 

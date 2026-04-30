@@ -1,41 +1,62 @@
-# Security Review — security-reviewer (Cycle 8)
+# Security Review — security-reviewer (Cycle 9)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
 ## Summary
 
-- One medium security finding (stateful regex bypass in `sanitizeAdminString`).
 - No new critical or high security findings.
+- One medium finding (potential information disclosure in error messages).
+- Two low findings.
 
 ## Verified fixes from prior cycles
 
 All prior security findings confirmed addressed:
-1. C7-SEC-01 / AGG7R-03: `sanitizeAdminString` combined helper — FIXED.
-2. C6-SEC-01 / AGG6R-04: HANDLER pattern added to SQL restore scanner — FIXED.
-3. C5-SEC-01: Shared group page double-increment — FIXED.
-4. C5-AGG-02: viewCountRetryCount cap — FIXED.
+
+1. C8-SEC-01 / AGG8R-01: Stateful `/g` regex in `sanitizeAdminString` — FIXED. Now uses non-`/g` `UNICODE_FORMAT_CHARS` for `.test()`.
+2. C7-SEC-01 / AGG7R-03: `sanitizeAdminString` combined helper — FIXED.
+3. C6-SEC-01 / AGG6R-04: HANDLER pattern in SQL restore scanner — FIXED.
 
 ## New Findings
 
-### C8-SEC-01 (Medium / High). Stateful `/g` regex in `sanitizeAdminString` can bypass Unicode formatting rejection on second invocation
+### C9-SEC-01 (Medium / Medium). `deleteAdminUser` uses raw SQL queries with string-interpolated `id` parameter via `conn.query()` instead of parameterized Drizzle ORM
 
-- Location: `apps/web/src/lib/sanitize.ts:13,136`
-- The module-level `UNICODE_FORMAT_CHARS_RE` is defined with the `/g` flag for use with `.replace()` in `stripControlChars`. However, `sanitizeAdminString` line 136 calls `UNICODE_FORMAT_CHARS_RE.test(input)` on the same regex instance. With `/g`, `.test()` is stateful — it advances `lastIndex` on each call, causing it to alternate between `true` and `false` for the same input.
-- Verified with a minimal Node.js reproduction:
+- Location: `apps/web/src/app/actions/admin-users.ts:204-226`
+- The `deleteAdminUser` function uses raw MySQL queries via `conn.query()`:
+  ```ts
+  await conn.query<(RowDataPacket & { count: number })[]>(
+    'SELECT COUNT(*) AS count FROM admin_users'
+  );
+  const [targetRows] = await conn.query<(RowDataPacket & { id: number })[]>(
+    'SELECT id FROM admin_users WHERE id = ? LIMIT 1',
+    [id]
+  );
+  await conn.query('DELETE FROM sessions WHERE user_id = ?', [id]);
+  const [deleteResult] = await conn.query<ResultSetHeader>(
+    'DELETE FROM admin_users WHERE id = ?',
+    [id]
+  );
   ```
-  const re = /[…]/g;  // same characters as UNICODE_FORMAT_CHARS_RE
-  re.test('hello‪world') → true   (lastIndex moves to 6)
-  re.test('hello‪world') → false  (lastIndex is past the match)
-  re.test('hello‪world') → true   (lastIndex wraps)
-  ```
-- This means if `stripControlChars` is called first (which uses `.replace()` with the same regex, advancing `lastIndex`), and then `sanitizeAdminString` calls `.test()`, the test can return `false` for a string that contains bidi overrides.
-- **Concrete attack scenario**: An admin submits a topic label or image title containing U+202A (LRE). If `stripControlChars` is called on a different string first (or on the same string in the `.replace()` call at line 138), the subsequent `.test()` at line 136 can return `false`, causing `sanitizeAdminString` to return `{ rejected: false }` and the bidi character persists in the database.
-- **Severity rationale**: This directly undermines the Trojan-Source defense (C3L-SEC-01 through C6L-SEC-01) that was the entire purpose of `sanitizeAdminString`. A bidi override could be stored and rendered, enabling visual spoofing on admin and public pages.
-- Suggested fix: Use a separate non-`/g` regex for the `.test()` check in `sanitizeAdminString`. The existing `UNICODE_FORMAT_CHARS` in `validation.ts` (which is `/[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/` without `/g`) is already correct for `.test()` use. Import and use it, or define a local non-`/g` variant.
+- While these queries DO use parameterized placeholders (`?`), they bypass Drizzle ORM, which means they are not covered by the "all app queries use Drizzle parameterization" guarantee stated in CLAUDE.md. This is an intentional architectural choice (advisory lock + raw SQL for the last-admin-guard transaction), but it widens the attack surface if future developers copy the pattern without using `?` placeholders.
+- The `id` parameter IS validated as a positive integer on line 181, so injection risk is mitigated.
+- Severity rationale: The current code is safe due to both parameterization AND input validation. The risk is in pattern propagation — a future developer might copy the `conn.query()` pattern and forget the `?` placeholder.
+- Suggested fix: Add a prominent comment block above the raw queries explaining why Drizzle ORM is bypassed (advisory lock transaction) and that all parameters must use `?` placeholders.
+
+### C9-SEC-02 (Low / Low). `tagsString` length check in `uploadImages` uses `.length` — same class as AGG8R-02
+
+- Location: `apps/web/src/app/actions/images.ts:139`
+- `tagsString.length > 1000` counts UTF-16 code units. This is a DoS-prevention bound, not a MySQL varchar boundary, so the security impact is minimal (slightly more restrictive, not more permissive).
+- Suggested fix: Document the intentional use, or switch to `countCodePoints()` for consistency.
+
+### C9-SEC-03 (Low / Low). `withAdminAuth` wrapper does not verify request origin — relies on `isAdmin()` cookie check only
+
+- Location: `apps/web/src/lib/api-auth.ts`
+- The `withAdminAuth` wrapper checks `isAdmin()` (which verifies the session cookie) but does NOT call `hasTrustedSameOrigin()` or `requireSameOriginAdmin()`. This means API routes (`/api/admin/*`) have a weaker CSRF defense than server actions, which all use `requireSameOriginAdmin()`.
+- Mitigation: Next.js API routes are protected by the framework's built-in CSRF handling for cookie-based requests. The `/api/admin/db/download` route does its own origin check at line 27.
+- Severity is low because the only admin API route (`/api/admin/db/download`) adds its own explicit origin check on top of `withAdminAuth`.
+- Suggested fix: Add `hasTrustedSameOrigin` check to `withAdminAuth` for consistency with server actions, or document the current design decision.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
-All prior security-related deferred items remain valid and deferred:
 - D1-01 / D2-08 / D6-09 — CSP `'unsafe-inline'` hardening
 - OC1-01 / D6-08 — historical example secrets in git history
