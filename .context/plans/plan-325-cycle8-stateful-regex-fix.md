@@ -1,7 +1,7 @@
 # Plan 325: Cycle 8 — Fix stateful `/g` regex in `sanitizeAdminString`
 
 Date: 2026-04-29
-Status: active
+Status: completed
 
 ## Overview
 
