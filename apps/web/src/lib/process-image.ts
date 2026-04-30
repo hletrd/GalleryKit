@@ -248,12 +248,12 @@ function clampUtf8Bytes(value: string, maxBytes: number = MAX_DB_VARCHAR_BYTES):
     return output.trim();
 }
 
+// C3-AGG-02: Use TextDecoder for correct UTF-16BE decoding including
+// surrogate pairs. The prior String.fromCharCode approach produced
+// unpaired surrogates for supplementary Unicode characters (emoji,
+// rare CJK) in ICC profile names.
 function decodeUtf16BE(buffer: Buffer): string {
-    const codeUnits: number[] = [];
-    for (let i = 0; i + 1 < buffer.length; i += 2) {
-        codeUnits.push(buffer.readUInt16BE(i));
-    }
-    return String.fromCharCode(...codeUnits);
+    return new TextDecoder('utf-16be').decode(buffer);
 }
 
 function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_BYTES): string | null {
