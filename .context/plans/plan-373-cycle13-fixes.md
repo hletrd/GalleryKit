@@ -31,8 +31,8 @@ This creates a contract inconsistency: some `rejected: true` paths return null (
 - `apps/web/src/lib/sanitize.ts` — line 173: change to `{ value: null, rejected: true }` when `stripped !== input`
 - `apps/web/src/__tests__/sanitize-admin-string.test.ts` — line 62: change `expect(result.value).toBe('helloworld')` to `expect(result.value).toBeNull()`
 
-### Verification
+### Status: DONE
 
-- Run `npm test --workspace=apps/web` to confirm all tests pass
-- Run `npm run lint --workspace=apps/web` for lint check
-- Run `npx tsc --noEmit` in apps/web for type check
+- Commit: `1c99ca5` — fix(sanitize): return null on all sanitizeAdminString rejected paths
+- All gates pass: ESLint, tsc --noEmit, vitest (577/577), lint:api-auth, lint:action-origin, next build
+- Deploy: successful
