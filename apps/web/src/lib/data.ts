@@ -556,11 +556,16 @@ function buildCursorCondition(cursor: ImageListCursor) {
         );
     }
 
+    // C10-LOW-01: isNotNull(capture_date) guards on dated branches match the
+    // getImage adjacency pattern (C6F-02). MySQL NULL comparisons already
+    // exclude NULL rows, but the explicit guard makes the intent clear and
+    // prevents a future developer from misinterpreting the missing guard as
+    // an oversight.
     return or(
         isNull(images.capture_date),
-        lt(images.capture_date, cursor.capture_date),
-        and(eq(images.capture_date, cursor.capture_date), lt(images.created_at, createdAt)),
-        and(eq(images.capture_date, cursor.capture_date), eq(images.created_at, createdAt), lt(images.id, cursor.id)),
+        and(isNotNull(images.capture_date), lt(images.capture_date, cursor.capture_date)),
+        and(isNotNull(images.capture_date), eq(images.capture_date, cursor.capture_date), lt(images.created_at, createdAt)),
+        and(isNotNull(images.capture_date), eq(images.capture_date, cursor.capture_date), eq(images.created_at, createdAt), lt(images.id, cursor.id)),
     );
 }
 
@@ -793,17 +798,21 @@ export async function getImage(id: number) {
         //   capture_date with latest created_at/id) — the prev query's
         //   ORDER BY asc(capture_date) will naturally pick the last dated row
         //   before the undated block.
+        // C10-LOW-02: use isNull() from drizzle-orm instead of raw sql
+        // template for consistency with the isNotNull() usage in the dated
+        // branches (C6F-02) and to benefit from Drizzle's identifier
+        // quoting/safety.
         prevConditions.push(
             isNotNull(images.capture_date),
-            and(sql`${images.capture_date} IS NULL`, gt(images.created_at, image.created_at)),
-            and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), gt(images.id, image.id)),
+            and(isNull(images.capture_date), gt(images.created_at, image.created_at)),
+            and(isNull(images.capture_date), eq(images.created_at, image.created_at), gt(images.id, image.id)),
         );
         // Next (DESC direction): only undated rows with earlier created_at/id.
         // No dated row can be a successor because all dated rows sort before
         // undated rows in DESC order.
         nextConditions.push(
-            and(sql`${images.capture_date} IS NULL`, lt(images.created_at, image.created_at)),
-            and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), lt(images.id, image.id)),
+            and(isNull(images.capture_date), lt(images.created_at, image.created_at)),
+            and(isNull(images.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id)),
         );
     }
 
