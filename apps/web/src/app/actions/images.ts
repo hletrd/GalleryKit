@@ -324,6 +324,11 @@ export async function uploadImages(formData: FormData) {
                     color_space: data.iccProfileName || exifDb.color_space,
                     bit_depth: data.bitDepth,
                     original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
+                    // C14-LOW-01: `mode: 'number'` is safe because UPLOAD_MAX_FILE_BYTES
+                    // (200 MB) is well within Number.MAX_SAFE_INTEGER (~9 PB). The schema
+                    // column uses `bigint('original_file_size', { mode: 'number' })` so
+                    // Drizzle returns a JS number. If the per-file cap is ever raised
+                    // above ~9 PB, this would silently lose precision.
                     original_file_size: file.size,
                 };
 
