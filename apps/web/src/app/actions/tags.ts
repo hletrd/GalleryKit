@@ -91,8 +91,8 @@ export async function updateTag(id: number, name: string) {
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         revalidateAllAppData();
         return { success: true };
-    } catch {
-        console.error("Failed to update tag");
+    } catch (e) {
+        console.error("Failed to update tag", e);
         return { error: t('failedToUpdateTag') };
     }
 }
@@ -130,8 +130,10 @@ export async function deleteTag(id: number) {
         revalidateLocalizedPaths('/admin/tags', '/admin/dashboard', '/');
         revalidateAllAppData();
         return { success: true };
-    } catch {
-        console.error("Failed to delete tag");
+    } catch (e) {
+        // C20-AGG-05: include error object for production debugging,
+        // matching the pattern in updateTag and addTagToImage.
+        console.error("Failed to delete tag", e);
         return { error: t('failedToDeleteTag') };
     }
 }
