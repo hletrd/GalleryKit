@@ -609,30 +609,39 @@ export async function deleteImages(ids: number[]) {
         }).catch(console.debug);
     }
 
-    // Clean up one image record at a time. Each derivative cleanup may scan a
-    // whole upload directory to remove historical size variants, so launching
-    // every selected image concurrently can fan out into hundreds of directory
-    // scans. Keep the per-image format cleanup parallel, but bound the outer
-    // batch to protect the shared filesystem.
+    // Clean up image records with bounded concurrency. Each derivative cleanup
+    // may scan a whole upload directory to remove historical size variants, so
+    // launching every selected image concurrently can fan out into hundreds of
+    // directory scans. Process a small chunk of images at a time (concurrency 5)
+    // so filesystem I/O pressure stays bounded while wall-clock time is
+    // significantly reduced compared to the prior fully-sequential for-of loop.
+    // C2-AGG-02 / plan-257.
+    const CLEANUP_CONCURRENCY = 5;
     const cleanupFailures: ImageCleanupFailure[] = [];
-    for (const image of imageRecords) {
-        // Pass empty sizes [] to scan directory and remove ALL size variants,
-        // including those from prior image-size configs.
-        const failures = await collectImageCleanupFailures([
-            { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
-            { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-            { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-            { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
-        ]);
+    for (let i = 0; i < imageRecords.length; i += CLEANUP_CONCURRENCY) {
+        const chunk = imageRecords.slice(i, i + CLEANUP_CONCURRENCY);
+        const chunkResults = await Promise.all(chunk.map(async (image) => {
+            // Pass empty sizes [] to scan directory and remove ALL size variants,
+            // including those from prior image-size configs.
+            const failures = await collectImageCleanupFailures([
+                { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFile(image.filename_original) },
+                { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariants(UPLOAD_DIR_WEBP, image.filename_webp, []) },
+                { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariants(UPLOAD_DIR_AVIF, image.filename_avif, []) },
+                { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariants(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
+            ]);
 
-        if (failures.length > 0) {
-            console.error('Image file cleanup incomplete after deleteImages', {
-                imageId: image.id,
-                cleanupFailures: failures,
-            });
+            if (failures.length > 0) {
+                console.error('Image file cleanup incomplete after deleteImages', {
+                    imageId: image.id,
+                    cleanupFailures: failures,
+                });
+            }
+
+            return failures;
+        }));
+        for (const failures of chunkResults) {
+            cleanupFailures.push(...failures);
         }
-
-        cleanupFailures.push(...failures);
     }
 
     const successCount = deletedRows;
