@@ -162,7 +162,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 router.push(buildPhotoPath(nextId));
             }
         }
-    }, [buildPhotoPath, currentIndex, images, prevId, nextId, router]);
+    }, [buildPhotoPath, currentIndex, currentImageId, images, prevId, nextId, router]);
 
     // Clean up auto-lightbox flag after lazy init consumes it
     useEffect(() => {
