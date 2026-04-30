@@ -1,3 +1,34 @@
+/**
+ * Rate Limiting — patterns and conventions
+ *
+ * Three rollback patterns are used across the codebase, each with distinct
+ * security/reliability tradeoffs. When adding a new rate-limited action,
+ * choose the appropriate pattern:
+ *
+ * 1. **No rollback on infrastructure error** (auth.ts login/updatePassword):
+ *    The pre-incremented rate-limit counter is NOT rolled back when an
+ *    unexpected infrastructure error occurs (e.g., DB connection dropped
+ *    during Argon2 verify). Rationale: the server cannot distinguish an
+ *    attacker-triggered infrastructure error from a genuine failure, so
+ *    rolling back gives the attacker extra attempts. The user can simply
+ *    retry — the 15-minute window is generous.
+ *    Use for: security-critical write paths (auth, credential changes).
+ *
+ * 2. **Rollback on infrastructure error** (public.ts loadMore/search):
+ *    The pre-incremented counter IS rolled back when the underlying
+ *    operation throws. Rationale: the user should not be penalized for
+ *    server errors on public read paths — a DB failure is not the user's
+ *    fault and the rate-limit charge would be unfair.
+ *    Use for: public read paths where the user has no malicious intent.
+ *
+ * 3. **Rollback on over-limit / FK violation only** (sharing.ts):
+ *    The counter is rolled back when the action did NOT execute (e.g.,
+ *    rate limit exceeded before the action ran, or FK violation means the
+ *    target was deleted). Infrastructure errors during the action itself
+ *    are also rolled back because admin share operations are low-risk.
+ *    Use for: admin write paths where legitimate user errors (duplicate
+ *    key, already-exists) should not consume rate-limit budget.
+ */
 import { createHash } from 'crypto';
 import { isIP } from 'net';
 import { db, rateLimitBuckets } from '@/db';
@@ -117,7 +148,7 @@ export function getClientIp(headerStore: HeaderLike): string {
     const ip = 'unknown';
     if (shouldWarnMissingTrustProxy(process.env.NODE_ENV, process.env.TRUST_PROXY, headerStore) && !warnedMissingTrustProxy) {
         warnedMissingTrustProxy = true;
-        console.warn('[rate-limit] Proxy headers are present but TRUST_PROXY is not set — rate limiting uses "unknown" IP. Set TRUST_PROXY=true if behind a reverse proxy.');
+        console.warn('[rate-limit] [SECURITY] Proxy headers are present but TRUST_PROXY is not set — rate limiting uses "unknown" IP, meaning ALL users share a single rate-limit bucket. After 5 failed login attempts from ANY IP, ALL users are locked out for 15 minutes. Set TRUST_PROXY=true if behind a reverse proxy (e.g., nginx).');
     }
     return ip;
 }
