@@ -109,7 +109,7 @@ export async function switchStorageBackend(type: StorageBackendType): Promise<vo
     // Initialize the new backend — roll back on failure
     try {
         await getStorage();
-        console.log(`[Storage] Switched to ${type} backend`);
+        console.debug(`[Storage] Switched to ${type} backend`);
         // New backend is confirmed working — now safe to dispose the old one
         if (oldBackend.dispose) {
             await oldBackend.dispose().catch(err => {
