@@ -59,6 +59,8 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
                 toast.error(t('home.loadMoreRateLimited'));
             } else if (page.status === 'maintenance') {
                 toast.error(t('home.loadMoreMaintenance'));
+            } else if (page.status === 'error') {
+                toast.error(t('home.loadMoreFailed'));
             }
         } catch (error) {
             console.error('Failed to load more images:', error);

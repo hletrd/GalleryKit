@@ -16,7 +16,7 @@ type PublicSearchItem = Awaited<ReturnType<typeof searchImages>>[number];
 
 export type LoadMoreImagesResult =
     | { status: 'ok'; images: PublicImageListItem[]; hasMore: boolean }
-    | { status: 'maintenance' | 'rateLimited'; images: []; hasMore: true }
+    | { status: 'maintenance' | 'rateLimited' | 'error'; images: []; hasMore: true }
     | { status: 'invalid'; images: []; hasMore: false };
 
 export type SearchImagesResult =
@@ -104,7 +104,13 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
         };
     } catch (err) {
         rollbackLoadMoreAttempt(ip);
-        throw err;
+        // C2-MED-02: return a structured error response instead of throwing.
+        // Throwing from a server action sends a generic error to the client
+        // and can leave the Load More button in a broken state. Returning a
+        // structured response lets the client handle the error gracefully
+        // with a toast notification while keeping the button functional.
+        console.error('loadMoreImages failed:', err);
+        return { status: 'error', images: [], hasMore: true };
     }
 }
 
