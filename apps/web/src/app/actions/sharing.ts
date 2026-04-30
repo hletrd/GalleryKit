@@ -6,6 +6,7 @@ import { eq, and, sql, inArray } from 'drizzle-orm';
 import { generateBase56 } from '@/lib/base56';
 import { headers } from 'next/headers';
 import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
+import { createResetAtBoundedMap } from '@/lib/bounded-map';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -18,11 +19,12 @@ import { requireSameOriginAdmin } from '@/lib/action-guards';
 const PHOTO_SHARE_KEY_LENGTH = 10;
 const GROUP_SHARE_KEY_LENGTH = 10;
 
-// In-memory rate limit for share link creation (per admin IP, per window)
+// C3-AGG-05: use BoundedMap for share rate limiting instead of inline
+// Map + manual prune/evict logic that duplicated the bounded-map pattern.
 const SHARE_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const SHARE_MAX_PER_WINDOW = 20;
 const SHARE_RATE_LIMIT_MAX_KEYS = 500;
-const shareRateLimit = new Map<string, { count: number; resetAt: number }>();
+const shareRateLimit = createResetAtBoundedMap<string>(SHARE_RATE_LIMIT_MAX_KEYS);
 type ShareRateLimitScope = 'share_photo' | 'share_group';
 
 function getShareKeyFingerprint(key: string) {
@@ -33,27 +35,11 @@ function getShareRateLimitKey(ip: string, scope: ShareRateLimitScope) {
     return `${scope}:${ip}`;
 }
 
-function pruneShareRateLimit() {
-    const now = Date.now();
-    for (const [key, entry] of shareRateLimit) {
-        if (entry.resetAt <= now) shareRateLimit.delete(key);
-    }
-    if (shareRateLimit.size > SHARE_RATE_LIMIT_MAX_KEYS) {
-        const excess = shareRateLimit.size - SHARE_RATE_LIMIT_MAX_KEYS;
-        let evicted = 0;
-        for (const key of shareRateLimit.keys()) {
-            if (evicted >= excess) break;
-            shareRateLimit.delete(key);
-            evicted++;
-        }
-    }
-}
-
 /** Pre-increment then check — prevents TOCTOU between concurrent requests.
  *  Same pattern as login (A-01) and createAdminUser (C11R2-02). */
 function checkShareRateLimit(ip: string, scope: ShareRateLimitScope): boolean {
-    pruneShareRateLimit();
     const now = Date.now();
+    shareRateLimit.prune(now);
     const key = getShareRateLimitKey(ip, scope);
     const entry = shareRateLimit.get(key);
     if (!entry || entry.resetAt <= now) {
