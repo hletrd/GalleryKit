@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { queueAddMock } = vi.hoisted(() => ({
@@ -88,8 +90,6 @@ describe('enqueueImageProcessing filename guard', () => {
         //
         // Regression guard: if pruneRetryMaps is rewritten to delete during
         // for-of iteration, this test fails.
-        const fs = require('fs') as typeof import('fs');
-        const path = require('path') as typeof import('path');
         const source = fs.readFileSync(
             path.join(__dirname, '..', 'lib', 'image-queue.ts'),
             'utf8',
