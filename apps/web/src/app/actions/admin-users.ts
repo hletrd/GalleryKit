@@ -8,7 +8,7 @@ import { getTranslations } from 'next-intl/server';
 import { headers } from 'next/headers';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { hasMySQLErrorCode } from '@/lib/validation';
+import { hasMySQLErrorCode, safeInsertId } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
@@ -142,8 +142,9 @@ export async function createAdminUser(formData: FormData) {
         });
 
         const currentUser = await getCurrentUser();
-        const newUserId = Number(result.insertId);
-        if (Number.isFinite(newUserId) && newUserId > 0) {
+        // C20-MED-01: use safeInsertId to prevent silent BigInt precision loss
+        const newUserId = safeInsertId(result.insertId);
+        if (newUserId > 0) {
             logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(newUserId)).catch(console.debug);
         }
 

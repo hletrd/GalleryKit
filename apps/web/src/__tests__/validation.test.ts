@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { containsUnicodeFormatting, hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug } from '@/lib/validation';
+import { containsUnicodeFormatting, hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug, safeInsertId } from '@/lib/validation';
 
 describe('isValidSlug', () => {
     it('accepts lowercase alphanumeric with hyphens and underscores', () => {
@@ -288,5 +288,48 @@ describe('UNICODE_FORMAT_CHARS regex synchronization', () => {
             // Also verify containsUnicodeFormatting agrees
             expect(containsUnicodeFormatting(input)).toBe(true);
         }
+    });
+});
+
+// C20-MED-01: safeInsertId validates BigInt coercion before converting
+// MySQL insertId to number. mysql2 returns BigInt when the auto-increment
+// value exceeds Number.MAX_SAFE_INTEGER, and bare Number() silently loses
+// precision.
+describe('safeInsertId', () => {
+    it('returns a safe number input unchanged', () => {
+        expect(safeInsertId(1)).toBe(1);
+        expect(safeInsertId(42)).toBe(42);
+        expect(safeInsertId(999999)).toBe(999999);
+    });
+
+    it('returns a safe BigInt input as a number', () => {
+        expect(safeInsertId(BigInt(1))).toBe(1);
+        expect(safeInsertId(BigInt(42))).toBe(42);
+        expect(safeInsertId(BigInt(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+    });
+
+    it('throws on BigInt exceeding Number.MAX_SAFE_INTEGER', () => {
+        const unsafe = BigInt(Number.MAX_SAFE_INTEGER) + BigInt(1);
+        expect(() => safeInsertId(unsafe)).toThrow('exceeds Number.MAX_SAFE_INTEGER');
+    });
+
+    it('throws on BigInt below Number.MIN_SAFE_INTEGER', () => {
+        const unsafe = BigInt(Number.MIN_SAFE_INTEGER) - BigInt(1);
+        expect(() => safeInsertId(unsafe)).toThrow('exceeds Number.MAX_SAFE_INTEGER');
+    });
+
+    it('throws on non-finite number input', () => {
+        expect(() => safeInsertId(Infinity)).toThrow('not a valid auto-increment ID');
+        expect(() => safeInsertId(-Infinity)).toThrow('not a valid auto-increment ID');
+        expect(() => safeInsertId(NaN)).toThrow('not a valid auto-increment ID');
+    });
+
+    it('throws on negative number input', () => {
+        expect(() => safeInsertId(-1)).toThrow('not a valid auto-increment ID');
+    });
+
+    it('accepts zero as valid (edge case)', () => {
+        expect(safeInsertId(0)).toBe(0);
+        expect(safeInsertId(BigInt(0))).toBe(0);
     });
 });

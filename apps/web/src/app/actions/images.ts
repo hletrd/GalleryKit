@@ -9,7 +9,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, safeInsertId } from '@/lib/validation';
 import { countCodePoints } from '@/lib/utils';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
@@ -323,6 +323,10 @@ export async function uploadImages(formData: FormData) {
                     ...exifDb,
                     color_space: data.iccProfileName || exifDb.color_space,
                     bit_depth: data.bitDepth,
+                    // C22-AGG-02: .slice(0, 10) is safe on UTF-16 code units because
+                    // getSafeExtension() in process-image.ts guarantees ASCII-only
+                    // output ([a-z0-9.]), so .length == countCodePoints and slice
+                    // cannot split a surrogate pair. Truncation matches varchar(10).
                     original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
                     // C14-LOW-01: `mode: 'number'` is safe because UPLOAD_MAX_FILE_BYTES
                     // (200 MB) is well within Number.MAX_SAFE_INTEGER (~9 PB). The schema
@@ -333,8 +337,9 @@ export async function uploadImages(formData: FormData) {
                 };
 
                 const [result] = await db.insert(images).values(insertValues);
-                const insertedId = Number(result.insertId);
-                if (!Number.isFinite(insertedId) || insertedId <= 0) {
+                // C20-MED-01: use safeInsertId to prevent silent BigInt precision loss
+                const insertedId = safeInsertId(result.insertId);
+                if (insertedId <= 0) {
                     console.error(`Invalid insertId for file: ${file.name}`);
                     // Clean up saved original file — no DB record references it
                     await deleteOriginalUploadFile(savedOriginalFilename);

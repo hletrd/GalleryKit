@@ -108,12 +108,14 @@ export function isValidTagSlug(slug: string): boolean {
     // which always replaces underscores with hyphens before producing a slug.
     // Keeping these consistent prevents confusion where a slug passes
     // validation but would never be produced by the slug generator.
-    // AGG10-03: `.length` is acceptable here because `getTagSlug()` normalizes
-    // to BMP-heavy forms where `.length` counts correctly (CJK characters are
-    // 1 code unit each). Supplementary characters in tag slugs are extremely
-    // rare. If `isValidTagSlug` is changed to allow supplementary characters,
-    // migrate to `countCodePoints()`.
-    return /^[\p{Letter}\p{Number}-]+$/u.test(slug) && slug.length > 0 && slug.length <= 100;
+    // C22-AGG-01: use countCodePoints for max-length check so supplementary
+    // characters (rare CJK ideographs allowed by the \p{Letter} regex) count
+    // as one character each, matching MySQL's utf8mb4 varchar semantics and
+    // the countCodePoints pattern used in isValidTopicAlias (C21-AGG-02) and
+    // isValidTagName (C21-AGG-03). Replaces the prior AGG10-03 `.length`
+    // usage which could reject valid supplementary-character slugs that are
+    // under the varchar(100) character limit but over 100 UTF-16 code units.
+    return /^[\p{Letter}\p{Number}-]+$/u.test(slug) && slug.length > 0 && countCodePoints(slug) <= 100;
 }
 
 // Validate filename (no path traversal, only safe characters)
@@ -134,4 +136,32 @@ export function isMySQLError(e: unknown): e is Error & { code: string; cause?: {
 /** True when the top-level or wrapped MySQL/Drizzle error matches the given code. */
 export function hasMySQLErrorCode(e: unknown, code: string): boolean {
     return isMySQLError(e) && (e.code === code || e.cause?.code === code);
+}
+
+/**
+ * Safely coerce a MySQL `insertId` (which may be a `BigInt`) to a `number`.
+ *
+ * `mysql2` returns `BigInt` when the auto-increment value exceeds
+ * `Number.MAX_SAFE_INTEGER`. A bare `Number(insertId)` silently loses precision
+ * in that case — the resulting number passes `Number.isFinite()` but refers to
+ * the wrong row. This helper validates the value is safe before coercion and
+ * throws on overflow so the caller can surface an error instead of persisting
+ * a wrong ID.
+ *
+ * C20-MED-01: used at all three insertId sites (sharing.ts, admin-users.ts,
+ * images.ts) to close the BigInt coercion risk class previously flagged as
+ * C14-MED-03 / C19F-MED-02.
+ */
+export function safeInsertId(insertId: number | bigint): number {
+    if (typeof insertId === 'bigint') {
+        if (insertId > BigInt(Number.MAX_SAFE_INTEGER) || insertId < BigInt(Number.MIN_SAFE_INTEGER)) {
+            throw new Error(`insertId ${insertId} exceeds Number.MAX_SAFE_INTEGER — cannot safely coerce to number`);
+        }
+        return Number(insertId);
+    }
+    // number path — still validate for Infinity/NaN from malformed results
+    if (!Number.isFinite(insertId) || insertId < 0) {
+        throw new Error(`insertId ${insertId} is not a valid auto-increment ID`);
+    }
+    return insertId;
 }

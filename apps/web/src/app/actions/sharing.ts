@@ -11,7 +11,7 @@ import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { revalidateLocalizedPaths } from '@/lib/revalidation';
-import { hasMySQLErrorCode } from '@/lib/validation';
+import { hasMySQLErrorCode, safeInsertId } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -244,8 +244,9 @@ export async function createGroupShareLink(imageIds: number[]) {
                 const [result] = await tx.insert(sharedGroups)
                     .values({ key: groupKey });
 
-                const groupId = Number(result.insertId);
-                if (!Number.isFinite(groupId) || groupId <= 0) {
+                // C20-MED-01: use safeInsertId to prevent silent BigInt precision loss
+                const groupId = safeInsertId(result.insertId);
+                if (groupId <= 0) {
                     throw new Error('Invalid insert ID from shared group creation');
                 }
 

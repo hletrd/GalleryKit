@@ -884,11 +884,13 @@ export async function getImageByShareKey(key: string) {
         ...publicSelectFields,
         blur_data_url: images.blur_data_url,
         topic_label: topics.label,
-        // C16-MED-02: combined GROUP_CONCAT with null-byte delimiter eliminates
-        // index-based zip alignment issues. Previously two separate GROUP_CONCATs
-        // were zipped by index — comma-containing tag names (pre-validation rows)
-        // or DISTINCT count mismatches could misalign name/slug pairs.
-        tag_concat: sql<string | null>`GROUP_CONCAT(DISTINCT CONCAT(${tags.slug}, CHAR(0), ${tags.name}) ORDER BY ${tags.slug})`,
+        // C16-MED-02: combined GROUP_CONCAT with null-byte inner delimiter and
+        // explicit \x01 outer separator eliminates index-based zip alignment issues
+        // and removes the assumption that the default comma separator is safe.
+        // C20-LOW-02: use explicit SEPARATOR '\x01' instead of MySQL's default
+        // comma so the parsing is robust against any future change to MySQL's
+        // default separator or tag slug format.
+        tag_concat: sql<string | null>`GROUP_CONCAT(DISTINCT CONCAT(${tags.slug}, CHAR(0), ${tags.name}) ORDER BY ${tags.slug} SEPARATOR CHAR(1))`,
     })
         .from(images)
         .leftJoin(topics, eq(images.topic, topics.slug))
@@ -906,12 +908,13 @@ export async function getImageByShareKey(key: string) {
     if (!result) return null;
 
     // C16-MED-02: Parse combined GROUP_CONCAT by splitting on the record
-    // delimiter (comma, added by GROUP_CONCAT between DISTINCT entries), then
+    // delimiter (CHAR(1) / \x01, set via SEPARATOR clause above), then
     // splitting each entry on the null byte to extract slug and name.
     // GROUP_CONCAT returns null when no tags exist (LEFT JOIN produced no rows).
+    // C20-LOW-02: split on \x01 instead of comma to match the explicit SEPARATOR.
     const imageTagsList: { slug: string; name: string }[] = [];
     if (result.tag_concat) {
-        for (const entry of result.tag_concat.split(',')) {
+        for (const entry of result.tag_concat.split('\x01')) {
             const nullIdx = entry.indexOf('\0');
             if (nullIdx === -1) continue; // skip malformed entries
             imageTagsList.push({ slug: entry.slice(0, nullIdx), name: entry.slice(nullIdx + 1) });
