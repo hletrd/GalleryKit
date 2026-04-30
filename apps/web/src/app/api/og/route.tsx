@@ -67,7 +67,11 @@ export async function GET(req: NextRequest) {
 
     const topicLabel = clampDisplayText(topicRecord.label, MAX_TOPIC_LABEL_LENGTH);
     const siteTitle = seo.title || siteConfig.title;
-    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)) : [];
+    // C2-AGG-03 / plan-257: clamp each tag name for display to prevent
+    // layout distortion in the OG image when a tag hits the 100-char
+    // isValidTagName ceiling. 30 chars is comfortable for the pill layout.
+    const MAX_OG_TAG_DISPLAY_LENGTH = 30;
+    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)).map(t => clampDisplayText(t, MAX_OG_TAG_DISPLAY_LENGTH)) : [];
 
     // AGG8F-01 / plan-233: ETag covers the inputs that drive the
     // rendered image. If a crawler revisits with `If-None-Match`,
