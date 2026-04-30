@@ -1,28 +1,26 @@
-# Aggregate Review — Cycle 10
+# Aggregate Review — Cycle 12
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 Reviewers: code-reviewer, security-reviewer, perf-reviewer, critic, verifier
 
-**HEAD:** `441f718` (Preserve cycle 9 quality review evidence)
+**HEAD:** `2f8b9ba` (Update cycle 11 plan status to completed)
 
 ## Source reviews (5 files)
 
 | Reviewer | File |
 |---|---|
-| Code Reviewer | `.context/reviews/code-reviewer-cycle10.md` |
-| Security Reviewer | `.context/reviews/security-reviewer-cycle10.md` |
-| Perf Reviewer | `.context/reviews/perf-reviewer-cycle10.md` |
-| Critic | `.context/reviews/critic-cycle10.md` |
-| Verifier | `.context/reviews/verifier-cycle10.md` |
+| Code Reviewer | `.context/reviews/code-reviewer.md` |
+| Security Reviewer | `.context/reviews/security-reviewer.md` |
+| Perf Reviewer | `.context/reviews/perf-reviewer.md` |
+| Critic | `.context/reviews/critic.md` |
+| Verifier | `.context/reviews/verifier.md` |
 
 ## Deduplicated findings (cross-agent agreement noted)
 
 | Unified ID | Source IDs | Description | Severity | Confidence | Cross-Agent |
 |---|---|---|---|---|---|
-| **AGG10-01** | C10-CR-03, C10-SEC-01, C10-CRIT-01, C10-V-01 | `addTagToImage` audit log fires on INSERT IGNORE no-op (duplicate row). `db.insert(imageTags).ignore()` returns `affectedRows === 0` for duplicates, but audit log fires unconditionally. `batchUpdateImageTags` in the same file correctly gates on `affectedRows > 0`. | LOW | MEDIUM | 4 agents |
-| **AGG10-02** | C10-CR-01, C10-SEC-02 | `isValidSlug` in `validation.ts:23` uses `slug.length <= 100`. The ASCII regex makes `.length` correct. Consistency concern only — same class as AGG8R-02/AGG9R-03. | LOW | LOW | 2 agents |
-| **AGG10-03** | C10-CR-02, C10-SEC-02 | `isValidTagSlug` in `validation.ts:96` uses `slug.length <= 100`. Unicode letters are allowed but BMP-heavy in practice. Consistency concern only. | LOW | LOW | 2 agents |
+| **AGG12-01** | C12-CR-01, C12-SEC-01, C12-CRIT-01, C12-V-01 | `batchAddTags` audit log fires on INSERT IGNORE no-op (all duplicate rows). `db.insert(imageTags).ignore().values(values)` returns `affectedRows === 0` for duplicates, but audit log fires unconditionally with `count: existingIds.size`. The `batchUpdateImageTags` in the same file correctly gates `added++` on `affectedRows > 0`. | LOW | MEDIUM | 4 agents |
 
 ## Priority remediation order (this cycle)
 
@@ -36,11 +34,7 @@ None.
 
 ### Consider-fix (LOW — batch into polish patch if time permits)
 
-1. **AGG10-01** (4 agents): Gate `addTagToImage` audit log on `linkResult.affectedRows > 0`. This is an audit integrity fix — same class as C10R3-03 which was already fixed for `deleteAdminUser`.
-
-2. **AGG10-02** (2 agents): Add comment in `isValidSlug` documenting that `.length` is safe because the regex restricts to ASCII. No code change needed.
-
-3. **AGG10-03** (2 agents): Add comment in `isValidTagSlug` documenting that `.length` is acceptable for BMP-heavy slug patterns. No code change needed.
+1. **AGG12-01** (4 agents): Gate `batchAddTags` audit log on `affectedRows > 0` from the INSERT IGNORE result. Also update the `count` metadata to reflect actual rows inserted instead of `existingIds.size`. This is the same class as AGG10-01 (fixed cycle 10 for `addTagToImage`) and AGG11-01 (fixed cycle 11 for `removeTagFromImage`), but the batch-add counterpart was missed.
 
 ### Defer (LOW — documented for future)
 
@@ -48,7 +42,7 @@ None new this cycle.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
-All prior deferred items from cycles 5-46 remain deferred with no change in status. Full list preserved in `.context/plans/` deferred carry-forward documents.
+All prior deferred items from cycles 5-46 remain deferred with no change in status. Full list preserved in `.context/plans/` deferred carry-forward documents and `.omc/plans/plan-deferred-items.md`.
 
 Key items:
 - C32-03: Insertion-order eviction in Maps (also CRI-38-01 DRY concern)
@@ -73,6 +67,6 @@ Key items:
 
 ## Convergence assessment
 
-Cycle 10 found only LOW-severity findings (3 items). No CRITICAL or HIGH findings, and no MEDIUM findings. All cycle 9 fixes verified. The codebase is in a stable, well-hardened state. The only actionable code fix is the audit-log gating in `addTagToImage` (AGG10-01); the other two are documentation-only.
+Cycle 12 found only one LOW-severity finding (1 item). No CRITICAL or HIGH findings, and no MEDIUM findings. All prior cycle fixes verified intact. The codebase is in a stable, well-hardened state. The only actionable fix is the audit-log gating in `batchAddTags` (AGG12-01); this completes the trilogy of audit-log consistency fixes across the tag management actions (addTagToImage fixed in cycle 10, removeTagFromImage fixed in cycle 11, batchAddTags identified this cycle).
 
-**Convergence signal**: Finding count and severity continue to decrease. The review is at a near-fixed-point where only audit-log consistency and documentation uniformity issues remain.
+**Convergence signal**: Finding count and severity continue to decrease. The review is at a near-fixed-point where only one audit-log consistency issue remains in the tag-management action surface.

@@ -1,4 +1,4 @@
-# Critic Review — critic (Cycle 11)
+# Critic Review — critic (Cycle 12)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
@@ -6,22 +6,23 @@ Date: 2026-04-29
 ## Summary
 
 - No medium or high findings.
-- One low finding about audit-log consistency (same class as cycle 10 fix).
+- One low finding about audit-log consistency (same class as cycle 10/11 fixes, but on the batch path).
 
 ## Verified fixes from prior cycles
 
-All Cycle 10 critic findings confirmed addressed:
+All prior critic findings confirmed addressed:
 
-1. C10-CRIT-01 (`addTagToImage` audit on no-op INSERT IGNORE): FIXED — gated on `affectedRows > 0`.
+1. AGG11-01 / C11-CRIT-01 (`removeTagFromImage` audit on no-op DELETE): FIXED — gated on `affectedRows > 0`.
+2. AGG10-01 / C10-CRIT-01 (`addTagFromImage` audit on no-op INSERT IGNORE): FIXED — gated on `affectedRows > 0`.
 
 ## New Findings
 
-### C11-CRIT-01 (Low / Medium). `removeTagFromImage` logs `tag_remove` audit event even when DELETE affected 0 rows (tag was not linked)
+### C12-CRIT-01 (Low / Medium). `batchAddTags` logs `tags_batch_add` audit event even when INSERT IGNORE affected 0 rows (all duplicates)
 
-- Location: `apps/web/src/app/actions/tags.ts:252`
-- The `db.delete(imageTags)` at line 236 returns `affectedRows === 0` when the tag was not linked to the image. The code at lines 242-248 checks if the image still exists but does NOT return early or gate the audit log. The audit log at line 252 fires unconditionally. `batchUpdateImageTags` (same file, line 429) correctly gates `removed++` on `deleteResult.affectedRows > 0`. The inconsistency means the audit log can show a `tag_remove` event when nothing was actually removed.
-- This is the exact same class of issue as AGG10-01 / C10-CRIT-01 (fixed for `addTagToImage` in cycle 10), but the remove counterpart was missed.
-- Suggested fix: Move the audit log inside a conditional that checks `deleteResult.affectedRows > 0`.
+- Location: `apps/web/src/app/actions/tags.ts:327`
+- The `db.insert(imageTags).ignore().values(values)` at line 324 returns `affectedRows === 0` when all rows are duplicates. The audit log at line 327 fires unconditionally with `count: existingIds.size`. `batchUpdateImageTags` (same file, line 414) correctly gates `added++` on `tagInsertResult.affectedRows > 0`, but `batchAddTags` does not gate its audit log.
+- This is the exact same class of issue as AGG10-01 / C10-CRIT-01 (fixed for `addTagFromImage` in cycle 10) and AGG11-01 / C11-CRIT-01 (fixed for `removeTagFromImage` in cycle 11), but the batch-add counterpart was missed.
+- Suggested fix: Capture the result's `affectedRows` and gate the audit log on `affectedRows > 0`. Update the `count` metadata to reflect actual rows inserted.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
