@@ -15,32 +15,19 @@ import { stripControlChars, requireCleanInput } from '@/lib/sanitize';
 import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStart, incrementRateLimit, isRateLimitExceeded } from '@/lib/rate-limit';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
+import { createResetAtBoundedMap } from '@/lib/bounded-map';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const USER_CREATE_MAX_ATTEMPTS = 10;
 const USER_CREATE_RATE_LIMIT_MAX_KEYS = 500;
-const userCreateRateLimit = new Map<string, { count: number; resetAt: number }>();
-
-function pruneUserCreateRateLimit() {
-    const now = Date.now();
-    for (const [key, entry] of userCreateRateLimit) {
-        if (entry.resetAt <= now) userCreateRateLimit.delete(key);
-    }
-    if (userCreateRateLimit.size > USER_CREATE_RATE_LIMIT_MAX_KEYS) {
-        const excess = userCreateRateLimit.size - USER_CREATE_RATE_LIMIT_MAX_KEYS;
-        let evicted = 0;
-        for (const key of userCreateRateLimit.keys()) {
-            if (evicted >= excess) break;
-            userCreateRateLimit.delete(key);
-            evicted++;
-        }
-    }
-}
+// C4-AGG-02: migrated from raw Map with inline prune/evict to BoundedMap for
+// consistency with all other rate-limit surfaces (sharing, search, OG, login).
+const userCreateRateLimit = createResetAtBoundedMap<string>(USER_CREATE_RATE_LIMIT_MAX_KEYS);
 
 function checkUserCreateRateLimit(ip: string): boolean {
-    pruneUserCreateRateLimit();
     const now = Date.now();
+    userCreateRateLimit.prune(now);
     const entry = userCreateRateLimit.get(ip);
     if (!entry || entry.resetAt <= now) {
         userCreateRateLimit.set(ip, { count: 1, resetAt: now + USER_CREATE_WINDOW_MS });
