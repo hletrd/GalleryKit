@@ -753,27 +753,30 @@ export async function getImage(id: number) {
 
     if (image.capture_date) {
         // C5F-01: Dated image in sort order capture_date DESC NULLS LAST.
+        // C6F-02: isNotNull(capture_date) guards on dated-only branches make the
+        // intent explicit — MySQL NULL comparisons are already falsy, but without
+        // the guard the code depends on implicit NULL semantics and is fragile.
         // Prev (ASC direction): rows that sort BEFORE this image.
         //   - Dated rows with later capture_date, same-date with later created_at/id.
         //   - Undated rows (NULL) sort LAST in ASC, so they are NOT predecessors
-        //     of dated rows. Removed `isNull(images.capture_date)` from here.
+        //     of dated rows.
         prevConditions.push(
-            gt(images.capture_date, image.capture_date),
-            and(eq(images.capture_date, image.capture_date), gt(images.created_at, image.created_at)),
-            and(eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), gt(images.id, image.id)),
+            and(isNotNull(images.capture_date), gt(images.capture_date, image.capture_date)),
+            and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), gt(images.created_at, image.created_at)),
+            and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), gt(images.id, image.id)),
         );
         // Next (DESC direction): rows that sort AFTER this image.
-        //   - Dated rows with earlier capture_date, same-date with earlier created_at/id.
         //   - Undated rows (NULL sorts last in DESC → first in "after" direction),
         //     so they ARE successors of dated rows. The closest undated successor
         //     has the latest created_at among undated rows.
+        //   - Dated rows with earlier capture_date, same-date with earlier created_at/id.
         //   - Parity with buildCursorCondition (lines 553-558) which correctly
         //     includes isNull(capture_date) in the "after" direction for dated cursors.
         nextConditions.push(
             isNull(images.capture_date),
-            lt(images.capture_date, image.capture_date),
-            and(eq(images.capture_date, image.capture_date), lt(images.created_at, image.created_at)),
-            and(eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id)),
+            and(isNotNull(images.capture_date), lt(images.capture_date, image.capture_date)),
+            and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), lt(images.created_at, image.created_at)),
+            and(isNotNull(images.capture_date), eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id)),
         );
     } else {
         // C5F-01: Undated image in sort order capture_date DESC NULLS LAST.
@@ -930,6 +933,10 @@ export async function getSharedGroup(
         )
     )
     .orderBy(asc(sharedGroupImages.position), asc(sharedGroupImages.imageId))
+    // C6F-05: limit(100) matches the SHARE_MAX_IMAGES cap enforced at group
+    // creation time in sharing.ts (uniqueImageIds.length > 100 check). The
+    // read-path limit is a safety cap — if a group somehow exceeds 100 images
+    // (e.g. via a direct DB edit), extras are silently dropped.
     .limit(100);
 
     // Fetch tags for all images in a single batched query (avoids N+1)
@@ -960,13 +967,15 @@ export async function getSharedGroup(
         imagesWithTags = [];
     }
 
-    if (imagesWithTags.length === 0) {
-        return null;
-    }
-
+    // C6F-01: return the group even when images are empty (still processing
+    // or all unprocessed) so the page can show a meaningful state instead of
+    // a 404. Previously returned null, which made valid shared links appear
+    // broken while images were being processed.
     // Increment view count only after the image fetch succeeds — avoids
-    // overcounting on DB errors during the image JOIN query.
-    if (options?.incrementViewCount !== false) {
+    // overcounting on DB errors during the image JOIN query. Skip the
+    // increment when there are no processed images to avoid inflating
+    // the counter for groups with no visible content yet.
+    if (imagesWithTags.length > 0 && options?.incrementViewCount !== false) {
         bufferGroupViewCount(group.id);
     }
 
@@ -1025,6 +1034,7 @@ interface SearchResult {
     topic_label: string | null;
     camera_model: string | null;
     capture_date: string | null;
+    created_at: Date;
 }
 
 export type { SearchResult };
@@ -1040,11 +1050,13 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
 
     // PRIVACY: Omit filename_webp and filename_avif from public search results
     // to minimize internal filename exposure. filename_jpeg is needed for thumbnails.
+    // C6F-03: created_at included in SELECT and GROUP BY for strict SQL mode
+    // compatibility (ORDER BY references it).
     const searchFields = {
         id: images.id, title: images.title, description: images.description,
         filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
         topic: images.topic, topic_label: topics.label, camera_model: images.camera_model,
-        capture_date: images.capture_date,
+        capture_date: images.capture_date, created_at: images.created_at,
     };
 
     // Run main query first; only query tags if we need more results (saves a connection)
@@ -1123,6 +1135,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                     topics.label,
                     images.camera_model,
                     images.capture_date,
+                    images.created_at,
                 )
                 .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(remainingLimit),
@@ -1142,6 +1155,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                     topics.label,
                     images.camera_model,
                     images.capture_date,
+                    images.created_at,
                 )
                 .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(aliasRemainingLimit),
