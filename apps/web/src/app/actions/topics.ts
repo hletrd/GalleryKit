@@ -349,9 +349,10 @@ export async function deleteTopic(slug: string) {
         if (deletedImageFilename) {
             await deleteTopicImage(deletedImageFilename);
         }
-        // Log audit event only when the topic was actually deleted — avoids duplicate
-        // entries when concurrent deletion causes the transaction to delete 0 rows.
-        if (deletedRows > 0) {
+        // Log audit event — the early return above guarantees deletedRows >= 1 here.
+        // C15-AGG-01: removed the redundant `if (deletedRows > 0)` guard which was
+        // always true after the `deletedRows === 0` early return on line 346.
+        {
             const currentUser = await getCurrentUser();
             logAuditEvent(currentUser?.id ?? null, 'topic_delete', 'topic', cleanSlug).catch(console.debug);
         }
