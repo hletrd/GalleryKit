@@ -45,6 +45,7 @@ import { sizedImageUrl } from '@/lib/image-url';
 import { localizeUrl } from '@/lib/locale-path';
 import { useRouter } from 'next/navigation';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { countCodePoints } from '@/lib/utils';
 
 interface ImageType {
     id: number;
@@ -229,6 +230,18 @@ export function ImageManager({
 
     const handleSaveEdit = async () => {
         if (!editingImage) return;
+        // C7-MED-03: validate using code-point counting so the client-side limit
+        // matches the server-side countCodePoints() validation. The browser's
+        // native maxLength counts UTF-16 code units, which is stricter than
+        // necessary for supplementary characters (emoji, rare CJK).
+        if (editTitle && countCodePoints(editTitle) > 255) {
+            toast.error(t('imageManager.titleTooLong'));
+            return;
+        }
+        if (editDescription && countCodePoints(editDescription) > 5000) {
+            toast.error(t('imageManager.descTooLong'));
+            return;
+        }
         setIsSavingEdit(true);
         try {
             const res = await updateImageMetadata(editingImage.id, editTitle, editDescription);
@@ -493,11 +506,11 @@ export function ImageManager({
                     <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                             <Label htmlFor="title">{t('imageManager.titleField')}</Label>
-                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField')} maxLength={255} />
+                            <Input id="title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('imageManager.titleField')} />
                         </div>
                         <div className="grid gap-2">
                             <Label htmlFor="description">{t('imageManager.descField')}</Label>
-                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField')} maxLength={5000} />
+                            <Textarea id="description" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder={t('imageManager.descField')} />
                         </div>
                     </div>
                     <DialogFooter>

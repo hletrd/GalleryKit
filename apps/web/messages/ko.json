@@ -195,7 +195,9 @@
     "bulkDeleteFailed": "일괄 삭제에 실패했습니다",
     "shareFailed": "그룹 공유에 실패했습니다",
     "updateFailed": "수정에 실패했습니다",
-    "tagsForImage": "{title}의 태그"
+    "tagsForImage": "{title}의 태그",
+    "titleTooLong": "제목이 너무 깁니다 (최대 255자)",
+    "descTooLong": "설명이 너무 깁니다 (최대 5,000자)"
   },
   "home": {
     "latestUploads": "최근 사진",

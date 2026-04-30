@@ -195,7 +195,9 @@
     "bulkDeleteFailed": "Bulk delete failed",
     "shareFailed": "Failed to share group",
     "updateFailed": "Failed to update",
-    "tagsForImage": "Tags for {title}"
+    "tagsForImage": "Tags for {title}",
+    "titleTooLong": "Title is too long (max 255 characters)",
+    "descTooLong": "Description is too long (max 5,000 characters)"
   },
   "home": {
     "latestUploads": "Latest",
