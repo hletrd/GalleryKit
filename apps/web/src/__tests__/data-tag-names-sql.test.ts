@@ -148,6 +148,59 @@ describe('getImagesLite tag_names SQL shape', () => {
      * once `.toSQL()` runs, so a slow assertion would still indicate
      * a real problem.
      */
+    /**
+     * C14-MED-02: lock that searchFields keys and searchGroupByColumns
+     * stay in sync. The two GROUP BY clauses in searchImages (tag search,
+     * alias search) previously duplicated the column list inline. If a
+     * developer adds a field to searchFields without adding it to the
+     * shared array, MySQL ONLY_FULL_GROUP_BY mode will reject the query
+     * in production. This test verifies the shared array exists and
+     * references the same column set as searchFields.
+     */
+    it('searchImages uses a shared searchGroupByColumns array that covers all searchFields keys', () => {
+        const source = readSource();
+        // Verify the shared array is defined
+        expect(source).toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
+        // Verify both .groupBy() calls use the shared array
+        expect(source).toMatch(/\.groupBy\(\.\.\.searchGroupByColumns\)/);
+        // Count occurrences — should be exactly 2 (tag search + alias search)
+        const groupBySpreadMatches = source.match(/\.groupBy\(\.\.\.searchGroupByColumns\)/g);
+        expect(groupBySpreadMatches).toHaveLength(2);
+        // Verify searchFields is defined nearby (same function body)
+        const searchFnStart = source.indexOf('export async function searchImages(');
+        expect(searchFnStart).toBeGreaterThan(-1);
+        const searchFnBody = extractFunctionBody(source, 'searchImages');
+        expect(searchFnBody).toMatch(/const\s+searchFields\s*=\s*\{/);
+        expect(searchFnBody).toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
+        // Ensure the old inline .groupBy(images.id, ...) pattern is gone
+        expect(searchFnBody).not.toMatch(/\.groupBy\(\s*images\.id,/);
+    });
+
+    /**
+     * C14-MED-01: lock that getImageByShareKey uses a single query with
+     * LEFT JOIN + GROUP_CONCAT for tags instead of two sequential queries
+     * (image row + tags). The single-query shape eliminates one DB
+     * round-trip per shared-photo page load.
+     */
+    it('getImageByShareKey uses single LEFT JOIN + GROUP_CONCAT query for tags', () => {
+        const source = readSource();
+        const body = extractFunctionBody(source, 'getImageByShareKey');
+        // Must include tag_names via tagNamesAgg (shared constant)
+        expect(body).toMatch(/tag_names:\s*tagNamesAgg/);
+        // Must include tag_slugs for structured tag objects
+        expect(body).toMatch(/tag_slugs:/);
+        // Must LEFT JOIN imageTags and tags (not inner join, since photos may have no tags)
+        expect(body).toContain('.leftJoin(imageTags');
+        expect(body).toContain('.leftJoin(tags');
+        // Must use GROUP BY
+        expect(body).toContain('.groupBy(images.id)');
+        // Must NOT have a separate db.select for tags (the old 2-query pattern)
+        // The old pattern had: const imageTagsResult = await db.select({
+        expect(body).not.toMatch(/const\s+imageTagsResult\s*=\s*await\s+db\.select/);
+        // Privacy: must use publicSelectFields (not adminSelectFields)
+        expect(body).toContain('...publicSelectFields');
+    });
+
     it('Drizzle compiled SQL for the lite query shape emits GROUP_CONCAT + LEFT JOIN + GROUP BY', { timeout: 30000 }, async () => {
         const { sql: drizzleSql, eq } = await import('drizzle-orm');
         const { drizzle: drizzleProxy } = await import('drizzle-orm/mysql-proxy');

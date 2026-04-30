@@ -865,6 +865,10 @@ export async function getImage(id: number) {
 // `selectFields` intentionally omits latitude, longitude, filename_original,
 // and user_filename. Do NOT add those fields — they would leak PII to
 // unauthenticated visitors. See CLAUDE.md "Privacy" section.
+// C14-MED-01: collapsed image + tags into a single query using LEFT JOIN +
+// GROUP_CONCAT (matching getImagesLite pattern). Previously this function
+// issued 2 sequential DB queries (image row, then tags), adding one round-
+// trip per shared-photo page load.
 export async function getImageByShareKey(key: string) {
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, 10)) {
@@ -875,34 +879,45 @@ export async function getImageByShareKey(key: string) {
     // consistency with getSharedGroup (blur placeholder) and getImage
     // (topic display label). Without blur_data_url the shared photo
     // page (/s/[key]) falls back to a shimmer skeleton during decode.
-    const result = await db.select({
+    const [result] = await db.select({
         ...publicSelectFields,
         blur_data_url: images.blur_data_url,
         topic_label: topics.label,
+        tag_names: tagNamesAgg,
+        tag_slugs: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.slug} ORDER BY ${tags.slug})`,
     })
         .from(images)
         .leftJoin(topics, eq(images.topic, topics.slug))
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
         .where(
             and(
                 eq(images.share_key, trimmedKey),
                 eq(images.processed, true)
             )
         )
+        .groupBy(images.id)
         .limit(1);
-    const image = result[0];
-    if (!image) return null;
 
-    const imageTagsResult = await db.select({
-            slug: tags.slug,
-            name: tags.name
-        })
-        .from(imageTags)
-        .innerJoin(tags, eq(imageTags.tagId, tags.id))
-        .where(eq(imageTags.imageId, image.id));
+    if (!result) return null;
+
+    // Parse GROUP_CONCAT results into structured tag arrays.
+    // GROUP_CONCAT returns null when no tags exist (LEFT JOIN produced no rows).
+    const parsedTagNames = result.tag_names ? result.tag_names.split(',') : [];
+    const parsedTagSlugs = result.tag_slugs ? result.tag_slugs.split(',') : [];
+
+    const imageTagsList: { slug: string; name: string }[] = [];
+    for (let i = 0; i < parsedTagNames.length; i++) {
+        imageTagsList.push({ slug: parsedTagSlugs[i] ?? '', name: parsedTagNames[i] });
+    }
+
+    // Destructure to strip tag_names/tag_slugs from the return value
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- intentionally stripped from return value
+    const { tag_names: _tagNames, tag_slugs: _tagSlugs, ...imageFields } = result;
 
     return {
-        ...image,
-        tags: imageTagsResult,
+        ...imageFields,
+        tags: imageTagsList,
         prevId: null,
         nextId: null
     };
@@ -1068,17 +1083,32 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     // C6F-03: created_at included in SELECT and GROUP BY for strict SQL mode
     // compatibility (ORDER BY references it).
     // C8-MED-02 / C7-MED-04: MAINTENANCE NOTE — any new column added to
-    // searchFields MUST also be added to BOTH GROUP BY clauses below:
-    //   - Tag search GROUP BY (lines ~1127-1139)
-    //   - Alias search GROUP BY (lines ~1147-1159)
+    // searchFields MUST also be added to searchGroupByColumns below.
     // MySQL ONLY_FULL_GROUP_BY mode will reject queries where a selected
     // column is not in the GROUP BY or an aggregate function.
+    // C14-MED-02: extracted the GROUP BY column list into a shared array so
+    // the tag and alias queries cannot drift independently. Adding a field to
+    // searchFields requires adding it here too (single place to update).
     const searchFields = {
         id: images.id, title: images.title, description: images.description,
         filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
         topic: images.topic, topic_label: topics.label, camera_model: images.camera_model,
         capture_date: images.capture_date, created_at: images.created_at,
     };
+
+    const searchGroupByColumns = [
+        images.id,
+        images.title,
+        images.description,
+        images.filename_jpeg,
+        images.width,
+        images.height,
+        images.topic,
+        topics.label,
+        images.camera_model,
+        images.capture_date,
+        images.created_at,
+    ];
 
     // Run main query first; only query tags if we need more results (saves a connection)
     const results = await db.select(searchFields).from(images)
@@ -1145,19 +1175,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 .innerJoin(imageTags, eq(images.id, imageTags.imageId))
                 .innerJoin(tags, eq(imageTags.tagId, tags.id))
                 .where(and(...tagConditions))
-                .groupBy(
-                    images.id,
-                    images.title,
-                    images.description,
-                    images.filename_jpeg,
-                    images.width,
-                    images.height,
-                    images.topic,
-                    topics.label,
-                    images.camera_model,
-                    images.capture_date,
-                    images.created_at,
-                )
+                .groupBy(...searchGroupByColumns)
                 .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(remainingLimit),
             aliasRemainingLimit <= 0 ? [] : db.select(searchFields)
@@ -1165,19 +1183,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 .leftJoin(topics, eq(images.topic, topics.slug))
                 .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))
                 .where(and(...aliasConditions))
-                .groupBy(
-                    images.id,
-                    images.title,
-                    images.description,
-                    images.filename_jpeg,
-                    images.width,
-                    images.height,
-                    images.topic,
-                    topics.label,
-                    images.camera_model,
-                    images.capture_date,
-                    images.created_at,
-                )
+                .groupBy(...searchGroupByColumns)
                 .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(aliasRemainingLimit),
         ]);
