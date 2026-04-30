@@ -95,13 +95,23 @@ export function requireCleanInput(raw: string | null | undefined, trim = true): 
  * Do NOT remove either regex without understanding both formats.
  * Moved from db-actions.ts for unit-testability (C5-AGG-01).
  */
-export function sanitizeStderr(data: Buffer | string, pwd?: string): string {
+export function sanitizeStderr(data: Buffer | string, pwd?: string, sensitiveValues?: string[]): string {
     let text = typeof data === 'string' ? data : data.toString('utf8');
     // Redact the actual password value if it appears in stderr
     if (pwd && pwd.length > 0) {
         // Escape regex-special chars in the password
         const escaped = pwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         text = text.replace(new RegExp(escaped, 'g'), '[REDACTED]');
+    }
+    // C1F-SR-08: redact additional sensitive connection parameters (host, user, db name)
+    // that may appear in MySQL error messages like "Access denied for user 'x'@'y'".
+    if (sensitiveValues) {
+        for (const val of sensitiveValues) {
+            if (val && val.length > 0) {
+                const escaped = val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                text = text.replace(new RegExp(escaped, 'g'), '[REDACTED]');
+            }
+        }
     }
     // Regex 1: generic password=VALUE and password:VALUE patterns (see doc above)
     text = text.replace(/(password\s*[:=]\s*)[^\s;'"`)]*/gi, '$1[REDACTED]');

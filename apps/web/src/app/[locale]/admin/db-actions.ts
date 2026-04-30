@@ -170,7 +170,7 @@ export async function dumpDatabase() {
         });
 
         dump.stderr.on('data', (data: Buffer) => {
-            console.error(`mysqldump stderr: ${sanitizeStderr(data, DB_PASSWORD)}`);
+            console.error(`mysqldump stderr: ${sanitizeStderr(data, DB_PASSWORD, [DB_USER, DB_HOST, DB_NAME])}`);
         });
 
         dump.on('close', async (code: number) => {
@@ -472,7 +472,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         });
 
         restore.stderr.on('data', (data: Buffer) => {
-            console.error(`mysql restore stderr: ${sanitizeStderr(data, DB_PASSWORD)}`);
+            console.error(`mysql restore stderr: ${sanitizeStderr(data, DB_PASSWORD, [DB_USER, DB_HOST, DB_NAME])}`);
         });
 
         restore.on('close', async (code: number) => {
