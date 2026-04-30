@@ -9,8 +9,7 @@ import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { validateSeoOgImageUrl } from '@/lib/seo-og-url';
 import { normalizeOpenGraphLocale } from '@/lib/locale-path';
-import { normalizeStringRecord } from '@/lib/sanitize';
-import { containsUnicodeFormatting } from '@/lib/validation';
+import { normalizeStringRecord, sanitizeAdminString } from '@/lib/sanitize';
 import { SEO_SETTING_KEYS } from '@/lib/gallery-config-shared';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -60,6 +59,27 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
 
+    // C7-AGG7R-03: check Unicode formatting on RAW values BEFORE
+    // normalizeStringRecord strips them (stripControlChars now removes
+    // bidi/zero-width chars). Guard with typeof because runtime Server
+    // Action payloads can contain non-strings.
+    // C6L-SEC-01: `seo_locale` and `seo_og_image_url` skip this gate
+    // because their existing validators (`normalizeOpenGraphLocale`,
+    // `validateSeoOgImageUrl`) are stricter than the Unicode-formatting
+    // filter.
+    if (typeof settings.seo_title === 'string' && sanitizeAdminString(settings.seo_title).rejected) {
+        return { error: t('seoTitleInvalid') };
+    }
+    if (typeof settings.seo_description === 'string' && sanitizeAdminString(settings.seo_description).rejected) {
+        return { error: t('seoDescriptionInvalid') };
+    }
+    if (typeof settings.seo_nav_title === 'string' && sanitizeAdminString(settings.seo_nav_title).rejected) {
+        return { error: t('seoNavTitleInvalid') };
+    }
+    if (typeof settings.seo_author === 'string' && sanitizeAdminString(settings.seo_author).rejected) {
+        return { error: t('seoAuthorInvalid') };
+    }
+
     // Validate all provided keys are allowed and all values are strings.
     // normalizeStringRecord guards against non-string runtime payloads
     // (null, number, array) that would cause TypeError on .trim().
@@ -69,24 +89,6 @@ export async function updateSeoSettings(settings: Record<string, string>) {
         return { error: t(normalized.error === 'invalidSettingKey' ? 'invalidSeoKey' : normalized.error) };
     }
     const sanitizedSettings = normalized.record;
-
-    // C6L-SEC-01: reject Unicode bidi/invisible formatting characters in
-    // the four free-form SEO fields before length checks. `seo_locale`
-    // and `seo_og_image_url` skip this gate because their existing
-    // validators (`normalizeOpenGraphLocale`, `validateSeoOgImageUrl`)
-    // are stricter than the Unicode-formatting filter.
-    if (containsUnicodeFormatting(sanitizedSettings.seo_title)) {
-        return { error: t('seoTitleInvalid') };
-    }
-    if (containsUnicodeFormatting(sanitizedSettings.seo_description)) {
-        return { error: t('seoDescriptionInvalid') };
-    }
-    if (containsUnicodeFormatting(sanitizedSettings.seo_nav_title)) {
-        return { error: t('seoNavTitleInvalid') };
-    }
-    if (containsUnicodeFormatting(sanitizedSettings.seo_author)) {
-        return { error: t('seoAuthorInvalid') };
-    }
 
     // Validate individual field lengths (on sanitized values)
     if (sanitizedSettings.seo_title && sanitizedSettings.seo_title.length > MAX_TITLE_LENGTH) {
