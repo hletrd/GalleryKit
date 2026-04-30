@@ -22,9 +22,9 @@ const GROUP_SHARE_KEY_LENGTH = 10;
 // C3-AGG-05: use BoundedMap for share rate limiting instead of inline
 // Map + manual prune/evict logic that duplicated the bounded-map pattern.
 const SHARE_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const SHARE_MAX_PER_WINDOW = 20;
-const SHARE_RATE_LIMIT_MAX_KEYS = 500;
-const shareRateLimit = createResetAtBoundedMap<string>(SHARE_RATE_LIMIT_MAX_KEYS);
+const SHARE_WRITE_MAX_PER_WINDOW = 20;
+const SHARE_WRITE_RATE_LIMIT_MAX_KEYS = 500;
+const shareWriteRateLimit = createResetAtBoundedMap<string>(SHARE_WRITE_RATE_LIMIT_MAX_KEYS);
 type ShareRateLimitScope = 'share_photo' | 'share_group';
 
 function getShareKeyFingerprint(key: string) {
@@ -39,27 +39,27 @@ function getShareRateLimitKey(ip: string, scope: ShareRateLimitScope) {
  *  Same pattern as login (A-01) and createAdminUser (C11R2-02). */
 function checkShareRateLimit(ip: string, scope: ShareRateLimitScope): boolean {
     const now = Date.now();
-    shareRateLimit.prune(now);
+    shareWriteRateLimit.prune(now);
     const key = getShareRateLimitKey(ip, scope);
-    const entry = shareRateLimit.get(key);
+    const entry = shareWriteRateLimit.get(key);
     if (!entry || entry.resetAt <= now) {
-        shareRateLimit.set(key, { count: 1, resetAt: now + SHARE_RATE_LIMIT_WINDOW_MS });
+        shareWriteRateLimit.set(key, { count: 1, resetAt: now + SHARE_RATE_LIMIT_WINDOW_MS });
     } else {
         entry.count++;
     }
     // Return true if OVER the limit (rate-limited)
-    const currentEntry = shareRateLimit.get(key)!;
-    return currentEntry.count > SHARE_MAX_PER_WINDOW;
+    const currentEntry = shareWriteRateLimit.get(key)!;
+    return currentEntry.count > SHARE_WRITE_MAX_PER_WINDOW;
 }
 
 function rollbackShareRateLimit(ip: string, scope: ShareRateLimitScope) {
     const key = getShareRateLimitKey(ip, scope);
-    const currentEntry = shareRateLimit.get(key);
+    const currentEntry = shareWriteRateLimit.get(key);
     if (currentEntry && currentEntry.count > 1) {
         currentEntry.count--;
         return;
     }
-    shareRateLimit.delete(key);
+    shareWriteRateLimit.delete(key);
 }
 
 /**
@@ -98,6 +98,10 @@ export async function createPhotoShareLink(imageId: number) {
     if (!image.processed) return { error: t('imageStillProcessing') };
 
     if (image.share_key) {
+        // C16-LOW-10: no-op path — share key already exists. Roll back the
+        // pre-incremented rate-limit counters so the admin isn't charged
+        // for an action that didn't execute.
+        await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
         return { success: true, key: image.share_key };
     }
 
@@ -108,8 +112,8 @@ export async function createPhotoShareLink(imageId: number) {
     // DB-backed check for accuracy across restarts (pre-increment before check)
     try {
         await incrementRateLimit(ip, 'share_photo', SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
-        const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
-        if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
+        const dbLimit = await checkRateLimit(ip, 'share_photo', SHARE_WRITE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
+        if (isRateLimitExceeded(dbLimit.count, SHARE_WRITE_MAX_PER_WINDOW, true)) {
             // C6R-RPL-03: roll back BOTH counters so the DB counter doesn't
             // drift ahead of the in-memory counter over the window.
             await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
@@ -222,8 +226,8 @@ export async function createGroupShareLink(imageIds: number[]) {
     // DB-backed check for accuracy across restarts (pre-increment before check)
     try {
         await incrementRateLimit(ip, 'share_group', SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
-        const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
-        if (isRateLimitExceeded(dbLimit.count, SHARE_MAX_PER_WINDOW, true)) {
+        const dbLimit = await checkRateLimit(ip, 'share_group', SHARE_WRITE_MAX_PER_WINDOW, SHARE_RATE_LIMIT_WINDOW_MS, shareBucketStart);
+        if (isRateLimitExceeded(dbLimit.count, SHARE_WRITE_MAX_PER_WINDOW, true)) {
             // C6R-RPL-03: roll back BOTH counters.
             await rollbackShareRateLimitFull(ip, 'share_group', shareBucketStart);
             return { error: t('tooManyShareRequests') };
