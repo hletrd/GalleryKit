@@ -59,7 +59,10 @@ describe('sanitizeAdminString', () => {
     it('returns rejected: true for string with C0 control characters only', () => {
         const result = sanitizeAdminString('hello\x01world');
         expect(result.rejected).toBe(true);
-        expect(result.value).toBe('helloworld');
+        // C13-MED-01: value is null when rejected=true (matches Unicode formatting
+        // path). C0 control characters also produce visually-identical stripped
+        // strings, so the null contract applies consistently.
+        expect(result.value).toBeNull();
     });
 
     it('returns rejected: true for string with BOM (U+FEFF)', () => {

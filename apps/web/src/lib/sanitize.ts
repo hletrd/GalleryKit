@@ -169,6 +169,14 @@ export function sanitizeAdminString(raw: string | null | undefined, trim = true)
         return { value: null, rejected: true };
     }
 
+    // C13-MED-01: return null on ALL rejected paths, not just Unicode formatting.
+    // C0 control characters also produce visually-identical stripped strings
+    // (e.g., "hello\x01world" -> "helloworld"), so returning the stripped value
+    // when rejected=true creates an inconsistent contract. Callers that check
+    // `rejected` and then use `value` would persist a visually-identical string
+    // on the C0 path but not the Unicode path. Returning null forces explicit
+    // handling on every rejection, matching the C1F-CR-08 / C1F-TE-05 contract.
     const stripped = stripControlChars(input) ?? '';
-    return { value: stripped, rejected: stripped !== input };
+    const rejected = stripped !== input;
+    return { value: rejected ? null : stripped, rejected };
 }
