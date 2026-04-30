@@ -1,43 +1,38 @@
-# Critic Review — Cycle 21
+# Critic Review — Cycle 22
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
 ## Summary
 
-One new medium-severity finding about `searchImages` query length validation inconsistency. One low-severity observation about validation functions using `.length` for fields that allow non-ASCII input. All prior critic findings confirmed still fixed.
+All C21 findings have been fixed. One new low-severity finding about `isValidTagSlug` remaining on `.length` while sibling validators were migrated to `countCodePoints()`. The codebase is in good shape — all previously identified `countCodePoints` inconsistencies have been addressed. The remaining finding is a consistency gap, not a correctness bug.
 
 ## Verified fixes from prior cycles
 
-1. C15-CRIT-01 / C15-AGG-01 (deleteTopic redundant guard): FIXED.
-2. C14-AGG-01 (audit.ts metadata truncation): FIXED.
-3. C14-AGG-02 (deleteAdminUser raw SQL rationale): FIXED.
-4. C16-CT-01 (image-queue.ts contradictory comment): FIXED.
-5. C16-CT-02 (instrumentation.ts console.log): FIXED.
-6. C18-MED-01 (searchImagesAction re-throw): FIXED.
-7. C19-AGG-01 (cache caveat on getImageByShareKeyCached): DOCUMENTED.
-8. C19-AGG-02 (duplicated topic-slug regex): FIXED.
-9. C20-AGG-01 (password length countCodePoints): FIXED.
-10. C20-AGG-02 (getTopicBySlug inline regex): FIXED.
-11. C20-AGG-04/05 (tags.ts catch blocks): FIXED.
+1. C21-AGG-01 (searchImages countCodePoints): FIXED.
+2. C21-AGG-02 (isValidTopicAlias countCodePoints): FIXED.
+3. C21-AGG-03 (isValidTagName countCodePoints): FIXED.
+4. C20-AGG-01 (password length countCodePoints): FIXED.
+5. C20-AGG-02 (getTopicBySlug inline regex): FIXED.
+6. C20-AGG-03 (updateImageMetadata redundant updated_at): FIXED.
+7. C20-AGG-04/05 (tags.ts catch blocks): FIXED.
+8. C18-MED-01 (searchImagesAction re-throw): FIXED.
+9. C16-MED-01 (loadMoreImages DB counter sync): FIXED.
+10. C19-AGG-01 (cache caveat on getImageByShareKeyCached): DOCUMENTED.
+11. C19-AGG-02 (duplicated topic-slug regex): FIXED.
 
 ## New Findings
 
-### C21-CT-01 (Medium / High): `searchImages` query length uses `.length` while caller uses `countCodePoints()` — inconsistent, and `slice(0, 200)` can split surrogate pairs
+### C22-CT-01 (Low / Medium): `isValidTagSlug` uses `.length <= 100` while sibling validators `isValidTopicAlias` and `isValidTagName` were migrated to `countCodePoints()` in C21 — consistency gap
 
-- **Source**: `apps/web/src/lib/data.ts:1082`, `apps/web/src/app/actions/public.ts:158,205`
-- **Cross-agent agreement**: same finding as C21-CR-01, C21-SR-01.
-- From a critic's perspective, this is the same class of inconsistency that was fixed in C20-AGG-01. The codebase has established the pattern of using `countCodePoints()` for all user-facing string length checks where the input may contain non-ASCII characters. Search queries can contain any Unicode. The `slice(0, 200)` in public.ts:205 is particularly problematic because it can split a surrogate pair, producing an invalid string that gets passed to the LIKE query. The fix for C20-AGG-01 should have been applied consistently to all `.length` usages on non-ASCII fields.
-- **Fix**: Replace `query.length > 200` with `countCodePoints(query) > 200` in data.ts. Replace `sanitizedQuery.slice(0, 200)` with a code-point-aware truncation or remove the redundant slice (the caller already validates length).
-
-### C21-CT-02 (Low / Medium): `isValidTopicAlias` and `isValidTagName` use `.length` for max-length checks on fields that explicitly allow CJK/emoji
-
-- **Source**: `apps/web/src/lib/validation.ts:85,96`
-- **Cross-agent agreement**: same finding as C21-CR-02, C21-CR-03.
-- The codebase established the `countCodePoints()` pattern in C20-AGG-01 and applied it consistently to title, description, label, SEO fields, and passwords. The validation.ts functions were not updated, creating an inconsistency. A 128-emoji topic alias (128 code points, 256 UTF-16 code units) would be rejected by `alias.length <= 255` despite fitting in MySQL's varchar(255).
-- **Fix**: Use `countCodePoints()` in both validation functions.
+- **Source**: `apps/web/src/lib/validation.ts:116`
+- **Cross-agent agreement**: same finding as C22-CR-01.
+- From a critic's perspective: the C21 fixes established the `countCodePoints()` pattern for all validation functions that accept non-ASCII characters. `isValidTagSlug` was explicitly excluded with a comment (AGG10-03) stating that `.length` is acceptable because `getTagSlug()` normalizes to BMP-heavy forms. However, the regex `/^[\p{Letter}\p{Number}-]+$/u` explicitly allows supplementary characters — the comment says "if `isValidTagSlug` is changed to allow supplementary characters, migrate to `countCodePoints()`" but the regex already does allow them. This is a code-comment inconsistency that should be resolved: either migrate to `countCodePoints()` for consistency, or tighten the regex to BMP-only and update the comment.
+- **Fix**: Migrate to `countCodePoints(slug) <= 100` for consistency, or change the comment to explicitly document why `.length` is safe despite the `\p{Letter}` regex (e.g., "getTagSlug() always produces BMP output, so supplementary characters cannot appear in practice").
+- **Confidence**: Medium
 
 ## Carry-forward (unchanged — existing deferred backlog)
+
 - AGG6R-06: Restore lock complexity
 - AGG6R-07: OG tag clamping
 - AGG6R-09: Preamble repetition

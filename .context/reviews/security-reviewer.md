@@ -1,14 +1,16 @@
-# Security Reviewer — Cycle 21
+# Security Reviewer — Cycle 22
 
 ## Review method
+
 Direct deep review of security-critical modules: session.ts, auth.ts,
 request-origin.ts, api-auth.ts, proxy.ts, validation.ts, sanitize.ts,
 csv-escape.ts, safe-json-ld.ts, content-security-policy.ts, rate-limit.ts,
 auth-rate-limit.ts, db-actions.ts, image-queue.ts, advisory-locks.ts,
 upload-tracker-state.ts, public.ts, schema.ts, process-image.ts,
-serve-upload.ts, upload-paths.ts.
+serve-upload.ts, upload-paths.ts. Verified C21 fixes are in place.
 
 ## Previously verified security controls (all still in place)
+
 - Session tokens: HMAC-SHA256 signed, timingSafeEqual comparison
 - Cookie attributes: httpOnly, secure (production), sameSite:lax, path:/
 - Login rate limiting: dual-bucket (IP + account), pre-increment TOCTOU fix
@@ -30,13 +32,11 @@ serve-upload.ts, upload-paths.ts.
 - X-Content-Type-Options: nosniff on admin API responses
 - Stricter middleware session cookie format check
 - Password length validation uses countCodePoints (C20-AGG-01)
+- searchImages query length uses countCodePoints (C21-AGG-01)
+- isValidTopicAlias uses countCodePoints (C21-AGG-02)
+- isValidTagName uses countCodePoints (C21-AGG-03)
+- Surrogate-pair-unsafe slice(0,200) removed from searchImagesAction (C21-AGG-01)
 
 ## New Findings
 
-### C21-SR-01 (Low / Medium): `searchImages` query length uses `.length` (UTF-16) instead of `countCodePoints()` — same class as C20-AGG-01
-
-- **Source**: `apps/web/src/lib/data.ts:1082`
-- **Issue**: The `searchImages` function uses `query.length > 200` to guard against oversized queries. JavaScript `.length` counts UTF-16 code units, so a 101-emoji search query (202 code units, 101 code points) would be rejected by this guard. While not a direct security vulnerability, this is the same class of inconsistency that was fixed in C20-AGG-01 for passwords. The defense-in-depth guard in data.ts is more restrictive than intended for supplementary Unicode characters.
-- **Confidence**: High
-
-No other new security findings this cycle. All critical security controls remain intact and properly implemented.
+No new security findings this cycle. All critical security controls remain intact and properly implemented. The C21 fixes for countCodePoints consistency strengthen the defense-in-depth posture for supplementary Unicode characters across all validation surfaces.

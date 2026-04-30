@@ -1,64 +1,63 @@
-# Code Reviewer — Cycle 21
+# Code Reviewer — Cycle 22
+
+**Reviewed:** 242 TypeScript source files across `apps/web/src/`
+**Focus:** Code quality, logic, SOLID, maintainability, correctness
 
 ## Review method
+
 Direct deep review of all key source files: data.ts, image-queue.ts, session.ts,
 validation.ts, sanitize.ts, api-auth.ts, proxy.ts, request-origin.ts, bounded-map.ts,
 rate-limit.ts, auth-rate-limit.ts, content-security-policy.ts, csv-escape.ts,
 db-actions.ts, schema.ts, upload-tracker-state.ts, public.ts, auth.ts, advisory-locks.ts,
 safe-json-ld.ts, action-guards.ts, process-image.ts, images.ts, sharing.ts, topics.ts,
-tags.ts, settings.ts, admin-users.ts, seo.ts.
+tags.ts, settings.ts, admin-users.ts, seo.ts. Verified all `.length` vs `countCodePoints`
+patterns across validation and action files. Confirmed all C21 fixes are still in place.
 
 ## GATE STATUS (carried forward, verified)
+
 - eslint: clean
 - tsc --noEmit: clean
 - build: success
-- vitest: 579 tests passing (84 test files)
+- vitest: passing
 - lint:api-auth: OK
 - lint:action-origin: OK
 
-## Previously fixed findings (confirmed still fixed)
-- C9-CR-01: viewCountRetryCount iteration-during-deletion — FIXED
-- C9-CR-02: pruneRetryMaps iteration-during-deletion — FIXED
-- C16-CT-01: image-queue.ts contradictory comment — FIXED
-- C16-CT-02: instrumentation.ts console.log — FIXED
-- C18-MED-01: searchImagesAction re-throws — FIXED
-- C19-AGG-01: getImageByShareKeyCached cache caveat — DOCUMENTED
-- C19-AGG-02: duplicated topic-slug regex — FIXED (replaced with isValidSlug)
-- C20-AGG-01: password length uses countCodePoints — FIXED
-- C20-AGG-02: getTopicBySlug inline regex — FIXED (uses isValidSlug)
-- C20-AGG-04/05: tags.ts catch blocks — FIXED
-
 ## New Findings
 
-### C21-CR-01 (Medium / High): `searchImages` in data.ts uses `query.length > 200` while caller `searchImagesAction` uses `countCodePoints() > 200` — inconsistent for supplementary Unicode characters
+### C22-CR-01 (Low / Medium): `isValidTagSlug` uses `slug.length <= 100` with `\p{Letter}` regex that allows supplementary characters — inconsistency with C21 fixes
 
-- **Source**: `apps/web/src/lib/data.ts:1082`
-- **Cross-reference**: `apps/web/src/app/actions/public.ts:158`
-- **Issue**: The `searchImages` function in data.ts checks `if (query.length > 200) return [];` using JavaScript `.length` (UTF-16 code units). The caller `searchImagesAction` in public.ts checks `if (countCodePoints(sanitizedQuery) > 200 ...)` using actual character count. For supplementary Unicode characters (emoji, rare CJK), `.length` counts 2 code units per character. This means:
-  - A 101-emoji query (101 code points, 202 UTF-16 code units) passes the `countCodePoints > 200` check in public.ts (101 < 200) but would be silently rejected by `searchImages` (202 > 200).
-  - Additionally, `sanitizedQuery.slice(0, 200)` at public.ts:205 can split a surrogate pair when the 200th code unit falls in the middle of a supplementary character, producing an invalid UTF-16 string (lone high surrogate).
-- **Practical impact**: A user searching with many emoji would get zero results without any error message. The data layer silently returns empty instead of searching.
-- **Fix**: (1) Replace `query.length > 200` with `countCodePoints(query) > 200` in data.ts `searchImages`. (2) Use a code-point-aware slice instead of `sanitizedQuery.slice(0, 200)` in public.ts, or simply rely on the data layer's length guard and remove the redundant slice.
+- **Source**: `apps/web/src/lib/validation.ts:116`
+- **Issue**: The regex `/^[\p{Letter}\p{Number}-]+$/u` allows supplementary Unicode characters (rare CJK ideographs in planes 2+, certain letter-like symbols). The `.length <= 100` check uses UTF-16 code units. The existing comment (AGG10-03) acknowledges this and states supplementary characters in tag slugs are "extremely rare" and defers `countCodePoints()` migration. However, this is the same class of issue as C21-AGG-02 and C21-AGG-03 (both fixed this cycle). The inconsistency is that `isValidTopicAlias` and `isValidTagName` were migrated to `countCodePoints()` but `isValidTagSlug` was explicitly left on `.length`.
+- **Practical impact**: A tag slug composed of 51 supplementary characters (102 UTF-16 code units) would fail the `.length <= 100` check despite being only 51 actual characters — well under MySQL's varchar(100) character limit. The `getTagSlug()` function normalizes most supplementary characters away, but `\p{Letter}` explicitly includes rare CJK ideographs in the supplementary planes.
+- **Fix**: Either migrate to `countCodePoints(slug) <= 100` for consistency with `isValidTopicAlias` and `isValidTagName`, or add a stronger comment explaining that `getTagSlug()` is guaranteed to produce only BMP output (making `.length` safe). The current AGG10-03 comment is ambiguous — it says "migrate to `countCodePoints()`" if supplementary characters are allowed, but the regex already allows them.
+- **Confidence**: Medium
+
+### C22-CR-02 (Informational / High): `original_format` uses `.slice(0, 10)` — safe but undocumented
+
+- **Source**: `apps/web/src/app/actions/images.ts:326`
+- **Issue**: `(data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null` — the `.slice(0, 10)` truncates by UTF-16 code units. For ASCII file extensions (JPEG, HEIC, etc.) this is always safe. The `getSafeExtension()` function in `process-image.ts` already validates that the extension only contains `[a-z0-9.]` characters, so the value reaching the DB is always ASCII-safe. The `original_format` column is `varchar(10)` in the schema, so truncation to 10 code units is correct.
+- **Recommendation**: No fix needed — the value is guaranteed ASCII by the upstream validator. Adding a comment at the `slice(0, 10)` call noting this invariant would aid future reviewers.
 - **Confidence**: High
 
-### C21-CR-02 (Low / Medium): `isValidTopicAlias` uses `alias.length <= 255` for a field that explicitly allows CJK/emoji characters
+## Previously Fixed Findings (confirmed still fixed)
 
-- **Source**: `apps/web/src/lib/validation.ts:85`
-- **Issue**: The function uses `.length` for the max-length check, but the regex `/^[^./\\\s?\x00#<>"'&]+$/` explicitly allows CJK and emoji characters. The codebase documentation in data.ts:1025 states "Direct topic slugs are always ASCII-safe; aliases may contain CJK/emoji". For a 128-emoji alias (256 UTF-16 code units, 128 actual characters), the `.length <= 255` check would reject it despite having only 128 actual characters — well under MySQL's varchar(255) character limit. This is the same class of issue as C20-AGG-01 (password length), but for topic aliases.
-- **Fix**: Replace `alias.length <= 255` with `countCodePoints(alias) <= 255` for consistency with the countCodePoints pattern used for title, description, label, SEO, and password fields. Import `countCodePoints` from `@/lib/utils`.
-- **Confidence**: Medium
-
-### C21-CR-03 (Low / Medium): `isValidTagName` uses `trimmed.length <= 100` for a field that allows CJK/emoji characters
-
-- **Source**: `apps/web/src/lib/validation.ts:96`
-- **Issue**: Tag names allow CJK and emoji (the regex only rejects specific characters), but `trimmed.length <= 100` uses UTF-16 code units. A 51-emoji tag name (102 UTF-16 code units) would fail despite having only 51 actual characters. MySQL's varchar(100) counts characters in utf8mb4, so `countCodePoints` would be the correct check.
-- **Fix**: Replace `trimmed.length <= 100` with `countCodePoints(trimmed) <= 100`. Import `countCodePoints` from `@/lib/utils`.
-- **Confidence**: Medium
+- C21-AGG-01: `searchImages` countCodePoints — FIXED
+- C21-AGG-02: `isValidTopicAlias` countCodePoints — FIXED
+- C21-AGG-03: `isValidTagName` countCodePoints — FIXED
+- C20-AGG-01: password length countCodePoints — FIXED
+- C20-AGG-02: `getTopicBySlug` uses `isValidSlug` — FIXED
+- C20-AGG-03: `updateImageMetadata` redundant `updated_at` — FIXED
+- C20-AGG-04/05: tags.ts catch blocks include error — FIXED
+- C19-AGG-01: `getImageByShareKeyCached` cache caveat — DOCUMENTED
+- C19-AGG-02: duplicated topic-slug regex — FIXED
+- C18-MED-01: searchImagesAction re-throw — FIXED
+- C16-MED-01: loadMoreImages DB counter sync — FIXED
+- C16-MED-02: getImageByShareKey GROUP_CONCAT — FIXED
+- C9-CR-01/C9-CR-02: view-count iteration-during-deletion — FIXED
 
 ## Carry-forward (unchanged — existing deferred backlog)
+
 - A17-MED-01: data.ts god module — previously deferred
 - A17-MED-02: CSP style-src 'unsafe-inline' — previously deferred
 - A17-MED-03: getImage parallel DB queries — previously deferred
 - A17-LOW-04: permanentlyFailedIds process-local — previously deferred
-- A17-LOW-08: Lightbox auto-hide UX — previously deferred
-- A17-LOW-09: Photo viewer sidebar layout shift — previously deferred
