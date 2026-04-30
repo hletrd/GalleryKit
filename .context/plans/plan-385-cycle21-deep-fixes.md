@@ -1,7 +1,7 @@
 # Plan 385 — Cycle 21 Deep Fixes
 
 **Created:** 2026-04-30 (Cycle 21 Deep Review)
-**Status:** Pending
+**Status:** Done
 
 ## C21-AGG-01: `clampDisplayText` in OG route uses `.length`/`.slice()` — surrogate-pair unsafe
 
@@ -13,7 +13,7 @@
   2. Replace `trimmed.length <= maxLength` with `countCodePoints(trimmed) <= maxLength`
   3. Replace `trimmed.slice(0, maxLength - 1).trimEnd()` with a codepoint-safe truncation that uses `Array.from(trimmed).slice(0, maxLength - 1).join('').trimEnd()`
   4. Add a test in `apps/web/src/__tests__/` for `clampDisplayText` with supplementary characters
-- **Progress**: [ ] implementation
+- **Progress**: [x] implementation
 
 ## C21-AGG-02: `exportImagesCsv` GROUP_CONCAT separator uses `', '` — defensive improvement
 
@@ -21,7 +21,11 @@
 - **Severity/Confidence:** LOW / LOW
 - **Issue**: The `GROUP_CONCAT` in `exportImagesCsv` uses `SEPARATOR ', '` which differs from the more robust `\x01` approach in `getImageByShareKey`. Currently safe because `isValidTagName` rejects commas, but inconsistent with the data.ts pattern.
 - **Plan**: For consistency and future-proofing, align the CSV export with the data.ts `\x01` separator pattern. Split on `\x01` before CSV-escaping each tag name.
-- **Progress**: [ ] implementation
+- **Progress**: [x] implementation
+
+## C21-AGG-03: `exportImagesCsv` type-unsafe GC hint (informational)
+
+- **Status**: Informational only — no code change needed.
 
 ## Deferred Items (no change from plan 384)
 
