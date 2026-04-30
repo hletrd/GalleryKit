@@ -19,6 +19,9 @@ const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
 ]);
 
 // Validate slug format (lowercase alphanumeric, hyphens, underscores only)
+// AGG10-02: `.length` is correct here because the regex `/^[a-z0-9_-]+$/`
+// restricts to ASCII characters where `.length` and `countCodePoints()`
+// always agree. Same pattern as AGG9R-03 for username validation.
 export function isValidSlug(slug: string): boolean {
     return /^[a-z0-9_-]+$/.test(slug) && slug.length > 0 && slug.length <= 100;
 }
@@ -93,6 +96,11 @@ export function isValidTagSlug(slug: string): boolean {
     // which always replaces underscores with hyphens before producing a slug.
     // Keeping these consistent prevents confusion where a slug passes
     // validation but would never be produced by the slug generator.
+    // AGG10-03: `.length` is acceptable here because `getTagSlug()` normalizes
+    // to BMP-heavy forms where `.length` counts correctly (CJK characters are
+    // 1 code unit each). Supplementary characters in tag slugs are extremely
+    // rare. If `isValidTagSlug` is changed to allow supplementary characters,
+    // migrate to `countCodePoints()`.
     return /^[\p{Letter}\p{Number}-]+$/u.test(slug) && slug.length > 0 && slug.length <= 100;
 }
 
