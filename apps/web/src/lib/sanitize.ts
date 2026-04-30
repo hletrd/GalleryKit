@@ -2,10 +2,20 @@
  * Shared sanitization utilities for user-facing input stored in the database.
  */
 
-/** Strip all C0 control characters (0x00–0x1F, including tab, newline, carriage return), DEL (0x7F), and Unicode C1 controls (0x80–0x9F) that can cause MySQL truncation, display issues, or unexpected formatting. */
+// C7-AGG7R-03: Unicode bidi overrides, zero-width / invisible formatting
+// characters, and interlinear annotation anchors. Added to stripControlChars
+// so stripping + rejection happen in one place. `containsUnicodeFormatting`
+// in validation.ts remains as a secondary defense-in-depth guard.
+// Character ranges (matching UNICODE_FORMAT_CHARS in validation.ts):
+//   U+180E MVS, U+200B-200F ZWSP/ZWNJ/ZWJ/LRM/RLM,
+//   U+202A-202E LRE/RLE/PDF/LRO/RLO, U+2060 WJ,
+//   U+2066-2069 LRI/RLI/FSI/PDI, U+FEFF BOM, U+FFF9-FFFB interlinear anchors
+const UNICODE_FORMAT_CHARS_RE = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/g;
+
+/** Strip all C0 control characters (0x00–0x1F, including tab, newline, carriage return), DEL (0x7F), Unicode C1 controls (0x80–0x9F), and Unicode bidi/invisible formatting characters that can cause MySQL truncation, display issues, unexpected formatting, or Trojan-Source-style visual spoofing. */
 export function stripControlChars(s: string | null): string | null {
     if (!s) return s;
-    return s.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+    return s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(UNICODE_FORMAT_CHARS_RE, '');
 }
 
 /**
@@ -96,4 +106,38 @@ export function sanitizeStderr(data: Buffer | string, pwd?: string): string {
     // Regex 2: specific MySQL "using password: YES/NO" format (see doc above)
     text = text.replace(/(using password:\s*)[^\s)]+/gi, '$1[REDACTED]');
     return text;
+}
+
+/**
+ * C7-AGG7R-03: Combined sanitization + validation for admin-controlled
+ * persistent strings. Strips C0/C1 controls and Unicode bidi/invisible
+ * formatting characters, then rejects if the original input contained
+ * formatting characters (defense-in-depth).
+ *
+ * Before this helper, every admin string entry point had to call both
+ * `stripControlChars` and `containsUnicodeFormatting` separately. Missing
+ * either one allowed bidi/zero-width characters through. This helper
+ * enforces the contract at the function level.
+ *
+ * @param raw  The raw user input (may be null/undefined).
+ * @param trim Whether to trim whitespace before sanitizing (default: true).
+ * @returns `{ value, rejected }` where `rejected` is true when Unicode
+ *          formatting characters were found in the input. Callers should
+ *          return an error when `rejected` is true.
+ */
+export function sanitizeAdminString(raw: string | null | undefined, trim = true): { value: string | null; rejected: boolean } {
+    if (!raw) return { value: raw ?? null, rejected: false };
+    const input = trim ? raw.trim() : raw;
+
+    // Check for Unicode formatting characters BEFORE stripping so we can
+    // reject the input (don't silently strip bidi/zero-width chars — the
+    // admin must know their input was rejected). Uses the same regex as
+    // stripControlChars for consistency.
+    if (UNICODE_FORMAT_CHARS_RE.test(input)) {
+        const stripped = stripControlChars(input) ?? '';
+        return { value: stripped, rejected: true };
+    }
+
+    const stripped = stripControlChars(input) ?? '';
+    return { value: stripped, rejected: stripped !== input };
 }
