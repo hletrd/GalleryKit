@@ -700,14 +700,19 @@ export async function getImage(id: number) {
         );
     } else {
         // Undated image: predecessor is undated with later created_at / id.
+        // C7-AGG7R-01: removed standalone `IS NULL` condition that subsumed
+        // the more selective composite conditions below. The standalone
+        // `capture_date IS NULL` matched ALL undated rows, making the
+        // `IS NULL AND (created_at > ...)` branches dead SQL. The composite
+        // conditions are sufficient — they select only undated rows that
+        // sort after/before the current image, which is more selective and
+        // helps MySQL skip irrelevant rows early.
         prevConditions.push(
-            sql`${images.capture_date} IS NULL`,
             and(sql`${images.capture_date} IS NULL`, gt(images.created_at, image.created_at)),
             and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), gt(images.id, image.id)),
         );
         // Successor is undated with earlier created_at / id.
         nextConditions.push(
-            sql`${images.capture_date} IS NULL`,
             and(sql`${images.capture_date} IS NULL`, lt(images.created_at, image.created_at)),
             and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), lt(images.id, image.id)),
         );
