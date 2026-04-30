@@ -191,6 +191,15 @@ export async function deleteAdminUser(id: number) {
 
     // Serialize deletion through a DB advisory lock so concurrent requests
     // cannot both observe "more than one admin" and remove the final two rows.
+    //
+    // Raw SQL (conn.query) is used instead of Drizzle ORM because the
+    // advisory lock (GET_LOCK/RELEASE_LOCK) requires a dedicated connection
+    // that persists across multiple queries in the same transaction.
+    // Drizzle's connection pool does not expose a "pin this connection"
+    // API, so we acquire a dedicated connection from the pool manually
+    // and issue parameterized queries directly. All values are parameterized
+    // to prevent SQL injection (defense in depth alongside Drizzle's
+    // parameterization used elsewhere).
     const conn = await connection.getConnection();
     let lockAcquired = false;
 
