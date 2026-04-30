@@ -854,15 +854,13 @@ export async function getImageByShareKey(key: string) {
     const image = result[0];
     if (!image) return null;
 
-    const [imageTagsResult] = await Promise.all([
-        db.select({
-                slug: tags.slug,
-                name: tags.name
-            })
-            .from(imageTags)
-            .innerJoin(tags, eq(imageTags.tagId, tags.id))
-            .where(eq(imageTags.imageId, image.id)),
-    ]);
+    const imageTagsResult = await db.select({
+            slug: tags.slug,
+            name: tags.name
+        })
+        .from(imageTags)
+        .innerJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(eq(imageTags.imageId, image.id));
 
     return {
         ...image,
@@ -1056,6 +1054,17 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     // query is insufficient. The alias query only needs mainIds for
     // dedup (not tag results), so both can start simultaneously,
     // reducing the sequential 3-query worst case to 2 sequential rounds.
+    //
+    // C3-PR-01: The alias-query limit is capped at `remainingLimit` rather
+    // than `effectiveLimit - mainIds.length` to avoid over-fetching when
+    // both tag and alias queries return results. Since both queries run in
+    // parallel, neither can account for the other's results. The worst-case
+    // total DB rows fetched is `results + remainingLimit + remainingLimit`,
+    // bounded by `2 * effectiveLimit`. The final `.slice(0, effectiveLimit)`
+    // and dedup Set ensure the returned result is correct. Serializing the
+    // alias query after the tag query would eliminate the over-fetch but
+    // adds latency (3 sequential rounds instead of 2). At personal-gallery
+    // scale the over-fetch is acceptable.
     const remainingLimit = effectiveLimit - results.length;
     const mainIds = results.map(r => r.id);
 
@@ -1068,7 +1077,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     if (mainIds.length > 0) {
         aliasConditions.push(notInArray(images.id, mainIds));
     }
-    const aliasRemainingLimit = effectiveLimit - mainIds.length;
+    const aliasRemainingLimit = remainingLimit;
 
     const [tagResults, aliasResults] = remainingLimit <= 0
         ? [[], []] as [SearchResult[], SearchResult[]]
