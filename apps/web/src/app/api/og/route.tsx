@@ -5,6 +5,7 @@ import { isValidSlug, isValidTagName } from '@/lib/validation';
 import siteConfig from '@/site-config.json';
 import { getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { getClientIp, preIncrementOgAttempt, rollbackOgAttempt } from '@/lib/rate-limit';
+import { countCodePoints } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
@@ -17,10 +18,15 @@ const MAX_TOPIC_LABEL_LENGTH = 100;
 const OG_SUCCESS_CACHE_CONTROL = 'public, max-age=3600, stale-while-revalidate=86400';
 const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
 
+// C21-AGG-01: use countCodePoints and Array.from for codepoint-safe
+// truncation so supplementary characters (emoji, rare CJK) are never
+// split mid-surrogate by .slice(). Produces U+FFFD replacement
+// characters in the Satori-rendered OG image when split.
 function clampDisplayText(value: string, maxLength: number) {
   const trimmed = value.trim().replace(/\s+/g, ' ');
-  if (trimmed.length <= maxLength) return trimmed;
-  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
+  if (countCodePoints(trimmed) <= maxLength) return trimmed;
+  const chars = Array.from(trimmed);
+  return `${chars.slice(0, maxLength - 1).join('').trimEnd()}…`;
 }
 
 export async function GET(req: NextRequest) {
