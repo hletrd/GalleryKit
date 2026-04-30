@@ -2,14 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { extractExifForDb, extractIccProfileName } from '@/lib/process-image';
 
-function utf16be(text: string) {
-    const buffer = Buffer.alloc(text.length * 2);
-    for (let i = 0; i < text.length; i++) {
-        buffer.writeUInt16BE(text.charCodeAt(i), i * 2);
-    }
-    return buffer;
-}
-
 function makeMlucIcc(text: string) {
     const dataOffset = 144;
     const recordSize = 12;
