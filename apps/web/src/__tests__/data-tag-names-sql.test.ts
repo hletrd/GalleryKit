@@ -157,23 +157,26 @@ describe('getImagesLite tag_names SQL shape', () => {
      * in production. This test verifies the shared array exists and
      * references the same column set as searchFields.
      */
-    it('searchImages uses a shared searchGroupByColumns array that covers all searchFields keys', () => {
+    it('searchImages derives searchGroupByColumns from searchFields so they cannot drift', () => {
         const source = readSource();
-        // Verify the shared array is defined
-        expect(source).toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
-        // Verify both .groupBy() calls use the shared array
+        // C19F-MED-01: searchGroupByColumns is now derived via Object.values(searchFields)
+        // instead of a manually-maintained array literal, so adding a column to searchFields
+        // without updating GROUP BY is a compile-time error rather than a runtime failure.
+        // Verify the derivation pattern exists
+        expect(source).toMatch(/const\s+searchGroupByColumns\s*=\s*Object\.values\(searchFields\)/);
+        // Verify both .groupBy() calls use the derived array
         expect(source).toMatch(/\.groupBy\(\.\.\.searchGroupByColumns\)/);
         // Count occurrences — should be exactly 2 (tag search + alias search)
         const groupBySpreadMatches = source.match(/\.groupBy\(\.\.\.searchGroupByColumns\)/g);
         expect(groupBySpreadMatches).toHaveLength(2);
-        // Verify searchFields is defined nearby (same function body)
-        const searchFnStart = source.indexOf('export async function searchImages(');
-        expect(searchFnStart).toBeGreaterThan(-1);
+        // Verify searchFields and searchGroupByColumns are both in the function body
         const searchFnBody = extractFunctionBody(source, 'searchImages');
         expect(searchFnBody).toMatch(/const\s+searchFields\s*=\s*\{/);
-        expect(searchFnBody).toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
+        expect(searchFnBody).toMatch(/const\s+searchGroupByColumns\s*=\s*Object\.values\(searchFields\)/);
         // Ensure the old inline .groupBy(images.id, ...) pattern is gone
         expect(searchFnBody).not.toMatch(/\.groupBy\(\s*images\.id,/);
+        // Ensure the old manually-maintained array literal pattern is gone
+        expect(searchFnBody).not.toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
     });
 
     /**

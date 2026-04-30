@@ -6,6 +6,7 @@ import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
 import { isRestoreMaintenanceActive } from './restore-maintenance';
 import { isValidTagSlug, isValidSlug } from './validation';
+import { countCodePoints } from './utils';
 import siteConfig from '@/site-config.json';
 
 // Module-level buffer for debounced shared-group view count increments.
@@ -1079,7 +1080,11 @@ export type { SearchResult };
 
 export async function searchImages(query: string, limit: number = 20): Promise<SearchResult[]> {
     if (!query || query.trim().length === 0) return [];
-    if (query.length > 200) return [];
+    // C21-AGG-01: use countCodePoints for query length validation so
+    // supplementary characters (emoji, rare CJK) count as one character
+    // each, matching the countCodePoints pattern in searchImagesAction
+    // (public.ts) and the password/title/description/label/SEO fields.
+    if (countCodePoints(query) > 200) return [];
     if (limit <= 0) return [];
     const effectiveLimit = Math.min(Math.max(limit, 1), 100);
 
@@ -1097,6 +1102,9 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     // C14-MED-02: extracted the GROUP BY column list into a shared array so
     // the tag and alias queries cannot drift independently. Adding a field to
     // searchFields requires adding it here too (single place to update).
+    // C19F-MED-01: derive searchGroupByColumns from searchFields so adding
+    // a column to searchFields without updating GROUP BY is a compile-time
+    // error rather than a runtime ONLY_FULL_GROUP_BY failure.
     const searchFields = {
         id: images.id, title: images.title, description: images.description,
         filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
@@ -1104,19 +1112,9 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         capture_date: images.capture_date, created_at: images.created_at,
     };
 
-    const searchGroupByColumns = [
-        images.id,
-        images.title,
-        images.description,
-        images.filename_jpeg,
-        images.width,
-        images.height,
-        images.topic,
-        topics.label,
-        images.camera_model,
-        images.capture_date,
-        images.created_at,
-    ];
+    // Derive GROUP BY columns from searchFields values so they cannot drift.
+    // Object.values preserves insertion order in ES6+ for string keys.
+    const searchGroupByColumns = Object.values(searchFields);
 
     // Run main query first; only query tags if we need more results (saves a connection)
     // C16-LOW-02: GROUP BY is intentionally omitted here because this branch
