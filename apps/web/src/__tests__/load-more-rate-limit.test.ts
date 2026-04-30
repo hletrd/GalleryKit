@@ -153,8 +153,11 @@ describe('loadMoreRateLimit (C3-TG03)', () => {
 
             getImagesLiteMock.mockRejectedValueOnce(new Error('DB error'));
 
-            // Pre-increment happened but rollback should decrement it
-            await expect(loadMoreImages(undefined, [], 0, 30)).rejects.toThrow('DB error');
+            // Pre-increment happened but rollback should decrement it.
+            // C2-MED-02: loadMoreImages now catches errors and returns a
+            // structured { status: 'error' } response instead of re-throwing.
+            const errorResult = await loadMoreImages(undefined, [], 0, 30);
+            expect(errorResult.status).toBe('error');
 
             // The next call should succeed (the failed increment was rolled back)
             const result = await loadMoreImages(undefined, [], 0, 30);
@@ -165,9 +168,12 @@ describe('loadMoreRateLimit (C3-TG03)', () => {
             const ip = nextIp();
             setupMocks(ip);
 
-            // One failed call whose pre-increment is rolled back
+            // One failed call whose pre-increment is rolled back.
+            // C2-MED-02: loadMoreImages now catches errors and returns a
+            // structured { status: 'error' } response instead of re-throwing.
             getImagesLiteMock.mockRejectedValueOnce(new Error('DB error'));
-            await expect(loadMoreImages(undefined, [], 0, 30)).rejects.toThrow('DB error');
+            const errorResult = await loadMoreImages(undefined, [], 0, 30);
+            expect(errorResult.status).toBe('error');
 
             // Now 120 successful calls — the failed attempt does not count
             for (let i = 0; i < LOAD_MORE_MAX_REQUESTS; i++) {
