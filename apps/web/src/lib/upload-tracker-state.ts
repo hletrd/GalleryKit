@@ -30,6 +30,12 @@ export function pruneUploadTracker(now: number = Date.now()) {
     // pattern is clearer for reviewers and matches BoundedMap.prune() (C7-MED-01).
     const expiredKeys: string[] = [];
     for (const [key, entry] of uploadTracker) {
+        // C17-LOW-09: 2x grace period (2 hours) accommodates in-flight uploads
+        // that started near the end of a 1-hour window and may still be settling
+        // their tracker claims (e.g., a large batch upload that took several
+        // minutes to complete). The window-reset logic below uses exactly 1x,
+        // but pruning is deliberately more conservative to avoid dropping active
+        // trackers during a long upload.
         if (now - entry.windowStart > UPLOAD_TRACKING_WINDOW_MS * 2) {
             expiredKeys.push(key);
         }
