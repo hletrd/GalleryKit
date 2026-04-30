@@ -64,6 +64,16 @@ describe('containsDangerousSql', () => {
         expect(containsDangerousSql('CREATE TABLE images (id INT);\nINSERT INTO images VALUES (1);')).toBe(false);
     });
 
+    it('blocks HANDLER ... READ (C6-AGG6R-04 defence-in-depth)', () => {
+        expect(containsDangerousSql('HANDLER images READ FIRST;')).toBe(true);
+        expect(containsDangerousSql('HANDLER  images READ NEXT;')).toBe(true);
+        expect(containsDangerousSql('HANDLER mydb.images OPEN;')).toBe(true);
+        // Benign — "HANDLER" word inside string data
+        expect(containsDangerousSql("INSERT INTO notes VALUES ('Error HANDLER test');")).toBe(false);
+        // Normal mysqldump output never contains HANDLER
+        expect(containsDangerousSql('CREATE TABLE images (id INT);\nINSERT INTO images VALUES (1);')).toBe(false);
+    });
+
     it('blocks DO statements that can hold the restore session open', () => {
         expect(containsDangerousSql('DO SLEEP(5);')).toBe(true);
         expect(containsDangerousSql('DO 1;')).toBe(true);

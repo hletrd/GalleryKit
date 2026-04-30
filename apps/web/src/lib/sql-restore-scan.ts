@@ -50,6 +50,10 @@ const DANGEROUS_SQL_PATTERNS = [
     // to execute actions beyond --one-database's scope. Legitimate
     // mysqldump output never emits CALL. Defense-in-depth.
     /\bCALL\s+\w+/i,
+    // C6-AGG6R-04: block HANDLER ... READ. MySQL's HANDLER interface provides
+    // low-level table access that bypasses some access controls. Legitimate
+    // mysqldump output never emits HANDLER statements. Defense-in-depth.
+    /\bHANDLER\s+/i,
     // C1RPF-03 / AGG1-04: block DO statements. `DO SLEEP(...)` is not
     // emitted by normal mysqldump output and can hold the restore session
     // and maintenance lock without touching table data.
