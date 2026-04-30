@@ -248,8 +248,13 @@ export async function removeTagFromImage(imageId: number, tagName: string) {
             }
         }
 
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
+        // AGG11-01: only log the audit event when the tag was actually removed.
+        // DELETE returns affectedRows === 0 when the tag was not linked to the
+        // image (no-op), meaning no tag_remove event occurred.
+        if (deleteResult.affectedRows > 0) {
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'tag_remove', 'image', String(imageId), undefined, { tag: cleanName }).catch(console.debug);
+        }
         revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', imageRecord.topic ? `/${imageRecord.topic}` : '', '/admin/dashboard');
         revalidateAllAppData();
         return { success: true };
