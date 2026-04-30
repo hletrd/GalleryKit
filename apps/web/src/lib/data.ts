@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings } from '@/db';
-import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull } from 'drizzle-orm';
+import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull, isNotNull } from 'drizzle-orm';
 import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
@@ -719,6 +719,7 @@ export async function getImage(id: number) {
     }
 
     // Only return explicitly processed images.
+    // C5F-03: .limit(1) is defense-in-depth on a primary-key lookup.
     const [image] = await db.select({
         ...publicSelectFields,
         blur_data_url: images.blur_data_url,
@@ -731,7 +732,8 @@ export async function getImage(id: number) {
                 eq(images.id, id),
                 eq(images.processed, true)
             )
-        );
+        )
+        .limit(1);
 
     if (!image) {
         return null;
@@ -750,35 +752,46 @@ export async function getImage(id: number) {
     const nextConditions: (SQL | undefined)[] = [];
 
     if (image.capture_date) {
-        // Dated image: predecessor can be a later-dated row, an undated
-        // row (NULL sorts last in DESC → first in ASC), or same-date
-        // with later created_at / id.
+        // C5F-01: Dated image in sort order capture_date DESC NULLS LAST.
+        // Prev (ASC direction): rows that sort BEFORE this image.
+        //   - Dated rows with later capture_date, same-date with later created_at/id.
+        //   - Undated rows (NULL) sort LAST in ASC, so they are NOT predecessors
+        //     of dated rows. Removed `isNull(images.capture_date)` from here.
         prevConditions.push(
             gt(images.capture_date, image.capture_date),
-            isNull(images.capture_date),
             and(eq(images.capture_date, image.capture_date), gt(images.created_at, image.created_at)),
             and(eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), gt(images.id, image.id)),
         );
-        // Successor: older-dated row, or same-date with earlier created_at / id.
+        // Next (DESC direction): rows that sort AFTER this image.
+        //   - Dated rows with earlier capture_date, same-date with earlier created_at/id.
+        //   - Undated rows (NULL sorts last in DESC → first in "after" direction),
+        //     so they ARE successors of dated rows. The closest undated successor
+        //     has the latest created_at among undated rows.
+        //   - Parity with buildCursorCondition (lines 553-558) which correctly
+        //     includes isNull(capture_date) in the "after" direction for dated cursors.
         nextConditions.push(
+            isNull(images.capture_date),
             lt(images.capture_date, image.capture_date),
             and(eq(images.capture_date, image.capture_date), lt(images.created_at, image.created_at)),
             and(eq(images.capture_date, image.capture_date), eq(images.created_at, image.created_at), lt(images.id, image.id)),
         );
     } else {
-        // Undated image: predecessor is undated with later created_at / id.
-        // C7-AGG7R-01: removed standalone `IS NULL` condition that subsumed
-        // the more selective composite conditions below. The standalone
-        // `capture_date IS NULL` matched ALL undated rows, making the
-        // `IS NULL AND (created_at > ...)` branches dead SQL. The composite
-        // conditions are sufficient — they select only undated rows that
-        // sort after/before the current image, which is more selective and
-        // helps MySQL skip irrelevant rows early.
+        // C5F-01: Undated image in sort order capture_date DESC NULLS LAST.
+        // All dated rows sort BEFORE all undated rows, so:
+        // Prev (ASC direction): any dated row is a valid predecessor (they all
+        //   sort before undated rows). Also undated rows with later created_at/id.
+        //   The closest dated predecessor has the latest capture_date (or same
+        //   capture_date with latest created_at/id) — the prev query's
+        //   ORDER BY asc(capture_date) will naturally pick the last dated row
+        //   before the undated block.
         prevConditions.push(
+            isNotNull(images.capture_date),
             and(sql`${images.capture_date} IS NULL`, gt(images.created_at, image.created_at)),
             and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), gt(images.id, image.id)),
         );
-        // Successor is undated with earlier created_at / id.
+        // Next (DESC direction): only undated rows with earlier created_at/id.
+        // No dated row can be a successor because all dated rows sort before
+        // undated rows in DESC order.
         nextConditions.push(
             and(sql`${images.capture_date} IS NULL`, lt(images.created_at, image.created_at)),
             and(sql`${images.capture_date} IS NULL`, eq(images.created_at, image.created_at), lt(images.id, image.id)),
