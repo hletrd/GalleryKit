@@ -207,6 +207,20 @@ export function preIncrementOgAttempt(ip: string, now: number): boolean {
     return (ogRateLimit.get(ip)?.count ?? 0) > OG_MAX_REQUESTS;
 }
 
+/** Roll back a pre-incremented OG rate-limit counter. Used when the
+ *  request was rejected before the expensive CPU work ran (e.g., topic
+ *  not found) — the user should not be charged for resources they didn't
+ *  consume. Matches the public-read-path rollback pattern (Pattern 2
+ *  in the rate-limit docstring at the top of this file). */
+export function rollbackOgAttempt(ip: string) {
+    const currentEntry = ogRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        currentEntry.count--;
+    } else {
+        ogRateLimit.delete(ip);
+    }
+}
+
 export function resetOgRateLimitForTests() {
     ogRateLimit.clear();
 }
