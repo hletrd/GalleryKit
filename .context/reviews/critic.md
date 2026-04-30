@@ -1,11 +1,11 @@
-# Critic Review — Cycle 19
+# Critic Review — Cycle 20
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
 ## Summary
 
-No new high-severity findings. Two low-severity observations about code organization and documentation consistency. All prior critic findings confirmed still fixed.
+No new high-severity findings. One low-severity observation about inconsistent error logging in tags.ts. All prior critic findings confirmed still fixed.
 
 ## Verified fixes from prior cycles
 
@@ -15,22 +15,24 @@ No new high-severity findings. Two low-severity observations about code organiza
 4. C16-CT-01 (image-queue.ts contradictory comment): FIXED.
 5. C16-CT-02 (instrumentation.ts console.log): FIXED.
 6. C18-MED-01 (searchImagesAction re-throw): FIXED.
+7. C19-AGG-01 (cache caveat on getImageByShareKeyCached): DOCUMENTED.
+8. C19-AGG-02 (duplicated topic-slug regex): FIXED.
 
 ## New Findings
 
-### C19-CT-01 (Low / Medium): `getImageByShareKeyCached` wraps a function with side effects — cache() may silently suppress view-count increments
+### C20-CT-01 (Low / Low): Inconsistent error logging in `updateTag` catch block
 
-- **Source**: Direct code review of `apps/web/src/lib/data.ts:1231`
-- **Cross-agent agreement**: same finding as C19-CR-01, C19-SR-01.
-- From a critic's perspective, this is a design concern: `cache()` should only wrap pure functions or functions where side effects are idempotent. `getImageByShareKey` has a conditional side effect (`bufferGroupViewCount`) that is NOT idempotent — incrementing a view count twice is different from once. While the current call pattern avoids the issue, the API surface encourages misuse. A future developer may call `getImageByShareKeyCached(key, { incrementViewCount: true })` from two components in the same render and not realize only one view count is recorded.
-- **Fix**: Either remove the `cache()` wrapper or rename the function to make the caveat explicit (e.g., `getImageByShareKeyCached_readOnly`).
+- **Source**: `apps/web/src/app/actions/tags.ts:94`
+- **Cross-agent agreement**: same finding as C20-CR-02.
+- From a critic's perspective, this is a consistency/maintainability issue. Every other catch block in the same file logs the error object (`console.error("...", e)`), but `updateTag` logs only the message string. This makes the function harder to debug in production. The inconsistency also signals that this catch block was written in a different pass or by a different author without the same discipline.
+- **Fix**: Add the error object as the second argument to `console.error`.
 
-### C19-CT-02 (Low / Low): Duplicated topic-slug validation regex in data.ts
+### C20-CT-02 (Low / Low): Redundant `updated_at` explicit set in `updateImageMetadata`
 
-- **Source**: Direct code review of `apps/web/src/lib/data.ts:404,441`
-- **Cross-agent agreement**: same finding as C19-CR-03.
-- `getImageCount` at line 404 and `buildImageConditions` at line 441 both have inline `/^[a-z0-9_-]+$/.test(topic) || topic.length > 100` instead of using the existing `isValidSlug()` from validation.ts. This violates DRY and could drift independently.
-- **Fix**: Replace inline regex checks with `!isValidSlug(topic)`.
+- **Source**: `apps/web/src/app/actions/images.ts:754`
+- **Cross-agent agreement**: same finding as C20-CR-01.
+- The schema's `onUpdateNow()` already handles `updated_at` auto-update. The explicit set in the `.set()` call is technically correct but redundant. This creates a maintenance pattern that could mislead future developers into thinking `onUpdateNow()` is not active.
+- **Fix**: Remove the explicit `updated_at` from the SET clause and add a comment.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 - AGG6R-06: Restore lock complexity

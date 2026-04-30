@@ -1,51 +1,46 @@
-# Code Reviewer — Cycle 19
+# Code Reviewer — Cycle 20
 
 ## Review method
 Direct deep review of all key source files: data.ts, image-queue.ts, session.ts,
 validation.ts, sanitize.ts, api-auth.ts, proxy.ts, request-origin.ts, bounded-map.ts,
 rate-limit.ts, auth-rate-limit.ts, content-security-policy.ts, csv-escape.ts,
 db-actions.ts, schema.ts, upload-tracker-state.ts, public.ts, auth.ts, advisory-locks.ts,
-safe-json-ld.ts.
+safe-json-ld.ts, action-guards.ts, process-image.ts, images.ts, sharing.ts, topics.ts,
+tags.ts, settings.ts, admin-users.ts, seo.ts.
 
-## GATE STATUS (carried forward, verified still green)
+## GATE STATUS (carried forward, verified)
 - eslint: clean
 - tsc --noEmit: clean
 - build: success
-- vitest: 574 tests passing
+- vitest: 574 tests passing (84 test files)
 - lint:api-auth: OK
 - lint:action-origin: OK
 
 ## Previously fixed findings (confirmed still fixed)
-- C9-CR-01: viewCountRetryCount iteration-during-deletion — FIXED (collect-then-delete applied)
-- C9-CR-02: pruneRetryMaps iteration-during-deletion — FIXED (collect-then-delete applied)
-- C16-CT-01: image-queue.ts contradictory comment — FIXED (comment updated)
-- C16-CT-02: instrumentation.ts console.log — FIXED (changed to console.debug)
-- C18-MED-01: searchImagesAction re-throws on DB error — FIXED (returns structured error)
+- C9-CR-01: viewCountRetryCount iteration-during-deletion — FIXED
+- C9-CR-02: pruneRetryMaps iteration-during-deletion — FIXED
+- C16-CT-01: image-queue.ts contradictory comment — FIXED
+- C16-CT-02: instrumentation.ts console.log — FIXED
+- C18-MED-01: searchImagesAction re-throws — FIXED
+- C19-AGG-01: getImageByShareKeyCached cache caveat — DOCUMENTED
+- C19-AGG-02: duplicated topic-slug regex — FIXED (replaced with isValidSlug)
 
 ## New Findings
 
-### C19-CR-01 (Medium / Medium): `getImageByShareKeyCached` wraps `getImageByShareKey` with `cache()` but `getImageByShareKey` accepts `incrementViewCount` — cached calls silently skip view-count increments
+### C20-CR-01 (Low / Medium): `updateImageMetadata` explicitly sets `updated_at: sql\`CURRENT_TIMESTAMP\`` but the schema already has `.onUpdateNow()`
 
-- **Source**: Direct code review of `apps/web/src/lib/data.ts:1231`
-- **Location**: `getImageByShareKeyCached = cache(getImageByShareKey)`
-- **Issue**: `getImageByShareKey` accepts an `options?.incrementViewCount` parameter that controls whether `bufferGroupViewCount` is called. When `cache()` wraps this function, React deduplicates calls with the same arguments within a single server render. If two different call sites in the same request pass different `incrementViewCount` values, only the first call's behavior wins. More importantly, if a future call site uses the cached version and relies on the view count being incremented, it may not be — the cached result returns the data without re-executing the function body. Currently the only consumer is the shared-photo page which passes `incrementViewCount: true` explicitly, so this is a latent risk rather than an active bug.
-- **Fix**: Either remove the `cache()` wrapper from `getImageByShareKey` (since shared-photo pages are not deduplicated within the same request in practice), or document the caching caveat prominently at the `getImageByShareKeyCached` definition site.
-- **Confidence**: Medium (latent risk, not an active bug)
+- **Source**: `apps/web/src/app/actions/images.ts:754`
+- **Location**: `updateImageMetadata` function, `.set({ title, description, updated_at: sql\`CURRENT_TIMESTAMP\` })`
+- **Issue**: The `images` table schema already declares `updated_at: timestamp("updated_at").default(sql\`CURRENT_TIMESTAMP\`).onUpdateNow()`, which auto-updates on every row mutation. The explicit `updated_at: sql\`CURRENT_TIMESTAMP\`` in the SET clause is redundant — it does the same thing `onUpdateNow()` would do automatically. This is not a bug (the explicit set takes precedence and produces the same value), but it's misleading: a future developer might think `onUpdateNow()` is not active and add this explicit set to every mutation site, creating a maintenance burden. If the column definition ever changes (e.g., to track only specific mutation types), this explicit set would need to be audited.
+- **Fix**: Remove the explicit `updated_at: sql\`CURRENT_TIMESTAMP\`` from the `.set()` call. The `onUpdateNow()` schema annotation handles it automatically. Add a code comment noting that `onUpdateNow()` covers this.
+- **Confidence**: Medium
 
-### C19-CR-02 (Low / Medium): `adminUsers.updated_at` column added but not selected in `getCurrentUser` or `getAdminUserWithHash`
+### C20-CR-02 (Low / Low): `tags.ts` `updateTag` catch block logs error without the error object
 
-- **Source**: Direct code review of `apps/web/src/app/actions/auth.ts:35-39,44-49`
-- **Location**: `getCurrentUser()` and `getAdminUserWithHash()` select statements
-- **Issue**: The `updated_at` column was added to `adminUsers` in the current uncommitted changes (C16-LOW-14). However, neither `getCurrentUser()` nor `getAdminUserWithHash()` selects it. This is consistent because the column is `onUpdateNow()` and is not used in auth logic, but if a future feature needs to check "last password change" time, it will need this column. Currently no code references it — it's a schema-only addition that auto-updates.
-- **Fix**: No fix needed now — the column auto-updates on row changes. When a "last password change" feature is built, add the column to the relevant select. This finding is informational only.
-- **Confidence**: Low (informational)
-
-### C19-CR-03 (Low / Low): `buildImageConditions` validates topic slug with regex but `getImageCount` has its own separate regex — duplication
-
-- **Source**: Direct code review of `apps/web/src/lib/data.ts:404,441`
-- **Location**: `getImageCount` line 404 and `buildImageConditions` line 441
-- **Issue**: Both `getImageCount` and `buildImageConditions` validate the topic parameter with `/^[a-z0-9_-]+$/.test(topic) || topic.length > 100`. This duplicated regex is fragile — if one is updated, the other might not be. The existing `isValidSlug` function in validation.ts provides the same check with `slug.length > 0 && slug.length <= 100`.
-- **Fix**: Replace both inline regex checks with `!isValidSlug(topic)` from `@/lib/validation` for consistency.
+- **Source**: `apps/web/src/app/actions/tags.ts:94`
+- **Location**: `catch { console.error("Failed to update tag"); }`
+- **Issue**: The catch block in `updateTag` logs a string message without the actual error object. Every other catch block in the same file (`deleteTag` line 133, `addTagToImage` line 200, etc.) logs the error object as the second argument. Without the error object, operators cannot diagnose root causes from the logs.
+- **Fix**: Change to `catch (e) { console.error("Failed to update tag", e); }` matching the pattern in `deleteTag` and `addTagToImage`.
 - **Confidence**: Low
 
 ## Carry-forward (unchanged — existing deferred backlog)
