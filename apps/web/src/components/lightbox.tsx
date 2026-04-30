@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
 import { isEditableTarget } from '@/components/photo-viewer';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { getConcisePhotoAltText } from '@/lib/photo-title';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -306,7 +307,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                 )}
                 <img
                     src={jpegSrc}
-                    alt={image.title ?? image.filename_jpeg ?? ''}
+                    alt={getConcisePhotoAltText(image, t('common.photo'))}
                     width={image.width}
                     height={image.height}
                     className="w-full h-full object-contain"
