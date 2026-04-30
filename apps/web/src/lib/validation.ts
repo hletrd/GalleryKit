@@ -48,7 +48,12 @@ export function isReservedTopicRouteSegment(segment: string): boolean {
 //   U+180E MVS, U+200B-200F ZWSP/ZWNJ/ZWJ/LRM/RLM,
 //   U+202A-202E LRE/RLE/PDF/LRO/RLO, U+2060 WJ,
 //   U+2066-2069 LRI/RLI/FSI/PDI, U+FEFF BOM, U+FFF9-FFFB interlinear anchors
-export const UNICODE_FORMAT_CHARS = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/;
+// C18-LOW-01: use \uXXXX escape sequences instead of literal Unicode
+// characters so the regex is ASCII-safe and editor-portable. Invisible
+// literal characters can be silently stripped by text editors, CI
+// systems, or ASCII-only Git configs, breaking the regex without any
+// visible diff.
+export const UNICODE_FORMAT_CHARS = /[\u180E\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\uFFF9-\uFFFB]/;
 
 /**
  * Returns true when `value` contains Unicode bidi/invisible formatting

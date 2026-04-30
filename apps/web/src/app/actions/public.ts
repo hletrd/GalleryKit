@@ -21,7 +21,7 @@ export type LoadMoreImagesResult =
 
 export type SearchImagesResult =
     | { status: 'ok'; results: PublicSearchItem[] }
-    | { status: 'maintenance' | 'rateLimited' | 'invalid'; results: [] };
+    | { status: 'maintenance' | 'rateLimited' | 'error' | 'invalid'; results: [] };
 
 async function rollbackSearchAttempt(ip: string, bucketStart: number) {
     const currentEntry = searchRateLimit.get(ip);
@@ -172,6 +172,13 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
         return { status: 'ok', results: await searchImages(safeQuery, 20) };
     } catch (err) {
         await rollbackSearchAttempt(ip, bucketStart);
-        throw err;
+        // C18-MED-01: return a structured error response instead of throwing.
+        // Throwing from a server action sends a generic error to the client
+        // and can leave the search UI in a broken state. Returning a
+        // structured response lets the client handle the error gracefully
+        // with a toast notification while keeping search functional.
+        // Matches the loadMoreImages pattern (C2-MED-02).
+        console.error('searchImagesAction failed:', err);
+        return { status: 'error', results: [] };
     }
 }

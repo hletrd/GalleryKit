@@ -237,10 +237,12 @@ describe('searchImagesAction', () => {
         });
     });
 
-    it('rolls back both search counters when the search query throws after pre-increment', async () => {
+    it('rolls back both search counters and returns structured error when the search query throws after pre-increment', async () => {
         searchImagesMock.mockRejectedValue(new Error('db query failed'));
 
-        await expect(searchImagesAction('landscape')).rejects.toThrow('db query failed');
+        // C18-MED-01: searchImagesAction returns a structured error instead of throwing,
+        // matching the loadMoreImages pattern (C2-MED-02).
+        await expect(searchImagesAction('landscape')).resolves.toEqual({ status: 'error', results: [] });
 
         expect(searchRateLimit.has('203.0.113.42')).toBe(false);
         expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'search', 60_000, 1_700_000_000);
