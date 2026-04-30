@@ -207,4 +207,40 @@ describe('tag actions', () => {
         });
         expect(transactionMock).not.toHaveBeenCalled();
     });
+
+    // AGG13-01: verify that batchUpdateImageTags does NOT log a tags_batch_update
+    // audit event when all tag operations are no-ops (added === 0 && removed === 0).
+    // This is the same class as AGG10-01 (addTagToImage), AGG11-01
+    // (removeTagFromImage), and AGG12-01 (batchAddTags) but the batch-update
+    // counterpart was not gated. The audit event should only fire when at least
+    // one tag was actually added or removed.
+    it('does not log tags_batch_update audit event when added === 0 && removed === 0', async () => {
+        // Simulate a transaction where all tag names are rejected by requireCleanInput
+        // (e.g., they contain control characters), so added === 0 && removed === 0.
+        transactionMock.mockImplementation(async (callback: (tx: {
+            select: typeof selectMock;
+            insert: typeof insertMock;
+            delete: typeof deleteMock;
+        }) => Promise<void>) => {
+            const txSelect = vi.fn()
+                .mockReturnValueOnce(makeSelectChain([{ topic: 'travel' }]));
+            // No insert or delete calls because all tag names are invalid and skipped
+            const txInsert = vi.fn();
+            const txDelete = vi.fn();
+
+            await callback({
+                select: txSelect,
+                insert: txInsert,
+                delete: txDelete,
+            });
+        });
+
+        // Pass tag names with control characters that requireCleanInput will reject
+        const result = await batchUpdateImageTags(5, ['\x00evil'], []);
+
+        expect(result.success).toBe(true);
+        expect(result.added).toBe(0);
+        expect(result.removed).toBe(0);
+        expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
 });
