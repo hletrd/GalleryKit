@@ -25,26 +25,7 @@ import { beginRestoreMaintenance, endRestoreMaintenance, getRestoreMaintenanceMe
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
-
-/**
- * C12R2-03: Sanitize stderr from mysqldump/mysql child processes before
- * logging. stderr may contain connection strings or passwords (e.g.,
- * "Access denied for user 'gallery'@'10.0.0.1' (using password: YES)").
- * Redact the MYSQL_PWD value and common credential patterns.
- */
-function sanitizeStderr(data: Buffer | string, pwd?: string): string {
-    let text = typeof data === 'string' ? data : data.toString('utf8');
-    // Redact the actual password value if it appears in stderr
-    if (pwd && pwd.length > 0) {
-        // Escape regex-special chars in the password
-        const escaped = pwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        text = text.replace(new RegExp(escaped, 'g'), '[REDACTED]');
-    }
-    // Redact common credential patterns regardless (matches both = and : separators)
-    text = text.replace(/(password\s*[:=]\s*)[^\s;'"`]*/gi, '$1[REDACTED]');
-    text = text.replace(/(using password:\s*)\S+/gi, '$1[REDACTED]');
-    return text;
-}
+import { sanitizeStderr } from "@/lib/sanitize";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).

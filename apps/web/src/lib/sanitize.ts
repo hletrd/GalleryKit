@@ -60,3 +60,40 @@ export function requireCleanInput(raw: string | null | undefined, trim = true): 
     const sanitized = stripControlChars(input) ?? '';
     return { value: sanitized, rejected: sanitized !== input };
 }
+
+/**
+ * Sanitize stderr from mysqldump/mysql child processes before logging.
+ * stderr may contain connection strings or passwords (e.g.,
+ * "Access denied for user 'gallery'@'10.0.0.1' (using password: YES)").
+ * Redact the MYSQL_PWD value and common credential patterns.
+ *
+ * Two regexes cover distinct MySQL error message formats:
+ *
+ * Regex 1: matches "password=VALUE" and "password:VALUE" patterns.
+ * Broadened from "=" only to "[:=]" (C4-AGG-08) to also match
+ * colon-separated credential patterns.
+ *
+ * Regex 2: matches the specific MySQL "using password: YES/NO" format
+ * that appears in Access denied messages. Although regex 1 overlaps for
+ * the "password:" case, this regex is intentionally kept because
+ * "using password:" is a distinct MySQL error format prefix. Removing
+ * it could miss edge cases with custom auth plugins that emit
+ * "using password: <hash>".
+ *
+ * Do NOT remove either regex without understanding both formats.
+ * Moved from db-actions.ts for unit-testability (C5-AGG-01).
+ */
+export function sanitizeStderr(data: Buffer | string, pwd?: string): string {
+    let text = typeof data === 'string' ? data : data.toString('utf8');
+    // Redact the actual password value if it appears in stderr
+    if (pwd && pwd.length > 0) {
+        // Escape regex-special chars in the password
+        const escaped = pwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        text = text.replace(new RegExp(escaped, 'g'), '[REDACTED]');
+    }
+    // Regex 1: generic password=VALUE and password:VALUE patterns (see doc above)
+    text = text.replace(/(password\s*[:=]\s*)[^\s;'"`)]*/gi, '$1[REDACTED]');
+    // Regex 2: specific MySQL "using password: YES/NO" format (see doc above)
+    text = text.replace(/(using password:\s*)[^\s)]+/gi, '$1[REDACTED]');
+    return text;
+}
