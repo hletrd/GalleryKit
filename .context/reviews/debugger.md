@@ -1,23 +1,37 @@
-# Debugger Review — debugger (Cycle 13)
+# Debugger Review — debugger (Cycle 15)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-29
+Date: 2026-04-30
 
 ## Summary
 
-- No new critical or high findings.
-- No new medium findings.
+- No new critical, high, or medium findings.
+- All latent bug surfaces and failure modes previously identified are properly guarded.
 
-## Verified fixes from prior cycles
+## Latent bug surface analysis
 
-1. C8-DBG-01 / C8-AGG8R-01: `sanitizeAdminString` stateful regex — FIXED.
-2. C7-DBG-01 / AGG7R-01: Redundant `IS NULL` conditions — FIXED.
-3. C7-DBG-02 / AGG7R-02: `.length` vs code points — FIXED for all admin string surfaces.
+### Edge Conditions
+- Empty array inputs: All batch operations (`deleteImages`, `createGroupShareLink`, etc.) validate non-empty arrays before proceeding.
+- Null values in cursor pagination: `normalizeImageListCursor` returns `null` for invalid cursors, and callers fall back to offset pagination.
+- Zero-byte files: `saveOriginalAndGetMetadata` rejects files with `file.size === 0`.
+- Missing EXIF: `extractExifForDb` gracefully handles missing/empty EXIF data, returning `null` for all fields.
+
+### Failure Modes
+- DB connection drops during flush: View count buffer swaps the Map atomically before draining, so a crash mid-flush doesn't lose unprocessed increments. Failed increments are re-buffered with a retry cap.
+- Sharp errors mid-processing: Queue catches processing errors, retries up to 3 times, then gives up. Orphaned variant files are cleaned up when the image is detected as deleted during processing.
+- Advisory lock connection drops: `finally` blocks always release connections and locks, even on exceptions.
+- Filesystem cleanup failures: `collectImageCleanupFailures` retries once, then reports failures without blocking the main operation. Failed cleanups are logged for operator attention.
+- Disk full during upload: `statfs` check requires at least 1GB free before accepting uploads. If the check fails, the upload is rejected with `insufficientDiskSpace`.
+
+### Error Recovery
+- Upload tracker pre-increment settlement: `settleUploadTrackerClaim` reconciles claimed vs actual bytes after upload completes or partially fails.
+- Rate limit rollback: All rate-limiting surfaces roll back on infrastructure failures (not user errors).
+- Queue bootstrap retry: Exponential backoff with 30s delay on connection failures, with cursor-based continuation for large pending sets.
 
 ## New Findings
 
-None this cycle. The codebase is in a stable, well-hardened state.
+None. All latent bug surfaces and failure modes are properly handled.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
-- AGG6R-10: Log noise from orphaned tmp cleanup — appropriate.
+- C6-V-02: `bootstrapImageProcessingQueue` cursor continuation path untested.

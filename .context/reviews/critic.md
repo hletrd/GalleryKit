@@ -1,30 +1,29 @@
-# Critic Review — critic (Cycle 14)
+# Critic Review — critic (Cycle 15)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-29
+Date: 2026-04-30
 
 ## Summary
 
 - No medium or high findings.
-- One low finding about audit metadata truncation UX.
+- One low finding about redundant conditional in deleteTopic.
 
 ## Verified fixes from prior cycles
 
 All prior critic findings confirmed addressed:
 
-1. AGG13-01 / C13-CRIT-01 (`batchUpdateImageTags` audit on zero-effect operations): FIXED — gated on `added > 0 || removed > 0`.
-2. AGG12-01 / C12-CRIT-01 (`batchAddTags` audit on INSERT IGNORE no-ops): FIXED — gated on `affectedRows > 0`.
-3. AGG11-01 / C11-CRIT-01 (`removeTagFromImage` audit on no-op DELETE): FIXED — gated on `affectedRows > 0`.
-4. AGG10-01 / C10-CRIT-01 (`addTagToImage` audit on no-op INSERT IGNORE): FIXED — gated on `affectedRows > 0`.
+1. C14-AGG-01 (audit.ts metadata truncation with ellipsis marker): FIXED.
+2. C14-AGG-02 (deleteAdminUser raw SQL rationale comment): FIXED.
+3. AGG13-01 through AGG10-01 (audit-log gating): All FIXED.
 
 ## New Findings
 
-### C14-CRIT-01 (Low / Low). `audit.ts` metadata truncation produces a JSON fragment in the `preview` field — confusing for log analysts
+### C15-CRIT-01 (Low / Low). `deleteTopic` has an unreachable `deletedRows > 0` guard around the audit log — code path analysis shows it's always true when reached
 
-- Location: `apps/web/src/lib/audit.ts:29-33`
-- When audit metadata exceeds 4096 bytes, the code slices the serialized JSON string at 4000 code points and wraps it as `{ truncated: true, preview: "<raw-slice>" }`. The `preview` field is a raw character slice of the JSON string, which may terminate mid-key or mid-value, producing an invalid JSON fragment inside a valid JSON envelope. A log analyst scanning audit events could misinterpret the truncated preview as the full metadata.
-- This is not a security issue — the `truncated: true` flag correctly indicates that data was cut. But the preview itself is noise rather than useful context if it terminates mid-structure.
-- Suggested fix: Append a `"…"` marker to the preview, or truncate at the last complete key-value pair boundary.
+- Location: `apps/web/src/app/actions/topics.ts:354`
+- After the early return at line 346-348 when `deletedRows === 0`, the remaining code can only execute when `deletedRows >= 1`. The `if (deletedRows > 0)` condition at line 354 is therefore always true. While functionally correct, it creates a false impression that `deletedRows` could be `<= 0` at that point.
+- Same pattern as C15-CR-01 from code-reviewer (cross-agent agreement).
+- Suggested fix: Remove the guard and add a comment that `deletedRows >= 1` is guaranteed by the early return above.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 

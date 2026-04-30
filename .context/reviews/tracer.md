@@ -1,35 +1,51 @@
-# Tracer Review — tracer (Cycle 13)
+# Tracer Review — tracer (Cycle 15)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-29
+Date: 2026-04-30
 
-## Causal tracing of suspicious flows
+## Summary
 
-### Trace 1: `batchUpdateImageTags` audit event on zero-mutation path
+- No new critical, high, or medium findings.
+- All race conditions and shared-state hazards previously identified remain properly guarded.
 
-**Hypothesis H1**: `batchUpdateImageTags` logs a `tags_batch_update` audit event even when the transaction made no changes to the database.
+## Causal tracing: key flow verification
 
-**Trace**:
-1. Admin UI calls `batchUpdateImageTags(imageId, ['invalid<name>'], [])` via server action.
-2. `batchUpdateImageTags` validates and enters the transaction at line 390.
-3. Inside the transaction, the `for` loop at line 400 iterates over `addTagNames`:
-   - `requireCleanInput('invalid<name>')` returns `rejected: true` (contains `<`).
-   - `nameRejected` is true, so `continue` at line 404 skips the tag.
-4. No `added++` or `removed++` occurs.
-5. Transaction completes successfully (no throws).
-6. After the transaction at line 451-452: `logAuditEvent(...)` fires with `{ added: 0, removed: 0 }`.
-7. No data was mutated, but an audit event is recorded.
+### Upload + Processing Pipeline
+- Upload tracker pre-increment prevents TOCTOU on concurrent uploads from same IP: confirmed.
+- Upload processing contract lock serializes uploads with `image_sizes` / `strip_gps_on_upload` changes: confirmed.
+- Per-image advisory lock (`gallerykit:image-processing:{jobId}`) prevents duplicate processing across workers: confirmed.
+- Queue detects mid-processing deletion via `WHERE processed = false` conditional UPDATE: confirmed.
 
-**Verdict H1**: CONFIRMED — the audit event fires with zero-effect metadata. The metadata is accurate (not misleading like AGG10-01/AGG12-01), but the event itself is unnecessary noise. This is a minor consistency gap in the audit-log gating pattern.
+### DB Restore Flow
+- Advisory lock `gallerykit_db_restore` serializes concurrent restore requests: confirmed.
+- Restore maintenance flag gates all mutating admin actions: confirmed.
+- Queue quiescence before restore prevents processing during DB replacement: confirmed.
+
+### Admin Delete Flow
+- Advisory lock `gallerykit_admin_delete` prevents concurrent deletion of the last admin: confirmed.
+- Raw SQL with dedicated connection is correct for advisory-lock semantics: confirmed.
+
+### Topic Mutation Flow
+- Advisory lock `gallerykit_topic_route_segments` serializes slug/alias uniqueness checks: confirmed.
+- Transaction wraps reference updates before PK rename in `updateTopic`: confirmed.
+
+### View Count Buffering
+- Atomic Map swap prevents losing increments during flush: confirmed.
+- Retry cap (VIEW_COUNT_MAX_RETRIES = 3) prevents infinite re-buffering: confirmed.
+- Exponential backoff on flush failures (BASE_FLUSH_INTERVAL_MS to MAX_FLUSH_INTERVAL_MS): confirmed.
+- `isFlushing` flag prevents concurrent flush: confirmed.
+
+### Rate Limiting
+- All mutating surfaces use pre-increment-then-check pattern: confirmed.
+- DB-backed counters provide cross-restart accuracy: confirmed.
+- Rollback on infrastructure failure (not user error): confirmed across all surfaces.
 
 ## New Findings
 
-### C13-TR-01 (Low / Low). `batchUpdateImageTags` logs `tags_batch_update` audit event when `added === 0 && removed === 0`
-
-- Location: `apps/web/src/app/actions/tags.ts:452`
-- Same class as AGG10-01/AGG11-01/AGG12-01 but with lower impact because the metadata is accurate (no false positive count). The event is just unnecessary noise when no mutation occurred.
-- Suggested fix: Gate the audit log on `added > 0 || removed > 0`.
+None. All critical race conditions and shared-state hazards are properly guarded.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
-- C8-TR-02: `countCodePoints()` not applied to topics.ts / seo.ts — already fixed in C8-AGG8R-02.
+- C30-03 / C36-03: `flushGroupViewCounts` re-buffers without retry limit (partially addressed by retry cap).
+- C30-04 / C36-02: `createGroupShareLink` insertId validation / BigInt coercion.
+- CR-38-02: `uploadTracker` uses insertion-order eviction, not LRU.

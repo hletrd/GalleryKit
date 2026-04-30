@@ -1,75 +1,81 @@
-# Security Review — security-reviewer (Cycle 14)
+# Security Review — security-reviewer (Cycle 15)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-29
+Date: 2026-04-30
 
 ## Summary
 
 - No new critical or high security findings.
-- One low finding about audit metadata preview truncation.
+- No new medium security findings.
 - All prior security fixes confirmed intact.
 
 ## Verified fixes from prior cycles
 
 All prior security findings confirmed addressed:
 
-1. AGG13-01 (`batchUpdateImageTags` audit gating): FIXED — gated on `added > 0 || removed > 0`.
-2. AGG12-01 (`batchAddTags` audit on INSERT IGNORE no-ops): FIXED — gated on `affectedRows > 0`.
-3. AGG11-01 (`removeTagFromImage` audit on no-op DELETE): FIXED — gated on `affectedRows > 0`.
-4. AGG10-01 (`addTagToImage` audit on no-op INSERT IGNORE): FIXED — gated on `affectedRows > 0`.
-5. AGG9R-02 (`withAdminAuth` origin check): FIXED — `hasTrustedSameOrigin` added centrally.
-6. AGG9R-01 (`countCodePoints` for varchar length checks): FIXED — used in all relevant actions.
-7. C8-AGG8R-01 (stateful `/g` regex in `sanitizeAdminString`): FIXED — uses `UNICODE_FORMAT_CHARS` (non-`/g`) for `.test()`.
+1. C14-AGG-01 (audit.ts metadata truncation): FIXED — ellipsis marker added.
+2. AGG13-01 through AGG8R-01: All confirmed intact.
+3. Argon2id password hashing: confirmed.
+4. HMAC-SHA256 session tokens with `timingSafeEqual`: confirmed.
+5. Login rate limiting (per-IP + per-account dual bucket): confirmed.
+6. `requireSameOriginAdmin()` on all mutating server actions: confirmed across all 9 action files.
+7. `withAdminAuth` + `hasTrustedSameOrigin` on all API routes: confirmed.
+8. Upload security (UUID filenames, path traversal prevention, symlink rejection): confirmed.
+9. Privacy enforcement (`publicSelectFields` + compile-time guard): confirmed.
+10. Unicode bidi/invisible formatting rejection: confirmed on all admin string surfaces.
+11. `sanitizeStderr` password redaction: confirmed.
+12. `safeJsonLd` XSS prevention in JSON-LD scripts: confirmed.
+13. CSP with nonce in production: confirmed.
+14. `serveUploadFile` security (path traversal, symlink rejection, directory whitelist, extension validation, realpath containment): confirmed.
 
 ## Deep review: comprehensive sweep
 
 ### Authentication & Session Security
-- Argon2id password hashing: confirmed.
+- Argon2id password hashing with dummy hash for timing-safe user enumeration prevention: confirmed.
 - HMAC-SHA256 session tokens with `timingSafeEqual`: confirmed.
-- Cookie attributes (`httpOnly`, `secure` in production, `sameSite: lax`, `path: /`): confirmed.
-- Login rate limiting (per-IP + per-account dual bucket): confirmed, pre-increment pattern intact.
-- Password change rate limiting: confirmed, validation-before-increment ordering intact.
-- Session fixation prevention (delete old sessions before inserting new): confirmed in `login` and `updatePassword`.
+- Login rate limiting (dual bucket, pre-increment pattern): confirmed.
+- Password change rate limiting (validation-before-increment ordering): confirmed.
+- Session fixation prevention (delete old before insert new in transaction): confirmed.
 - `unstable_rethrow` for Next.js control flow signals: confirmed in both `login` and `updatePassword`.
 
 ### CSRF / Origin Verification
-- `requireSameOriginAdmin()` applied to all mutating server actions: confirmed across all 9 action files.
-- `withAdminAuth` includes `hasTrustedSameOrigin`: confirmed in `api-auth.ts:31-37`.
-- `hasTrustedSameOrigin` checks both `Origin` and `Referer` with protocol normalization: confirmed.
+- `requireSameOriginAdmin()` on all mutating server actions: confirmed.
+- `withAdminAuth` + `hasTrustedSameOrigin` on API routes: confirmed.
+- `hasTrustedSameOrigin` checks both Origin and Referer with protocol normalization: confirmed.
 
 ### Input Sanitization Pipeline
-- `sanitizeAdminString` (Unicode bidi/invisible rejection + C0/C1 stripping): confirmed in all admin string entry points.
-- `requireCleanInput` (strip + reject-if-changed): confirmed for all slug/alias/tag name inputs.
+- `sanitizeAdminString` (Unicode bidi/invisible rejection + C0/C1 stripping): confirmed.
+- `requireCleanInput` (strip + reject-if-changed): confirmed.
 - `stripControlChars`: confirmed in all FormData parsing paths.
-- `countCodePoints` for MySQL-compatible varchar length: confirmed in images.ts, topics.ts, seo.ts.
-- LIKE wildcard escaping in search: confirmed in `data.ts:953` and `public.ts:116`.
+- `countCodePoints` for MySQL-compatible varchar length: confirmed.
+- LIKE wildcard escaping in search: confirmed.
+- Cursor normalization with strict format validation: confirmed.
 
 ### File Upload Security
 - UUID filenames via `crypto.randomUUID()`: confirmed.
 - Path traversal prevention (`SAFE_SEGMENT` + `ALLOWED_UPLOAD_DIRS`): confirmed.
-- Symlink rejection via `lstat()`: confirmed.
+- Symlink rejection via `lstat()`: confirmed (both upload routes).
 - Decompression bomb mitigation (Sharp `limitInputPixels`): confirmed.
 - Upload tracker TOCTOU fix (pre-increment before async operations): confirmed.
+- Directory extension mapping to prevent serving mismatched files: confirmed.
+- `realpath` containment to prevent TOCTOU symlink race: confirmed.
 
 ### Database Security
 - Drizzle ORM parameterization for all application queries: confirmed.
-- Raw SQL in `deleteAdminUser` uses parameterized queries: confirmed.
-- Advisory locks for concurrent mutation prevention: confirmed for admin delete, topic route segments, DB restore, upload contract, image processing.
+- Raw SQL in `deleteAdminUser` uses parameterized queries with documented rationale: confirmed.
+- Advisory locks for concurrent mutation prevention: confirmed for all 5 lock names.
+- `MYSQL_PWD` env var used for mysqldump/restore (not `-p` flag): confirmed.
 
 ### Privacy
 - `publicSelectFields` omits all PII fields: confirmed.
 - Compile-time guard `_SensitiveKeysInPublic` enforced: confirmed.
 - GPS coordinates excluded from public API: confirmed.
 - `filename_original` and `user_filename` excluded from public queries: confirmed.
+- `blur_data_url` excluded from listing queries (fetched only in individual queries): confirmed.
 
-## New Findings
+### New Findings
 
-### C14-SEC-01 (Low / Low). `audit.ts` metadata `preview` field may contain truncated JSON that could mislead forensic analysts
-
-- Location: `apps/web/src/lib/audit.ts:29-33`
-- When metadata exceeds 4096 bytes, the truncation slices the serialized JSON at an arbitrary code-point boundary and wraps it in `{ truncated: true, preview: "..." }`. The `preview` value is a raw character slice of the stringified JSON, which may end mid-key or mid-value (e.g., `{"key": "val`), creating an invalid JSON fragment. While this is intentional (the field is for human debugging), a forensic analyst scanning audit logs could misinterpret the truncated preview as the complete metadata.
-- Severity is Low because this is a diagnostic field, not a security boundary. The `truncated: true` flag correctly indicates that data was cut.
-- Suggested fix: Add a trailing `…` marker or document that `preview` is not valid JSON.
+None.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
