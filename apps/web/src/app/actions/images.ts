@@ -9,11 +9,12 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, containsUnicodeFormatting } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug } from '@/lib/validation';
+import { countCodePoints } from '@/lib/utils';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
-import { stripControlChars } from '@/lib/sanitize';
+import { stripControlChars, sanitizeAdminString } from '@/lib/sanitize';
 import { ensureTagRecord, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
@@ -688,31 +689,26 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         return { error: t('invalidImageId') };
     }
 
-    // Sanitize title and description BEFORE length validation so checks
-    // operate on the same value that will be stored. Follows the
-    // sanitize-before-validate ordering from settings.ts/seo.ts (C29-09 /
-    // C30-01 / C45-03); null preservation is image-specific (DB columns are
-    // nullable). Unicode-formatting rejection added in C5L-SEC-01 to close
-    // the parity gap with topic aliases (C3L-SEC-01) and tag names
-    // (C4L-SEC-01) for admin-controlled persistent strings rendered into
-    // public photo viewer, lightbox, OG images, and SEO previews.
-    const sanitizedTitle = stripControlChars(title ? title.trim() : null) || null;
-    const sanitizedDescription = stripControlChars(description ? description.trim() : null) || null;
+    // C7-AGG7R-03: sanitizeAdminString checks Unicode formatting BEFORE
+    // stripping (stripControlChars now removes bidi/zero-width chars, so
+    // calling containsUnicodeFormatting after it would always pass).
+    // Combines C5L-SEC-01 formatting rejection + C0/C1 strip in one call.
+    // Null preservation is image-specific (DB columns are nullable).
+    const { value: sanitizedTitle, rejected: titleRejected } = sanitizeAdminString(title);
+    const { value: sanitizedDescription, rejected: descRejected } = sanitizeAdminString(description);
+    if (titleRejected) return { error: t('invalidTitle') };
+    if (descRejected) return { error: t('invalidDescription') };
 
-    // C5L-SEC-01 / C6L-ARCH-01: single canonical helper for the
-    // Unicode-formatting policy (truthiness guard handled internally).
-    if (containsUnicodeFormatting(sanitizedTitle)) {
-        return { error: t('invalidTitle') };
-    }
-    if (containsUnicodeFormatting(sanitizedDescription)) {
-        return { error: t('invalidDescription') };
-    }
-
-    if (sanitizedTitle && sanitizedTitle.length > 255) {
+    // C7-AGG7R-02: use countCodePoints for length validation so
+    // supplementary characters (emoji, rare CJK) are counted as one
+    // character each, matching MySQL varchar semantics. JS `.length`
+    // counts UTF-16 code units (2 per surrogate pair), causing false
+    // rejections for emoji-heavy titles that fit in varchar(255).
+    if (sanitizedTitle && countCodePoints(sanitizedTitle) > 255) {
         return { error: t('titleTooLong') };
     }
 
-    if (sanitizedDescription && sanitizedDescription.length > 5000) {
+    if (sanitizedDescription && countCodePoints(sanitizedDescription) > 5000) {
         return { error: t('descriptionTooLong') };
     }
 
