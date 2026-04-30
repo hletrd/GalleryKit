@@ -321,10 +321,15 @@ export async function batchAddTags(imageIds: number[], tagName: string) {
             tagId: resolvedTag.tag.id
         }));
 
-        await db.insert(imageTags).ignore().values(values);
+        const [batchInsertResult] = await db.insert(imageTags).ignore().values(values);
 
-        const currentUser = await getCurrentUser();
-        logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: existingIds.size, tag: cleanName }).catch(console.debug);
+        // AGG12-01: only log the audit event when tags were actually linked.
+        // INSERT IGNORE returns affectedRows === 0 for duplicate rows, meaning
+        // no tags_batch_add event occurred.
+        if (batchInsertResult.affectedRows > 0) {
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'tags_batch_add', 'image', undefined, undefined, { count: batchInsertResult.affectedRows, tag: cleanName }).catch(console.debug);
+        }
 
         revalidateLocalizedPaths('/admin/dashboard', '/', '/admin/tags');
         revalidateAllAppData();
