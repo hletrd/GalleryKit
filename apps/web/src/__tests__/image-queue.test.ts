@@ -81,6 +81,32 @@ describe('enqueueImageProcessing filename guard', () => {
         expect(queueAddMock).not.toHaveBeenCalled();
     });
 
+    it('C9-TE-02: pruneRetryMaps FIFO eviction uses collect-then-delete pattern', () => {
+        // C9-MED-02: the pruneRetryMaps function collects keys into an array
+        // first, then deletes in a separate loop. This matches the project
+        // convention (BoundedMap.prune(), C8-MED-01, C9-MED-01).
+        //
+        // Regression guard: if pruneRetryMaps is rewritten to delete during
+        // for-of iteration, this test fails.
+        const fs = require('fs') as typeof import('fs');
+        const path = require('path') as typeof import('path');
+        const source = fs.readFileSync(
+            path.join(__dirname, '..', 'lib', 'image-queue.ts'),
+            'utf8',
+        );
+
+        // Verify MAX_RETRY_MAP_SIZE constant
+        expect(source).toMatch(/const\s+MAX_RETRY_MAP_SIZE\s*=\s*10000\b/);
+
+        // Verify the collect-then-delete pattern in pruneRetryMaps:
+        // 1. collect excess keys into evictKeys array
+        // 2. break when enough keys collected
+        // 3. delete collected keys in a separate loop
+        expect(source).toMatch(
+            /const\s+evictKeys\s*:\s*number\[\]\s*=\s*\[\]\s*;\s*\n\s*for\s*\(\s*const\s+key\s+of\s+map\.keys\(\)\s*\)\s*\{\s*\n\s*if\s*\(\s*evictKeys\.length\s*>=\s*excess\s*\)\s*break\s*;\s*\n\s*evictKeys\.push\s*\(\s*key\s*\)\s*;\s*\n\s*\}\s*\n\s*for\s*\(\s*const\s+key\s+of\s+evictKeys\s*\)\s*\{\s*\n\s*map\.delete\s*\(\s*key\s*\)/
+        );
+    });
+
     it('marks bootstrap stale and schedules a retry scan after repeated processing failures', async () => {
         vi.useFakeTimers();
         const state = getProcessingQueueState();

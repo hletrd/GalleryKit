@@ -143,6 +143,22 @@ describe('view-count flush — C2-F01 swap-and-drain + backoff invariants', () =
         expect(dataFnBody).toMatch(/if\s*\(\s*viewCountRetryCount\.size\s*>\s*MAX_VIEW_COUNT_RETRY_SIZE\s*\)/);
     });
 
+    it('C9-TE-01: viewCountRetryCount hard-cap eviction uses collect-then-delete pattern', () => {
+        // C9-MED-01: the eviction collects keys into an array first, then
+        // deletes in a separate loop. This is a project convention (matching
+        // BoundedMap.prune() and C8-MED-01) that makes iteration-during-
+        // deletion explicit even though ES6 guarantees Map deletion during
+        // for-of iteration is safe.
+        //
+        // The pattern must be: collect excess keys → break → delete collected keys.
+        // A regresssion to `for (const key of viewCountRetryCount.keys()) {
+        //   viewCountRetryCount.delete(key); }` would still work in ES6 but
+        // violates the project convention.
+        expect(dataSource).toMatch(
+            /const\s+evictKeys\s*:\s*number\[\]\s*=\s*\[\]\s*;\s*\n\s*for\s*\(\s*const\s+key\s+of\s+viewCountRetryCount\.keys\(\)\s*\)\s*\{\s*\n\s*if\s*\(\s*evictKeys\.length\s*>=\s*excess\s*\)\s*break\s*;\s*\n\s*evictKeys\.push\s*\(\s*key\s*\)\s*;\s*\n\s*\}\s*\n\s*for\s*\(\s*const\s+key\s+of\s+evictKeys\s*\)\s*\{\s*\n\s*viewCountRetryCount\.delete\s*\(\s*key\s*\)/
+        );
+    });
+
     it('VIEW_COUNT_MAX_RETRIES = 3: increments drop after 3 failed flush attempts', () => {
         // The retry counter limits how many times a failed increment is re-buffered.
         expect(dataSource).toMatch(/const\s+VIEW_COUNT_MAX_RETRIES\s*=\s*3\b/);
