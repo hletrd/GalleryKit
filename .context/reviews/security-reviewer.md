@@ -1,4 +1,4 @@
-# Security Review — security-reviewer (Cycle 9)
+# Security Review — security-reviewer (Cycle 11)
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
@@ -6,55 +6,27 @@ Date: 2026-04-29
 ## Summary
 
 - No new critical or high security findings.
-- One medium finding (potential information disclosure in error messages).
-- Two low findings.
+- One low finding (audit-log integrity — same class as AGG10-01).
+- All prior security fixes confirmed intact.
 
 ## Verified fixes from prior cycles
 
 All prior security findings confirmed addressed:
 
-1. C8-SEC-01 / AGG8R-01: Stateful `/g` regex in `sanitizeAdminString` — FIXED. Now uses non-`/g` `UNICODE_FORMAT_CHARS` for `.test()`.
-2. C7-SEC-01 / AGG7R-03: `sanitizeAdminString` combined helper — FIXED.
-3. C6-SEC-01 / AGG6R-04: HANDLER pattern in SQL restore scanner — FIXED.
+1. AGG10-01 (`addTagToImage` audit on INSERT IGNORE no-op): FIXED — gated on `affectedRows > 0`.
+2. AGG9R-02 (`withAdminAuth` origin check): FIXED — `hasTrustedSameOrigin` added centrally.
+3. AGG10-02/AGG10-03 (`.length` documentation): FIXED — comments added.
+4. C10R3-01/C10R3-02 (OG route validation): FIXED — `isValidSlug`/`isValidTagName` enforced.
+5. C10R3-03 (`deleteAdminUser` affectedRows): FIXED — checks `affectedRows === 0`.
 
 ## New Findings
 
-### C9-SEC-01 (Medium / Medium). `deleteAdminUser` uses raw SQL queries with string-interpolated `id` parameter via `conn.query()` instead of parameterized Drizzle ORM
+### C11-SEC-01 (Low / Medium). `removeTagFromImage` audit log fires on no-op DELETE — misleading audit trail
 
-- Location: `apps/web/src/app/actions/admin-users.ts:204-226`
-- The `deleteAdminUser` function uses raw MySQL queries via `conn.query()`:
-  ```ts
-  await conn.query<(RowDataPacket & { count: number })[]>(
-    'SELECT COUNT(*) AS count FROM admin_users'
-  );
-  const [targetRows] = await conn.query<(RowDataPacket & { id: number })[]>(
-    'SELECT id FROM admin_users WHERE id = ? LIMIT 1',
-    [id]
-  );
-  await conn.query('DELETE FROM sessions WHERE user_id = ?', [id]);
-  const [deleteResult] = await conn.query<ResultSetHeader>(
-    'DELETE FROM admin_users WHERE id = ?',
-    [id]
-  );
-  ```
-- While these queries DO use parameterized placeholders (`?`), they bypass Drizzle ORM, which means they are not covered by the "all app queries use Drizzle parameterization" guarantee stated in CLAUDE.md. This is an intentional architectural choice (advisory lock + raw SQL for the last-admin-guard transaction), but it widens the attack surface if future developers copy the pattern without using `?` placeholders.
-- The `id` parameter IS validated as a positive integer on line 181, so injection risk is mitigated.
-- Severity rationale: The current code is safe due to both parameterization AND input validation. The risk is in pattern propagation — a future developer might copy the `conn.query()` pattern and forget the `?` placeholder.
-- Suggested fix: Add a prominent comment block above the raw queries explaining why Drizzle ORM is bypassed (advisory lock transaction) and that all parameters must use `?` placeholders.
-
-### C9-SEC-02 (Low / Low). `tagsString` length check in `uploadImages` uses `.length` — same class as AGG8R-02
-
-- Location: `apps/web/src/app/actions/images.ts:139`
-- `tagsString.length > 1000` counts UTF-16 code units. This is a DoS-prevention bound, not a MySQL varchar boundary, so the security impact is minimal (slightly more restrictive, not more permissive).
-- Suggested fix: Document the intentional use, or switch to `countCodePoints()` for consistency.
-
-### C9-SEC-03 (Low / Low). `withAdminAuth` wrapper does not verify request origin — relies on `isAdmin()` cookie check only
-
-- Location: `apps/web/src/lib/api-auth.ts`
-- The `withAdminAuth` wrapper checks `isAdmin()` (which verifies the session cookie) but does NOT call `hasTrustedSameOrigin()` or `requireSameOriginAdmin()`. This means API routes (`/api/admin/*`) have a weaker CSRF defense than server actions, which all use `requireSameOriginAdmin()`.
-- Mitigation: Next.js API routes are protected by the framework's built-in CSRF handling for cookie-based requests. The `/api/admin/db/download` route does its own origin check at line 27.
-- Severity is low because the only admin API route (`/api/admin/db/download`) adds its own explicit origin check on top of `withAdminAuth`.
-- Suggested fix: Add `hasTrustedSameOrigin` check to `withAdminAuth` for consistency with server actions, or document the current design decision.
+- Location: `apps/web/src/app/actions/tags.ts:252`
+- The `tag_remove` audit event is logged unconditionally after the DELETE, even when `deleteResult.affectedRows === 0`. The code checks if the image still exists at lines 243-248 but does NOT gate the audit log on whether the deletion actually occurred.
+- This is the same class as AGG10-01 (which was fixed for `addTagToImage` in cycle 10). A `tag_remove` event in the audit log that did not actually remove a tag is misleading for forensic analysis.
+- Suggested fix: Wrap the audit log in `if (deleteResult.affectedRows > 0)`.
 
 ## Carry-forward (unchanged — existing deferred backlog)
 

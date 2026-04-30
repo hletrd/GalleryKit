@@ -1,89 +1,41 @@
-# Aggregate Review — Cycle 11 (2026-04-19)
+# Aggregate Review — Cycle 11
 
-**Source reviews:** cycle11-comprehensive-review (single reviewer, multi-angle)
+Repository: `/Users/hletrd/flash-shared/gallery`
+Date: 2026-04-29
+Sources: code-reviewer-cycle11.md, security-reviewer-cycle11.md, perf-reviewer-cycle11.md, verifier-cycle11.md, critic-cycle11.md
 
----
+## Verified fixes from cycle 10
 
-## DEDUPLICATION & CROSS-AGENT AGREEMENT
+All Cycle 10 findings confirmed FIXED:
 
-Single-reviewer cycle — no deduplication needed. All findings are from the comprehensive review.
+| ID | Description | Status |
+|----|-------------|--------|
+| AGG10-01 | addTagToImage audit log fires on INSERT IGNORE no-op (duplicate row) | FIXED |
+| AGG10-02 | isValidSlug uses .length - document ASCII safety | FIXED |
+| AGG10-03 | isValidTagSlug uses .length - document BMP safety | FIXED |
 
----
+## New Findings (Cycle 11)
 
-## Findings
+### AGG11-01 (Low / Medium). removeTagFromImage audit log fires unconditionally on no-op DELETE
 
-| ID | Description | Severity | Confidence | Action |
-|----|------------|----------|------------|--------|
-| C11-F01 | `uploadImages` tracker adjustment may operate on stale reference after Map eviction | MEDIUM | Medium | IMPLEMENT |
-| C11-F02 | `api-auth.ts` returns hardcoded English `'Unauthorized'` string | MEDIUM | High | IMPLEMENT |
-| C11-F03 | `photo-viewer.tsx` has hardcoded English fallback `'Failed to share'` | LOW | High | IMPLEMENT |
-| C11-F04 | `login-form.tsx` references missing `description` translation key | LOW | High | IMPLEMENT |
-| C11-F05 | `deleteImages` audit log omits `notFoundCount` from metadata | LOW | Medium | IMPLEMENT |
+- **File+line**: apps/web/src/app/actions/tags.ts:252
+- **Description**: When deleteResult.affectedRows === 0 (the tag was not linked to the image, so the DELETE was a no-op), the code at lines 242-248 checks if the image still exists but does NOT return early or gate the audit log. The tag_remove audit event at line 252 fires unconditionally, recording a removal event even when nothing was actually removed.
+- **Cross-agent agreement**: Flagged independently by code-reviewer (C11-CR-01), security-reviewer (C11-SEC-01), verifier (C11-V-01), and critic (C11-CRIT-01). Four-agent consensus increases signal confidence.
+- **Same class as**: AGG10-01 (fixed in cycle 10 for addTagToImage). The add path was gated on affectedRows > 0, but the remove counterpart was missed.
+- **batchUpdateImageTags parity**: The batch function at line 429 correctly gates removed++ on deleteResult.affectedRows > 0, making this inconsistency a clear oversight.
+- **Suggested fix**: Gate the audit log on deleteResult.affectedRows > 0, matching the AGG10-01 fix.
 
-### C11-F01: uploadImages tracker stale reference [MEDIUM]
-After eviction by pruneUploadTracker, the captured `tracker` object reference may be orphaned. The additive adjustment on lines 248-249 would not reflect concurrent modifications, and `uploadTracker.set()` on line 250 would overwrite the current Map entry.
+## Carry-forward (unchanged - existing deferred backlog)
 
-**Fix:** Re-read tracker from Map immediately before adjustment.
-
-### C11-F02: api-auth.ts hardcoded English [MEDIUM]
-`withAdminAuth` returns `{ error: 'Unauthorized' }` — all server actions use `t('unauthorized')`. The `/api/admin/db/download` route uses this wrapper.
-
-**Fix:** Import `getTranslations` and localize the string.
-
-### C11-F03: photo-viewer.tsx English fallback [LOW]
-`toast.error(result.error || 'Failed to share')` — should use `t('viewer.errorSharing')`.
-
-**Fix:** Replace hardcoded fallback with `t('viewer.errorSharing')`.
-
-### C11-F04: login-form missing description key [LOW]
-`<CardDescription>{t('description')}</CardDescription>` — `login.description` key missing from both locale files.
-
-**Fix:** Add `description` key to `en.json` and `ko.json` under `login` section.
-
-### C11-F05: deleteImages audit metadata incomplete [LOW]
-Audit log records `count: successCount` but omits `notFoundCount`.
-
-**Fix:** Add `requested` and `notFound` to audit metadata.
-
----
-
-## PREVIOUSLY FIXED — Confirmed Resolved
-
-All cycle 1-10 findings remain resolved. No regressions detected.
-
----
-
-## DEFERRED CARRY-FORWARD
-
-All previously deferred items from cycles 5-37 remain deferred with no change in status:
-
-- C32-03: Insertion-order eviction in Maps
-- C32-04 / C30-08: Health endpoint DB disclosure
-- C29-05: `passwordChangeRateLimit` shares `LOGIN_RATE_LIMIT_MAX_KEYS` cap
-- C30-03 / C36-03 / C7-F01: `flushGroupViewCounts` re-buffers without retry limit
-- C30-04 / C36-02 / C8-01: `createGroupShareLink` insertId validation / BigInt coercion
-- C9-F01: original_file_size bigint mode: 'number' precision [MEDIUM]
-- C9-F03: searchImagesAction rate limit check/increment window [LOW]
-- C30-06: Tag slug regex inconsistency
-- Font subsetting (Python brotli dependency)
-- Docker node_modules removal (native module bundling)
-- C4-F02 / C6-F04: Admin checkboxes use native `<input>` (no Checkbox component)
-- C6-F03: No E2E test coverage for upload pipeline
-- C7-F03: No test coverage for view count buffering system
-- C7-F04: No test for search rate limit rollback logic
-- C8-F01: deleteTopicAlias revalidation (informational)
-
----
-
-## AGENT FAILURES
-
-None — single reviewer completed successfully.
-
----
-
-## TOTALS
-
-- **2 MEDIUM** findings requiring implementation
-- **3 LOW** findings recommended for implementation
-- **0 CRITICAL/HIGH** findings
-- **5 total** actionable findings (2M + 3L)
+- AGG6R-06: Restore lock complexity is correct but hard to simplify.
+- AGG6R-07: OG tag clamping is cosmetic.
+- AGG6R-08: lib/data.ts approaching 1200 lines - extraction could improve maintainability.
+- AGG6R-09: Preamble repetition is intentional defense-in-depth.
+- AGG6R-15: getImage 2-round-trip query pattern is already optimal - no action needed.
+- C6-V-02: bootstrapImageProcessingQueue cursor continuation path untested.
+- C4-CR-03/C5-CR-03/C6-V-01: NULL capture_date navigation integration test gap.
+- D1-01 / D2-08 / D6-09: CSP unsafe-inline hardening.
+- OC1-01 / D6-08: historical example secrets in git history.
+- AGG10-02 (partial): isValidSlug .length - documented safe, switch to countCodePoints deferred.
+- AGG10-03 (partial): isValidTagSlug .length - documented safe for BMP, switch deferred.
+- C9-PERF-01: search query cascade optimization - deferred at personal-gallery scale.

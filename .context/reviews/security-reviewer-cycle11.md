@@ -1,33 +1,34 @@
-# Security Reviewer -- Cycle 11 (2026-04-23)
+# Security Review — security-reviewer (Cycle 11)
 
-## Scope
-Security-focused review: OWASP Top 10, auth/authz, secrets, unsafe patterns, PII leakage, rate-limit consistency.
+Repository: `/Users/hletrd/flash-shared/gallery`
+Date: 2026-04-29
 
-## Files Reviewed
-- All files listed in code-reviewer-cycle11.md
-- Additionally: `apps/web/src/proxy.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/session.ts`
+## Summary
 
-## Findings
+- No new critical or high security findings.
+- One low finding (audit-log integrity - same class as AGG10-01).
+- All prior security fixes confirmed intact.
 
-### C11-SEC-01 — `createAdminUser` rate-limit not rolled back on duplicate username (MEDIUM confidence)
-- **Severity:** LOW (admin-authenticated endpoint, not a privilege escalation)
-- **Confidence:** High
-- **File:** `apps/web/src/app/actions/admin-users.ts:159-162`
-- **Problem:** Duplicate username attempts consume a rate-limit slot, allowing an authenticated admin to accidentally lock themselves out from creating users. On admin-to-admin environments, this is a usability issue; it also creates a minor side-channel where the presence of usernames can be probed (the error message `usernameExists` is already confirming this directly, so the side-channel isn't new).
-- **Related controls already in place:** login uses dummy-hash timing equalization, so username enumeration from login is blocked. `createAdminUser` needs no such guarantee because it's admin-only.
-- **Fix:** Roll back both counters on the duplicate-entry branch (same as C11-FRESH-01 fix).
+## Verified fixes from prior cycles
 
-## Confirmed strong controls
-- **Session tokens:** HMAC-SHA256 signed, constant-time comparison via `timingSafeEqual`. Session insert+invalidate is transactional.
-- **Argon2id** with proper work factor.
-- **Same-origin guard:** All mutating server actions use `requireSameOriginAdmin()` from `@/lib/action-guards`. The custom lint `lint:action-origin` enforces this at CI time.
-- **CSRF via `SameSite=Lax` + origin check:** Layered defense; the `hasTrustedSameOrigin` check catches cases where the cookie is leaked to a third-party origin.
-- **Path traversal in file serving:** Multi-layered defense in `serve-upload.ts` — `SAFE_SEGMENT` regex, `ALLOWED_UPLOAD_DIRS` whitelist, `lstat`+symlink rejection, `resolvedPath.startsWith()` containment.
-- **SQL injection:** All queries via Drizzle ORM with parameterized bindings; raw conn.query paths use `?` placeholders.
-- **CSV export:** Zero-width chars + bidi control chars + formula-injection chars all stripped.
-- **DB restore:** Schema-scanner + `--one-database` flag; MYSQL_PWD via env var, not `-p`.
-- **Rate limits:** IP-scoped AND account-scoped for login, preventing distributed brute-force.
-- **PII gating:** `publicSelectFields` / `adminSelectFields` split with compile-time guard.
+All prior security findings confirmed addressed:
 
-## Confidence note
-No new CRITICAL or HIGH security issues found. The codebase has been hardened through 46+ review cycles. C11-SEC-01 is a consistency gap, not a new vulnerability class.
+1. AGG10-01 (addTagToImage audit on INSERT IGNORE no-op): FIXED - gated on affectedRows > 0.
+2. AGG9R-02 (withAdminAuth origin check): FIXED - hasTrustedSameOrigin added centrally.
+3. AGG10-02/AGG10-03 (.length documentation): FIXED - comments added.
+4. C10R3-01/C10R3-02 (OG route validation): FIXED - isValidSlug/isValidTagName enforced.
+5. C10R3-03 (deleteAdminUser affectedRows): FIXED - checks affectedRows === 0.
+
+## New Findings
+
+### C11-SEC-01 (Low / Medium). removeTagFromImage audit log fires on no-op DELETE - misleading audit trail
+
+- Location: apps/web/src/app/actions/tags.ts:252
+- The tag_remove audit event is logged unconditionally after the DELETE, even when deleteResult.affectedRows === 0. The code checks if the image still exists at lines 243-248 but does NOT gate the audit log on whether the deletion actually occurred.
+- This is the same class as AGG10-01 (which was fixed for addTagToImage in cycle 10). A tag_remove event in the audit log that did not actually remove a tag is misleading for forensic analysis.
+- Suggested fix: Wrap the audit log in if (deleteResult.affectedRows > 0).
+
+## Carry-forward (unchanged - existing deferred backlog)
+
+- D1-01 / D2-08 / D6-09 - CSP unsafe-inline hardening
+- OC1-01 / D6-08 - historical example secrets in git history
