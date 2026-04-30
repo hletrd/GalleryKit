@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, images, sessions } from '@/db';
-import { eq, and, sql, asc, gt } from 'drizzle-orm';
+import { eq, and, sql, asc, gt, notInArray } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
@@ -69,6 +69,8 @@ const CLAIM_RETRY_DELAY_MS = 5000;
 const BOOTSTRAP_BATCH_SIZE = 500;
 const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_MAP_SIZE = 10000;
+/** Maximum number of permanently-failed IDs to track. FIFO eviction when exceeded. */
+const MAX_PERMANENTLY_FAILED_IDS = 1000;
 
 /** Prune retry Maps to prevent unbounded growth from abandoned jobs.
  *
@@ -109,6 +111,9 @@ export type ProcessingQueueState = {
     enqueued: Set<number>;
     retryCounts: Map<number, number>;
     claimRetryCounts: Map<number, number>;
+    /** C1F-DB-02: IDs of images that have permanently failed processing (MAX_RETRIES exceeded).
+     *  These are excluded from bootstrap re-scans to prevent infinite re-enqueue loops. */
+    permanentlyFailedIds: Set<number>;
     bootstrapped: boolean;
     shuttingDown: boolean;
     shutdownPromise?: Promise<void>;
@@ -133,6 +138,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
             enqueued: new Set<number>(),
             retryCounts: new Map<number, number>(),
             claimRetryCounts: new Map<number, number>(),
+            permanentlyFailedIds: new Set<number>(),
             bootstrapped: false,
             shuttingDown: false,
             bootstrapContinuationScheduled: false,
@@ -328,6 +334,19 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
             state.retryCounts.delete(job.id);
             console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up`);
+            // C1F-DB-02: Track permanently failed IDs so the bootstrap query
+            // can exclude them, preventing infinite re-enqueue loops. The set
+            // is capped (MAX_PERMANENTLY_FAILED_IDS) with FIFO eviction to
+            // prevent unbounded memory growth.
+            state.permanentlyFailedIds.add(job.id);
+            if (state.permanentlyFailedIds.size > MAX_PERMANENTLY_FAILED_IDS) {
+                const oldest = state.permanentlyFailedIds.values().next().value;
+                if (oldest !== undefined) state.permanentlyFailedIds.delete(oldest);
+            }
+            // Do NOT reset bootstrapped / scheduleBootstrapRetry here — that
+            // was the old pattern that caused infinite re-enqueue. The
+            // permanently-failed ID will be excluded from the next bootstrap
+            // scan, and other pending jobs can still be discovered.
             state.bootstrapped = false;
             state.bootstrapCursorId = null;
             scheduleBootstrapRetry(state, `[Queue] Job ${job.id} remains pending after ${MAX_RETRIES} processing attempts.`);
@@ -406,9 +425,18 @@ export const bootstrapImageProcessingQueue = async () => {
         // Select only columns needed for enqueue and cap the in-memory backlog per bootstrap pass.
         // Continue from the highest scanned id so a small set of permanently failing low-id rows cannot
         // monopolize every bootstrap batch and starve later pending rows.
-        const pendingWhere = state.bootstrapCursorId === null
-            ? eq(images.processed, false)
-            : and(eq(images.processed, false), gt(images.id, state.bootstrapCursorId));
+        // C1F-DB-02: exclude permanently-failed IDs from the bootstrap query so
+        // they are not re-enqueued indefinitely.
+        const baseConditions = [eq(images.processed, false)];
+        if (state.bootstrapCursorId !== null) {
+            baseConditions.push(gt(images.id, state.bootstrapCursorId));
+        }
+        if (state.permanentlyFailedIds.size > 0) {
+            baseConditions.push(notInArray(images.id, [...state.permanentlyFailedIds]));
+        }
+        const pendingWhere = baseConditions.length === 1
+            ? baseConditions[0]
+            : and(...baseConditions);
         const pending = await db.select({
             id: images.id,
             filename_original: images.filename_original,
@@ -483,6 +511,9 @@ export async function quiesceImageProcessingQueueForRestore(
     state.enqueued.clear();
     state.retryCounts.clear();
     state.claimRetryCounts.clear();
+    // C1F-DB-02: clear permanently-failed IDs on restore — the DB restore
+    // may fix the underlying issue (e.g., corrupt original file replaced).
+    state.permanentlyFailedIds.clear();
     state.bootstrapped = false;
     state.bootstrapContinuationScheduled = false;
     state.bootstrapCursorId = null;
