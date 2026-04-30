@@ -68,6 +68,13 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // because their existing validators (`normalizeOpenGraphLocale`,
     // `validateSeoOgImageUrl`) are stricter than the Unicode-formatting
     // filter.
+    // C15-LOW-02: These sanitizeAdminString checks are a belt-and-suspenders
+    // guard. normalizeStringRecord (line 88) provides the same defense-in-depth
+    // check via UNICODE_FORMAT_CHARS.test(value). The explicit pre-checks here
+    // give per-field error messages (seoTitleInvalid, seoDescriptionInvalid, etc.)
+    // instead of the generic `invalidInput` from normalizeStringRecord. The
+    // intentional overlap ensures that a change to either check alone cannot
+    // weaken the validation.
     if (typeof settings.seo_title === 'string' && sanitizeAdminString(settings.seo_title).rejected) {
         return { error: t('seoTitleInvalid') };
     }
