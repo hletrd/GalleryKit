@@ -56,7 +56,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     // SET needed here (and a per-session SET would be unreliable in a pooled
     // environment where the SET and the SELECT may use different connections).
 
-    let results = await db
+    const results = await db
         .select({
             id: images.id,
             filename: images.user_filename,
@@ -99,8 +99,12 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
 
     // Release the DB results array before materializing the full CSV string
     const rowCount = results.length;
-    // Release reference to allow GC — results are no longer needed
-    results = [] as typeof results;
+    // C22-01: Release element references for GC without type-unsafe reassignment.
+    // `results.length = 0` clears the array in place, preserving the correct type
+    // so any accidental downstream access gets an empty array of the right shape.
+    // The prior `results = [] as typeof results` was a type lie that could confuse
+    // future maintainers.
+    results.length = 0;
 
     const csvContent = csvLines.join("\n");
 
