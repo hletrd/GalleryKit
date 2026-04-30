@@ -1,7 +1,7 @@
 # Plan — Cycle 12 Fixes
 
 Date: 2026-04-29
-Status: IN PROGRESS
+Status: COMPLETED
 
 ## Source: Aggregate review AGG12-01
 
@@ -54,9 +54,9 @@ if (batchInsertResult.affectedRows > 0) {
 ```
 
 **Progress:**
-- [ ] Implement the affectedRows gating
-- [ ] Run existing tests to verify no regression
-- [ ] Run all gates
+- [x] Implement the affectedRows gating
+- [x] Run existing tests to verify no regression
+- [x] Run all gates
 
 ## Deferred (not implementing this cycle)
 
