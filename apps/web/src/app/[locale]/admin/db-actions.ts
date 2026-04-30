@@ -65,7 +65,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
             height: images.height,
             captureDate: images.capture_date,
             topic: images.topic,
-            tags: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name} SEPARATOR ', ')`
+            tags: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name} SEPARATOR CHAR(1))`
         })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -88,7 +88,12 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
             escapeCsvField(String(row.height)),
             escapeCsvField(row.captureDate ? String(row.captureDate) : ""),
             escapeCsvField(row.topic || ""),
-            escapeCsvField(row.tags || ""),
+            // C21-AGG-02: split on \x01 (matching SEPARATOR CHAR(1) in the
+            // GROUP_CONCAT above) and rejoin with comma+space for a
+            // human-readable CSV value. The \x01 separator is robust
+            // against tag names containing commas (currently rejected by
+            // isValidTagName, but defensive against future changes).
+            escapeCsvField(row.tags ? row.tags.split('\x01').join(', ') : ""),
         ].join(","));
     }
 
