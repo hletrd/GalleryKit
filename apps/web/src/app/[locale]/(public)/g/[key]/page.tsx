@@ -37,20 +37,16 @@ async function isShareLookupRateLimited() {
 export async function generateMetadata({ params, searchParams }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }): Promise<Metadata> {
     const { key } = await params;
     const { photoId: photoIdParam } = await searchParams;
-    // Rate-limit metadata lookups before touching the DB so share-key
-    // enumeration cannot bypass throttling via head/meta requests.
-    const lookupLimited = await isShareLookupRateLimited();
+    // C4-AGG-01: Rate limit is NOT checked here — it is enforced once in the
+    // page body. Both generateMetadata and the page body run in separate React
+    // render contexts, so calling preIncrementShareAttempt in both would
+    // double-increment the counter, giving users half the intended budget.
     const [locale, t, seo, config] = await Promise.all([
         getLocale(),
         getTranslations('sharedGroup'),
         getSeoSettings(),
         getGalleryConfig(),
     ]);
-    if (lookupLimited) return {
-        title: t('notFoundTitle'),
-        description: t('notFoundDescription'),
-        robots: sharePageRobots,
-    };
     const group = await getSharedGroupCached(key, { incrementViewCount: false });
     if (!group) return {
         title: t('notFoundTitle'),
