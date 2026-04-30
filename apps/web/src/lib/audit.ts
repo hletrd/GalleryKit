@@ -26,10 +26,16 @@ export async function logAuditEvent(
             // UTF-16 surrogate pairs. `[...str]` iterates by code point
             // (not UTF-16 code unit), so `.slice()` on the resulting
             // array cannot bisect a surrogate pair.
+            // C14-AGG-01: The `preview` field is a raw character slice of
+            // the stringified JSON and may terminate mid-key or mid-value,
+            // producing an invalid JSON fragment. This is intentional — the
+            // `preview` is for human forensic debugging only and is not
+            // meant to be parsed programmatically. The trailing "…" marker
+            // makes the truncation visually unambiguous.
             const codePoints = [...serializedMetadata];
             serializedMetadata = JSON.stringify({
                 truncated: true,
-                preview: codePoints.slice(0, 4000).join(''),
+                preview: codePoints.slice(0, 4000).join('') + '…',
             });
         }
     }
