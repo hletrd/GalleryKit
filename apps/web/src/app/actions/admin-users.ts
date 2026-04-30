@@ -202,10 +202,16 @@ export async function deleteAdminUser(id: number) {
     // parameterization used elsewhere).
     const conn = await connection.getConnection();
     let lockAcquired = false;
+    // C7-HIGH-01: scope the advisory lock to the target user ID so concurrent
+    // deletions of different users do not serialize on a single global lock.
+    // The lock name includes the user ID so only concurrent attempts to delete
+    // the same user are serialized (e.g., double-click protection).
+    const lockName = `gallerykit_admin_delete:${id}`;
 
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(
-            "SELECT GET_LOCK('gallerykit_admin_delete', 5) AS acquired"
+            'SELECT GET_LOCK(?, 5) AS acquired',
+            [lockName]
         );
         lockAcquired = (lockRows[0]?.acquired ?? 0) === 1;
         if (!lockAcquired) {
@@ -256,7 +262,7 @@ export async function deleteAdminUser(id: number) {
         return { error: t('failedToDeleteUser') };
     } finally {
         if (lockAcquired) {
-            await conn.query("SELECT RELEASE_LOCK('gallerykit_admin_delete')").catch(() => {});
+            await conn.query('SELECT RELEASE_LOCK(?)', [lockName]).catch(() => {});
         }
         conn.release();
     }
