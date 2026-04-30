@@ -185,8 +185,12 @@ describe('getImagesLite tag_names SQL shape', () => {
     it('getImageByShareKey uses single LEFT JOIN + GROUP_CONCAT query for tags', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getImageByShareKey');
-        // Must include tag_names via tagNamesAgg (shared constant)
-        expect(body).toMatch(/tag_names:\s*tagNamesAgg/);
+        // C15-MED-02: both GROUP_CONCATs must ORDER BY the same column (tags.slug)
+        // to ensure name-slug alignment when zipped by index. The tag_names
+        // expression uses a local SQL (ORDER BY tags.slug) instead of the
+        // shared tagNamesAgg (ORDER BY tags.name) to avoid misalignment.
+        expect(body).toMatch(/tag_names:/);
+        expect(body).toMatch(/ORDER BY \$\{tags\.slug\}/);
         // Must include tag_slugs for structured tag objects
         expect(body).toMatch(/tag_slugs:/);
         // Must LEFT JOIN imageTags and tags (not inner join, since photos may have no tags)

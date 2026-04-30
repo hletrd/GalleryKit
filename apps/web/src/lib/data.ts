@@ -883,7 +883,11 @@ export async function getImageByShareKey(key: string) {
         ...publicSelectFields,
         blur_data_url: images.blur_data_url,
         topic_label: topics.label,
-        tag_names: tagNamesAgg,
+        // C15-MED-02: both GROUP_CONCATs must ORDER BY the same column (tags.slug)
+        // so that index-based zip produces correctly aligned name-slug pairs.
+        // Using tagNamesAgg here (ORDER BY tags.name) would misalign when name
+        // and slug sort differently (e.g., name="Zebra" slug="alpha-tag").
+        tag_names: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.slug})`,
         tag_slugs: sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.slug} ORDER BY ${tags.slug})`,
     })
         .from(images)
