@@ -1,6 +1,6 @@
 FROM node:24-slim AS build-base
 
-# Install build tooling needed to compile native dependencies during npm ci.
+# Install build tooling needed to compile native dependencies during npm install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
@@ -18,20 +18,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM build-base AS deps
 WORKDIR /app
 
-# Copy package.json and lock file from monorepo root
-COPY package.json package-lock.json ./
+# Copy package.json files only (no lockfile). The lockfile is generated on
+# macOS and lacks Linux platform-specific optional packages like
+# @swc/core-linux-arm64-gnu and @parcel/watcher-linux-arm64-glibc.
+# Without the lockfile constraint, npm install resolves the correct
+# platform packages on the target Linux host.
+COPY package.json ./
 COPY apps/web/package.json ./apps/web/
 
-# Install dependencies (including devDependencies for build).
-# The lockfile is generated on macOS and lacks Linux platform-specific
-# optional packages (e.g. @parcel/watcher-linux-arm64-glibc). Explicitly
-# install the missing native binding so next-intl's file watcher resolves.
-RUN npm install --workspace=apps/web && \
-    npm install --workspace=apps/web @parcel/watcher-linux-arm64-glibc --no-save
+# Install dependencies (including devDependencies for build)
+RUN npm install --workspace=apps/web
 
 FROM build-base AS prod-deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY apps/web/package.json ./apps/web/
 RUN npm install --omit=dev --workspace=apps/web
 
