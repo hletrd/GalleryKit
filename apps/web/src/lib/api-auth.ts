@@ -6,6 +6,8 @@ import { hasTrustedSameOrigin } from '@/lib/request-origin';
 const NO_STORE_HEADERS = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
     'Pragma': 'no-cache',
+    // C16-LOW-08: prevent MIME-type sniffing on API route responses
+    'X-Content-Type-Options': 'nosniff',
 };
 
 /**
