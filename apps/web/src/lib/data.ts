@@ -110,6 +110,20 @@ async function flushGroupViewCounts() {
         }
     } finally {
         isFlushing = false;
+        // C1F-DB-01: enforce buffer cap after re-buffering. Re-buffered entries
+        // whose group IDs already exist in the new buffer bypass the capacity
+        // check in the re-buffer path (line 101). This post-flush enforcement
+        // evicts the oldest entries (FIFO, matching viewCountRetryCount eviction)
+        // to keep the buffer within cap. The overflow is bounded by the chunk
+        // size (FLUSH_CHUNK_SIZE = 20).
+        while (viewCountBuffer.size > MAX_VIEW_COUNT_BUFFER_SIZE) {
+            const oldestKey = viewCountBuffer.keys().next().value;
+            if (oldestKey !== undefined) {
+                viewCountBuffer.delete(oldestKey);
+            } else {
+                break;
+            }
+        }
         // Update backoff counter: reset on any success, increment on total failure
         if (succeeded > 0) {
             consecutiveFlushFailures = 0;
