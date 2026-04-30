@@ -475,7 +475,15 @@ export async function processImageFormats(
             const outputPath = path.join(dir, sizedFilename);
 
             if (lastRendered && lastRendered.resizeWidth === resizeWidth) {
-                await fs.copyFile(lastRendered.filePath, outputPath);
+                // C4F-11: prefer hard link (zero-copy on same filesystem) over
+                // copyFile for same-size variant dedup, matching the atomic
+                // link pattern used for the base filename (line 507). Falls
+                // back to copyFile on cross-device or link failure.
+                try {
+                    await fs.link(lastRendered.filePath, outputPath);
+                } catch {
+                    await fs.copyFile(lastRendered.filePath, outputPath);
+                }
             } else {
                 const sharpInstance = image.clone().resize({ width: resizeWidth }).keepIccProfile();
 
