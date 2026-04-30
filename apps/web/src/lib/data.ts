@@ -1047,7 +1047,11 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 like(topics.label, searchTerm),
             )
         ))
-        .orderBy(desc(images.created_at), desc(images.id))
+        // C4F-12: ORDER BY matches gallery sort order (capture_date DESC,
+        // created_at DESC, id DESC) so search results are consistent with
+        // browsing. MySQL sorts NULL capture_date last in DESC, matching
+        // the gallery grid behavior for undated photos.
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
         .limit(effectiveLimit);
 
     // Short-circuit: if the main query already filled the limit, skip
@@ -1107,7 +1111,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                     images.camera_model,
                     images.capture_date,
                 )
-                .orderBy(desc(images.created_at), desc(images.id))
+                .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(remainingLimit),
             aliasRemainingLimit <= 0 ? [] : db.select(searchFields)
                 .from(images)
@@ -1126,7 +1130,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                     images.camera_model,
                     images.capture_date,
                 )
-                .orderBy(desc(images.created_at), desc(images.id))
+                .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
                 .limit(aliasRemainingLimit),
         ]);
 
