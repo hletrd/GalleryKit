@@ -484,6 +484,11 @@ export async function deleteImage(id: number) {
     const queueState = getProcessingQueueState();
     queueState.enqueued.delete(id);
     queueState.permanentlyFailedIds.delete(id);
+    // C10-LOW-03: clean retry maps for deleted IDs so stale entries
+    // don't accumulate until pruneRetryMaps evicts them at capacity.
+    // Consistent with permanentlyFailedIds cleanup (C7-MED-05).
+    queueState.retryCounts.delete(id);
+    queueState.claimRetryCounts.delete(id);
 
     // US-008: Delete DB records in a transaction for consistency
     let deletedRows = 0;
@@ -591,6 +596,9 @@ export async function deleteImages(ids: number[]) {
     for (const id of foundIds) {
         queueState.enqueued.delete(id);
         queueState.permanentlyFailedIds.delete(id);
+        // C10-LOW-03: clean retry maps for deleted IDs (matches deleteImage).
+        queueState.retryCounts.delete(id);
+        queueState.claimRetryCounts.delete(id);
     }
 
     // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
