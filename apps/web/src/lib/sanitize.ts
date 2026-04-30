@@ -12,7 +12,9 @@ import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
 //   U+180E MVS, U+200B-200F ZWSP/ZWNJ/ZWJ/LRM/RLM,
 //   U+202A-202E LRE/RLE/PDF/LRO/RLO, U+2060 WJ,
 //   U+2066-2069 LRI/RLI/FSI/PDI, U+FEFF BOM, U+FFF9-FFFB interlinear anchors
-const UNICODE_FORMAT_CHARS_RE = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/g;
+// C17-VR-09: derive from validation.ts import so the character set cannot
+// drift between .test() (no /g) and .replace() (/g) usages.
+const UNICODE_FORMAT_CHARS_RE = new RegExp(UNICODE_FORMAT_CHARS.source, 'g');
 
 /** Strip all C0 control characters (0x00–0x1F, including tab, newline, carriage return), DEL (0x7F), Unicode C1 controls (0x80–0x9F), and Unicode bidi/invisible formatting characters that can cause MySQL truncation, display issues, unexpected formatting, or Trojan-Source-style visual spoofing. */
 export function stripControlChars(s: string | null): string | null {

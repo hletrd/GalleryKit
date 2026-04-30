@@ -258,3 +258,35 @@ describe('hasMySQLErrorCode', () => {
         expect(hasMySQLErrorCode(Object.assign(new Error('other'), { code: 'ER_ACCESS_DENIED_ERROR' }), 'ER_DUP_ENTRY')).toBe(false);
     });
 });
+
+// C17-VR-09: verify UNICODE_FORMAT_CHARS regex stays in sync between
+// validation.ts (no /g, used for .test()) and sanitize.ts (with /g, used
+// for .replace()). The sanitize.ts module derives its regex from the
+// validation.ts import, so the .source property must match.
+describe('UNICODE_FORMAT_CHARS regex synchronization', () => {
+    it('sanitize.ts stripControlChars removes the same chars that validation.ts UNICODE_FORMAT_CHARS detects', async () => {
+        const { UNICODE_FORMAT_CHARS, containsUnicodeFormatting } = await import('@/lib/validation');
+        // Dynamic import so we get the actual runtime value after the
+        // C17-VR-09 refactor (new RegExp(UNICODE_FORMAT_CHARS.source, 'g'))
+        const { stripControlChars } = await import('@/lib/sanitize');
+        // Verify indirectly: stripControlChars should strip the same chars
+        // that UNICODE_FORMAT_CHARS / containsUnicodeFormatting detect.
+        const testChars = [
+            '​', // ZWSP
+            '‎', // LRM
+            '‪', // LRE
+            '﻿', // BOM
+            '᠎', // MVS
+            '⁠', // WJ
+            '￹', // interlinear anchor start
+        ];
+        for (const char of testChars) {
+            const input = `hello${char}world`;
+            expect(UNICODE_FORMAT_CHARS.test(input)).toBe(true);
+            const result = stripControlChars(input);
+            expect(result).toBe('helloworld');
+            // Also verify containsUnicodeFormatting agrees
+            expect(containsUnicodeFormatting(input)).toBe(true);
+        }
+    });
+});
