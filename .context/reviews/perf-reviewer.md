@@ -1,11 +1,11 @@
-# Performance Reviewer — Cycle 22
+# Performance Reviewer — Cycle 23
 
 ## Review method
 
-Direct review of all performance-critical modules: data.ts (1280 lines),
+Direct review of all performance-critical modules: data.ts (1283 lines),
 image-queue.ts, bounded-map.ts, rate-limit.ts, upload-tracker-state.ts,
 public.ts actions, process-image.ts, serve-upload.ts. Verified no regressions
-from C21 fixes.
+from C22 fixes.
 
 ## GATE STATUS (carried forward, verified)
 
@@ -25,6 +25,7 @@ No new actionable performance findings. The codebase continues to use appropriat
 - Connection pool (10 connections, queue limit 20)
 - Cursor-based pagination for load-more with offset cap (10000) for legacy path
 - `searchGroupByColumns` derived from `searchFields` via `Object.values()` (C19F-MED-01 fix)
+- Upload cleanup uses bounded concurrency (IMAGE_CLEANUP_CONCURRENCY env-configurable)
 
 ## Previously identified items (still deferred)
 
