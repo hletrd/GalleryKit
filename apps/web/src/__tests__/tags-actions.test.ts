@@ -191,4 +191,20 @@ describe('tag actions', () => {
         });
         expect(transactionMock).not.toHaveBeenCalled();
     });
+
+    it('rejects batchUpdateImageTags when removeTagNames is a string', async () => {
+        const result = await batchUpdateImageTags(
+            5,
+            ['valid'],
+            'not-an-array' as unknown as string[],
+        );
+
+        expect(result).toEqual({
+            success: false,
+            added: 0,
+            removed: 0,
+            warnings: ['invalidInput'],
+        });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
 });
