@@ -1,44 +1,27 @@
-# Security Review — security-reviewer (Cycle 16)
+# Security Reviewer — Cycle 9
 
-Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-29
+## C9-SR-01 (Medium): Advisory lock names are scattered string literals — risk of accidental collision
 
-## Summary
+**File+line**: Multiple files:
+- `apps/web/src/app/[locale]/admin/db-actions.ts:280` — `gallerykit_db_restore`
+- `apps/web/src/lib/upload-processing-contract-lock.ts` — `gallerykit_upload_processing_contract`
+- `apps/web/src/app/actions/topics.ts:55` — `gallerykit_topic_route_segments`
+- `apps/web/src/app/actions/admin-users.ts:209` — `gallerykit_admin_delete:${id}`
+- `apps/web/src/lib/image-queue.ts:153` — `gallerykit:image-processing:${jobId}`
 
-- No new critical, high, or medium security findings.
-- All prior security fixes confirmed intact.
+Lock names are defined as inline string literals in separate files. A new contributor could accidentally reuse a name. C8R-RPL-06 / AGG8R-05 already notes these locks are scoped to the MySQL server, not the database. Centralizing the names into a shared constants module would reduce collision risk and improve auditability.
 
-## Verified fixes from prior cycles
+**Confidence**: Medium
+**Fix**: Extract all advisory lock name patterns to a shared `@/lib/advisory-locks.ts` module.
 
-All prior security findings confirmed addressed:
+## C9-SR-02 (Low): `searchImages` LIKE patterns are correctly escaped
 
-1. C1F-SR-08 (sanitizeStderr redacts DB_HOST, DB_USER, DB_NAME): CONFIRMED.
-2. C1F-SR-01 (rate-limit rollback on infrastructure errors): CONFIRMED — fixed in commit e5a6779.
-3. C1F-DB-02 (permanently-failed IDs prevent infinite re-enqueue): CONFIRMED.
-4. Argon2id password hashing: confirmed.
-5. HMAC-SHA256 session tokens with `timingSafeEqual`: confirmed.
-6. Login rate limiting (per-IP + per-account dual bucket): confirmed.
-7. `requireSameOriginAdmin()` on all mutating server actions: confirmed.
-8. `withAdminAuth` + `hasTrustedSameOrigin` on all API routes: confirmed.
-9. Upload security (UUID filenames, path traversal prevention, symlink rejection): confirmed.
-10. Privacy enforcement (`publicSelectFields` + compile-time guard): confirmed.
-11. Unicode bidi/invisible formatting rejection: confirmed on all admin string surfaces.
-12. `safeJsonLd` XSS prevention in JSON-LD scripts: confirmed.
-13. CSP with nonce in production: confirmed.
-14. `serveUploadFile` security: confirmed.
+**File+line**: `apps/web/src/lib/data.ts:1048-1049`
 
-## Deep review: sanitize and auth patterns
+Verified that `%`, `_`, and `\` are correctly escaped before wrapping with `%...%`. No issue found.
 
-- `sanitizeAdminString` now returns `null` when `rejected=true` (C1F-CR-08/C1F-TE-05): confirmed.
-- `UNICODE_FORMAT_CHARS` (non-/g) used for `.test()` in `sanitizeAdminString` (C8-AGG8R-01): confirmed.
-- `UNICODE_FORMAT_CHARS_RE` (with /g) used only for `.replace()` in `stripControlChars`: confirmed.
-- All admin string entry points use `sanitizeAdminString` or `requireCleanInput`: confirmed.
+## C9-SR-03 (Low): Session token verification uses `timingSafeEqual` — confirmed correct
 
-## New Findings
+**File+line**: `apps/web/src/lib/session.ts:117`
 
-None.
-
-## Carry-forward (unchanged — existing deferred backlog)
-
-- D1-01 / D2-08 / D6-09 — CSP `'unsafe-inline'` hardening
-- OC1-01 / D6-08 — historical example secrets in git history
+Verified HMAC signature comparison uses `timingSafeEqual`. No issue found.

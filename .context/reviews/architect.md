@@ -1,39 +1,18 @@
-# Architect Review — architect (Cycle 15)
+# Architect — Cycle 9
 
-Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-30
+## C9-AR-01 (Low): Advisory lock name strings not centralized
 
-## Summary
+**File+line**: Multiple files (see C9-SR-01)
 
-- No new critical, high, or medium findings.
-- All prior architectural concerns remain acknowledged as deferred.
+Lock names are scattered as string literals. A central constant registry would reduce the risk of accidental name collisions and make it easier to audit lock scope (as noted in C8R-RPL-06 / AGG8R-05).
 
-## Architectural analysis
+**Confidence**: Low (maintainability, not correctness)
+**Fix**: Extract lock names to a shared constants module.
 
-### Module Structure
-- `lib/data.ts` (~1120 lines): Still a large module containing all data access functions, select field definitions, privacy guards, SEO settings, and view count buffering. The module is well-organized with clear section comments, but its size makes it a cognitive burden for new contributors. Extraction of the view count buffering subsystem and the SEO settings into separate modules would improve navigability.
-- Action files are well-scoped: `auth.ts`, `images.ts`, `topics.ts`, `tags.ts`, `sharing.ts`, `admin-users.ts`, `settings.ts`, `seo.ts`, `public.ts` — each handles a single domain.
+## C9-AR-02 (Low): `data.ts` trending toward 1500-line threshold
 
-### Layering
-- Clear separation between data layer (`lib/data.ts`), action layer (`app/actions/`), and UI layer (`components/`).
-- Server actions properly validate and sanitize before calling data layer.
-- Privacy enforcement at the data layer via `publicSelectFields` / `adminSelectFields` with compile-time guards.
+**File+line**: `apps/web/src/lib/data.ts`
 
-### Coupling
-- Advisory lock names are scoped to MySQL server, not database (documented in CLAUDE.md as C8R-RPL-06 / AGG8R-05). Single-instance-per-MySQL-server is the intended deployment.
-- Upload processing contract lock couples upload flow to admin settings changes. The lock is appropriate for the single-writer topology.
+Currently ~1240 lines. The deferred D2-MED item notes the 1500-line threshold. No new lines were added this cycle that push it closer significantly, but the trend continues.
 
-### Scalability Limits
-- Single-writer topology is documented and appropriate for a personal gallery.
-- View count buffer, upload tracker, and rate limit maps are all process-local (bounded Maps with eviction).
-- `original_file_size: bigint('original_file_size', { mode: 'number' })` uses JS `number` which loses precision for files > 8 PB — safe for practical purposes but noted as deferred C9-F01.
-
-## New Findings
-
-None. The architectural posture is sound for the personal-gallery use case.
-
-## Carry-forward (unchanged — existing deferred backlog)
-
-- ARCH-38-03: `data.ts` is a god module (acknowledged — extraction deferred).
-- AGG6R-08: `lib/data.ts` approaching 1200 lines — extraction could improve maintainability.
-- C9-F01: `original_file_size` bigint mode `number` precision (LOW — safe for practical file sizes).
+**Status**: Already deferred as D2-MED/D3-MED.
