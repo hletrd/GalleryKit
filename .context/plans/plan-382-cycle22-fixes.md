@@ -1,21 +1,21 @@
 # Plan 382 — Cycle 22 Fixes
 
 **Created:** 2026-04-29 (Cycle 22)
-**Status:** In Progress
+**Status:** Done
 
 ## C22-AGG-01: `isValidTagSlug` uses `slug.length <= 100` with `\p{Letter}` regex that allows supplementary characters — consistency gap with C21 fixes
 
 - **Source**: `apps/web/src/lib/validation.ts:116`
 - **Severity**: Low / Confidence: Medium
 - **Fix**: Migrate to `countCodePoints(slug) <= 100` for consistency with `isValidTopicAlias` and `isValidTagName` which were migrated in C21. Import `countCodePoints` from `@/lib/utils` (already imported in validation.ts for C21-AGG-02/03). Update the AGG10-03 comment to reflect that the migration has been done.
-- **Progress**: [ ] validation.ts fix
+- **Progress**: [x] validation.ts fix (committed in 43f511e)
 
 ## C22-AGG-02: `original_format` uses `.slice(0, 10)` — safe but undocumented invariant
 
 - **Source**: `apps/web/src/app/actions/images.ts:326`
 - **Severity**: Informational / Confidence: High
 - **Fix**: Add a comment at the `slice(0, 10)` call noting that the value is guaranteed ASCII by the upstream `getSafeExtension()` validator (which only allows `[a-z0-9.]`), so `.slice()` on UTF-16 code units is equivalent to code-point-based truncation.
-- **Progress**: [ ] comment added
+- **Progress**: [x] comment added (committed in 43f511e)
 
 ## Deferred items (no changes from prior cycles)
 
