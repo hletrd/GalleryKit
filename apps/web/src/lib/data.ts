@@ -217,6 +217,59 @@ const adminSelectFields = {
     // to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
 } as const;
 
+// ADMIN LISTING: lightweight field set for the admin dashboard grid.
+// Omits EXIF columns (camera_model, lens_model, iso, f_number, exposure_time,
+// focal_length, latitude, longitude, color_space, white_balance, metering_mode,
+// exposure_compensation, exposure_program, flash, bit_depth, original_format,
+// original_file_size) and original_width/original_height which are not needed
+// for the grid display. Uses the same destructuring pattern as publicSelectFields
+// to maintain the derivation relationship with adminSelectFields.
+const {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    camera_model: _omitCameraModel,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    lens_model: _omitLensModel,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    iso: _omitIso,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    f_number: _omitFNumber,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    exposure_time: _omitExposureTime,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    focal_length: _omitFocalLength,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    latitude: _omitLatitudeAdmin,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    longitude: _omitLongitudeAdmin,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    color_space: _omitColorSpace,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    white_balance: _omitWhiteBalance,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    metering_mode: _omitMeteringMode,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    exposure_compensation: _omitExposureCompensation,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    exposure_program: _omitExposureProgram,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    flash: _omitFlash,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    bit_depth: _omitBitDepth,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    original_format: _omitOriginalFormatAdmin,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    original_file_size: _omitOriginalFileSizeAdmin,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    original_width: _omitOriginalWidth,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
+    original_height: _omitOriginalHeight,
+    ...adminListSelectFieldCore
+} = adminSelectFields;
+
+const adminListSelectFields = {
+    ...adminListSelectFieldCore,
+} as const;
+
 // PRIVACY: publicSelectFields is the canonical field set for ALL unauthenticated routes.
 // It is derived from adminSelectFields by explicitly OMITTING PII/internal fields (latitude,
 // longitude, filename_original, user_filename, original_format, original_file_size, processed). Because it is a separate object (not
@@ -643,7 +696,7 @@ export async function getAdminImagesLite(limit: number = 0, offset: number = 0, 
     }
 
     const baseQuery = db.select({
-        ...adminSelectFields,
+        ...adminListSelectFields,
         tag_names: tagNamesAgg,
     })
         .from(images)
