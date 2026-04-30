@@ -135,6 +135,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     }, [isSharedView, locale, syncPhotoQueryBasePath]);
 
     const navigate = useCallback((direction: number) => {
+        // C7-LOW-03: guard against stale closure when images prop updates but
+        // currentImageId has not yet been recalculated — currentIndex would be
+        // -1 (not found), making navigation compute incorrect newIndex.
+        if (currentIndex === -1) return;
         const newIndex = currentIndex + direction;
         if (newIndex >= 0 && newIndex < images.length) {
             setCurrentImageId(images[newIndex].id);
