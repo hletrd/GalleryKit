@@ -448,8 +448,16 @@ export async function batchUpdateImageTags(
         return { success: false, added: 0, removed: 0, warnings: [t('failedToAddTag')] };
     }
 
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
+    // AGG13-01: only log the audit event when tags were actually added or
+    // removed. When all tag names were invalid, had slug collisions, or were
+    // already in the desired state, added === 0 && removed === 0 and no
+    // tags_batch_update event occurred. Same class as AGG10-01, AGG11-01,
+    // AGG12-01 but with lower severity because the metadata is accurate
+    // (no false positive count) — the event is just unnecessary noise.
+    if (added > 0 || removed > 0) {
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'tags_batch_update', 'image', String(imageId), undefined, { added, removed }).catch(console.debug);
+    }
     revalidateLocalizedPaths(`/p/${imageId}`, '/', '/admin/tags', imageTopic ? `/${imageTopic}` : '', '/admin/dashboard');
     revalidateAllAppData();
     return { success: true, added, removed, warnings };
