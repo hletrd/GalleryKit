@@ -35,7 +35,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
-    const [searchStatus, setSearchStatus] = useState<'failed' | 'error' | 'rateLimited' | 'maintenance' | 'invalid' | null>(null);
+    const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | null>(null);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -77,7 +77,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
         } catch {
             if (requestId === requestIdRef.current) {
                 setResults([]);
-                setSearchStatus('failed');
+                setSearchStatus('error');
             }
         } finally {
             if (requestId === requestIdRef.current) {
