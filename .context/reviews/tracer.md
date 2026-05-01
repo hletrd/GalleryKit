@@ -1,51 +1,40 @@
-# Tracer Review — tracer (Cycle 15)
+# Tracer — Cycle 25
 
-Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-30
+## Review method
 
-## Summary
+Causal tracing of suspicious flows, competing hypotheses analysis. Traced
+authentication, upload, sharing, rate-limiting, and restore flows end-to-end.
 
-- No new critical, high, or medium findings.
-- All race conditions and shared-state hazards previously identified remain properly guarded.
+## Traced flows (all verified correct)
 
-## Causal tracing: key flow verification
+1. **Login flow**: headers() -> hasTrustedSameOrigin() -> getClientIp() ->
+   pre-increment (IP + account) -> DB increment -> combined check -> Argon2 verify
+   -> clear counters on success / no-rollback on infrastructure error -> session
+   creation in transaction -> cookie set. No gaps found.
 
-### Upload + Processing Pipeline
-- Upload tracker pre-increment prevents TOCTOU on concurrent uploads from same IP: confirmed.
-- Upload processing contract lock serializes uploads with `image_sizes` / `strip_gps_on_upload` changes: confirmed.
-- Per-image advisory lock (`gallerykit:image-processing:{jobId}`) prevents duplicate processing across workers: confirmed.
-- Queue detects mid-processing deletion via `WHERE processed = false` conditional UPDATE: confirmed.
+2. **Upload flow**: getCurrentUser() -> requireSameOriginAdmin() -> upload contract
+   lock -> cumulative tracker (TOCTOU-safe) -> disk space check -> topic existence
+   check -> pre-increment tracker -> save original -> EXIF -> DB insert ->
+   safeInsertId -> tag processing -> enqueue processing. No gaps found.
 
-### DB Restore Flow
-- Advisory lock `gallerykit_db_restore` serializes concurrent restore requests: confirmed.
-- Restore maintenance flag gates all mutating admin actions: confirmed.
-- Queue quiescence before restore prevents processing during DB replacement: confirmed.
+3. **Rate-limit rollback symmetry**: Login, password change, search, load-more,
+   and sharing all follow the same pre-increment + rollback-on-over-limit pattern.
+   Infrastructure errors do NOT roll back (auth paths). Share paths roll back on
+   FK violation and no-op. All verified symmetric.
 
-### Admin Delete Flow
-- Advisory lock `gallerykit_admin_delete` prevents concurrent deletion of the last admin: confirmed.
-- Raw SQL with dedicated connection is correct for advisory-lock semantics: confirmed.
+4. **Restore flow**: advisory lock -> upload contract lock -> maintenance flag ->
+   flush view counts -> quiesce queue -> header validation -> SQL scan ->
+   mysql restore -> resume queue -> release locks. No gaps found.
 
-### Topic Mutation Flow
-- Advisory lock `gallerykit_topic_route_segments` serializes slug/alias uniqueness checks: confirmed.
-- Transaction wraps reference updates before PK rename in `updateTopic`: confirmed.
-
-### View Count Buffering
-- Atomic Map swap prevents losing increments during flush: confirmed.
-- Retry cap (VIEW_COUNT_MAX_RETRIES = 3) prevents infinite re-buffering: confirmed.
-- Exponential backoff on flush failures (BASE_FLUSH_INTERVAL_MS to MAX_FLUSH_INTERVAL_MS): confirmed.
-- `isFlushing` flag prevents concurrent flush: confirmed.
-
-### Rate Limiting
-- All mutating surfaces use pre-increment-then-check pattern: confirmed.
-- DB-backed counters provide cross-restart accuracy: confirmed.
-- Rollback on infrastructure failure (not user error): confirmed across all surfaces.
+5. **Image queue**: advisory lock per job -> claim check -> process -> conditional
+   UPDATE -> orphan cleanup on delete-during-process. Bootstrap cursor-based with
+   permanently-failed exclusion. No gaps found.
 
 ## New Findings
 
-None. All critical race conditions and shared-state hazards are properly guarded.
+None. All traced flows are correct and complete.
 
-## Carry-forward (unchanged — existing deferred backlog)
+## Carry-forward (unchanged)
 
-- C30-03 / C36-03: `flushGroupViewCounts` re-buffers without retry limit (partially addressed by retry cap).
-- C30-04 / C36-02: `createGroupShareLink` insertId validation / BigInt coercion.
-- CR-38-02: `uploadTracker` uses insertion-order eviction, not LRU.
+- C30-03: viewCountRetryCount re-buffer pattern (retry cap in place)
+- C30-04: createGroupShareLink insertId (safeInsertId in place)

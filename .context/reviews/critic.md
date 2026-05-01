@@ -1,11 +1,14 @@
-# Critic Review — Cycle 24
+# Critic Review — Cycle 25
 
 Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-29
+Date: 2026-05-01
 
 ## Summary
 
-The codebase is in excellent shape after 23 cycles of iterative review and fixing. No new findings were identified in this cycle. All C23 fixes remain in place. The codebase has achieved full convergence for actionable findings at the current threat model and scale.
+The codebase is in excellent shape after 24 cycles of iterative review and fixing.
+No new findings were identified in this cycle. All C24 fixes remain in place.
+The codebase has achieved full convergence for actionable findings at the current
+threat model and scale.
 
 ## Verified fixes from prior cycles (all confirmed still in place)
 
@@ -13,11 +16,11 @@ The codebase is in excellent shape after 23 cycles of iterative review and fixin
 2. C21-AGG-01 (clampDisplayText surrogate-pair-safe truncation): FIXED
 3. C21-AGG-02 (CSV GROUP_CONCAT separator): FIXED (CHAR(1))
 4. C22-AGG-01 (isValidTagSlug countCodePoints): FIXED
-5. C22-AGG-02 (original_format slice documented): DOCUMENTED
-6. C20-AGG-01 (password length countCodePoints): FIXED
-7. C20-AGG-02 (getTopicBySlug uses isValidSlug): FIXED
-8. C20-AGG-03 (updateImageMetadata redundant updated_at): FIXED
-9. C20-AGG-04/05 (tags.ts catch blocks include error): FIXED
+5. C20-AGG-01 (password length countCodePoints): FIXED
+6. C20-AGG-02 (getTopicBySlug uses isValidSlug): FIXED
+7. C20-AGG-03 (updateImageMetadata redundant updated_at): FIXED
+8. C20-AGG-04/05 (tags.ts catch blocks include error): FIXED
+9. C19F-MED-01 (searchGroupByColumns derived from searchFields): FIXED
 10. C18-MED-01 (searchImagesAction re-throw): FIXED
 11. C16-MED-01 (loadMoreImages DB counter sync): FIXED
 

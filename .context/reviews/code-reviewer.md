@@ -1,6 +1,6 @@
-# Code Reviewer — Cycle 24
+# Code Reviewer — Cycle 25
 
-**Reviewed:** 242 TypeScript source files across `apps/web/src/`
+**Reviewed:** All 242+ TypeScript source files across `apps/web/src/`
 **Focus:** Code quality, logic, SOLID, maintainability, correctness
 
 ## Review method
@@ -14,7 +14,7 @@ process-image.ts, sanitize.ts, safe-json-ld.ts, blur-data-url.ts, upload-paths.t
 action-guards.ts, advisory-locks.ts, lightbox.tsx, photo-viewer.tsx,
 image-manager.tsx, og/route.tsx.
 
-All C22/C23 fixes confirmed still in place. No regressions found.
+All C22/C23/C24 fixes confirmed still in place. No regressions found.
 
 ## GATE STATUS (all green)
 
@@ -26,29 +26,23 @@ All C22/C23 fixes confirmed still in place. No regressions found.
 
 ## New Findings
 
-No new actionable code quality findings this cycle. The codebase is in excellent shape:
+No new actionable code quality findings this cycle. The codebase remains in
+excellent shape. All prior fixes verified:
 
-- All `.length` vs `countCodePoints` patterns are consistent (C21-AGG-01/02/03 + C22-AGG-01 fixes verified)
-- Rate-limit rollback patterns are symmetric across all action surfaces
-- `safeInsertId` is used at all three insertId sites (sharing.ts, admin-users.ts, images.ts)
-- `sanitizeAdminString` is used at all admin-controlled string write sites
-- No empty catch blocks found in production code
+- `safeInsertId` used at all three insertId sites
+- `sanitizeAdminString` used at all admin string write sites
+- `countCodePoints` used consistently for length validation
+- No empty catch blocks in production code
 - No `eval`/`new Function` usage
-- `dangerouslySetInnerHTML` only used for JSON-LD with `safeJsonLd()` sanitization and CSP nonces
-- No `any` type annotations found in action or lib files
-- All timers use `.unref?.()` to prevent blocking process exit
-- `parseInt` calls in topics.ts have NaN guards and range clamping
-- `results.length = 0` (C22-01 fix) confirmed still in place in db-actions.ts
-- `clampDisplayText` (C21-AGG-01 fix) confirmed using countCodePoints + Array.from
-- CSV CHAR(1) separator (C21-AGG-02 fix) confirmed still in place
-
-## Previously Fixed Findings (confirmed still fixed)
-
-All prior fixes from cycles 16-23 remain in place.
+- `dangerouslySetInnerHTML` only for JSON-LD with `safeJsonLd()`
+- All timers use `.unref?.()`
+- `results.length = 0` GC-safe pattern confirmed
+- `searchGroupByColumns` derived from `searchFields` via `Object.values()`
+- `clampDisplayText` uses `countCodePoints` + `Array.from`
 
 ## Carry-forward (unchanged — existing deferred backlog)
 
-- A17-MED-01: data.ts god module — previously deferred
+- A17-MED-01: data.ts god module (1283 lines)
 - A17-MED-02: CSP style-src 'unsafe-inline' — previously deferred
 - A17-MED-03: getImage parallel DB queries — previously deferred
 - A17-LOW-04: permanentlyFailedIds process-local — previously deferred

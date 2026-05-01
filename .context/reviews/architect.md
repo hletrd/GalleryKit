@@ -1,18 +1,34 @@
-# Architect — Cycle 9
+# Architect — Cycle 25
 
-## C9-AR-01 (Low): Advisory lock name strings not centralized
+## Review method
 
-**File+line**: Multiple files (see C9-SR-01)
+Architectural review of coupling, layering, module boundaries, and design risks.
 
-Lock names are scattered as string literals. A central constant registry would reduce the risk of accidental name collisions and make it easier to audit lock scope (as noted in C8R-RPL-06 / AGG8R-05).
+## Architecture assessment
 
-**Confidence**: Low (maintainability, not correctness)
-**Fix**: Extract lock names to a shared constants module.
+The codebase follows a clean layered architecture:
 
-## C9-AR-02 (Low): `data.ts` trending toward 1500-line threshold
+- **Route layer**: `app/[locale]/(public)/*` and `app/[locale]/admin/*` pages
+- **Server action layer**: `app/actions/*` with consistent guard pattern
+  (isAdmin -> requireSameOriginAdmin -> maintenance check -> business logic)
+- **Data access layer**: `lib/data.ts` with React.cache() deduplication
+- **Library layer**: `lib/*` utilities with clear single-responsibility
+- **Middleware layer**: `proxy.ts` with CSP and admin auth guard
 
-**File+line**: `apps/web/src/lib/data.ts`
+**Coupling observations**:
+- Server actions depend on `isAdmin` and `requireSameOriginAdmin` in consistent
+  order — good pattern that prevents accidental omission
+- `data.ts` at 1283 lines is the largest module but is internally well-organized
+  with clear section comments
+- Advisory lock names are centralized in `advisory-locks.ts` — good
+- Rate-limit rollback patterns are symmetric across all action surfaces
 
-Currently ~1240 lines. The deferred D2-MED item notes the 1500-line threshold. No new lines were added this cycle that push it closer significantly, but the trend continues.
+**Layering concerns (all previously deferred)**:
+- data.ts god module (1283 lines) — A17-MED-01
+- getImage parallel queries pool exhaustion — A17-MED-03
+- CSP unsafe-inline — A17-MED-02
 
-**Status**: Already deferred as D2-MED/D3-MED.
+## New Findings
+
+None. The architecture is sound and consistent with the single-writer /
+personal-gallery deployment model documented in CLAUDE.md.

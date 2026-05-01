@@ -1,4 +1,4 @@
-# Security Reviewer — Cycle 24
+# Security Reviewer — Cycle 25
 
 ## Review method
 
@@ -8,7 +8,6 @@ csv-escape.ts, safe-json-ld.ts, content-security-policy.ts, rate-limit.ts,
 auth-rate-limit.ts, db-actions.ts, image-queue.ts, advisory-locks.ts,
 upload-tracker-state.ts, public.ts, schema.ts, process-image.ts,
 serve-upload.ts, upload-paths.ts, blur-data-url.ts, action-guards.ts.
-Verified all C22/C23 fixes are in place.
 
 ## Previously verified security controls (all still in place)
 
@@ -32,21 +31,16 @@ Verified all C22/C23 fixes are in place.
 - Same-origin verification on all mutating admin actions and API routes
 - X-Content-Type-Options: nosniff on admin API responses
 - Stricter middleware session cookie format check
-- Password length validation uses countCodePoints (C20-AGG-01)
-- searchImages query length uses countCodePoints (C21-AGG-01)
-- isValidTopicAlias uses countCodePoints (C21-AGG-02)
-- isValidTagName uses countCodePoints (C21-AGG-03)
-- isValidTagSlug uses countCodePoints (C22-AGG-01)
-- Surrogate-pair-unsafe slice(0,200) removed from searchImagesAction (C21-AGG-01)
-- JSON-LD uses safeJsonLd() + CSP nonce on all dangerouslySetInnerHTML sites
-- safeInsertId used at all three insertId sites (C20-MED-01)
-- sanitizeAdminString checks Unicode formatting BEFORE stripping (C7-AGG7R-03)
-- requireCleanInput returns null on rejection (C15-MED-01)
-- normalizeStringRecord rejects Unicode formatting at validation boundary (C2-MED-01)
+- countCodePoints migration complete across all validation surfaces
+- safeInsertId used at all three insertId sites
+- sanitizeAdminString checks Unicode formatting BEFORE stripping
+- requireCleanInput returns null on rejection
+- normalizeStringRecord rejects Unicode formatting at validation boundary
 
 ## New Findings
 
-No new security findings this cycle. All critical security controls remain intact and properly implemented. The countCodePoints migration across all validation surfaces (C20-C22) is complete and consistent.
+No new security findings this cycle. All critical security controls remain intact
+and properly implemented.
 
 ## Carry-forward (unchanged)
 

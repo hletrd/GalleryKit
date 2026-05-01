@@ -1,4 +1,4 @@
-# Verifier — Cycle 24
+# Verifier — Cycle 25
 
 ## Gate verification results
 
@@ -15,25 +15,13 @@
 **Status**: PASSED. All mutating server actions enforce same-origin provenance.
 
 ### vitest
-**Status**: PASSED. 84 test files, 586 tests, all passing. Duration: 58.99s.
+**Status**: PASSED. 84 test files, 586 tests, all passing.
 
 ## Verification of Prior Cycle Fixes
 
-### C22-01: exportImagesCsv type-unsafe GC hint replaced with results.length = 0
-**File**: `apps/web/src/app/[locale]/admin/db-actions.ts:107`
-**Status**: VERIFIED. `results.length = 0` with clear comment explaining the rationale.
-
-### C21-AGG-01: clampDisplayText uses countCodePoints + Array.from
-**File**: `apps/web/src/app/api/og/route.tsx:25-29`
-**Status**: VERIFIED.
-
-### C21-AGG-02: CSV GROUP_CONCAT uses CHAR(1) separator
-**File**: `apps/web/src/app/[locale]/admin/db-actions.ts:68`
-**Status**: VERIFIED. `SEPARATOR CHAR(1)` in SQL, `\x01` split in JavaScript.
-
-### All other prior fixes (C20-AGG-01/02/03/04/05, C22-AGG-01/02)
-**Status**: VERIFIED. All still in place and working correctly.
+All prior fixes from cycles 16-24 remain in place and verified.
 
 ## New Findings
 
-No new verification findings this cycle. All prior fixes confirmed still in place and all gates pass.
+No new verification findings this cycle. All prior fixes confirmed still in place
+and all gates pass.

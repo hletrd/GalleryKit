@@ -1,41 +1,39 @@
-# Document Specialist Review — document-specialist (Cycle 15)
+# Document Specialist — Cycle 25
 
-Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-30
+## Review method
 
-## Summary
+Compared code behavior against CLAUDE.md documentation, inline comments,
+and README instructions. Checked for doc-code mismatches.
 
-- No new critical or high findings.
-- CLAUDE.md accurately reflects the current codebase.
+## Doc-code alignment verification
 
-## Doc-code cross-reference verification
+1. **CLAUDE.md "Image Processing Pipeline"**: Verified process-image.ts follows
+   the documented flow (original save -> Sharp AVIF/WebP/JPEG in parallel ->
+   EXIF extraction -> processed flag). Matches.
 
-### CLAUDE.md Claims Verified
-- "Next.js 16.2 (App Router, React 19, TypeScript 6)": matches `package.json`.
-- "Argon2 password hashing": confirmed in `auth.ts` and `admin-users.ts`.
-- "HMAC-SHA256 session tokens": confirmed in `session.ts`.
-- "Sharp (AVIF, WebP, JPEG conversion, parallel pipeline)": confirmed in `process-image.ts`.
-- "MySQL advisory locks" (5 named locks): confirmed — `gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit:image-processing:{jobId}`.
-- "Max upload size: 200 MB per file": confirmed (`MAX_FILE_SIZE` in `process-image.ts`).
-- "Batch byte cap (UPLOAD_MAX_TOTAL_BYTES, default 2 GiB) and batch file-count cap (UPLOAD_MAX_FILES_PER_WINDOW, default 100)": confirmed in `upload-limits.ts`.
-- "Session secret: SESSION_SECRET env var is required in production": confirmed in `session.ts`.
-- "Login rate limiting enforced in two buckets: per-IP and per-account": confirmed in `auth.ts`.
-- "Cookie attributes: httpOnly, secure (in production), sameSite: lax, path: /": confirmed in `auth.ts`.
-- "Output: 'standalone' for Docker": confirmed in `next.config.ts`.
-- "DB backups stored in data/backups/": confirmed in `db-actions.ts`.
-- "CSV export escapes formula injection characters": confirmed in `csv-escape.ts`.
-- "Unicode bidi/invisible formatting rejection on admin string surfaces": confirmed across `validation.ts`, `sanitize.ts`, and all action files.
+2. **CLAUDE.md "Security Architecture"**: Verified all stated security controls
+   exist in code (Argon2, HMAC-SHA256, timingSafeEqual, cookie attributes,
+   rate limiting). Matches.
 
-### Code Comments Verified
-- Audit-log gating comments (cycles 10-13) are all present and accurate.
-- Advisory lock rationale comment in `deleteAdminUser` (C14-AGG-02) is present.
-- Metadata truncation comment in `audit.ts` (C14-AGG-01) is present.
-- `tagNamesAgg` comment about GROUP_CONCAT shape is present.
+3. **CLAUDE.md "Race Condition Protections"**: Verified all stated protections
+   exist (delete-while-processing, concurrent tag creation, topic slug rename,
+   batch delete, session secret init, concurrent DB restore, upload-processing
+   contract, per-image-processing claim). Matches.
+
+4. **CLAUDE.md "Runtime topology"**: Single-writer / single-process assumption
+   documented and enforced via process-local state (view count buffer,
+   permanentlyFailedIds, upload tracker). Matches.
+
+5. **CLAUDE.md "Database Indexes"**: Verified composite indexes exist in schema.ts.
+   Matches.
+
+6. **CLAUDE.md "Privacy"**: Verified publicSelectFields omits PII fields and
+   compile-time guard exists. Matches.
+
+7. **CLAUDE.md "Storage Backend"**: Verified S3/MinIO module exists but is not
+   wired into the upload/serving pipeline. Matches the "Not Yet Integrated"
+   note.
 
 ## New Findings
 
 None. Documentation and code are in sync.
-
-## Carry-forward (unchanged — existing deferred backlog)
-
-- DOC-38-01 / DOC-38-02: CLAUDE.md version mismatches (minor — deferred in prior cycles).

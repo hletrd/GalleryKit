@@ -1,28 +1,32 @@
-# Test Engineer — Cycle 9
+# Test Engineer — Cycle 25
 
-## C9-TE-01 (Medium): No test for `viewCountRetryCount` FIFO hard-cap eviction
+## Review method
 
-**File+line**: `apps/web/src/lib/data.ts:152-160`
+Reviewed all 84 test files in `apps/web/src/__tests__/` and the e2e test
+surface. Checked for coverage gaps, flaky test patterns, TDD opportunities,
+and test-code correctness issues.
 
-The `viewCountRetryCount` hard-cap eviction (`size > MAX_VIEW_COUNT_RETRY_SIZE`) with FIFO eviction has no direct unit test. The existing `data-view-count-flush.test.ts` tests flush and retry re-buffer logic but not the hard-cap eviction of the retry counter itself.
+## Test surface summary
 
-**Confidence**: Medium
-**Fix**: Add a test that overflows `viewCountRetryCount` beyond `MAX_VIEW_COUNT_RETRY_SIZE` and verifies oldest entries are evicted.
+- 84 test files, 586 tests, all passing
+- Key fixture tests: touch-target-audit, check-api-auth, check-action-origin,
+  data-tag-names-sql, process-image-blur-wiring, images-action-blur-wiring,
+  privacy-fields, csv-escape, safe-json-ld, content-security-policy
+- E2E: Playwright-based tests in `apps/web/e2e/`
 
-## C9-TE-02 (Medium): No test for `pruneRetryMaps` FIFO eviction in image-queue
+## New Findings
 
-**File+line**: `apps/web/src/lib/image-queue.ts:84-95`
+No new test coverage gaps identified this cycle. All critical surfaces have
+fixture-style tests that enforce architectural invariants:
 
-The `pruneRetryMaps` function caps `retryCounts` and `claimRetryCounts` at `MAX_RETRY_MAP_SIZE` with FIFO eviction. There is no direct unit test for this pruning logic.
+- API auth wrapper coverage via `check-api-auth.test.ts`
+- Action origin provenance via `check-action-origin.test.ts`
+- Touch target audit via `touch-target-audit.test.ts`
+- Privacy field leakage via `privacy-fields.test.ts`
+- Tag names SQL shape via `data-tag-names-sql.test.ts`
+- Blur data URL wiring at producer and consumer
+- CSV escape with formula injection and Unicode bidi
 
-**Confidence**: Medium
-**Fix**: Add a test that overflows the retry maps and verifies FIFO eviction.
+## Carry-forward
 
-## C9-TE-03 (Medium): No explicit test for `buildCursorCondition` cursor boundary cases
-
-**File+line**: `apps/web/src/lib/data.ts:541-558`
-
-While `data-adjacency-source.test.ts` tests `getImage` prev/next conditions, `buildCursorCondition` (used by `getImagesLite` cursor pagination) does not have explicit unit tests for the dated-to-undated and undated-to-dated cursor boundary transitions.
-
-**Confidence**: Medium
-**Fix**: Add explicit cursor-condition tests for boundary cases.
+- C9-TE-03-DEFER: buildCursorCondition cursor boundary test coverage

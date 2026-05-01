@@ -1,37 +1,43 @@
-# Debugger Review — debugger (Cycle 15)
+# Debugger — Cycle 25
 
-Repository: `/Users/hletrd/flash-shared/gallery`
-Date: 2026-04-30
+## Review method
 
-## Summary
+Latent bug surface analysis: failure modes, edge cases, race conditions,
+error-handling gaps, and regression risks.
 
-- No new critical, high, or medium findings.
-- All latent bug surfaces and failure modes previously identified are properly guarded.
+## Failure mode analysis (all previously addressed)
 
-## Latent bug surface analysis
+1. **Delete-while-processing**: Queue checks row exists + conditional UPDATE.
+   Orphaned files cleaned up. Verified correct.
 
-### Edge Conditions
-- Empty array inputs: All batch operations (`deleteImages`, `createGroupShareLink`, etc.) validate non-empty arrays before proceeding.
-- Null values in cursor pagination: `normalizeImageListCursor` returns `null` for invalid cursors, and callers fall back to offset pagination.
-- Zero-byte files: `saveOriginalAndGetMetadata` rejects files with `file.size === 0`.
-- Missing EXIF: `extractExifForDb` gracefully handles missing/empty EXIF data, returning `null` for all fields.
+2. **Concurrent tag creation**: `INSERT IGNORE` + slug collision detection.
+   Verified correct.
 
-### Failure Modes
-- DB connection drops during flush: View count buffer swaps the Map atomically before draining, so a crash mid-flush doesn't lose unprocessed increments. Failed increments are re-buffered with a retry cap.
-- Sharp errors mid-processing: Queue catches processing errors, retries up to 3 times, then gives up. Orphaned variant files are cleaned up when the image is detected as deleted during processing.
-- Advisory lock connection drops: `finally` blocks always release connections and locks, even on exceptions.
-- Filesystem cleanup failures: `collectImageCleanupFailures` retries once, then reports failures without blocking the main operation. Failed cleanups are logged for operator attention.
-- Disk full during upload: `statfs` check requires at least 1GB free before accepting uploads. If the check fails, the upload is rejected with `insufficientDiskSpace`.
+3. **Topic slug rename**: Transaction wraps reference updates before PK rename.
+   Verified correct.
 
-### Error Recovery
-- Upload tracker pre-increment settlement: `settleUploadTrackerClaim` reconciles claimed vs actual bytes after upload completes or partially fails.
-- Rate limit rollback: All rate-limiting surfaces roll back on infrastructure failures (not user errors).
-- Queue bootstrap retry: Exponential backoff with 30s delay on connection failures, with cursor-based continuation for large pending sets.
+4. **Batch delete**: Wrapped in DB transaction. Verified correct.
+
+5. **Concurrent DB restore**: MySQL advisory lock prevents concurrent restores.
+   Verified correct.
+
+6. **Upload-processing contract changes**: Advisory lock serializes with uploads.
+   Verified correct.
+
+7. **Per-image-processing claim**: Advisory lock + conditional UPDATE.
+   Verified correct.
+
+8. **Rate-limit pre-increment TOCTOU**: All paths use pre-increment-then-check.
+   Verified correct.
+
+9. **View count flush atomicity**: Map swap pattern prevents loss during flush.
+   Verified correct.
 
 ## New Findings
 
-None. All latent bug surfaces and failure modes are properly handled.
+None. All latent bug surfaces previously identified have been addressed.
+The error-handling paths are comprehensive with no silent failures.
 
-## Carry-forward (unchanged — existing deferred backlog)
+## Carry-forward (unchanged)
 
-- C6-V-02: `bootstrapImageProcessingQueue` cursor continuation path untested.
+- C6-V-02: bootstrapImageProcessingQueue cursor continuation path untested
