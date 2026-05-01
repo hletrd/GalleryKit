@@ -250,6 +250,7 @@
       "blue": "Blue"
     },
     "fullscreen": "Fullscreen",
+    "fullscreenUnavailable": "Fullscreen is not available",
     "bottomSheet": "Photo Info",
     "whiteBalance": "White Balance",
     "meteringMode": "Metering",

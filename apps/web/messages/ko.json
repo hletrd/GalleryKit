@@ -250,6 +250,7 @@
       "blue": "파랑"
     },
     "fullscreen": "전체 화면",
+    "fullscreenUnavailable": "전체 화면을 사용할 수 없습니다",
     "bottomSheet": "사진 정보",
     "whiteBalance": "화이트 밸런스",
     "meteringMode": "측광 모드",
