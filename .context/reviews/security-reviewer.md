@@ -1,4 +1,4 @@
-# Security Reviewer — Cycle 23
+# Security Reviewer — Cycle 24
 
 ## Review method
 
@@ -8,7 +8,7 @@ csv-escape.ts, safe-json-ld.ts, content-security-policy.ts, rate-limit.ts,
 auth-rate-limit.ts, db-actions.ts, image-queue.ts, advisory-locks.ts,
 upload-tracker-state.ts, public.ts, schema.ts, process-image.ts,
 serve-upload.ts, upload-paths.ts, blur-data-url.ts, action-guards.ts.
-Verified all C22 fixes are in place.
+Verified all C22/C23 fixes are in place.
 
 ## Previously verified security controls (all still in place)
 
@@ -40,6 +40,9 @@ Verified all C22 fixes are in place.
 - Surrogate-pair-unsafe slice(0,200) removed from searchImagesAction (C21-AGG-01)
 - JSON-LD uses safeJsonLd() + CSP nonce on all dangerouslySetInnerHTML sites
 - safeInsertId used at all three insertId sites (C20-MED-01)
+- sanitizeAdminString checks Unicode formatting BEFORE stripping (C7-AGG7R-03)
+- requireCleanInput returns null on rejection (C15-MED-01)
+- normalizeStringRecord rejects Unicode formatting at validation boundary (C2-MED-01)
 
 ## New Findings
 

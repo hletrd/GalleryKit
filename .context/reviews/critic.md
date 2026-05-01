@@ -1,27 +1,25 @@
-# Critic Review — Cycle 23
+# Critic Review — Cycle 24
 
 Repository: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-04-29
 
 ## Summary
 
-All C22 findings have been fixed. The codebase is in excellent shape after 22 cycles of iterative review and fixing. The countCodePoints migration is now complete across all validation surfaces. No new findings were identified in this cycle.
+The codebase is in excellent shape after 23 cycles of iterative review and fixing. No new findings were identified in this cycle. All C23 fixes remain in place. The codebase has achieved full convergence for actionable findings at the current threat model and scale.
 
-## Verified fixes from prior cycles
+## Verified fixes from prior cycles (all confirmed still in place)
 
-1. C22-AGG-01 (isValidTagSlug countCodePoints): FIXED.
-2. C22-AGG-02 (original_format slice documented): DOCUMENTED.
-3. C21-AGG-01 (searchImages countCodePoints): FIXED.
-4. C21-AGG-02 (isValidTopicAlias countCodePoints): FIXED.
-5. C21-AGG-03 (isValidTagName countCodePoints): FIXED.
-6. C20-AGG-01 (password length countCodePoints): FIXED.
-7. C20-AGG-02 (getTopicBySlug inline regex): FIXED.
-8. C20-AGG-03 (updateImageMetadata redundant updated_at): FIXED.
-9. C20-AGG-04/05 (tags.ts catch blocks): FIXED.
-10. C18-MED-01 (searchImagesAction re-throw): FIXED.
-11. C16-MED-01 (loadMoreImages DB counter sync): FIXED.
-12. C19-AGG-01 (cache caveat on getImageByShareKeyCached): DOCUMENTED.
-13. C19-AGG-02 (duplicated topic-slug regex): FIXED.
+1. C22-01 (exportImagesCsv type-unsafe GC hint): FIXED (results.length = 0)
+2. C21-AGG-01 (clampDisplayText surrogate-pair-safe truncation): FIXED
+3. C21-AGG-02 (CSV GROUP_CONCAT separator): FIXED (CHAR(1))
+4. C22-AGG-01 (isValidTagSlug countCodePoints): FIXED
+5. C22-AGG-02 (original_format slice documented): DOCUMENTED
+6. C20-AGG-01 (password length countCodePoints): FIXED
+7. C20-AGG-02 (getTopicBySlug uses isValidSlug): FIXED
+8. C20-AGG-03 (updateImageMetadata redundant updated_at): FIXED
+9. C20-AGG-04/05 (tags.ts catch blocks include error): FIXED
+10. C18-MED-01 (searchImagesAction re-throw): FIXED
+11. C16-MED-01 (loadMoreImages DB counter sync): FIXED
 
 ## New Findings
 
