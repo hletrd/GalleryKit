@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react';
 import FocusTrap from '@/components/lazy-focus-trap';
-import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Maximize, Minimize, Play, Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
@@ -21,6 +21,8 @@ interface LightboxProps {
     onSlideshowAdvance?: () => void;
     imageSizes?: number[];
     slideshowIntervalSeconds?: number;
+    currentIndex?: number;
+    totalCount?: number;
 }
 
 export function shouldAutoHideLightboxControls(hasHover: boolean, hasFinePointer: boolean) {
@@ -72,7 +74,7 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
         : 'scale(1.08) translate(2%, 2%)';
 }
 
-export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT }: LightboxProps) {
+export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -409,6 +411,12 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     height={image.height}
                     className="w-full h-full object-contain"
                     draggable={false}
+                    aria-roledescription="slide"
+                    aria-label={
+                        currentIndex != null && totalCount != null
+                            ? `${currentIndex + 1} / ${totalCount}`
+                            : undefined
+                    }
                     style={
                         isSlideshowActive && !shouldReduceMotion
                             ? {
@@ -434,7 +442,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 <button
                     ref={closeButtonRef}
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(false);
@@ -454,7 +462,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {/* Fullscreen toggle — top right, second from right */}
                 <button
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(false);
@@ -471,11 +479,32 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     )}
                 </button>
 
+                {/* Play/Pause slideshow — top right, third from right */}
+                <button
+                    {...controlVisibilityProps}
+                    className="pointer-events-auto absolute top-4 right-[7.5rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSlideshowActive(prev => !prev);
+                        showControls(true);
+                    }}
+                    aria-label={isSlideshowActive ? t('aria.pauseSlideshow') : t('aria.playSlideshow')}
+                    aria-keyshortcuts="Space"
+                    aria-pressed={isSlideshowActive}
+                    title={`${isSlideshowActive ? t('aria.pauseSlideshow') : t('aria.playSlideshow')} (Space)`}
+                >
+                    {isSlideshowActive ? (
+                        <Pause className="h-5 w-5" />
+                    ) : (
+                        <Play className="h-5 w-5" />
+                    )}
+                </button>
+
                 {/* Prev button — left edge */}
                 {prevId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20"
+                        className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);
@@ -495,7 +524,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {nextId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20"
+                        className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);

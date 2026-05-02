@@ -696,6 +696,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     }}
                     imageSizes={imageSizes}
                     slideshowIntervalSeconds={slideshowIntervalSeconds}
+                    currentIndex={currentIndex}
+                    totalCount={images.length}
                 />
             )}
 
