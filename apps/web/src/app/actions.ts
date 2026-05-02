@@ -8,7 +8,7 @@ export { getSession, getCurrentUser, isAdmin, login, logout, updatePassword } fr
 export { uploadImages, deleteImage, deleteImages, updateImageMetadata } from './actions/images';
 
 // Topics
-export { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias } from './actions/topics';
+export { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias, setTopicMapVisible } from './actions/topics';
 
 // Tags
 export { getAdminTags, updateTag, deleteTag, addTagToImage, removeTagFromImage, batchAddTags, batchUpdateImageTags } from './actions/tags';

@@ -494,3 +494,28 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
     revalidateAllAppData();
     return { success: true };
 }
+
+// US-P21: toggle per-topic opt-in for the public /map GPS view.
+export async function setTopicMapVisible(topicSlug: string, mapVisible: boolean) {
+    const t = await getTranslations('serverActions');
+    const originError = await requireSameOriginAdmin();
+    if (originError) return originError;
+    const adminCheck = await isAdmin();
+    if (!adminCheck) return { error: t('unauthorized') };
+
+    const { value: cleanSlug, rejected: slugRejected } = requireCleanInput(topicSlug);
+    if (slugRejected || !cleanSlug || !isValidSlug(cleanSlug)) return { error: t('invalidSlug') };
+
+    const [result] = await db
+        .update(topics)
+        .set({ map_visible: mapVisible })
+        .where(eq(topics.slug, cleanSlug));
+
+    if (result.affectedRows === 0) return { error: t('topicNotFound') };
+
+    const currentUser = await getCurrentUser();
+    logAuditEvent(currentUser?.id ?? null, 'topic_map_visible_set', 'topic', cleanSlug, undefined, { map_visible: mapVisible }).catch(console.debug);
+
+    revalidateAllAppData();
+    return { success: true };
+}
