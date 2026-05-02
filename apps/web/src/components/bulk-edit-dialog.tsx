@@ -24,6 +24,7 @@ import { TagInput } from '@/components/tag-input';
 import { useTranslation } from '@/components/i18n-provider';
 import type { BulkUpdateImagesInput, LicenseTier, TriState } from '@/lib/bulk-edit-types';
 import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
+type ApplyAltTarget = 'title' | 'description';
 import { countCodePoints } from '@/lib/utils';
 
 type FieldMode = 'leave' | 'set' | 'clear';
@@ -89,6 +90,7 @@ export function BulkEditDialog({
     const [licenseValue, setLicenseValue] = useState<LicenseTier>('none');
     const [addTagNames, setAddTagNames] = useState<string[]>([]);
     const [removeTagNames, setRemoveTagNames] = useState<string[]>([]);
+    const [applyAltSuggested, setApplyAltSuggested] = useState<ApplyAltTarget | null>(null);
 
     const resetState = () => {
         setTopicMode('leave');
@@ -101,6 +103,7 @@ export function BulkEditDialog({
         setLicenseValue('none');
         setAddTagNames([]);
         setRemoveTagNames([]);
+        setApplyAltSuggested(null);
         setValidationError(null);
     };
 
@@ -156,6 +159,7 @@ export function BulkEditDialog({
             licenseTier: licenseField,
             addTagNames,
             removeTagNames,
+            applyAltSuggested: applyAltSuggested ?? null,
         };
 
         setIsSubmitting(true);
@@ -270,6 +274,25 @@ export function BulkEditDialog({
                                 </Select>
                             )}
                         </div>
+                    </div>
+
+                    {/* Apply suggested alt text (US-P52) */}
+                    <div className="space-y-2">
+                        <Label>{t('imageManager.bulkApplyAltSuggested')}</Label>
+                        <Select
+                            value={applyAltSuggested ?? 'none'}
+                            onValueChange={(v) => setApplyAltSuggested(v === 'none' ? null : v as ApplyAltTarget)}
+                        >
+                            <SelectTrigger className="h-11 w-full" aria-label={t('imageManager.bulkApplyAltSuggested')}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">{t('imageManager.bulkAltSuggested_none')}</SelectItem>
+                                <SelectItem value="title">{t('imageManager.bulkAltSuggested_title')}</SelectItem>
+                                <SelectItem value="description">{t('imageManager.bulkAltSuggested_description')}</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">{t('imageManager.bulkApplyAltSuggestedHint')}</p>
                     </div>
 
                     {/* Add tags */}

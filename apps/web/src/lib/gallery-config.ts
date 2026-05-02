@@ -60,6 +60,9 @@ export interface GalleryConfig {
 
     // US-P31: Reactions
     reactionsEnabled: boolean;
+
+    // US-P52: Auto alt-text (ONNX stub, opt-in)
+    autoAltTextEnabled: boolean;
 }
 
 /**
@@ -95,6 +98,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('reactions_enabled', raw)) return DEFAULTS.reactions_enabled !== 'false';
                 return raw !== 'false';
             })(),
+            autoAltTextEnabled: (() => {
+                const raw = getSetting(map, 'auto_alt_text_enabled');
+                if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
+                return raw === 'true';
+            })(),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -108,6 +116,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
             reactionsEnabled: DEFAULTS.reactions_enabled !== 'false',
+            autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
         };
     }
 }

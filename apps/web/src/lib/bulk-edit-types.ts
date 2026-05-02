@@ -19,4 +19,6 @@ export interface BulkUpdateImagesInput {
     licenseTier: TriState<LicenseTier>;
     addTagNames: string[];
     removeTagNames: string[];
+    // US-P52: copy alt_text_suggested → title or description (explicit admin action only)
+    applyAltSuggested?: 'title' | 'description' | null;
 }

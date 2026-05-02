@@ -22,6 +22,9 @@ export const GALLERY_SETTING_KEYS = [
 
     // US-P31: Reactions
     'reactions_enabled',
+
+    // US-P52: Auto alt-text via local Florence-2 (ONNX stub, default off)
+    'auto_alt_text_enabled',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -56,6 +59,9 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     slideshow_interval_seconds: String(SLIDESHOW_INTERVAL_DEFAULT),
     // US-P31: reactions enabled by default
     reactions_enabled: 'true',
+
+    // US-P52: auto alt-text disabled by default (heavy ONNX model, opt-in)
+    auto_alt_text_enabled: 'false',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -71,6 +77,9 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     slideshow_interval_seconds: (v) => { const n = Number(v); return Number.isInteger(n) && n >= SLIDESHOW_INTERVAL_MIN && n <= SLIDESHOW_INTERVAL_MAX; },
     // US-P31
     reactions_enabled: (v) => v === 'true' || v === 'false',
+
+    // US-P52
+    auto_alt_text_enabled: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */

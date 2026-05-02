@@ -800,7 +800,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     if (originError) return { error: originError };
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
-    const { ids, topic, titlePrefix, description, licenseTier, addTagNames, removeTagNames } = input;
+    const { ids, topic, titlePrefix, description, licenseTier, addTagNames, removeTagNames, applyAltSuggested } = input;
 
     if (!Array.isArray(ids) || ids.length === 0) {
         return { error: t('noImagesSelected') };
@@ -856,6 +856,12 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
         }
     }
 
+    // Validate applyAltSuggested — only 'title' | 'description' | null allowed.
+    if (applyAltSuggested !== undefined && applyAltSuggested !== null
+        && applyAltSuggested !== 'title' && applyAltSuggested !== 'description') {
+        return { error: t('invalidInput') };
+    }
+
     try {
         await db.transaction(async (tx) => {
             // Build scalar SET clause — only include fields not in 'leave' mode so
@@ -870,6 +876,42 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
 
             if (Object.keys(setClause).length > 0) {
                 await tx.update(images).set(setClause).where(inArray(images.id, ids));
+            }
+
+            // US-P52: Apply suggested alt text → title or description.
+            // Copies alt_text_suggested into the chosen field ONLY when the
+            // image has no admin-set value for that field (never auto-overwrite).
+            if (applyAltSuggested === 'title' || applyAltSuggested === 'description') {
+                const rows = await tx.select({
+                    id: images.id,
+                    title: images.title,
+                    description: images.description,
+                    alt_text_suggested: images.alt_text_suggested,
+                }).from(images).where(inArray(images.id, ids));
+
+                // Build a map of id → suggested caption for rows that qualify.
+                // Rows with an existing admin-set value for the target field are skipped
+                // (never auto-overwrite). Per-row updates avoid a bulk SET that would
+                // overwrite different suggested values with a single expression.
+                const toUpdate: { id: number; caption: string }[] = [];
+                for (const row of rows) {
+                    if (!row.alt_text_suggested) continue;
+                    if (applyAltSuggested === 'title' && row.title) continue;
+                    if (applyAltSuggested === 'description' && row.description) continue;
+                    toUpdate.push({ id: row.id, caption: row.alt_text_suggested });
+                }
+
+                for (const { id, caption } of toUpdate) {
+                    if (applyAltSuggested === 'title') {
+                        await tx.update(images)
+                            .set({ title: caption })
+                            .where(eq(images.id, id));
+                    } else {
+                        await tx.update(images)
+                            .set({ description: caption })
+                            .where(eq(images.id, id));
+                    }
+                }
             }
 
             // Tag additions: ensure tag record exists, then batch-insert imageTags
@@ -910,6 +952,7 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
             licenseTierMode: licenseTier.mode,
             addTagNames,
             removeTagNames,
+            applyAltSuggested: applyAltSuggested ?? null,
         }).catch(console.debug);
 
         // Revalidate broadly — many images and potentially multiple topics may be affected.
