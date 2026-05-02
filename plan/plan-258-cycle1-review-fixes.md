@@ -82,7 +82,7 @@ Prompt 3 must run the full configured gate list after implementation:
 - [x] Prompt 3 implementation started.
 - [x] Scheduled items fixed or explicitly reconciled.
 - [x] Full gates green.
-- [ ] Signed gitmoji commits pushed (pending commit step).
+- [x] Signed gitmoji commits pushed.
 - [ ] Per-cycle deploy attempted after green gates (pending deploy step).
 
 - [x] Implemented security/correctness fixes: global admin-delete lock, charged successful admin creation, generic share metadata, share/OG limiter semantics, nginx forwarded-IP overwrite, upload input rejection, schema/migration alignment, Drizzle TLS, tag-filter dedupe, shared-group photoId counting, and restore cleanup ordering.
