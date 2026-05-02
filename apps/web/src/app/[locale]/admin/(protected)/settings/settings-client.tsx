@@ -11,7 +11,8 @@ import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
-import { Save, ChevronLeft, ImageIcon, Shield, Loader2 } from 'lucide-react';
+import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play } from 'lucide-react';
+import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
 
@@ -188,6 +189,33 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             {t('settings.uploadContractLocked')}
                         </p>
                     )}
+                </CardContent>
+            </Card>
+
+            {/* Slideshow */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Play className="h-5 w-5" />
+                        {t('settings.slideshowTitle')}
+                    </CardTitle>
+                    <CardDescription>{t('settings.slideshowDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="slideshow-interval">{t('settings.slideshowInterval')}</Label>
+                        <Input
+                            id="slideshow-interval"
+                            type="number"
+                            min={SLIDESHOW_INTERVAL_MIN}
+                            max={SLIDESHOW_INTERVAL_MAX}
+                            value={settings.slideshow_interval_seconds || ''}
+                            onChange={(e) => handleChange('slideshow_interval_seconds', e.target.value)}
+                            placeholder={getPlaceholder('slideshow_interval_seconds')}
+                            aria-describedby="slideshow-interval-help"
+                        />
+                        <p id="slideshow-interval-help" className="text-xs text-muted-foreground">{t('settings.slideshowIntervalHint')}</p>
+                    </div>
                 </CardContent>
             </Card>
         </div>

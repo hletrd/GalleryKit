@@ -20,9 +20,10 @@ export {
     isValidSettingValue,
     getSettingDefaults,
     parseImageSizes,
+    parseSlideshowInterval,
 } from './gallery-config-shared';
 
-import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, parseImageSizes } from './gallery-config-shared';
+import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, parseImageSizes, parseSlideshowInterval } from './gallery-config-shared';
 import type { GallerySettingKey } from './gallery-config-shared';
 
 // ── Defaults (imported from shared module to avoid duplication) ────────────────
@@ -53,6 +54,9 @@ export interface GalleryConfig {
 
     // Privacy
     stripGpsOnUpload: boolean;
+
+    // Slideshow
+    slideshowIntervalSeconds: number;
 }
 
 /**
@@ -82,6 +86,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('strip_gps_on_upload', raw)) return DEFAULTS.strip_gps_on_upload === 'true';
                 return raw === 'true';
             })(),
+            slideshowIntervalSeconds: parseSlideshowInterval(getSetting(map, 'slideshow_interval_seconds')),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -93,6 +98,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             imageQualityJpeg: Number(DEFAULTS.image_quality_jpeg),
             imageSizes: parseImageSizes(DEFAULTS.image_sizes),
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
+            slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
         };
     }
 }

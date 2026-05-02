@@ -16,6 +16,9 @@ export const GALLERY_SETTING_KEYS = [
 
     // Privacy
     'strip_gps_on_upload',
+
+    // Slideshow
+    'slideshow_interval_seconds',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -37,12 +40,17 @@ export type SeoSettingKey = typeof SEO_SETTING_KEYS[number];
 
 const DEFAULT_IMAGE_SIZE_VALUES = [640, 1536, 2048, 4096] as const;
 
+export const SLIDESHOW_INTERVAL_DEFAULT = 5;
+export const SLIDESHOW_INTERVAL_MIN = 2;
+export const SLIDESHOW_INTERVAL_MAX = 30;
+
 const DEFAULTS: Record<GallerySettingKey, string> = {
     image_quality_webp: '90',
     image_quality_avif: '85',
     image_quality_jpeg: '90',
     image_sizes: DEFAULT_IMAGE_SIZE_VALUES.join(','),
     strip_gps_on_upload: 'false',
+    slideshow_interval_seconds: String(SLIDESHOW_INTERVAL_DEFAULT),
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -55,6 +63,7 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     image_quality_jpeg: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 && n <= 100; },
     image_sizes: (v) => normalizeConfiguredImageSizes(v) !== null,
     strip_gps_on_upload: (v) => v === 'true' || v === 'false',
+    slideshow_interval_seconds: (v) => { const n = Number(v); return Number.isInteger(n) && n >= SLIDESHOW_INTERVAL_MIN && n <= SLIDESHOW_INTERVAL_MAX; },
 };
 
 /** Validate a setting value. Returns true if valid. */
@@ -151,4 +160,15 @@ export function parseImageSizes(sizesStr: string): number[] {
     const normalized = normalizeConfiguredImageSizes(sizesStr);
     if (!normalized) return DEFAULT_IMAGE_SIZES;
     return normalized.split(',').map((value) => Number(value));
+}
+
+/**
+ * Parse slideshow_interval_seconds setting string into a number.
+ * Returns SLIDESHOW_INTERVAL_DEFAULT if the input is empty or invalid.
+ */
+export function parseSlideshowInterval(value: string | undefined): number {
+    if (!value) return SLIDESHOW_INTERVAL_DEFAULT;
+    const n = Number(value);
+    if (Number.isInteger(n) && n >= SLIDESHOW_INTERVAL_MIN && n <= SLIDESHOW_INTERVAL_MAX) return n;
+    return SLIDESHOW_INTERVAL_DEFAULT;
 }
