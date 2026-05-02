@@ -3,7 +3,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
@@ -15,7 +15,7 @@ import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-que
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
 import { stripControlChars, sanitizeAdminString, requireCleanInput } from '@/lib/sanitize';
-import { ensureTagRecord, getTagSlug } from '@/lib/tag-records';
+import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
 import { getClientIp } from '@/lib/rate-limit';
@@ -26,6 +26,8 @@ import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { headers } from 'next/headers';
+import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
+import type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
 
 type ImageCleanupFailure = {
     target: 'original' | 'webp' | 'avif' | 'jpeg';
@@ -787,6 +789,135 @@ export async function updateImageMetadata(id: number, title: string | null, desc
         return { success: true as const, title: sanitizedTitle, description: sanitizedDescription };
     } catch (e) {
         console.error("Failed to update image metadata", e);
+        return { error: t('failedToUpdateImage') };
+    }
+}
+
+export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
+    const t = await getTranslations('serverActions');
+    // US-P41: requireSameOriginAdmin first, then isAdmin (matches existing action pattern).
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
+
+    const { ids, topic, titlePrefix, description, licenseTier, addTagNames, removeTagNames } = input;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return { error: t('noImagesSelected') };
+    }
+    if (ids.length > 100) {
+        return { error: t('tooManyImages') };
+    }
+    for (const id of ids) {
+        if (!Number.isInteger(id) || id <= 0) {
+            return { error: t('invalidImageId') };
+        }
+    }
+    if (!Array.isArray(addTagNames) || !Array.isArray(removeTagNames)) {
+        return { error: t('invalidInput') };
+    }
+    if (!addTagNames.every(v => typeof v === 'string') || !removeTagNames.every(v => typeof v === 'string')) {
+        return { error: t('invalidInput') };
+    }
+    if (addTagNames.length > 100 || removeTagNames.length > 100) {
+        return { error: t('tooManyTags') };
+    }
+
+    // Validate topic field — verify slug format and existence before any writes.
+    if (topic.mode === 'set') {
+        if (!isValidSlug(topic.value)) return { error: t('invalidTopicFormat') };
+        const [topicRow] = await db.select({ slug: topics.slug })
+            .from(topics).where(eq(topics.slug, topic.value)).limit(1);
+        if (!topicRow) return { error: t('topicNotFound') };
+    }
+
+    // Validate and sanitize titlePrefix field (reuses updateImageMetadata validation).
+    let sanitizedTitlePrefix: string | null = null;
+    if (titlePrefix.mode === 'set') {
+        const { value: sv, rejected: rej } = sanitizeAdminString(titlePrefix.value);
+        if (rej) return { error: t('invalidTitle') };
+        if (sv && countCodePoints(sv) > 255) return { error: t('titleTooLong') };
+        sanitizedTitlePrefix = sv;
+    }
+
+    // Validate and sanitize description field.
+    let sanitizedDescription: string | null = null;
+    if (description.mode === 'set') {
+        const { value: sv, rejected: rej } = sanitizeAdminString(description.value);
+        if (rej) return { error: t('invalidDescription') };
+        if (sv && countCodePoints(sv) > 5000) return { error: t('descriptionTooLong') };
+        sanitizedDescription = sv;
+    }
+
+    // Validate licenseTier enum value.
+    if (licenseTier.mode === 'set') {
+        if (!(LICENSE_TIERS as readonly string[]).includes(licenseTier.value)) {
+            return { error: t('invalidInput') };
+        }
+    }
+
+    try {
+        await db.transaction(async (tx) => {
+            // Build scalar SET clause — only include fields not in 'leave' mode so
+            // the UPDATE is minimal and untouched fields are never overwritten.
+            const setClause: Record<string, string | null> = {};
+            if (topic.mode === 'set') setClause['topic'] = topic.value;
+            if (titlePrefix.mode === 'set') setClause['title'] = sanitizedTitlePrefix;
+            if (titlePrefix.mode === 'clear') setClause['title'] = null;
+            if (description.mode === 'set') setClause['description'] = sanitizedDescription;
+            if (description.mode === 'clear') setClause['description'] = null;
+            if (licenseTier.mode === 'set') setClause['license_tier'] = licenseTier.value;
+
+            if (Object.keys(setClause).length > 0) {
+                await tx.update(images).set(setClause).where(inArray(images.id, ids));
+            }
+
+            // Tag additions: ensure tag record exists, then batch-insert imageTags
+            // rows for all selected images.
+            for (const name of addTagNames) {
+                const { value: cleanName, rejected } = requireCleanInput(name);
+                if (rejected || !cleanName) continue;
+                if (!isValidTagName(cleanName)) continue;
+                const slug = getTagSlug(cleanName);
+                if (!isValidTagSlug(slug)) continue;
+                const resolved = await ensureTagRecord(tx, cleanName, slug);
+                if (resolved.kind !== 'found') continue;
+                await tx.insert(imageTags).ignore().values(
+                    ids.map(imageId => ({ imageId, tagId: resolved.tag.id }))
+                );
+            }
+
+            // Tag removals: look up tag by exact name (then slug fallback), then
+            // delete only rows matching both the imageId batch AND the specific tagId
+            // to avoid removing unrelated tags.
+            for (const name of removeTagNames) {
+                const { value: cleanName, rejected } = requireCleanInput(name);
+                if (rejected || !cleanName) continue;
+                const resolved = await findTagRecordByNameOrSlug(tx, cleanName);
+                if (resolved.kind !== 'found') continue;
+                await tx.delete(imageTags).where(
+                    and(inArray(imageTags.imageId, ids), eq(imageTags.tagId, resolved.tag.id))
+                );
+            }
+        });
+
+        const currentUser = await getCurrentUser();
+        logAuditEvent(currentUser?.id ?? null, 'images_bulk_update', 'image', 'bulk', undefined, {
+            ids,
+            topicMode: topic.mode,
+            titlePrefixMode: titlePrefix.mode,
+            descriptionMode: description.mode,
+            licenseTierMode: licenseTier.mode,
+            addTagNames,
+            removeTagNames,
+        }).catch(console.debug);
+
+        // Revalidate broadly — many images and potentially multiple topics may be affected.
+        revalidateAllAppData();
+
+        return { success: true as const, count: ids.length };
+    } catch (e) {
+        console.error('bulkUpdateImages transaction failed:', e);
         return { error: t('failedToUpdateImage') };
     }
 }

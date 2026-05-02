@@ -5,7 +5,12 @@
 export { getSession, getCurrentUser, isAdmin, login, logout, updatePassword } from './actions/auth';
 
 // Images
-export { uploadImages, deleteImage, deleteImages, updateImageMetadata } from './actions/images';
+export { uploadImages, deleteImage, deleteImages, updateImageMetadata, bulkUpdateImages } from './actions/images';
+
+// US-P41: bulk edit shared types — exported from the non-server shared lib so
+// client components can import them without triggering 'use server' restrictions.
+export { LICENSE_TIERS } from '@/lib/bulk-edit-types';
+export type { BulkUpdateImagesInput, LicenseTier, TriState } from '@/lib/bulk-edit-types';
 
 // Topics
 export { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias, setTopicMapVisible } from './actions/topics';
