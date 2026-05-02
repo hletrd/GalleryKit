@@ -245,6 +245,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 shareBaseUrl={seo.url}
                 untitledFallbackTitle={t('titleWithId', { id: image.id })}
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
+                reactionsEnabled={config.reactionsEnabled}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (

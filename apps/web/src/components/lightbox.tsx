@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react';
 import FocusTrap from '@/components/lazy-focus-trap';
-import { X, ChevronLeft, ChevronRight, Maximize, Minimize, Play, Pause } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Maximize, Minimize, Play, Pause, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageDetail } from '@/lib/image-types';
 import { useTranslation } from '@/components/i18n-provider';
@@ -23,6 +23,11 @@ interface LightboxProps {
     slideshowIntervalSeconds?: number;
     currentIndex?: number;
     totalCount?: number;
+    reactionsEnabled?: boolean;
+    reactionCount?: number;
+    liked?: boolean;
+    onToggleReaction?: () => void;
+    isReacting?: boolean;
 }
 
 export function shouldAutoHideLightboxControls(hasHover: boolean, hasFinePointer: boolean) {
@@ -74,7 +79,7 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
         : 'scale(1.08) translate(2%, 2%)';
 }
 
-export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount }: LightboxProps) {
+export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount, reactionsEnabled = true, reactionCount = 0, liked = false, onToggleReaction, isReacting = false }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -499,6 +504,30 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         <Play className="h-5 w-5" />
                     )}
                 </button>
+
+                {/* Heart/like — top right, fourth from right (only when reactions enabled) */}
+                {reactionsEnabled && onToggleReaction && (
+                    <button
+                        {...controlVisibilityProps}
+                        className="pointer-events-auto absolute top-4 right-[11rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleReaction();
+                            showControls(true);
+                        }}
+                        disabled={isReacting}
+                        aria-label={liked ? t('reaction.unlikePhoto') : t('reaction.likePhoto')}
+                        aria-pressed={liked}
+                        title={liked ? t('reaction.unlikePhoto') : t('reaction.likePhoto')}
+                    >
+                        <Heart className={liked ? "h-5 w-5 fill-current" : "h-5 w-5"} />
+                        {reactionCount > 0 && (
+                            <span className="absolute -bottom-1 -right-1 bg-black/70 text-white text-[10px] rounded-full min-w-[16px] h-4 flex items-center justify-center px-0.5 font-medium">
+                                {reactionCount}
+                            </span>
+                        )}
+                    </button>
+                )}
 
                 {/* Prev button — left edge */}
                 {prevId !== null && (

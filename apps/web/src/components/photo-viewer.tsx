@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardDescription, CardFooter } from "@/components/ui/card";
-import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose } from "lucide-react";
+import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose, Heart } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
 import { useTranslation } from "@/components/i18n-provider";
@@ -54,9 +54,10 @@ interface PhotoViewerProps {
     untitledFallbackTitle?: string;
     showDocumentHeading?: boolean;
     slideshowIntervalSeconds?: number;
+    reactionsEnabled?: boolean;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5 }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, reactionsEnabled = true }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -64,6 +65,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [isPinned, setIsPinned] = useState(false);
     const [showLightbox, setShowLightbox] = useState(false);
     const [isSharingPhoto, setIsSharingPhoto] = useState(false);
+    const [reactionCount, setReactionCount] = useState<number>(0);
+    const [liked, setLiked] = useState<boolean>(false);
+    const [isReacting, setIsReacting] = useState(false);
     useEffect(() => {
         try {
             if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
@@ -81,6 +85,57 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     useEffect(() => {
         setCurrentImageId(initialImageId);
     }, [initialImageId]);
+
+    // US-P31: fetch reaction state whenever the displayed image changes
+    useEffect(() => {
+        if (!reactionsEnabled) return;
+        let cancelled = false;
+        fetch(`/api/reactions/${currentImageId}`, { method: 'GET' })
+            .then(r => r.ok ? r.json() : null)
+            .then((data: { reactionCount: number; liked: boolean } | null) => {
+                if (!cancelled && data) {
+                    setReactionCount(data.reactionCount);
+                    setLiked(data.liked);
+                }
+            })
+            .catch(() => {/* ignore fetch errors for read-only state */});
+        return () => { cancelled = true; };
+    }, [currentImageId, reactionsEnabled]);
+
+    const handleToggleReaction = useCallback(async () => {
+        if (isReacting || !reactionsEnabled) return;
+        setIsReacting(true);
+        // Optimistic update
+        const prevLiked = liked;
+        const prevCount = reactionCount;
+        setLiked(!liked);
+        setReactionCount(liked ? Math.max(0, reactionCount - 1) : reactionCount + 1);
+        try {
+            const res = await fetch(`/api/reactions/${currentImageId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            if (res.status === 429) {
+                setLiked(prevLiked);
+                setReactionCount(prevCount);
+                toast.error(t('reaction.rateLimited'));
+            } else if (!res.ok) {
+                setLiked(prevLiked);
+                setReactionCount(prevCount);
+                toast.error(t('reaction.error'));
+            } else {
+                const data: { reactionCount: number; liked: boolean } = await res.json();
+                setReactionCount(data.reactionCount);
+                setLiked(data.liked);
+            }
+        } catch {
+            setLiked(prevLiked);
+            setReactionCount(prevCount);
+            toast.error(t('reaction.error'));
+        } finally {
+            setIsReacting(false);
+        }
+    }, [isReacting, reactionsEnabled, liked, reactionCount, currentImageId, t]);
 
     const normalizedDisplayTitle = useMemo(() => (
         image
@@ -333,6 +388,21 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 )}
 
                 <div className="flex gap-2">
+                    {reactionsEnabled && (
+                        <Button
+                            variant={liked ? "default" : "outline"}
+                            size="sm"
+                            onClick={handleToggleReaction}
+                            disabled={isReacting}
+                            className="gap-2 h-11"
+                            aria-label={liked ? t('reaction.unlikePhoto') : t('reaction.likePhoto')}
+                            aria-pressed={liked}
+                            title={liked ? t('reaction.unlikePhoto') : t('reaction.likePhoto')}
+                        >
+                            <Heart className={liked ? "h-4 w-4 fill-current" : "h-4 w-4"} />
+                            {reactionCount > 0 ? reactionCount : (liked ? t('reaction.liked') : t('reaction.like'))}
+                        </Button>
+                    )}
                     <LightboxTrigger onClick={() => setShowLightbox(true)} />
 
                     <Button
@@ -698,6 +768,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     slideshowIntervalSeconds={slideshowIntervalSeconds}
                     currentIndex={currentIndex}
                     totalCount={images.length}
+                    reactionsEnabled={reactionsEnabled}
+                    reactionCount={reactionCount}
+                    liked={liked}
+                    onToggleReaction={handleToggleReaction}
+                    isReacting={isReacting}
                 />
             )}
 
