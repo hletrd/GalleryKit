@@ -12,6 +12,7 @@ import siteConfig from "@/site-config.json";
 import { getCspNonce } from '@/lib/csp-nonce';
 
 import Script from 'next/script';
+import { RegisterServiceWorker } from '@/components/register-service-worker';
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
@@ -127,6 +128,7 @@ export default async function RootLayout({
             <Toaster />
           </ThemeProvider>
         </NextIntlClientProvider>
+        <RegisterServiceWorker />
         {/* Pretendard font loaded via self-hosted @font-face in globals.css */}
         {siteConfig.google_analytics_id && /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id) && (
           <>
