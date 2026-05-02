@@ -16,6 +16,7 @@ import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename } from '@/lib/validation';
 import { getImageProcessingLockName } from '@/lib/advisory-locks';
+import { generateCaption } from '@/lib/caption-generator';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -112,6 +113,9 @@ export type ImageProcessingJob = {
     quality?: ImageQualitySettings;
     imageSizes?: number[];
     iccProfileName?: string | null;
+    // US-P52: EXIF hints for caption stub / future ONNX inference
+    camera_model?: string | null;
+    capture_date?: string | null;
 };
 
 export type ProcessingQueueState = {
@@ -281,6 +285,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             // straddle later admin config changes while it waits in the queue.
             let quality: ImageQualitySettings | undefined = job.quality;
             let imageSizes: number[] | undefined = job.imageSizes;
+            let autoAltTextEnabled = false;
             if (!quality && !imageSizes) {
                 try {
                     const config = await getGalleryConfig();
@@ -290,6 +295,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                         jpeg: config.imageQualityJpeg,
                     };
                     imageSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
+                    autoAltTextEnabled = config.autoAltTextEnabled;
                 } catch {
                     // DB unavailable during processing — use Sharp defaults (90/85/90)
                 }
@@ -334,6 +340,25 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 ]);
                 return;
             }
+
+            // US-P52: Fire-and-forget caption hook. MUST NOT block the queue job.
+            // Runs after Sharp processing completes and processed=true is committed.
+            generateCaption(
+                { imageId: job.id, camera_model: job.camera_model, capture_date: job.capture_date },
+                autoAltTextEnabled,
+            ).then(async (caption) => {
+                if (caption === null) return;
+                try {
+                    await db.update(images)
+                        .set({ alt_text_suggested: caption })
+                        .where(eq(images.id, job.id));
+                    console.debug(`[Queue] Caption stored for image ${job.id}`);
+                } catch (captionErr) {
+                    console.warn(`[Queue] Failed to store caption for image ${job.id}:`, captionErr);
+                }
+            }).catch((captionErr) => {
+                console.warn(`[Queue] Caption generation failed for image ${job.id}:`, captionErr);
+            });
 
             console.debug(`[Queue] Job ${job.id} complete`);
         } catch (err) {
