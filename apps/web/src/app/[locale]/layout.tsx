@@ -3,7 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { NextIntlClientProvider } from 'next-intl';
-import { getMessages } from 'next-intl/server';
+import { getMessages, getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/lib/constants';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
@@ -79,9 +79,10 @@ export default async function RootLayout({
     return notFound();
   }
 
-  const [seo, messages] = await Promise.all([
+  const [seo, messages, t] = await Promise.all([
     getSeoSettings(),
     getMessages(),
+    getTranslations('common'),
   ]);
   const nonce = await getCspNonce();
 
@@ -100,6 +101,16 @@ export default async function RootLayout({
         suppressHydrationWarning
         className="antialiased min-h-screen bg-background font-sans flex flex-col"
       >
+        {/* Skip-to-main-content: first focusable element in the document so
+            keyboard users can bypass repeated navigation on every page load.
+            Becomes visible on focus; target id="main-content" is set by the
+            (public) sub-layout's <main> element (US-P15 AC-6). */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md"
+        >
+          {t('skipToContent')}
+        </a>
         <NextIntlClientProvider messages={messages}>
           <ThemeProvider
             attribute="class"
