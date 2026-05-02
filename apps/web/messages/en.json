@@ -469,9 +469,16 @@
     "uploadSettingsLocked": "Upload-processing settings are locked while uploads are active or after photos exist. Regenerate the library to change them.",
     "tagPersistenceWarning": "Uploaded {file}, but one or more requested tags could not be saved."
   },
+  "theme": {
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+    "oled": "OLED"
+  },
   "aria": {
     "searchPhotos": "Search photos",
     "toggleTheme": "Toggle theme",
+    "cycleTheme": "Theme: {theme}. Click to cycle.",
     "expandMenu": "Expand menu",
     "collapseMenu": "Collapse menu",
     "openFullscreen": "Open fullscreen view",

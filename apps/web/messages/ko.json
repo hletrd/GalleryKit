@@ -469,9 +469,16 @@
     "uploadSettingsLocked": "업로드가 진행 중이거나 사진이 있으면 업로드 처리 설정이 잠깁니다. 변경하려면 라이브러리를 다시 생성해 주세요.",
     "tagPersistenceWarning": "{file} 업로드는 완료됐지만 요청한 태그 중 일부를 저장하지 못했습니다."
   },
+  "theme": {
+    "system": "시스템",
+    "light": "라이트",
+    "dark": "다크",
+    "oled": "OLED"
+  },
   "aria": {
     "searchPhotos": "사진 검색",
     "toggleTheme": "테마 전환",
+    "cycleTheme": "테마: {theme}. 클릭하여 변경.",
     "expandMenu": "메뉴 열기",
     "collapseMenu": "메뉴 닫기",
     "openFullscreen": "전체 화면으로 보기",
