@@ -1,5 +1,6 @@
 import { getImagesLite, getImagesLitePage, getTagsCached, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
+import { OnThisDayWidget } from '@/components/on-this-day-widget';
 import { Metadata } from 'next';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -49,13 +50,14 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   // too (previously missing). The unfiltered home page is the highest-SEO
   // surface and benefits the most from cross-locale association.
   const alternateLanguages = buildHreflangAlternates(seo.url, '/');
+  const atomFeedUrl = `${seo.url}/feed.xml`;
 
   if (seo.og_image_url) {
     const ogImages = [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }];
     return {
       title,
       description,
-      alternates: { canonical: pageUrl, languages: alternateLanguages },
+      alternates: { canonical: pageUrl, languages: alternateLanguages, types: { 'application/atom+xml': atomFeedUrl } },
       robots,
       openGraph: {
         title,
@@ -100,7 +102,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   return {
     title: title,
     description: description,
-    alternates: { canonical: pageUrl, languages: alternateLanguages },
+    alternates: { canonical: pageUrl, languages: alternateLanguages, types: { 'application/atom+xml': atomFeedUrl } },
     robots,
     openGraph: {
       title: title,
@@ -188,7 +190,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
           }}
         />
       )}
-      <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
+      <div className="flex flex-col lg:flex-row gap-8">
+        <div className="flex-1 min-w-0">
+          <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
+        </div>
+        <div className="lg:w-64 xl:w-72 flex-shrink-0">
+          <OnThisDayWidget />
+        </div>
+      </div>
     </>
   );
 }

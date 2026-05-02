@@ -96,6 +96,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   // duplicate-content penalties. The map is generated from the LOCALES
   // constant so adding a new locale automatically extends it.
   const alternateLanguages = buildHreflangAlternates(seo.url, `/${topicData.slug}`);
+  const atomFeedUrl = `${pageUrl}/feed.xml`;
 
   return {
     title: title,
@@ -103,6 +104,7 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
     alternates: {
       canonical: pageUrl,
       languages: alternateLanguages,
+      types: { 'application/atom+xml': atomFeedUrl },
     },
     robots: tagSlugs.length > 0 ? { index: false, follow: true } : undefined,
     openGraph: {
