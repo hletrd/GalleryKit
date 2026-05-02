@@ -4,6 +4,7 @@ import { countCodePoints } from '@/lib/utils';
 const RESERVED_TOPIC_ROUTE_SEGMENTS = new Set([
     'admin',
     'g',
+    'map',
     'p',
     's',
     'uploads',

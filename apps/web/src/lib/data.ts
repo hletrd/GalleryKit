@@ -306,6 +306,31 @@ const publicSelectFields = {
     ...publicSelectFieldCore,
 } as const;
 
+// PRIVACY: publicMapSelectFields is the ONLY select that exposes latitude/longitude
+// to unauthenticated visitors. It is used exclusively by getMapImages() which
+// enforces topics.map_visible = true at the query level (inner JOIN). It omits
+// the same internal/PII fields as publicSelectFields, but retains latitude and
+// longitude so map markers can be placed.
+//
+// DO NOT use this field set without the map_visible topic filter.
+const {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy (same as publicSelectFields)
+    filename_original: _omitFilenameOriginalMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
+    user_filename: _omitUserFilenameMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
+    original_format: _omitOriginalFormatMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
+    original_file_size: _omitOriginalFileSizeMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
+    processed: _omitProcessedMap,
+    ...publicMapSelectFieldCore
+} = adminSelectFields;
+
+const publicMapSelectFields = {
+    ...publicMapSelectFieldCore,
+} as const;
+
 export const adminSelectFieldKeys = Object.freeze(
     Object.keys(adminSelectFields).sort(),
 ) as readonly (keyof typeof adminSelectFields)[];
@@ -313,6 +338,10 @@ export const adminSelectFieldKeys = Object.freeze(
 export const publicSelectFieldKeys = Object.freeze(
     Object.keys(publicSelectFields).sort(),
 ) as readonly (keyof typeof publicSelectFields)[];
+
+export const publicMapSelectFieldKeys = Object.freeze(
+    Object.keys(publicMapSelectFields).sort(),
+) as readonly (keyof typeof publicMapSelectFields)[];
 
 // Compile-time privacy guard: if latitude, longitude, filename_original, or user_filename
 // are ever added to publicSelectFields, this assertion will produce a TypeScript error.
@@ -324,6 +353,14 @@ type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'u
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
+
+// Compile-time guard for publicMapSelectFields: it must NOT contain any admin-only
+// field beyond latitude and longitude. The allowed set is exactly publicSelectFields
+// UNION {latitude, longitude}. If any OTHER sensitive key leaks in, this guard fires.
+type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size';
+type _MapSensitiveKeysInPublicMap = Extract<keyof typeof publicMapSelectFields, _MapSensitiveKeys>;
+const _mapPrivacyGuard: _MapSensitiveKeysInPublicMap extends never ? true : [_MapSensitiveKeysInPublicMap, 'ERROR: privacy-sensitive field found in publicMapSelectFields — must only add latitude/longitude vs publicSelectFields'] = true;
+void _mapPrivacyGuard;
 
 // Cycle 1 RPF loop AGG1-L07 / A1-LOW-01: compile-time guard against
 // adding large/perf-sensitive payload fields to the public listing
@@ -1229,6 +1266,43 @@ export async function getImageIdsForSitemap(limit: number = 24000) {
     .where(eq(images.processed, true))
     .orderBy(desc(images.created_at))
     .limit(safeLimit);
+}
+
+// PRIVACY: getMapImages is the ONLY public-facing function that exposes
+// latitude/longitude. It enforces two layers of GPS-leak prevention:
+// 1. SQL layer: INNER JOIN on topics.map_visible = true ensures the DB
+//    only returns rows from opted-in topics.
+// 2. Runtime layer: every returned row is asserted to have topic_map_visible=true
+//    (defense-in-depth — catches future refactors that break the JOIN condition).
+// Only images where BOTH latitude IS NOT NULL AND longitude IS NOT NULL are returned.
+export async function getMapImages() {
+    const rows = await db
+        .select({
+            ...publicMapSelectFields,
+            topic_label: topics.label,
+            topic_map_visible: topics.map_visible,
+        })
+        .from(images)
+        .innerJoin(topics, eq(images.topic, topics.slug))
+        .where(
+            and(
+                eq(images.processed, true),
+                eq(topics.map_visible, true),
+                isNotNull(images.latitude),
+                isNotNull(images.longitude),
+            )
+        );
+
+    // Runtime defense-in-depth: assert every row has map_visible=true.
+    for (const row of rows) {
+        if (!row.topic_map_visible) {
+            throw new Error(
+                `[getMapImages] GPS leak guard: image ${row.id} belongs to a map_visible=false topic. Refusing to return GPS data.`
+            );
+        }
+    }
+
+    return rows;
 }
 
 export const getImageCached = cache(getImage);
