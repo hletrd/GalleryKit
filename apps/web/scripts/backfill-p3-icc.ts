@@ -141,13 +141,16 @@ async function main() {
 
     // Pull all rows that have an icc_profile_name indicating P3 or wider gamut.
     // We filter in JS (resolveAvifIccProfile) to reuse the canonical logic.
-    const rows = await db.execute<ImageRow>(sql`
+    // Drizzle's mysql2 execute() returns ResultSetHeader | FieldPacket[] at the
+    // type level; the runtime value for SELECT is the row array — cast explicitly.
+    const rawRows = await db.execute(sql`
         SELECT id, filename_avif, icc_profile_name
         FROM images
         WHERE processed = TRUE
           AND icc_profile_name IS NOT NULL
         ORDER BY id ASC
     `);
+    const rows = rawRows as unknown as ImageRow[];
 
     const candidates = rows.filter(
         (r) => resolveAvifIccProfile(r.icc_profile_name) === 'p3',
