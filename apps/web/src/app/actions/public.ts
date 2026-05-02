@@ -2,6 +2,8 @@
 
 import { headers } from 'next/headers';
 import { getImagesLite, normalizeImageListCursor, searchImages, type ImageListCursorInput } from '@/lib/data';
+import { db, imageViews, topicViews, sharedGroupViews } from '@/db';
+import { isBot, lookupCountry, sanitizeReferrerHost } from '@/lib/analytics';
 
 import { isValidSlug, isValidTagSlug } from '@/lib/validation';
 import { stripControlChars } from '@/lib/sanitize';
@@ -218,4 +220,69 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
         console.error('searchImagesAction failed:', err);
         return { status: 'error', results: [] };
     }
+}
+
+// ---------------------------------------------------------------------------
+// US-P44: fire-and-forget view recording actions.
+// These live in public.ts (excluded from the action-origin gate by name) and
+// do NOT require same-origin admin auth — they are intentionally public.
+// Bot views are recorded with bot=true and excluded from public-facing counts.
+// Full IPs are never stored; only country_code derived from the IP.
+// ---------------------------------------------------------------------------
+
+async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers>>) {
+    const ip = getClientIp(requestHeaders);
+    const referrerHeader = requestHeaders.get('referer') ?? requestHeaders.get('referrer') ?? '';
+    const ua = requestHeaders.get('user-agent') ?? '';
+    return {
+        referrer_host: sanitizeReferrerHost(referrerHeader),
+        country_code: lookupCountry(ip),
+        bot: isBot(ua),
+    };
+}
+
+// @action-origin-exempt: public analytics endpoint — no admin auth needed
+export async function recordPhotoView(imageId: number): Promise<void> {
+    if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
+    const requestHeaders = await headers();
+    const params = await buildViewParams(requestHeaders);
+    // Fire-and-forget: swallow errors so analytics never blocks page render
+    db.insert(imageViews).values({
+        imageId,
+        referrer_host: params.referrer_host,
+        country_code: params.country_code,
+        bot: params.bot,
+    }).catch((err: unknown) => {
+        console.debug('[analytics] recordPhotoView failed:', err);
+    });
+}
+
+// @action-origin-exempt: public analytics endpoint — no admin auth needed
+export async function recordTopicView(topicSlug: string): Promise<void> {
+    if (typeof topicSlug !== 'string' || topicSlug.length === 0 || topicSlug.length > 255) return;
+    const requestHeaders = await headers();
+    const params = await buildViewParams(requestHeaders);
+    db.insert(topicViews).values({
+        topic: topicSlug,
+        referrer_host: params.referrer_host,
+        country_code: params.country_code,
+        bot: params.bot,
+    }).catch((err: unknown) => {
+        console.debug('[analytics] recordTopicView failed:', err);
+    });
+}
+
+// @action-origin-exempt: public analytics endpoint — no admin auth needed
+export async function recordSharedGroupView(groupId: number): Promise<void> {
+    if (typeof groupId !== 'number' || !Number.isInteger(groupId) || groupId <= 0) return;
+    const requestHeaders = await headers();
+    const params = await buildViewParams(requestHeaders);
+    db.insert(sharedGroupViews).values({
+        groupId,
+        referrer_host: params.referrer_host,
+        country_code: params.country_code,
+        bot: params.bot,
+    }).catch((err: unknown) => {
+        console.debug('[analytics] recordSharedGroupView failed:', err);
+    });
 }
