@@ -169,6 +169,34 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch { console.debug('sessionStorage remove failed') }
     }, []);
 
+    // Idle prefetch of prev/next photo pages (1.5 s delay via requestIdleCallback)
+    useEffect(() => {
+        const ids = [prevId, nextId].filter((id): id is number => id != null);
+        if (ids.length === 0) return;
+
+        const cancelFns: (() => void)[] = [];
+
+        const scheduleIdle = (fn: () => void): (() => void) => {
+            if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                const id = window.requestIdleCallback(fn, { timeout: 3000 });
+                return () => window.cancelIdleCallback(id);
+            }
+            const id = setTimeout(fn, 1500);
+            return () => clearTimeout(id);
+        };
+
+        for (const id of ids) {
+            const cancel = scheduleIdle(() => {
+                router.prefetch(buildPhotoPath(id));
+            });
+            cancelFns.push(cancel);
+        }
+
+        return () => {
+            for (const cancel of cancelFns) cancel();
+        };
+    }, [prevId, nextId, buildPhotoPath, router]);
+
     useEffect(() => {
         if (!syncPhotoQueryBasePath || !image) return;
         router.replace(`${syncPhotoQueryBasePath}?photoId=${image.id}`, { scroll: false });
@@ -207,6 +235,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 navigate(1);
             } else if (e.key === 'f' || e.key === 'F') {
                 setShowLightbox(prev => !prev);
+            } else if (e.key === 'i' || e.key === 'I') {
+                const isLg = window.matchMedia('(min-width: 1024px)').matches;
+                if (isLg) {
+                    setIsPinned(prev => !prev);
+                } else {
+                    setShowBottomSheet(prev => !prev);
+                }
             }
         };
         window.addEventListener("keydown", handleKeyDown);
@@ -277,7 +312,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 <h1 className="sr-only">{normalizedDisplayTitle ?? t('common.photo')}</h1>
             )}
             {/* F-9: the keyboard-shortcut hint is irrelevant on touch
-                devices (no arrow keys, no `F`); hide it below the `md`
+                devices (no arrow keys, no `F`, no `I`); hide it below the `md`
                 breakpoint to stop wasting precious vertical space above
                 the photo on phones. */}
             <p className="mb-2 text-xs text-muted-foreground hidden md:block" id="photo-viewer-shortcuts">
@@ -306,6 +341,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         // F-20: bump to 44 px on mobile; the toolbar is
                         // touch-primary on the `lg:hidden` breakpoint.
                         className="gap-2 lg:hidden h-11"
+                        aria-keyshortcuts="I"
+                        title={`${t('viewer.info')} (I)`}
                     >
                         <Info className="h-4 w-4" />
                         {t('viewer.info')}
@@ -356,6 +393,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             }
                         }}
                         className="gap-2 transition-all hidden lg:flex h-11"
+                        aria-keyshortcuts="I"
+                        title={`${isPinned ? t('viewer.infoPinned') : t('viewer.info')} (I)`}
                     >
                         {isPinned ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
                         {isPinned ? t('viewer.infoPinned') : t('viewer.info')}
