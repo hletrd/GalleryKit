@@ -17,7 +17,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { withAdminAuth, type VerifiedToken } from '@/lib/api-auth';
+import { withAdminAuth } from '@/lib/api-auth';
+import { verifyToken } from '@/lib/admin-tokens';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb } from '@/lib/process-image';
@@ -37,11 +38,16 @@ const NO_CACHE = {
 };
 
 export const POST = withAdminAuth(
-    async function POST(
-        request: NextRequest,
-        ctx?: { token?: VerifiedToken },
-    ) {
-        const tokenUserId = ctx?.token?.userId ?? null;
+    async function POST(request: NextRequest) {
+        // Re-verify the X-GalleryKit-Token to access userId for audit
+        // logging. The withAdminAuth wrapper already verified scope and
+        // gated entry; this second verifyToken pass is type-safe (avoids
+        // augmenting the route handler's signature with a non-Next.js
+        // second parameter) and cheap (one sha256 + one indexed lookup).
+        // Cookie-authenticated requests (no header) leave tokenUserId null.
+        const tokenHeader = request.headers.get('X-GalleryKit-Token');
+        const verified = tokenHeader ? await verifyToken(tokenHeader) : null;
+        const tokenUserId = verified?.userId ?? null;
         const ip = getClientIp(request.headers);
 
         let formData: FormData;
