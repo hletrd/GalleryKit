@@ -262,7 +262,7 @@
       "default": "Gallery"
     },
     "downloadJpeg": "Download JPEG",
-    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox."
+    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info."
   },
   "shared": {
     "viewGallery": "View Gallery",

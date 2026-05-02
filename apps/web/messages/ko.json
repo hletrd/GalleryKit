@@ -262,7 +262,7 @@
       "default": "갤러리"
     },
     "downloadJpeg": "JPEG 다운로드",
-    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글."
+    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글."
   },
   "shared": {
     "viewGallery": "갤러리 보기",
