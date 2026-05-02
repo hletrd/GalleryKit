@@ -21,6 +21,7 @@ export function AdminNav() {
         { href: localizePath(locale, '/admin/password'), label: t('nav.password') },
         { href: localizePath(locale, '/admin/users'), label: t('nav.users') },
         { href: localizePath(locale, '/admin/db'), label: t('nav.db') },
+        { href: localizePath(locale, '/admin/analytics'), label: t('nav.analytics') },
     ];
 
     return (
