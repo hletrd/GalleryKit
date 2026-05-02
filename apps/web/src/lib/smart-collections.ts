@@ -236,10 +236,12 @@ function compilePredicate(pred: Predicate): SQL {
             return inArray(col, p.values) as SQL;
         }
 
-        default:
+        default: {
+            const exhaustive = pred as { operator: string; column: string };
             throw new SmartCollectionQueryError(
-                `Unknown operator "${(pred as { operator: string }).operator}" for column "${pred.column}"`,
+                `Unknown operator "${exhaustive.operator}" for column "${exhaustive.column}"`,
             );
+        }
     }
 }
 
