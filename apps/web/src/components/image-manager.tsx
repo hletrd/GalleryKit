@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, batchUpdateImageTags, updateImageMetadata } from '@/app/actions';
+import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, batchUpdateImageTags, updateImageMetadata, bulkUpdateImages } from '@/app/actions';
+import type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
+import { BulkEditDialog } from '@/components/bulk-edit-dialog';
 import { copyToClipboard } from '@/lib/clipboard';
 import { TagInput } from "@/components/tag-input";
 import { Button } from "@/components/ui/button";
@@ -63,11 +65,13 @@ interface ImageType {
 export function ImageManager({
     initialImages,
     availableTags,
+    availableTopics = [],
     imageSizes = DEFAULT_IMAGE_SIZES,
     shareBaseUrl,
 }: {
     initialImages: ImageType[],
     availableTags: { id: number, name: string, slug: string }[],
+    availableTopics?: { slug: string, label: string }[],
     imageSizes?: number[],
     shareBaseUrl: string,
 }) {
@@ -200,6 +204,25 @@ export function ImageManager({
     const [isBatchAddingTag, setIsBatchAddingTag] = useState(false);
     const [tagInput, setTagInput] = useState('');
 
+    const [isBulkEditDialogOpen, setIsBulkEditDialogOpen] = useState(false);
+
+    const handleBulkEdit = async (input: BulkUpdateImagesInput) => {
+        try {
+            const res = await bulkUpdateImages(input);
+            if (res?.success) {
+                toast.success(t('imageManager.bulkEditSuccess', { count: res.count }));
+                setSelectedIds(new Set());
+                setIsBulkEditDialogOpen(false);
+                router.refresh();
+            } else {
+                toast.error(res?.error || t('imageManager.bulkEditFailed'));
+            }
+        } catch (err) {
+            console.warn('Failed to bulk edit images:', err);
+            toast.error(t('imageManager.bulkEditFailed'));
+        }
+    };
+
     const handleBatchAddTag = async () => {
          if (!tagInput.trim()) return;
          setIsBatchAddingTag(true);
@@ -274,6 +297,10 @@ export function ImageManager({
                 <div className="sticky top-0 z-20 bg-muted/95 p-2 rounded-md flex flex-col gap-2 border shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-sm font-medium px-2">{t('imageManager.selected', { count: selectedIds.size })}</span>
                     <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => setIsBulkEditDialogOpen(true)}>
+                            {t('imageManager.bulkEditButton')}
+                        </Button>
+
                         <Dialog
                             open={isBatchTagDialogOpen}
                             onOpenChange={(open) => {
@@ -496,6 +523,15 @@ export function ImageManager({
                     </TableBody>
                 </Table>
             </div>
+
+            <BulkEditDialog
+                open={isBulkEditDialogOpen}
+                onOpenChange={setIsBulkEditDialogOpen}
+                selectedIds={Array.from(selectedIds)}
+                availableTags={availableTags}
+                availableTopics={availableTopics}
+                onSubmit={handleBulkEdit}
+            />
 
             <Dialog open={!!editingImage} onOpenChange={(open) => !open && setEditingImage(null)}>
                 <DialogContent closeLabel={t('aria.close')}>

@@ -36,7 +36,7 @@ export function DashboardClient({ images, topics, tags, page, totalPages, imageS
                 <div className="min-w-0">
                     <h2 className="text-xl font-semibold mb-4">{t('dashboard.recentUploads')}</h2>
                     <div className="max-w-full max-h-[calc(100vh-16rem)] overflow-auto 2xl:max-h-[calc(100vh-14rem)]">
-                        <ImageManager initialImages={images} availableTags={tags} imageSizes={imageSizes} shareBaseUrl={shareBaseUrl} />
+                        <ImageManager initialImages={images} availableTags={tags} availableTopics={topics} imageSizes={imageSizes} shareBaseUrl={shareBaseUrl} />
                     </div>
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-4 mt-4">
