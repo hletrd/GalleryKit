@@ -105,6 +105,8 @@ export default async function RootLayout({
             attribute="class"
             defaultTheme="system"
             enableSystem
+            themes={['system', 'light', 'dark', 'oled']}
+            storageKey="gallery_theme"
             disableTransitionOnChange
             nonce={nonce}
           >
