@@ -265,7 +265,9 @@
       "default": "Gallery"
     },
     "downloadJpeg": "Download JPEG",
-    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info."
+    "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, Space to toggle slideshow.",
+    "slideshowOn": "Slideshow started",
+    "slideshowOff": "Slideshow stopped"
   },
   "shared": {
     "viewGallery": "View Gallery",
@@ -500,7 +502,8 @@
     "deleteItem": "Delete",
     "deleteUser": "Delete user {username}",
     "goBack": "Go back",
-    "switchLocale": "Switch language to {language}"
+    "switchLocale": "Switch language to {language}",
+    "toggleSlideshow": "Toggle slideshow"
   },
   "common": {
     "untitled": "Untitled",
@@ -553,7 +556,11 @@
     "stripGpsHint": "New uploads won't store GPS in gallery metadata. Existing images and source EXIF aren't touched.",
     "loadFailed": "Could not load settings. Please try again before saving changes.",
     "imageSizesLockedHint": "Output sizes are locked because photos already exist. Empty the gallery to change them.",
-    "uploadContractLocked": "Image size and GPS settings are locked for an existing gallery, so old and new uploads stay consistent."
+    "uploadContractLocked": "Image size and GPS settings are locked for an existing gallery, so old and new uploads stay consistent.",
+    "slideshowTitle": "Slideshow",
+    "slideshowDesc": "Configure slideshow auto-advance interval.",
+    "slideshowInterval": "Slideshow Interval (seconds)",
+    "slideshowIntervalHint": "2–30 seconds. How long each photo is shown in slideshow mode."
   },
   "footer": {
     "admin": "Admin"

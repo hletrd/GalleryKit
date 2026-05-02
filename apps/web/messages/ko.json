@@ -265,7 +265,9 @@
       "default": "갤러리"
     },
     "downloadJpeg": "JPEG 다운로드",
-    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글."
+    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, Space 슬라이드쇼 토글.",
+    "slideshowOn": "슬라이드쇼 시작",
+    "slideshowOff": "슬라이드쇼 중지"
   },
   "shared": {
     "viewGallery": "갤러리 보기",
@@ -500,7 +502,8 @@
     "deleteItem": "삭제",
     "deleteUser": "사용자 {username} 삭제",
     "goBack": "뒤로",
-    "switchLocale": "언어를 {language}(으)로 전환"
+    "switchLocale": "언어를 {language}(으)로 전환",
+    "toggleSlideshow": "슬라이드쇼 토글"
   },
   "common": {
     "untitled": "제목 없음",
@@ -553,7 +556,11 @@
     "stripGpsHint": "새 업로드는 갤러리 메타데이터에 GPS를 저장하지 않습니다. 기존 이미지와 원본 EXIF는 그대로 둡니다.",
     "loadFailed": "설정을 불러오지 못했습니다. 변경 사항을 저장하기 전에 다시 시도해 주세요.",
     "imageSizesLockedHint": "사진이 이미 있어 출력 크기는 잠겨 있습니다. 변경하려면 갤러리를 비우세요.",
-    "uploadContractLocked": "이미지 크기와 GPS 설정은 기존 갤러리의 일관성을 위해 잠겨 있습니다."
+    "uploadContractLocked": "이미지 크기와 GPS 설정은 기존 갤러리의 일관성을 위해 잠겨 있습니다.",
+    "slideshowTitle": "슬라이드쇼",
+    "slideshowDesc": "슬라이드쇼 자동 진행 간격을 설정합니다.",
+    "slideshowInterval": "슬라이드쇼 간격 (초)",
+    "slideshowIntervalHint": "2~30초. 슬라이드쇼 모드에서 각 사진이 표시되는 시간입니다."
   },
   "footer": {
     "admin": "관리자"
