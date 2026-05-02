@@ -9,7 +9,8 @@
     "seo": "SEO",
     "settings": "Settings",
     "logout": "Log out",
-    "admin": "Admin"
+    "admin": "Admin",
+    "analytics": "Analytics"
   },
   "db": {
     "title": "Database",
@@ -679,5 +680,23 @@
       "11": "November",
       "12": "December"
     }
+  },
+  "analytics": {
+    "title": "Analytics",
+    "windowLabel": "Time window",
+    "window30d": "Last 30 days",
+    "window90d": "Last 90 days",
+    "windowAll": "All time",
+    "topPhotosTitle": "Top 20 Photos by Views",
+    "topTopicsTitle": "Top Topics by Views",
+    "countriesTitle": "Views by Country",
+    "referrersTitle": "Views by Referrer",
+    "colPhoto": "Photo",
+    "colTopic": "Topic",
+    "colViews": "Views",
+    "colCountry": "Country",
+    "colReferrer": "Referrer",
+    "noData": "No data for this period.",
+    "untitled": "Untitled"
   }
 }

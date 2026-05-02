@@ -9,7 +9,8 @@
     "seo": "SEO",
     "settings": "설정",
     "logout": "로그아웃",
-    "admin": "관리"
+    "admin": "관리",
+    "analytics": "분석"
   },
   "db": {
     "title": "데이터베이스 관리",
@@ -653,5 +654,23 @@
       "11": "11월",
       "12": "12월"
     }
+  },
+  "analytics": {
+    "title": "분석",
+    "windowLabel": "기간 선택",
+    "window30d": "최근 30일",
+    "window90d": "최근 90일",
+    "windowAll": "전체 기간",
+    "topPhotosTitle": "조회수 상위 20개 사진",
+    "topTopicsTitle": "조회수 상위 카테고리",
+    "countriesTitle": "국가별 조회수",
+    "referrersTitle": "유입 경로별 조회수",
+    "colPhoto": "사진",
+    "colTopic": "카테고리",
+    "colViews": "조회수",
+    "colCountry": "국가",
+    "colReferrer": "유입 경로",
+    "noData": "해당 기간의 데이터가 없습니다.",
+    "untitled": "제목 없음"
   }
 }
