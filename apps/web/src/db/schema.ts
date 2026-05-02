@@ -6,6 +6,9 @@ export const topics = mysqlTable("topics", {
     label: varchar("label", { length: 255 }).notNull(),
     order: int("order").default(0),
     image_filename: varchar("image_filename", { length: 255 }),
+    // US-P21: per-topic opt-in for the public /map view. Defaults to false so
+    // every existing topic stays GPS-private until an admin explicitly opts in.
+    map_visible: boolean("map_visible").notNull().default(false),
 });
 
 export const topicAliases = mysqlTable("topic_aliases", {
