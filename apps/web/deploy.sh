@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Gallery Deployment Script
 # Must be run from the repo root (e.g., /home/ubuntu/gallery)

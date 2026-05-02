@@ -3,40 +3,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
+import { DEFAULT_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
 
 interface ImageZoomProps {
     children: React.ReactNode;
     className?: string;
 }
 
-const MIN_ZOOM = 1.0;
-const MAX_ZOOM = 5.0;
 const DOUBLE_TAP_MS = 300;
-const DEFAULT_ZOOM = 2.5;
-const SNAP_THRESHOLD = 1.1;
-
-/** Euclidean distance between two touch points. */
-function touchDistance(t0: React.Touch, t1: React.Touch): number {
-    const dx = t1.clientX - t0.clientX;
-    const dy = t1.clientY - t0.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-/** Midpoint between two touch points, in client coordinates. */
-function touchMidpoint(t0: React.Touch, t1: React.Touch): { x: number; y: number } {
-    return { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
-}
-
-/**
- * Compute the clamped pan position after a zoom or pan operation.
- * x/y are expressed as percentages of the container size.
- */
-function clampPan(x: number, y: number): { x: number; y: number } {
-    return {
-        x: Math.max(-100, Math.min(100, x)),
-        y: Math.max(-100, Math.min(100, y)),
-    };
-}
 
 export function ImageZoom({ children, className }: ImageZoomProps) {
     const { t } = useTranslation();
@@ -114,8 +88,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             e.preventDefault();
             e.stopPropagation();
 
-            const factor = e.deltaY > 0 ? 0.9 : 1.1;
-            const newLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentLevel * factor));
+            const newLevel = wheelStep(currentLevel, e.deltaY);
 
             if (newLevel <= MIN_ZOOM) {
                 resetZoom(false);
@@ -270,24 +243,24 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             if (pinchStartDistanceRef.current === 0) return;
 
             const rawLevel = pinchStartZoomRef.current * (dist / pinchStartDistanceRef.current);
-            const newLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, rawLevel));
+            const clampedLevel = clampZoom(rawLevel);
 
             // Anchor to pinch midpoint
             const mid = pinchMidpointRef.current;
             const startPos = pinchStartPositionRef.current;
-            const scaleRatio = newLevel / pinchStartZoomRef.current;
+            const scaleRatio = clampedLevel / pinchStartZoomRef.current;
             const newX = mid.x + (startPos.x - mid.x) * scaleRatio;
             const newY = mid.y + (startPos.y - mid.y) * scaleRatio;
             const clamped = clampPan(newX, newY);
 
-            zoomLevelRef.current = newLevel;
+            zoomLevelRef.current = clampedLevel;
             positionRef.current = clamped;
 
-            if (newLevel > MIN_ZOOM) {
+            if (clampedLevel > MIN_ZOOM) {
                 setIsZoomed(true);
-                lastPinchLevelRef.current = newLevel;
+                lastPinchLevelRef.current = clampedLevel;
             }
-            applyTransform(newLevel, clamped.x, clamped.y, false);
+            applyTransform(clampedLevel, clamped.x, clamped.y, false);
             return;
         }
 

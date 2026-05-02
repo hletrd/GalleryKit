@@ -16,7 +16,10 @@ test
 .omc
 .omx/
 .env.deploy
-.context/
+.context/*
+!.context/reviews/
+!.context/reviews/**
 .agent/
+apps/web/.context/
 apps/web/test-results/
 apps/web/playwright-report/

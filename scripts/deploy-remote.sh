@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_DEPLOY_ENV_FILE="$HOME/.gallerykit-secrets/gallery-deploy.env"
-ENV_FILE="${DEPLOY_ENV_FILE:-$DEFAULT_DEPLOY_ENV_FILE}"
 
 expand_tilde_path() {
   local value="${1:-}"
@@ -19,6 +18,15 @@ expand_tilde_path() {
 
   printf '%s\n' "$value"
 }
+
+ROOT_DEPLOY_ENV_FILE="$ROOT_DIR/.env.deploy"
+if [[ -n "${DEPLOY_ENV_FILE:-}" ]]; then
+  ENV_FILE="$(expand_tilde_path "$DEPLOY_ENV_FILE")"
+elif [[ -f "$ROOT_DEPLOY_ENV_FILE" ]]; then
+  ENV_FILE="$ROOT_DEPLOY_ENV_FILE"
+else
+  ENV_FILE="$DEFAULT_DEPLOY_ENV_FILE"
+fi
 
 build_deploy_command() {
   local host="${DEPLOY_HOST:-}"
@@ -46,7 +54,7 @@ build_deploy_command() {
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing deploy env file: $ENV_FILE" >&2
-  echo "Copy .env.deploy.example to $DEFAULT_DEPLOY_ENV_FILE (or set DEPLOY_ENV_FILE) and customize DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH (or DEPLOY_CMD) first." >&2
+  echo "Copy .env.deploy.example to .env.deploy or $DEFAULT_DEPLOY_ENV_FILE (or set DEPLOY_ENV_FILE) and customize DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH (or DEPLOY_CMD) first." >&2
   exit 1
 fi
 

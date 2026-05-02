@@ -63,13 +63,14 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
   const tagSlugs = requestedTagSlugs.length > 0
     ? filterExistingTagSlugs(requestedTagSlugs, allTags)
     : [];
+  const tagLabels = tagSlugs.map((slug) => allTags.find((tag) => tag.slug === slug)?.name ?? slug);
 
   const title = tagSlugs.length > 0
-    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${topicData.label}`
+    ? `${tagLabels.map(tag => '#' + tag).join(' ')} | ${topicData.label}`
     : topicData.label;
 
   const description = tagSlugs.length > 0
-    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), topic: topicData.label })
+    ? t('browsePhotosWithTag', { tags: tagLabels.join(', '), topic: topicData.label })
     : t('photosInTopic', { topic: topicData.label });
 
   const pageUrl = localizeUrl(seo.url, locale, `/${topicData.slug}`);
@@ -77,8 +78,8 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
 
   // Use custom OG image if configured, otherwise use generated OG image
   const topicOgParams = new URLSearchParams({ topic: topicData.slug });
-  if (tagSlugs.length > 0) {
-    topicOgParams.set('tags', tagSlugs.join(','));
+  if (tagLabels.length > 0) {
+    topicOgParams.set('tags', tagLabels.join(','));
   }
   const ogImages = seo.og_image_url
     ? [{ url: seo.og_image_url, width: 1200, height: 630, alt: title }]

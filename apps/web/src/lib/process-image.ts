@@ -393,8 +393,8 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
             // Cycle 4 RPF loop AGG4-L01: route the producer-side
             // literal through the central `assertBlurDataUrl` contract
             // so producer + consumer + reader all consult the same
-            // validator. Without this the consumer-side wrap at
-            // `actions/images.ts:307` was the only validator in the
+            // validator. Without this the consumer-side validation in
+            // `uploadImages` was the only validator in the
             // pipeline, which created a one-direction information
             // flow: a future MIME drift in this producer (e.g. to
             // AVIF/WebP) would silently write NULL `blur_data_url`

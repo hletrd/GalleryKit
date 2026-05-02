@@ -408,6 +408,7 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
     const CHUNK_SIZE = 1024 * 1024;
     const fileSize = (await fs.stat(tempPath)).size;
     const scanFd = await fs.open(tempPath, 'r');
+    let dangerousSqlDetected = false;
     try {
         let scanTail = '';
         for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
@@ -422,14 +423,17 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
             const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk);
             if (containsDangerousSql(combined)) {
-                // Don't close scanFd here — the finally block handles it
-                await fs.unlink(tempPath).catch(() => {});
-                return { success: false, error: t('disallowedSql') };
+                dangerousSqlDetected = true;
+                break;
             }
             scanTail = nextTail;
         }
     } finally {
         await scanFd.close();
+    }
+    if (dangerousSqlDetected) {
+        await fs.unlink(tempPath).catch(() => {});
+        return { success: false, error: t('disallowedSql') };
     }
 
     const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT } = process.env;

@@ -14,7 +14,7 @@ import { countCodePoints } from '@/lib/utils';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
-import { stripControlChars, sanitizeAdminString } from '@/lib/sanitize';
+import { stripControlChars, sanitizeAdminString, requireCleanInput } from '@/lib/sanitize';
 import { ensureTagRecord, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
@@ -128,13 +128,19 @@ export async function uploadImages(formData: FormData) {
     const originError = await requireSameOriginAdmin();
     if (originError) return { error: originError };
     const files = formData.getAll('files').filter((f): f is File => f instanceof File);
-    // Topic is now a string slug — sanitize before validation (defense in depth)
-    const topic = stripControlChars(formData.get('topic')?.toString() ?? '') ?? '';
-    // Sanitize before validation so length/format checks operate on the same
-    // value that will be stored. Without this, control characters pass the
-    // length check but are stripped later, causing a mismatch between validated
-    // and persisted data (matches topic/label/seo pattern, see C46-01).
-    const tagsString = stripControlChars(formData.get('tags')?.toString() ?? '') ?? '';
+    // Topic and tags are admin-controlled strings that become route/query/UI
+    // data. Reject rather than silently stripping C0/C1 or Unicode formatting
+    // characters so validation, user feedback, and persistence cannot drift.
+    const { value: topicValue, rejected: topicRejected } = requireCleanInput(formData.get('topic')?.toString());
+    const { value: tagsValue, rejected: tagsRejected } = requireCleanInput(formData.get('tags')?.toString());
+    if (topicRejected) {
+        return { error: t('invalidTopicFormat') };
+    }
+    if (tagsRejected) {
+        return { error: t('invalidTagNames') };
+    }
+    const topic = topicValue ?? '';
+    const tagsString = tagsValue ?? '';
 
     if (tagsString && countCodePoints(tagsString) > 1000) {
         return { error: t('tagsStringTooLong') };
@@ -237,10 +243,8 @@ export async function uploadImages(formData: FormData) {
         }
 
         // C11-MED-01: verify the topic exists in the database before accepting
-        // uploads. Without this, deleting a topic while another admin has the
-        // upload form open results in orphaned images with no topic metadata
-        // (label, order, image_filename). The schema uses varchar without a FK
-        // constraint on images.topic, so the INSERT would otherwise succeed.
+        // uploads. The schema now has an FK, but checking here keeps the error
+        // localized and avoids saving files before a doomed INSERT.
         const [topicRow] = await db.select({ slug: topics.slug })
             .from(topics)
             .where(eq(topics.slug, topic))

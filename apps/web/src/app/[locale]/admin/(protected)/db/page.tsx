@@ -37,7 +37,7 @@ export default function DbPage() {
                 if (result.success && result.url) {
                     // Validate URL prefix to prevent open redirect
                     if (!result.url.startsWith('/api/admin/db/download')) {
-                        toast.error(`${t('errorBackup')}: Invalid download URL`);
+                        toast.error(`${t('errorBackup')}: ${t('invalidDownloadUrl')}`);
                         return;
                     }
                     const link = document.createElement('a');

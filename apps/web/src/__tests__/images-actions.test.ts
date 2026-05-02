@@ -237,6 +237,30 @@ describe('uploadImages', () => {
         expect(insertMock).not.toHaveBeenCalled();
     });
 
+    it('rejects upload tags when sanitization would change the submitted input', async () => {
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', 'night\u200bsky');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTagNames' });
+        expect(acquireUploadProcessingContractLockMock).not.toHaveBeenCalled();
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects upload topic when sanitization would change the submitted slug', async () => {
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'tra\u0000vel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'invalidTopicFormat' });
+        expect(acquireUploadProcessingContractLockMock).not.toHaveBeenCalled();
+        expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
+        expect(insertMock).not.toHaveBeenCalled();
+    });
+
     it('rejects the entire upload batch when any single tag fails validation (C7L-FIX-01 / C7L-TE-01)', async () => {
         // Two candidate tags split from `tagsString`: the first is valid, the
         // second contains an angle bracket that `isValidTagName` rejects.

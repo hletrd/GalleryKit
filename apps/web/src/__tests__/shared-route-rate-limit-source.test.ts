@@ -48,4 +48,18 @@ describe('public share route lookup throttling', () => {
         // enforcement point.
         expect(metadata.indexOf('await isShareLookupRateLimited()')).toBe(-1);
     });
+
+    it('does NOT perform share-key DB lookups in single-photo metadata', () => {
+        const source = routeSource('s');
+        const metadata = source.slice(source.indexOf('export async function generateMetadata'), source.indexOf('export default async function'));
+
+        expect(metadata).not.toContain('getImageByShareKeyCached(key)');
+    });
+
+    it('does NOT perform share-key DB lookups in group metadata', () => {
+        const source = routeSource('g');
+        const metadata = source.slice(source.indexOf('export async function generateMetadata'), source.indexOf('export default async function'));
+
+        expect(metadata).not.toContain('getSharedGroupCached(key');
+    });
 });

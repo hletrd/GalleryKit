@@ -18,6 +18,16 @@ const WEAK_PLAINTEXT_PASSWORDS = new Set([
     'qwerty123',
 ]);
 
+// Keep the plain Node migration script aligned with src/lib/password-hashing.ts.
+// This file runs outside the TS path-alias/transpile pipeline in the production
+// container, so the policy is duplicated deliberately with this pointer.
+const PASSWORD_HASH_OPTIONS = {
+    type: argon2.argon2id,
+    memoryCost: 65536,
+    timeCost: 3,
+    parallelism: 4,
+};
+
 function resolveAppRoot() {
     const candidates = [
         process.cwd(),
@@ -279,6 +289,7 @@ async function reconcileLegacySchema(connection, dbName) {
             username varchar(255) NOT NULL,
             password_hash varchar(512) NOT NULL,
             created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY admin_users_username_unique (username)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -287,6 +298,7 @@ async function reconcileLegacySchema(connection, dbName) {
     if (passwordHashInfo && Number(passwordHashInfo.CHARACTER_MAXIMUM_LENGTH || 0) < 512) {
         await connection.query('ALTER TABLE admin_users MODIFY COLUMN password_hash varchar(512) NOT NULL');
     }
+    await ensureColumn(connection, dbName, 'admin_users', 'updated_at', 'ALTER TABLE admin_users ADD COLUMN updated_at timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 
     await ensureTable(connection, `
         CREATE TABLE IF NOT EXISTS images (
@@ -516,7 +528,7 @@ async function seedAdmin(connection) {
         ? password
         : await (async () => {
             assertStrongBootstrapPassword(password);
-            return argon2.hash(password, { type: argon2.argon2id });
+            return argon2.hash(password, PASSWORD_HASH_OPTIONS);
         })();
     await connection.query('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)', ['admin', hash]);
     console.log('[Migration] Admin user created.');

@@ -156,7 +156,8 @@ export function TagInput({
         setHighlightedIndex(0);
     }, [filteredTags.length, showCreateOption]);
 
-    const activeDescendantId = isOpen
+    const suggestionsVisible = isOpen && !!(inputValue || filteredTags.length > 0);
+    const activeDescendantId = suggestionsVisible
         ? highlightedIndex < filteredTags.length
             ? `${suggestionsId}-option-${filteredTags[highlightedIndex]?.id}`
             : showCreateOption && highlightedIndex === filteredTags.length
@@ -173,7 +174,7 @@ export function TagInput({
                         <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); removeTag(tag); }}
-                            className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground focus:ring-2 focus:ring-ring focus:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
+                            className="ml-1 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground focus:ring-2 focus:ring-ring focus:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
                             aria-label={t('aria.removeTag', { tag })}
                         >
                             <X className="h-3 w-3" />
@@ -186,8 +187,8 @@ export function TagInput({
                     role="combobox"
                     aria-label={ariaLabel || placeholder}
                     aria-autocomplete="list"
-                    aria-expanded={isOpen && !!(inputValue || filteredTags.length > 0)}
-                    aria-controls={suggestionsId}
+	                    aria-expanded={suggestionsVisible}
+	                    aria-controls={suggestionsVisible ? suggestionsId : undefined}
                     aria-activedescendant={activeDescendantId}
                     className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"
                     placeholder={selectedTags.length === 0 ? placeholder : ''}
@@ -201,7 +202,7 @@ export function TagInput({
                 />
             </div>
 
-            {isOpen && (inputValue || filteredTags.length > 0) && (
+            {suggestionsVisible && (
                 <div className="absolute top-full left-0 w-full mt-1 z-50 rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-in fade-in-0 zoom-in-95">
                     <div className="max-h-[300px] overflow-auto p-1" id={suggestionsId} role="listbox">
                         {filteredTags.length === 0 && !showCreateOption && (
@@ -217,7 +218,7 @@ export function TagInput({
                                 role="option"
                                 aria-selected={highlightedIndex === index}
                                 className={cn(
-                                    "relative flex select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none cursor-pointer",
+	                                    "relative flex min-h-11 select-none items-center rounded-sm px-2 py-2 text-sm outline-none cursor-pointer",
                                     highlightedIndex === index ? "bg-accent text-accent-foreground" : ""
                                 )}
                                 onClick={() => addTag(tag.name)}
@@ -234,7 +235,7 @@ export function TagInput({
                                 role="option"
                                 aria-selected={highlightedIndex === filteredTags.length}
                                 className={cn(
-                                    "relative flex select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none cursor-pointer border-t mt-1",
+	                                    "relative flex min-h-11 select-none items-center rounded-sm px-2 py-2 text-sm outline-none cursor-pointer border-t mt-1",
                                     highlightedIndex === filteredTags.length ? "bg-accent text-accent-foreground" : ""
                                 )}
                                 onClick={() => addTag(inputValue)}

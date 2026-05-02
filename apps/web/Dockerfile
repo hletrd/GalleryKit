@@ -18,26 +18,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM build-base AS deps
 WORKDIR /app
 
-# Copy package.json files only (no lockfile). The lockfile is generated on
-# macOS and lacks Linux platform-specific optional packages like
-# @swc/core-linux-arm64-gnu and @parcel/watcher-linux-arm64-glibc.
-# Without the lockfile constraint, npm install resolves the correct
-# platform packages on the target Linux host.
-COPY package.json ./
+# Copy package manifests with the committed lockfile so container builds are
+# reproducible and install exactly the reviewed dependency graph.
+COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 
 # Install dependencies (including devDependencies for build)
-RUN npm install --workspace=apps/web
+RUN npm ci --workspace=apps/web
 
 FROM build-base AS prod-deps
 WORKDIR /app
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
-RUN npm install --omit=dev --workspace=apps/web
+RUN npm ci --omit=dev --workspace=apps/web
 
 FROM build-base AS builder
+ARG BASE_URL
 ARG IMAGE_BASE_URL
 ARG UPLOAD_MAX_TOTAL_BYTES
+ENV BASE_URL=${BASE_URL}
 ENV IMAGE_BASE_URL=${IMAGE_BASE_URL}
 ENV UPLOAD_MAX_TOTAL_BYTES=${UPLOAD_MAX_TOTAL_BYTES}
 WORKDIR /app

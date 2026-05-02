@@ -98,10 +98,8 @@ export async function createPhotoShareLink(imageId: number) {
     if (!image.processed) return { error: t('imageStillProcessing') };
 
     if (image.share_key) {
-        // C16-LOW-10: no-op path — share key already exists. Roll back the
-        // pre-incremented rate-limit counters so the admin isn't charged
-        // for an action that didn't execute.
-        await rollbackShareRateLimitFull(ip, 'share_photo', shareBucketStart);
+        // No-op path before any rate-limit pre-increment: share key already
+        // exists, so return it without touching the quota.
         return { success: true, key: image.share_key };
     }
 

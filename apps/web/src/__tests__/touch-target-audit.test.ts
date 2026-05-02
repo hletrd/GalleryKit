@@ -39,6 +39,10 @@ import * as path from 'path';
 const srcRoot = path.resolve(__dirname, '..');
 const componentsDir = path.resolve(srcRoot, 'components');
 const adminDir = path.resolve(srcRoot, 'app', '[locale]', 'admin');
+const appLevelErrorFiles = [
+    path.resolve(srcRoot, 'app', 'global-error.tsx'),
+    path.resolve(srcRoot, 'app', '[locale]', 'error.tsx'),
+];
 
 /**
  * AGG1-M01 / AGG1-M02 (cycle 1 RPF loop): explicit list of scan roots.
@@ -425,6 +429,7 @@ describe('touch-target audit (44 px floor)', () => {
         for (const root of SCAN_ROOTS) {
             files.push(...listFilesRecursive(root, (f) => /\.(tsx|jsx)$/.test(f)));
         }
+        files.push(...appLevelErrorFiles.filter((file) => fs.existsSync(file)));
         const violationsByFile: Map<string, FoundIssue[]> = new Map();
         for (const f of files) {
             const rel = relPathFromSrc(f);

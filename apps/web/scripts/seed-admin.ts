@@ -41,11 +41,12 @@ async function main() {
         // Simple heuristic: Argon2 hashes usually start with $argon2
         if (!passwordOrHash.startsWith('$argon2')) {
             assertStrongBootstrapPassword(passwordOrHash);
-            console.log('Detected plain text password. Hashing...');
+                console.log('Detected plain text password. Hashing...');
             try {
                 // Dynamic import for script execution context
                 const argon2 = await import('argon2');
-                hash = await argon2.hash(passwordOrHash);
+                const { PASSWORD_HASH_OPTIONS } = await import('../src/lib/password-hashing');
+                hash = await argon2.hash(passwordOrHash, PASSWORD_HASH_OPTIONS);
             } catch (e) {
                 console.error('Could not load argon2. Cannot hash password.', e);
                 process.exit(1);

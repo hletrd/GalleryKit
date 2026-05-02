@@ -168,16 +168,20 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
-                        <div>
-                            <Label htmlFor="strip-gps">{t('settings.stripGps')}</Label>
-                            <p className="text-xs text-muted-foreground">{t('settings.stripGpsHint')}</p>
-                        </div>
-                        <Switch
-                            id="strip-gps"
-                            checked={settings.strip_gps_on_upload === 'true'}
-                            onCheckedChange={(checked) => handleChange('strip_gps_on_upload', checked ? 'true' : 'false')}
-                            aria-label={t('settings.stripGps')}
-                        />
+	                        <div>
+	                            <Label htmlFor="strip-gps">{t('settings.stripGps')}</Label>
+	                            <p id="strip-gps-help" className="text-xs text-muted-foreground">
+	                                {hasExistingImages ? t('settings.uploadContractLocked') : t('settings.stripGpsHint')}
+	                            </p>
+	                        </div>
+	                        <Switch
+	                            id="strip-gps"
+	                            checked={settings.strip_gps_on_upload === 'true'}
+	                            onCheckedChange={(checked) => handleChange('strip_gps_on_upload', checked ? 'true' : 'false')}
+	                            disabled={hasExistingImages}
+	                            aria-describedby="strip-gps-help"
+	                            aria-label={t('settings.stripGps')}
+	                        />
                     </div>
                     {hasExistingImages && (
                         <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">

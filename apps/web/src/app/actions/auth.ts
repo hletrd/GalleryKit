@@ -18,6 +18,7 @@ import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { getTrustedRequestProtocol, hasTrustedSameOrigin } from '@/lib/request-origin';
 import { countCodePoints } from '@/lib/utils';
+import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
 
 export async function getSession() {
     const cookieStore = await cookies();
@@ -63,7 +64,7 @@ export async function isAdmin() {
 let dummyHashPromise: Promise<string> | null = null;
 async function getDummyHash(): Promise<string> {
     if (!dummyHashPromise) {
-        dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), { type: argon2.argon2id });
+        dummyHashPromise = argon2.hash(randomBytes(32).toString('hex'), PASSWORD_HASH_OPTIONS);
     }
     return dummyHashPromise;
 }
@@ -376,7 +377,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
             return { error: t('incorrectPassword') };
         }
 
-        const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+        const newHash = await argon2.hash(newPassword, PASSWORD_HASH_OPTIONS);
         const newSessionToken = await generateSessionToken();
         const newSessionId = hashSessionToken(newSessionToken);
         const newSessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

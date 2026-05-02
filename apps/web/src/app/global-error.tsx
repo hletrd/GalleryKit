@@ -71,7 +71,7 @@ export default function GlobalError({
                         <button
                             type="button"
                             onClick={reset}
-                            className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                         >
                             {copy.action}
                         </button>

@@ -181,7 +181,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                 <button
                     ref={dragHandleRef}
                     type="button"
-                    className="flex w-full justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+	                    className="flex min-h-11 w-full justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => setSheetState((prev) => (prev === 'expanded' ? 'peek' : 'expanded'))}
                     onKeyDown={(e) => {
                         if (e.key === 'Escape') {
@@ -208,7 +208,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                         ref={closeButtonRef}
                         type="button"
                         onClick={onClose}
-                        className="absolute right-4 top-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+	                        className="absolute right-4 top-0 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         aria-label={t('aria.close')}
                     >
                         <X className="h-4 w-4" />

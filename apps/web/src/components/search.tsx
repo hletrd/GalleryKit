@@ -195,12 +195,12 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                         <Input
                             id="search-input"
                             ref={inputRef}
-                            aria-label={t('search.placeholder')}
-                            role="combobox"
-                            aria-autocomplete="list"
-                            aria-controls="search-results"
-                            aria-expanded={results.length > 0}
-                            aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
+	                            aria-label={t('search.placeholder')}
+	                            role="combobox"
+	                            aria-autocomplete="list"
+	                            aria-controls={results.length > 0 ? 'search-results' : undefined}
+	                            aria-expanded={results.length > 0}
+	                            aria-activedescendant={activeIndex >= 0 && results[activeIndex] ? `search-result-${activeIndex}` : undefined}
                             value={query}
                             onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
                             onKeyDown={(e) => {

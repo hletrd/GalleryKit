@@ -422,9 +422,9 @@ export async function getImageCount(
 
 /** Build tag-filter conditions (shared between getImages and getImagesLite). */
 function buildTagFilterCondition(tagSlugs?: string[]) {
-    const validTagSlugs = (tagSlugs || [])
+    const validTagSlugs = [...new Set((tagSlugs || [])
         .map(s => s.trim())
-        .filter(isValidTagSlug);
+        .filter(isValidTagSlug))];
     if (validTagSlugs.length === 0) return null;
     const tagConditions = validTagSlugs.map(slug => eq(tags.slug, slug));
     return inArray(images.id, db
@@ -939,7 +939,7 @@ export async function getImageByShareKey(key: string) {
 // unauthenticated visitors. See CLAUDE.md "Privacy" section.
 export async function getSharedGroup(
     key: string,
-    options?: { incrementViewCount?: boolean },
+    options?: { incrementViewCount?: boolean; selectedPhotoId?: number | null },
 ) {
     const trimmedKey = (key || '').trim();
     if (!isBase56(trimmedKey, 10)) {
@@ -1014,8 +1014,13 @@ export async function getSharedGroup(
     // Increment view count only after the image fetch succeeds — avoids
     // overcounting on DB errors during the image JOIN query. Skip the
     // increment when there are no processed images to avoid inflating
-    // the counter for groups with no visible content yet.
-    if (imagesWithTags.length > 0 && options?.incrementViewCount !== false) {
+    // the counter for groups with no visible content yet. A valid selected
+    // photo is a within-group navigation state, not a fresh group view; invalid
+    // or missing photoId values still count as a group-view lookup.
+    const selectedPhotoId = options?.selectedPhotoId;
+    const hasSelectedPhoto = typeof selectedPhotoId === 'number'
+        && imagesWithTags.some((image) => image.id === selectedPhotoId);
+    if (imagesWithTags.length > 0 && options?.incrementViewCount !== false && !hasSelectedPhoto) {
         bufferGroupViewCount(group.id);
     }
 
@@ -1231,12 +1236,10 @@ export const getTopicBySlugCached = cache(getTopicBySlug);
 export const getTopicsCached = cache(getTopics);
 export const getTagsCached = cache(_getTags);
 export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
-// C19-AGG-01: cache() deduplicates calls by arguments within a single request.
-// getImageByShareKey has a conditional side effect (bufferGroupViewCount via
-// incrementViewCount option). This cached wrapper is safe because the only
-// current call site passes incrementViewCount: true once per page render.
-// If a future call site needs a different incrementViewCount value for the
-// same key within one request, use getImageByShareKey directly instead.
+// cache() deduplicates calls by arguments within a single request. Shared-group
+// lookups may buffer a view-count side effect unless called with
+// incrementViewCount:false or a valid selectedPhotoId. Do not call the cached
+// wrapper twice with different count semantics in the same render path.
 export const getImageByShareKeyCached = cache(getImageByShareKey);
 export const getSharedGroupCached = cache(getSharedGroup);
 

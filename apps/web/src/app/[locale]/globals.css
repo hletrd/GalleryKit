@@ -133,9 +133,6 @@
     min-height: 100vh;
     padding: 0;
   }
-  .masonry-grid {
-    columns: 2;
-  }
 }
 
 /* Orientation-aware layout: landscape tablet */

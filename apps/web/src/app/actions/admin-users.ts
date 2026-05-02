@@ -17,7 +17,8 @@ import { getClientIp, checkRateLimit, decrementRateLimit, getRateLimitBucketStar
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
-import { getAdminDeleteLockName } from '@/lib/advisory-locks';
+import { LOCK_ADMIN_DELETE } from '@/lib/advisory-locks';
+import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
 
 // In-memory rate limit for admin user creation (per admin IP, per window)
 const USER_CREATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -135,7 +136,7 @@ export async function createAdminUser(formData: FormData) {
     }
 
     try {
-        const hash = await argon2.hash(password, { type: argon2.argon2id });
+        const hash = await argon2.hash(password, PASSWORD_HASH_OPTIONS);
         const [result] = await db.insert(adminUsers).values({
             username,
             password_hash: hash
@@ -148,10 +149,9 @@ export async function createAdminUser(formData: FormData) {
             logAuditEvent(currentUser?.id ?? null, 'user_create', 'user', String(newUserId)).catch(console.debug);
         }
 
-        // Roll back only this pre-incremented attempt. Deleting the whole bucket
-        // lets alternating success/duplicate requests erase concurrent pressure
-        // and bypass the hourly user_create budget.
-        await rollbackUserCreateRateLimit(ip, 'successful creation', userCreateBucketStart);
+        // Successful creation intentionally consumes the pre-incremented
+        // budget. Rolling it back lets a scripted admin perform unlimited
+        // expensive Argon2 work by creating unique users.
 
         revalidateLocalizedPaths('/admin/dashboard', '/admin/users');
         return { success: true };
@@ -208,11 +208,11 @@ export async function deleteAdminUser(id: number) {
     // parameterization used elsewhere).
     const conn = await connection.getConnection();
     let lockAcquired = false;
-    // C7-HIGH-01: scope the advisory lock to the target user ID so concurrent
-    // deletions of different users do not serialize on a single global lock.
-    // The lock name includes the user ID so only concurrent attempts to delete
-    // the same user are serialized (e.g., double-click protection).
-    const lockName = getAdminDeleteLockName(id);
+    // Serialize all admin deletions through one global advisory lock. The
+    // protected invariant is table-wide ("never delete the last admin"), so
+    // target-scoped locks are insufficient when two different users are
+    // deleted concurrently.
+    const lockName = LOCK_ADMIN_DELETE;
 
     try {
         const [lockRows] = await conn.query<(RowDataPacket & { acquired: number })[]>(

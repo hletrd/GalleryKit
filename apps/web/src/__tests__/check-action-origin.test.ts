@@ -70,6 +70,50 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
     });
 
+    it('fails when a DB mutation happens before the same-origin guard', () => {
+        const src = `
+            export async function deleteFoo(id) {
+                await db.delete(foo).where(eq(foo.id, id));
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
+    it('allows non-mutating localization/auth work before the same-origin guard', () => {
+        const src = `
+            export async function deleteFoo(id) {
+                const t = await getTranslations('serverActions');
+                if (!(await isAdmin())) return { error: t('unauthorized') };
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.delete(foo).where(eq(foo.id, id));
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: actions/fixture.ts::deleteFoo']);
+    });
+
+    it('fails when revalidation happens before the same-origin guard', () => {
+        const src = `
+            export async function updateFoo(id) {
+                revalidateLocalizedPaths('/admin');
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed[0]).toContain('MISSING requireSameOriginAdmin');
+    });
+
     it('requires explicit exemptions for getter-style function declarations', () => {
         const src = `
             export async function getFoo() {

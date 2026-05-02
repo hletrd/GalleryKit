@@ -28,11 +28,13 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
     const observerRef = useRef<IntersectionObserver | null>(null);
     const loadingRef = useRef(false);
     const queryVersionRef = useRef(0);
+    const [statusMessage, setStatusMessage] = useState('');
 
     const loadMore = useCallback(async () => {
         if (loadingRef.current || !hasMore) return;
         loadingRef.current = true;
         setLoading(true);
+        setStatusMessage(t('home.loadingMore'));
         const version = queryVersionRef.current;
         try {
             const page = await loadMoreImages(topicSlug, tagSlugs, cursor ?? offset, limit);
@@ -41,6 +43,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
                 setHasMore(page.hasMore);
                 if (page.images.length > 0) {
                     onLoadMore(page.images);
+                    setStatusMessage(t('home.loadedMore', { count: page.images.length }));
                     setOffset(prev => prev + page.images.length);
                     const lastImage = page.images.at(-1);
                     if (lastImage) {
@@ -50,6 +53,8 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
                             created_at: lastImage.created_at,
                         });
                     }
+                } else if (!page.hasMore) {
+                    setStatusMessage(t('home.noMorePhotos'));
                 }
                 return;
             }
@@ -120,7 +125,7 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
                 </div>
             )}
             <div className="sr-only" aria-live="polite" aria-atomic="true">
-                {loading ? t('home.loadingMore') : ''}
+                {statusMessage}
             </div>
         </>
     );

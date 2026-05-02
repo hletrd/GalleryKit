@@ -171,6 +171,45 @@ function statementReturnsOnGuard(statement: ts.Statement, guardName: string): bo
     return false;
 }
 
+const MUTATING_METHOD_NAMES = new Set([
+    'insert',
+    'update',
+    'delete',
+    'transaction',
+    'query',
+    'execute',
+    'beginTransaction',
+    'commit',
+    'rollback',
+]);
+
+const MUTATING_FUNCTION_NAMES = new Set([
+    'logAuditEvent',
+    'revalidateLocalizedPaths',
+    'revalidateAllAppData',
+]);
+
+function statementContainsPreGuardMutation(statement: ts.Statement): boolean {
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isCallExpression(node)) {
+            const callee = node.expression;
+            if (ts.isPropertyAccessExpression(callee) && MUTATING_METHOD_NAMES.has(callee.name.text)) {
+                found = true;
+                return;
+            }
+            if (ts.isIdentifier(callee) && MUTATING_FUNCTION_NAMES.has(callee.text)) {
+                found = true;
+                return;
+            }
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(statement);
+    return found;
+}
+
 function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
     // Only accept an effective guard in the exported action's own top-level
     // body. The guard function returns a localized error string; merely
@@ -185,6 +224,10 @@ function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
     for (let index = 0; index < body.statements.length; index++) {
         const guardName = sameOriginGuardVariableName(body.statements[index]);
         if (!guardName) continue;
+
+        if (body.statements.slice(0, index).some(statementContainsPreGuardMutation)) {
+            return false;
+        }
 
         for (const followingStatement of body.statements.slice(index + 1)) {
             if (statementReturnsOnGuard(followingStatement, guardName)) {

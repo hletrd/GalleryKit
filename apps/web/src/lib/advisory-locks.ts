@@ -24,12 +24,13 @@ export const LOCK_UPLOAD_PROCESSING_CONTRACT = 'gallerykit_upload_processing_con
 export const LOCK_TOPIC_ROUTE_SEGMENTS = 'gallerykit_topic_route_segments';
 
 /**
- * Lock serializes deletion of a specific admin user.
- * Scoped to the target user ID so concurrent deletions of different
- * users do not serialize on a single global lock (C7-HIGH-01).
+ * Lock serializes all admin-user deletions.
+ *
+ * The invariant being protected is table-wide: at least one admin account must
+ * remain. Target-scoped locks let two concurrent deletes of different users
+ * both observe "more than one admin" and delete the final two accounts.
  */
-export const getAdminDeleteLockName = (userId: number) =>
-    `gallerykit_admin_delete:${userId}`;
+export const LOCK_ADMIN_DELETE = 'gallerykit_admin_delete';
 
 /**
  * Lock serializes per-image processing claims so two queue workers

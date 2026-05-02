@@ -42,7 +42,7 @@ test.describe('admin workflows (opt-in)', () => {
     await expect(page.locator('input[type="file"]')).toBeVisible();
   });
 
-  test('admin settings GPS toggle reflects in the hydrated UI (C1R-07)', async ({ page }) => {
+  test('admin settings GPS toggle reflects lock state in the hydrated UI (C1R-07)', async ({ page }) => {
     await loginAsAdmin(page);
 
     await page.locator('a[href$="/admin/settings"]').first().click();
@@ -52,6 +52,12 @@ test.describe('admin workflows (opt-in)', () => {
     await expect(gpsToggle).toBeVisible();
 
     const initialState = await gpsToggle.getAttribute('data-state');
+    if (await gpsToggle.isDisabled()) {
+      await expect(page.locator('#strip-gps-help')).toContainText(/locked|잠깁니다|잠겨/i);
+      expect(initialState).toMatch(/checked|unchecked/);
+      return;
+    }
+
     // Flip the toggle; the switch updates its data-state synchronously after click.
     await gpsToggle.click();
     const flippedState = await gpsToggle.getAttribute('data-state');
@@ -77,14 +83,19 @@ test.describe('admin workflows (opt-in)', () => {
       buffer: jpegBuffer,
     });
 
-    await page.getByRole('button', { name: /Upload 1 photos|1장 업로드/i }).click();
-    await expect(page.getByText(/Uploaded 1 photos\.|1장을 업로드했습니다\./)).toBeVisible({ timeout: 30_000 });
-
     const uploadedRow = page.getByRole('row').filter({ hasText: uploadName }).first();
-    await expect(uploadedRow).toBeVisible({ timeout: 30_000 });
-    await waitForImageProcessed(uploadName);
-    await uploadedRow.getByRole('button', { name: /delete/i }).click();
-    await page.getByRole('button', { name: /^Delete$|^삭제$/i }).click();
-    await expect(uploadedRow).toBeHidden({ timeout: 30_000 });
+    try {
+      await page.getByRole('button', { name: /Upload 1 photos|1장 업로드/i }).click();
+      await expect(page.getByText(/Uploaded 1 photos\.|1장을 업로드했습니다\./)).toBeVisible({ timeout: 30_000 });
+
+      await expect(uploadedRow).toBeVisible({ timeout: 30_000 });
+      await waitForImageProcessed(uploadName);
+    } finally {
+      if (await uploadedRow.isVisible().catch(() => false)) {
+        await uploadedRow.getByRole('button', { name: /delete/i }).click();
+        await page.getByRole('button', { name: /^Delete$|^삭제$/i }).click();
+        await expect(uploadedRow).toBeHidden({ timeout: 30_000 });
+      }
+    }
   });
 });

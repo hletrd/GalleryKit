@@ -22,4 +22,10 @@ describe('nginx production edge hardening', () => {
         expect(nginxConfig).toContain('/admin/(categories|tags|users|password|seo|settings)');
         expect(nginxConfig).toMatch(/location \^~ \/api\/admin\/ \{[\s\S]*limit_req zone=admin/);
     });
+
+    it('overwrites inbound X-Forwarded-For instead of appending spoofable client values', () => {
+        expect(nginxConfig).not.toContain('$proxy_add_x_forwarded_for');
+        const forwardedForHeaders = nginxConfig.match(/proxy_set_header X-Forwarded-For \$remote_addr;/g) ?? [];
+        expect(forwardedForHeaders.length).toBeGreaterThanOrEqual(5);
+    });
 });

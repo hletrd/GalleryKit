@@ -182,7 +182,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
 7. Conditional UPDATE marks as processed; if image was deleted mid-processing, orphaned files are cleaned up
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
-9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at producer (`lib/process-image.ts` blur builder), write time (upload action `actions/images.ts`), and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4 KB. The producer-side wrap (cycle 4 RPF loop AGG4-L01) closes the symmetric defense — a future MIME drift in the producer is caught at the source rather than masked by the consumer-side throttled warn at `actions/images.ts:307`. Locked by fixture tests `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`
+9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at producer (`lib/process-image.ts` blur builder), write time (`uploadImages` in `apps/web/src/app/actions/images.ts`), and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4 KB. The producer-side wrap (cycle 4 RPF loop AGG4-L01) closes the symmetric defense — a future MIME drift in the producer is caught at the source rather than masked by the consumer-side validation. Locked by fixture tests `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`
 
 ## Race Condition Protections
 
@@ -217,7 +217,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **Node.js 24+** required, **TypeScript 6.0+**
 - Processed images are stored in `apps/web/public/uploads/`; original uploads are stored privately under the data volume — **ensure both are persisted in Docker**
 - Max upload size: 200 MB per file; batch byte cap (`UPLOAD_MAX_TOTAL_BYTES`, default 2 GiB) and batch file-count cap (`UPLOAD_MAX_FILES_PER_WINDOW`, default 100) are separate limits that both apply to every upload
-- Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 GiB** for general requests and **250 MB** for `/admin/db` restore requests
+- Keep the reverse proxy body caps aligned with the app limits: the shipped nginx config uses **2 MiB** by default, **64 KiB** for login, **250 MiB** for `/admin/db` restore requests, and **216 MiB** for admin dashboard uploads. The app enforces **200 MiB per file**, a default **2 GiB** cumulative upload window, and **100 files per window**.
 - Uses `output: 'standalone'` for Docker deployments
 - DB backups stored in `data/backups/` (volume-mounted, not public)
 - Docker liveness should probe `/api/live`; `/api/health` is liveness-only by default and performs a DB readiness probe only when `HEALTH_CHECK_DB=true`
@@ -278,9 +278,8 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
 2. Generate a unique runtime `SESSION_SECRET`: `openssl rand -hex 32`
 3. Copy `site-config.example.json` to `site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing
 4. Run `docker compose -f apps/web/docker-compose.yml up -d --build`
-5. Initialize DB: container runs migrations automatically
-6. Push schema indexes: `npm run db:push` (from apps/web/)
-7. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`
+5. Initialize DB: container runs committed migrations automatically
+6. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`
 
 ## Remote Deploy Helper
 

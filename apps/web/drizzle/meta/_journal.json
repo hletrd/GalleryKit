@@ -29,6 +29,13 @@
       "when": 1777023600000,
       "tag": "0003_audit_created_at_index",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1777727760696,
+      "tag": "0004_admin_users_updated_at",
+      "breakpoints": true
     }
   ]
 }

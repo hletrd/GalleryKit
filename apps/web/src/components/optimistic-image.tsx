@@ -73,7 +73,7 @@ function OptimisticImageInner({ src, alt, className, fallbackSrc, ...props }: Op
                 </div>
             )}
              {error && (
-                <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-xs p-2 text-center">
+                <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-xs p-2 text-center" role="status" aria-live="polite">
                     {t('common.imageUnavailable')}
                 </div>
             )}

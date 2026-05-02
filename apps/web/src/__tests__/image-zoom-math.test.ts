@@ -1,42 +1,5 @@
 import { describe, expect, it } from 'vitest';
-
-// Pure math extracted from image-zoom.tsx for unit testing.
-
-const MIN_ZOOM = 1.0;
-const MAX_ZOOM = 5.0;
-const SNAP_THRESHOLD = 1.1;
-
-function touchDistance(
-    t0: { clientX: number; clientY: number },
-    t1: { clientX: number; clientY: number },
-): number {
-    const dx = t1.clientX - t0.clientX;
-    const dy = t1.clientY - t0.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-function touchMidpoint(
-    t0: { clientX: number; clientY: number },
-    t1: { clientX: number; clientY: number },
-): { x: number; y: number } {
-    return { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
-}
-
-function clampZoom(level: number): number {
-    return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, level));
-}
-
-function wheelStep(current: number, deltaY: number): number {
-    const factor = deltaY > 0 ? 0.9 : 1.1;
-    return clampZoom(current * factor);
-}
-
-function clampPan(x: number, y: number): { x: number; y: number } {
-    return {
-        x: Math.max(-100, Math.min(100, x)),
-        y: Math.max(-100, Math.min(100, y)),
-    };
-}
+import { MAX_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
 
 describe('touchDistance', () => {
     it('returns 0 for coincident points', () => {

@@ -8,8 +8,6 @@ import { ArrowLeft } from 'lucide-react';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
-import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 
@@ -27,12 +25,6 @@ const sharePageRobots = {
     },
 } as const;
 
-function toIsoTimestamp(value: string | Date | null | undefined) {
-    if (!value) return undefined;
-    const date = value instanceof Date ? value : new Date(value);
-    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-
 async function isShareLookupRateLimited() {
     const requestHeaders = await headers();
     const ip = getClientIp(requestHeaders);
@@ -45,55 +37,41 @@ export async function generateMetadata({ params }: { params: Promise<{ key: stri
     // page body. Both generateMetadata and the page body run in separate React
     // render contexts, so calling preIncrementShareAttempt in both would
     // double-increment the counter, giving users half the intended budget.
-    const [locale, t, seo, config] = await Promise.all([
+    //
+    // AGG-C1-02: metadata also must not perform the share-key DB lookup. That
+    // lookup is the enumeration-sensitive operation and is rate-limited only in
+    // the page body, so metadata stays generic/noindex rather than revealing
+    // whether a key exists or exposing image-specific OG details.
+    const [locale, t, seo] = await Promise.all([
         getLocale(),
         getTranslations('shared'),
         getSeoSettings(),
-        getGalleryConfig(),
     ]);
-    const image = await getImageByShareKeyCached(key);
-    if (!image) return {
-        title: t('ogNotFoundTitle'),
-        description: t('ogNotFoundDescription'),
-        robots: sharePageRobots,
-    };
-    const title = getPhotoDisplayTitle(image, t('ogTitle'));
+    const title = t('ogTitle');
+    const description = t('ogDescription', { site: seo.title });
     const pageUrl = localizeUrl(seo.url, locale, `/s/${key}`);
     const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
-    // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
-    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
-
-    const ogImageUrl = absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url);
-    const ogImages = [{
-        url: ogImageUrl,
-        width: image.width,
-        height: image.height,
-        alt: title,
-    }];
 
     return {
-        title: title,
-        description: image.description || t('ogDescription', { site: seo.title }),
+        title,
+        description,
         robots: sharePageRobots,
         alternates: {
             canonical: pageUrl,
         },
         openGraph: {
-            title: title,
-            description: image.description || t('ogDescription', { site: seo.title }),
+            title,
+            description,
             url: pageUrl,
             siteName: seo.title,
-            images: ogImages,
-            type: 'article',
-            publishedTime: toIsoTimestamp(image.created_at),
+            type: 'website',
             locale: openGraphLocale,
             alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
         },
         twitter: {
-            card: 'summary_large_image',
-            title: title,
-            description: image.description || t('ogDescription', { site: seo.title }),
-            images: [ogImageUrl],
+            card: 'summary',
+            title,
+            description,
         },
     };
 }

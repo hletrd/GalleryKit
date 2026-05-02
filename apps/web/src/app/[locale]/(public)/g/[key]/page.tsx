@@ -6,11 +6,11 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { headers } from 'next/headers';
 import { ArrowLeft } from 'lucide-react';
-import { absoluteImageUrl, imageUrl } from '@/lib/image-url';
+import { imageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { findGridCardImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 
@@ -34,51 +34,26 @@ async function isShareLookupRateLimited() {
     return preIncrementShareAttempt(ip);
 }
 
-export async function generateMetadata({ params, searchParams }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }): Promise<Metadata> {
     const { key } = await params;
-    const { photoId: photoIdParam } = await searchParams;
     // C4-AGG-01: Rate limit is NOT checked here — it is enforced once in the
     // page body. Both generateMetadata and the page body run in separate React
     // render contexts, so calling preIncrementShareAttempt in both would
     // double-increment the counter, giving users half the intended budget.
-    const [locale, t, seo, config] = await Promise.all([
+    //
+    // AGG-C1-02: do not look up the share group here either. `generateMetadata`
+    // is not the rate-limit enforcement point, so it must not reveal key
+    // validity or image-specific OG data through an unthrottled DB lookup.
+    const [locale, t, seo] = await Promise.all([
         getLocale(),
         getTranslations('sharedGroup'),
         getSeoSettings(),
-        getGalleryConfig(),
     ]);
-    const group = await getSharedGroupCached(key, { incrementViewCount: false });
-    if (!group) return {
-        title: t('notFoundTitle'),
-        description: t('notFoundDescription'),
-        robots: sharePageRobots,
-    };
-    let selectedImage = null;
-    if (photoIdParam && /^\d+$/.test(photoIdParam)) {
-        const selectedId = Number.parseInt(photoIdParam, 10);
-        selectedImage = group.images.find((image) => image.id === selectedId) ?? null;
-    }
-
-    const pagePath = selectedImage ? `/g/${key}?photoId=${selectedImage.id}` : `/g/${key}`;
+    const pagePath = `/g/${key}`;
     const pageUrl = localizeUrl(seo.url, locale, pagePath);
     const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
-    const coverImage = selectedImage ?? group.images[0];
-    const metadataTitle = selectedImage ? getPhotoDisplayTitle(selectedImage, t('photo')) : t('ogTitle');
-    const metadataDescription = selectedImage?.description || (selectedImage ? t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }) : t('ogDescriptionWithSite', { count: group.images.length, site: seo.title }));
-    // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
-    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
-
-    const coverImageUrl = coverImage
-        ? absoluteImageUrl(`/uploads/jpeg/${coverImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url)
-        : null;
-    const ogImages = coverImage && coverImageUrl
-        ? [{
-            url: coverImageUrl,
-            width: coverImage.width,
-            height: coverImage.height,
-            alt: selectedImage ? metadataTitle : t('ogAlt'),
-        }]
-        : [];
+    const metadataTitle = t('ogTitle');
+    const metadataDescription = t('ogGenericDescription', { site: seo.title });
 
     return {
         title: metadataTitle,
@@ -93,7 +68,6 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
             url: pageUrl,
             siteName: seo.title,
             type: 'website',
-            images: ogImages,
             locale: openGraphLocale,
             alternateLocale: getAlternateOpenGraphLocales(locale, seo.locale),
         },
@@ -101,9 +75,6 @@ export async function generateMetadata({ params, searchParams }: { params: Promi
             card: 'summary_large_image',
             title: metadataTitle,
             description: metadataDescription,
-            ...(coverImageUrl ? {
-                images: [coverImageUrl],
-            } : {}),
         },
     };
 }
@@ -117,8 +88,16 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return notFound();
     }
 
+    let photoId: number | null = null;
+    if (photoIdParam && /^\d+$/.test(photoIdParam)) {
+        const parsed = parseInt(photoIdParam, 10);
+        if (parsed > 0) {
+            photoId = parsed;
+        }
+    }
+
     const [group, seo, t, config] = await Promise.all([
-        getSharedGroupCached(key, { incrementViewCount: !photoIdParam }),
+        getSharedGroupCached(key, { selectedPhotoId: photoId }),
         getSeoSettings(),
         getTranslations('sharedGroup'),
         getGalleryConfig(),
@@ -128,14 +107,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
         return notFound();
     }
     const gridImageSize = findGridCardImageSize(config.imageSizes);
-
-    let photoId: number | null = null;
-    if (photoIdParam && /^\d+$/.test(photoIdParam)) {
-        const parsed = parseInt(photoIdParam, 10);
-        if (parsed > 0) {
-            photoId = parsed;
-        }
-    }
 
     let selectedImage = null;
 
@@ -193,7 +164,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                         <Link
                             key={image.id}
                             href={`${localizePath(locale, `/g/${key}`)}?photoId=${image.id}`}
-                            className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20"
+                            className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                         >
                             <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>

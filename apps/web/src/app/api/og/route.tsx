@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
 import siteConfig from '@/site-config.json';
 import { getSeoSettings, getTopicBySlug } from '@/lib/data';
-import { getClientIp, preIncrementOgAttempt, rollbackOgAttempt } from '@/lib/rate-limit';
+import { getClientIp, preIncrementOgAttempt } from '@/lib/rate-limit';
 import { countCodePoints } from '@/lib/utils';
 
 export const runtime = 'nodejs';
@@ -65,12 +65,8 @@ export async function GET(req: NextRequest) {
       getTopicBySlug(topic),
     ]);
     if (!topicRecord) {
-      // C17-LOW-06: roll back the rate-limit counter on 404 — the user
-      // searched for a non-existent topic and didn't consume CPU resources
-      // for image generation. Public read paths should use rollback pattern
-      // (Pattern 2 from rate-limit.ts docstring). The 500 error path below
-      // intentionally keeps the charge per Pattern 1 logic.
-      rollbackOgAttempt(ip);
+      // Keep the post-DB 404 charged. Nonexistent topic probes still consume
+      // public DB work and otherwise become a free topic-enumeration oracle.
       return new Response('Topic not found', {
         status: 404,
         headers: { 'Cache-Control': OG_ERROR_CACHE_CONTROL },

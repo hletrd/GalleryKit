@@ -79,6 +79,14 @@ describe('getImagesLite tag_names SQL shape', () => {
         );
     });
 
+    it('deduplicates requested tag slugs before building all-tags filters', () => {
+        const source = readSource();
+        const body = extractFunctionBody(source.replace('function buildTagFilterCondition', 'export async function buildTagFilterCondition'), 'buildTagFilterCondition');
+
+        expect(body).toContain('new Set');
+        expect(body).toContain('COUNT(DISTINCT');
+    });
+
     it('uses LEFT JOIN + GROUP BY for getImagesLite', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getImagesLite');

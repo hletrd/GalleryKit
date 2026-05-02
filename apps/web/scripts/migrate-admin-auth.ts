@@ -7,6 +7,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 // Remove static import
 // import { db, adminUsers } from '../src/db';
 import * as argon2 from 'argon2';
+import { PASSWORD_HASH_OPTIONS } from '../src/lib/password-hashing';
 
 const WEAK_PLAINTEXT_PASSWORDS = new Set([
     'password',
@@ -46,7 +47,7 @@ async function main() {
     if (!adminPasswordHash.startsWith('$argon2')) {
         assertStrongBootstrapPassword(adminPasswordHash);
         console.log('ADMIN_PASSWORD is plain text, hashing it...');
-        adminPasswordHash = await argon2.hash(adminPasswordHash);
+        adminPasswordHash = await argon2.hash(adminPasswordHash, PASSWORD_HASH_OPTIONS);
     }
 
     // Dynamic import to ensure env vars are loaded first

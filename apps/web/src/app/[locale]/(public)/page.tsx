@@ -33,13 +33,14 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const tagSlugs = requestedTagSlugs.length > 0
     ? filterExistingTagSlugs(requestedTagSlugs, allTags)
     : [];
+  const tagLabels = tagSlugs.map((slug) => allTags.find((tag) => tag.slug === slug)?.name ?? slug);
 
   const title = tagSlugs.length > 0
-    ? `${tagSlugs.map(t => '#' + t).join(' ')} | ${seo.title}`
+    ? `${tagLabels.map(tag => '#' + tag).join(' ')} | ${seo.title}`
     : seo.title;
 
   const description = tagSlugs.length > 0
-    ? t('browsePhotosWithTag', { tags: tagSlugs.join(', '), site: seo.title })
+    ? t('browsePhotosWithTag', { tags: tagLabels.join(', '), site: seo.title })
     : seo.description;
 
   const robots = tagSlugs.length > 0 ? { index: false, follow: true } : undefined;

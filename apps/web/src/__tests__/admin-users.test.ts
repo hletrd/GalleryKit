@@ -107,6 +107,7 @@ describe('createAdminUser', () => {
         headersMock.mockResolvedValue({ get: vi.fn().mockReturnValue(null) });
         getClientIpMock.mockReturnValue('203.0.113.5');
         checkRateLimitMock.mockResolvedValue({ count: 1 });
+        decrementRateLimitMock.mockReset();
         decrementRateLimitMock.mockResolvedValue(undefined);
         getRateLimitBucketStartMock.mockReturnValue(12345);
         incrementRateLimitMock.mockResolvedValue(undefined);
@@ -147,7 +148,7 @@ describe('createAdminUser', () => {
         expect(insertMock).not.toHaveBeenCalled();
     });
 
-    it('rolls back only the current attempt after successful creation', async () => {
+    it('keeps the pre-incremented user_create budget after successful creation', async () => {
         insertMock.mockReturnValue(makeInsertChain([{ insertId: 7 }]));
 
         const formData = new FormData();
@@ -157,7 +158,7 @@ describe('createAdminUser', () => {
 
         await expect(createAdminUser(formData)).resolves.toEqual({ success: true });
 
-        expect(decrementRateLimitMock).toHaveBeenCalledWith('203.0.113.5', 'user_create', 60 * 60 * 1000, 12345);
+        expect(decrementRateLimitMock).not.toHaveBeenCalled();
         expect(resetRateLimitMock).not.toHaveBeenCalled();
     });
 

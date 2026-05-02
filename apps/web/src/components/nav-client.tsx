@@ -91,6 +91,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                     )}
                     aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
                     aria-expanded={isExpanded}
+                    aria-controls="primary-nav-topics primary-nav-controls"
                 >
                     {isExpanded ? (
                         <ChevronUp className="h-4 w-4" />
@@ -100,7 +101,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                 </button>
 
                 {/* Topics */}
-                <div className={cn(
+                <div id="primary-nav-topics" className={cn(
                     "flex items-center gap-2 text-sm font-medium min-w-0 transition-all duration-300",
                     isExpanded
                         ? "flex-wrap content-start w-full mt-1"
@@ -139,7 +140,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                 </div>
 
                 {/* Controls: hidden on mobile when collapsed, shown when expanded; always rightmost on desktop */}
-                <div className={cn(
+                <div id="primary-nav-controls" className={cn(
                     "items-center gap-1 shrink-0",
                     isExpanded ? "flex w-full mt-2" : "hidden md:flex"
                 )}>
