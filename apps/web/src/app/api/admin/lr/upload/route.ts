@@ -129,12 +129,20 @@ export const POST = withAdminAuth(
         const imageId = safeInsertId(insertResult[0].insertId);
 
         enqueueImageProcessing({
-            imageId,
+            id: imageId,
             filenameOriginal: data.filenameOriginal,
             filenameWebp: data.filenameWebp,
             filenameAvif: data.filenameAvif,
             filenameJpeg: data.filenameJpeg,
-            config,
+            width: data.width,
+            topic: topicSlug,
+            quality: {
+                webp: config.imageQualityWebp,
+                avif: config.imageQualityAvif,
+                jpeg: config.imageQualityJpeg,
+            },
+            imageSizes: config.imageSizes.length > 0 ? config.imageSizes : undefined,
+            iccProfileName: data.iccProfileName,
         });
 
         await logAuditEvent(
@@ -146,7 +154,7 @@ export const POST = withAdminAuth(
             { topic: topicSlug, filename: fileEntry.name },
         ).catch(console.debug);
 
-        revalidateAllAppData().catch(console.debug);
+        revalidateAllAppData();
 
         return NextResponse.json(
             { success: true, id: imageId },
