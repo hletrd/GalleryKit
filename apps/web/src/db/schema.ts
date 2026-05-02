@@ -138,6 +138,25 @@ export const sessions = mysqlTable("sessions", {
     idxSessionsExpiresAt: index('idx_sessions_expires_at').on(table.expiresAt),
 }));
 
+// US-P53: Admin Personal Access Tokens (PATs) for non-browser integrations
+// such as the Lightroom Classic publish plugin. Only the SHA-256 digest of
+// the token is persisted; plaintext is shown to the admin exactly once at
+// creation time. The lib at apps/web/src/lib/admin-tokens.ts fails closed
+// when this table is missing (verify returns null, list returns []).
+export const adminTokens = mysqlTable("admin_tokens", {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id").references(() => adminUsers.id, { onDelete: 'cascade' }).notNull(),
+    label: varchar("label", { length: 255 }).notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    scopes: text("scopes"),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    lastUsedAt: timestamp("last_used_at"),
+    expiresAt: timestamp("expires_at"),
+}, (table) => ({
+    tokenHashIdx: index("admin_tokens_token_hash_idx").on(table.tokenHash),
+    userIdx: index("admin_tokens_user_idx").on(table.userId),
+}));
+
 export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
     ip: varchar("ip", { length: 45 }).notNull(),
     bucketType: varchar("bucket_type", { length: 20 }).notNull(),

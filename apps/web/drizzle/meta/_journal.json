@@ -36,6 +36,20 @@
       "when": 1777727760696,
       "tag": "0004_admin_users_updated_at",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1778304000000,
+      "tag": "0005_topics_map_visible",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1778304060000,
+      "tag": "0006_admin_tokens",
+      "breakpoints": true
     }
   ]
 }
