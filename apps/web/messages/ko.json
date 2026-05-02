@@ -211,6 +211,11 @@
     "bulkLicenseTier": "라이선스",
     "bulkAddTags": "태그 추가",
     "bulkRemoveTags": "태그 제거",
+    "bulkApplyAltSuggested": "제안된 대체 텍스트 적용",
+    "bulkApplyAltSuggestedHint": "AI가 제안한 대체 텍스트를 선택한 필드가 비어 있는 경우에만 복사합니다.",
+    "bulkAltSuggested_none": "적용 안 함",
+    "bulkAltSuggested_title": "제목으로 복사",
+    "bulkAltSuggested_description": "설명으로 복사",
     "licenseTier_none": "없음",
     "licenseTier_editorial": "에디토리얼",
     "licenseTier_commercial": "상업용",
@@ -597,7 +602,11 @@
     "reactionsTitle": "반응",
     "reactionsDesc": "익명 방문자가 사진에 좋아요를 남길 수 있도록 합니다.",
     "reactionsEnabled": "반응 기능 사용",
-    "reactionsEnabledHint": "비활성화하면 하트 버튼이 숨겨지고 새로운 반응이 기록되지 않습니다."
+    "reactionsEnabledHint": "비활성화하면 하트 버튼이 숨겨지고 새로운 반응이 기록되지 않습니다.",
+    "autoAltTextTitle": "자동 대체 텍스트",
+    "autoAltTextDesc": "로컬 Florence-2 모델을 사용하여 AI 대체 텍스트 제안을 생성합니다 (스텁; 실제 ONNX 추론은 향후 기능).",
+    "autoAltTextEnabled": "자동 대체 텍스트 사용",
+    "autoAltTextEnabledHint": "활성화하면 각 이미지 처리 후 EXIF 기반 대체 텍스트 힌트를 생성합니다. Florence-2 ONNX 모델이 필요합니다 (현재 스텁 활성)."
   },
   "reaction": {
     "like": "좋아요",

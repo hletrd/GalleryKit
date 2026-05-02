@@ -211,6 +211,11 @@
     "bulkLicenseTier": "License",
     "bulkAddTags": "Add tags",
     "bulkRemoveTags": "Remove tags",
+    "bulkApplyAltSuggested": "Apply suggested alt text",
+    "bulkApplyAltSuggestedHint": "Copies AI-suggested alt text into the chosen field only when that field is currently empty.",
+    "bulkAltSuggested_none": "Do not apply",
+    "bulkAltSuggested_title": "Copy to title",
+    "bulkAltSuggested_description": "Copy to description",
     "licenseTier_none": "None",
     "licenseTier_editorial": "Editorial",
     "licenseTier_commercial": "Commercial",
@@ -597,7 +602,11 @@
     "reactionsTitle": "Reactions",
     "reactionsDesc": "Allow anonymous visitors to like photos.",
     "reactionsEnabled": "Enable Reactions",
-    "reactionsEnabledHint": "When disabled, the heart button is hidden and no new reactions are recorded."
+    "reactionsEnabledHint": "When disabled, the heart button is hidden and no new reactions are recorded.",
+    "autoAltTextTitle": "Auto Alt-Text",
+    "autoAltTextDesc": "Generate AI alt-text suggestions using a local Florence-2 model (stub; real ONNX inference is a future feature).",
+    "autoAltTextEnabled": "Enable Auto Alt-Text",
+    "autoAltTextEnabledHint": "When enabled, generates an EXIF-derived alt text hint after each image is processed. Requires the Florence-2 ONNX model (stub active)."
   },
   "reaction": {
     "like": "Like",
