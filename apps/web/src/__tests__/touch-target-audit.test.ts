@@ -139,11 +139,10 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     //   - delete-selected toolbar (`size="sm"`)
     //   - per-row inline edit (`size="icon"`)
     //   - per-row inline delete (`size="icon"`)
-    // All of these sit on the desktop admin dashboard; the table is
-    // keyboard-primary and the icons render at 36 px which is the
-    // shadcn default. Re-open: when admin becomes mobile-priority,
-    // drop these to h-11.
-    'components/image-manager.tsx': 5,
+    // US-P41: count raised from 5 → 6 for the new "Bulk edit" size="sm"
+    // toolbar button. Same admin keyboard-primary rationale applies.
+    // Re-open: when admin becomes mobile-priority, drop these to h-11.
+    'components/image-manager.tsx': 6,
     // admin-user-manager: "Add admin" header button (`size="sm"`)
     // and the per-row delete-user icon (`size="icon"`). Cycle 3 RPF
     // loop AGG3-M01: count raised from 1 → 2 because the multi-line
