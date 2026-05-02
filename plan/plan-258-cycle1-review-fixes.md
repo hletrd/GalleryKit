@@ -83,7 +83,7 @@ Prompt 3 must run the full configured gate list after implementation:
 - [x] Scheduled items fixed or explicitly reconciled.
 - [x] Full gates green.
 - [x] Signed gitmoji commits pushed.
-- [ ] Per-cycle deploy attempted after green gates (pending deploy step).
+- [x] Per-cycle deploy attempted after green gates — `DEPLOY: per-cycle-failed:missing deploy env file`.
 
 - [x] Implemented security/correctness fixes: global admin-delete lock, charged successful admin creation, generic share metadata, share/OG limiter semantics, nginx forwarded-IP overwrite, upload input rejection, schema/migration alignment, Drizzle TLS, tag-filter dedupe, shared-group photoId counting, and restore cleanup ordering.
 - [x] Implemented build/deploy/docs/config fixes: Docker lockfile/npm ci, BASE_URL build arg, fail-fast deploy script, root `.env.deploy` fallback, Node 24 type pin, review-artifact ignore exceptions, body-cap docs, stale comments, localized DB URL error, components config path, and CSS cleanup.
