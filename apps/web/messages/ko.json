@@ -510,7 +510,9 @@
     "deleteUser": "사용자 {username} 삭제",
     "goBack": "뒤로",
     "switchLocale": "언어를 {language}(으)로 전환",
-    "toggleSlideshow": "슬라이드쇼 토글"
+    "toggleSlideshow": "슬라이드쇼 토글",
+    "playSlideshow": "슬라이드쇼 시작",
+    "pauseSlideshow": "슬라이드쇼 일시정지"
   },
   "common": {
     "untitled": "제목 없음",

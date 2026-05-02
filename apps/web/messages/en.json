@@ -510,7 +510,9 @@
     "deleteUser": "Delete user {username}",
     "goBack": "Go back",
     "switchLocale": "Switch language to {language}",
-    "toggleSlideshow": "Toggle slideshow"
+    "toggleSlideshow": "Toggle slideshow",
+    "playSlideshow": "Play slideshow",
+    "pauseSlideshow": "Pause slideshow"
   },
   "common": {
     "untitled": "Untitled",
