@@ -44,11 +44,10 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
         return { title: t('notFoundTitle') };
     }
 
-    const [locale, t, seo, config, image] = await Promise.all([
+    const [locale, t, seo, image] = await Promise.all([
         getLocale(),
         getTranslations('photo'),
         getSeoSettings(),
-        getGalleryConfig(),
         getImageCached(imageId),
     ]);
 
@@ -67,10 +66,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
     if (image.topic) keywords.push(image.topic);
 
-    // Use configured image sizes for OG image URLs (avoids 404s if admin changes image_sizes)
-    const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
-    const imageUrl = `/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`;
-    const ogImageUrl = absoluteImageUrl(imageUrl, seo.url);
     const pageUrl = localizeUrl(seo.url, locale, `/p/${id}`);
     const author = seo.author.trim();
     const metadataDescription = image.description
@@ -79,10 +74,13 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
             : displayTitle);
     const openGraphLocale = getOpenGraphLocale(locale, seo.locale);
 
+    // US-P13: use per-photo OG image route; falls back to site default internally.
+    const ogImageUrl = absoluteImageUrl(`/api/og/photo/${id}`, seo.url);
+
     const ogImages = [{
         url: ogImageUrl,
-        width: image.width,
-        height: image.height,
+        width: 1200,
+        height: 630,
         alt: displayTitle,
     }];
 
