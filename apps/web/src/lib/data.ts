@@ -222,6 +222,8 @@ const adminSelectFields = {
     original_file_size: images.original_file_size,
     // blur_data_url excluded — fetched only in individual image queries
     // to avoid bloating InnoDB buffer pool and SSR payload on listing pages.
+    // US-P52: alt_text_suggested is PUBLIC (SEO + a11y fallback, not PII).
+    alt_text_suggested: images.alt_text_suggested,
 } as const;
 
 // ADMIN LISTING: lightweight field set for the admin dashboard grid.
