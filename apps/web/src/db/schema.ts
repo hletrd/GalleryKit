@@ -184,6 +184,43 @@ export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
     pk: primaryKey({ columns: [table.ip, table.bucketType, table.bucketStart] }),
 }));
 
+// US-P44 (Phase 4.4): Per-photo / per-topic / per-shared-group analytics views.
+// Privacy: no full IPs stored — only country_code (2-char) derived from IP.
+// referrer_host stores TLD+1 only (never full URL). bot flag records crawler views
+// but they are excluded from public-facing counts.
+export const imageViews = mysqlTable("image_views", {
+    id: int("id").primaryKey().autoincrement(),
+    imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
+    viewed_at: timestamp("viewed_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    referrer_host: varchar("referrer_host", { length: 128 }).notNull().default('direct'),
+    country_code: varchar("country_code", { length: 2 }).notNull().default('XX'),
+    bot: boolean("bot").notNull().default(false),
+}, (table) => ({
+    idxImageViewsImageIdViewedAt: index('idx_image_views_image_id_viewed_at').on(table.imageId, table.viewed_at),
+}));
+
+export const topicViews = mysqlTable("topic_views", {
+    id: int("id").primaryKey().autoincrement(),
+    topic: varchar("topic", { length: 255 }).references(() => topics.slug, { onDelete: 'cascade' }).notNull(),
+    viewed_at: timestamp("viewed_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    referrer_host: varchar("referrer_host", { length: 128 }).notNull().default('direct'),
+    country_code: varchar("country_code", { length: 2 }).notNull().default('XX'),
+    bot: boolean("bot").notNull().default(false),
+}, (table) => ({
+    idxTopicViewsTopicViewedAt: index('idx_topic_views_topic_viewed_at').on(table.topic, table.viewed_at),
+}));
+
+export const sharedGroupViews = mysqlTable("shared_group_views", {
+    id: int("id").primaryKey().autoincrement(),
+    groupId: int("group_id").references(() => sharedGroups.id, { onDelete: 'cascade' }).notNull(),
+    viewed_at: timestamp("viewed_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    referrer_host: varchar("referrer_host", { length: 128 }).notNull().default('direct'),
+    country_code: varchar("country_code", { length: 2 }).notNull().default('XX'),
+    bot: boolean("bot").notNull().default(false),
+}, (table) => ({
+    idxSharedGroupViewsGroupIdViewedAt: index('idx_shared_group_views_group_id_viewed_at').on(table.groupId, table.viewed_at),
+}));
+
 // US-P42 (Phase 4.2): Smart collections — admin-defined dynamic galleries
 // driven by an EXIF/topic/tag predicate AST stored in `query_json`. The AST
 // is compiled to safe parameterized SQL by `apps/web/src/lib/smart-collections.ts`
