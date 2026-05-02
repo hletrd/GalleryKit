@@ -80,7 +80,13 @@ export function getPhotoDisplayTitleFromTagNames(
 }
 
 export function getConcisePhotoAltText(
-    image: { title: string | null | undefined; tag_names?: string | null | undefined },
+    image: {
+        title: string | null | undefined;
+        tag_names?: string | null | undefined;
+        // US-P52: AI-generated alt text suggestion. Used as fallback when
+        // title and tags are absent. Admin-set alt always takes precedence.
+        alt_text_suggested?: string | null | undefined;
+    },
     fallback: string,
 ): string {
     // F-18 / AGG1L-LOW-01: derive alt text from the photo's tag list (or
@@ -89,6 +95,15 @@ export function getConcisePhotoAltText(
     // are normalized via `humanizeTagLabel` (now applied at the helper
     // level above), so this routine just strips the `#` prefix marks
     // that `getPhotoDisplayTitle` adds for visual hashtag formatting.
+    //
+    // Fallback chain: title > tag-derived > alt_text_suggested > fallback
+    // US-P52: if neither title nor tags produce a non-fallback result,
+    // use alt_text_suggested before the generic fallback string.
+    const hasMeaningfulTitle = image.title && image.title.trim() && !isFilenameLikeTitle(image.title);
+    const hasTags = image.tag_names && image.tag_names.trim();
+    if (!hasMeaningfulTitle && !hasTags && image.alt_text_suggested && image.alt_text_suggested.trim()) {
+        return image.alt_text_suggested.trim();
+    }
     return getPhotoDisplayTitleFromTagNames(image, fallback)
         .replace(/^#+/, '')
         .replace(/\s+#/g, ', ');
