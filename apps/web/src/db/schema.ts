@@ -53,6 +53,9 @@ export const images = mysqlTable("images", {
     original_file_size: bigint('original_file_size', { mode: 'number' }),
     blur_data_url: text('blur_data_url'),
 
+    // US-P31: denormalized like count, updated atomically with image_reactions inserts/deletes
+    reaction_count: int('reaction_count').notNull().default(0),
+
     created_at: timestamp("created_at")
         .default(sql`CURRENT_TIMESTAMP`)
         .notNull(),
@@ -155,6 +158,19 @@ export const adminTokens = mysqlTable("admin_tokens", {
 }, (table) => ({
     tokenHashIdx: index("admin_tokens_token_hash_idx").on(table.tokenHash),
     userIdx: index("admin_tokens_user_idx").on(table.userId),
+}));
+
+// US-P31: Anonymous visitor reactions (heart/like).
+// visitor_id_hash = SHA-256(visitor_uuid + YYYY-MM-DD) — no PII stored.
+// reaction_count on images is updated atomically inside a transaction.
+export const imageReactions = mysqlTable("image_reactions", {
+    id: int("id").autoincrement().primaryKey(),
+    imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
+    visitorIdHash: varchar("visitor_id_hash", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+    imageVisitorUnique: uniqueIndex("image_reactions_image_visitor_unique").on(table.imageId, table.visitorIdHash),
+    imageIdIdx: index("image_reactions_image_id_idx").on(table.imageId),
 }));
 
 export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
