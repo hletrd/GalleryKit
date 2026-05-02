@@ -498,10 +498,12 @@ export async function deleteTopicAlias(topicSlug: string, alias: string) {
 // US-P21: toggle per-topic opt-in for the public /map GPS view.
 export async function setTopicMapVisible(topicSlug: string, mapVisible: boolean) {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) return { error: maintenanceError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
+    // C2R-02: defense-in-depth same-origin check for mutating server actions.
     const originError = await requireSameOriginAdmin();
-    if (originError) return originError;
-    const adminCheck = await isAdmin();
-    if (!adminCheck) return { error: t('unauthorized') };
+    if (originError) return { error: originError };
 
     const { value: cleanSlug, rejected: slugRejected } = requireCleanInput(topicSlug);
     if (slugRejected || !cleanSlug || !isValidSlug(cleanSlug)) return { error: t('invalidSlug') };
