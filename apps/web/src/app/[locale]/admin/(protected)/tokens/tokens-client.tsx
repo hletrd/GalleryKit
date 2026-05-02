@@ -39,7 +39,7 @@ export function TokensClient() {
         });
     };
 
-    useEffect(() => { fetchTokens(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { fetchTokens(); }, []);
 
     const handleCreate = () => {
         if (!newLabel.trim()) {
