@@ -19,6 +19,9 @@ export const GALLERY_SETTING_KEYS = [
 
     // Slideshow
     'slideshow_interval_seconds',
+
+    // US-P31: Reactions
+    'reactions_enabled',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -51,6 +54,8 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     image_sizes: DEFAULT_IMAGE_SIZE_VALUES.join(','),
     strip_gps_on_upload: 'false',
     slideshow_interval_seconds: String(SLIDESHOW_INTERVAL_DEFAULT),
+    // US-P31: reactions enabled by default
+    reactions_enabled: 'true',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -64,6 +69,8 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     image_sizes: (v) => normalizeConfiguredImageSizes(v) !== null,
     strip_gps_on_upload: (v) => v === 'true' || v === 'false',
     slideshow_interval_seconds: (v) => { const n = Number(v); return Number.isInteger(n) && n >= SLIDESHOW_INTERVAL_MIN && n <= SLIDESHOW_INTERVAL_MAX; },
+    // US-P31
+    reactions_enabled: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */

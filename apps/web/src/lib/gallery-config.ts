@@ -57,6 +57,9 @@ export interface GalleryConfig {
 
     // Slideshow
     slideshowIntervalSeconds: number;
+
+    // US-P31: Reactions
+    reactionsEnabled: boolean;
 }
 
 /**
@@ -87,6 +90,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 return raw === 'true';
             })(),
             slideshowIntervalSeconds: parseSlideshowInterval(getSetting(map, 'slideshow_interval_seconds')),
+            reactionsEnabled: (() => {
+                const raw = getSetting(map, 'reactions_enabled');
+                if (!isValidSettingValue('reactions_enabled', raw)) return DEFAULTS.reactions_enabled !== 'false';
+                return raw !== 'false';
+            })(),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -99,6 +107,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             imageSizes: parseImageSizes(DEFAULTS.image_sizes),
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
+            reactionsEnabled: DEFAULTS.reactions_enabled !== 'false',
         };
     }
 }
