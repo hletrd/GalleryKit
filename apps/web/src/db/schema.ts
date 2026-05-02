@@ -51,6 +51,8 @@ export const images = mysqlTable("images", {
     bit_depth: int('bit_depth'),
     original_format: varchar('original_format', { length: 10 }),
     original_file_size: bigint('original_file_size', { mode: 'number' }),
+    // US-P41: license tier for bulk metadata editor. Validated as enum at action layer.
+    license_tier: varchar('license_tier', { length: 16 }).notNull().default('none'),
     blur_data_url: text('blur_data_url'),
 
     // US-P31: denormalized like count, updated atomically with image_reactions inserts/deletes
