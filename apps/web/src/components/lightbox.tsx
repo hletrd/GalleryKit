@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react';
 import FocusTrap from '@/components/lazy-focus-trap';
 import { X, ChevronLeft, ChevronRight, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
 import { isEditableTarget } from '@/components/photo-viewer';
-import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize, SLIDESHOW_INTERVAL_DEFAULT } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText } from '@/lib/photo-title';
 
 interface LightboxProps {
@@ -18,7 +18,9 @@ interface LightboxProps {
     nextId: number | null;
     onClose: () => void;
     onNavigate: (direction: number) => void;
+    onSlideshowAdvance?: () => void;
     imageSizes?: number[];
+    slideshowIntervalSeconds?: number;
 }
 
 export function shouldAutoHideLightboxControls(hasHover: boolean, hasFinePointer: boolean) {
@@ -45,11 +47,37 @@ export function LightboxTrigger({ onClick }: { onClick: () => void }) {
     );
 }
 
-export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSizes = DEFAULT_IMAGE_SIZES }: LightboxProps) {
+/**
+ * Deterministically pick a Ken Burns direction variant based on image id.
+ * Returns 0 or 1 to alternate direction per image.
+ */
+export function getKenBurnsVariant(imageId: number): 0 | 1 {
+    return (imageId % 2) as 0 | 1;
+}
+
+/**
+ * Build the CSS transform string for Ken Burns animation start/end.
+ * Exported for unit testing.
+ */
+export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): string {
+    // variant 0: zoom in from bottom-left, pan toward top-right
+    // variant 1: zoom in from top-right, pan toward bottom-left
+    if (variant === 0) {
+        return phase === 'start'
+            ? 'scale(1) translate(0%, 0%)'
+            : 'scale(1.08) translate(-2%, -2%)';
+    }
+    return phase === 'start'
+        ? 'scale(1) translate(0%, 0%)'
+        : 'scale(1.08) translate(2%, 2%)';
+}
+
+export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [shouldAutoHideControls, setShouldAutoHideControls] = useState(getLightboxAutoHidePreference);
+    const [isSlideshowActive, setIsSlideshowActive] = useState(false);
     const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastControlRevealRef = useRef(0);
     const [shouldReduceMotion, setShouldReduceMotion] = useState(
@@ -59,6 +87,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
     const closeButtonRef = useRef<HTMLButtonElement>(null);
     const previouslyFocusedRef = useRef<HTMLElement | null>(null);
     const dialogRef = useRef<HTMLDivElement>(null);
+    const slideshowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Stable ref so the interval callback always sees the latest advance function
+    const onSlideshowAdvanceRef = useRef(onSlideshowAdvance);
+    useEffect(() => { onSlideshowAdvanceRef.current = onSlideshowAdvance; }, [onSlideshowAdvance]);
 
     useEffect(() => {
         const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -118,6 +150,36 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         }, 3000);
     }, [controlsVisible, shouldAutoHideControls]);
 
+    // Slideshow timer: start/stop based on isSlideshowActive
+    useEffect(() => {
+        if (!isSlideshowActive) {
+            if (slideshowTimerRef.current) {
+                clearInterval(slideshowTimerRef.current);
+                slideshowTimerRef.current = null;
+            }
+            return;
+        }
+        slideshowTimerRef.current = setInterval(() => {
+            onSlideshowAdvanceRef.current?.();
+        }, slideshowIntervalSeconds * 1000);
+        return () => {
+            if (slideshowTimerRef.current) {
+                clearInterval(slideshowTimerRef.current);
+                slideshowTimerRef.current = null;
+            }
+        };
+    }, [isSlideshowActive, slideshowIntervalSeconds]);
+
+    // Stop slideshow when lightbox unmounts
+    useEffect(() => {
+        return () => {
+            if (slideshowTimerRef.current) {
+                clearInterval(slideshowTimerRef.current);
+                slideshowTimerRef.current = null;
+            }
+        };
+    }, []);
+
     // Swipe navigation for mobile
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
         showControls(true);
@@ -130,6 +192,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
         const dt = Date.now() - touchStartRef.current.time;
         touchStartRef.current = null;
+        // Stop slideshow on touch input
+        setIsSlideshowActive(false);
         // Only trigger on horizontal swipe (dx > dy) with enough distance or velocity
         if (Math.abs(dx) > Math.abs(dy) && (Math.abs(dx) > 50 || Math.abs(dx) / dt > 0.3)) {
             if (dx > 0 && prevId !== null) onNavigate(-1);
@@ -196,8 +260,18 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Any key interaction resets the auto-hide timer
+            // Space key toggles slideshow — don't reset controls or stop slideshow
+            if (e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isEditableTarget(e)) return;
+                setIsSlideshowActive(prev => !prev);
+                showControls(true);
+                return;
+            }
+            // Any other key interaction resets the auto-hide timer and stops slideshow
             showControls(true);
+            setIsSlideshowActive(false);
             // Only stop propagation for keys we handle
             if (['f', 'F', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) {
                 e.stopPropagation();
@@ -222,6 +296,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
     }, [prevId, nextId, onNavigate, onClose, toggleFullscreen, showControls]);
 
     const handleBackdropClick = useCallback(() => {
+        setIsSlideshowActive(false);
         onClose();
     }, [onClose]);
 
@@ -261,6 +336,12 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
         ? {}
         : { transition: 'opacity 0.2s ease-in-out' };
 
+    // Ken Burns animation parameters
+    const kenBurnsVariant = getKenBurnsVariant(image.id);
+    const kenBurnsStart = kenBurnsTransform(kenBurnsVariant, 'start');
+    const kenBurnsEnd = kenBurnsTransform(kenBurnsVariant, 'end');
+    const kenBurnsDuration = `${slideshowIntervalSeconds + 2}s`;
+
     // Lock body scroll and manage focus when lightbox is open
     useEffect(() => {
         const prev = document.body.style.overflow;
@@ -282,15 +363,31 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
             role="dialog"
             aria-modal="true"
             aria-label={t('aria.lightbox')}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black overflow-hidden"
             onClick={handleBackdropClick}
             onMouseMove={handleMouseMove}
             onFocusCapture={() => showControls(true)}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
         >
-            {/* Image */}
-            <picture className="w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            {/* Accessible live region for slideshow state changes */}
+            <div aria-live="polite" aria-atomic="true" className="sr-only">
+                {isSlideshowActive ? t('viewer.slideshowOn') : ''}
+            </div>
+
+            {/* Image with Ken Burns effect when slideshow is active */}
+            <picture
+                className="w-full h-full flex items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+                style={
+                    isSlideshowActive && !shouldReduceMotion
+                        ? {
+                            animation: `none`,
+                            transformOrigin: 'center center',
+                        }
+                        : undefined
+                }
+            >
                 {avifSrcSet && (
                     <source
                         type="image/avif"
@@ -312,6 +409,16 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                     height={image.height}
                     className="w-full h-full object-contain"
                     draggable={false}
+                    style={
+                        isSlideshowActive && !shouldReduceMotion
+                            ? {
+                                animation: `lightbox-ken-burns-${kenBurnsVariant} ${kenBurnsDuration} ease-in-out forwards`,
+                                transformOrigin: 'center center',
+                                '--kb-start': kenBurnsStart,
+                                '--kb-end': kenBurnsEnd,
+                            } as CSSProperties
+                            : undefined
+                    }
                 />
             </picture>
 
@@ -330,6 +437,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                     className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
+                        setIsSlideshowActive(false);
                         if (document.fullscreenElement) {
                             document.exitFullscreen().then(() => onClose()).catch(() => onClose());
                         } else {
@@ -349,6 +457,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                     className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
                     onClick={(e) => {
                         e.stopPropagation();
+                        setIsSlideshowActive(false);
                         toggleFullscreen();
                     }}
                     aria-label={isFullscreen ? t('aria.exitFullscreen') : t('aria.openFullscreen')}
@@ -369,6 +478,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                         className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20"
                         onClick={(e) => {
                             e.stopPropagation();
+                            setIsSlideshowActive(false);
                             onNavigate(-1);
                         }}
                         aria-label={t('aria.previousImage')}
@@ -388,6 +498,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, imageSize
                         className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20"
                         onClick={(e) => {
                             e.stopPropagation();
+                            setIsSlideshowActive(false);
                             onNavigate(1);
                         }}
                         aria-label={t('aria.nextImage')}

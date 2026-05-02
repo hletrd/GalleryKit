@@ -246,6 +246,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 siteTitle={seo.title}
                 shareBaseUrl={seo.url}
                 untitledFallbackTitle={t('titleWithId', { id: image.id })}
+                slideshowIntervalSeconds={config.slideshowIntervalSeconds}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (

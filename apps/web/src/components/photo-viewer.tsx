@@ -53,9 +53,10 @@ interface PhotoViewerProps {
     shareBaseUrl?: string;
     untitledFallbackTitle?: string;
     showDocumentHeading?: boolean;
+    slideshowIntervalSeconds?: number;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5 }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -688,7 +689,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
                     onClose={() => setShowLightbox(false)}
                     onNavigate={navigate}
+                    onSlideshowAdvance={() => {
+                        if (images.length <= 1) return;
+                        const nextIndex = (currentIndex + 1) % images.length;
+                        setCurrentImageId(images[nextIndex].id);
+                    }}
                     imageSizes={imageSizes}
+                    slideshowIntervalSeconds={slideshowIntervalSeconds}
                 />
             )}
 

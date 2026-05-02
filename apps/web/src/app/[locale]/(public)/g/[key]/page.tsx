@@ -143,6 +143,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     shareBaseUrl={seo.url}
                     untitledFallbackTitle={t('photo')}
                     showDocumentHeading={false}
+                    slideshowIntervalSeconds={config.slideshowIntervalSeconds}
                 />
             </>
         );

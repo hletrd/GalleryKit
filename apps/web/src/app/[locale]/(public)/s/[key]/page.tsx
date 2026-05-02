@@ -122,6 +122,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 shareBaseUrl={seo.url}
                 untitledFallbackTitle={t('sharedPhoto')}
                 showDocumentHeading={false}
+                slideshowIntervalSeconds={config.slideshowIntervalSeconds}
             />
         </>
     );
