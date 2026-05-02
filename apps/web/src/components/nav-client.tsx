@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronUp, ChevronDown, Sun, Moon } from "lucide-react";
+import { ChevronUp, ChevronDown, Sun, Moon, Monitor, Circle } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "next-themes";
 
@@ -14,6 +14,7 @@ import { DEFAULT_LOCALE, LOCALES } from "@/lib/constants";
 import siteConfig from "@/site-config.json";
 import { Search } from "@/components/search";
 import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
+import { nextTheme, type StoredTheme } from "@/lib/theme";
 
 interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
@@ -29,7 +30,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
     const locale = useLocale();
     const router = useRouter();
     const { t } = useTranslation();
-    const { resolvedTheme, setTheme } = useTheme();
+    const { theme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
 
     // Auto-collapse when viewport crosses into desktop
@@ -146,12 +147,15 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                 )}>
                     <Search previewImageSizes={imageSizes} />
                     <button
-                        onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+                        onClick={() => setTheme(nextTheme((theme ?? 'system') as StoredTheme))}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
-                        aria-label={t('aria.toggleTheme')}
+                        aria-label={t('aria.cycleTheme', { theme: theme ?? 'system' })}
+                        title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
                     >
-                        <Sun className="h-4 w-4 hidden dark:block" />
-                        <Moon className="h-4 w-4 block dark:hidden" />
+                        {(theme === 'light') && <Sun className="h-4 w-4" />}
+                        {(theme === 'dark') && <Moon className="h-4 w-4" />}
+                        {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+                        {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
                     </button>
                     <button
                         onClick={handleLocaleSwitch}
