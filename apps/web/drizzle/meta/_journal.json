@@ -78,6 +78,13 @@
       "when": 1746748800000,
       "tag": "0010_analytics_views",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1746835200000,
+      "tag": "0011_image_alt_text_suggested",
+      "breakpoints": true
     }
   ]
 }

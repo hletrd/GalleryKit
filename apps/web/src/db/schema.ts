@@ -58,6 +58,11 @@ export const images = mysqlTable("images", {
     // US-P31: denormalized like count, updated atomically with image_reactions inserts/deletes
     reaction_count: int('reaction_count').notNull().default(0),
 
+    // US-P52: AI-generated alt text suggestion. NULL until caption hook runs.
+    // PUBLIC field — used as <img alt> fallback when image.title is empty (SEO + a11y).
+    // Admin-set alt (title/description) always takes precedence; this is never auto-applied.
+    alt_text_suggested: text('alt_text_suggested'),
+
     created_at: timestamp("created_at")
         .default(sql`CURRENT_TIMESTAMP`)
         .notNull(),
