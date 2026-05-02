@@ -64,6 +64,13 @@
       "when": 1746576000000,
       "tag": "0008_image_license_tier",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1746662400000,
+      "tag": "0009_smart_collections",
+      "breakpoints": true
     }
   ]
 }

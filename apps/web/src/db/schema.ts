@@ -183,3 +183,19 @@ export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
 }, (table) => ({
     pk: primaryKey({ columns: [table.ip, table.bucketType, table.bucketStart] }),
 }));
+
+// US-P42 (Phase 4.2): Smart collections — admin-defined dynamic galleries
+// driven by an EXIF/topic/tag predicate AST stored in `query_json`. The AST
+// is compiled to safe parameterized SQL by `apps/web/src/lib/smart-collections.ts`
+// (allowlisted columns, bounded depth, no raw concat). Public collections
+// are reachable at `/[locale]/c/[slug]`; non-public collections require admin auth.
+export const smartCollections = mysqlTable("smart_collections", {
+    id: int("id").primaryKey().autoincrement(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    name: varchar("name", { length: 255 }).notNull(),
+    query_json: text("query_json").notNull(),
+    is_public: boolean("is_public").notNull().default(false),
+    created_at: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+    idxSmartCollectionsPublic: index('idx_smart_collections_public').on(table.is_public),
+}));
