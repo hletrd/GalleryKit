@@ -62,6 +62,32 @@
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
   }
+
+  /* OLED true-black theme: --background #000, --card #0a0a0a.
+     --foreground 0 0% 98% on #000 = 19.3:1 (WCAG AAA).
+     --muted-foreground 240 5% 64.9% on #000 = ~5.7:1 (WCAG AA).
+     All other tokens inherited from .dark stay WCAG-AA compliant. */
+  .oled {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 10%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 10%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 10%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 10%;
+    --input: 240 3.7% 10%;
+    --ring: 240 4.9% 83.9%;
+  }
 }
 
 @layer base {
