@@ -1,4 +1,5 @@
 import { getImagesLitePage, getTagsCached, getTopicBySlugCached, getTopicsCached, getSeoSettings } from '@/lib/data';
+import { recordTopicView } from '@/app/actions/public';
 import { HomeClient } from '@/components/home-client';
 import { notFound, redirect } from 'next/navigation';
 import { Metadata } from 'next';
@@ -155,6 +156,9 @@ export default async function TopicPage({
       }
       redirect(redirectSearch.size > 0 ? `${destination}?${redirectSearch.toString()}` : destination);
   }
+
+  // Fire-and-forget topic view recording (do not block render on analytics insert).
+  void recordTopicView(topicData.slug);
 
   const [seo, config, allTags, allTopics] = await Promise.all([
     getSeoSettings(),

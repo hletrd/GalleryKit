@@ -14,6 +14,7 @@ import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { PhotoViewerLoading } from '@/components/photo-viewer-loading';
 import { getCspNonce } from '@/lib/csp-nonce';
+import { recordPhotoView } from '@/app/actions/public';
 
 const PhotoViewer = dynamic(() => import('@/components/photo-viewer'), {
     loading: () => <PhotoViewerLoading />,
@@ -140,6 +141,10 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     ]);
 
     if (!image) return notFound();
+
+    // Fire-and-forget view recording: do not block render on analytics insert.
+    // recordPhotoView is a void server action — errors are swallowed internally.
+    void recordPhotoView(image.id);
 
     // Keep JSON-LD naming aligned with metadata and the hydrated viewer
     const displayTitle = getPhotoDisplayTitle(image, t('titleWithId', { id: image.id }));

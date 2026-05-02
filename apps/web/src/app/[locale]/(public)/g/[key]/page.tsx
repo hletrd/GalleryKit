@@ -1,4 +1,5 @@
 import { getSharedGroupCached, getSeoSettings } from '@/lib/data';
+import { recordSharedGroupView } from '@/app/actions/public';
 import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -106,6 +107,16 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     if (!group) {
         return notFound();
     }
+
+    // Fire-and-forget durable view recording. Only on the initial shared-group
+    // page load (no per-photo query param) and only when there are visible images
+    // — matching the existing bufferGroupViewCount logic in data.ts.
+    // The existing denormalized view_count column is kept in lockstep by the
+    // existing buffer flush mechanism; this adds the durable per-event record.
+    if (!photoId && group.images.length > 0) {
+        void recordSharedGroupView(group.id);
+    }
+
     const gridImageSize = findGridCardImageSize(config.imageSizes);
 
     let selectedImage = null;
