@@ -572,7 +572,21 @@
     "slideshowTitle": "슬라이드쇼",
     "slideshowDesc": "슬라이드쇼 자동 진행 간격을 설정합니다.",
     "slideshowInterval": "슬라이드쇼 간격 (초)",
-    "slideshowIntervalHint": "2~30초. 슬라이드쇼 모드에서 각 사진이 표시되는 시간입니다."
+    "slideshowIntervalHint": "2~30초. 슬라이드쇼 모드에서 각 사진이 표시되는 시간입니다.",
+    "reactionsTitle": "반응",
+    "reactionsDesc": "익명 방문자가 사진에 좋아요를 남길 수 있도록 합니다.",
+    "reactionsEnabled": "반응 기능 사용",
+    "reactionsEnabledHint": "비활성화하면 하트 버튼이 숨겨지고 새로운 반응이 기록되지 않습니다."
+  },
+  "reaction": {
+    "like": "좋아요",
+    "liked": "좋아요 취소",
+    "likePhoto": "이 사진에 좋아요",
+    "unlikePhoto": "좋아요 취소",
+    "likeCount": "{count, plural, one {좋아요 #개} other {좋아요 #개}}",
+    "rateLimited": "반응이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+    "disabled": "반응 기능이 비활성화되어 있습니다.",
+    "error": "반응을 저장하지 못했습니다. 다시 시도해 주세요."
   },
   "footer": {
     "admin": "관리자"
