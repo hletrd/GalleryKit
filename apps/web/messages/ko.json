@@ -90,7 +90,10 @@
     "aliasPlaceholder": "새 별칭 추가",
     "placeholderLabel": "이름 (예: 풍경)",
     "placeholderSlug": "슬러그 (예: nature)",
-    "placeholderOrder": "순서 (예: 1)"
+    "placeholderOrder": "순서 (예: 1)",
+    "mapVisible": "지도에 표시",
+    "mapVisibleToggle": "{label} 지도 표시 전환",
+    "mapVisibleUpdated": "지도 표시 설정이 업데이트되었습니다"
   },
   "tags": {
     "title": "태그 관리",
@@ -573,5 +576,48 @@
   },
   "footer": {
     "admin": "관리자"
+  },
+  "onThisDay": {
+    "title": "오늘의 사진",
+    "widgetLabel": "오늘 이 날의 사진",
+    "viewTimeline": "타임라인",
+    "yearLabel": "{year}년",
+    "untitledPhoto": "제목 없음",
+    "photo": "사진",
+    "viewPhotoAria": "사진 보기: {title}",
+    "noPhotos": "이날 찍은 사진이 아직 없습니다."
+  },
+  "map": {
+    "title": "지도",
+    "description": "지도에서 위치 정보가 있는 사진 찾아보기",
+    "noPhotos": "지도에 표시할 위치 정보가 있는 사진이 없습니다.",
+    "openPhoto": "사진 열기"
+  },
+  "timeline": {
+    "title": "타임라인",
+    "description": "날짜별로 사진 찾아보기",
+    "yearScrubberLabel": "연도로 이동",
+    "allYears": "전체",
+    "noPhotos": "촬영 날짜가 있는 사진이 아직 없습니다.",
+    "monthHeading": "{year}년 {month}",
+    "photosCount": "사진 {count}장",
+    "yearInReview": "{year}년 돌아보기",
+    "yearInReviewDescription": "{year}년의 모든 사진",
+    "backToTimeline": "타임라인으로 돌아가기",
+    "noPhotosForYear": "{year}년 사진을 찾을 수 없습니다.",
+    "months": {
+      "1": "1월",
+      "2": "2월",
+      "3": "3월",
+      "4": "4월",
+      "5": "5월",
+      "6": "6월",
+      "7": "7월",
+      "8": "8월",
+      "9": "9월",
+      "10": "10월",
+      "11": "11월",
+      "12": "12월"
+    }
   }
 }

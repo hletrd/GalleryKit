@@ -90,7 +90,10 @@
     "aliasPlaceholder": "Add new alias",
     "placeholderLabel": "Name (e.g. Nature)",
     "placeholderSlug": "Slug (e.g. nature)",
-    "placeholderOrder": "Order (e.g. 1)"
+    "placeholderOrder": "Order (e.g. 1)",
+    "mapVisible": "Show on Map",
+    "mapVisibleToggle": "Toggle map visibility for {label}",
+    "mapVisibleUpdated": "Map visibility updated"
   },
   "tags": {
     "title": "Tags",
@@ -573,5 +576,48 @@
   },
   "footer": {
     "admin": "Admin"
+  },
+  "onThisDay": {
+    "title": "On This Day",
+    "widgetLabel": "On this day in history",
+    "viewTimeline": "Timeline",
+    "yearLabel": "{year}",
+    "untitledPhoto": "Untitled",
+    "photo": "Photo",
+    "viewPhotoAria": "View photo: {title}",
+    "noPhotos": "No photos on this day yet."
+  },
+  "map": {
+    "title": "Map",
+    "description": "Browse geotagged photos on a map",
+    "noPhotos": "No geotagged photos are available on the map.",
+    "openPhoto": "Open photo"
+  },
+  "timeline": {
+    "title": "Timeline",
+    "description": "Browse photos by date",
+    "yearScrubberLabel": "Jump to year",
+    "allYears": "All",
+    "noPhotos": "No photos with a capture date yet.",
+    "monthHeading": "{month} {year}",
+    "photosCount": "{count, plural, one {# photo} other {# photos}}",
+    "yearInReview": "{year} in Review",
+    "yearInReviewDescription": "All photos from {year}",
+    "backToTimeline": "Back to Timeline",
+    "noPhotosForYear": "No photos found for {year}.",
+    "months": {
+      "1": "January",
+      "2": "February",
+      "3": "March",
+      "4": "April",
+      "5": "May",
+      "6": "June",
+      "7": "July",
+      "8": "August",
+      "9": "September",
+      "10": "October",
+      "11": "November",
+      "12": "December"
+    }
   }
 }
