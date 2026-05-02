@@ -29,7 +29,8 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias } from '@/app/actions';
+import { createTopic, updateTopic, deleteTopic, createTopicAlias, deleteTopicAlias, setTopicMapVisible } from '@/app/actions';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { Pencil, Trash2, Plus, ChevronLeft, X, Loader2 } from 'lucide-react';
 import { useTranslation } from "@/components/i18n-provider";
@@ -41,6 +42,7 @@ type Topic = {
     label: string;
     order: number | null;
     image_filename: string | null;
+    map_visible: boolean;
     aliases: string[];
 };
 
@@ -55,6 +57,24 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [isDeletingTopic, setIsDeletingTopic] = useState(false);
     const [isDeletingAlias, setIsDeletingAlias] = useState(false);
     const [isAddingAlias, setIsAddingAlias] = useState(false);
+    const [togglingMapSlug, setTogglingMapSlug] = useState<string | null>(null);
+
+    async function handleMapVisibleToggle(slug: string, currentValue: boolean) {
+        setTogglingMapSlug(slug);
+        try {
+            const res = await setTopicMapVisible(slug, !currentValue);
+            if (typeof res === 'object' && res !== null && 'error' in res && res.error) {
+                toast.error(String(res.error));
+            } else {
+                toast.success(t('categories.mapVisibleUpdated'));
+                router.refresh();
+            }
+        } catch {
+            toast.error(t('serverActions.failedToUpdateTopic'));
+        } finally {
+            setTogglingMapSlug(null);
+        }
+    }
 
     async function handleCreate(formData: FormData) {
         try {
@@ -199,6 +219,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                         <TableHead>{t('categories.label')}</TableHead>
                         <TableHead>{t('categories.slug')}</TableHead>
                         <TableHead>{t('categories.aliases')}</TableHead>
+                        <TableHead>{t('categories.mapVisible')}</TableHead>
                         <TableHead className="text-right">{t('imageManager.actions')}</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -216,6 +237,14 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         </span>
                                     ))}
                                 </div>
+                            </TableCell>
+                            <TableCell>
+                                <Switch
+                                    checked={topic.map_visible}
+                                    onCheckedChange={() => handleMapVisibleToggle(topic.slug, topic.map_visible)}
+                                    disabled={togglingMapSlug === topic.slug}
+                                    aria-label={t('categories.mapVisibleToggle', { label: topic.label })}
+                                />
                             </TableCell>
                             <TableCell className="text-right space-x-2">
                                 <Button variant="ghost" size="icon" onClick={() => setEditingTopic(topic)} aria-label={t('aria.editItem')}>
