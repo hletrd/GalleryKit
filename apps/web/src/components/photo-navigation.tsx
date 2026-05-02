@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useTranslation } from '@/components/i18n-provider';
 import { localizePath } from '@/lib/locale-path';
 
+
 interface PhotoNavigationProps {
     prevId: number | null;
     nextId: number | null;
@@ -212,6 +213,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => goToPhoto(prevId)}
+                        onMouseEnter={() => router.prefetch(getPhotoPath(prevId))}
                         aria-label={t('aria.previousPhoto')}
                     >
                         <ChevronLeft className="h-6 w-6" />
@@ -226,6 +228,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                         size="icon"
                         className="h-12 w-12 rounded-full bg-black/50 text-white hover:bg-black/70 border-none"
                         onClick={() => goToPhoto(nextId)}
+                        onMouseEnter={() => router.prefetch(getPhotoPath(nextId))}
                         aria-label={t('aria.nextPhoto')}
                     >
                         <ChevronRight className="h-6 w-6" />
