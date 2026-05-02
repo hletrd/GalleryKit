@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "prebuild": "NODE_ENV=production node scripts/ensure-site-config.mjs",
+    "prebuild": "NODE_ENV=production node scripts/ensure-site-config.mjs && tsx scripts/generate-pwa-icons.ts && tsx scripts/build-sw.ts",
     "build": "npm run typecheck && GALLERYKIT_TYPECHECKED=1 next build",
     "start": "next start",
     "test": "vitest run",
