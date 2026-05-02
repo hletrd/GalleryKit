@@ -267,6 +267,69 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
     return clampUtf8Bytes(s, maxBytes) || null;
 }
 
+/**
+ * Resolve which ICC profile name to embed in AVIF derivatives given the source
+ * ICC profile name (from extractIccProfileName) and the EXIF ColorSpace tag.
+ *
+ * Decision matrix
+ * ───────────────────────────────────────────────────────────────────────────
+ * Source ICC name                 │ AVIF ICC output │ Rationale
+ * ────────────────────────────────┼─────────────────┼──────────────────────
+ * 'Display P3'                    │ p3              │ exact match
+ * 'DCI-P3'                        │ p3              │ same primaries, D65 WP
+ * 'P3-D65'                        │ p3              │ alias for Display P3
+ * 'Display P3 - ACES'             │ p3              │ P3 gamut variant
+ * 'sRGB IEC61966-2.1' / sRGB ICC  │ srgb            │ stays sRGB
+ * 'Adobe RGB (1998)' / 'AdobeRGB' │ p3              │ wider than sRGB; P3
+ *                                 │                 │ is the closest Sharp
+ *                                 │                 │ named target that
+ *                                 │                 │ covers the gamut
+ * 'ProPhoto RGB' / 'ProPhoto'     │ p3              │ same reasoning
+ * 'ITU-R BT.2020' / 'Rec.2020'   │ p3              │ same reasoning
+ * null / unknown                  │ srgb            │ safe default
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * WebP and JPEG derivatives are always left at sRGB for universal
+ * compatibility. Only AVIF is tagged with P3 because AVIF decoders in modern
+ * browsers correctly honour embedded P3 ICC and tone-map accordingly.
+ *
+ * Sharp's withMetadata({ icc: 'p3' }) embeds Apple's Display P3 ICC profile,
+ * which is the standard Display-P3 D65 target used by modern browsers.
+ *
+ * @returns 'p3' | 'srgb'
+ */
+export function resolveAvifIccProfile(iccProfileName: string | null | undefined): 'p3' | 'srgb' {
+    if (!iccProfileName) return 'srgb';
+
+    const name = iccProfileName.toLowerCase();
+
+    // Explicit P3 families
+    if (
+        name.includes('display p3') ||
+        name.includes('p3-d65') ||
+        name === 'dci-p3' ||
+        name.startsWith('dci-p3')
+    ) {
+        return 'p3';
+    }
+
+    // Wider-than-sRGB gamuts: AdobeRGB, ProPhoto, Rec.2020 — map to P3 as
+    // the closest Sharp-supported named target that encompasses sRGB.
+    if (
+        name.includes('adobe rgb') ||
+        name.includes('adobergb') ||
+        name.includes('prophoto') ||
+        name.includes('rec. 2020') ||
+        name.includes('rec.2020') ||
+        name.includes('bt.2020') ||
+        name.includes('bt2020')
+    ) {
+        return 'p3';
+    }
+
+    return 'srgb';
+}
+
 export function extractIccProfileName(icc?: Buffer | null): string | null {
     if (!icc || icc.length <= 132) return null;
 
@@ -446,6 +509,7 @@ export async function processImageFormats(
     baseWidth: number, // The width from metadata
     quality?: ImageQualitySettings, // Admin-configured quality overrides
     sizes: number[] = DEFAULT_OUTPUT_SIZES, // Admin-configured output sizes
+    iccProfileName?: string | null, // Source ICC profile name for AVIF P3 tagging
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
@@ -456,6 +520,10 @@ export async function processImageFormats(
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
+
+    // Resolve the ICC profile to embed in AVIF derivatives. withMetadata({icc})
+    // is a zero-cost flag — Sharp sets it at encode time with no extra decode pass.
+    const avifIcc = resolveAvifIccProfile(iccProfileName);
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -490,7 +558,10 @@ export async function processImageFormats(
                 if (format === 'webp') {
                     await sharpInstance.webp({ quality: qualityWebp }).toFile(outputPath);
                 } else if (format === 'avif') {
-                    await sharpInstance.avif({ quality: qualityAvif }).toFile(outputPath);
+                    await sharpInstance
+                        .withMetadata({ icc: avifIcc })
+                        .avif({ quality: qualityAvif })
+                        .toFile(outputPath);
                 } else {
                     await sharpInstance.jpeg({ quality: qualityJpeg }).toFile(outputPath);
                 }

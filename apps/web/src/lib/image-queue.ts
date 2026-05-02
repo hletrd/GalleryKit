@@ -111,6 +111,7 @@ export type ImageProcessingJob = {
     topic?: string | null;
     quality?: ImageQualitySettings;
     imageSizes?: number[];
+    iccProfileName?: string | null;
 };
 
 export type ProcessingQueueState = {
@@ -301,6 +302,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 job.width,
                 quality,
                 imageSizes,
+                job.iccProfileName,
             );
 
             // Verify all 3 output formats exist and are non-zero before marking processed
