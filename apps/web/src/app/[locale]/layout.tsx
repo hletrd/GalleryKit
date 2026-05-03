@@ -62,7 +62,10 @@ export const viewport: Viewport = {
   colorScheme: 'light dark',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
+    // CM-LOW-3: pure black in dark to match the OLED canvas background
+    // (--background: 0 0% 0%). The pre-fix #09090b created a visible
+    // status-bar-vs-canvas seam in OLED dark mode on iOS Safari.
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
   ],
 };
 
