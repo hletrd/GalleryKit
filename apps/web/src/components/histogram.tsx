@@ -112,7 +112,16 @@ function computeHistogramAsync(
     const h = Math.round(imageEl.naturalHeight * scale);
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext('2d');
+    // CM-MED-6: request a Display-P3 2D context on P3-capable displays so a
+    // P3-tagged AVIF/JPEG composites without sRGB clipping. On non-P3
+    // displays we fall through to the default sRGB context.
+    const supportsP3 = typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(color-gamut: p3)').matches;
+    const ctxOptions: CanvasRenderingContext2DSettings | undefined = supportsP3
+        ? { colorSpace: 'display-p3' as PredefinedColorSpace }
+        : undefined;
+    const ctx = canvas.getContext('2d', ctxOptions);
     if (!ctx) {
         return Promise.resolve({
             r: new Array(256).fill(0),
