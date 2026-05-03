@@ -131,9 +131,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         // is a data-integrity safeguard, not a hygiene one.
         const trimmedEmailRaw = customerEmailRaw.trim();
         if (trimmedEmailRaw.length > 255) {
+            // Cycle 6 RPF / P390-05 / C6-RPF-05: include `cap: 255` in the
+            // structured payload so the log is self-describing. Operator
+            // triage previously had to consult the source to map "length:
+            // 1024 → why rejected?". Adding the cap makes the threshold
+            // explicit at the log line.
             console.error('Stripe webhook: rejecting oversized customer email', {
                 sessionId,
                 length: trimmedEmailRaw.length,
+                cap: 255,
             });
             // 200 — Stripe should not retry; permanent metadata error.
             return NextResponse.json({ received: true }, { headers: NO_STORE });
@@ -192,7 +198,15 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const imageId = parseInt(imageIdStr, 10);
         if (!Number.isFinite(imageId) || imageId <= 0) {
-            console.error('Stripe webhook: invalid imageId in metadata', imageIdStr);
+            // Cycle 6 RPF / P390-02 / C6-RPF-02: structured-object log shape
+            // for consistency with all cycle 1-5 webhook log lines (idempotent
+            // skip, entitlement created, oversized email, etc.). The
+            // sessionId correlation key was missing from the prior positional
+            // form, making operator triage by sessionId impossible.
+            console.error('Stripe webhook: invalid imageId in metadata', {
+                sessionId,
+                imageIdStr,
+            });
             return NextResponse.json({ received: true }, { headers: NO_STORE });
         }
 
