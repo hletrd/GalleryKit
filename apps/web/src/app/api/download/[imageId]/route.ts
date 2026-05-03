@@ -130,8 +130,14 @@ export async function GET(
             return new NextResponse('Access denied', { status: 403, headers: NO_STORE });
         }
 
-        const resolvedUploadsDir = await realpath(uploadsDir).catch(() => uploadsDir);
-        resolvedFilePath = await realpath(filePath);
+        // Cycle 4 RPF / P264-06 / C4-RPF-06: parallelize the two realpath
+        // calls — they're independent fs round-trips and the prior serial
+        // form added an avoidable round-trip per download.
+        const [resolvedUploadsDir, resolved] = await Promise.all([
+            realpath(uploadsDir).catch(() => uploadsDir),
+            realpath(filePath),
+        ]);
+        resolvedFilePath = resolved;
         if (!resolvedFilePath.startsWith(`${resolvedUploadsDir}${path.sep}`)) {
             return new NextResponse('Access denied', { status: 403, headers: NO_STORE });
         }
