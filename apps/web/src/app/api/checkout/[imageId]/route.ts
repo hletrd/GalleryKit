@@ -114,7 +114,12 @@ export async function POST(
         // limit on `product_data.name`. `images.title` is admin-controlled
         // and should normally be short, but truncating at the call site
         // prevents a silent Stripe API rejection on a corner-case title.
-        const titleForStripe = image.title ? image.title.slice(0, 200) : null;
+        // Cycle 2 RPF / P260-09 / C2-RPF-14: append an ellipsis when truncation
+        // actually fires so the customer's Stripe receipt shows the elision
+        // explicitly rather than a silent cut.
+        const titleForStripe = image.title
+            ? (image.title.length > 200 ? image.title.slice(0, 199) + '…' : image.title)
+            : null;
         const session = await stripe.checkout.sessions.create({
             mode: 'payment',
             line_items: [
