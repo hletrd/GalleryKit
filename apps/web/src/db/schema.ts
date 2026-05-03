@@ -226,6 +226,24 @@ export const sharedGroupViews = mysqlTable("shared_group_views", {
     idxSharedGroupViewsGroupIdViewedAt: index('idx_shared_group_views_group_id_viewed_at').on(table.groupId, table.viewed_at),
 }));
 
+// US-P51 (Phase 5.1): CLIP semantic search — 512-dim float32 embeddings per image.
+// embedding is stored as a MEDIUMBLOB (2048 bytes = 512 × 4-byte little-endian float32).
+// The Drizzle column is typed as `text` for schema diffing; the actual SQL migration
+// creates it as MEDIUMBLOB. The application layer converts Buffer ↔ Float32Array.
+// model_version tags which encoder produced the embedding (stub: 'stub-sha256-v1').
+// No PII: only image_id and the embedding vector are stored.
+export const imageEmbeddings = mysqlTable("image_embeddings", {
+    imageId: int("image_id").primaryKey().references(() => images.id, { onDelete: 'cascade' }),
+    // Note: actual column is MEDIUMBLOB — see migration 0012. The `text` type here
+    // is a Drizzle approximation; the lib layer wraps Buffer reads/writes.
+    embedding: text("embedding").notNull(),
+    modelVersion: varchar("model_version", { length: 32 }).notNull(),
+    updatedAt: timestamp("updated_at")
+        .default(sql`CURRENT_TIMESTAMP`)
+        .onUpdateNow()
+        .notNull(),
+});
+
 // US-P42 (Phase 4.2): Smart collections — admin-defined dynamic galleries
 // driven by an EXIF/topic/tag predicate AST stored in `query_json`. The AST
 // is compiled to safe parameterized SQL by `apps/web/src/lib/smart-collections.ts`
