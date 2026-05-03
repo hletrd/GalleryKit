@@ -537,8 +537,9 @@ export async function processImageFormats(
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
 
-    // Resolve the ICC profile to embed in AVIF derivatives. withMetadata({icc})
-    // is a zero-cost flag — Sharp sets it at encode time with no extra decode pass.
+    // CM-CRIT-1: resolve the OUTPUT colorspace for AVIF based on the SOURCE
+    // ICC name. Strict P3 detection — only true Display-P3 sources stay in
+    // P3; everything else converts to sRGB pixels with a matching sRGB tag.
     const avifIcc = resolveAvifIccProfile(iccProfileName);
 
     const generateForFormat = async (
@@ -569,17 +570,37 @@ export async function processImageFormats(
                     await fs.copyFile(lastRendered.filePath, outputPath);
                 }
             } else {
-                const sharpInstance = image.clone().resize({ width: resizeWidth }).keepIccProfile();
+                // CM-CRIT-1 / CM-HIGH-1: build per-format pipelines that
+                // explicitly convert pixel values into the target colorspace
+                // BEFORE encoding, then attach the matching ICC tag via
+                // withIccProfile (CM-HIGH-2: ICC bit only — no EXIF leak).
+                const base = image.clone().resize({ width: resizeWidth });
 
                 if (format === 'webp') {
-                    await sharpInstance.webp({ quality: qualityWebp }).toFile(outputPath);
+                    // WebP is always sRGB for universal compatibility.
+                    await base
+                        .toColorspace('srgb')
+                        .withIccProfile('srgb')
+                        .webp({ quality: qualityWebp })
+                        .toFile(outputPath);
                 } else if (format === 'avif') {
-                    await sharpInstance
-                        .withMetadata({ icc: avifIcc })
+                    // AVIF: P3-tagged only when SOURCE was actually P3
+                    // (resolveAvifIccProfile returns 'p3' iff the source ICC
+                    // is Display-P3 / P3-D65 / DCI-P3). For everything else
+                    // we convert pixels to sRGB and tag accordingly.
+                    await base
+                        .toColorspace(avifIcc)
+                        .withIccProfile(avifIcc)
                         .avif({ quality: qualityAvif })
                         .toFile(outputPath);
                 } else {
-                    await sharpInstance.jpeg({ quality: qualityJpeg }).toFile(outputPath);
+                    // JPEG is always sRGB for universal compatibility (matches
+                    // the gratis "Download JPEG" UX expectation).
+                    await base
+                        .toColorspace('srgb')
+                        .withIccProfile('srgb')
+                        .jpeg({ quality: qualityJpeg })
+                        .toFile(outputPath);
                 }
 
                 lastRendered = { resizeWidth, filePath: outputPath };
