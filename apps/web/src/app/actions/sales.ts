@@ -67,7 +67,9 @@ export async function listEntitlements(): Promise<{ error?: string; rows?: Entit
             })),
         };
     } catch (err) {
-        console.error('listEntitlements failed:', err);
+        // Cycle 7 RPF / P392-05 / C7-RPF-05: structured-object log shape
+        // for consistency with the cycle 5/6 contract on the Stripe surface.
+        console.error('listEntitlements failed', { err });
         return { error: 'Failed to load sales' };
     }
 }
@@ -211,7 +213,11 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
 
         return { success: true };
     } catch (err) {
-        console.error('Stripe refund failed:', err);
+        // Cycle 7 RPF / P392-04 / C7-RPF-04: structured-object log shape
+        // with entitlementId so admin retries (and Stripe-side reruns) can
+        // be correlated to a specific entitlement row. Without it, a
+        // multi-failure timeline is unparseable.
+        console.error('Stripe refund failed', { entitlementId, err });
         // Cycle 6 RPF / P390-03 / C6-RPF-03: do NOT cross the action boundary
         // with `err.message`. The Stripe SDK includes request IDs (req_xxx)
         // and other internal diagnostics in `err.message` that the doc block
