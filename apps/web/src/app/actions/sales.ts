@@ -107,6 +107,12 @@ function mapStripeRefundError(err: unknown): RefundErrorCode {
     if (e.code === 'charge_already_refunded') return 'already-refunded';
     if (e.code === 'resource_missing') return 'charge-unknown';
     if (e.type === 'StripeConnectionError' || e.type === 'StripeAPIError') return 'network';
+    // Cycle 4 RPF / P264-07 / C4-RPF-07: StripeAuthenticationError (rotated
+    // key, ops issue) and StripeRateLimitError (rate limit, retry-after) are
+    // both transient/operational and previously collapsed to 'unknown'. Map
+    // them to 'network' so operators see the recoverable-error toast that
+    // says "Stripe could not be reached" rather than the generic fallback.
+    if (e.type === 'StripeAuthenticationError' || e.type === 'StripeRateLimitError') return 'network';
     return 'unknown';
 }
 
