@@ -110,6 +110,11 @@ export async function POST(
         const origin = request.nextUrl.origin;
         // C1RPF-PHOTO-LOW-03: locale-aware redirect URLs.
         const locale = deriveLocaleFromReferer(request.headers.get('referer'));
+        // N-CYCLE1-03: defensive truncation. Stripe enforces a 1500-char
+        // limit on `product_data.name`. `images.title` is admin-controlled
+        // and should normally be short, but truncating at the call site
+        // prevents a silent Stripe API rejection on a corner-case title.
+        const titleForStripe = image.title ? image.title.slice(0, 200) : null;
         const session = await stripe.checkout.sessions.create({
             mode: 'payment',
             line_items: [
@@ -118,7 +123,9 @@ export async function POST(
                         currency: 'usd',
                         unit_amount: priceCents,
                         product_data: {
-                            name: image.title ? `${image.title} — ${image.license_tier} license` : `Photo #${image.id} — ${image.license_tier} license`,
+                            name: titleForStripe
+                                ? `${titleForStripe} — ${image.license_tier} license`
+                                : `Photo #${image.id} — ${image.license_tier} license`,
                             description: `Single-use download license (${image.license_tier})`,
                         },
                     },
