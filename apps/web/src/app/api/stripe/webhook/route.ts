@@ -58,7 +58,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         const session = event.data.object as Stripe.Checkout.Session;
         const imageIdStr = session.metadata?.imageId;
         const tier = session.metadata?.tier;
-        const customerEmail = session.customer_details?.email ?? session.customer_email ?? '';
+        // N-CYCLE1-01: defensive truncation to RFC-5321 max email length (320
+        // chars). Stripe does not normally violate this, but a future schema
+        // migration could shrink the column and silently drop the INSERT for
+        // a paid order. Truncate at the read site so the rest of the path
+        // sees a known-bounded string.
+        const customerEmailRaw = session.customer_details?.email ?? session.customer_email ?? '';
+        const customerEmail = customerEmailRaw.slice(0, 320);
         const sessionId = session.id;
         const amountTotalCents = session.amount_total ?? 0;
 
