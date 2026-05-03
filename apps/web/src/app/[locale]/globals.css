@@ -236,3 +236,24 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* CM-LOW-5: Windows High Contrast Mode legibility for the photo card text
+ * overlays. The masonry cards stack `text-white` over a black-to-transparent
+ * gradient on top of a photo. In forced-colors mode the gradient is forced
+ * to a flat system color, but `text-white` is overridden to the system
+ * foreground (HighlightText / ButtonText), which on light HC themes leaves
+ * white-on-light, illegible. Pin the text + background to the system
+ * Canvas/CanvasText pair and suppress the gradient so the overlay reads
+ * cleanly regardless of theme. */
+@media (forced-colors: active) {
+  .masonry-card h3,
+  .masonry-card p {
+    color: CanvasText !important;
+    background: Canvas;
+    padding: 0.1em 0.25em;
+    border-radius: 0.2em;
+  }
+  .masonry-card .absolute[class*="bg-gradient-to-"] {
+    background: transparent !important;
+  }
+}
