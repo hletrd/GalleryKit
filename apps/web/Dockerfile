@@ -24,15 +24,21 @@ COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 
 # Install dependencies (including devDependencies for build).
-# Force linux-{arm64,x64} Sharp binaries explicitly because `npm ci` from
-# a macOS-generated lockfile sometimes resolves only @img/sharp-darwin-*
-# optional deps even though the lockfile lists every platform variant.
-# Sharp's documented cross-platform install path is `--os=linux
-# --cpu=<arch> sharp` (https://sharp.pixelplumbing.com/install#cross-platform).
-# Using TARGETPLATFORM lets buildx pick the right arch when cross-building.
+# Sharp ships prebuilt platform-specific binaries via optionalDependencies
+# (@img/sharp-linux-arm64 etc.). Some macOS-generated package-lock.json
+# files do not propagate the linux-arm64 binary into the container even
+# though the lockfile lists it; the symptom is `Could not load the
+# "sharp" module using the linux-arm64 runtime` at build time.
+#
+# Fix: force Sharp's npm-config OS/arch detection to the BuildKit target
+# platform via env vars BEFORE `npm ci`, then rebuild Sharp's native
+# bindings to be sure the right binary is loadable.
 ARG TARGETARCH
+ENV npm_config_os=linux
+ENV npm_config_cpu=${TARGETARCH:-arm64}
+ENV npm_config_libc=glibc
 RUN npm ci --workspace=apps/web --include=optional && \
-    cd apps/web && npm install --os=linux --cpu=${TARGETARCH:-arm64} --include=optional --workspaces=false sharp
+    npm rebuild --workspace=apps/web sharp || true
 
 FROM build-base AS prod-deps
 WORKDIR /app
