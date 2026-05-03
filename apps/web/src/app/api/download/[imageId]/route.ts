@@ -148,7 +148,14 @@ export async function GET(
             // a refund without an "already used" support burden.
             return new NextResponse('File not found', { status: 404, headers: NO_STORE });
         }
-        console.error('Download lstat/realpath error:', err);
+        // Cycle 8 RPF / P394-01 / C8-RPF-01: structured-object log shape
+        // with `entitlementId` correlation key. Mirrors the same-file
+        // stream-error log on line 206 below and the cycle 5/6/7 contract
+        // on the upstream Stripe surface (webhook + checkout + refund +
+        // listEntitlements). Closes the audit chain so an operator
+        // triaging a paid-asset download incident can correlate this
+        // catch with the upstream entitlement row by entitlementId.
+        console.error('Download lstat/realpath error', { entitlementId: entitlement.id, err });
         return new NextResponse('Internal Server Error', { status: 500, headers: NO_STORE });
     }
 
