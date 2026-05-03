@@ -702,6 +702,7 @@
     "refundErrorAlreadyRefunded": "이미 환불된 결제입니다.",
     "refundErrorChargeUnknown": "Stripe 결제를 찾을 수 없습니다. Stripe 대시보드를 확인해 주세요.",
     "refundErrorNetwork": "Stripe에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    "refundErrorAuth": "Stripe 인증에 실패했습니다. STRIPE_SECRET_KEY 환경 변수를 확인하고 서버를 재시작해 주세요.",
     "refundErrorNotFound": "해당 판매 내역이 더 이상 존재하지 않습니다. 목록이 오래되었을 수 있으니 새로고침 후 다시 시도해 주세요.",
     "refundErrorInvalidId": "잘못된 판매 ID입니다. 페이지를 새로고침한 후 다시 시도해 주세요.",
     "refundErrorNoPaymentIntent": "이 Stripe 세션에는 연결된 결제가 없습니다. 자동으로 환불할 수 없습니다.",

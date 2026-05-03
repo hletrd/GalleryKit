@@ -42,6 +42,10 @@ interface SalesTranslations {
     refundErrorAlreadyRefunded: string;
     refundErrorChargeUnknown: string;
     refundErrorNetwork: string;
+    /** Cycle 5 RPF / P388-03 / C5-RPF-03: Stripe authentication error
+     * (rotated/revoked API key — separate from network because retry
+     * won't help; operator must rotate STRIPE_SECRET_KEY). */
+    refundErrorAuth: string;
     refundErrorNotFound: string;
     refundErrorInvalidId: string;
     refundErrorNoPaymentIntent: string;
@@ -109,6 +113,11 @@ function mapErrorCode(code: RefundErrorCode | undefined, t: SalesTranslations): 
             return t.refundErrorChargeUnknown;
         case 'network':
             return t.refundErrorNetwork;
+        // Cycle 5 RPF / P388-03 / C5-RPF-03: surface Stripe auth errors
+        // distinctly so operators see "rotate the API key" instead of
+        // "try again shortly".
+        case 'auth-error':
+            return t.refundErrorAuth;
         case 'not-found':
             return t.refundErrorNotFound;
         case 'invalid-id':

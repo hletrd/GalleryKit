@@ -43,6 +43,9 @@ export default async function SalesPage() {
                 refundErrorAlreadyRefunded: t('refundErrorAlreadyRefunded'),
                 refundErrorChargeUnknown: t('refundErrorChargeUnknown'),
                 refundErrorNetwork: t('refundErrorNetwork'),
+                // Cycle 5 RPF / P388-03 / C5-RPF-03: actionable error string
+                // for Stripe auth (rotated key, separate from network).
+                refundErrorAuth: t('refundErrorAuth'),
                 // Cycle 4 RPF / P264-04 / C4-RPF-04: actionable error strings
                 // for the previously-unmapped RefundErrorCode values.
                 refundErrorNotFound: t('refundErrorNotFound'),

@@ -728,6 +728,7 @@
     "refundErrorAlreadyRefunded": "This charge was already refunded.",
     "refundErrorChargeUnknown": "The Stripe charge could not be located. Check the Stripe dashboard.",
     "refundErrorNetwork": "Stripe could not be reached. Try again shortly.",
+    "refundErrorAuth": "Stripe authentication failed. Please verify the API key in STRIPE_SECRET_KEY and restart the server.",
     "refundErrorNotFound": "This sale no longer exists. The list may be stale; refresh and try again.",
     "refundErrorInvalidId": "Invalid sale ID. Please refresh the page and try again.",
     "refundErrorNoPaymentIntent": "This Stripe session has no associated payment. Refund cannot be processed automatically.",
