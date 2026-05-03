@@ -67,27 +67,45 @@ export async function POST(request: NextRequest): Promise<Response> {
         // log for a customer who has not actually paid. Async-paid flows are
         // not currently supported; a future cycle should add a handler for
         // `checkout.session.async_payment_succeeded` to round out coverage.
+        // Cycle 4 RPF / P264-03 / C4-RPF-03: split the log severity so
+        // `'unpaid'` (the documented async-paid happy path) does not trigger
+        // PagerDuty pages keyed on `console.error`. Reserve `console.error`
+        // for `'no_payment_required'` and any future unexpected status, which
+        // should also be caught by the zero-amount gate below.
         if (session.payment_status !== 'paid') {
-            console.error('Stripe webhook: rejecting non-paid session', {
-                sessionId: session.id,
-                paymentStatus: session.payment_status,
-            });
+            if (session.payment_status === 'unpaid') {
+                console.warn('Stripe webhook: rejecting non-paid (async) session', {
+                    sessionId: session.id,
+                    paymentStatus: session.payment_status,
+                });
+            } else {
+                console.error('Stripe webhook: rejecting unexpected non-paid status', {
+                    sessionId: session.id,
+                    paymentStatus: session.payment_status,
+                });
+            }
             return NextResponse.json({ received: true }, { headers: NO_STORE });
         }
 
         const imageIdStr = session.metadata?.imageId;
         const tier = session.metadata?.tier;
-        // N-CYCLE1-01: defensive truncation to RFC-5321 max email length (320
-        // chars). Stripe does not normally violate this, but a future schema
-        // migration could shrink the column and silently drop the INSERT for
-        // a paid order. Truncate at the read site so the rest of the path
-        // sees a known-bounded string.
+        // N-CYCLE1-01: defensive truncation to schema column width.
+        // Cycle 4 RPF / P264-01 / C4-RPF-01: slice to 255 (the
+        // entitlements.customer_email varchar(255) width), NOT to RFC-5321's
+        // 320-char max. In MySQL strict mode an INSERT with a 256-320 char
+        // email would throw `Data too long for column 'customer_email'`,
+        // returning 500 to Stripe and triggering retries indefinitely while
+        // each retry mints a fresh plaintext token.
         // Cycle 3 RPF / P262-09 / C3-RPF-09: lowercase the email after slice
         // so case-mismatched stripes (`Customer@Example.COM` vs
         // `customer@example.com`) coalesce on the same DB row for future
         // customer-history lookups.
+        // Cycle 4 RPF / P264-05 / C4-RPF-05: trim accidental whitespace from
+        // misconfigured callers BEFORE the EMAIL_SHAPE regex, which rejects
+        // any whitespace and would otherwise drop a legit address with
+        // copy-paste padding.
         const customerEmailRaw = session.customer_details?.email ?? session.customer_email ?? '';
-        const customerEmail = customerEmailRaw.slice(0, 320).toLowerCase();
+        const customerEmail = customerEmailRaw.trim().slice(0, 255).toLowerCase();
         const sessionId = session.id;
         const amountTotalCents = session.amount_total ?? 0;
 

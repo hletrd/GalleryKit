@@ -82,8 +82,10 @@ describe('cycle 3 RPF / webhook source-contracts', () => {
     });
 
     it('P262-09: lowercases customerEmail (after slice, before INSERT)', () => {
-        // The transform should be applied right at the slice site.
-        expect(WEBHOOK_SRC).toMatch(/\.slice\(0, 320\)\.toLowerCase\(\)/);
+        // Cycle 4 RPF / P264-01: slice limit moved from 320 to 255 to match
+        // the schema column width and avoid MySQL strict-mode INSERT failures
+        // for 256-320 char emails. Cycle 4 RPF / P264-05: also adds .trim().
+        expect(WEBHOOK_SRC).toMatch(/\.trim\(\)\.slice\(0, 255\)\.toLowerCase\(\)/);
         const lowerIndex = WEBHOOK_SRC.indexOf('.toLowerCase()');
         const insertIndex = WEBHOOK_SRC.indexOf('db.insert(entitlements)');
         expect(lowerIndex).toBeGreaterThan(-1);
