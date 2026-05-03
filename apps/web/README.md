@@ -74,6 +74,8 @@ Operators can `docker logs <web-container> | grep manual-distribution` to retrie
 
 The flag defaults to off so production deployments do not leak tokens into log shippers without explicit opt-in. The hashed token in the `entitlements` row is the durable record; the plaintext only ever lives in stdout under this flag.
 
+> **Retention warning (cycle 3 RPF):** stdout in containerized environments is typically forwarded to a log shipper (Loki, Datadog, CloudWatch, etc.) with retention windows of 30–90 days. Enabling `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true` means the customer email **and** the plaintext download token live in those retained records together. Confirm your log retention is short, your shippers redact the `[manual-distribution]` prefix, **or** treat this flag as a temporary scaffold and turn it off once the email pipeline (US-P54 phase 2) ships.
+
 ### Refunds
 
 `/admin/sales` lists all entitlements with a Refund button. Refunds are confirmed via dialog (irreversible — Stripe refund + immediate token invalidation) and surface localized error messages for known Stripe error codes (`charge_already_refunded`, `resource_missing`, network errors).

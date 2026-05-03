@@ -2,8 +2,8 @@
  * US-P54: Single-use download token utilities.
  *
  * Token format: `dl_<base64url(32 random bytes)>` — 43 chars after prefix.
- * The token itself is never stored; only its SHA-256 hex digest is persisted
- * in entitlements.download_token_hash.
+ * The token itself is never stored; only its lowercase SHA-256 hex digest
+ * (64 chars) is persisted in entitlements.download_token_hash.
  *
  * Single-use enforcement:
  *   1. On download: check downloadedAt IS NULL and expiresAt > NOW().
@@ -11,7 +11,8 @@
  *   3. If UPDATE affected 0 rows → already used → 410 Gone.
  *
  * Verification uses a constant-time comparison via crypto.timingSafeEqual
- * to prevent timing-side-channel token enumeration.
+ * to prevent timing-side-channel token enumeration. The stored hash MUST
+ * match `^[0-9a-f]{64}$` (lowercase hex); see `STORED_HASH_SHAPE` below.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
