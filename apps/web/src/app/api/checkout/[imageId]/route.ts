@@ -120,31 +120,45 @@ export async function POST(
         const titleForStripe = image.title
             ? (image.title.length > 200 ? image.title.slice(0, 199) + '…' : image.title)
             : null;
-        const session = await stripe.checkout.sessions.create({
-            mode: 'payment',
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'usd',
-                        unit_amount: priceCents,
-                        product_data: {
-                            name: titleForStripe
-                                ? `${titleForStripe} — ${image.license_tier} license`
-                                : `Photo #${image.id} — ${image.license_tier} license`,
-                            description: `Single-use download license (${image.license_tier})`,
+        // Cycle 6 RPF / P390-01 / C6-RPF-01: pass an Idempotency-Key on the
+        // Stripe Checkout session POST. Stripe deduplicates server-side when
+        // the same key is used, so a browser double-click (or transient
+        // network retry) returns the same session.id rather than creating a
+        // second pending Checkout session that would otherwise sit unpaid in
+        // the dashboard until expiry (~24h) and trigger false-positive
+        // payment-monitoring alerts. The minute-window deterministic key
+        // (`checkout-${imageId}-${ip}-${minute}`) collapses rapid duplicates
+        // while keeping distinct legitimate buys at minute N+1 separate.
+        // Mirrors the cycle 5 P388-01 refund idempotency-key pattern.
+        const idempotencyKey = `checkout-${image.id}-${ip}-${Math.floor(Date.now() / 60_000)}`;
+        const session = await stripe.checkout.sessions.create(
+            {
+                mode: 'payment',
+                line_items: [
+                    {
+                        price_data: {
+                            currency: 'usd',
+                            unit_amount: priceCents,
+                            product_data: {
+                                name: titleForStripe
+                                    ? `${titleForStripe} — ${image.license_tier} license`
+                                    : `Photo #${image.id} — ${image.license_tier} license`,
+                                description: `Single-use download license (${image.license_tier})`,
+                            },
                         },
+                        quantity: 1,
                     },
-                    quantity: 1,
+                ],
+                metadata: {
+                    imageId: String(image.id),
+                    tier: image.license_tier,
                 },
-            ],
-            metadata: {
-                imageId: String(image.id),
-                tier: image.license_tier,
+                customer_email: undefined,
+                success_url: `${origin}/${locale}/p/${image.id}?checkout=success`,
+                cancel_url: `${origin}/${locale}/p/${image.id}?checkout=cancel`,
             },
-            customer_email: undefined,
-            success_url: `${origin}/${locale}/p/${image.id}?checkout=success`,
-            cancel_url: `${origin}/${locale}/p/${image.id}?checkout=cancel`,
-        });
+            { idempotencyKey },
+        );
 
         return NextResponse.json({ url: session.url }, { headers: NO_STORE });
     } catch (err) {
