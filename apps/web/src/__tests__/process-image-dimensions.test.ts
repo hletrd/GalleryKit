@@ -14,6 +14,13 @@ vi.mock('sharp', () => {
   const sharp = Object.assign(vi.fn(), {
     concurrency: vi.fn(),
     limitInputPixels: vi.fn(),
+    // Sharp.cache(false) is called at module load to disable libvips
+    // operation cache for server use (CM-LOW-9). Mock-out for the
+    // dimension-validation unit test that doesn't need real Sharp.
+    cache: vi.fn(),
+    // CM-MED-1: process-image reads sharp.versions.heif at module load
+    // to gate 10-bit AVIF.
+    versions: { heif: '1.20.2' },
   });
   return { default: sharp };
 });

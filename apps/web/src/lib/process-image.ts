@@ -17,13 +17,26 @@ import { assertBlurDataUrl } from '@/lib/blur-data-url';
 const cpuCount = typeof os.availableParallelism === 'function'
     ? os.availableParallelism()
     : os.cpus()?.length ?? 1;
-const maxConcurrency = Math.max(1, cpuCount - 1);
+// CM-LOW-10: processImageFormats fans out to AVIF + WebP + JPEG via
+// Promise.all, and sharp.concurrency() is the PER-CALL libvips thread cap.
+// One image at the default cap can therefore spawn 3*(cores-1) threads,
+// drowning the libuv pool when QUEUE_CONCURRENCY > 1. Divide by the format
+// fan-out so the per-image total stays close to (cores - 1).
+const maxConcurrency = Math.max(1, Math.floor((cpuCount - 1) / 3));
 const envConcurrency = Number.parseInt(process.env.SHARP_CONCURRENCY ?? '', 10);
 const sharpConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
-    ? Math.min(envConcurrency, maxConcurrency)
+    ? Math.min(envConcurrency, Math.max(1, cpuCount - 1))
     : maxConcurrency;
 // Limit libvips worker threads to keep the server responsive during conversions.
 sharp.concurrency(sharpConcurrency);
+// CM-LOW-9: server processes never see cache hits (every UUID is fresh) and
+// the libvips operation cache pins buffers in heap. Disable for steady RSS.
+sharp.cache(false);
+
+// CM-MED-1: Sharp's prebuilt binaries ship libheif without 10/12-bit AVIF
+// support — passing bitdepth:10 throws there. Detect at module load so we
+// can gate the wide-gamut bit-depth bump cleanly.
+const HAS_HIGH_BITDEPTH_AVIF = !sharp.versions.heif;
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
@@ -46,9 +59,14 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  * pre-fix bytes (any version < 2 is the un-versioned legacy output).
  *
  * History:
- *   2 — first versioned cut: failOn:'error', autoOrient, ETag-based cache.
+ *   2 — first versioned cut: failOn:'error', autoOrient, ETag-based cache,
+ *       strict P3 detection, toColorspace + withIccProfile encode chain.
+ *   3 — perf + bit-depth tuning: pipelineColorspace('rgb16') for wide-gamut,
+ *       10-bit AVIF for wide-gamut, 4:4:4 JPEG chroma for wide-gamut,
+ *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
+ *       by format fan-out.
  */
-export const IMAGE_PIPELINE_VERSION = 2;
+export const IMAGE_PIPELINE_VERSION = 3;
 
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
@@ -574,7 +592,15 @@ export async function processImageFormats(
                 // explicitly convert pixel values into the target colorspace
                 // BEFORE encoding, then attach the matching ICC tag via
                 // withIccProfile (CM-HIGH-2: ICC bit only — no EXIF leak).
-                const base = image.clone().resize({ width: resizeWidth });
+                // CM-MED-2: pipelineColorspace('rgb16') runs the resize in
+                // 16-bit linear-light space for wide-gamut sources, killing
+                // the edge halos/desaturation that gamma-space resize
+                // introduces. Only paid on the wide-gamut path because it
+                // doubles peak RAM during resize.
+                const isWideGamutSource = avifIcc === 'p3';
+                const base = isWideGamutSource
+                    ? image.clone().pipelineColorspace('rgb16').resize({ width: resizeWidth })
+                    : image.clone().resize({ width: resizeWidth });
 
                 if (format === 'webp') {
                     // WebP is always sRGB for universal compatibility.
@@ -588,18 +614,38 @@ export async function processImageFormats(
                     // (resolveAvifIccProfile returns 'p3' iff the source ICC
                     // is Display-P3 / P3-D65 / DCI-P3). For everything else
                     // we convert pixels to sRGB and tag accordingly.
+                    // CM-MED-1: 10-bit AVIF for wide-gamut sources kills
+                    // banding in skies/skin gradients. Gated on
+                    // HAS_HIGH_BITDEPTH_AVIF because Sharp's prebuilt
+                    // binaries reject 10/12-bit; falls back to 8-bit
+                    // there. 8-bit for sRGB sources keeps file sizes tight.
+                    // CM-LOW-11: effort:6 squeezes ~10% off file size at
+                    // ~30% extra CPU; encode time is amortized over many
+                    // views on a self-hosted gallery.
+                    const avifBitdepth = (isWideGamutSource && HAS_HIGH_BITDEPTH_AVIF) ? 10 : 8;
                     await base
                         .toColorspace(avifIcc)
                         .withIccProfile(avifIcc)
-                        .avif({ quality: qualityAvif })
+                        .avif({
+                            quality: qualityAvif,
+                            effort: 6,
+                            bitdepth: avifBitdepth,
+                        })
                         .toFile(outputPath);
                 } else {
                     // JPEG is always sRGB for universal compatibility (matches
                     // the gratis "Download JPEG" UX expectation).
+                    // CM-MED-3: wide-gamut sources benefit from 4:4:4 chroma
+                    // subsampling; the gamut compression compounds chroma
+                    // resolution loss otherwise. sRGB sources stay at the
+                    // Sharp default for tighter file sizes.
                     await base
                         .toColorspace('srgb')
                         .withIccProfile('srgb')
-                        .jpeg({ quality: qualityJpeg })
+                        .jpeg({
+                            quality: qualityJpeg,
+                            ...(isWideGamutSource ? { chromaSubsampling: '4:4:4' as const } : {}),
+                        })
                         .toFile(outputPath);
                 }
 
