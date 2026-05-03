@@ -173,8 +173,7 @@ describe('color round-trip — untagged sRGB source', () => {
 // ---------------------------------------------------------------------------
 
 describe('color round-trip — Display-P3 source', () => {
-    // TODO(PR4): un-skip once CM-HIGH-1 fix lands (WebP/JPEG always sRGB).
-    it.skip('P3-source AVIF carries a P3 ICC profile', async () => {
+    it('P3-source AVIF carries a P3 ICC profile', async () => {
         const srcPath = path.join(tmpDir, 'p3-src.jpg');
         await makeTaggedJpeg('p3', srcPath);
 
@@ -210,8 +209,7 @@ describe('color round-trip — Display-P3 source', () => {
 // ---------------------------------------------------------------------------
 
 describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-1)', () => {
-    // TODO(PR4): un-skip once CM-CRIT-1 fix lands (strict P3 detection).
-    it.skip('Adobe RGB source: AVIF output is NOT labeled Display-P3 (must convert or fall back to sRGB)', async () => {
+    it('Adobe RGB source: AVIF output is NOT labeled Display-P3 (must convert or fall back to sRGB)', async () => {
         const srcPath = path.join(tmpDir, 'adobergb-src.tif');
         await makeWideGamutLabelledTiff('Adobe RGB (1998)', srcPath);
 
@@ -235,8 +233,7 @@ describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-
         expect(profileName?.toLowerCase() ?? '').not.toMatch(/p3|sp3c/);
     });
 
-    // TODO(PR4): un-skip once CM-CRIT-1 fix lands (strict P3 detection).
-    it.skip('ProPhoto source: AVIF output is NOT labeled Display-P3', async () => {
+    it('ProPhoto source: AVIF output is NOT labeled Display-P3', async () => {
         const srcPath = path.join(tmpDir, 'prophoto-src.tif');
         await makeWideGamutLabelledTiff('ProPhoto RGB', srcPath);
 
@@ -257,8 +254,7 @@ describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-
         expect(profileName?.toLowerCase() ?? '').not.toMatch(/p3|sp3c/);
     });
 
-    // TODO(PR4): un-skip once CM-CRIT-1 fix lands (strict P3 detection).
-    it.skip('Rec.2020 source: AVIF output is NOT labeled Display-P3', async () => {
+    it('Rec.2020 source: AVIF output is NOT labeled Display-P3', async () => {
         const srcPath = path.join(tmpDir, 'rec2020-src.tif');
         await makeWideGamutLabelledTiff('ITU-R BT.2020', srcPath);
 

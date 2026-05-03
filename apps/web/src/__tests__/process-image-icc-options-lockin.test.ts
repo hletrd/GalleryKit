@@ -26,23 +26,20 @@ function readSource(): string {
 }
 
 describe('process-image ICC option lock-in (CM-CRIT-1, CM-HIGH-1, CM-HIGH-2)', () => {
-    // TODO(PR4): un-skip once withIccProfile replaces withMetadata({icc:...}).
-    it.skip('calls withIccProfile() at least once on the encode chain', () => {
+    it('calls withIccProfile() at least once on the encode chain', () => {
         const source = readSource();
         // The fix replaces withMetadata({icc:...}) with withIccProfile(...).
         expect(source).toMatch(/\.withIccProfile\s*\(/);
     });
 
-    // TODO(PR4): un-skip once withIccProfile replaces withMetadata({icc:...}).
-    it.skip('does NOT call withMetadata({ icc: ... }) for any output branch', () => {
+    it('does NOT call withMetadata({ icc: ... }) for any output branch', () => {
         const source = readSource();
         // Negative assertion: if withMetadata({icc:...}) shows up again,
         // CM-HIGH-2 (EXIF leak via metadata-bit-promotion) regresses.
         expect(source).not.toMatch(/\.withMetadata\s*\(\s*\{\s*icc\s*:/);
     });
 
-    // TODO(PR4): un-skip once toColorspace() is wired into the encode chain.
-    it.skip('calls toColorspace() to actually convert pixels (not just relabel)', () => {
+    it('calls toColorspace() to actually convert pixels (not just relabel)', () => {
         const source = readSource();
         // CM-CRIT-1 fix requires explicit pixel conversion via toColorspace.
         expect(source).toMatch(/\.toColorspace\s*\(/);

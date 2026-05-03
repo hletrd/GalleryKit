@@ -120,8 +120,7 @@ describe('EXIF strip on AVIF derivatives (CM-HIGH-2)', () => {
         }
     });
 
-    // TODO(PR4): un-skip once CM-HIGH-2 fix lands (withIccProfile replaces withMetadata).
-    it.skip('AVIF output has no camera serial when source carries one', async () => {
+    it('AVIF output has no camera serial when source carries one', async () => {
         const srcPath = path.join(tmpDir, 'serial-source.jpg');
         await makeJpegWithGps(srcPath);
 
