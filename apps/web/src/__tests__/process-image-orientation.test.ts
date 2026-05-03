@@ -73,8 +73,7 @@ async function makeOrientedJpeg(orientation: number, destPath: string): Promise<
 }
 
 describe('EXIF Orientation handling (CM-HIGH-4)', () => {
-    // TODO(PR2): un-skip once autoOrient() lands in processImageFormats.
-    it.skip('Orientation=6 source produces upright AVIF/WebP/JPEG (pixels rotated, tag cleared)', async () => {
+    it('Orientation=6 source produces upright AVIF/WebP/JPEG (pixels rotated, tag cleared)', async () => {
         const srcPath = path.join(tmpDir, 'oriented-source.jpg');
         await makeOrientedJpeg(6, srcPath);
 

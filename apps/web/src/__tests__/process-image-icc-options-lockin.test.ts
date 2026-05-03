@@ -48,14 +48,15 @@ describe('process-image ICC option lock-in (CM-CRIT-1, CM-HIGH-1, CM-HIGH-2)', (
         expect(source).toMatch(/\.toColorspace\s*\(/);
     });
 
-    // TODO(PR2): un-skip once autoOrient() lands in processImageFormats.
-    it.skip('still calls autoOrient() to honor EXIF orientation (CM-HIGH-4 lock-in)', () => {
+    it('honors EXIF orientation via autoOrient (CM-HIGH-4 lock-in)', () => {
         const source = readSource();
-        expect(source).toMatch(/\.autoOrient\s*\(\s*\)/);
+        // Accept either the operator-form `.autoOrient()` or the
+        // constructor-option-form `autoOrient: true` — both produce
+        // upright pixels with the orientation tag cleared.
+        expect(source).toMatch(/\.autoOrient\s*\(\s*\)|autoOrient\s*:\s*true/);
     });
 
-    // TODO(PR2): un-skip once failOn:'error' lands on every Sharp constructor.
-    it.skip('passes failOn to Sharp constructors (CM-HIGH-3 lock-in)', () => {
+    it('passes failOn to Sharp constructors (CM-HIGH-3 lock-in)', () => {
         const source = readSource();
         // failOn 'error' keeps benign warnings tolerable while rejecting truncated input.
         expect(source).toMatch(/failOn\s*:\s*['"]error['"]/);

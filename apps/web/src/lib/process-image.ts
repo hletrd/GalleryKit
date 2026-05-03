@@ -421,7 +421,10 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     // CM-HIGH-3: failOn:'error' tolerates benign libvips warnings (legacy
     // EXIF blocks, JFIF mismatches) while still rejecting truncated input;
     // sequentialRead:true caps peak memory on large originals.
-    const image = sharp(originalPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true });
+    // CM-HIGH-4: autoOrient:true applies EXIF Orientation pre-decode so
+    // metadata().width/height reflect visual orientation and downstream
+    // encoders write upright pixels with no orientation tag.
+    const image = sharp(originalPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true });
 
     let metadata: sharp.Metadata;
     try {
@@ -521,7 +524,9 @@ export async function processImageFormats(
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.
     // CM-HIGH-3: failOn:'error' rejects truncated/corrupt input; sequentialRead:true
     // streams large files instead of random-access reading them.
-    const image = sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true });
+    // CM-HIGH-4: autoOrient:true rotates/flips per EXIF Orientation before
+    // resize so derivatives are always served upright with no orientation tag.
+    const image = sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true });
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
