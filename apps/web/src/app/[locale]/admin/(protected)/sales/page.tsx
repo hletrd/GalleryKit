@@ -43,6 +43,11 @@ export default async function SalesPage() {
                 refundErrorAlreadyRefunded: t('refundErrorAlreadyRefunded'),
                 refundErrorChargeUnknown: t('refundErrorChargeUnknown'),
                 refundErrorNetwork: t('refundErrorNetwork'),
+                // Cycle 4 RPF / P264-04 / C4-RPF-04: actionable error strings
+                // for the previously-unmapped RefundErrorCode values.
+                refundErrorNotFound: t('refundErrorNotFound'),
+                refundErrorInvalidId: t('refundErrorInvalidId'),
+                refundErrorNoPaymentIntent: t('refundErrorNoPaymentIntent'),
                 noSales: t('noSales'),
                 // Cycle 3 RPF / P262-10 / C3-RPF-10: when listEntitlements
                 // returns an error, surface the i18n-translated string so
