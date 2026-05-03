@@ -151,7 +151,11 @@ export default async function TopicPage({
   if (topicData.slug !== topic) {
       const destination = localizePath(locale, `/${topicData.slug}`);
       const redirectSearch = new URLSearchParams();
-      if (tagsParam) {
+      // N-CYCLE1-02: length-cap the carry-forward `tags` query param so a
+      // hostile referrer cannot bloat redirect URLs in proxy/CDN logs.
+      // URLSearchParams already encodes correctly, so this is purely a
+      // hygiene cap, not an injection defense.
+      if (tagsParam && tagsParam.length <= 1024) {
         redirectSearch.set('tags', tagsParam);
       }
       redirect(redirectSearch.size > 0 ? `${destination}?${redirectSearch.toString()}` : destination);
