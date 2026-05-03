@@ -63,6 +63,9 @@ export interface GalleryConfig {
 
     // US-P52: Auto alt-text (ONNX stub, opt-in)
     autoAltTextEnabled: boolean;
+
+    // US-P51: CLIP semantic search (ONNX stub, opt-in; default off until backfill completes)
+    semanticSearchEnabled: boolean;
 }
 
 /**
@@ -103,6 +106,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
                 return raw === 'true';
             })(),
+            semanticSearchEnabled: (() => {
+                const raw = getSetting(map, 'semantic_search_enabled');
+                if (!isValidSettingValue('semantic_search_enabled', raw)) return DEFAULTS.semantic_search_enabled === 'true';
+                return raw === 'true';
+            })(),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -117,6 +125,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
             reactionsEnabled: DEFAULTS.reactions_enabled !== 'false',
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
+            semanticSearchEnabled: DEFAULTS.semantic_search_enabled === 'true',
         };
     }
 }

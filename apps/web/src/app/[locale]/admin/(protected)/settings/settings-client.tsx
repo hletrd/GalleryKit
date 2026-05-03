@@ -11,7 +11,7 @@ import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
-import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Heart } from 'lucide-react';
+import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Heart, Brain, Search } from 'lucide-react';
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -243,6 +243,62 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             aria-describedby="slideshow-interval-help"
                         />
                         <p id="slideshow-interval-help" className="text-xs text-muted-foreground">{t('settings.slideshowIntervalHint')}</p>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Auto Alt-Text */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Brain className="h-5 w-5" />
+                        {t('settings.autoAltTextTitle')}
+                    </CardTitle>
+                    <CardDescription>{t('settings.autoAltTextDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label htmlFor="auto-alt-text-enabled">{t('settings.autoAltTextEnabled')}</Label>
+                            <p id="auto-alt-text-enabled-help" className="text-xs text-muted-foreground">
+                                {t('settings.autoAltTextEnabledHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="auto-alt-text-enabled"
+                            checked={settings.auto_alt_text_enabled === 'true'}
+                            onCheckedChange={(checked) => handleChange('auto_alt_text_enabled', checked ? 'true' : 'false')}
+                            aria-describedby="auto-alt-text-enabled-help"
+                            aria-label={t('settings.autoAltTextEnabled')}
+                        />
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Semantic Search */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Search className="h-5 w-5" />
+                        {t('settings.semanticSearchTitle')}
+                    </CardTitle>
+                    <CardDescription>{t('settings.semanticSearchDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label htmlFor="semantic-search-enabled">{t('settings.semanticSearchEnabled')}</Label>
+                            <p id="semantic-search-enabled-help" className="text-xs text-muted-foreground">
+                                {t('settings.semanticSearchEnabledHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="semantic-search-enabled"
+                            checked={settings.semantic_search_enabled === 'true'}
+                            onCheckedChange={(checked) => handleChange('semantic_search_enabled', checked ? 'true' : 'false')}
+                            aria-describedby="semantic-search-enabled-help"
+                            aria-label={t('settings.semanticSearchEnabled')}
+                        />
                     </div>
                 </CardContent>
             </Card>

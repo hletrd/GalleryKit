@@ -6,6 +6,8 @@ import FocusTrap from '@/components/lazy-focus-trap';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { searchImagesAction } from '@/app/actions';
 import Link from 'next/link';
 import { useTranslation } from '@/components/i18n-provider';
@@ -15,6 +17,7 @@ import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface SearchProps {
     previewImageSizes?: number[];
+    semanticSearchEnabled?: boolean;
 }
 
 interface SearchResult {
@@ -29,13 +32,14 @@ interface SearchResult {
     camera_model: string | null;
 }
 
-export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps) {
+export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearchEnabled = false }: SearchProps) {
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<SearchResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchStatus, setSearchStatus] = useState<'error' | 'rateLimited' | 'maintenance' | 'invalid' | null>(null);
+    const [useSemanticSearch, setUseSemanticSearch] = useState(false);
     const [isMac, setIsMac] = useState(true);
     const [activeIndex, setActiveIndex] = useState(-1);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -50,7 +54,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
         setIsMac(/Mac|iPhone|iPad/.test((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform));
     }, []);
 
-    const performSearch = useCallback(async (searchQuery: string) => {
+    const performSearch = useCallback(async (searchQuery: string, semantic: boolean) => {
         // Clear stale refs from previous result sets
         resultRefs.current = [];
         if (!searchQuery.trim()) {
@@ -64,14 +68,50 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
         setLoading(true);
         setSearchStatus(null);
         try {
-            const data = await searchImagesAction(searchQuery);
-            if (requestId === requestIdRef.current) {
-                if (data.status === 'ok') {
-                    setResults(data.results);
-                    setSearchStatus(null);
-                } else {
+            if (semantic) {
+                // Semantic search: POST to /api/search/semantic
+                const resp = await fetch('/api/search/semantic', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQuery, topK: 20 }),
+                });
+                if (requestId !== requestIdRef.current) return;
+                if (resp.status === 429) {
                     setResults([]);
-                    setSearchStatus(data.status);
+                    setSearchStatus('rateLimited');
+                } else if (resp.status === 503) {
+                    setResults([]);
+                    setSearchStatus('maintenance');
+                } else if (!resp.ok) {
+                    setResults([]);
+                    setSearchStatus('error');
+                } else {
+                    const json = await resp.json() as { results?: { imageId: number; score: number }[] };
+                    // Semantic results only return imageId — show as minimal result cards
+                    const semanticResults: SearchResult[] = (json.results ?? []).map(r => ({
+                        id: r.imageId,
+                        title: null,
+                        description: null,
+                        filename_jpeg: '',
+                        width: 0,
+                        height: 0,
+                        topic: '',
+                        topic_label: null,
+                        camera_model: null,
+                    }));
+                    setResults(semanticResults);
+                    setSearchStatus(null);
+                }
+            } else {
+                const data = await searchImagesAction(searchQuery);
+                if (requestId === requestIdRef.current) {
+                    if (data.status === 'ok') {
+                        setResults(data.results);
+                        setSearchStatus(null);
+                    } else {
+                        setResults([]);
+                        setSearchStatus(data.status);
+                    }
                 }
             }
         } catch {
@@ -96,12 +136,12 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
             return;
         }
         debounceRef.current = setTimeout(() => {
-            performSearch(query);
+            performSearch(query, useSemanticSearch);
         }, 300);
         return () => {
             if (debounceRef.current) clearTimeout(debounceRef.current);
         };
-    }, [query, performSearch]);
+    }, [query, useSemanticSearch, performSearch]);
 
     const handleClose = useCallback(() => {
         setIsOpen(false);
@@ -292,6 +332,31 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES }: SearchProps)
                             <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}
                         </p>
                     </div>
+                    {semanticSearchEnabled && (
+                        <div className="p-3 border-t flex items-center justify-between gap-3">
+                            <Label
+                                htmlFor="semantic-search-toggle"
+                                className="text-xs text-muted-foreground cursor-pointer select-none"
+                            >
+                                {t('search.semanticToggle')}
+                            </Label>
+                            <Switch
+                                id="semantic-search-toggle"
+                                checked={useSemanticSearch}
+                                onCheckedChange={(checked) => {
+                                    setUseSemanticSearch(checked);
+                                    setResults([]);
+                                    setSearchStatus(null);
+                                    if (query.trim()) {
+                                        performSearch(query, checked);
+                                    }
+                                }}
+                                aria-label={t('search.semanticToggle')}
+                                // 44px touch-target floor: Switch has an implicit min-h,
+                                // wrapper div provides at least 44px tap area via padding.
+                            />
+                        </div>
+                    )}
                 </div>
             </div>
             </FocusTrap>

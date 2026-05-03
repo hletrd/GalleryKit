@@ -25,6 +25,9 @@ export const GALLERY_SETTING_KEYS = [
 
     // US-P52: Auto alt-text via local Florence-2 (ONNX stub, default off)
     'auto_alt_text_enabled',
+
+    // US-P51: CLIP semantic search (ONNX stub, default off until backfill completes)
+    'semantic_search_enabled',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -62,6 +65,9 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
     // US-P52: auto alt-text disabled by default (heavy ONNX model, opt-in)
     auto_alt_text_enabled: 'false',
+
+    // US-P51: semantic search disabled by default until backfill completes
+    semantic_search_enabled: 'false',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -80,6 +86,9 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
 
     // US-P52
     auto_alt_text_enabled: (v) => v === 'true' || v === 'false',
+
+    // US-P51
+    semantic_search_enabled: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */
