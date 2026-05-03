@@ -8,12 +8,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 responses: never cached.
  *
- * 3350247 is replaced at build time by scripts/build-sw.ts.
+ * 97d1e38 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '3350247';
+const SW_VERSION = '97d1e38';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
