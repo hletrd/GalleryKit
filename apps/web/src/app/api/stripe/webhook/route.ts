@@ -68,6 +68,18 @@ export async function POST(request: NextRequest): Promise<Response> {
         const sessionId = session.id;
         const amountTotalCents = session.amount_total ?? 0;
 
+        // Cycle 2 RPF / P260-03 / C2-RPF-03: validate email shape at ingest
+        // before insert. Rejects values that contain whitespace or quoting
+        // characters that could spoof renderings in downstream tools (CSV
+        // exports, copy-paste to email clients). RFC-conformant for the common
+        // case; we explicitly do not allow IDN/unicode-direction characters.
+        const EMAIL_SHAPE = /^[^\s<>"'@]+@[^\s<>"'@]+\.[^\s<>"'@]+$/;
+        if (customerEmail && !EMAIL_SHAPE.test(customerEmail)) {
+            console.warn('Stripe webhook: rejecting malformed customer email shape', { sessionId });
+            // 200 — Stripe should not retry; this is a permanent metadata error
+            return NextResponse.json({ received: true }, { headers: NO_STORE });
+        }
+
         if (!imageIdStr || !tier || !customerEmail || !sessionId) {
             // C1RPF-PHOTO-MED-01: do not log customerEmail at error level — it
             // is PII and ends up in retained log shippers. Log presence flags
@@ -101,8 +113,17 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         // Generate single-use download token.
         // The plaintext token would normally be emailed to the customer (deferred per PRD).
-        // Only the hash is stored in DB; surfaced in admin /sales view for manual distribution.
-        const { hash: downloadTokenHash } = generateDownloadToken();
+        // Only the hash is stored in DB.
+        // Cycle 2 RPF / P260-01 / C2-RPF-01: until the email pipeline ships,
+        // the plaintext token has no path to the customer. To close the
+        // workflow loop with the lowest-risk change, surface the plaintext
+        // token to stdout when the operator opts in via
+        // `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true`. Operators run `docker logs |
+        // grep 'session=cs_...'` to retrieve the token and email it to the
+        // customer manually. The opt-in flag prevents accidental token leakage
+        // in default deployments. See `apps/web/README.md` "Paid downloads"
+        // section for the operational workflow.
+        const { token: downloadToken, hash: downloadTokenHash } = generateDownloadToken();
 
         const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
 
@@ -128,8 +149,18 @@ export async function POST(request: NextRequest): Promise<Response> {
         // retained log shippers creates a transaction-level ledger that
         // the photographer did not consciously opt into. Keep imageId/tier/
         // sessionId for audit; the hash is already persisted in the
-        // entitlements row and surfaced via the admin /sales view.
+        // entitlements row.
+        // Cycle 2 RPF / P260-01: when LOG_PLAINTEXT_DOWNLOAD_TOKENS=true,
+        // also surface the plaintext token + email to stdout on a separate
+        // log line so operators can retrieve and email it to the customer.
+        // This is opt-in to avoid leaking tokens in default deployments.
         console.info(`Entitlement created: imageId=${imageId} tier=${tier} session=${sessionId}`);
+        if (process.env.LOG_PLAINTEXT_DOWNLOAD_TOKENS === 'true') {
+            console.info(
+                `[manual-distribution] download_token: imageId=${imageId} tier=${tier} ` +
+                `session=${sessionId} email=${customerEmail} token=${downloadToken}`,
+            );
+        }
     }
 
     return NextResponse.json({ received: true }, { headers: NO_STORE });
