@@ -55,25 +55,28 @@ describe('resolveAvifIccProfile — ICC decision matrix', () => {
         expect(resolveAvifIccProfile('P3-D65')).toBe('p3');
     });
 
-    // Wider-than-sRGB gamuts → 'p3'
-    it('returns p3 for Adobe RGB (1998)', () => {
-        expect(resolveAvifIccProfile('Adobe RGB (1998)')).toBe('p3');
+    // CM-CRIT-1 fix: wider-than-sRGB gamuts now return 'srgb' (not 'p3').
+    // The encode chain converts these pixels to sRGB explicitly so the AVIF
+    // ICC tag matches the actual pixel colorspace. Mapping them to 'p3'
+    // without a pixel transform was the source of the colorimetric bug.
+    it('returns srgb for Adobe RGB (1998) (CM-CRIT-1: pixels converted, not just relabelled)', () => {
+        expect(resolveAvifIccProfile('Adobe RGB (1998)')).toBe('srgb');
     });
 
-    it('returns p3 for AdobeRGB', () => {
-        expect(resolveAvifIccProfile('AdobeRGB')).toBe('p3');
+    it('returns srgb for AdobeRGB (CM-CRIT-1: pixels converted, not just relabelled)', () => {
+        expect(resolveAvifIccProfile('AdobeRGB')).toBe('srgb');
     });
 
-    it('returns p3 for ProPhoto RGB', () => {
-        expect(resolveAvifIccProfile('ProPhoto RGB')).toBe('p3');
+    it('returns srgb for ProPhoto RGB (CM-CRIT-1: pixels converted, not just relabelled)', () => {
+        expect(resolveAvifIccProfile('ProPhoto RGB')).toBe('srgb');
     });
 
-    it('returns p3 for ITU-R BT.2020', () => {
-        expect(resolveAvifIccProfile('ITU-R BT.2020')).toBe('p3');
+    it('returns srgb for ITU-R BT.2020 (CM-CRIT-1: pixels converted, not just relabelled)', () => {
+        expect(resolveAvifIccProfile('ITU-R BT.2020')).toBe('srgb');
     });
 
-    it('returns p3 for Rec.2020', () => {
-        expect(resolveAvifIccProfile('Rec.2020')).toBe('p3');
+    it('returns srgb for Rec.2020 (CM-CRIT-1: pixels converted, not just relabelled)', () => {
+        expect(resolveAvifIccProfile('Rec.2020')).toBe('srgb');
     });
 
     // sRGB / unknown → 'srgb'

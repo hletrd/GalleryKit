@@ -280,7 +280,23 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
 
 /**
  * Resolve which ICC profile name to embed in AVIF derivatives given the source
- * ICC profile name (from extractIccProfileName) and the EXIF ColorSpace tag.
+ * ICC profile name (from extractIccProfileName).
+ *
+ * STRICT P3 DETECTION (CM-CRIT-1 fix). Only sources whose ICC actually IS
+ * Display-P3 / P3-D65 / DCI-P3 are tagged 'p3'. Wider-gamut sources
+ * (Adobe RGB, ProPhoto, Rec.2020) used to be falsely mapped to 'p3' here,
+ * which made the AVIF encoder embed Apple's Display-P3 ICC over the
+ * wider-gamut pixel values without any actual gamut conversion. The result
+ * was visibly wrong color (washed-out greens, hue shifts) on every
+ * ICC-aware browser.
+ *
+ * The encode chain in processImageFormats() now performs an explicit
+ * .toColorspace('srgb') for non-P3 sources, so the right downstream tag
+ * is 'srgb' too. Wider-than-P3 gamuts (Adobe RGB / ProPhoto / Rec.2020)
+ * are gamut-clipped to sRGB at encode time. This is a knowing trade-off:
+ * accurate-but-narrower colors today, in exchange for the option to add
+ * a true wide-gamut path later (10-bit AVIF + actual ProPhoto-aware
+ * conversion) without breaking existing assets.
  *
  * Decision matrix
  * ───────────────────────────────────────────────────────────────────────────
@@ -291,21 +307,13 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
  * 'P3-D65'                        │ p3              │ alias for Display P3
  * 'Display P3 - ACES'             │ p3              │ P3 gamut variant
  * 'sRGB IEC61966-2.1' / sRGB ICC  │ srgb            │ stays sRGB
- * 'Adobe RGB (1998)' / 'AdobeRGB' │ p3              │ wider than sRGB; P3
- *                                 │                 │ is the closest Sharp
- *                                 │                 │ named target that
- *                                 │                 │ covers the gamut
- * 'ProPhoto RGB' / 'ProPhoto'     │ p3              │ same reasoning
- * 'ITU-R BT.2020' / 'Rec.2020'   │ p3              │ same reasoning
+ * 'Adobe RGB (1998)' / 'AdobeRGB' │ srgb            │ pixels converted to sRGB
+ * 'ProPhoto RGB' / 'ProPhoto'     │ srgb            │ pixels converted to sRGB
+ * 'ITU-R BT.2020' / 'Rec.2020'    │ srgb            │ pixels converted to sRGB
  * null / unknown                  │ srgb            │ safe default
  * ───────────────────────────────────────────────────────────────────────────
  *
- * WebP and JPEG derivatives are always left at sRGB for universal
- * compatibility. Only AVIF is tagged with P3 because AVIF decoders in modern
- * browsers correctly honour embedded P3 ICC and tone-map accordingly.
- *
- * Sharp's withMetadata({ icc: 'p3' }) embeds Apple's Display P3 ICC profile,
- * which is the standard Display-P3 D65 target used by modern browsers.
+ * WebP and JPEG derivatives are always sRGB for universal compatibility.
  *
  * @returns 'p3' | 'srgb'
  */
@@ -314,26 +322,13 @@ export function resolveAvifIccProfile(iccProfileName: string | null | undefined)
 
     const name = iccProfileName.toLowerCase();
 
-    // Explicit P3 families
+    // Explicit P3 families ONLY. Wider-gamut sources fall through to 'srgb'
+    // because the encoder does an explicit .toColorspace('srgb') for them.
     if (
         name.includes('display p3') ||
         name.includes('p3-d65') ||
         name === 'dci-p3' ||
         name.startsWith('dci-p3')
-    ) {
-        return 'p3';
-    }
-
-    // Wider-than-sRGB gamuts: AdobeRGB, ProPhoto, Rec.2020 — map to P3 as
-    // the closest Sharp-supported named target that encompasses sRGB.
-    if (
-        name.includes('adobe rgb') ||
-        name.includes('adobergb') ||
-        name.includes('prophoto') ||
-        name.includes('rec. 2020') ||
-        name.includes('rec.2020') ||
-        name.includes('bt.2020') ||
-        name.includes('bt2020')
     ) {
         return 'p3';
     }
