@@ -35,11 +35,28 @@ export function hashToken(token: string): string {
 }
 
 /**
+ * Cycle 2 RPF / P260-11 / C2-RPF-06: storedHash MUST be a 64-char
+ * lowercase hex string (sha256). Validate shape before `Buffer.from`
+ * so a corrupted/clipped DB value is distinguishable from an attacker
+ * supplying a wrong token. `Buffer.from(s, 'hex')` silently truncates
+ * at the first non-hex char, which would otherwise hide DB corruption
+ * as a generic 403 with no log signal.
+ */
+const STORED_HASH_SHAPE = /^[0-9a-f]{64}$/;
+
+/**
  * Constant-time comparison of a provided token against a stored hash.
  * Returns true if the token's hash matches storedHash.
  */
 export function verifyTokenAgainstHash(token: string, storedHash: string): boolean {
     if (!token.startsWith('dl_')) return false;
+    if (!STORED_HASH_SHAPE.test(storedHash)) {
+        // Operational signal: the row's hash is malformed, not the user's
+        // token. Worth a warn so ops can spot DB corruption / partial
+        // migrations.
+        console.warn('[download-tokens] storedHash malformed (expected 64-char lowercase hex)');
+        return false;
+    }
     const candidateHash = hashToken(token);
     // Both hex strings are 64 chars — same length, safe to compare
     try {

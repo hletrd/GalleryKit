@@ -34,12 +34,14 @@ export const PAID_TIER_PRICE_KEYS: Record<PaidLicenseTier, string> = {
  * Checkout success_url / cancel_url, so the visitor lands back on the
  * same locale they came from. Returns the default locale on any miss.
  *
- * NOTE: The set of supported locales is mirrored from `i18n/config.ts`.
- * If a new locale is added there, update the regex below.
+ * Cycle 2 RPF / P260-10 / C2-RPF-08: imports the canonical `LOCALES`
+ * constant from `lib/constants.ts` instead of duplicating the literal,
+ * so adding a new locale there automatically propagates here.
  */
-const SUPPORTED_LOCALES = ['en', 'ko'] as const;
-export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
-const DEFAULT_LOCALE: SupportedLocale = 'en';
+import { LOCALES, DEFAULT_LOCALE as CONSTANTS_DEFAULT_LOCALE, type Locale } from './constants';
+
+export type SupportedLocale = Locale;
+const DEFAULT_LOCALE: SupportedLocale = CONSTANTS_DEFAULT_LOCALE;
 
 export function deriveLocaleFromReferer(referer: string | null | undefined): SupportedLocale {
     if (!referer) return DEFAULT_LOCALE;
@@ -52,7 +54,7 @@ export function deriveLocaleFromReferer(referer: string | null | undefined): Sup
     const m = /^\/([a-z]{2})(?:\/|$)/i.exec(pathname);
     if (!m) return DEFAULT_LOCALE;
     const cand = m[1].toLowerCase();
-    return (SUPPORTED_LOCALES as readonly string[]).includes(cand)
+    return (LOCALES as readonly string[]).includes(cand)
         ? (cand as SupportedLocale)
         : DEFAULT_LOCALE;
 }
