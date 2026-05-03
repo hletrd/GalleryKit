@@ -4,6 +4,7 @@ import { createReadStream } from 'fs';
 import { lstat, realpath } from 'fs/promises';
 import { Readable } from 'stream';
 import { UPLOAD_ROOT } from '@/lib/upload-paths';
+import { IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
@@ -88,6 +89,13 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
             return new NextResponse('Unsupported file type', { status: 404 });
         }
 
+        // CM-HIGH-5: build an ETag from (pipeline_version, mtime, size) so the
+        // cache invalidates as soon as we change the encoder pipeline OR the
+        // file is rewritten. Using `must-revalidate` instead of `immutable`
+        // costs one round-trip to a 304 response on each load but lets us
+        // ship color-pipeline fixes without orphan year-long stale caches.
+        const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}"`;
+
         // Create stream and convert to web ReadableStream for proper lifecycle management
         // Stream from the resolved (realpath) path, not the original path, to
         // close the TOCTOU gap where a file could be replaced by a symlink
@@ -99,7 +107,13 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
             headers: {
                 'Content-Type': contentType,
                 'Content-Length': stats.size.toString(),
-                'Cache-Control': 'public, max-age=31536000, immutable',
+                // public + max-age + must-revalidate: edge caches keep the file
+                // fast for one day, but every browser must revalidate on the
+                // next request via If-None-Match. Combined with the
+                // pipeline-version-bearing ETag, a pipeline change forces a
+                // fresh fetch with no operator action required.
+                'Cache-Control': 'public, max-age=86400, must-revalidate',
+                'ETag': etag,
                 'X-Content-Type-Options': 'nosniff',
             },
         });

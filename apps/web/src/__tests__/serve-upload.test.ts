@@ -35,6 +35,28 @@ describe('serveUploadFile', () => {
         expect(await response.text()).toBe('jpeg-data');
     });
 
+    it('emits Cache-Control with must-revalidate and a pipeline-versioned ETag (CM-HIGH-5)', async () => {
+        const jpegPath = path.join(uploadRoot, 'jpeg', 'cache.jpg');
+        await fsp.writeFile(jpegPath, 'cache-test-data');
+
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+        const { IMAGE_PIPELINE_VERSION } = await import('@/lib/process-image');
+        const response = await serveUploadFile(['jpeg', 'cache.jpg']);
+
+        expect(response.status).toBe(200);
+        const cc = response.headers.get('Cache-Control') ?? '';
+        // No `immutable` — that would prevent invalidation when the encoder
+        // pipeline version bumps.
+        expect(cc).not.toContain('immutable');
+        // must-revalidate forces edge caches and browsers to consult the
+        // origin's ETag on every fetch instead of trusting age alone.
+        expect(cc).toContain('must-revalidate');
+        // Versioned weak ETag — when IMAGE_PIPELINE_VERSION bumps every
+        // existing cached entry stops matching automatically.
+        const etag = response.headers.get('ETag') ?? '';
+        expect(etag).toMatch(new RegExp(`^W/"v${IMAGE_PIPELINE_VERSION}-`));
+    });
+
     it('rejects extension/directory mismatches', async () => {
         const { serveUploadFile } = await import('@/lib/serve-upload');
 
