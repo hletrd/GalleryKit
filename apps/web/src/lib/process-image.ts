@@ -39,6 +39,17 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
         : 64 * 1024 * 1024;
 })();
 
+/**
+ * Color-pipeline version. Bumped whenever the encoder semantics change so
+ * downstream caches (browser, CDN, service worker) can re-fetch automatically
+ * via the ETag emitted by serve-upload.ts. Skip 1 to mark the cutover from
+ * pre-fix bytes (any version < 2 is the un-versioned legacy output).
+ *
+ * History:
+ *   2 — first versioned cut: failOn:'error', autoOrient, ETag-based cache.
+ */
+export const IMAGE_PIPELINE_VERSION = 2;
+
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
 ]);
