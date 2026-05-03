@@ -827,17 +827,21 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     </div>
                                 </div>
                             </CardContent>
-                            <CardFooter>
-                                {/* C1RPF-PHOTO-LOW-02: hide the gratis "Download JPEG"
-                                    button when the photo is paid (license_tier !==
-                                    'none'). Otherwise the photographer's "Buy
-                                    ($X)" CTA sits next to a free Download that
-                                    serves the same JPEG derivative every visitor
-                                    can grab — directly undermining the licensing
-                                    intent. The post-purchase download path
-                                    (/api/download/[imageId]?token=…) still
-                                    delivers the original on legitimate purchase. */}
-                                {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
+                            {/* C1RPF-PHOTO-LOW-02: hide the gratis "Download JPEG"
+                                button when the photo is paid (license_tier !==
+                                'none'). Otherwise the photographer's "Buy
+                                ($X)" CTA sits next to a free Download that
+                                serves the same JPEG derivative every visitor
+                                can grab — directly undermining the licensing
+                                intent. The post-purchase download path
+                                (/api/download/[imageId]?token=…) still
+                                delivers the original on legitimate purchase.
+                                Cycle 2 RPF / P260-08 / C2-RPF-07: also wrap
+                                the surrounding CardFooter in the same guard so
+                                paid images don't render an empty padded footer
+                                below the metadata block. */}
+                            {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
+                                <CardFooter>
                                     <Button asChild className="w-full gap-2">
                                         <a
                                             href={downloadHref}
@@ -846,8 +850,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
                                         </a>
                                     </Button>
-                                )}
-                            </CardFooter>
+                                </CardFooter>
+                            )}
                         </Card>
                     )}
                 </div>
