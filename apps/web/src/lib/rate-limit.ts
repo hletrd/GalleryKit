@@ -54,6 +54,20 @@ export const OG_MAX_REQUESTS = 30;
 export const OG_RATE_LIMIT_MAX_KEYS = 2000;
 export const ogRateLimit = createResetAtBoundedMap<string>(OG_RATE_LIMIT_MAX_KEYS);
 
+// Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-01: in-memory per-IP rate
+// limit for the public unauthenticated `/api/checkout/[imageId]` route.
+// The route creates a Stripe Checkout session on every call (outbound
+// HTTPS + DB SELECTs) and was shipped without rate limiting. Budget: 10
+// requests per 60s per IP — well above natural per-visitor browsing
+// (clicking Buy more than 10 times in a minute is bot-like) but small
+// enough that a scripted abuser cannot exhaust the gallery's Stripe API
+// rate budget. Mirrors the OG/share rate-limit posture (Pattern 2 in the
+// docstring at the top of this file: rollback on infrastructure error).
+export const CHECKOUT_WINDOW_MS = 60 * 1000;
+export const CHECKOUT_MAX_REQUESTS = 10;
+export const CHECKOUT_RATE_LIMIT_MAX_KEYS = 2000;
+export const checkoutRateLimit = createResetAtBoundedMap<string>(CHECKOUT_RATE_LIMIT_MAX_KEYS);
+
 // In-memory rate limit for public share-key lookup routes (/s/[key] and /g/[key]).
 // These routes are unauthenticated and each lookup hits the DB. Without rate
 // limiting, bots can probe random share keys causing unnecessary DB pressure.
@@ -245,6 +259,41 @@ export function preIncrementShareAttempt(ip: string, now: number = Date.now()): 
 
 export function resetShareRateLimitForTests() {
     shareRateLimit.clear();
+}
+
+// ── Checkout rate-limit helpers (cycle 1 RPF / plan-100) ─────────────
+
+export function pruneCheckoutRateLimit(now: number) {
+    checkoutRateLimit.prune(now);
+}
+
+/** Returns `true` when the (pre-incremented) bucket is over the limit. */
+export function preIncrementCheckoutAttempt(ip: string, now: number = Date.now()): boolean {
+    pruneCheckoutRateLimit(now);
+    const entry = checkoutRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        checkoutRateLimit.set(ip, { count: 1, resetAt: now + CHECKOUT_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    return (checkoutRateLimit.get(ip)?.count ?? 0) > CHECKOUT_MAX_REQUESTS;
+}
+
+/** Roll back a pre-incremented checkout rate-limit counter. Used when the
+ *  request was rejected before the expensive Stripe API call ran (e.g.,
+ *  image not found, image not for sale) — Pattern 2 (rollback on
+ *  infrastructure error) per the docstring at the top of this file. */
+export function rollbackCheckoutAttempt(ip: string) {
+    const currentEntry = checkoutRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        currentEntry.count--;
+    } else {
+        checkoutRateLimit.delete(ip);
+    }
+}
+
+export function resetCheckoutRateLimitForTests() {
+    checkoutRateLimit.clear();
 }
 
 // ── MySQL-backed persistent rate limiting ──────────────────────────────
