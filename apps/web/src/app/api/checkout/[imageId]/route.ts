@@ -153,7 +153,6 @@ export async function POST(
                     imageId: String(image.id),
                     tier: image.license_tier,
                 },
-                customer_email: undefined,
                 success_url: `${origin}/${locale}/p/${image.id}?checkout=success`,
                 cancel_url: `${origin}/${locale}/p/${image.id}?checkout=cancel`,
             },
@@ -162,7 +161,10 @@ export async function POST(
 
         return NextResponse.json({ url: session.url }, { headers: NO_STORE });
     } catch (err) {
-        console.error('Stripe checkout session creation failed:', err);
+        // Cycle 7 RPF / P392-01 / C7-RPF-01: structured-object log shape so
+        // operators triaging a Stripe outage can grep by imageId. Mirrors
+        // the cycle 5/6 webhook log refactor pattern.
+        console.error('Stripe checkout session creation failed', { imageId: image.id, ip, err });
         // Pattern 2: roll back the rate-limit charge for legitimate visitors
         // hit by a transient Stripe outage so they aren't penalized.
         rollbackCheckoutAttempt(ip);
