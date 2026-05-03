@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import { connection, db, images, sessions } from '@/db';
+import { connection, db, images, sessions, imageEmbeddings } from '@/db';
 import { eq, and, sql, asc, gt, notInArray } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
@@ -17,6 +17,8 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename } from '@/lib/validation';
 import { getImageProcessingLockName } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
+import { embedImageStub } from '@/lib/clip-inference';
+import { embeddingToBuffer, CLIP_MODEL_VERSION } from '@/lib/clip-embeddings';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -359,6 +361,40 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }).catch((captionErr) => {
                 console.warn(`[Queue] Caption generation failed for image ${job.id}:`, captionErr);
             });
+
+            // US-P51: Fire-and-forget embedding hook. MUST NOT block the queue job.
+            // Runs after Sharp processing + processed=true is committed. Gated by
+            // semantic_search_enabled admin setting so it is a no-op by default.
+            void (async () => {
+                let semanticEnabled = false;
+                try {
+                    const cfg = await getGalleryConfig();
+                    semanticEnabled = cfg.semanticSearchEnabled;
+                } catch {
+                    // DB unavailable — skip silently
+                }
+                if (!semanticEnabled) return;
+                try {
+                    const embedding = embedImageStub(job.id);
+                    const buf = embeddingToBuffer(embedding);
+                    const base64 = buf.toString('base64');
+                    await db.insert(imageEmbeddings)
+                        .values({
+                            imageId: job.id,
+                            embedding: base64,
+                            modelVersion: CLIP_MODEL_VERSION,
+                        })
+                        .onDuplicateKeyUpdate({
+                            set: {
+                                embedding: base64,
+                                modelVersion: CLIP_MODEL_VERSION,
+                            },
+                        });
+                    console.debug(`[Queue] Embedding stored for image ${job.id}`);
+                } catch (embedErr) {
+                    console.warn(`[Queue] Failed to store embedding for image ${job.id}:`, embedErr);
+                }
+            })();
 
             console.debug(`[Queue] Job ${job.id} complete`);
         } catch (err) {
