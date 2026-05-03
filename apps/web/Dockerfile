@@ -36,11 +36,19 @@ COPY apps/web/package.json ./apps/web/
 # resolver chose at `npm ci` time. TARGETARCH is auto-populated by
 # buildx (defaults to arm64 to match the gallery.atik.kr Mac mini).
 ARG TARGETARCH
+# Native binaries that ship per-platform via optionalDependencies. The
+# macOS-authored lockfile sometimes fails to materialize the linux-arm64
+# variants inside the container even though the lockfile lists them, so
+# we install every needed Linux native explicitly with --no-save. Order
+# matters: dependent libvips before sharp.
 RUN npm ci --workspace=apps/web --include=optional && \
     npm install --workspace=apps/web --include=optional --no-save \
-        @img/sharp-linux-${TARGETARCH:-arm64} \
         @img/sharp-libvips-linux-${TARGETARCH:-arm64} \
-        @parcel/watcher-linux-${TARGETARCH:-arm64}-glibc
+        @img/sharp-linux-${TARGETARCH:-arm64} \
+        @parcel/watcher-linux-${TARGETARCH:-arm64}-glibc \
+        @swc/core-linux-${TARGETARCH:-arm64}-gnu \
+        @next/swc-linux-${TARGETARCH:-arm64}-gnu \
+        lightningcss-linux-${TARGETARCH:-arm64}-gnu
 
 FROM build-base AS prod-deps
 WORKDIR /app
