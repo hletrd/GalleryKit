@@ -8,7 +8,7 @@
 
 import { db } from '@/db';
 import { entitlements, images } from '@/db/schema';
-import { eq, desc, sum } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { isAdmin } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { getStripe } from '@/lib/stripe';
@@ -72,23 +72,16 @@ export async function listEntitlements(): Promise<{ error?: string; rows?: Entit
     }
 }
 
-/** @action-origin-exempt: read-only admin getter */
-export async function getTotalRevenueCents(): Promise<{ error?: string; totalCents?: number }> {
-    if (!(await isAdmin())) return { error: 'Not authorized' };
-
-    try {
-        const [row] = await db
-            .select({ total: sum(entitlements.amountTotalCents) })
-            .from(entitlements)
-            .where(eq(entitlements.refunded, false));
-
-        const totalCents = row?.total ? parseInt(String(row.total), 10) : 0;
-        return { totalCents: Number.isFinite(totalCents) ? totalCents : 0 };
-    } catch (err) {
-        console.error('getTotalRevenueCents failed:', err);
-        return { error: 'Failed to calculate revenue' };
-    }
-}
+/**
+ * Cycle 3 RPF / P262-06 / C3-RPF-06: `getTotalRevenueCents` was removed in
+ * cycle 3 because cycle 2's P260-05 fix made the client compute revenue
+ * directly from the loaded rows. The action's only remaining use was the
+ * `rows.length === 0` fallback in /admin/sales — but in that case the
+ * all-time SUM is also 0 (no rows to sum), so the action was dead code
+ * paying for a full-table SUM on every page load. The exit criterion of
+ * cycle 2's deferred item C2-RPF-D02 (re-open in the cycle after Plan 260
+ * lands) is met. Removed.
+ */
 
 /**
  * Cycle 2 RPF / P260-07 / C2-RPF-13: known Stripe refund error codes

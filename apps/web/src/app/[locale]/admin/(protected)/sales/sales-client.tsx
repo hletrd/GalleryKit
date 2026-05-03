@@ -48,10 +48,6 @@ interface SalesTranslations {
 
 interface Props {
     rows: EntitlementRow[];
-    /** Pre-refund total fallback. Only used when row data is unavailable (e.g.,
-     *  load error). Cycle 2 RPF / P260-05 dropped the silent `||` fallback that
-     *  otherwise displayed pre-refund totals when 100% of sales were refunded. */
-    totalRevenueCents: number;
     t: SalesTranslations;
 }
 
@@ -111,7 +107,7 @@ function mapErrorCode(code: RefundErrorCode | undefined, t: SalesTranslations): 
     }
 }
 
-export function SalesClient({ rows: initialRows, totalRevenueCents, t }: Props) {
+export function SalesClient({ rows: initialRows, t }: Props) {
     const locale = useLocale();
     const formatCents = useMemo(() => makeCurrencyFormatter(locale), [locale]);
     const [rows, setRows] = useState<EntitlementRow[]>(initialRows);
@@ -144,12 +140,16 @@ export function SalesClient({ rows: initialRows, totalRevenueCents, t }: Props) 
      * directly. The previous `nonRefundedRevenue || totalRevenueCents`
      * fallback fired when nonRefundedRevenue === 0 (every entitlement
      * refunded), masking the refund and showing the pre-refund total.
-     * `totalRevenueCents` is now only used as a placeholder when no rows
-     * loaded (initial load error or empty response).
+     * Cycle 3 RPF / P262-06 / C3-RPF-06: dropped the `totalRevenueCents`
+     * fallback entirely. When rows are empty the displayed revenue is 0,
+     * which matches both the empty-state ("No sales yet.") and the
+     * error-state semantics. The all-time SUM action was deleted server-side
+     * because it was dead code in the post-P260-05 path.
      */
-    const displayedRevenueCents = rows.length > 0
-        ? rows.filter((r) => !r.refunded).reduce((acc, r) => acc + r.amountTotalCents, 0)
-        : totalRevenueCents;
+    const displayedRevenueCents = useMemo(
+        () => rows.filter((r) => !r.refunded).reduce((acc, r) => acc + r.amountTotalCents, 0),
+        [rows],
+    );
 
     return (
         <div className="space-y-6">
@@ -203,8 +203,21 @@ export function SalesClient({ rows: initialRows, totalRevenueCents, t }: Props) 
                                         </td>
                                         <td className="py-2">
                                             {canRefund && (
+                                                /*
+                                                  Cycle 3 RPF / P262-08 /
+                                                  C3-RPF-08: row Refund button
+                                                  reverts to `outline` to keep
+                                                  the destructive-emphasis
+                                                  budget on the AlertDialog
+                                                  confirm action only. Row +
+                                                  dialog were both red after
+                                                  cycle 2; per shadcn convention
+                                                  the trigger should be neutral
+                                                  and the confirm action carries
+                                                  the destructive variant.
+                                                */
                                                 <Button
-                                                    variant="destructive"
+                                                    variant="outline"
                                                     size="sm"
                                                     className="h-11"
                                                     disabled={refundingId === row.id}

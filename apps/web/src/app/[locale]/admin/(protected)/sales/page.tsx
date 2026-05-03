@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { listEntitlements, getTotalRevenueCents } from '@/app/actions/sales';
+import { listEntitlements } from '@/app/actions/sales';
 import { SalesClient } from './sales-client';
 
 export const dynamic = 'force-dynamic';
@@ -7,15 +7,17 @@ export const dynamic = 'force-dynamic';
 export default async function SalesPage() {
     const t = await getTranslations('sales');
 
-    const [salesResult, revenueResult] = await Promise.all([
-        listEntitlements(),
-        getTotalRevenueCents(),
-    ]);
+    // Cycle 3 RPF / P262-06 / C3-RPF-06: removed the parallel
+    // `getTotalRevenueCents()` call. Revenue is now derived directly from the
+    // loaded rows in `sales-client.tsx` (cycle 2 P260-05). The fallback was
+    // dead code — when rows are empty, the all-time SUM is also 0, and the
+    // only case where the two diverged was a silent listEntitlements failure
+    // that the UI also surfaces as "No sales yet."
+    const salesResult = await listEntitlements();
 
     return (
         <SalesClient
             rows={salesResult.rows ?? []}
-            totalRevenueCents={revenueResult.totalCents ?? 0}
             t={{
                 title: t('title'),
                 totalRevenue: t('totalRevenue'),
@@ -42,7 +44,12 @@ export default async function SalesPage() {
                 refundErrorChargeUnknown: t('refundErrorChargeUnknown'),
                 refundErrorNetwork: t('refundErrorNetwork'),
                 noSales: t('noSales'),
-                errorLoad: salesResult.error ?? '',
+                // Cycle 3 RPF / P262-10 / C3-RPF-10: when listEntitlements
+                // returns an error, surface the i18n-translated string so
+                // Korean users see Korean text instead of the English server
+                // message. The presence of `salesResult.error` is what the
+                // client renders against.
+                errorLoad: salesResult.error ? t('errorLoad') : '',
             }}
         />
     );

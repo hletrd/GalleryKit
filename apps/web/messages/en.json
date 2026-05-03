@@ -728,7 +728,8 @@
     "refundErrorAlreadyRefunded": "This charge was already refunded.",
     "refundErrorChargeUnknown": "The Stripe charge could not be located. Check the Stripe dashboard.",
     "refundErrorNetwork": "Stripe could not be reached. Try again shortly.",
-    "noSales": "No sales yet."
+    "noSales": "No sales yet.",
+    "errorLoad": "Could not load sales. Please try again."
   },
   "licensePrice": {
     "title": "License Pricing",
