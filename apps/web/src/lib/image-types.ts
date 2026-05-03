@@ -30,6 +30,8 @@ export interface ImageDetail {
     original_format?: string | null;
     original_file_size?: number | null;
     blur_data_url?: string | null;
+    // US-P54: license tier drives the Buy/Download button on the photo viewer
+    license_tier?: string | null;
     share_key?: string | null;
     user_filename?: string | null;
     tag_names?: string | null;

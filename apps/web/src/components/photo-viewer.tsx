@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardDescription, CardFooter } from "@/components/ui/card";
-import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose, Heart } from "lucide-react";
+import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose, Heart, ShoppingCart } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
 import { useTranslation } from "@/components/i18n-provider";
@@ -55,9 +55,11 @@ interface PhotoViewerProps {
     showDocumentHeading?: boolean;
     slideshowIntervalSeconds?: number;
     reactionsEnabled?: boolean;
+    /** US-P54: per-tier prices in cents (0 = not for sale). Used to show Buy/Download button. */
+    licensePrices?: Record<string, number>;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, reactionsEnabled = true }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, reactionsEnabled = true, licensePrices }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -68,6 +70,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const [reactionCount, setReactionCount] = useState<number>(0);
     const [liked, setLiked] = useState<boolean>(false);
     const [isReacting, setIsReacting] = useState(false);
+    const [isCheckingOut, setIsCheckingOut] = useState(false);
     useEffect(() => {
         try {
             if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
@@ -403,6 +406,42 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             {reactionCount > 0 ? reactionCount : (liked ? t('reaction.liked') : t('reaction.like'))}
                         </Button>
                     )}
+                    {/* US-P54: Buy/Download button when tier != none and price > 0 */}
+                    {image.license_tier && image.license_tier !== 'none' && licensePrices && (licensePrices[image.license_tier] ?? 0) > 0 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isCheckingOut}
+                            className="gap-2 h-11"
+                            onClick={async () => {
+                                if (isCheckingOut) return;
+                                setIsCheckingOut(true);
+                                try {
+                                    const res = await fetch(`/api/checkout/${image.id}`, { method: 'POST' });
+                                    if (!res.ok) {
+                                        toast.error(t('stripe.checkoutError'));
+                                        return;
+                                    }
+                                    const data: { url?: string; error?: string } = await res.json();
+                                    if (data.url) {
+                                        window.location.href = data.url;
+                                    } else {
+                                        toast.error(data.error ?? t('stripe.checkoutError'));
+                                    }
+                                } catch {
+                                    toast.error(t('stripe.checkoutError'));
+                                } finally {
+                                    setIsCheckingOut(false);
+                                }
+                            }}
+                        >
+                            <ShoppingCart className="h-4 w-4" />
+                            {isCheckingOut
+                                ? t('stripe.checkingOut')
+                                : `${t('stripe.buy')} ($${((licensePrices[image.license_tier] ?? 0) / 100).toFixed(2)})`}
+                        </Button>
+                    )}
+
                     <LightboxTrigger onClick={() => setShowLightbox(true)} />
 
                     <Button
