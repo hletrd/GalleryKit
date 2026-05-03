@@ -30,15 +30,16 @@ COPY apps/web/package.json ./apps/web/
 # though the lockfile lists it; the symptom is `Could not load the
 # "sharp" module using the linux-arm64 runtime` at build time.
 #
-# Fix: force Sharp's npm-config OS/arch detection to the BuildKit target
-# platform via env vars BEFORE `npm ci`, then rebuild Sharp's native
-# bindings to be sure the right binary is loadable.
+# Fix: install the workspace deps, then EXPLICITLY install Sharp's
+# platform-specific prebuilt binary as a top-level dep (no-save) so it
+# lands in /app/node_modules/@img regardless of how the optional-dep
+# resolver chose at `npm ci` time. TARGETARCH is auto-populated by
+# buildx (defaults to arm64 to match the gallery.atik.kr Mac mini).
 ARG TARGETARCH
-ENV npm_config_os=linux
-ENV npm_config_cpu=${TARGETARCH:-arm64}
-ENV npm_config_libc=glibc
 RUN npm ci --workspace=apps/web --include=optional && \
-    npm rebuild --workspace=apps/web sharp || true
+    npm install --workspace=apps/web --include=optional --no-save \
+        @img/sharp-linux-${TARGETARCH:-arm64} \
+        @img/sharp-libvips-linux-${TARGETARCH:-arm64}
 
 FROM build-base AS prod-deps
 WORKDIR /app
