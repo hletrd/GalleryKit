@@ -57,9 +57,16 @@ interface PhotoViewerProps {
     reactionsEnabled?: boolean;
     /** US-P54: per-tier prices in cents (0 = not for sale). Used to show Buy/Download button. */
     licensePrices?: Record<string, number>;
+    /**
+     * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02: Stripe Checkout
+     * post-redirect status. Surfaced as a toast on first mount so the
+     * visitor sees a confirmation after paying instead of landing on a
+     * silent page that looks identical to pre-checkout.
+     */
+    checkoutStatus?: 'success' | 'cancel' | null;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, reactionsEnabled = true, licensePrices }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, reactionsEnabled = true, licensePrices, checkoutStatus = null }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -78,6 +85,38 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             }
         } catch { console.debug('sessionStorage read failed') }
     }, []);
+
+    /**
+     * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02:
+     * Surface Stripe Checkout post-redirect status to the visitor as a
+     * toast on first mount. Without this the visitor lands back on the
+     * exact same photo page they clicked Buy from with zero UI signal,
+     * which looks like the click did nothing and frequently triggers a
+     * chargeback. The current product surfaces the download token via
+     * the admin /sales view for manual distribution (see CLAUDE.md and
+     * the webhook docstring), so the success copy explicitly says
+     * "your download link is being prepared" — no over-promise.
+     *
+     * Run-once via a ref guard for React 18 strict-mode double-mount.
+     * After firing we strip the `?checkout=…` query param so a soft
+     * refresh doesn't re-toast.
+     */
+    const checkoutToastFiredRef = useRef(false);
+    useEffect(() => {
+        if (!checkoutStatus || checkoutToastFiredRef.current) return;
+        checkoutToastFiredRef.current = true;
+        if (checkoutStatus === 'success') {
+            toast.success(t('stripe.checkoutSuccess'));
+        } else if (checkoutStatus === 'cancel') {
+            toast.info(t('stripe.checkoutCancelled'));
+        }
+        try {
+            const u = new URL(window.location.href);
+            u.searchParams.delete('checkout');
+            window.history.replaceState(null, '', u.pathname + (u.search ? u.search : '') + u.hash);
+        } catch { /* noop */ }
+    }, [checkoutStatus, t]);
+
     const showLightboxRef = useRef(showLightbox);
     useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
     const [showBottomSheet, setShowBottomSheet] = useState(false);
@@ -438,7 +477,19 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             <ShoppingCart className="h-4 w-4" />
                             {isCheckingOut
                                 ? t('stripe.checkingOut')
-                                : `${t('stripe.buy')} ($${((licensePrices[image.license_tier] ?? 0) / 100).toFixed(2)})`}
+                                : (() => {
+                                    // C1RPF-PHOTO-LOW-01: localize the price label via Intl.NumberFormat
+                                    // so a Korean visitor sees a locale-formatted USD price (e.g. "US$12.00")
+                                    // instead of a hardcoded "$12.00". The actual Stripe currency stays USD.
+                                    const cents = licensePrices[image.license_tier] ?? 0;
+                                    let formatted: string;
+                                    try {
+                                        formatted = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(cents / 100);
+                                    } catch {
+                                        formatted = `$${(cents / 100).toFixed(2)}`;
+                                    }
+                                    return `${t('stripe.buy')} (${formatted})`;
+                                })()}
                         </Button>
                     )}
 
@@ -565,7 +616,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         </motion.div>
                     </AnimatePresence>
                     {images.length > 1 && (
-                        <div role="status" aria-live="polite" aria-label={t('aria.photoPosition', { current: currentIndex + 1, total: images.length })} className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10">
+                        // C1RPF-PHOTO-LOW-05: bump bg-black/50 → bg-black/70 so the
+                        // white text clears WCAG AA against bright photo content.
+                        <div role="status" aria-live="polite" aria-label={t('aria.photoPosition', { current: currentIndex + 1, total: images.length })} className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1 rounded-full z-10">
                             {currentIndex + 1} / {images.length}
                         </div>
                     )}
@@ -775,7 +828,16 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 </div>
                             </CardContent>
                             <CardFooter>
-                                {downloadHref && (
+                                {/* C1RPF-PHOTO-LOW-02: hide the gratis "Download JPEG"
+                                    button when the photo is paid (license_tier !==
+                                    'none'). Otherwise the photographer's "Buy
+                                    ($X)" CTA sits next to a free Download that
+                                    serves the same JPEG derivative every visitor
+                                    can grab — directly undermining the licensing
+                                    intent. The post-purchase download path
+                                    (/api/download/[imageId]?token=…) still
+                                    delivers the original on legitimate purchase. */}
+                                {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
                                     <Button asChild className="w-full gap-2">
                                         <a
                                             href={downloadHref}
