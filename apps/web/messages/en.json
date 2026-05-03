@@ -316,7 +316,8 @@
     "error": "Search failed. Please try again.",
     "rateLimited": "Too many searches. Please wait a moment and try again.",
     "maintenance": "Search is temporarily unavailable during maintenance.",
-    "invalid": "Type at least 2 characters to search."
+    "invalid": "Type at least 2 characters to search.",
+    "semanticToggle": "Semantic search"
   },
   "notFound": {
     "description": "Page not found.",
@@ -606,7 +607,11 @@
     "autoAltTextTitle": "Auto Alt-Text",
     "autoAltTextDesc": "Generate AI alt-text suggestions using a local Florence-2 model (stub; real ONNX inference is a future feature).",
     "autoAltTextEnabled": "Enable Auto Alt-Text",
-    "autoAltTextEnabledHint": "When enabled, generates an EXIF-derived alt text hint after each image is processed. Requires the Florence-2 ONNX model (stub active)."
+    "autoAltTextEnabledHint": "When enabled, generates an EXIF-derived alt text hint after each image is processed. Requires the Florence-2 ONNX model (stub active).",
+    "semanticSearchTitle": "Semantic Search",
+    "semanticSearchDesc": "Enable CLIP-based semantic image search (stub; real ONNX inference is a future feature). Run the backfill script after enabling.",
+    "semanticSearchEnabled": "Enable Semantic Search",
+    "semanticSearchEnabledHint": "When enabled, shows a semantic search toggle in the search box. Requires the embedding backfill to complete first. (Stub active — embeddings are deterministic but not semantically meaningful.)"
   },
   "reaction": {
     "like": "Like",
