@@ -42,6 +42,9 @@ interface SalesTranslations {
     refundErrorAlreadyRefunded: string;
     refundErrorChargeUnknown: string;
     refundErrorNetwork: string;
+    refundErrorNotFound: string;
+    refundErrorInvalidId: string;
+    refundErrorNoPaymentIntent: string;
     noSales: string;
     errorLoad: string;
 }
@@ -95,6 +98,10 @@ function StatusBadge({ status, t }: { status: SalesStatus; t: SalesTranslations 
 }
 
 function mapErrorCode(code: RefundErrorCode | undefined, t: SalesTranslations): string {
+    // Cycle 4 RPF / P264-04 / C4-RPF-04: cover the remaining RefundErrorCode
+    // values explicitly so operators see actionable messages instead of the
+    // generic "Refund failed" fallback. 'unknown' and undefined still fall
+    // through to the generic message.
     switch (code) {
         case 'already-refunded':
             return t.refundErrorAlreadyRefunded;
@@ -102,6 +109,12 @@ function mapErrorCode(code: RefundErrorCode | undefined, t: SalesTranslations): 
             return t.refundErrorChargeUnknown;
         case 'network':
             return t.refundErrorNetwork;
+        case 'not-found':
+            return t.refundErrorNotFound;
+        case 'invalid-id':
+            return t.refundErrorInvalidId;
+        case 'no-payment-intent':
+            return t.refundErrorNoPaymentIntent;
         default:
             return t.refundError;
     }
@@ -161,7 +174,12 @@ export function SalesClient({ rows: initialRows, t }: Props) {
             </div>
 
             {t.errorLoad && (
-                <div className="text-destructive text-sm">{t.errorLoad}</div>
+                /*
+                  Cycle 4 RPF / P264-09 / C4-RPF-09: announce the load
+                  failure to assistive tech via role="alert" (a live region).
+                  The previous static <div> rendered silently to screen readers.
+                */
+                <div role="alert" className="text-destructive text-sm">{t.errorLoad}</div>
             )}
 
             {rows.length === 0 ? (
@@ -223,7 +241,22 @@ export function SalesClient({ rows: initialRows, t }: Props) {
                                                     disabled={refundingId === row.id}
                                                     onClick={() => setConfirmTarget(row)}
                                                 >
-                                                    {refundingId === row.id ? t.refunding : t.refundButton}
+                                                    {/*
+                                                       Cycle 4 RPF / P264-08 /
+                                                       C4-RPF-08: keep row
+                                                       button text pinned to
+                                                       t.refundButton — the
+                                                       in-flight feedback is
+                                                       on the AlertDialog
+                                                       confirm action button
+                                                       only (`disabled` here
+                                                       communicates in-flight
+                                                       to the row trigger).
+                                                       Per shadcn convention,
+                                                       only one button rotates
+                                                       its label.
+                                                    */}
+                                                    {t.refundButton}
                                                 </Button>
                                             )}
                                         </td>
