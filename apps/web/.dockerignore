@@ -9,3 +9,11 @@ public/uploads/**
 build
 dist
 *.log
+# Exclude macOS AppleDouble metadata files — they live alongside files on
+# NFS/SMB shared filesystems and Docker BuildKit's tar sender chokes on
+# their xattrs ("failed to xattr ._data: operation not permitted") when the
+# build context lives on macOS-shared NFS. The companion entry in
+# `.gitignore` keeps them out of the repo.
+**/._*
+.DS_Store
+**/.DS_Store
