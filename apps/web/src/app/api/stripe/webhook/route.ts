@@ -21,6 +21,7 @@ import { db } from '@/db';
 import { entitlements } from '@/db/schema';
 import { constructStripeEvent } from '@/lib/stripe';
 import { generateDownloadToken } from '@/lib/download-tokens';
+import { isPaidLicenseTier } from '@/lib/license-tiers';
 import type Stripe from 'stripe';
 
 export const dynamic = 'force-dynamic';
@@ -62,8 +63,27 @@ export async function POST(request: NextRequest): Promise<Response> {
         const amountTotalCents = session.amount_total ?? 0;
 
         if (!imageIdStr || !tier || !customerEmail || !sessionId) {
-            console.error('Stripe webhook: missing required metadata', { imageIdStr, tier, customerEmail, sessionId });
+            // C1RPF-PHOTO-MED-01: do not log customerEmail at error level — it
+            // is PII and ends up in retained log shippers. Log presence flags
+            // only so on-call has enough to triage without storing PII.
+            console.error('Stripe webhook: missing required metadata', {
+                hasImageIdStr: Boolean(imageIdStr),
+                hasTier: Boolean(tier),
+                hasCustomerEmail: Boolean(customerEmail),
+                hasSessionId: Boolean(sessionId),
+            });
             // Return 200 to prevent Stripe from retrying malformed events
+            return NextResponse.json({ received: true }, { headers: NO_STORE });
+        }
+
+        // C1RPF-PHOTO-MED-02: allowlist-validate tier from Stripe metadata
+        // before it touches the entitlements table. A misconfigured Checkout
+        // flow or future bug must not be able to seed arbitrary tier strings
+        // ('admin', '<script>', etc.) into a row that gets rendered in the
+        // admin /sales view.
+        if (!isPaidLicenseTier(tier)) {
+            console.warn('Stripe webhook: rejecting unknown tier in metadata', { sessionId });
+            // 200 so Stripe does not retry — this is a permanent metadata error
             return NextResponse.json({ received: true }, { headers: NO_STORE });
         }
 
@@ -97,8 +117,13 @@ export async function POST(request: NextRequest): Promise<Response> {
             return NextResponse.json({ error: 'Database error' }, { status: 500, headers: NO_STORE });
         }
 
-        // Log token for admin view (surfaced via /admin/sales)
-        console.info(`Entitlement created: imageId=${imageId} tier=${tier} session=${sessionId} tokenHash=${downloadTokenHash}`);
+        // C1RPF-PHOTO-MED-01: drop tokenHash from the structured log line.
+        // The hash is not the token, but pairing it with sessionId in
+        // retained log shippers creates a transaction-level ledger that
+        // the photographer did not consciously opt into. Keep imageId/tier/
+        // sessionId for audit; the hash is already persisted in the
+        // entitlements row and surfaced via the admin /sales view.
+        console.info(`Entitlement created: imageId=${imageId} tier=${tier} session=${sessionId}`);
     }
 
     return NextResponse.json({ received: true }, { headers: NO_STORE });
