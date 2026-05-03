@@ -39,7 +39,8 @@ ARG TARGETARCH
 RUN npm ci --workspace=apps/web --include=optional && \
     npm install --workspace=apps/web --include=optional --no-save \
         @img/sharp-linux-${TARGETARCH:-arm64} \
-        @img/sharp-libvips-linux-${TARGETARCH:-arm64}
+        @img/sharp-libvips-linux-${TARGETARCH:-arm64} \
+        @parcel/watcher-linux-${TARGETARCH:-arm64}-glibc
 
 FROM build-base AS prod-deps
 WORKDIR /app
