@@ -84,8 +84,14 @@ const KO_JSON_SRC = fs.readFileSync(
 
 describe('cycle 4 RPF / webhook source-contracts', () => {
     it('P264-01: slices customer email to 255 (matching schema column width), trims first (P264-05)', () => {
-        // Cycle 4 RPF / P264-01 + P264-05: shape is .trim().slice(0, 255).toLowerCase()
-        expect(WEBHOOK_SRC).toMatch(/\.trim\(\)\.slice\(0, 255\)\.toLowerCase\(\)/);
+        // Cycle 4 RPF / P264-01 + P264-05: shape was .trim().slice(0, 255).toLowerCase()
+        // Cycle 5 RPF / P388-06: trim is now hoisted into a `trimmedEmailRaw`
+        // local so the trimmed length can be range-checked BEFORE truncation.
+        // The .trim() call still happens (now on its own line); the
+        // .slice(0, 255).toLowerCase() chain remains. The test allows the
+        // multi-line form.
+        expect(WEBHOOK_SRC).toMatch(/customerEmailRaw\.trim\(\)/);
+        expect(WEBHOOK_SRC).toMatch(/\.slice\(0, 255\)\.toLowerCase\(\)/);
         // Must NOT use the legacy 320-char limit anymore.
         expect(WEBHOOK_SRC).not.toMatch(/customerEmailRaw\.slice\(0, 320\)/);
     });

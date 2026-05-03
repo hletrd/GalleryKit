@@ -85,7 +85,11 @@ describe('cycle 3 RPF / webhook source-contracts', () => {
         // Cycle 4 RPF / P264-01: slice limit moved from 320 to 255 to match
         // the schema column width and avoid MySQL strict-mode INSERT failures
         // for 256-320 char emails. Cycle 4 RPF / P264-05: also adds .trim().
-        expect(WEBHOOK_SRC).toMatch(/\.trim\(\)\.slice\(0, 255\)\.toLowerCase\(\)/);
+        // Cycle 5 RPF / P388-06: trim is hoisted into a named local so the
+        // length-check happens BEFORE truncation. The .slice + .toLowerCase
+        // chain remains intact; the .trim() call is now on its own line.
+        expect(WEBHOOK_SRC).toMatch(/customerEmailRaw\.trim\(\)/);
+        expect(WEBHOOK_SRC).toMatch(/\.slice\(0, 255\)\.toLowerCase\(\)/);
         const lowerIndex = WEBHOOK_SRC.indexOf('.toLowerCase()');
         const insertIndex = WEBHOOK_SRC.indexOf('db.insert(entitlements)');
         expect(lowerIndex).toBeGreaterThan(-1);
