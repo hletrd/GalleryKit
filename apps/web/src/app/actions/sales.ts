@@ -141,6 +141,20 @@ function mapStripeRefundError(err: unknown): RefundErrorCode {
     // 'network' code path. Cycle 5 split 'StripeAuthenticationError' into
     // its own 'auth-error' bucket above.
     if (e.type === 'StripeRateLimitError') return 'network';
+    // Cycle 6 RPF / P390-04 / C6-RPF-04: proactive ops signal when Stripe
+    // ships a new error type that the mapping table does not yet cover.
+    // Silent 'unknown' returns previously caused operators to learn about
+    // emerging Stripe error types only via customer complaint. The warn
+    // line surfaces the new type/code/name so the mapping table can be
+    // updated proactively. Skipped under NODE_ENV=test to keep unit-test
+    // output clean.
+    if (process.env.NODE_ENV !== 'test') {
+        console.warn('Stripe refund: unrecognized error type', {
+            name: maybeNonError?.name,
+            type: e.type,
+            code: e.code,
+        });
+    }
     return 'unknown';
 }
 
@@ -198,8 +212,16 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
         return { success: true };
     } catch (err) {
         console.error('Stripe refund failed:', err);
+        // Cycle 6 RPF / P390-03 / C6-RPF-03: do NOT cross the action boundary
+        // with `err.message`. The Stripe SDK includes request IDs (req_xxx)
+        // and other internal diagnostics in `err.message` that the doc block
+        // (above mapStripeRefundError) explicitly says should not leak to
+        // the client. The client-visible signal is `errorCode`, which is
+        // mapped to a localized i18n string by `mapErrorCode` in
+        // sales-client.tsx. The `error` field is a stable client-safe
+        // fallback for the rare case where a UI surface reads it directly.
         return {
-            error: err instanceof Error ? err.message : 'Refund failed',
+            error: 'Refund failed',
             errorCode: mapStripeRefundError(err),
         };
     }
