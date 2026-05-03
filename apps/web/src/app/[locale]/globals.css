@@ -100,6 +100,39 @@
   }
 }
 
+/* CM-MED-4: oklch overrides for primary/accent/ring/destructive on browsers
+ * that support the oklch() color function. The values are perceptually
+ * equivalent to the HSL fallbacks so the visual output stays identical on
+ * sRGB displays; on P3-capable displays the perceptually-uniform interpolation
+ * gives smoother gradient transitions and opens the door to wide-gamut UI
+ * accents in a follow-up. The @supports guard keeps legacy browsers on the
+ * existing HSL values. */
+@supports (color: oklch(0 0 0)) {
+  @layer base {
+    :root {
+      --primary: oklch(20.5% 0.01 264);
+      --primary-foreground: oklch(98% 0 0);
+      --accent: oklch(95.5% 0.005 264);
+      --ring: oklch(20.5% 0.01 264);
+      --destructive: oklch(58% 0.21 27);
+    }
+    .dark {
+      --primary: oklch(98% 0 0);
+      --primary-foreground: oklch(20.5% 0.01 264);
+      --accent: oklch(20% 0.005 264);
+      --ring: oklch(83% 0.01 264);
+      --destructive: oklch(40% 0.16 27);
+    }
+    .oled {
+      --primary: oklch(98% 0 0);
+      --primary-foreground: oklch(20.5% 0.01 264);
+      --accent: oklch(15% 0.005 264);
+      --ring: oklch(83% 0.01 264);
+      --destructive: oklch(40% 0.16 27);
+    }
+  }
+}
+
 @layer utilities {
   .mask-gradient-right {
     mask-image: linear-gradient(to right, black 80%, transparent 100%);
