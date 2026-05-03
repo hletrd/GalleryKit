@@ -120,7 +120,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     };
 }
 
-export default async function PhotoPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PhotoPage({ params, searchParams }: {
+    params: Promise<{ id: string }>;
+    // C1RPF-PHOTO-HIGH-02: read `?checkout=success|cancel` so the photo
+    // viewer can surface a toast on Stripe post-checkout redirect.
+    searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
     // Validate that id is a purely numeric positive integer
     if (!/^\d+$/.test(id)) {
@@ -130,6 +135,12 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
         return notFound();
     }
+
+    const sp = (await searchParams) ?? {};
+    const checkoutRaw = sp.checkout;
+    const checkoutValue = Array.isArray(checkoutRaw) ? checkoutRaw[0] : checkoutRaw;
+    const checkoutStatus: 'success' | 'cancel' | null =
+        checkoutValue === 'success' || checkoutValue === 'cancel' ? checkoutValue : null;
 
     const [locale, t, image, seo, config, isAdminUser] = await Promise.all([
         getLocale(),
@@ -252,6 +263,7 @@ export default async function PhotoPage({ params }: { params: Promise<{ id: stri
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
                 reactionsEnabled={config.reactionsEnabled}
                 licensePrices={config.licensePrices}
+                checkoutStatus={checkoutStatus}
             />
             {/* Prefetch adjacent photos for instant navigation */}
             {image.prevId && (
