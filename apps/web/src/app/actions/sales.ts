@@ -1,0 +1,137 @@
+'use server';
+
+/**
+ * US-P54: Server actions for admin /sales view.
+ * List entitlements, refund, and revenue totals.
+ * All mutating actions require requireSameOriginAdmin().
+ */
+
+import { db } from '@/db';
+import { entitlements, images } from '@/db/schema';
+import { eq, desc, sum } from 'drizzle-orm';
+import { isAdmin } from '@/app/actions/auth';
+import { requireSameOriginAdmin } from '@/lib/action-guards';
+import { getStripe } from '@/lib/stripe';
+
+export interface EntitlementRow {
+    id: number;
+    imageId: number;
+    imageTitle: string | null;
+    tier: string;
+    customerEmail: string;
+    sessionId: string;
+    amountTotalCents: number;
+    downloadedAt: Date | null;
+    expiresAt: Date;
+    refunded: boolean;
+    createdAt: Date;
+}
+
+/** @action-origin-exempt: read-only admin getter */
+export async function listEntitlements(): Promise<{ error?: string; rows?: EntitlementRow[] }> {
+    if (!(await isAdmin())) return { error: 'Not authorized' };
+
+    try {
+        const rows = await db
+            .select({
+                id: entitlements.id,
+                imageId: entitlements.imageId,
+                imageTitle: images.title,
+                tier: entitlements.tier,
+                customerEmail: entitlements.customerEmail,
+                sessionId: entitlements.sessionId,
+                amountTotalCents: entitlements.amountTotalCents,
+                downloadedAt: entitlements.downloadedAt,
+                expiresAt: entitlements.expiresAt,
+                refunded: entitlements.refunded,
+                createdAt: entitlements.createdAt,
+            })
+            .from(entitlements)
+            .leftJoin(images, eq(entitlements.imageId, images.id))
+            .orderBy(desc(entitlements.createdAt))
+            .limit(500);
+
+        return {
+            rows: rows.map((r) => ({
+                id: r.id,
+                imageId: r.imageId,
+                imageTitle: r.imageTitle ?? null,
+                tier: r.tier,
+                customerEmail: r.customerEmail,
+                sessionId: r.sessionId,
+                amountTotalCents: r.amountTotalCents,
+                downloadedAt: r.downloadedAt ?? null,
+                expiresAt: r.expiresAt,
+                refunded: r.refunded,
+                createdAt: r.createdAt,
+            })),
+        };
+    } catch (err) {
+        console.error('listEntitlements failed:', err);
+        return { error: 'Failed to load sales' };
+    }
+}
+
+/** @action-origin-exempt: read-only admin getter */
+export async function getTotalRevenueCents(): Promise<{ error?: string; totalCents?: number }> {
+    if (!(await isAdmin())) return { error: 'Not authorized' };
+
+    try {
+        const [row] = await db
+            .select({ total: sum(entitlements.amountTotalCents) })
+            .from(entitlements)
+            .where(eq(entitlements.refunded, false));
+
+        const totalCents = row?.total ? parseInt(String(row.total), 10) : 0;
+        return { totalCents: Number.isFinite(totalCents) ? totalCents : 0 };
+    } catch (err) {
+        console.error('getTotalRevenueCents failed:', err);
+        return { error: 'Failed to calculate revenue' };
+    }
+}
+
+export async function refundEntitlement(entitlementId: number): Promise<{ error?: string; success?: true }> {
+    const originError = await requireSameOriginAdmin();
+    if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: 'Not authorized' };
+
+    if (!Number.isFinite(entitlementId) || entitlementId <= 0) {
+        return { error: 'Invalid entitlement ID' };
+    }
+
+    const [row] = await db
+        .select({
+            id: entitlements.id,
+            sessionId: entitlements.sessionId,
+            refunded: entitlements.refunded,
+        })
+        .from(entitlements)
+        .where(eq(entitlements.id, entitlementId))
+        .limit(1);
+
+    if (!row) return { error: 'Entitlement not found' };
+    if (row.refunded) return { error: 'Already refunded' };
+
+    try {
+        const stripe = getStripe();
+        // Retrieve the payment intent from the checkout session
+        const session = await stripe.checkout.sessions.retrieve(row.sessionId);
+        const paymentIntent = session.payment_intent;
+        if (!paymentIntent) {
+            return { error: 'No payment intent found for this session' };
+        }
+        const piId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent.id;
+        await stripe.refunds.create({ payment_intent: piId });
+
+        // Mark entitlement as refunded (blocks future downloads)
+        await db
+            .update(entitlements)
+            .set({ refunded: true, downloadTokenHash: null })
+            .where(eq(entitlements.id, entitlementId));
+
+        return { success: true };
+    } catch (err) {
+        console.error('Stripe refund failed:', err);
+        return { error: err instanceof Error ? err.message : 'Refund failed' };
+    }
+}
