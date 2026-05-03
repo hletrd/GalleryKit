@@ -505,8 +505,20 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
 
     const iccProfileName = extractIccProfileName(metadata.icc);
 
-    const rawBitDepth = metadata.depth ? (typeof metadata.depth === 'string' ? parseInt(metadata.depth, 10) : metadata.depth) : null;
-    const bitDepth = (rawBitDepth !== null && Number.isFinite(rawBitDepth)) ? rawBitDepth : null;
+    // CM-LOW-1: Sharp's metadata.depth is a string union ('uchar', 'ushort',
+    // 'float', etc.), not a numeric string. The pre-fix code did
+    // parseInt('uchar', 10) → NaN → null, so the bit_depth column was
+    // always empty. Map the documented string values to their bit count.
+    const DEPTH_TO_BITS: Record<string, number> = {
+        uchar: 8, char: 8,
+        ushort: 16, short: 16,
+        uint: 32, int: 32,
+        float: 32, complex: 64,
+        double: 64, dpcomplex: 128,
+    };
+    const bitDepth: number | null = (typeof metadata.depth === 'string' && metadata.depth in DEPTH_TO_BITS)
+        ? DEPTH_TO_BITS[metadata.depth]
+        : (typeof metadata.depth === 'number' && Number.isFinite(metadata.depth) ? metadata.depth : null);
 
     return {
         id,
