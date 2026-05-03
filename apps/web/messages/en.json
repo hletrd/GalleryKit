@@ -721,6 +721,13 @@
     "refunding": "Refunding…",
     "refundSuccess": "Refund issued.",
     "refundError": "Refund failed",
+    "refundConfirmTitle": "Refund this purchase?",
+    "refundConfirmDesc": "Refund {amount} to {email} for \"{title}\"? This cannot be undone — the customer's download token will be invalidated immediately.",
+    "refundConfirmAction": "Refund",
+    "refundCancel": "Cancel",
+    "refundErrorAlreadyRefunded": "This charge was already refunded.",
+    "refundErrorChargeUnknown": "The Stripe charge could not be located. Check the Stripe dashboard.",
+    "refundErrorNetwork": "Stripe could not be reached. Try again shortly.",
     "noSales": "No sales yet."
   },
   "licensePrice": {

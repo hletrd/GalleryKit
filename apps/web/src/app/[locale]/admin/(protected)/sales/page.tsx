@@ -34,6 +34,13 @@ export default async function SalesPage() {
                 refunding: t('refunding'),
                 refundSuccess: t('refundSuccess'),
                 refundError: t('refundError'),
+                refundConfirmTitle: t('refundConfirmTitle'),
+                refundConfirmDescTemplate: (vars) => t('refundConfirmDesc', vars),
+                refundConfirmAction: t('refundConfirmAction'),
+                refundCancel: t('refundCancel'),
+                refundErrorAlreadyRefunded: t('refundErrorAlreadyRefunded'),
+                refundErrorChargeUnknown: t('refundErrorChargeUnknown'),
+                refundErrorNetwork: t('refundErrorNetwork'),
                 noSales: t('noSales'),
                 errorLoad: salesResult.error ?? '',
             }}

@@ -90,13 +90,40 @@ export async function getTotalRevenueCents(): Promise<{ error?: string; totalCen
     }
 }
 
-export async function refundEntitlement(entitlementId: number): Promise<{ error?: string; success?: true }> {
+/**
+ * Cycle 2 RPF / P260-07 / C2-RPF-13: known Stripe refund error codes
+ * mapped to short, stable identifiers. The full Stripe error is logged
+ * server-side; only the mapped identifier crosses the action boundary
+ * to the client, which then renders a localized message via i18n. This
+ * stops Stripe-internal request ids from leaking into UI toasts and
+ * makes refund errors localizable.
+ */
+export type RefundErrorCode =
+    | 'already-refunded'
+    | 'charge-unknown'
+    | 'network'
+    | 'not-found'
+    | 'invalid-id'
+    | 'no-payment-intent'
+    | 'unknown';
+
+function mapStripeRefundError(err: unknown): RefundErrorCode {
+    if (!(err instanceof Error)) return 'unknown';
+    // Stripe SDK errors carry a `code` and `type` on the error object.
+    const e = err as Error & { code?: string; type?: string };
+    if (e.code === 'charge_already_refunded') return 'already-refunded';
+    if (e.code === 'resource_missing') return 'charge-unknown';
+    if (e.type === 'StripeConnectionError' || e.type === 'StripeAPIError') return 'network';
+    return 'unknown';
+}
+
+export async function refundEntitlement(entitlementId: number): Promise<{ error?: string; errorCode?: RefundErrorCode; success?: true }> {
     const originError = await requireSameOriginAdmin();
-    if (originError) return { error: originError };
-    if (!(await isAdmin())) return { error: 'Not authorized' };
+    if (originError) return { error: originError, errorCode: 'unknown' };
+    if (!(await isAdmin())) return { error: 'Not authorized', errorCode: 'unknown' };
 
     if (!Number.isFinite(entitlementId) || entitlementId <= 0) {
-        return { error: 'Invalid entitlement ID' };
+        return { error: 'Invalid entitlement ID', errorCode: 'invalid-id' };
     }
 
     const [row] = await db
@@ -109,8 +136,8 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
         .where(eq(entitlements.id, entitlementId))
         .limit(1);
 
-    if (!row) return { error: 'Entitlement not found' };
-    if (row.refunded) return { error: 'Already refunded' };
+    if (!row) return { error: 'Entitlement not found', errorCode: 'not-found' };
+    if (row.refunded) return { error: 'Already refunded', errorCode: 'already-refunded' };
 
     try {
         const stripe = getStripe();
@@ -118,7 +145,7 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
         const session = await stripe.checkout.sessions.retrieve(row.sessionId);
         const paymentIntent = session.payment_intent;
         if (!paymentIntent) {
-            return { error: 'No payment intent found for this session' };
+            return { error: 'No payment intent found for this session', errorCode: 'no-payment-intent' };
         }
         const piId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent.id;
         await stripe.refunds.create({ payment_intent: piId });
@@ -132,6 +159,9 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
         return { success: true };
     } catch (err) {
         console.error('Stripe refund failed:', err);
-        return { error: err instanceof Error ? err.message : 'Refund failed' };
+        return {
+            error: err instanceof Error ? err.message : 'Refund failed',
+            errorCode: mapStripeRefundError(err),
+        };
     }
 }
