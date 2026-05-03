@@ -10,7 +10,8 @@
     "settings": "Settings",
     "logout": "Log out",
     "admin": "Admin",
-    "analytics": "Analytics"
+    "analytics": "Analytics",
+    "sales": "Sales"
   },
   "db": {
     "title": "Database",
@@ -694,6 +695,46 @@
       "11": "November",
       "12": "December"
     }
+  },
+  "stripe": {
+    "buy": "Buy",
+    "checkingOut": "Loading…",
+    "checkoutError": "Could not start checkout. Please try again.",
+    "checkoutSuccess": "Purchase complete! Your download link is being prepared.",
+    "checkoutCancelled": "Checkout cancelled."
+  },
+  "sales": {
+    "title": "Sales",
+    "totalRevenue": "Total Revenue",
+    "colDate": "Date",
+    "colImage": "Photo",
+    "colTier": "License",
+    "colEmail": "Customer",
+    "colAmount": "Amount",
+    "colStatus": "Status",
+    "colActions": "Actions",
+    "statusDownloaded": "Downloaded",
+    "statusPending": "Pending",
+    "statusExpired": "Expired",
+    "statusRefunded": "Refunded",
+    "refundButton": "Refund",
+    "refunding": "Refunding…",
+    "refundSuccess": "Refund issued.",
+    "refundError": "Refund failed",
+    "noSales": "No sales yet."
+  },
+  "licensePrice": {
+    "title": "License Pricing",
+    "desc": "Set prices for each license tier (in US cents). Set to 0 to disable purchasing for that tier.",
+    "editorialLabel": "Editorial (cents)",
+    "commercialLabel": "Commercial (cents)",
+    "rmLabel": "Rights Managed (cents)",
+    "hint": "Enter price in cents (e.g. 1000 = $10.00). Set to 0 to disable.",
+    "save": "Save Prices",
+    "saving": "Saving…",
+    "saveSuccess": "License prices saved.",
+    "saveFailed": "Failed to save license prices.",
+    "noChanges": "No changes to save."
   },
   "analytics": {
     "title": "Analytics",

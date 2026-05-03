@@ -10,7 +10,8 @@
     "settings": "설정",
     "logout": "로그아웃",
     "admin": "관리",
-    "analytics": "분석"
+    "analytics": "분석",
+    "sales": "판매"
   },
   "db": {
     "title": "데이터베이스 관리",
@@ -668,6 +669,46 @@
       "11": "11월",
       "12": "12월"
     }
+  },
+  "stripe": {
+    "buy": "구매",
+    "checkingOut": "로딩 중…",
+    "checkoutError": "결제를 시작할 수 없습니다. 다시 시도해 주세요.",
+    "checkoutSuccess": "구매 완료! 다운로드 링크를 준비 중입니다.",
+    "checkoutCancelled": "결제가 취소되었습니다."
+  },
+  "sales": {
+    "title": "판매 내역",
+    "totalRevenue": "총 수익",
+    "colDate": "날짜",
+    "colImage": "사진",
+    "colTier": "라이선스",
+    "colEmail": "구매자",
+    "colAmount": "금액",
+    "colStatus": "상태",
+    "colActions": "작업",
+    "statusDownloaded": "다운로드됨",
+    "statusPending": "대기 중",
+    "statusExpired": "만료됨",
+    "statusRefunded": "환불됨",
+    "refundButton": "환불",
+    "refunding": "환불 중…",
+    "refundSuccess": "환불이 처리되었습니다.",
+    "refundError": "환불 실패",
+    "noSales": "아직 판매 내역이 없습니다."
+  },
+  "licensePrice": {
+    "title": "라이선스 가격",
+    "desc": "각 라이선스 등급의 가격을 US 센트로 설정하세요. 0으로 설정하면 해당 등급 구매가 비활성화됩니다.",
+    "editorialLabel": "에디토리얼 (센트)",
+    "commercialLabel": "상업용 (센트)",
+    "rmLabel": "권리 관리 (센트)",
+    "hint": "가격을 센트로 입력하세요 (예: 1000 = $10.00). 0으로 설정하면 비활성화됩니다.",
+    "save": "가격 저장",
+    "saving": "저장 중…",
+    "saveSuccess": "라이선스 가격이 저장되었습니다.",
+    "saveFailed": "라이선스 가격 저장에 실패했습니다.",
+    "noChanges": "변경 사항이 없습니다."
   },
   "analytics": {
     "title": "분석",
