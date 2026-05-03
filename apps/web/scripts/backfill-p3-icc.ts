@@ -7,126 +7,83 @@
  *
  * What it does
  * ────────────
- * For every image row in the DB whose source ICC profile indicates a P3 or
- * wider gamut (resolveAvifIccProfile returns 'p3'), re-emits AVIF derivatives
- * that carry the Display P3 ICC profile via Sharp's withMetadata({ icc: 'p3' }).
+ * For every processed image row, re-runs processImageFormats() against the
+ * stored original to regenerate AVIF / WebP / JPEG derivatives with the
+ * post-fix encoder. The new pipeline (see CM-CRIT-1, CM-HIGH-1, CM-HIGH-2,
+ * CM-HIGH-4 in process-image.ts) produces:
+ *   - strict P3 detection so wider-than-P3 sources are converted to sRGB
+ *     instead of being mistagged as Display-P3,
+ *   - explicit pixel conversion via toColorspace + matching ICC tag via
+ *     withIccProfile (no EXIF leak),
+ *   - autoOrient applied so iPhone landscape photos are upright.
  *
- * Idempotent: skips any AVIF file whose embedded ICC profile already contains
- * P3 metadata (non-null ICC buffer that differs from a freshly-generated sRGB
- * AVIF is treated as "already tagged"). A row is also skipped if the AVIF base
- * file does not exist on disk (never processed, or deleted).
+ * The serve-upload route emits an ETag containing IMAGE_PIPELINE_VERSION
+ * (CM-HIGH-5), so once the original file is reprocessed any cached client
+ * copy will revalidate against the new ETag and re-fetch automatically.
  *
- * Only AVIF files are re-emitted. WebP and JPEG derivatives are not changed —
- * they remain sRGB for universal compatibility.
+ * The script is idempotent at the row level: each row's existing
+ * derivatives are replaced atomically by processImageFormats(). Re-running
+ * after a successful pass simply re-emits identical bytes.
  *
- * Concurrency is capped at 2 to avoid OOM on the default single-instance
- * deployment (QUEUE_CONCURRENCY controls the live upload queue; this script
- * uses its own limit so it does not compete with ongoing uploads).
+ * Concurrency is capped at BACKFILL_CONCURRENCY (default 2) to avoid
+ * starving the live web process during long re-runs.
+ *
+ * CM-HIGH-6 fix: pre-fix script referenced a non-existent `icc_profile_name`
+ * column. The actual schema column is `color_space`. The script now reads
+ * filename_original from the row and re-runs the full encoder, rather than
+ * trying to retag derivative bytes in place with a stale ICC profile name.
  */
 
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
-import sharp from 'sharp';
-import path from 'path';
 import fs from 'fs/promises';
 import PQueue from 'p-queue';
-import { resolveAvifIccProfile, extractIccProfileName } from '../src/lib/process-image';
-import { UPLOAD_DIR_AVIF } from '../src/lib/upload-paths';
+import { processImageFormats } from '../src/lib/process-image';
+import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 
 // ---------------------------------------------------------------------------
 // Minimal type for DB rows we need
 // ---------------------------------------------------------------------------
 
-interface ImageRow {
+export interface ImageRow {
     id: number;
+    filename_original: string;
     filename_avif: string;
-    icc_profile_name: string | null;
+    filename_webp: string;
+    filename_jpeg: string;
+    color_space: string | null;
+    width: number;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Single-row reprocessor — exported for unit tests.
 // ---------------------------------------------------------------------------
 
-/**
- * Return true if the AVIF at filePath already carries a P3 ICC profile.
- * We compare the embedded profile against a freshly-generated sRGB reference:
- * if they differ, the file already has a non-sRGB (i.e. P3) profile.
- */
-let _srgbIccRef: Buffer | null = null;
-async function getSrgbIccRef(): Promise<Buffer> {
-    if (_srgbIccRef) return _srgbIccRef;
-    const buf = await sharp({
-        create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 0, b: 0 } },
-    })
-        .withMetadata({ icc: 'srgb' })
-        .avif({ quality: 50 })
-        .toBuffer();
-    const meta = await sharp(buf).metadata();
-    _srgbIccRef = meta.icc ?? Buffer.alloc(0);
-    return _srgbIccRef;
-}
-
-async function avifAlreadyHasP3(avifPath: string): Promise<boolean> {
-    let meta: sharp.Metadata;
+export async function reprocessRow(row: ImageRow): Promise<'processed' | 'skipped' | 'error'> {
+    const originalPath = await resolveOriginalUploadPath(row.filename_original);
     try {
-        meta = await sharp(avifPath).metadata();
+        await fs.access(originalPath);
     } catch {
-        return false; // file missing or corrupt — treat as not tagged
+        return 'skipped';
     }
-    if (!meta.icc || meta.icc.length === 0) return false;
 
-    const srgbRef = await getSrgbIccRef();
-    // If the embedded ICC differs from sRGB reference it must be P3 (we only
-    // ever write 'srgb' or 'p3' from GalleryKit). Belt-and-suspenders: also
-    // check the profile name via the existing ICC parser.
-    if (!meta.icc.equals(srgbRef)) return true;
-
-    const profileName = extractIccProfileName(meta.icc);
-    return resolveAvifIccProfile(profileName) === 'p3';
-}
-
-/**
- * Re-emit all AVIF size variants for a base filename with P3 ICC.
- * Scans the AVIF directory for files matching the UUID stem.
- */
-async function retagAvifVariants(baseFilename: string): Promise<number> {
-    const ext = path.extname(baseFilename); // '.avif'
-    const stem = path.basename(baseFilename, ext); // uuid part
-
-    // Collect all matching variants (uuid.avif, uuid_640.avif, etc.)
-    let entries: string[];
     try {
-        const dir = await fs.opendir(UPLOAD_DIR_AVIF);
-        entries = [];
-        for await (const entry of dir) {
-            if (!entry.isFile()) continue;
-            if (entry.name === baseFilename || (entry.name.startsWith(`${stem}_`) && entry.name.endsWith(ext))) {
-                entries.push(entry.name);
-            }
-        }
+        await processImageFormats(
+            originalPath,
+            row.filename_webp,
+            row.filename_avif,
+            row.filename_jpeg,
+            row.width,
+            undefined,
+            undefined,
+            row.color_space,
+        );
+        return 'processed';
     } catch (err) {
-        console.error(`  [skip] Cannot read AVIF dir: ${err}`);
-        return 0;
+        console.error(`  [error] id=${row.id}: ${err}`);
+        return 'error';
     }
-
-    let retagged = 0;
-    for (const filename of entries) {
-        const filePath = path.join(UPLOAD_DIR_AVIF, filename);
-        const tmpPath = filePath + '.retag.tmp';
-        try {
-            await sharp(filePath)
-                .withMetadata({ icc: 'p3' })
-                .avif({ quality: 85 }) // match default; idempotent on re-run
-                .toFile(tmpPath);
-            await fs.rename(tmpPath, filePath);
-            retagged++;
-        } catch (err) {
-            console.error(`  [error] Failed to retag ${filename}: ${err}`);
-            await fs.unlink(tmpPath).catch(() => {});
-        }
-    }
-    return retagged;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,63 +96,42 @@ async function main() {
 
     console.log('[backfill-p3-icc] Fetching candidate rows from DB…');
 
-    // Pull all rows that have an icc_profile_name indicating P3 or wider gamut.
-    // We filter in JS (resolveAvifIccProfile) to reuse the canonical logic.
-    // Drizzle's mysql2 execute() returns ResultSetHeader | FieldPacket[] at the
-    // type level; the runtime value for SELECT is the row array — cast explicitly.
+    // Pull all processed rows. We re-emit derivatives for every row because
+    // the post-fix encoder pipeline produces different bytes (toColorspace,
+    // withIccProfile, autoOrient) for sRGB sources too — not just wide-gamut
+    // ones. This is the point of the IMAGE_PIPELINE_VERSION cutover.
     const rawRows = await db.execute(sql`
-        SELECT id, filename_avif, icc_profile_name
+        SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
+               color_space, width
         FROM images
         WHERE processed = TRUE
-          AND icc_profile_name IS NOT NULL
         ORDER BY id ASC
     `);
     const rows = rawRows as unknown as ImageRow[];
 
-    const candidates = rows.filter(
-        (r) => resolveAvifIccProfile(r.icc_profile_name) === 'p3',
-    );
+    console.log(`[backfill-p3-icc] ${rows.length} processed image(s) found.`);
 
-    console.log(`[backfill-p3-icc] ${candidates.length} P3-source image(s) found.`);
-
-    if (candidates.length === 0) {
+    if (rows.length === 0) {
         console.log('[backfill-p3-icc] Nothing to do. Exiting.');
         process.exit(0);
     }
 
-    const queue = new PQueue({ concurrency: 2 });
+    const concurrency = Math.max(1, Number(process.env.BACKFILL_CONCURRENCY) || 2);
+    const queue = new PQueue({ concurrency });
     let skipped = 0;
     let processed = 0;
     let errors = 0;
+    const reportEvery = Math.max(1, Math.floor(rows.length / 20));
 
-    for (const row of candidates) {
+    for (const [index, row] of rows.entries()) {
         queue.add(async () => {
-            const avifBase = path.join(UPLOAD_DIR_AVIF, row.filename_avif);
+            const outcome = await reprocessRow(row);
+            if (outcome === 'processed') processed++;
+            else if (outcome === 'skipped') skipped++;
+            else errors++;
 
-            // Check the base file exists
-            try {
-                await fs.access(avifBase);
-            } catch {
-                console.log(`  [skip] id=${row.id} — AVIF file not found on disk`);
-                skipped++;
-                return;
-            }
-
-            // Idempotency check
-            if (await avifAlreadyHasP3(avifBase)) {
-                console.log(`  [skip] id=${row.id} — AVIF already carries P3 ICC`);
-                skipped++;
-                return;
-            }
-
-            console.log(`  [process] id=${row.id} icc="${row.icc_profile_name}" → re-tagging AVIF variants…`);
-            try {
-                const count = await retagAvifVariants(row.filename_avif);
-                console.log(`  [done] id=${row.id} — ${count} variant(s) retagged`);
-                processed++;
-            } catch (err) {
-                console.error(`  [error] id=${row.id}: ${err}`);
-                errors++;
+            if ((index + 1) % reportEvery === 0) {
+                console.log(`  [progress] ${index + 1}/${rows.length} processed=${processed} skipped=${skipped} errors=${errors}`);
             }
         });
     }
@@ -206,7 +142,10 @@ async function main() {
     process.exit(errors > 0 ? 1 : 0);
 }
 
-main().catch((err) => {
-    console.error('[backfill-p3-icc] Fatal:', err);
-    process.exit(1);
-});
+// Only run main() when invoked directly, not when imported by tests.
+if (import.meta.url === `file://${process.argv[1]}`) {
+    main().catch((err) => {
+        console.error('[backfill-p3-icc] Fatal:', err);
+        process.exit(1);
+    });
+}
