@@ -23,8 +23,16 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 
-# Install dependencies (including devDependencies for build)
-RUN npm ci --workspace=apps/web
+# Install dependencies (including devDependencies for build).
+# Force linux-{arm64,x64} Sharp binaries explicitly because `npm ci` from
+# a macOS-generated lockfile sometimes resolves only @img/sharp-darwin-*
+# optional deps even though the lockfile lists every platform variant.
+# Sharp's documented cross-platform install path is `--os=linux
+# --cpu=<arch> sharp` (https://sharp.pixelplumbing.com/install#cross-platform).
+# Using TARGETPLATFORM lets buildx pick the right arch when cross-building.
+ARG TARGETARCH
+RUN npm ci --workspace=apps/web --include=optional && \
+    cd apps/web && npm install --os=linux --cpu=${TARGETARCH:-arm64} --include=optional --workspaces=false sharp
 
 FROM build-base AS prod-deps
 WORKDIR /app
