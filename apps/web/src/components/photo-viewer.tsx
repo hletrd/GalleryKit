@@ -392,6 +392,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
                     decoding="async"
                     loading="eager"
+                    fetchPriority="high"
                 />
             </picture>
         );
@@ -589,7 +590,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     navigation transitions instead of swapping
                     instantaneously underneath the still-fading-out
                     previous photo. */}
-                <div className="relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-xl border p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer">
+                <div className="relative flex items-center justify-center bg-black/5 dark:bg-black rounded-xl border dark:border-transparent p-2 overflow-hidden min-h-[40vh] md:min-h-[500px] group skeleton-shimmer">
                     <PhotoNavigation
                         prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
                         nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
