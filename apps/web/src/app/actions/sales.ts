@@ -90,29 +90,57 @@ export async function listEntitlements(): Promise<{ error?: string; rows?: Entit
  * to the client, which then renders a localized message via i18n. This
  * stops Stripe-internal request ids from leaking into UI toasts and
  * makes refund errors localizable.
+ *
+ * Cycle 5 RPF / P388-03 / C5-RPF-03: split `'auth-error'` from
+ * `'network'`. `StripeAuthenticationError` (rotated/revoked API key)
+ * requires ops to rotate STRIPE_SECRET_KEY; surfacing it as `'network'`
+ * (the previous behavior) caused operators to retry forever instead of
+ * fixing the key. `StripeRateLimitError` and `StripeConnectionError`
+ * remain `'network'` since both are transient by definition.
+ *
+ * Stripe error type → RefundErrorCode mapping:
+ *   - StripeAuthenticationError       → 'auth-error'  (key rotated)
+ *   - StripeConnectionError           → 'network'     (transient)
+ *   - StripeAPIError                  → 'network'     (transient)
+ *   - StripeRateLimitError            → 'network'     (transient)
+ *   - charge_already_refunded (code)  → 'already-refunded'
+ *   - resource_missing (code)         → 'charge-unknown'
+ *   - AbortError / ETIMEDOUT / ECONNREFUSED (non-Error throws) → 'network'
+ *   - everything else                 → 'unknown'
  */
 export type RefundErrorCode =
     | 'already-refunded'
     | 'charge-unknown'
     | 'network'
+    | 'auth-error'
     | 'not-found'
     | 'invalid-id'
     | 'no-payment-intent'
     | 'unknown';
 
 function mapStripeRefundError(err: unknown): RefundErrorCode {
+    // Cycle 5 RPF / P388-05 / C5-RPF-05: handle non-Error throws BEFORE the
+    // instanceof check. AbortController-issued AbortError is a DOMException
+    // in Node.js, NOT an Error, so the previous instanceof check returned
+    // 'unknown' and the user saw the generic fallback toast on a hung
+    // network request. Common Node.js fs/network error codes (ETIMEDOUT,
+    // ECONNREFUSED) also propagate without subclassing Error in some paths.
+    const maybeNonError = err as { name?: string; code?: string } | null;
+    if (maybeNonError?.name === 'AbortError') return 'network';
+    if (maybeNonError?.code === 'ETIMEDOUT' || maybeNonError?.code === 'ECONNREFUSED') return 'network';
     if (!(err instanceof Error)) return 'unknown';
     // Stripe SDK errors carry a `code` and `type` on the error object.
     const e = err as Error & { code?: string; type?: string };
     if (e.code === 'charge_already_refunded') return 'already-refunded';
     if (e.code === 'resource_missing') return 'charge-unknown';
+    // Cycle 5 RPF / P388-03 / C5-RPF-03: split auth-error from network.
+    if (e.type === 'StripeAuthenticationError') return 'auth-error';
     if (e.type === 'StripeConnectionError' || e.type === 'StripeAPIError') return 'network';
-    // Cycle 4 RPF / P264-07 / C4-RPF-07: StripeAuthenticationError (rotated
-    // key, ops issue) and StripeRateLimitError (rate limit, retry-after) are
-    // both transient/operational and previously collapsed to 'unknown'. Map
-    // them to 'network' so operators see the recoverable-error toast that
-    // says "Stripe could not be reached" rather than the generic fallback.
-    if (e.type === 'StripeAuthenticationError' || e.type === 'StripeRateLimitError') return 'network';
+    // Cycle 4 RPF / P264-07 / C4-RPF-07: StripeRateLimitError is transient
+    // (rate-limited by Stripe, retry-after is the fix). Keep it on the
+    // 'network' code path. Cycle 5 split 'StripeAuthenticationError' into
+    // its own 'auth-error' bucket above.
+    if (e.type === 'StripeRateLimitError') return 'network';
     return 'unknown';
 }
 
@@ -147,7 +175,19 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
             return { error: 'No payment intent found for this session', errorCode: 'no-payment-intent' };
         }
         const piId = typeof paymentIntent === 'string' ? paymentIntent : paymentIntent.id;
-        await stripe.refunds.create({ payment_intent: piId });
+        // Cycle 5 RPF / P388-01 / C5-RPF-01: pass an Idempotency-Key on the
+        // refund POST. Stripe deduplicates server-side when the same key is
+        // used, so a retry (transient network error or browser double-click)
+        // returns the same refund.id rather than creating a second refund
+        // attempt — which Stripe would auto-reject with
+        // `charge_already_refunded`, mapping to a confusing
+        // "already-refunded" toast on a successful refund. The deterministic
+        // `refund-${entitlementId}` key allows safe retries because each
+        // entitlement has at most one refund.
+        await stripe.refunds.create(
+            { payment_intent: piId },
+            { idempotencyKey: `refund-${entitlementId}` },
+        );
 
         // Mark entitlement as refunded (blocks future downloads)
         await db
