@@ -32,6 +32,19 @@ export const runtime = 'nodejs';
 
 const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
+// Cycle 5 RPF / P388-04 / C5-RPF-04: hoist EMAIL_SHAPE regex to module
+// scope. Consistency with `STORED_HASH_SHAPE` in
+// `apps/web/src/lib/download-tokens.ts` (also module-scoped). V8 caches
+// regex literals so the micro-perf gain is essentially free; the readability
+// and consistency win is the primary motive.
+//
+// Cycle 2 RPF / P260-03 / C2-RPF-03: validate email shape at ingest before
+// insert. Rejects values that contain whitespace or quoting characters that
+// could spoof renderings in downstream tools (CSV exports, copy-paste to
+// email clients). RFC-conformant for the common case; we explicitly do not
+// allow IDN/unicode-direction characters.
+const EMAIL_SHAPE = /^[^\s<>"'@]+@[^\s<>"'@]+\.[^\s<>"'@]+$/;
+
 export async function POST(request: NextRequest): Promise<Response> {
     const signature = request.headers.get('stripe-signature');
     if (!signature) {
@@ -105,18 +118,44 @@ export async function POST(request: NextRequest): Promise<Response> {
         // any whitespace and would otherwise drop a legit address with
         // copy-paste padding.
         const customerEmailRaw = session.customer_details?.email ?? session.customer_email ?? '';
-        const customerEmail = customerEmailRaw.trim().slice(0, 255).toLowerCase();
         const sessionId = session.id;
         const amountTotalCents = session.amount_total ?? 0;
 
-        // Cycle 2 RPF / P260-03 / C2-RPF-03: validate email shape at ingest
-        // before insert. Rejects values that contain whitespace or quoting
-        // characters that could spoof renderings in downstream tools (CSV
-        // exports, copy-paste to email clients). RFC-conformant for the common
-        // case; we explicitly do not allow IDN/unicode-direction characters.
+        // Cycle 5 RPF / P388-06 / C5-RPF-06: reject 256+-char raw email
+        // BEFORE truncation. Cycle 4 P264-01 set the slice to 255 to match
+        // schema column width, but truncation is silent: a 1000-char
+        // misconfigured upstream email could pass the post-truncation
+        // EMAIL_SHAPE regex (rare, but a 250-char-local + valid domain
+        // fits 255) and get persisted with a different mailbox than the
+        // customer intended. Treat oversized raw emails as malformed — this
+        // is a data-integrity safeguard, not a hygiene one.
+        const trimmedEmailRaw = customerEmailRaw.trim();
+        if (trimmedEmailRaw.length > 255) {
+            console.error('Stripe webhook: rejecting oversized customer email', {
+                sessionId,
+                length: trimmedEmailRaw.length,
+            });
+            // 200 — Stripe should not retry; permanent metadata error.
+            return NextResponse.json({ received: true }, { headers: NO_STORE });
+        }
+        // Cycle 4 RPF / P264-01 / C4-RPF-01: slice to 255 (the
+        // entitlements.customer_email varchar(255) width). Reachable only when
+        // length <= 255 (the cycle 5 P388-06 reject above handles the
+        // oversized case), so the slice is now a defense-in-depth no-op but
+        // is preserved for explicitness against future column-width changes.
+        // Cycle 3 RPF / P262-09 / C3-RPF-09: lowercase the email after slice
+        // so case-mismatched stripes (`Customer@Example.COM` vs
+        // `customer@example.com`) coalesce on the same DB row for future
+        // customer-history lookups.
+        // Cycle 4 RPF / P264-05 / C4-RPF-05: trim accidental whitespace from
+        // misconfigured callers BEFORE the EMAIL_SHAPE regex, which rejects
+        // any whitespace and would otherwise drop a legit address with
+        // copy-paste padding. (Trimming is now done above into
+        // `trimmedEmailRaw` so we only need slice + lowercase here.)
+        const customerEmail = trimmedEmailRaw.slice(0, 255).toLowerCase();
+
         // Cycle 3 RPF / P262-11: console.error so log-shipper alerts catch
         // this — silent rejects are bad ops UX.
-        const EMAIL_SHAPE = /^[^\s<>"'@]+@[^\s<>"'@]+\.[^\s<>"'@]+$/;
         if (customerEmail && !EMAIL_SHAPE.test(customerEmail)) {
             console.error('Stripe webhook: rejecting malformed customer email shape', { sessionId });
             // 200 — Stripe should not retry; this is a permanent metadata error
@@ -213,7 +252,10 @@ export async function POST(request: NextRequest): Promise<Response> {
             .where(eq(entitlements.sessionId, sessionId))
             .limit(1);
         if (existing) {
-            console.info(`Stripe webhook: idempotent skip — entitlement already exists session=${sessionId}`);
+            // Cycle 5 RPF / P388-02 / C5-RPF-02: structured-object log shape
+            // for consistency with cycle 1-4 lines. Log shippers (Datadog,
+            // Loki) parse JSON better than free-form text.
+            console.info('Stripe webhook: idempotent skip', { sessionId });
             return NextResponse.json({ received: true }, { headers: NO_STORE });
         }
 
@@ -265,7 +307,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         // also surface the plaintext token + email to stdout on a separate
         // log line so operators can retrieve and email it to the customer.
         // This is opt-in to avoid leaking tokens in default deployments.
-        console.info(`Entitlement created: imageId=${imageId} tier=${tier} session=${sessionId}`);
+        // Cycle 5 RPF / P388-02 / C5-RPF-02: structured-object log shape for
+        // consistency with cycle 1-4 lines.
+        console.info('Entitlement created', { imageId, tier, sessionId });
         if (process.env.LOG_PLAINTEXT_DOWNLOAD_TOKENS === 'true') {
             console.info(
                 `[manual-distribution] download_token: imageId=${imageId} tier=${tier} ` +
