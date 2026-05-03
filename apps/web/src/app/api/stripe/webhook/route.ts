@@ -19,7 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { entitlements } from '@/db/schema';
+import { entitlements, images } from '@/db/schema';
 import { constructStripeEvent } from '@/lib/stripe';
 import { generateDownloadToken } from '@/lib/download-tokens';
 import { isPaidLicenseTier } from '@/lib/license-tiers';
@@ -155,6 +155,27 @@ export async function POST(request: NextRequest): Promise<Response> {
         if (!Number.isFinite(imageId) || imageId <= 0) {
             console.error('Stripe webhook: invalid imageId in metadata', imageIdStr);
             return NextResponse.json({ received: true }, { headers: NO_STORE });
+        }
+
+        // Cycle 4 RPF / P264-02 / C4-RPF-02: defensive cross-check between
+        // Stripe metadata tier and the image's CURRENT license_tier in DB.
+        // If admin re-tiers an image after checkout creation but before
+        // webhook delivery, the entitlement gets recorded with the stale
+        // metadata tier. Behavior is unchanged (we still proceed using the
+        // metadata tier — the customer paid for that tier, after all). This
+        // is an audit signal only so operators can spot the drift.
+        const [currentImage] = await db
+            .select({ license_tier: images.license_tier })
+            .from(images)
+            .where(eq(images.id, imageId))
+            .limit(1);
+        if (currentImage && currentImage.license_tier !== tier) {
+            console.warn('Stripe webhook: tier mismatch between Stripe metadata and current image tier', {
+                sessionId,
+                imageId,
+                metadataTier: tier,
+                currentTier: currentImage.license_tier,
+            });
         }
 
         // Cycle 3 RPF / P262-02 / C3-RPF-02: reject zero-amount sessions.
