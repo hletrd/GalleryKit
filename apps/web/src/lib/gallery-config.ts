@@ -66,6 +66,9 @@ export interface GalleryConfig {
 
     // US-P51: CLIP semantic search (ONNX stub, opt-in; default off until backfill completes)
     semanticSearchEnabled: boolean;
+
+    // US-P54: license tier prices in cents (0 = not for sale)
+    licensePrices: Record<string, number>;
 }
 
 /**
@@ -111,6 +114,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('semantic_search_enabled', raw)) return DEFAULTS.semantic_search_enabled === 'true';
                 return raw === 'true';
             })(),
+            licensePrices: {
+                editorial: validatedNumber(map, 'license_price_editorial_cents'),
+                commercial: validatedNumber(map, 'license_price_commercial_cents'),
+                rm: validatedNumber(map, 'license_price_rm_cents'),
+            },
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -126,6 +134,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             reactionsEnabled: DEFAULTS.reactions_enabled !== 'false',
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
             semanticSearchEnabled: DEFAULTS.semantic_search_enabled === 'true',
+            licensePrices: {
+                editorial: Number(DEFAULTS.license_price_editorial_cents),
+                commercial: Number(DEFAULTS.license_price_commercial_cents),
+                rm: Number(DEFAULTS.license_price_rm_cents),
+            },
         };
     }
 }
