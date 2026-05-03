@@ -64,7 +64,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     try {
         event = constructStripeEvent(payload, signature);
     } catch (err) {
-        console.error('Stripe webhook signature verification failed:', err);
+        // Cycle 7 RPF / P392-02 / C7-RPF-02: structured-object log shape.
+        // signatureLength helps operators distinguish a malformed/truncated
+        // signature header from a genuine signature mismatch (a malformed
+        // header would have an unusual length; a real attacker-supplied
+        // forgery would have the typical Stripe length but wrong HMAC).
+        console.error('Stripe webhook signature verification failed', {
+            signatureLength: signature.length,
+            err,
+        });
         return NextResponse.json({ error: 'Invalid signature' }, { status: 400, headers: NO_STORE });
     }
 
@@ -306,7 +314,17 @@ export async function POST(request: NextRequest): Promise<Response> {
                 expiresAt,
             }).onDuplicateKeyUpdate({ set: { sessionId } }); // no-op update keeps idempotency
         } catch (err) {
-            console.error('Stripe webhook: failed to insert entitlement:', err);
+            // Cycle 7 RPF / P392-03 / C7-RPF-03: structured-object log shape
+            // with sessionId/imageId/tier so operator can correlate the
+            // failure with the Stripe retry that follows (Stripe retries on
+            // our 500). Without these keys, repeated retries produce
+            // indistinguishable log lines.
+            console.error('Stripe webhook: failed to insert entitlement', {
+                sessionId,
+                imageId,
+                tier,
+                err,
+            });
             // Return 500 so Stripe retries
             return NextResponse.json({ error: 'Database error' }, { status: 500, headers: NO_STORE });
         }
