@@ -418,7 +418,10 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         throw new Error('Failed to save uploaded file');
     }
 
-    const image = sharp(originalPath, { limitInputPixels: maxInputPixels });
+    // CM-HIGH-3: failOn:'error' tolerates benign libvips warnings (legacy
+    // EXIF blocks, JFIF mismatches) while still rejecting truncated input;
+    // sequentialRead:true caps peak memory on large originals.
+    const image = sharp(originalPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true });
 
     let metadata: sharp.Metadata;
     try {
@@ -516,7 +519,9 @@ export async function processImageFormats(
     const sortedSizes = [...sizes].sort((a, b) => a - b);
 
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.
-    const image = sharp(inputPath, { limitInputPixels: maxInputPixels });
+    // CM-HIGH-3: failOn:'error' rejects truncated/corrupt input; sequentialRead:true
+    // streams large files instead of random-access reading them.
+    const image = sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true });
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
