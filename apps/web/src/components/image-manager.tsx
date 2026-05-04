@@ -48,6 +48,7 @@ import { localizeUrl } from '@/lib/locale-path';
 import { useRouter } from 'next/navigation';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { countCodePoints } from '@/lib/utils';
+import { formatStoredExifDate } from '@/lib/exif-datetime';
 
 interface ImageType {
     id: number;
@@ -56,6 +57,7 @@ interface ImageType {
     processed: boolean | null;
     title: string | null;
     topic: string | null;
+    capture_date?: string | null;
     created_at: string | Date | null;
     tag_names?: string | null; // GROUP_CONCAT returns null when no tags
     user_filename?: string | null;
@@ -483,7 +485,7 @@ export function ImageManager({
                                         />
                                     </div>
                                 </TableCell>
-                                <TableCell suppressHydrationWarning>{image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</TableCell>
+                                <TableCell suppressHydrationWarning>{formatStoredExifDate(image.capture_date, locale) || (image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-')}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
                                         <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => startEdit(image)} aria-label={t('aria.editItem')}>
