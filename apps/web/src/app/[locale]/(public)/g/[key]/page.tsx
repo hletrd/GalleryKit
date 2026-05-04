@@ -173,8 +173,13 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                 </Link>
             </div>
             <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-4 space-y-4">
-                {group.images.map((image) => {
+                {group.images.map((image, index) => {
                     const altText = getPhotoDisplayTitle(image, t('photo'));
+                    // Above-the-fold detection: in a CSS `columns` masonry layout,
+                    // images flow top-to-bottom then left-to-right. The max column
+                    // count is 4 (xl: breakpoint). Mark the first 4 images as eager
+                    // so they load immediately for the best LCP on any viewport.
+                    const isAboveFold = index < 4;
 
                     return (
                         <Link
@@ -211,7 +216,8 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                     width={image.width}
                                     height={image.height}
                                     className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
-                                    loading="lazy"
+                                    loading={isAboveFold ? "eager" : "lazy"}
+                                    fetchPriority={isAboveFold ? "high" : "auto"}
                                     decoding="async"
                                 />
                             </picture>
