@@ -53,6 +53,7 @@ export function UploadDropzone({
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [completedCount, setCompletedCount] = useState(0);
+    const [currentFileName, setCurrentFileName] = useState<string | null>(null);
     const [topic, setTopic] = useState<string>(topics[0]?.slug || '');
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [files, setFiles] = useState<PendingUploadItem[]>([]);
@@ -244,8 +245,10 @@ export function UploadDropzone({
             // spurious "upload settings locked" failures, so keep the client
             // side sequential until the server grows reader/writer semantics.
             for (const item of files) {
+                setCurrentFileName(item.file.name);
                 await uploadFile(item);
             }
+            setCurrentFileName(null);
 
             if (failedFiles.length === 0) {
                 if (uploadWarnings.length > 0) {
@@ -377,12 +380,17 @@ export function UploadDropzone({
                             aria-valuenow={Math.round(progress)}
                             aria-label={t('upload.uploadingProgress', { current: completedCount, total: files.length })}
                         />
+                        {currentFileName && (
+                            <p className="text-xs text-muted-foreground truncate" aria-live="polite">
+                                {currentFileName}
+                            </p>
+                        )}
                     </div>
                 )}
 
                 {/* File Grid */}
-                {files.length > 0 && !uploading && (
-                    <div className="space-y-4">
+                {files.length > 0 && (
+                    <div className={`space-y-4 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
                         <div className="flex items-center justify-between">
                             <h3 className="font-medium text-sm">{t('upload.filesSelected', { count: files.length })}</h3>
                             <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive">{t('upload.clearAll')}</Button>
