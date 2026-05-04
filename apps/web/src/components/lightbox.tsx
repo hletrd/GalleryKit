@@ -499,7 +499,11 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     )}
                 </button>
 
-                {/* Play/Pause slideshow — top right, third from right */}
+                {/* Play/Pause slideshow — top right, third from right.
+                    C9RPF-MED-03: hide when only one image is available
+                    because a slideshow cycling through a single photo
+                    does nothing meaningful and confuses the user. */}
+                {totalCount != null && totalCount > 1 && (
                 <button
                     {...controlVisibilityProps}
                     className="pointer-events-auto absolute top-4 right-[7.5rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
@@ -519,6 +523,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         <Play className="h-5 w-5" />
                     )}
                 </button>
+                )}
 
                 {/* Heart/like — top right, fourth from right (only when reactions enabled) */}
                 {reactionsEnabled && onToggleReaction && (
