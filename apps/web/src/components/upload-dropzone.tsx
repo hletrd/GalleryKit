@@ -433,18 +433,6 @@ export function UploadDropzone({
                                                         {tag}
                                                     </span>
                                                 ))}
-                                                {/* Local tags are handled inside TagInput now, but for preview we might want them?
-                                                   Actually TagInput handles display of its own tags. We don't need this separate display if TagInput shows them.
-                                                   Wait, checking TagInput implementation. Yes it shows badges.
-                                                   So we can remove this separate badge list for local tags.
-                                                   Global tags display might still be useful to see "what will be added".
-                                                   TagInput shows selectedTags.
-                                                   If we use TagInput for per-file tags, it will show the local tags inside itself.
-                                                   We should keep global tags display outside or pre-fill them?
-                                                   The current design is: Global tags are merged on upload.
-                                                   So global tags are implicitly added to everything.
-                                                   Let's keep global tags non-editable display here to remind user.
-                                                */}
                                             </div>
 
                                             <div className="flex flex-col gap-2">
