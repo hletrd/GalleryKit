@@ -121,7 +121,8 @@ export function UploadDropzone({
 
     // Access the URL map in render. previewVersion read ensures this
     // expression is re-evaluated after setPreviewVersion triggers a re-render.
-    const previewUrls = (previewVersion, previewUrlsRef.current);
+    void previewVersion;
+    const previewUrls = previewUrlsRef.current;
 
     const onDrop = useCallback((acceptedFiles: File[]) => {
         const currentFiles = filesRef.current;
