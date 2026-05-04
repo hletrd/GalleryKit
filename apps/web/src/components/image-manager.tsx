@@ -297,7 +297,7 @@ export function ImageManager({
                 <div className="sticky top-0 z-20 bg-muted/95 p-2 rounded-md flex flex-col gap-2 border shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-sm font-medium px-2">{t('imageManager.selected', { count: selectedIds.size })}</span>
                     <div className="flex flex-wrap items-center gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => setIsBulkEditDialogOpen(true)}>
+                        <Button variant="secondary" size="sm" className="h-11" onClick={() => setIsBulkEditDialogOpen(true)}>
                             {t('imageManager.bulkEditButton')}
                         </Button>
 
@@ -348,6 +348,7 @@ export function ImageManager({
                         <Button
                             variant="ghost"
                             size="sm"
+                            className="h-11"
                             onClick={handleShare}
                             disabled={isSharing}
                         >
@@ -356,7 +357,7 @@ export function ImageManager({
                         <div className="h-4 w-px bg-border" />
                         <AlertDialog>
                             <AlertDialogTrigger asChild>
-                                <Button variant="destructive" size="sm" disabled={isBulkDeleting}>
+                                <Button variant="destructive" size="sm" className="h-11" disabled={isBulkDeleting}>
                                     {isBulkDeleting ? t('imageManager.deleting') : t('imageManager.deleteSelected')}
                                 </Button>
                             </AlertDialogTrigger>
@@ -485,12 +486,12 @@ export function ImageManager({
                                 <TableCell suppressHydrationWarning>{image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
-                                        <Button variant="ghost" size="icon" onClick={() => startEdit(image)} aria-label={t('aria.editItem')}>
+                                        <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => startEdit(image)} aria-label={t('aria.editItem')}>
                                             <Pencil className="h-4 w-4" />
                                         </Button>
                                         <AlertDialog>
                                             <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" size="icon" aria-label={t('aria.deleteItem')}>
+                                            <Button variant="destructive" size="icon" className="h-11 w-11" aria-label={t('aria.deleteItem')}>
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </AlertDialogTrigger>
