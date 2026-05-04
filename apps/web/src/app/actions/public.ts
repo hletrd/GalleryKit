@@ -157,7 +157,12 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
     // Sanitize before validation so length checks operate on the same value
     // that will be stored (matches uploadImages/settings.ts pattern, see C46-02).
     const sanitizedQuery = stripControlChars(query.trim()) ?? '';
-    if (countCodePoints(sanitizedQuery) > 200 || sanitizedQuery.length < 2) return { status: 'invalid', results: [] };
+    // C9RPF-MED-02: use countCodePoints for both min and max length checks
+    // so supplementary characters (emoji, rare CJK) are counted consistently.
+    // Previously, min used `.length` (UTF-16 code units) while max used
+    // `countCodePoints`, causing a single emoji to pass the min check
+    // (`.length === 2`) even though it is one logical character.
+    if (countCodePoints(sanitizedQuery) > 200 || countCodePoints(sanitizedQuery) < 2) return { status: 'invalid', results: [] };
 
     // Server-side rate limiting for search (LIKE queries are expensive)
     const requestHeaders = await headers();
@@ -230,11 +235,33 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
 // Full IPs are never stored; only country_code derived from the IP.
 // ---------------------------------------------------------------------------
 
+// C9RPF-MED-01: in-memory per-IP rate limit for analytics view-recording
+// endpoints. Without this, bots or malicious actors can flood the
+// imageViews/topicViews/sharedGroupViews tables with millions of INSERTs.
+// Budget: 120 requests/min per IP — generous for normal browsing (one view
+// per page load) but restrictive enough to prevent automated flooding.
+const VIEW_RECORD_WINDOW_MS = 60 * 1000;
+const VIEW_RECORD_MAX_REQUESTS = 120;
+const VIEW_RECORD_RATE_LIMIT_MAX_KEYS = 2000;
+const viewRecordRateLimit = createResetAtBoundedMap<string>(VIEW_RECORD_RATE_LIMIT_MAX_KEYS);
+
+function isViewRecordRateLimited(ip: string, now: number): boolean {
+    viewRecordRateLimit.prune(now);
+    const entry = viewRecordRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        viewRecordRateLimit.set(ip, { count: 1, resetAt: now + VIEW_RECORD_WINDOW_MS });
+        return false;
+    }
+    entry.count++;
+    return entry.count > VIEW_RECORD_MAX_REQUESTS;
+}
+
 async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers>>) {
     const ip = getClientIp(requestHeaders);
     const referrerHeader = requestHeaders.get('referer') ?? requestHeaders.get('referrer') ?? '';
     const ua = requestHeaders.get('user-agent') ?? '';
     return {
+        ip,
         referrer_host: sanitizeReferrerHost(referrerHeader),
         country_code: lookupCountry(ip),
         bot: isBot(ua),
@@ -246,6 +273,7 @@ export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     // Fire-and-forget: swallow errors so analytics never blocks page render
     db.insert(imageViews).values({
         imageId,
@@ -262,6 +290,7 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     if (typeof topicSlug !== 'string' || topicSlug.length === 0 || topicSlug.length > 255) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     db.insert(topicViews).values({
         topic: topicSlug,
         referrer_host: params.referrer_host,
@@ -277,6 +306,7 @@ export async function recordSharedGroupView(groupId: number): Promise<void> {
     if (typeof groupId !== 'number' || !Number.isInteger(groupId) || groupId <= 0) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
+    if (isViewRecordRateLimited(params.ip, Date.now())) return;
     db.insert(sharedGroupViews).values({
         groupId,
         referrer_host: params.referrer_host,
