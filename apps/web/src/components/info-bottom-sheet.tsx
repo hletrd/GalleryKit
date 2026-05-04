@@ -307,7 +307,14 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             {hasExifData(image.color_space) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                    <p className="font-medium">{image.color_space}</p>
+                                    <p className="font-medium">
+                                        {image.color_space}
+                                        {image.color_space && image.color_space.toLowerCase().includes('p3') && (
+                                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded">
+                                                P3
+                                            </span>
+                                        )}
+                                    </p>
                                 </div>
                             )}
                             {(image.width > 0 && image.height > 0) && (
