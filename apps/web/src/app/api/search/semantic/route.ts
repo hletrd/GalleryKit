@@ -16,8 +16,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { db, imageEmbeddings } from '@/db';
-import { desc } from 'drizzle-orm';
+import { db, imageEmbeddings, images, topics } from '@/db';
+import { desc, eq, and, inArray } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
 import { getClientIp } from '@/lib/rate-limit';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
@@ -150,8 +150,65 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const results = topK(scored, topKParam, COSINE_THRESHOLD);
 
+    // Enrich results with basic image metadata so the client can render
+    // meaningful result cards (thumbnails, titles, topics) instead of
+    // bare imageId+score pairs.
+    let enrichedResults: Array<{ imageId: number; score: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null }> = [];
+    if (results.length > 0) {
+        const resultIds = results.map(r => r.imageId);
+        const scoreMap = new Map(results.map(r => [r.imageId, r.score]));
+        try {
+            const imageRows = await db.select({
+                id: images.id,
+                title: images.title,
+                description: images.description,
+                filename_jpeg: images.filename_jpeg,
+                width: images.width,
+                height: images.height,
+                topic: images.topic,
+                topic_label: topics.label,
+                camera_model: images.camera_model,
+            })
+            .from(images)
+            .leftJoin(topics, eq(images.topic, topics.slug))
+            .where(and(
+                inArray(images.id, resultIds),
+                eq(images.processed, true),
+            ));
+
+            enrichedResults = imageRows
+                .map(row => ({
+                    imageId: row.id,
+                    score: scoreMap.get(row.id) ?? 0,
+                    title: row.title,
+                    description: row.description,
+                    filename_jpeg: row.filename_jpeg,
+                    width: row.width,
+                    height: row.height,
+                    topic: row.topic,
+                    topic_label: row.topic_label,
+                    camera_model: row.camera_model,
+                }))
+                .sort((a, b) => b.score - a.score);
+        } catch {
+            // Fallback to bare results if image fetch fails
+            enrichedResults = results.map(r => ({
+                imageId: r.imageId,
+                score: r.score,
+                title: null,
+                description: null,
+                filename_jpeg: '',
+                width: 0,
+                height: 0,
+                topic: '',
+                topic_label: null,
+                camera_model: null,
+            }));
+        }
+    }
+
     return NextResponse.json(
-        { results: results.map(r => ({ imageId: r.imageId, score: r.score })) },
+        { results: enrichedResults },
         { headers: NO_STORE_HEADERS },
     );
 }

@@ -86,18 +86,17 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     setResults([]);
                     setSearchStatus('error');
                 } else {
-                    const json = await resp.json() as { results?: { imageId: number; score: number }[] };
-                    // Semantic results only return imageId — show as minimal result cards
+                    const json = await resp.json() as { results?: { imageId: number; score: number; title?: string | null; description?: string | null; filename_jpeg?: string; width?: number; height?: number; topic?: string; topic_label?: string | null; camera_model?: string | null }[] };
                     const semanticResults: SearchResult[] = (json.results ?? []).map(r => ({
                         id: r.imageId,
-                        title: null,
-                        description: null,
-                        filename_jpeg: '',
-                        width: 0,
-                        height: 0,
-                        topic: '',
-                        topic_label: null,
-                        camera_model: null,
+                        title: r.title ?? null,
+                        description: r.description ?? null,
+                        filename_jpeg: r.filename_jpeg ?? '',
+                        width: r.width ?? 0,
+                        height: r.height ?? 0,
+                        topic: r.topic ?? '',
+                        topic_label: r.topic_label ?? null,
+                        camera_model: r.camera_model ?? null,
                     }));
                     setResults(semanticResults);
                     setSearchStatus(null);
