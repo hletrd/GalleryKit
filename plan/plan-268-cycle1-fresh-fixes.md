@@ -1,7 +1,7 @@
 # Plan: Cycle 1 Fresh Fixes
 
 **Created**: 2026-05-04
-**Status**: IN PROGRESS
+**Status**: COMPLETE (except FIX-08 non-issue)
 **Source**: `_aggregate-c1-fresh.md` review findings
 
 ---
@@ -169,11 +169,11 @@ Update download button to use `sizedImageUrl` to find the largest available JPEG
 
 ## Progress
 
-- [ ] FIX-01: Admin buttons touch target
-- [ ] FIX-02: Back-to-top touch target
-- [ ] FIX-03: Semantic search empty cards
-- [ ] FIX-04: Dead ternary cleanup
-- [ ] FIX-05: Admin toolbar buttons touch target
-- [ ] FIX-06: Commented-out code removal
-- [ ] FIX-07: EXIF exposure_time normalization
-- [ ] FIX-08: JPEG download uses correct derivative
+- [x] FIX-01: Admin buttons touch target (commit b09bafe)
+- [x] FIX-02: Back-to-top touch target (commit 4927cb9)
+- [x] FIX-03: Semantic search empty cards (commit e0c7f30)
+- [x] FIX-04: Dead ternary cleanup (commit 919528b)
+- [x] FIX-05: Admin toolbar buttons touch target (commit b09bafe)
+- [x] FIX-06: Commented-out code removal (commit e520907)
+- [x] FIX-07: EXIF exposure_time normalization (commit d6d60bd)
+- [x] FIX-08: JPEG download uses correct derivative -- NON-ISSUE: filename_jpeg already points to the largest configured derivative per processImageFormats base-filename logic
