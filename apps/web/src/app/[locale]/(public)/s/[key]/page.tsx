@@ -123,6 +123,8 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
                 untitledFallbackTitle={t('sharedPhoto')}
                 showDocumentHeading={false}
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
+                reactionsEnabled={config.reactionsEnabled}
+                licensePrices={config.licensePrices}
             />
         </>
     );

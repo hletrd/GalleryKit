@@ -2,12 +2,14 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import FocusTrap from '@/components/lazy-focus-trap';
-import { Info, MapPin, Calendar, Clock, X } from "lucide-react";
+import { Info, MapPin, Calendar, Clock, X, Download } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { getPhotoDisplayTitle, humanizeTagLabel } from '@/lib/photo-title';
+import { imageUrl } from '@/lib/image-url';
+import { Button } from '@/components/ui/button';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
@@ -402,6 +404,22 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                 </p>
                             )}
                         </div>
+
+                        {/* Download JPEG button — mirrors desktop sidebar logic.
+                            Hidden when the photo has a paid license tier so the
+                            free download doesn't undermine the licensing intent. */}
+                        {image.filename_jpeg && (!image.license_tier || image.license_tier === 'none') && (
+                            <div className="mt-4 pt-4 border-t">
+                                <Button asChild className="w-full gap-2">
+                                    <a
+                                        href={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                        download={`photo-${image.id}.${image.filename_jpeg.split('.').pop() || 'jpg'}`}
+                                    >
+                                        <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
+                                    </a>
+                                </Button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

@@ -739,5 +739,31 @@
     "colReferrer": "유입 경로",
     "noData": "해당 기간의 데이터가 없습니다.",
     "untitled": "제목 없음"
+  },
+  "lrToken": {
+    "title": "라이트룸 토큰",
+    "description": "GalleryKit 라이트룸 클래식 발행 플러그인용 개인 액세스 토큰을 생성합니다.",
+    "generateButton": "LR 토큰 생성",
+    "empty": "아직 토큰이 없습니다. 라이트룸 클래식을 연결하려면 토큰을 생성하세요.",
+    "labelRequired": "토큰 라벨을 입력해 주세요.",
+    "labelField": "라벨",
+    "labelPlaceholder": "예: 라이트룸 클래식 – 맥북",
+    "createTitle": "라이트룸 토큰 생성",
+    "createDesc": "이 토큰에 기억하기 쉬운 라벨을 지정하세요. lr:upload, lr:read, lr:delete 권한이 자동으로 부여됩니다.",
+    "createButton": "생성",
+    "plaintextTitle": "새 토큰",
+    "plaintextDesc": "지금 이 토큰을 복사하세요. 이 대화 상자를 닫으면 다시 표시되지 않습니다.",
+    "plaintextDone": "토큰을 복사했습니다",
+    "copied": "토큰이 클립보드에 복사되었습니다.",
+    "copyFailed": "복사할 수 없습니다. 직접 복사해 주세요.",
+    "copyAria": "토큰을 클립보드에 복사",
+    "revokeTitle": "토큰을 취소하시겠습니까?",
+    "revokeDesc": "이 토큰을 취소하면 이 토큰을 사용하는 모든 라이트룸 연결이 즉시 차단됩니다.",
+    "revokeButton": "취소",
+    "revokeSuccess": "토큰이 취소되었습니다.",
+    "revokeAria": "토큰 {label} 취소",
+    "created": "생성일",
+    "lastUsed": "마지막 사용",
+    "expires": "만료일"
   }
 }
