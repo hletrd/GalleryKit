@@ -34,7 +34,7 @@ async function isShareLookupRateLimited() {
     return preIncrementShareAttempt(ip);
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ key: string }>, searchParams: Promise<{ photoId?: string }> }): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ key: string }> }): Promise<Metadata> {
     const { key } = await params;
     // C4-AGG-01: Rate limit is NOT checked here — it is enforced once in the
     // page body. Both generateMetadata and the page body run in separate React
@@ -215,6 +215,10 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                     decoding="async"
                                 />
                             </picture>
+                            {/* Desktop hover overlay — matches main gallery pattern */}
+                            <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/60 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
+                                <p className="text-white font-medium truncate">{altText}</p>
+                            </div>
                         </Link>
                     );
                 })}
