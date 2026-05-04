@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { TagInfo, formatShutterSpeed } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
+import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -24,6 +25,17 @@ function toIsoTimestamp(value: string | Date | null | undefined) {
     if (!value) return undefined;
     const date = value instanceof Date ? value : new Date(value);
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+/**
+ * Strip Unicode bidi/invisible formatting characters from a display string
+ * before embedding it into structured data. Defense-in-depth: these are already
+ * rejected at admin write time, but a cheap strip here closes any future gap
+ * (e.g., data imported from a raw DB restore that bypasses validation).
+ * Matches the `sanitizeForOg` in the OG image route.
+ */
+function sanitizeForOg(value: string): string {
+    return value.replace(UNICODE_FORMAT_CHARS, '');
 }
 
 
@@ -196,11 +208,11 @@ export default async function PhotoPage({ params, searchParams }: {
         keywords: keywords.join(', '),
         // GPS coordinates are intentionally excluded from public queries for privacy
         exifData: [
-            image.camera_model && { '@type': 'PropertyValue', name: 'Camera', value: image.camera_model },
-            image.lens_model && { '@type': 'PropertyValue', name: 'Lens', value: image.lens_model },
+            image.camera_model && { '@type': 'PropertyValue', name: 'Camera', value: sanitizeForOg(image.camera_model) },
+            image.lens_model && { '@type': 'PropertyValue', name: 'Lens', value: sanitizeForOg(image.lens_model) },
             image.iso && { '@type': 'PropertyValue', name: 'ISO', value: image.iso },
             image.f_number && { '@type': 'PropertyValue', name: 'Aperture', value: `f/${image.f_number}` },
-            image.exposure_time && { '@type': 'PropertyValue', name: 'Exposure Time', value: formatShutterSpeed(image.exposure_time) ?? image.exposure_time },
+            image.exposure_time && { '@type': 'PropertyValue', name: 'Exposure Time', value: sanitizeForOg(formatShutterSpeed(image.exposure_time) ?? image.exposure_time) },
         ].filter(Boolean),
     };
 
