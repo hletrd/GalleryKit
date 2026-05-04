@@ -1,7 +1,7 @@
 # Plan: Cycle 2 Fresh Fixes
 
 **Created**: 2026-05-04
-**Status**: IN PROGRESS
+**Status**: COMPLETE
 **Source**: `_aggregate-c2-fresh.md` review findings
 
 ---
@@ -49,5 +49,5 @@ No new deferred items from cycle 2. The 19 deferred items from cycle 1 remain as
 
 ## Progress
 
-- [ ] FIX-01: TypeScript build error in upload-dropzone.tsx
-- [ ] FIX-02: Admin dashboard capture date display
+- [x] FIX-01: TypeScript build error in upload-dropzone.tsx (commit 89081ee)
+- [x] FIX-02: Admin dashboard capture date display (commit 26a26b5)
