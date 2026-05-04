@@ -36,6 +36,19 @@ export function hashToken(token: string): string {
 }
 
 /**
+ * Cycle 3 / D-101-05: structural validity check for a download token.
+ * Tokens are `dl_<43-char base64url>` (32 random bytes encoded to 43
+ * base64url chars + 3-char prefix = 46 chars total). A pre-DB shape
+ * check rejects malformed inputs cheaply before they touch the indexed
+ * `download_token_hash` column. Exported so the route can short-circuit.
+ */
+const TOKEN_SHAPE_RE = /^dl_[A-Za-z0-9_-]{43}$/;
+
+export function isValidTokenShape(token: string | null | undefined): token is string {
+    return typeof token === 'string' && TOKEN_SHAPE_RE.test(token);
+}
+
+/**
  * Cycle 2 RPF / P260-11 / C2-RPF-06: storedHash MUST be a 64-char
  * lowercase hex string (sha256). Validate shape before `Buffer.from`
  * so a corrupted/clipped DB value is distinguishable from an attacker
@@ -50,7 +63,8 @@ const STORED_HASH_SHAPE = /^[0-9a-f]{64}$/;
  * Returns true if the token's hash matches storedHash.
  */
 export function verifyTokenAgainstHash(token: string, storedHash: string): boolean {
-    if (!token.startsWith('dl_')) return false;
+    // D-101-05: enforce shape before doing any hashing.
+    if (!isValidTokenShape(token)) return false;
     if (!STORED_HASH_SHAPE.test(storedHash)) {
         // Operational signal: the row's hash is malformed, not the user's
         // token. Worth a warn so ops can spot DB corruption / partial

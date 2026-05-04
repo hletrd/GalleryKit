@@ -1,4 +1,12 @@
 /**
+ * @public-no-rate-limit-required: webhook is gated by Stripe signature
+ *   verification (`stripe.webhooks.constructEvent`) which cryptographically
+ *   binds the request body to STRIPE_WEBHOOK_SECRET. Stripe enforces
+ *   server-side rate limits on its own outbound webhook deliveries, so an
+ *   IP-bucketed limit at this endpoint would only impact Stripe's retry
+ *   behavior on legitimate events. Forged unsigned requests are 400'd in
+ *   constant time before any DB work.
+ *
  * US-P54: POST /api/stripe/webhook
  *
  * This route is OUTSIDE /api/admin/ — authentication is by Stripe webhook
@@ -125,6 +133,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         // misconfigured callers BEFORE the EMAIL_SHAPE regex, which rejects
         // any whitespace and would otherwise drop a legit address with
         // copy-paste padding.
+        // D-101-09: lowercase + trim customerEmail before INSERT so the
+        // same human appearing as `User@Example.com` and `user@example.com`
+        // in two purchases doesn't show up as two rows in /sales.
         const customerEmailRaw = session.customer_details?.email ?? session.customer_email ?? '';
         const sessionId = session.id;
         const amountTotalCents = session.amount_total ?? 0;
@@ -176,7 +187,9 @@ export async function POST(request: NextRequest): Promise<Response> {
             return NextResponse.json({ received: true }, { headers: NO_STORE });
         }
 
-        if (!imageIdStr || !tier || !customerEmail || !sessionId) {
+        // D-101-04: do not require customerEmail in the guard — missing email
+        // is handled by the sentinel placeholder below.
+        if (!imageIdStr || !tier || !sessionId) {
             // C1RPF-PHOTO-MED-01: do not log customerEmail at error level — it
             // is PII and ends up in retained log shippers. Log presence flags
             // only so on-call has enough to triage without storing PII.
@@ -188,6 +201,22 @@ export async function POST(request: NextRequest): Promise<Response> {
             });
             // Return 200 to prevent Stripe from retrying malformed events
             return NextResponse.json({ received: true }, { headers: NO_STORE });
+        }
+        // D-101-04: previously a missing customerEmail caused the event to
+        // be silently dropped (200 to Stripe, no entitlement row). The
+        // photographer then had no audit trail tying the Stripe payment to
+        // an image. The schema column is NOT NULL, so we substitute a
+        // sentinel placeholder — `unknown+<sessionId>@stripe.local` — that
+        // is unambiguously non-real (the `.local` TLD is reserved by RFC
+        // 6762) but still satisfies the column constraint and tags the
+        // row with the originating session for manual reconciliation
+        // against the Stripe dashboard.
+        let resolvedEmail = customerEmail;
+        if (!resolvedEmail) {
+            resolvedEmail = `unknown+${sessionId}@stripe.local`;
+            console.warn('Stripe webhook: customer email missing, recording entitlement with sentinel placeholder', {
+                sessionId,
+            });
         }
 
         // C1RPF-PHOTO-MED-02: allowlist-validate tier from Stripe metadata
@@ -307,7 +336,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             await db.insert(entitlements).values({
                 imageId,
                 tier,
-                customerEmail,
+                customerEmail: resolvedEmail,
                 sessionId,
                 amountTotalCents,
                 downloadTokenHash,

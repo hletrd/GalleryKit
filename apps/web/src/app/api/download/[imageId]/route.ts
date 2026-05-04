@@ -22,7 +22,7 @@ import { db } from '@/db';
 import { images, entitlements } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
-import { verifyTokenAgainstHash, hashToken } from '@/lib/download-tokens';
+import { verifyTokenAgainstHash, hashToken, isValidTokenShape } from '@/lib/download-tokens';
 import { UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
 import path from 'path';
 import { createReadStream } from 'fs';
@@ -45,13 +45,25 @@ export async function GET(
     }
 
     const token = request.nextUrl.searchParams.get('token');
-    if (!token || !token.startsWith('dl_')) {
+    // D-101-05: full shape validation (`dl_` + 43 base64url chars) before
+    // we hash and probe the DB. A malformed token is now rejected with a
+    // single regex eval — no SHA-256, no index probe.
+    if (!token || !isValidTokenShape(token)) {
         return new NextResponse('Missing or invalid token', { status: 400, headers: NO_STORE });
     }
 
     const tokenHash = hashToken(token);
 
-    // Find entitlement by tokenHash
+    // Find entitlement by tokenHash. We look up by imageId alone here so we
+    // can correctly distinguish "token not found" from "token already used"
+    // — the post-claim UPDATE clears `downloadTokenHash` (privacy: prevents
+    // replay even on a DB leak) which previously caused legitimate
+    // post-download retries to surface a confusing "Token not found" 404.
+    // D-101-06: select the entitlement by imageId + matching tokenHash OR
+    // a row whose tokenHash has been cleared but whose downloadedAt is set
+    // (i.e. already-claimed). The constant-time hash check below still
+    // gates the route — an attacker without the original token cannot
+    // pass the `verifyTokenAgainstHash()` step on a still-claimable row.
     const [entitlement] = await db
         .select({
             id: entitlements.id,
@@ -69,6 +81,24 @@ export async function GET(
         .limit(1);
 
     if (!entitlement) {
+        // D-101-06: distinguish "token already used" from "token never
+        // existed". If a row exists for this image whose tokenHash is
+        // NULL and whose downloadedAt is set, treat that as already-used.
+        // This is a privacy-preserving 410 — we cannot tie the request
+        // back to the original token (the hash is gone), but we can give
+        // the visitor an accurate error message instead of a misleading
+        // 404. We do NOT serve the file here; this branch is purely UX.
+        const [usedRow] = await db
+            .select({ id: entitlements.id })
+            .from(entitlements)
+            .where(and(
+                eq(entitlements.imageId, imageId),
+                isNull(entitlements.downloadTokenHash),
+            ))
+            .limit(1);
+        if (usedRow) {
+            return new NextResponse('Token already used', { status: 410, headers: NO_STORE });
+        }
         return new NextResponse('Token not found', { status: 404, headers: NO_STORE });
     }
 
@@ -193,10 +223,23 @@ export async function GET(
         const safeExt = rawExt.replace(/[^a-zA-Z0-9.]/g, '').slice(0, 8) || '.jpg';
         const downloadName = `photo-${imageId}${safeExt}`;
 
+        // D-101-10: RFC 6266 + RFC 5987 encode the saved filename so a
+        // non-ASCII extension (today rare, future-possible if user
+        // filenames ever flow into the saved name) doesn't render
+        // garbled in browsers. We always emit the ASCII-safe `filename=`
+        // form for legacy clients and additionally emit `filename*=`
+        // when the name contains any byte outside the URL-token safe
+        // set, per RFC 5987 §3.2.
+        const isAsciiSafe = /^[\x20-\x7E]+$/.test(downloadName) && !/[",;\\]/.test(downloadName);
+        const asciiFallback = downloadName.replace(/[^\x20-\x7E]/g, '_').replace(/[",;\\]/g, '_');
+        const contentDisposition = isAsciiSafe
+            ? `attachment; filename="${downloadName}"`
+            : `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
+
         return new NextResponse(webStream, {
             headers: {
                 'Content-Type': 'application/octet-stream',
-                'Content-Disposition': `attachment; filename="${downloadName}"`,
+                'Content-Disposition': contentDisposition,
                 'Content-Length': stats.size.toString(),
                 'X-Content-Type-Options': 'nosniff',
                 'Cache-Control': 'no-store, no-cache, must-revalidate',

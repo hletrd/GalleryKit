@@ -33,10 +33,37 @@ sharp.concurrency(sharpConcurrency);
 // the libvips operation cache pins buffers in heap. Disable for steady RSS.
 sharp.cache(false);
 
-// CM-MED-1: Sharp's prebuilt binaries ship libheif without 10/12-bit AVIF
-// support — passing bitdepth:10 throws there. Detect at module load so we
-// can gate the wide-gamut bit-depth bump cleanly.
-const HAS_HIGH_BITDEPTH_AVIF = !sharp.versions.heif;
+// CM-MED-1: Gate 10-bit AVIF on libheif availability. Sharp's prebuilt
+// binaries bundle libheif which may or may not support 10/12-bit AVIF
+// encoding; passing bitdepth:10 throws when it doesn't. Detect at first
+// use so we can gate the wide-gamut bit-depth bump cleanly.
+// PP-BUG-2: the original `!sharp.versions.heif` was inverted — on Docker
+// production libheif IS bundled (truthy), so the negation made the gate
+// evaluate false and 8-bit AVIFs were shipped despite 10-bit being
+// available. A simple `!!sharp.versions.heif` fix is also wrong because
+// some builds report heif but still reject bitdepth:10 at encode time.
+// Solution: lazy one-shot probe. The first AVIF encode for a wide-gamut
+// source tries bitdepth:10; on failure we downgrade to 8-bit for the
+// process lifetime. This avoids top-level await and catches the case
+// where heif is reported but 10-bit encoding is not actually supported.
+let _highBitdepthAvifProbed = false;
+let _highBitdepthAvifAvailable = false;
+
+function canUseHighBitdepthAvif(): boolean {
+    if (_highBitdepthAvifProbed) return _highBitdepthAvifAvailable;
+    // Until the first probe completes, use heuristic: heif present → try.
+    return !!sharp.versions.heif;
+}
+
+function markHighBitdepthAvifUnavailable(): void {
+    _highBitdepthAvifProbed = true;
+    _highBitdepthAvifAvailable = false;
+}
+
+function markHighBitdepthAvifAvailable(): void {
+    _highBitdepthAvifProbed = true;
+    _highBitdepthAvifAvailable = true;
+}
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
@@ -165,23 +192,30 @@ function parseExifDateTime(value: unknown): string | null {
     }
 
     // Handle Date objects and numeric timestamps explicitly.
+    // PP-BUG-1: exif-reader constructs Date objects by interpreting EXIF local-time
+    // as server-local. Using UTC getters (getUTCHours etc.) then shifts by the
+    // server's TZ offset — masked in Docker UTC but silently corrupts by +9h on
+    // a JST NAS deployment. Use local-time getters instead: the EXIF datetime
+    // IS the camera's local time, so getFullYear/getHours etc. return the
+    // original components the Date was constructed from.
     // Run isValidExifDateTimeParts calendar validation (same as the string branch)
     // to reject out-of-range dates like year 2101+ that would pass the NaN check
     // but fail the 1900-2100 year range guard.
+    const pad2 = (n: number) => String(n).padStart(2, '0');
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        const y = value.getUTCFullYear(), m = value.getUTCMonth() + 1, d = value.getUTCDate();
-        const h = value.getUTCHours(), mi = value.getUTCMinutes(), s = value.getUTCSeconds();
+        const y = value.getFullYear(), m = value.getMonth() + 1, d = value.getDate();
+        const h = value.getHours(), mi = value.getMinutes(), s = value.getSeconds();
         if (isValidExifDateTimeParts(y, m, d, h, mi, s)) {
-            return value.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+            return `${y}-${pad2(m)}-${pad2(d)} ${pad2(h)}:${pad2(mi)}:${pad2(s)}`;
         }
     }
     if (typeof value === 'number' && !Number.isNaN(value)) {
         const date = new Date(value);
         if (!Number.isNaN(date.getTime())) {
-            const y = date.getUTCFullYear(), m = date.getUTCMonth() + 1, d = date.getUTCDate();
-            const h = date.getUTCHours(), mi = date.getUTCMinutes(), s = date.getUTCSeconds();
+            const y = date.getFullYear(), m = date.getMonth() + 1, d = date.getDate();
+            const h = date.getHours(), mi = date.getMinutes(), s = date.getSeconds();
             if (isValidExifDateTimeParts(y, m, d, h, mi, s)) {
-                return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+                return `${y}-${pad2(m)}-${pad2(d)} ${pad2(h)}:${pad2(mi)}:${pad2(s)}`;
             }
         }
     }
@@ -626,24 +660,45 @@ export async function processImageFormats(
                     // (resolveAvifIccProfile returns 'p3' iff the source ICC
                     // is Display-P3 / P3-D65 / DCI-P3). For everything else
                     // we convert pixels to sRGB and tag accordingly.
-                    // CM-MED-1: 10-bit AVIF for wide-gamut sources kills
-                    // banding in skies/skin gradients. Gated on
-                    // HAS_HIGH_BITDEPTH_AVIF because Sharp's prebuilt
-                    // binaries reject 10/12-bit; falls back to 8-bit
-                    // there. 8-bit for sRGB sources keeps file sizes tight.
+                    // CM-MED-1 / PP-BUG-2: 10-bit AVIF for wide-gamut sources
+                    // kills banding in skies/skin gradients. Gated on a lazy
+                    // probe — first wide-gamut encode tries bitdepth:10; if
+                    // the Sharp build rejects it, we downgrade to 8-bit for
+                    // the process lifetime. 8-bit for sRGB sources keeps
+                    // file sizes tight.
                     // CM-LOW-11: effort:6 squeezes ~10% off file size at
                     // ~30% extra CPU; encode time is amortized over many
                     // views on a self-hosted gallery.
-                    const avifBitdepth = (isWideGamutSource && HAS_HIGH_BITDEPTH_AVIF) ? 10 : 8;
-                    await base
-                        .toColorspace(avifIcc)
-                        .withIccProfile(avifIcc)
-                        .avif({
-                            quality: qualityAvif,
-                            effort: 6,
-                            bitdepth: avifBitdepth,
-                        })
-                        .toFile(outputPath);
+                    const wantHighBitdepth = isWideGamutSource && canUseHighBitdepthAvif();
+                    try {
+                        await base
+                            .toColorspace(avifIcc)
+                            .withIccProfile(avifIcc)
+                            .avif({
+                                quality: qualityAvif,
+                                effort: 6,
+                                ...(wantHighBitdepth ? { bitdepth: 10 } : {}),
+                            })
+                            .toFile(outputPath);
+                        if (wantHighBitdepth) markHighBitdepthAvifAvailable();
+                    } catch (err: unknown) {
+                        if (wantHighBitdepth && err instanceof Error && /bitdepth/i.test(err.message)) {
+                            // PP-BUG-2: this Sharp build doesn't support 10-bit AVIF.
+                            // Downgrade to 8-bit and mark as unavailable for the
+                            // process lifetime so subsequent encodes skip the probe.
+                            markHighBitdepthAvifUnavailable();
+                            await base.clone()
+                                .toColorspace(avifIcc)
+                                .withIccProfile(avifIcc)
+                                .avif({
+                                    quality: qualityAvif,
+                                    effort: 6,
+                                })
+                                .toFile(outputPath);
+                        } else {
+                            throw err;
+                        }
+                    }
                 } else {
                     // JPEG is always sRGB for universal compatibility (matches
                     // the gratis "Download JPEG" UX expectation).
@@ -843,4 +898,43 @@ export function extractExifForDb(exifData: ExifDataRaw) {
         // Set from Sharp metadata in saveOriginalAndGetMetadata
         bit_depth: null as number | null,
     };
+}
+
+/**
+ * PP-BUG-3: Strip GPS EXIF from the on-disk original file.
+ *
+ * The admin `strip_gps_on_upload` toggle previously only nulled the DB
+ * latitude/longitude columns, leaving the original at
+ * `data/uploads/original/` with intact GPS EXIF. The paid-download
+ * endpoint streams that file byte-for-byte, leaking wildlife/conflict
+ * photographers' protected locations.
+ *
+ * This function re-writes the original in-place, using Sharp's
+ * `.withMetadata({ orientation })` which keeps only the orientation tag
+ * (and ICC if present) while stripping GPS, camera serial, etc. The
+ * file is written to a temp path then atomically renamed over the
+ * original so concurrent readers never see a partial write.
+ */
+export async function stripGpsFromOriginal(filePath: string): Promise<void> {
+    const tmpPath = filePath + '.gps-strip.tmp';
+    try {
+        // Read orientation from the original so we can preserve it.
+        const meta = await sharp(filePath).metadata();
+        const orientation = typeof meta.orientation === 'number' && meta.orientation >= 1 && meta.orientation <= 8
+            ? meta.orientation : 1;
+
+        await sharp(filePath)
+            .withMetadata({ orientation })
+            .toFile(tmpPath);
+
+        await fs.rename(tmpPath, filePath);
+    } catch (e) {
+        // Best-effort cleanup of temp file
+        await fs.unlink(tmpPath).catch(() => {});
+        // Non-fatal: log and continue. The DB columns are already nulled,
+        // and the derivatives (which are what the public gallery serves)
+        // already have no GPS. Only the download-original path leaks, and
+        // failing the upload entirely would be worse.
+        console.error('stripGpsFromOriginal: failed to strip GPS from original', { filePath, err: e });
+    }
 }

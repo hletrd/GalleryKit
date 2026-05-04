@@ -47,8 +47,16 @@ async function getTierPriceCents(tier: string): Promise<number> {
         .from(adminSettings)
         .where(eq(adminSettings.key, key))
         .limit(1);
-    const cents = row ? parseInt(row.value, 10) : 0;
-    return Number.isInteger(cents) && cents >= 0 ? cents : 0;
+    // D-101-11: strict integer parse — `parseInt('500abc', 10)` is 500 and
+    // `parseInt('  500  ', 10)` is 500. We need a strict /^\d+$/ shape so a
+    // typo in the admin price field cannot silently charge a visitor a
+    // truncated price. The settings UI validates on submit, but defense in
+    // depth at the read site is cheap.
+    if (!row) return 0;
+    const raw = row.value;
+    if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return 0;
+    const cents = Number(raw);
+    return Number.isInteger(cents) && cents >= 0 && cents <= Number.MAX_SAFE_INTEGER ? cents : 0;
 }
 
 export async function POST(
@@ -109,7 +117,13 @@ export async function POST(
         const stripe = getStripe();
         const origin = request.nextUrl.origin;
         // C1RPF-PHOTO-LOW-03: locale-aware redirect URLs.
-        const locale = deriveLocaleFromReferer(request.headers.get('referer'));
+        // D-101-12: also pass accept-language so a cross-site Referer with
+        // an unsupported locale prefix falls through to the visitor's
+        // browser-declared language preference instead of `en`.
+        const locale = deriveLocaleFromReferer(
+            request.headers.get('referer'),
+            request.headers.get('accept-language'),
+        );
         // N-CYCLE1-03: defensive truncation. Stripe enforces a 1500-char
         // limit on `product_data.name`. `images.title` is admin-controlled
         // and should normally be short, but truncating at the call site

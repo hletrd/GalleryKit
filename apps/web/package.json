@@ -21,6 +21,7 @@
     "e2e:seed": "tsx scripts/seed-e2e.ts",
     "lint:api-auth": "tsx scripts/check-api-auth.ts",
     "lint:action-origin": "tsx scripts/check-action-origin.ts",
+    "lint:public-route-rate-limit": "tsx scripts/check-public-route-rate-limit.ts",
     "typecheck:app": "node scripts/prepare-next-typegen.mjs && next typegen && tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:scripts": "npm run check:js-scripts && tsc -p tsconfig.scripts.json --noEmit"
   },

@@ -4,7 +4,7 @@ import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { eq, inArray, and } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
@@ -289,6 +289,9 @@ export async function uploadImages(formData: FormData) {
                 if (uploadConfig.stripGpsOnUpload) {
                     exifDb.latitude = null;
                     exifDb.longitude = null;
+                    // PP-BUG-3: also strip GPS EXIF from the on-disk original so
+                    // the paid-download endpoint doesn't leak protected locations.
+                    await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
                 }
 
                 if (await cleanupOriginalIfRestoreMaintenanceBegan(savedOriginalFilename, deleteOriginalUploadFile)) {
