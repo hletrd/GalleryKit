@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { db } from '@/db';
-import { images, imageReactions } from '@/db/schema';
+import { images, imageReactions, adminSettings } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
 import { getClientIp } from '@/lib/rate-limit';
@@ -63,7 +63,6 @@ async function getOrCreateVisitor(cookieStore: Awaited<ReturnType<typeof cookies
 
 async function getReactionsEnabled(): Promise<boolean> {
     try {
-        const { adminSettings } = await import('@/db/schema');
         const rows = await db
             .select({ value: adminSettings.value })
             .from(adminSettings)
