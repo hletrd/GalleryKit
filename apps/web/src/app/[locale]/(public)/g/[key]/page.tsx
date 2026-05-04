@@ -10,7 +10,7 @@ import { imageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findGridCardImageSize } from '@/lib/gallery-config-shared';
+import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 
@@ -117,6 +117,9 @@ export default async function SharedGroupPage({ params, searchParams }: { params
     }
 
     const gridImageSize = findGridCardImageSize(config.imageSizes);
+    const gridImageSizes = config.imageSizes;
+    const smallGridSize = gridImageSizes.length >= 2 ? gridImageSizes[0] : gridImageSize;
+    const mediumGridSize = gridImageSizes.length >= 2 ? gridImageSizes[1] : findNearestImageSize(gridImageSizes, 1536);
 
     let selectedImage = null;
 
@@ -178,6 +181,11 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                             key={image.id}
                             href={`${localizePath(locale, `/g/${key}`)}?photoId=${image.id}`}
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                            style={{
+                                aspectRatio: `${image.width} / ${image.height}`,
+                                backgroundColor: 'hsl(var(--muted))',
+                                containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
+                            }}
                         >
                             <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>
@@ -186,19 +194,19 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 {image.filename_avif && (
                                     <source
                                         type="image/avif"
-                                        srcSet={imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${gridImageSize}.avif`)}`)}
+                                        srcSet={`${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${smallGridSize}.avif`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${mediumGridSize}.avif`)}`)} ${mediumGridSize}w`}
                                         sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                                     />
                                 )}
                                 {image.filename_webp && (
                                     <source
                                         type="image/webp"
-                                        srcSet={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${gridImageSize}.webp`)}`)}
+                                        srcSet={`${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${smallGridSize}.webp`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${mediumGridSize}.webp`)}`)} ${mediumGridSize}w`}
                                         sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                                     />
                                 )}
                                 <img
-                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${gridImageSize}.jpg`)}`)}
+                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${smallGridSize}.jpg`)}`)}
                                     alt={altText}
                                     width={image.width}
                                     height={image.height}
