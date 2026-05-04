@@ -9,11 +9,13 @@
 - **File**: `apps/web/src/app/api/reactions/[imageId]/route.ts:64-84`
 - **Fix**: Remove the dead `SELECT images.id FROM images LIMIT 0` query and `void row`. Keep only the `admin_settings` query.
 - **Confidence**: High
+- **Status**: DONE (commit 688b9d9)
 
 ### 2. C10-LOW-05: Handle maintenance/rateLimited status in load-more component (MEDIUM priority)
 - **File**: `apps/web/src/components/load-more.tsx`
-- **Fix**: Check the `status` field returned by `loadMoreImages` and show a toast for 'maintenance' and 'rateLimited' states so the user gets feedback instead of silent failures.
-- **Confidence**: Medium
+- **Fix**: Already implemented — the component handles all status states with toast notifications (lines 63-69).
+- **Confidence**: N/A
+- **Status**: ALREADY DONE (no change needed)
 
 ## Deferred items
 
