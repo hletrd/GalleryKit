@@ -63,12 +63,6 @@ async function getOrCreateVisitor(cookieStore: Awaited<ReturnType<typeof cookies
 
 async function getReactionsEnabled(): Promise<boolean> {
     try {
-        const row = await db
-            .select({ value: images.id })
-            .from(images)
-            .limit(0);
-        void row;
-        // Check admin_settings for reactions_enabled
         const { adminSettings } = await import('@/db/schema');
         const rows = await db
             .select({ value: adminSettings.value })
