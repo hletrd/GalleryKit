@@ -416,7 +416,6 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     height={image.height}
                     className="w-full h-full object-contain"
                     draggable={false}
-                    aria-roledescription="slide"
                     aria-label={
                         currentIndex != null && totalCount != null
                             ? `${currentIndex + 1} / ${totalCount}`

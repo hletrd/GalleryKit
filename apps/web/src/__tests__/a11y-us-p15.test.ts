@@ -7,7 +7,7 @@
  * similar to the existing action-origin and api-auth lint tests.
  *
  * AC-6:  skip-to-main-content link in root layout (layout.tsx)
- * AC-3:  aria-roledescription="slide" on lightbox <picture> element
+ * AC-3:  image position communicated via aria-label on lightbox img (aria-roledescription removed — lightbox is a dialog, not a carousel)
  * AC-7:  aria-live="polite" + aria-atomic="true" on load-more status region
  * AC-10: Play/Pause button in lightbox controls overlay
  */
@@ -38,9 +38,13 @@ describe('US-P15 a11y contracts', () => {
         expect(src).toMatch(/tabIndex=\{-1\}/);
     });
 
-    it('AC-3: lightbox image has aria-roledescription="slide"', () => {
+    it('AC-3: lightbox does NOT use aria-roledescription="slide" (dialog, not carousel)', () => {
         const src = readSrc('components/lightbox.tsx');
-        expect(src).toMatch(/aria-roledescription="slide"/);
+        // The lightbox is a dialog overlay showing one image at a time, not a
+        // carousel. aria-roledescription="slide" requires a parent carousel
+        // container per WAI-ARIA carousel pattern. The image position is
+        // communicated via aria-label instead (tested in AC-3b).
+        expect(src).not.toMatch(/aria-roledescription="slide"/);
     });
 
     it('AC-3: lightbox image aria-label references currentIndex/totalCount', () => {
