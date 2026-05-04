@@ -782,6 +782,55 @@ function cleanString(val: unknown): string | null {
     return cleanMetadataString(val);
 }
 
+/**
+ * Normalize ExposureTime to a consistent rational form (e.g., "1/125").
+ * Different cameras return ExposureTime as different types:
+ * - Rational string: "1/125" (Nikon, Canon)
+ * - Decimal number: 0.008 (some Sony, smartphone)
+ * - exif-reader may return either depending on the EXIF IFD type
+ *
+ * This normalizes to the rational string form at storage time for
+ * consistent display across camera brands.
+ */
+function normalizeExposureTime(val: unknown): string | null {
+    if (val === undefined || val === null) return null;
+
+    // If already a rational string like "1/125", clean and return as-is
+    if (typeof val === 'string') {
+        const cleaned = cleanMetadataString(val);
+        if (!cleaned) return null;
+        // Already in rational form
+        if (/^\d+\/\d+$/.test(cleaned)) return cleaned;
+        // Try parsing as decimal
+        const num = Number(cleaned);
+        if (Number.isFinite(num) && num > 0) {
+            return decimalToRational(num);
+        }
+        return cleaned;
+    }
+
+    // Numeric value from EXIF
+    if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+        return decimalToRational(val);
+    }
+
+    // Array form [numerator, denominator] from some EXIF readers
+    if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'number' && typeof val[1] === 'number' && val[1] !== 0) {
+        return `${val[0]}/${val[1]}`;
+    }
+
+    return cleanString(val);
+}
+
+function decimalToRational(val: number): string {
+    if (val >= 1) return String(Math.round(val * 100) / 100);
+    const denominator = Math.round(1 / val);
+    if (denominator > 0 && Math.abs(1 / denominator - val) < 0.001) {
+        return `1/${denominator}`;
+    }
+    return String(Math.round(val * 10000) / 10000);
+}
+
 function cleanNumber(val: unknown): number | null {
     if (val === undefined || val === null) return null;
     const v = Array.isArray(val) ? val[0] : val; // Handle arrays like [100]
@@ -830,7 +879,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
         lens_model: cleanString(exifParams.LensModel),
         iso: cleanNumber(iso),
         f_number: cleanNumber(fNumber),
-        exposure_time: cleanString(exposureTime),
+        exposure_time: normalizeExposureTime(exposureTime),
         focal_length: cleanNumber(exifParams.FocalLength),
         latitude,
         longitude,
