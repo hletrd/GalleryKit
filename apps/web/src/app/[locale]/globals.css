@@ -215,15 +215,18 @@
 
 /* Ken Burns pan/zoom for lightbox slideshow mode.
    Two variants alternate direction per photo based on image.id parity.
-   The --kb-start / --kb-end custom properties are set inline per image. */
+   The --kb-start / --kb-end custom properties are set inline per image
+   by kenBurnsTransform() in lightbox.tsx. Fallback values match the
+   JS-side defaults so the animation works even if the properties are
+   absent. */
 @keyframes lightbox-ken-burns-0 {
-  from { transform: scale(1) translate(0%, 0%); }
-  to   { transform: scale(1.08) translate(-2%, -2%); }
+  from { transform: var(--kb-start, scale(1) translate(0%, 0%)); }
+  to   { transform: var(--kb-end, scale(1.08) translate(-2%, -2%)); }
 }
 
 @keyframes lightbox-ken-burns-1 {
-  from { transform: scale(1) translate(0%, 0%); }
-  to   { transform: scale(1.08) translate(2%, 2%); }
+  from { transform: var(--kb-start, scale(1) translate(0%, 0%)); }
+  to   { transform: var(--kb-end, scale(1.08) translate(2%, 2%)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
