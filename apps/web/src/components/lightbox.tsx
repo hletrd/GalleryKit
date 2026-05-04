@@ -82,6 +82,7 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
 export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount, reactionsEnabled = true, reactionCount = 0, liked = false, onToggleReaction, isReacting = false }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
+    const controlsVisibleRef = useRef(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [shouldAutoHideControls, setShouldAutoHideControls] = useState(getLightboxAutoHidePreference);
     const [isSlideshowActive, setIsSlideshowActive] = useState(false);
@@ -131,12 +132,20 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         };
     }, []);
 
+    // Keep ref in sync with state for use in stable callbacks
+    useEffect(() => { controlsVisibleRef.current = controlsVisible; }, [controlsVisible]);
+
     const showControls = useCallback((forceReset = false) => {
         const now = Date.now();
-        if (!forceReset && controlsVisible && now - lastControlRevealRef.current < 500) {
+        // Use ref to avoid stale-closure dependency on controlsVisible.
+        // This prevents the callback from being recreated on every auto-hide
+        // toggle, which would cause keyboard/wheel handler effects to
+        // re-register their event listeners (~100 times in a 5-min slideshow).
+        if (!forceReset && controlsVisibleRef.current && now - lastControlRevealRef.current < 500) {
             return;
         }
         lastControlRevealRef.current = now;
+        controlsVisibleRef.current = true;
         setControlsVisible(true);
         if (!shouldAutoHideControls) {
             if (hideTimer.current) {
@@ -150,12 +159,14 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         }
         hideTimer.current = setTimeout(() => {
             if (dialogRef.current?.contains(document.activeElement)) {
+                controlsVisibleRef.current = true;
                 setControlsVisible(true);
                 return;
             }
+            controlsVisibleRef.current = false;
             setControlsVisible(false);
         }, 3000);
-    }, [controlsVisible, shouldAutoHideControls]);
+    }, [shouldAutoHideControls]);
 
     // Slideshow timer: start/stop based on isSlideshowActive
     useEffect(() => {
@@ -195,6 +206,9 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
 
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         if (!touchStartRef.current) return;
+        // Guard against cancelled touches where changedTouches is empty
+        // (e.g., iOS system gesture interruption).
+        if (!e.changedTouches[0]) return;
         const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
         const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
         const dt = Date.now() - touchStartRef.current.time;
@@ -222,9 +236,11 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
 
         hideTimer.current = setTimeout(() => {
             if (dialogRef.current?.contains(document.activeElement)) {
+                controlsVisibleRef.current = true;
                 setControlsVisible(true);
                 return;
             }
+            controlsVisibleRef.current = false;
             setControlsVisible(false);
         }, 3000);
         return () => {
