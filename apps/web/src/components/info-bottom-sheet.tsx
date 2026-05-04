@@ -234,9 +234,12 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                     </div>
                 </div>
 
-                {/* Expanded content */}
+                {/* Expanded content.
+                    C8-MED-02: use dvh (dynamic viewport height) to account for
+                    mobile browser chrome, and add safe-area-inset-bottom padding
+                    so the download button is not clipped by the home indicator. */}
                 {sheetState === 'expanded' && (
-                    <div className="max-h-[calc(95vh-140px)] overflow-y-auto px-4 pb-8 pt-1">
+                    <div className="max-h-[calc(95dvh-140px)] overflow-y-auto px-4 pt-1" style={{ paddingBottom: 'calc(2rem + env(safe-area-inset-bottom, 0px))' }}>
                         {/* Tags */}
                         {image.tags && image.tags.length > 0 && (
                             <div className="flex flex-wrap gap-2 mb-4">
@@ -292,7 +295,10 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                     <p className="font-medium">f/{image.f_number}</p>
                                 </div>
                             )}
-                            {formattedShutterSpeed && (
+                            {/* C8-MED-01: use hasExifData guard matching desktop sidebar pattern
+                                in photo-viewer.tsx, rather than relying on formatShutterSpeed()
+                                returning a falsy value for invalid input. */}
+                            {hasExifData(image.exposure_time) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.shutterSpeed')}</p>
                                     <p className="font-medium">{formattedShutterSpeed}</p>
