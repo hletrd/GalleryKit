@@ -3,7 +3,7 @@ import { isAdmin } from '@/app/actions/auth';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { TagInfo } from '@/lib/image-types';
+import { TagInfo, formatShutterSpeed } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
@@ -200,7 +200,7 @@ export default async function PhotoPage({ params, searchParams }: {
             image.lens_model && { '@type': 'PropertyValue', name: 'Lens', value: image.lens_model },
             image.iso && { '@type': 'PropertyValue', name: 'ISO', value: image.iso },
             image.f_number && { '@type': 'PropertyValue', name: 'Aperture', value: `f/${image.f_number}` },
-            image.exposure_time && { '@type': 'PropertyValue', name: 'Exposure Time', value: `${image.exposure_time}s` },
+            image.exposure_time && { '@type': 'PropertyValue', name: 'Exposure Time', value: formatShutterSpeed(image.exposure_time) ?? image.exposure_time },
         ].filter(Boolean),
     };
 
