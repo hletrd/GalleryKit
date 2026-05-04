@@ -63,8 +63,13 @@ export function nu(val: string | null | undefined): string | undefined {
 
 /**
  * Format a shutter speed value for display.
- * Converts decimal values like 0.002 to "1/500s" when the conversion is exact.
+ * Converts decimal values like 0.002 to "1/500" when the conversion is exact.
  * Returns the original string representation otherwise.
+ *
+ * Standard photography notation:
+ *   - Fractions like "1/125" are displayed without suffix (the slash implies seconds)
+ *   - Whole-second values like "1" or "30" receive an "s" suffix ("1s", "30s")
+ *   - Decimal seconds like "1.5" receive an "s" suffix ("1.5s")
  */
 export function formatShutterSpeed(exposureTime: string | null): string | null {
     if (!hasExifData(exposureTime)) return null;
@@ -73,8 +78,11 @@ export function formatShutterSpeed(exposureTime: string | null): string | null {
     if (val < 1 && val > 0) {
         const denominator = Math.round(1 / val);
         if (Math.abs(1 / denominator - val) < 0.00001) {
-            return `1/${denominator}s`;
+            // Fractional shutter speeds use standard photography notation
+            // without 's' suffix — the fraction inherently represents seconds.
+            return `1/${denominator}`;
         }
     }
+    // Whole-second and decimal-second values get the 's' suffix for clarity.
     return `${exposureTime}s`;
 }
