@@ -29,19 +29,17 @@ None — all review agents completed successfully.
 
 ### LOW severity
 
-#### C12-LOW-01: Lightbox `alt` attribute falls back to UUID-based filename
+#### C12-LOW-01: ~~Lightbox `alt` attribute falls back to UUID-based filename~~ — ALREADY FIXED
 - **Sources**: C12-DC-03 (Low/Medium), C12-VF-04 (Low/Low)
 - **2 agents agree**
-- **File+line**: `apps/web/src/components/lightbox.tsx:309`
-- **Issue**: The lightbox `<img>` tag uses `alt={image.title ?? image.filename_jpeg ?? ''}`. When `image.title` is null (default for uploaded images), the fallback is a UUID-based filename like `abc12345_2048.jpg` which is not meaningful for screen reader users. The photo viewer uses `getConcisePhotoAltText()` which falls back to tags or "Photo". The lightbox should use the same accessible alt text logic.
-- **Fix**: Import `getConcisePhotoAltText` and use it for the alt text, or pass the computed alt text from the parent component.
+- **File+line**: `apps/web/src/components/lightbox.tsx:430`
+- **Resolution**: VERIFIED FIXED in current code. The lightbox now uses `alt={getConcisePhotoAltText(image, t('common.photo'))}` which falls back to tags or "Photo" instead of the UUID filename.
 - **Confidence**: Medium
 
-#### C12-LOW-02: `exportImagesCsv` uses `results = [] as typeof results` pattern for GC hint
+#### C12-LOW-02: ~~`exportImagesCsv` uses `results = [] as typeof results` pattern for GC hint~~ — ALREADY FIXED
 - **Sources**: C12-CR-03 (Low/Low)
-- **File+line**: `apps/web/src/app/[locale]/admin/db-actions.ts:98`
-- **Issue**: The type-asserted reassignment pattern is misleading. A block scope or `results.length = 0` would be clearer.
-- **Fix**: Cosmetic — consider scoping or `length = 0`.
+- **File+line**: `apps/web/src/app/[locale]/admin/db-actions.ts:107`
+- **Resolution**: VERIFIED FIXED in current code. The pattern now uses `results.length = 0` with a clear comment explaining the GC rationale (C22-01).
 - **Confidence**: Low
 
 #### C12-LOW-03: `image-queue.ts` `bootstrapContinuationScheduled` flag could remain set if PQueue `onIdle` never resolves
@@ -122,6 +120,11 @@ All items from plan-370 (cycle 11 deferred) remain deferred:
 
 - Total findings across all agents: 25 (before dedup)
 - Deduplicated findings: 6 new + 7 carried-forward confirmations
-- MEDIUM severity: 1 (C12-MED-01 — 6-agent consensus)
+- MEDIUM severity: 1 (C12-MED-01 — 6-agent consensus — VERIFIED FALSE POSITIVE)
 - LOW severity: 5 new + 7 confirmations of prior deferred items
+  - C12-LOW-01: VERIFIED FIXED (lightbox alt text uses getConcisePhotoAltText)
+  - C12-LOW-02: VERIFIED FIXED (CSV export uses results.length = 0)
+  - C12-LOW-03: remains deferred (bootstrapContinuationScheduled flag)
+  - C12-LOW-04 through C12-LOW-06: confirmations of prior deferred items
 - Cross-agent agreement (2+ agents): 2 findings (C12-MED-01, C12-LOW-01)
+- **Cycle 12 verification pass**: All actionable findings from the c12 review are either false-positive, already-fixed, or deferred. No new implementation work required.
