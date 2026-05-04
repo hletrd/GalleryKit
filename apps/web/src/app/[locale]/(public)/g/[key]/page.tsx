@@ -1,7 +1,6 @@
 import { getSharedGroupCached, getSeoSettings } from '@/lib/data';
 import { recordSharedGroupView } from '@/app/actions/public';
 import { notFound } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
 import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -181,14 +180,31 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                             <div className="absolute inset-x-0 top-0 z-10 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
                                 <p className="text-white text-sm font-medium truncate">{altText}</p>
                             </div>
-                            <Image
-                                src={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${gridImageSize}.webp`)}`)}
-                                alt={altText}
-                                width={image.width}
-                                height={image.height}
-                                className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
-                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                            />
+                            <picture>
+                                {image.filename_avif && (
+                                    <source
+                                        type="image/avif"
+                                        srcSet={imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${gridImageSize}.avif`)}`)}
+                                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                    />
+                                )}
+                                {image.filename_webp && (
+                                    <source
+                                        type="image/webp"
+                                        srcSet={imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${gridImageSize}.webp`)}`)}
+                                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                    />
+                                )}
+                                <img
+                                    src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${gridImageSize}.jpg`)}`)}
+                                    alt={altText}
+                                    width={image.width}
+                                    height={image.height}
+                                    className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
+                                    loading="lazy"
+                                    decoding="async"
+                                />
+                            </picture>
                         </Link>
                     );
                 })}
