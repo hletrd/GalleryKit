@@ -157,7 +157,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     untitledFallbackTitle={t('photo')}
                     showDocumentHeading={false}
                     slideshowIntervalSeconds={config.slideshowIntervalSeconds}
-                    reactionsEnabled={config.reactionsEnabled}
                     licensePrices={config.licensePrices}
                 />
             </>
