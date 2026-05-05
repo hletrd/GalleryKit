@@ -42,27 +42,37 @@ sharp.cache(false);
 // evaluate false and 8-bit AVIFs were shipped despite 10-bit being
 // available. A simple `!!sharp.versions.heif` fix is also wrong because
 // some builds report heif but still reject bitdepth:10 at encode time.
-// Solution: lazy one-shot probe. The first AVIF encode for a wide-gamut
-// source tries bitdepth:10; on failure we downgrade to 8-bit for the
-// process lifetime. This avoids top-level await and catches the case
-// where heif is reported but 10-bit encoding is not actually supported.
-let _highBitdepthAvifProbed = false;
-let _highBitdepthAvifAvailable = false;
+// C12-LOW-04: replace the lazy probe-with-side-effects pattern (which
+// races when multiple images are processed concurrently) with a
+// Promise-based singleton. The first caller triggers a standalone
+// 2x2 probe encode; all concurrent callers await the same promise so
+// the result is observed exactly once and consistently.
+let _highBitdepthAvifProbePromise: Promise<boolean> | null = null;
 
-function canUseHighBitdepthAvif(): boolean {
-    if (_highBitdepthAvifProbed) return _highBitdepthAvifAvailable;
-    // Until the first probe completes, use heuristic: heif present → try.
-    return !!sharp.versions.heif;
+async function _probeHighBitdepthAvif(): Promise<boolean> {
+    try {
+        // Minimal 2x2 encode — enough to exercise the codec path without
+        // wasting CPU on a real image decode + resize pipeline.
+        await sharp({
+            create: {
+                width: 2,
+                height: 2,
+                channels: 3,
+                background: { r: 128, g: 128, b: 128 },
+            },
+        })
+            .avif({ quality: 1, effort: 1, bitdepth: 10 })
+            .toBuffer();
+        return true;
+    } catch {
+        return false;
+    }
 }
 
-function markHighBitdepthAvifUnavailable(): void {
-    _highBitdepthAvifProbed = true;
-    _highBitdepthAvifAvailable = false;
-}
-
-function markHighBitdepthAvifAvailable(): void {
-    _highBitdepthAvifProbed = true;
-    _highBitdepthAvifAvailable = true;
+async function canUseHighBitdepthAvif(): Promise<boolean> {
+    if (_highBitdepthAvifProbePromise) return _highBitdepthAvifProbePromise;
+    _highBitdepthAvifProbePromise = _probeHighBitdepthAvif();
+    return _highBitdepthAvifProbePromise;
 }
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
@@ -669,7 +679,7 @@ export async function processImageFormats(
                     // CM-LOW-11: effort:6 squeezes ~10% off file size at
                     // ~30% extra CPU; encode time is amortized over many
                     // views on a self-hosted gallery.
-                    const wantHighBitdepth = isWideGamutSource && canUseHighBitdepthAvif();
+                    const wantHighBitdepth = isWideGamutSource && await canUseHighBitdepthAvif();
                     try {
                         await base
                             .toColorspace(avifIcc)
@@ -680,13 +690,10 @@ export async function processImageFormats(
                                 ...(wantHighBitdepth ? { bitdepth: 10 } : {}),
                             })
                             .toFile(outputPath);
-                        if (wantHighBitdepth) markHighBitdepthAvifAvailable();
                     } catch (err: unknown) {
                         if (wantHighBitdepth && err instanceof Error && /bitdepth/i.test(err.message)) {
-                            // PP-BUG-2: this Sharp build doesn't support 10-bit AVIF.
-                            // Downgrade to 8-bit and mark as unavailable for the
-                            // process lifetime so subsequent encodes skip the probe.
-                            markHighBitdepthAvifUnavailable();
+                            // Probe said 10-bit is available but this specific encode
+                            // still failed — downgrade to 8-bit for this image only.
                             await base.clone()
                                 .toColorspace(avifIcc)
                                 .withIccProfile(avifIcc)
