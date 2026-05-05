@@ -24,6 +24,7 @@ export interface CaptionInput {
 }
 
 const ALT_TEXT_MAX_CHARS = 140;
+const ALT_TEXT_STUB_PREFIX = '[AUTO] ';
 
 /**
  * STUB: Produce an EXIF-derived caption placeholder.
@@ -31,10 +32,10 @@ const ALT_TEXT_MAX_CHARS = 140;
  */
 function generateCaptionStub(input: CaptionInput): string {
     if (input.camera_model) {
-        const raw = `Photo taken with ${input.camera_model}`;
+        const raw = `${ALT_TEXT_STUB_PREFIX}Photo taken with ${input.camera_model}`;
         return raw.length <= ALT_TEXT_MAX_CHARS ? raw : raw.slice(0, ALT_TEXT_MAX_CHARS);
     }
-    return 'Photo';
+    return `${ALT_TEXT_STUB_PREFIX}Photo`;
 }
 
 /**
