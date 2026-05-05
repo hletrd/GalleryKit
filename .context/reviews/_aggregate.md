@@ -1,8 +1,8 @@
-# Aggregate Review — Cycle 6
+# Aggregate Review — Cycle 10 (Run 2)
 
 **Date**: 2026-05-05
 **Review Type**: Comprehensive single-agent review (no sub-agent fan-out available)
-**Focus**: Post-cycle-5 delta, build artifact integrity, dead code elimination completeness, latent correctness issues
+**Focus**: Accessibility, UX edge cases, and test coverage gaps in recently modified and core files.
 
 ## Agent Failures
 
@@ -14,14 +14,16 @@
 
 | Unified ID | Source IDs | Description | Severity | Confidence | Status |
 |------------|------------|-------------|----------|------------|--------|
-| C6R-01 | cycle6-reviewer C6R-01 | SW template `sw.template.js:148` missing `.clone()` fix — every build regenerates a buggy `sw.js` that disturbs response bodies | High | High | NEW |
-| C6R-02 | cycle6-reviewer C6R-02 | `migrate.js reconcileLegacySchema` still creates dead `reaction_count` column and `image_reactions` table | Low | High | NEW |
-| C6R-03 | cycle6-reviewer C6R-03 | `check-public-route-rate-limit.ts:145` error message references deleted `reaction-rate-limit` module | Low | High | NEW |
-| C6R-04 | cycle6-reviewer C6R-04 | `db/index.ts` WeakMap key mismatch — `connectionInitPromises` lookup likely fails because `getConnection()` returns promise-style wrappers while keys are callback-style connections | Medium | Medium | NEW |
+| R2C10-MED-01 | code-reviewer C10-MED-01 | image-zoom.tsx keyboard zoom toggle broken — `onKeyDown` casts KeyboardEvent to MouseEvent and `handleClick`'s `target.closest('[role="button"]')` matches the container itself, preventing zoom | Medium | High | NEW |
+| R2C10-LOW-01 | code-reviewer C10-LOW-01 | load-more.tsx maintenance status produces repeated toast spam because `hasMore` stays true and IntersectionObserver refires immediately | Low | Medium | NEW |
+| R2C10-LOW-02 | test-engineer T10-LOW-01 | Missing component-level test for image-zoom keyboard interaction | Low | High | NEW |
+| R2C10-LOW-03 | test-engineer T10-LOW-02 | No tests for semantic search route | Low | High | NEW |
+| R2C10-LOW-04 | test-engineer T10-LOW-03 | load-more maintenance status not covered by component tests | Low | Medium | NEW |
 
 ## Cross-Agent Agreement
 
-N/A — single-agent review.
+- **R2C10-MED-01** (keyboard zoom bug) was identified by code-reviewer and reinforced by test-engineer as a bug that would have been caught by component-level tests.
+- Security-reviewer confirmed no new security findings, validating that the review surface is exhausted for security issues.
 
 ## Deferred Items
 
@@ -29,7 +31,6 @@ None. All findings are scheduled for implementation in the plan phase.
 
 ## Previous-Cycle Status
 
-- Cycle 5 findings C5R-01 through C5R-08 were all implemented in plan-402.
-- Cycle 5 successfully removed dead backend reaction API, schema artifacts, visitor cookies,
-  rate-limit modules, tests, and lint hints.
-- The working tree was clean after cycle 5 (no uncommitted changes).
+- Run 2 Cycle 9 (`_aggregate-r2c9.md`) found 0 new actionable findings.
+- Run 2 Cycle 9 verified that fixes from cycles 1-8 remain in place.
+- All gates (eslint, tsc, vitest, lint:api-auth, lint:action-origin, lint:public-route-rate-limit) are green.
