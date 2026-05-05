@@ -109,7 +109,12 @@ async function recordAndEvict(url, newSize) {
 
 async function staleWhileRevalidateImage(request) {
   const imageCache = await caches.open(IMAGE_CACHE);
-  const cached = await imageCache.match(request);
+  // C18-MED-01: use request.url (string) as the cache key so it matches
+  // the string key used in recordAndEvict's imageCache.delete(entry.url).
+  // The Cache API accepts strings for match/put/delete; using the same
+  // key type throughout prevents silent eviction failures.
+  const cacheKey = request.url;
+  const cached = await imageCache.match(cacheKey);
 
   const revalidate = fetch(request.clone())
     .then(async (networkResponse) => {
@@ -118,7 +123,7 @@ async function staleWhileRevalidateImage(request) {
       const clone = networkResponse.clone();
       const blob = await clone.blob();
       const size = blob.size;
-      await imageCache.put(request, networkResponse.clone());
+      await imageCache.put(cacheKey, networkResponse.clone());
       await recordAndEvict(request.url, size);
       return networkResponse;
     })
