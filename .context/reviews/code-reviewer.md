@@ -1,40 +1,46 @@
-# Code Review — Cycle 15 (2026-05-06)
+# Cycle 17 Code Review — code-reviewer
 
-**Reviewer angle**: Code quality, logic correctness, edge cases, maintainability
-**Scope**: Entire repository, focus on boundary conditions and cross-file interactions
-**Gates**: All green (eslint, tsc, vitest 1049 tests, lint:api-auth, lint:action-origin, lint:public-route-rate-limit)
-
----
-
-## Executive Summary
-
-After 15 review cycles and 1000+ tests, the codebase remains in a fully converged state. No new MEDIUM or HIGH severity findings were identified in cycle 15. All prior findings from cycles 1-14 remain correctly fixed.
+Date: 2026-05-06
+Scope: Full repository, post-cycle-16 state
+Focus: Code quality, logic correctness, edge cases, maintainability
 
 ## Findings
 
-No new findings in cycle 15.
+### MEDIUM SEVERITY
 
-## Verified Correct Patterns (Cycle 15 Deep Dive)
+**C17-MED-01: uploadImages omits EXIF caption hints from enqueueImageProcessing**
+- **File:** `apps/web/src/app/actions/images.ts` (lines 407-421)
+- **Confidence:** High
+- **Problem:** `uploadImages` calls `enqueueImageProcessing` with `id`, `filenameOriginal`, `filenameWebp`, `filenameAvif`, `filenameJpeg`, `width`, `topic`, `quality`, and `imageSizes` — but NOT `camera_model` or `capture_date`. These fields are available in `exifDb` (line 286) and are passed by the bootstrap query (`apps/web/src/lib/image-queue.ts` lines 549-560). The result is that freshly uploaded images lose EXIF hints for the `generateCaption` fire-and-forget hook, degrading caption quality for all uploads processed within a single process lifetime.
+- **Fix:** Pass `camera_model: exifDb.camera_model` and `capture_date: exifDb.capture_date` to `enqueueImageProcessing`.
 
-1. **proxy.ts** (post-C13-LOW-01 fix re-verified): The `x-nonce` response header leak remains correctly remediated. `applyProductionCsp` only sets `Content-Security-Policy` on the response; no `x-nonce` response header is emitted. The token format check (`token.length < 100` and `token.split(':').length !== 3`) correctly filters malformed tokens before they reach the DB verification path.
+**C17-MED-02: uploadImages omits iccProfileName from enqueueImageProcessing, breaking P3 AVIF tagging for fresh uploads**
+- **File:** `apps/web/src/app/actions/images.ts` (lines 407-421)
+- **Confidence:** High
+- **Problem:** `saveOriginalAndGetMetadata` returns `iccProfileName` (line 579 in process-image.ts), which determines whether `processImageFormats` tags AVIF derivatives as P3 or sRGB. `uploadImages` does NOT pass this value to `enqueueImageProcessing`. The queue handler passes `job.iccProfileName` to `processImageFormats` (image-queue.ts line 317), which defaults to `undefined` → `'srgb'`. Therefore, ALL freshly uploaded wide-gamut images processed by the queue get sRGB-tagged AVIF derivatives instead of P3, causing visible color degradation.
+- **Fix:** Pass `iccProfileName: data.iccProfileName` to `enqueueImageProcessing`.
 
-2. **Session management** (`lib/session.ts`): The `verifySessionToken` function uses `cache()` from React for per-request deduplication, preventing redundant DB queries when the same token is verified multiple times in a single server context. HMAC-SHA256 signature verification uses `timingSafeEqual` with explicit Buffer length checks. Token age bounds (`tokenAge < 0`) correctly reject future-dated tokens.
+### LOW SEVERITY
 
-3. **Rate-limit rollback patterns** (`lib/rate-limit.ts`, `lib/auth-rate-limit.ts`): All three documented rollback patterns are correctly implemented across their respective callers. The `decrementRateLimit` function atomically decrements via `GREATEST(count - 1, 0)` and cleans up zero-count rows, preventing negative counts and accumulation.
+**C17-LOW-01: Service Worker networkFirstHtml timestamp validation gap**
+- **File:** `apps/web/public/sw.js` (lines 162-169)
+- **Confidence:** Medium
+- **Problem:** `const age = Date.now() - Number(dateHeader);` If `dateHeader` is malformed (e.g., manually corrupted in Cache API), `Number(dateHeader)` returns `NaN`, and `NaN > HTML_MAX_AGE_MS` is always `false`. Stale HTML would be served indefinitely until the cache entry is manually cleared.
+- **Fix:** Validate `!Number.isNaN(age) && age > HTML_MAX_AGE_MS`.
 
-4. **Semantic search route** (`app/api/search/semantic/route.ts`): The `clampSemanticTopK` function correctly handles non-numeric inputs (falls back to default), negative values (clamped to 1), and values above max (clamped to SEMANTIC_TOP_K_MAX). The same-origin check, maintenance check, body size guard, and feature-flag check all correctly precede rate-limit consumption.
+**C17-LOW-02: process-image.ts decimalToRational rounds values >= 1 to 2 decimal places**
+- **File:** `apps/web/src/lib/process-image.ts` (lines 832-839)
+- **Confidence:** Low
+- **Problem:** Exposure times >= 1 second are rounded to 2 decimal places (e.g., 1.333s → "1.33"). This loses precision for display metadata. Impact is cosmetic only.
+- **Fix:** Use a higher-precision rounding or rational approximation for values >= 1.
 
-5. **Image processing pipeline** (`lib/process-image.ts`): The AVIF high-bitdepth probe uses a Promise-based singleton preventing races. The `stripGpsFromOriginal` function uses atomic rename (temp file → original) for safe in-place rewriting. Color pipeline version 3 correctly handles wide-gamut sources with explicit `toColorspace` conversion before encoding.
+## Previously Deferred Items (Status Check)
 
-## Areas Examined With No Issues Found
+- C16-HIGH-01 (SW metadata race): Still present, deferred.
+- C16-LOW-03 (rate-limit sub-second truncation): Still present, deferred.
+- C16-LOW-04 (SW caches non-image responses): Still present, deferred.
+- C16-LOW-05 (analytics entity validation): Still present, deferred.
 
-- `lib/bounded-map.ts` — hard-cap eviction, collect-then-delete pruning patterns
-- `lib/data.ts` — view count flush with atomic Map swap, retry cap, backoff
-- `lib/image-queue.ts` — claim retry logic, permanent failure tracking, bootstrap continuation
-- `lib/validation.ts` — Unicode formatting char rejection, safeInsertId BigInt guard
-- `app/actions/public.ts` — loadMore/search rollback symmetry, cursor pagination bounds
-- `scripts/check-public-route-rate-limit.ts` — TypeScript AST parsing, comment/string stripping
+## Cross-File Interaction Notes
 
-## Conclusion
-
-The codebase maintains its excellent quality posture. Cycle 15 found no new issues. All architectural invariants are enforced by automated lint gates.
+The `enqueueImageProcessing` call site in `uploadImages` (images.ts) and the bootstrap query in `image-queue.ts` are the two producers of `ImageProcessingJob`. They have diverged: bootstrap passes `camera_model`/`capture_date` (fixed in cycle 16) but upload does not. Upload also fails to pass `iccProfileName`, which bootstrap cannot pass because the DB schema lacks an `icc_profile_name` column. Both call sites should be kept in sync with the `ImageProcessingJob` type definition.

@@ -1,64 +1,38 @@
-# Security Review — Cycle 15 (2026-05-06)
+# Cycle 17 Security Review — security-reviewer
 
-**Reviewer angle**: OWASP Top 10, auth/authz, injection, XSS, CSRF, secrets, unsafe patterns
-**Scope**: Authentication, authorization, input validation, output encoding, rate limiting, CSP, upload pipeline, database queries
-**Gates**: All green
-
----
-
-## Executive Summary
-
-Security posture remains strong. No new findings in cycle 15. The C13-LOW-01 CSP nonce leak fix has been re-verified as intact. All three automated security lint gates pass.
+Date: 2026-05-06
+Scope: Full repository, post-cycle-16 state
+Focus: OWASP Top 10, auth/authz, injection, secrets, unsafe patterns
 
 ## Findings
 
-No new findings in cycle 15.
+### MEDIUM SEVERITY
 
-## Security Posture Verification (Cycle 15 Re-check)
+**C17-SEC-01: withAdminAuth duck-typed header extraction may bypass origin check**
+- **File:** `apps/web/src/lib/api-auth.ts` (lines 53-58)
+- **Confidence:** Medium
+- **Problem:** The `headers` variable is resolved via duck typing: `(request && 'headers' in request && typeof request.headers?.get === 'function')`. If a malformed request object passes this check but doesn't actually have meaningful headers, `headers` could be truthy but empty, causing `hasTrustedSameOrigin` to receive an empty header store. The `hasTrustedSameOrigin` function in `request-origin.ts` would then fall through its checks and potentially return `false`, which is safe (deny-by-default). However, the duck typing is fragile.
+- **Fix:** Type-narrow explicitly using `request instanceof NextRequest` or similar.
 
-### Authentication & Session Management
-- Argon2id with memory-hard parameters (verified in `lib/password-hashing.ts`)
-- Session tokens: HMAC-SHA256, verified with `timingSafeEqual` (verified in `lib/session.ts`)
-- Cookie attributes: `httpOnly`, `secure` (when HTTPS or production), `sameSite: lax`, `path: /`
-- Session fixation protection: existing sessions invalidated on new login (transaction-wrapped)
-- Production refuses DB-stored session secret fallback (throws on missing SESSION_SECRET)
+### LOW SEVERITY
 
-### Authorization
-- `isAdmin()` verifies session via DB lookup (not just cookie presence)
-- `requireSameOriginAdmin()` enforced on every mutating server action (verified by `lint:action-origin` gate)
-- API admin routes wrapped with `withAdminAuth()` (verified by `lint:api-auth` gate)
-- Last admin deletion prevented
+**C17-SEC-02: download route Content-Type is application/octet-stream for all originals**
+- **File:** `apps/web/src/app/api/download/[imageId]/route.ts` (line 241)
+- **Confidence:** Low
+- **Problem:** The download endpoint returns `Content-Type: application/octet-stream` for all original files, regardless of actual image format. While the `Content-Disposition: attachment` header forces a download, a browser might still sniff the content type. Combined with `X-Content-Type-Options: nosniff`, this is mostly mitigated, but serving the actual MIME type (e.g., `image/jpeg`, `image/heic`) would be cleaner.
+- **Fix:** Map common extensions to MIME types for the Content-Type header.
 
-### Input Validation
-- Filename sanitization: UUID-based filenames on disk
-- Path traversal prevention: `SAFE_SEGMENT` regex + `ALLOWED_UPLOAD_DIRS` whitelist + `resolvedPath.startsWith()` containment
-- Symlink rejection: `lstat()` + `isSymbolicLink()` check
-- EXIF bounds checking: capped tagCount, string lengths
-- SQL injection: Drizzle ORM parameterization for application queries
+**C17-SEC-03: checkout route idempotency key uses raw IP**
+- **File:** `apps/web/src/app/api/checkout/[imageId]/route.ts` (line 147)
+- **Confidence:** Low
+- **Problem:** `const idempotencyKey = \`checkout-${image.id}-${ip}-${Math.floor(Date.now() / 60_000)}\`;` If `ip` is `'unknown'` (when TRUST_PROXY is not set), all users share the same idempotency key within a minute window. This means concurrent checkout attempts from different users for the same image within the same minute would be deduplicated by Stripe, causing one user to receive another's checkout session URL.
+- **Fix:** Include a per-request nonce in the idempotency key, or use a session-derived identifier.
 
-### Output Encoding
-- JSON-LD uses `safeJsonLd()` which escapes `<` and Unicode line terminators
-- CSV export escapes formula injection characters and strips bidi/zero-width chars
-- Search LIKE wildcards escaped with backslash
-- No `dangerouslySetInnerHTML` with unsanitized user input
+## Previously Deferred Security Items
 
-### Rate Limiting
-- Login: per-IP (5/15min) + per-account (5/15min) with DB backup
-- Public routes: semantic search, OG images, checkout, share keys all rate-limited
-- Pattern 2 rollback correctly applied for public read paths
-- All public mutating routes either carry rate-limit helper or explicit exemption (verified by `lint:public-route-rate-limit` gate)
+- C16-HIGH-01 (SW metadata race): Deferred. Not a direct security issue but could allow cache budget exhaustion.
+- C16-LOW-04 (SW caches non-image responses): Deferred. Could cache HTML as image if server misconfigured.
 
-### Privacy
-- `publicSelectFields` omits PII (latitude, longitude, filename_original, user_filename)
-- Compile-time guards prevent accidental field leakage
-- GPS coordinates excluded from public API responses
-- `stripGpsFromOriginal` rewrites original files when admin toggle is enabled
+## Verdict
 
-### CSP (Post-C13 Fix Re-verified)
-- `proxy.ts` no longer sets `x-nonce` in response headers
-- Nonce is generated per-request, embedded in `<script nonce="...">` attributes
-- CSP policy correctly uses `script-src 'nonce-...'` directive
-
-## Conclusion
-
-No new security findings in cycle 15. Posture remains strong.
+No new critical or high-severity security findings. The codebase maintains strong security posture with Argon2id, HMAC-SHA256 sessions, rate limiting, same-origin guards, path traversal prevention, and SQL parameterization throughout. The idempotency key collision is a corner case that only manifests in misconfigured deployments without TRUST_PROXY.

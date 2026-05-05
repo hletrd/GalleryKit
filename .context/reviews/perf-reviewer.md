@@ -1,36 +1,37 @@
-# Performance Review — Cycle 15 (2026-05-06)
+# Cycle 17 Performance Review — perf-reviewer
 
-**Reviewer angle**: Performance, concurrency, CPU/memory/UI responsiveness
-**Scope**: Image processing pipeline, database queries, caching strategies, rate-limiting data structures, service worker efficiency
-**Gates**: All green (vitest 1049 tests)
-
----
-
-## Executive Summary
-
-Performance characteristics remain optimal. No new performance regressions or bottlenecks identified in cycle 15.
+Date: 2026-05-06
+Scope: Full repository, post-cycle-16 state
+Focus: CPU/memory, concurrency, UI responsiveness, database query efficiency
 
 ## Findings
 
-No new findings in cycle 15.
+### MEDIUM SEVERITY
 
-## Verified Performance Patterns
+**C17-PERF-01: uploadImages loses ICC profile info, causing incorrect color-space decisions in queue**
+- **File:** `apps/web/src/app/actions/images.ts` (lines 407-421)
+- **Confidence:** High
+- **Problem:** Missing `iccProfileName` in `enqueueImageProcessing` means `processImageFormats` defaults to sRGB for all queue-processed fresh uploads. For P3 sources, this skips the `pipelineColorspace('rgb16')` path and 10-bit AVIF encoding (process-image.ts lines 656-692). The result is smaller files (8-bit sRGB) but the visual quality loss is the actual bug. From a perf perspective, the wider-gamut path (16-bit pipeline + 10-bit AVIF) is MORE expensive, so omitting it actually saves CPU. However, this is a correctness bug masquerading as a performance difference.
+- **Fix:** Pass `iccProfileName` so the correct (more expensive but higher-quality) path is taken when appropriate.
 
-1. **Image queue** (`lib/image-queue.ts`): PQueue concurrency is configurable via `QUEUE_CONCURRENCY`. Single Sharp instance with `clone()` avoids triple buffer decode. Parallel AVIF/WebP/JPEG processing via `Promise.all`. Per-image libvips concurrency capped at `floor((cores - 1) / 3)` to prevent thread pool starvation.
+### LOW SEVERITY
 
-2. **BoundedMap** (`lib/bounded-map.ts`): Pruning is O(n) over the Map size, but the hard caps (2000-5000 entries) keep this trivial. No LRU overhead — FIFO eviction is sufficient for the single-writer topology.
+**C17-PERF-02: getImagesLitePage uses COUNT(*) OVER() which may be expensive on large tables**
+- **File:** `apps/web/src/lib/data.ts` (lines 694)
+- **Confidence:** Medium
+- **Problem:** The window function `COUNT(*) OVER()` computes the total count for every row returned. On a 100-row page, this repeats the total count 100 times. For a table with tens of thousands of images, this adds overhead compared to a separate `SELECT COUNT(*)` query.
+- **Fix:** Consider separate count query if table grows beyond ~50k rows.
 
-3. **Data layer** (`lib/data.ts`): React `cache()` deduplicates SSR queries. `Promise.all` parallelizes independent queries (tags + prev + next). View count flush uses atomic Map swap and chunking (20 entries per chunk) to limit concurrent DB promises.
+**C17-PERF-03: searchImages runs up to 3 queries in parallel with potential over-fetch**
+- **File:** `apps/web/src/lib/data.ts` (lines 1235-1255)
+- **Confidence:** Low
+- **Problem:** When the main query doesn't fill the limit, tag and alias queries run in parallel. Each can fetch up to `remainingLimit` rows. Worst-case total rows fetched: `effectiveLimit + 2 * remainingLimit`. For a limit of 20, this is at most 60 rows — negligible at personal-gallery scale.
+- **Fix:** No action needed at current scale.
 
-4. **Semantic search** (`app/api/search/semantic/route.ts`): Embeddings scanned with `LIMIT SEMANTIC_SCAN_LIMIT` (5000) hard cap. Cosine similarity computed in-memory after DB filter. Query embedding via stub encoder is synchronous (no async overhead).
+## Previously Deferred Performance Items
 
-## Areas Examined With No Issues Found
+- C16-LOW-03 (rate-limit sub-second truncation): Still deferred, latent only.
 
-- `lib/process-image.ts` — parallel format conversion, ICC profile caching, atomic rename fallback chain
-- `lib/rate-limit.ts` — in-memory fast path with DB backup
-- `components/image-zoom.tsx` — ref-based DOM manipulation, no React re-renders on mousemove
-- `components/histogram.tsx` — Canvas capped at 256x256
+## Verdict
 
-## Conclusion
-
-No performance concerns in cycle 15.
+No new performance regressions. The missing `iccProfileName` propagation actually reduces CPU per image (by skipping 16-bit pipeline + 10-bit AVIF) but degrades output quality — fix it for correctness, not performance.

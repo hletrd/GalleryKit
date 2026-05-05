@@ -1,33 +1,39 @@
-# Architecture Review — Cycle 15 (2026-05-06)
+# Cycle 17 Architect Review — architect
 
-**Reviewer angle**: Architectural/design risks, coupling, layering
-**Scope**: Module boundaries, data flow, deployment topology, i18n, build pipeline
-**Gates**: All green
-
----
-
-## Executive Summary
-
-Architecture remains clean and well-layered. No new architectural risks in cycle 15.
+Date: 2026-05-06
+Scope: Full repository, post-cycle-16 state
+Focus: Architectural/design risks, coupling, layering
 
 ## Findings
 
-No new findings in cycle 15.
+### MEDIUM SEVERITY
 
-## Verified Architecture
+**C17-ARCH-01: ImageProcessingJob is a bag-of-fields with weak producer contracts**
+- **File:** `apps/web/src/lib/image-queue.ts` (lines 107-121)
+- **Confidence:** High
+- **Problem:** `ImageProcessingJob` declares `camera_model?`, `capture_date?`, `iccProfileName?`, `quality?`, and `imageSizes?` as all optional. There is no compile-time or runtime enforcement that producers pass consistent sets of fields. The bootstrap query and `uploadImages` have already diverged twice (cycle 16 fixed bootstrap only; cycle 17 must fix upload). Optional fields for data that is always available at the producer create a footgun.
+- **Fix:** Split into `ImageProcessingJobRequired` (always-present fields) and `ImageProcessingJobOptional` (truly conditional fields), or use a builder pattern that validates completeness before enqueuing.
 
-1. **Module layering**: `data.ts` (queries) / `process-image.ts` (image pipeline) / `auth-rate-limit.ts` (security) are cleanly separated with no circular dependencies.
+**C17-ARCH-02: iccProfileName is not persisted, creating a bootstrapping gap**
+- **File:** `apps/web/src/db/schema.ts`
+- **Confidence:** High
+- **Problem:** The `images` table has `color_space` (from EXIF) but no `icc_profile_name` (from Sharp ICC parsing). The queue's `processImageFormats` needs `iccProfileName` to decide AVIF colorspace, but bootstrapped jobs can never receive it because it's not in the DB. This forces a design split: fresh uploads COULD pass it, but bootstrapped jobs never can.
+- **Fix:** Add `icc_profile_name` to the schema and persist it at upload time. This closes the gap and makes bootstrap behavior match fresh-upload behavior.
 
-2. **Single-instance topology**: Correctly documented. Process-local states (restore flags, upload quota, image queue, view count buffer) are acknowledged as not horizontally scalable without shared storage.
+### LOW SEVERITY
 
-3. **i18n**: Locale-prefix routes (`/[locale]/...`), server-side translations via `next-intl`, organized key structure in `messages/`.
+**C17-ARCH-03: Service Worker metadata store uses a single shared JSON blob**
+- **File:** `apps/web/public/sw.js` (lines 54-75)
+- **Confidence:** Medium
+- **Problem:** The metadata store (`getMeta`/`setMeta`) serializes the entire LRU Map to a single JSON blob stored under `/__meta__` in the Cache API. This creates a serialization bottleneck and the read-modify-write race (C16-HIGH-01). Per-URL metadata keys would eliminate the race and reduce serialization overhead.
+- **Fix:** Store each entry as a separate Cache API item with the URL as the key.
 
-4. **Build pipeline**: Service worker generation via `scripts/build-sw.ts`, standalone output for Docker, multi-stage Dockerfile.
+**C17-ARCH-04: Module-level singletons rely on single-writer topology**
+- **File:** `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/data.ts`
+- **Confidence:** Low
+- **Problem:** The processing queue state (`getProcessingQueueState`), rate-limit Maps, and view-count buffer are all module-level singletons. The CLAUDE.md documents this as intentional for the single-instance topology, but it means horizontal scaling is blocked without significant refactoring.
+- **Fix:** Documented and accepted by project rules. No action needed.
 
-5. **Storage abstraction**: `@/lib/storage` exists as internal abstraction but local filesystem is the only wired backend. Not exposed as a user-facing toggle — correctly documented.
+## Verdict
 
-6. **Lint gate architecture**: Three security-critical lint gates (api-auth, action-origin, public-route-rate-limit) each have fixture tests that validate the scanner itself, creating a self-testing enforcement layer.
-
-## Conclusion
-
-No architectural concerns in cycle 15.
+The architecture is sound for its intended single-instance deployment model. The main risk is the weak contract around `ImageProcessingJob` fields, which has already caused two cycles of partial fixes. Adding `icc_profile_name` to the schema would be a structural improvement that eliminates a persistent data-flow gap.
