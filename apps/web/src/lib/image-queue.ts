@@ -539,6 +539,8 @@ export const bootstrapImageProcessingQueue = async () => {
             filename_jpeg: images.filename_jpeg,
             width: images.width,
             topic: images.topic,
+            capture_date: images.capture_date,
+            camera_model: images.camera_model,
         })
             .from(images)
             .where(pendingWhere)
@@ -553,6 +555,8 @@ export const bootstrapImageProcessingQueue = async () => {
                 filenameJpeg: image.filename_jpeg,
                 width: image.width,
                 topic: image.topic,
+                capture_date: image.capture_date,
+                camera_model: image.camera_model,
             });
 
         }
