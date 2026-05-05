@@ -137,9 +137,14 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         const re = new RegExp(`\\b${prefix}[A-Za-z0-9_]+\\s*\\(`);
         return re.test(withoutStrings);
     });
+    // C8-F03: ignore commented-out imports so a developer cannot accidentally
+    // pass the lint by leaving a disabled import in the file.
     const importsRateLimitModule = RATE_LIMIT_MODULE_HINTS.some((mod) => {
         const re = new RegExp(`from\\s+['\"]@/lib/${mod}['\"]`);
-        return re.test(content);
+        return content.split('\n').some((line) => {
+            if (line.trimStart().startsWith('//')) return false;
+            return re.test(line);
+        });
     });
 
     if (usesPrefixHelper || importsRateLimitModule) {
