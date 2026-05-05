@@ -17,9 +17,9 @@ describe('checkPublicRouteSource', () => {
 
     it('passes variable export with rate-limit helper', () => {
         const source = `
-            import { checkAndIncrementSemanticRateLimit } from '@/lib/rate-limit';
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
             export const POST = async (request) => {
-                if (checkAndIncrementSemanticRateLimit('1.2.3.4', Date.now())) return { status: 429 };
+                if (preIncrementSemanticAttempt('1.2.3.4', Date.now())) return { status: 429 };
                 return { status: 200 };
             };
         `;
