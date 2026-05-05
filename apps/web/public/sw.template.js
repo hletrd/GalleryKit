@@ -175,9 +175,9 @@ async function networkFirstHtml(request) {
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
-self.addEventListener('install', () => {
+self.addEventListener('install', (event) => {
   // Skip waiting so the new SW activates immediately
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {

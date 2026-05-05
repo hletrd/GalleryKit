@@ -8,12 +8,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 responses: never cached.
  *
- * 96c9fad is replaced at build time by scripts/build-sw.ts.
+ * 1a97faf is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '96c9fad';
+const SW_VERSION = '1a97faf';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -175,9 +175,9 @@ async function networkFirstHtml(request) {
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
-self.addEventListener('install', () => {
+self.addEventListener('install', (event) => {
   // Skip waiting so the new SW activates immediately
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
