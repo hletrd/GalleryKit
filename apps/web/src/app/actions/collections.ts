@@ -6,6 +6,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin } from '@/app/actions/auth';
 import { requireCleanInput } from '@/lib/sanitize';
 import { isValidSlug } from '@/lib/validation';
+import { countCodePoints } from '@/lib/utils';
 import { parseSmartCollectionQuery } from '@/lib/smart-collections';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -23,6 +24,7 @@ export async function createSmartCollection(formData: FormData) {
 
     if (!slug || !isValidSlug(slug)) return { error: t('invalidSlugFormat') };
     if (!name || name.trim().length === 0) return { error: t('labelSlugRequired') };
+    if (countCodePoints(name) > 255) return { error: t('labelTooLong') };
 
     const queryJsonRaw = formData.get('query_json')?.toString() ?? '';
     try {
@@ -67,6 +69,7 @@ export async function updateSmartCollection(id: number, formData: FormData) {
 
     if (!slug || !isValidSlug(slug)) return { error: t('invalidSlugFormat') };
     if (!name || name.trim().length === 0) return { error: t('labelSlugRequired') };
+    if (countCodePoints(name) > 255) return { error: t('labelTooLong') };
 
     const queryJsonRaw = formData.get('query_json')?.toString() ?? '';
     try {
