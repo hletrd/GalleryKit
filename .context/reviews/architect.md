@@ -1,51 +1,31 @@
-# Architecture Review — Cycle 13 (2026-05-05)
+# Architecture Review — Cycle 14 (2026-05-06)
 
-**Reviewer angle**: Design risks, coupling, layering, scalability, maintainability
-**Scope**: Module boundaries, data flow, storage abstractions, i18n, deployment topology
+**Reviewer angle**: Architectural/design risks, coupling, layering
+**Scope**: Module boundaries, data flow, deployment topology, i18n, build pipeline
 **Gates**: All green
 
 ---
 
 ## Executive Summary
 
-The architecture is well-layered and appropriate for a single-writer personal gallery. Data access is centralized in `lib/data.ts`, image processing is isolated in `lib/process-image.ts`, and auth is cleanly separated. The codebase correctly acknowledges its single-instance topology limitations.
+Architecture remains clean and well-layered. No new architectural risks in cycle 14.
 
-No new architectural risks identified in this cycle.
+## Findings
 
-## Verified Architecture Decisions
+No new findings in cycle 14.
 
-### Single-Instance Topology Acknowledgment
-- `CLAUDE.md` explicitly documents: "The shipped Docker Compose deployment is a single web-instance / single-writer topology. Restore maintenance flags, upload quota tracking, and image queue state are process-local; do not horizontally scale the web service unless those coordination states are moved to a shared store."
-- This is an honest and appropriate architectural boundary for the project's scope.
+## Verified Architecture
 
-### Rate-Limit Abstraction
-- `BoundedMap` (`lib/bounded-map.ts`) consolidates the previously duplicated prune+evict pattern across rate-limit modules. Two strategies supported: `resetAt`-based and window-based.
-- The abstraction correctly delegates expiry policy to consumer-provided predicates while handling hard-cap eviction uniformly.
+1. **Module layering**: `data.ts` (queries) / `process-image.ts` (image pipeline) / `auth-rate-limit.ts` (security) are cleanly separated with no circular dependencies.
 
-### Image Processing Pipeline
-- Upload -> original save -> DB insert -> async queue -> Sharp processing (AVIF/WebP/JPEG in parallel) -> conditional UPDATE
-- Advisory locks (`gallerykit:image-processing:{jobId}`) prevent duplicate processing across workers/restarts
-- Single Sharp instance with `clone()` avoids triple buffer decode
-- Color pipeline versioning (`IMAGE_PIPELINE_VERSION = 3`) enables cache invalidation on encoder semantic changes
+2. **Single-instance topology**: Correctly documented. Process-local states (restore flags, upload quota, image queue, view count buffer) are acknowledged as not horizontally scalable without shared storage.
 
-### Privacy Field Guard Pattern
-- `adminSelectFields` -> destructuring omission -> `publicSelectFields` with compile-time guards
-- This is an effective pattern: adding a sensitive field to admin queries does NOT automatically leak it to public queries
-- Three compile-time guards prevent common mistakes: privacy keys, map-only keys, large payload keys
+3. **i18n**: Locale-prefix routes (`/[locale]/...`), server-side translations via `next-intl`, organized key structure in `messages/`.
 
-### i18n Architecture
-- `next-intl` with locale-prefixed routes (`/[locale]/...`)
-- Server actions use `getTranslations('serverActions')` for localized error messages
-- Translation keys are well-organized by domain
+4. **Build pipeline**: Service worker generation via `scripts/build-sw.ts`, standalone output for Docker, multi-stage Dockerfile.
 
-## Areas of Technical Debt (Already Documented)
-
-The following are known limitations, not new findings:
-- **Storage backend**: `lib/storage` module exists as an abstraction but only local filesystem is wired end-to-end
-- **Semantic search**: Uses deterministic stub embeddings; real ONNX inference deferred
-- **EXIF-based search/filter**: No range queries for ISO, aperture, etc.
-- **Bulk operations**: `bulkUpdateImages` uses per-row UPDATE loop
+5. **Storage abstraction**: `@/lib/storage` exists as internal abstraction but local filesystem is the only wired backend. Not exposed as a user-facing toggle — correctly documented.
 
 ## Conclusion
 
-Architecture is sound for the project's scope. No layering violations, coupling issues, or scalability risks beyond the already-documented single-instance constraint.
+No architectural concerns in cycle 14.

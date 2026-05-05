@@ -1,51 +1,41 @@
-# Code Review — Cycle 13 (2026-05-05)
+# Code Review — Cycle 14 (2026-05-06)
 
 **Reviewer angle**: Code quality, logic correctness, edge cases, maintainability
-**Scope**: Entire repository, focus on recently changed files and complex async paths
+**Scope**: Entire repository, focus on recently changed files and boundary conditions
 **Gates**: All green (eslint, tsc, vitest 1049 tests, playwright e2e 20 passed, lint:api-auth, lint:action-origin, lint:public-route-rate-limit)
 
 ---
 
 ## Executive Summary
 
-After 13+ review cycles and 1000+ tests, the codebase has converged to a highly stable state. Only one new finding of LOW severity was identified. All prior MEDIUM/HIGH findings have been resolved. The code quality is excellent with thorough documentation, defensive patterns, and comprehensive error handling.
+After 14 review cycles and 1000+ tests, the codebase is in a fully converged state. No new MEDIUM or HIGH severity findings were identified in cycle 14. All prior findings from cycles 1-13 remain correctly fixed. The code quality is excellent with thorough documentation, defensive patterns, and comprehensive error handling.
 
 ## Findings
 
-### C13-LOW-01: `x-nonce` CSP nonce propagated to HTTP response headers
-- **File+line**: `apps/web/src/proxy.ts:33-34`
-- **Severity**: LOW
-- **Confidence**: HIGH
-- **Problem**: `applyProductionCsp` sets `x-nonce` in response headers. The nonce is intended for server-side use (read from request headers by `csp-nonce.ts`) and for embedding in `<script nonce="...">` HTML attributes. Exposing it as a response header makes it readable by same-origin JavaScript via `fetch()`/`XMLHttpRequest`, slightly weakening CSP's inline-script injection protection.
-- **Failure scenario**: An attacker with DOM XSS makes a same-origin fetch, reads `x-nonce`, then injects `<script nonce="stolen">...</script>` that bypasses CSP.
-- **Suggested fix**: Remove `response.headers.set('x-nonce', nonce)` from `applyProductionCsp`. Server components already read the nonce from request headers; clients read it from DOM attributes. The response header serves no legitimate purpose.
-- **Cross-reference**: Verified no client-side code reads `x-nonce` from response headers. `csp-nonce.ts` imports from `next/headers` (request headers only).
+No new findings in cycle 14.
 
-## Verified Correct Patterns
+## Verified Correct Patterns (Cycle 14 Deep Dive)
 
-The following complex areas were examined and found correct:
+1. **proxy.ts** (post-C13-LOW-01 fix): The `x-nonce` response header leak has been correctly remediated. `applyProductionCsp` now only sets `Content-Security-Policy` on the response; no `x-nonce` response header is emitted. Verified by full-text search across the codebase.
 
-1. **Semantic search route** (`app/api/search/semantic/route.ts`): Rate-limit rollback correctly placed after all cheap validation gates and before expensive embedding work. Body size guard, same-origin check, and maintenance check all precede rate-limit consumption. Pattern 2 rollback (rollback on infrastructure error) is correctly implemented.
+2. **Service worker cache strategies** (`sw.template.js` / `sw.js`): LRU eviction correctly handles browser-independent quota evictions by checking `imageCache.delete()` return value before adjusting the running total. The `recordAndEvict` function properly serializes metadata through the Cache API. Version-scoped cache keys prevent cross-version contamination.
 
-2. **AVIF high-bitdepth probe** (`lib/process-image.ts:50-76`): Promise-based singleton correctly prevents concurrent probe races. The first caller triggers the probe; all concurrent callers await the same promise. If probe fails, the promise resolves to `false` and all callers get `false`.
+3. **Semantic search route** (`app/api/search/semantic/route.ts`): All validation gates (same-origin, maintenance, body size, JSON shape, query length, feature flag) correctly precede rate-limit consumption and embedding work. Rollback on DB failure is present and correct.
 
-3. **Image queue bootstrap** (`lib/image-queue.ts:510-596`): GC interval is properly cleared before creating a new one (line 580). Permanently-failed IDs are excluded from bootstrap queries. Connection-refused errors trigger retry with backoff.
+4. **BoundedMap** (`lib/bounded-map.ts`): The collect-then-delete pruning pattern is consistent and correct. Hard-cap eviction uses FIFO insertion order as documented. Convenience constructors properly bind the expiry predicate.
 
-4. **Upload tracker** (`lib/upload-tracker.ts`): The `settleUploadTrackerClaim` reconciliation math correctly handles partial failures: `currentEntry.count = Math.max(0, currentEntry.count + (successCount - claimedCount))`.
-
-5. **View count flush** (`lib/data.ts:63-166`): The atomic Map swap pattern prevents lost increments during flush. Retry cap with backoff, chunking, and post-flush buffer enforcement are all correct.
+5. **loadMoreImages / searchImagesAction** (`app/actions/public.ts`): Pattern 2 rollback (rollback on infrastructure error) is correctly implemented for both actions. In-memory and DB-backed counters are kept in sync with symmetric increment/rollback pairs.
 
 ## Areas Examined With No Issues Found
 
-- `lib/data.ts` — cursor-based pagination, search deduplication, privacy field guards
-- `lib/process-image.ts` — EXIF extraction, ICC profile parsing, color pipeline
-- `lib/rate-limit.ts` — all rate-limit helpers, rollback patterns, IP normalization
-- `lib/image-queue.ts` — claim locks, retry logic, bootstrap continuation
-- `app/actions/auth.ts` — login flow, session management, password change
-- `app/actions/images.ts` — upload flow, tag processing, cleanup
-- `proxy.ts` — middleware auth guard, CSP request handling (minus the header leak)
-- `public/sw.js` — cache strategies, LRU eviction, admin bypass
+- `lib/image-queue.ts` — claim retry logic, permanent failure tracking, bootstrap continuation
+- `lib/process-image.ts` — AVIF probe singleton, EXIF extraction, ICC parsing, variant cleanup
+- `lib/data.ts` — view count flush, cursor pagination, privacy field separation
+- `app/actions/auth.ts` — Argon2 verify, session creation, password change, rate-limit ordering
+- `app/actions/images.ts` — upload flow, tag processing, batch operations
+- `scripts/check-public-route-rate-limit.ts` — comment-stripping, string-literal bypass prevention
+- `scripts/build-sw.ts` — template replacement, git SHA fallback
 
 ## Conclusion
 
-The codebase is in excellent shape. One LOW-severity security finding (CSP nonce header leak) was identified. No correctness bugs, race conditions, or memory leaks were found in the critical paths.
+The codebase maintains its excellent quality posture. Cycle 14 found no new issues. All architectural invariants are enforced by automated lint gates.

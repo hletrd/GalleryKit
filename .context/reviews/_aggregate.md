@@ -1,6 +1,6 @@
-# Aggregate Review — Cycle 13 (2026-05-05)
+# Aggregate Review — Cycle 14 (2026-05-06)
 
-**Review methodology**: Single-agent multi-perspective deep review (code-quality, security, architecture). No custom reviewer agents available in this environment. All critical source files examined.
+**Review methodology**: Single-agent multi-perspective deep review (code-quality, security, architecture, performance, testing). No custom reviewer agents available in this environment. All critical source files examined.
 
 **Quality gates — all green**
 
@@ -8,6 +8,7 @@
 |------|--------|
 | `npm run lint --workspace=apps/web` | PASS (0 errors) |
 | `npx tsc --noEmit -p apps/web/tsconfig.json` | PASS (0 errors) |
+| `npm run build --workspace=apps/web` | PASS |
 | `npm test --workspace=apps/web` | PASS (123 files, 1049 tests) |
 | `npm run test:e2e --workspace=apps/web` | PASS (20 passed, 2 skipped) |
 | `npm run lint:api-auth --workspace=apps/web` | PASS |
@@ -16,35 +17,21 @@
 
 ---
 
-## NEW FINDINGS: 1
+## NEW FINDINGS: 0
 
-### C13-LOW-01: CSP nonce leaked via `x-nonce` HTTP response header
-- **File+line**: `apps/web/src/proxy.ts:33-34`
-- **Severity**: LOW
-- **Confidence**: HIGH
-- **CWE**: CWE-200
-- **Cross-agent agreement**: Code reviewer (C13-LOW-01), Security reviewer (SEC-LOW-01)
-- **Description**: `applyProductionCsp` copies the CSP nonce from request headers to response headers as `x-nonce`. Same-origin JavaScript can read arbitrary response headers via `fetch()`/`XMLHttpRequest`, allowing an attacker with script execution to obtain the nonce and bypass CSP inline-script protections.
-- **Failure scenario**: Attacker with DOM XSS capability fetches same-origin page, reads `x-nonce` header, injects `<script nonce="stolen">...</script>`.
-- **Suggested fix**: Remove `response.headers.set('x-nonce', nonce)` from `applyProductionCsp`. Server components read nonce from request headers (`csp-nonce.ts`); client script tags receive nonce via HTML attributes. No code reads `x-nonce` from response headers.
-- **Verification**: Full codebase search confirmed zero client-side reads of `x-nonce` response header.
+No new findings were identified in cycle 14.
 
 ---
 
 ## PREVIOUSLY FIXED FINDINGS (CONFIRMED STILL FIXED)
 
-All previously fixed items from cycles 1-12 remain intact:
+All previously fixed items from cycles 1-13 remain intact:
+- C13-LOW-01: CSP nonce header leak — fixed in commit b82fbf1, verified by code review
 - C12-LOW-04: AVIF probe Promise-based singleton (commit 44151ca)
 - C12-LOW-01: Comment-stripped rate-limit prefix check (commit 4fc5cfa)
 - C11-MED-01: Topic existence check before upload (commit a26bc28)
 - C11-MED-02: permanentlyFailedIds check in enqueue (commit eefa3f5)
 - All C1-C12 fixes verified as intact
-
----
-
-## CORRECTIONS TO PRIOR FINDINGS
-
-- **C11-LOW-01 / C12-LOW-04 / C13-LOW-05 (proxy.ts empty-field check)**: Already identified in prior aggregate `_aggregate-c13.md` as a FALSE POSITIVE. The token format check at `proxy.ts:104` correctly rejects empty fields via `tokenParts.some(p => p.length === 0)`. No action needed.
 
 ---
 
@@ -58,6 +45,8 @@ All previously fixed items from cycles 1-12 remain intact:
 - View count flush: atomic Map swap, retry cap, backoff, chunking all correct
 - Data layer: cursor pagination, search dedup, privacy field guards all correct
 - Process image: EXIF extraction, ICC parsing, color pipeline all correct
+- Service worker: LRU eviction, cache versioning, stale-while-revalidate all correct
+- BoundedMap: pruning, hard-cap eviction, convenience constructors all correct
 
 ### Security
 - Auth: Argon2id, HMAC-SHA256 sessions, timing-safe comparison, cookie attributes all correct
@@ -66,6 +55,7 @@ All previously fixed items from cycles 1-12 remain intact:
 - Output encoding: JSON-LD escaping, CSV sanitization, LIKE escaping all correct
 - Rate limiting: all public surfaces metered, rollback patterns correct
 - Privacy: field separation, compile-time guards, GPS stripping all correct
+- CSP: nonce leak fixed, no `x-nonce` in response headers
 
 ### Architecture
 - Module layering: data/process-image/auth cleanly separated
@@ -73,8 +63,19 @@ All previously fixed items from cycles 1-12 remain intact:
 - i18n: locale-prefix routes, server-side translations, organized key structure
 - Build pipeline: service worker generation, standalone output, Docker multi-stage
 
+### Performance
+- Image queue: PQueue concurrency, Sharp clone(), parallel processing
+- BoundedMap: O(n) pruning acceptable given hard caps
+- Service worker: non-blocking stale-while-revalidate, 50 MB LRU cap
+- Data layer: React cache() deduplication, parallel queries
+
+### Testing
+- 123 vitest files, 1049 tests passing
+- 20 e2e tests passing, 2 conditionally skipped
+- Lint gate fixture tests covering all three security-critical linters
+
 ---
 
 ## CONVERGENCE ASSESSMENT
 
-After 14 cycles of reviews (cycles 1-13 plus this cycle), the repository has fully stabilized for its current feature set. One LOW-severity finding was identified this cycle (CSP nonce header leak). All quality gates pass with 1049 tests across 123 files. The review surface is approaching exhaustion for the current feature set — future findings would likely require new feature development or a fundamentally different review lens.
+After 14 cycles of reviews, the repository has fully stabilized for its current feature set. Zero new findings were identified in cycle 14. All quality gates pass with 1049 tests across 123 files and 20 e2e tests. The review surface has been thoroughly exhausted for the current feature set. Future findings would likely require new feature development or a fundamentally different review lens.
