@@ -71,6 +71,18 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Maintenance' }, { status: 503, headers: NO_STORE_HEADERS });
     }
 
+    // Content-Type validation
+    const contentType = request.headers.get('content-type');
+    if (!contentType?.includes('application/json')) {
+        return NextResponse.json({ error: 'Content-Type must be application/json' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+
+    // Reject chunked transfer encoding — body size cannot be verified
+    const transferEncoding = request.headers.get('transfer-encoding');
+    if (transferEncoding?.includes('chunked')) {
+        return NextResponse.json({ error: 'Chunked transfer encoding is not supported' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+
     // Body size guard — reject oversized payloads before parsing
     const contentLength = request.headers.get('content-length');
     if (contentLength) {
@@ -89,11 +101,24 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
     }
 
-    // Parse body
+    // Parse body — read as text first with explicit size cap
+    let rawBody: string;
+    try {
+        rawBody = await request.text();
+    } catch {
+        return NextResponse.json({ error: 'Failed to read request body' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+    if (rawBody.length > MAX_SEMANTIC_BODY_BYTES) {
+        return NextResponse.json(
+            { error: 'Request body too large' },
+            { status: 413, headers: NO_STORE_HEADERS },
+        );
+    }
+
     let query: string;
     let topKParam: number;
     try {
-        const body = await request.json() as unknown;
+        const body = JSON.parse(rawBody) as unknown;
         if (
             typeof body !== 'object' ||
             body === null ||
