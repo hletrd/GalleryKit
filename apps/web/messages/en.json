@@ -601,10 +601,6 @@
     "slideshowDesc": "Configure slideshow auto-advance interval.",
     "slideshowInterval": "Slideshow Interval (seconds)",
     "slideshowIntervalHint": "2–30 seconds. How long each photo is shown in slideshow mode.",
-    "reactionsTitle": "Reactions",
-    "reactionsDesc": "Allow anonymous visitors to like photos.",
-    "reactionsEnabled": "Enable Reactions",
-    "reactionsEnabledHint": "When disabled, the heart button is hidden and no new reactions are recorded.",
     "autoAltTextTitle": "Auto Alt-Text",
     "autoAltTextDesc": "Generate AI alt-text suggestions using a local Florence-2 model (stub; real ONNX inference is a future feature).",
     "autoAltTextEnabled": "Enable Auto Alt-Text",
@@ -613,16 +609,6 @@
     "semanticSearchDesc": "Enable CLIP-based semantic image search (stub; real ONNX inference is a future feature). Run the backfill script after enabling.",
     "semanticSearchEnabled": "Enable Semantic Search",
     "semanticSearchEnabledHint": "When enabled, shows a semantic search toggle in the search box. Requires the embedding backfill to complete first. (Stub active — embeddings are deterministic but not semantically meaningful.)"
-  },
-  "reaction": {
-    "like": "Like",
-    "liked": "Liked",
-    "likePhoto": "Like this photo",
-    "unlikePhoto": "Unlike this photo",
-    "likeCount": "{count, plural, one {# like} other {# likes}}",
-    "rateLimited": "Too many reactions. Please wait a moment.",
-    "disabled": "Reactions are disabled.",
-    "error": "Could not save reaction. Please try again."
   },
   "footer": {
     "admin": "Admin"
