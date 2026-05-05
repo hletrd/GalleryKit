@@ -90,7 +90,7 @@ const MAX_PERMANENTLY_FAILED_IDS = 1000;
 // guarantees Map deletion during for-of iteration is safe, but the
 // explicit collect-then-delete pattern is clearer for reviewers.
 function pruneRetryMaps(state: ProcessingQueueState) {
-    for (const map of [state.retryCounts, state.claimRetryCounts] as const) {
+    for (const map of [state.retryCounts, state.claimRetryCounts, state.lastErrors] as const) {
         if (map.size <= MAX_RETRY_MAP_SIZE) continue;
         const excess = map.size - MAX_RETRY_MAP_SIZE;
         const evictKeys: number[] = [];
