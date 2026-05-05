@@ -152,9 +152,15 @@ function getLatestMigration(migrationsFolder) {
     const migrationPath = path.join(migrationsFolder, `${latestEntry.tag}.sql`);
     const migrationSql = fs.readFileSync(migrationPath, 'utf8');
 
+    // Use the maximum timestamp across ALL journal entries, not just the last one.
+    // Migration timestamps may not be monotonically increasing (e.g. entries added
+    // out of order), so the baseline must cover the latest timestamp to prevent
+    // drizzle from re-running earlier migrations with later timestamps.
+    const maxMillis = Math.max(...journal.entries.map(e => e.when));
+
     return {
         tag: latestEntry.tag,
-        folderMillis: latestEntry.when,
+        folderMillis: maxMillis,
         hash: crypto.createHash('sha256').update(migrationSql).digest('hex'),
     };
 }
