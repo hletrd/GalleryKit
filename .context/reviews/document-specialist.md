@@ -1,50 +1,49 @@
-# Document Specialist Review — Cycle 19
+# Document Specialist Review — Cycle 21
 
 ## Method
-
-Compared code against inline comments, CLAUDE.md references, and cross-file documentation. Focused on comments that no longer match implementation, stale references to removed features, and misleading documentation.
-
----
+Compared code against inline comments, CLAUDE.md references, and cross-file documentation. Focused on comments that no longer match implementation, stale references, and misleading documentation.
 
 ## Findings
 
-### C19-DOC-01 (LOW): Misplaced side-effect comment in data.ts
+### C21-DOC-01 (LOW): Semantic search endpoint comment understates the stub problem
+**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 17-19)
+**Confidence**: HIGH
 
-- **Source**: `apps/web/src/lib/data.ts:1324-1328`
-- **Issue**: The comment block reads:
-  ```typescript
-  // cache() deduplicates calls by arguments within a single request. Shared-group
-  // lookups may buffer a view-count side effect unless called with
-  // incrementViewCount:false or a valid selectedPhotoId. Do not call the cached
-  // wrapper twice with different count semantics in the same render path.
-  export const getImageByShareKeyCached = cache(getImageByShareKey);
-  ```
-  `getImageByShareKey` does NOT accept `incrementViewCount` or `selectedPhotoId` options, and it does NOT buffer view counts. The `bufferGroupViewCount` side effect was removed from this function in a prior refactor. The comment accurately describes `getSharedGroup` (which IS cached on the next line), not `getImageByShareKey`.
-- **Impact**: Future contributors may be confused about which function has side effects. They might incorrectly avoid calling `getImageByShareKeyCached` twice, or might incorrectly assume `getSharedGroupCached` is pure.
-- **Fix**: Move the comment to line 1329 (above `getSharedGroupCached`). Add a simple "Pure function — safe to cache" comment above `getImageByShareKeyCached`.
-- **Confidence**: High
+The comment says:
+```
+NOTE: The stub encoder produces deterministic but NOT semantically meaningful
+embeddings. Enable semantic_search_enabled only after running the backfill
+script and (in a future cycle) replacing the stub with real ONNX inference.
+```
 
-### C19-DOC-02 (LOW): Outdated comment in sw.js about build replacement
+This is accurate but understated. The problem is not just that embeddings are "not semantically meaningful" — it is that the entire endpoint returns RANDOM results that look legitimate. A developer skimming the comment might think "ok, results won't be great" rather than "results are completely unrelated to the query."
 
-- **Source**: `apps/web/public/sw.js:11`
-- **Issue**: The comment says `e04a331 is replaced at build time by scripts/build-sw.ts`. However, looking at the file, `SW_VERSION` is hardcoded to `'e04a331'` and there is no evidence in the repo of `scripts/build-sw.ts`. The checked-in `sw.js` appears to be the production file, not a template.
-- **Impact**: Developers may look for `scripts/build-sw.ts` and waste time searching for a non-existent file.
-- **Fix**: Update the comment to reflect the actual build process, or add the build script if it is missing.
-- **Confidence**: Medium
+**Fix**: Change comment to: "WARNING: The stub encoder returns RANDOM results. Do NOT enable semantic_search_enabled in production until the stub is replaced with real ONNX inference."
 
-### C19-DOC-03 (LOW): `check-public-route-rate-limit.ts` comment references non-existent gate name
+---
 
-- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:13-17`
-- **Issue**: The header comment references "Cycle 3 / D-101-15" and "C2RPF-CROSS-LOW-03". These appear to be internal ticket IDs that are not resolvable by someone reading the code without external context. While this is common in project comments, the comment also says the gate "closes the cycle 2 RPF C2RPF-CROSS-LOW-03 gap". Without access to the original ticket, a future maintainer cannot understand what gap was closed.
-- **Impact**: Low — the code itself is self-explanatory, but the historical context is opaque.
-- **Fix**: Add a one-sentence summary of what the gap was (e.g., "Ensures every public mutating API route has rate limiting or an explicit exemption").
-- **Confidence**: Low (informational)
+### C21-DOC-02 (LOW): `quiesceImageProcessingQueueForRestore` name contradicts behavior
+**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
+**Confidence**: HIGH
+
+The function name "quiesce" implies bringing to a complete stop. The implementation does not wait for active jobs. This is a documentation/semantics mismatch that could confuse operators reading logs or admin documentation.
+
+**Fix**: Rename to `pauseQueueForRestore` or add a docstring explaining that active jobs may still complete.
+
+---
+
+### C21-DOC-03 (LOW): `clip-inference.ts` TODO is not tracked
+**File**: `apps/web/src/lib/clip-inference.ts` (lines 9-13)
+**Confidence**: MEDIUM
+
+The TODO comment references deferred work (ONNX inference, model download) but there is no ticket reference or GitHub issue. In a project with many cycles, untracked TODOs are often forgotten.
+
+**Fix**: Create a tracking issue or add a ticket ID to the TODO.
 
 ---
 
 ## Documentation confirmed accurate
-
-- Rate-limit pattern docstring in `rate-limit.ts` (lines 1-31): Accurate and matches all three rollback patterns used in the codebase.
-- CLAUDE.md "Security Architecture" section: Matches implementation (Argon2, HMAC-SHA256, cookie flags, rate limiting).
-- `process-image.ts` ICC profile resolution matrix: Matches the implementation in `resolveAvifIccProfile`.
-- Privacy field comments in `data.ts`: `adminSelectFields` / `publicSelectFields` derivation is correct; compile-time guards `_privacyGuard` and `_mapPrivacyGuard` are present.
+- Rate-limit pattern docstring in `rate-limit.ts`: Accurate.
+- CLAUDE.md "Security Architecture" section: Matches implementation.
+- `process-image.ts` ICC profile resolution matrix: Matches implementation.
+- Privacy field comments in `data.ts`: Correct.

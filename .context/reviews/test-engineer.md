@@ -1,49 +1,64 @@
-# Test Engineer Review — Cycle 19
+# Test Engineer Review — Cycle 21
 
 ## Method
-
-Reviewed test coverage for newly introduced code (`check-public-route-rate-limit.ts`), verified existing fixture contracts, and identified gaps in edge-case testing. Examined `__tests__/` directory for relevant test files.
-
----
-
-## Verified Prior Fixes
-
-- C18-TEST-01 (checkout idempotency): FIXED — `route.ts` no longer uses `randomUUID()` in idempotency key.
-- C18-TEST-02 (SW cache key): FIXED — `sw.js` uses string keys consistently.
-- C18-TEST-03 (semantic search codepoints): FIXED — `route.ts` now uses `countCodePoints(query) < 3`.
-
----
+Reviewed test coverage for newly introduced code, verified existing fixture contracts, and identified gaps in edge-case testing.
 
 ## Findings
 
-### C19-TEST-01 (MEDIUM): No test for ESM import of `check-public-route-rate-limit.ts`
+### C21-TEST-01 (MEDIUM): No test for chunked encoding body size bypass in semantic search
+**File**: `apps/web/src/app/api/search/semantic/route.ts`
+**Confidence**: HIGH
 
-- **Source**: `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
-- **Issue**: The test file imports `checkPublicRouteSource` from `../../scripts/check-public-route-rate-limit`. If the module is ever loaded in an ESM context (e.g., future Vitest ESM mode), the top-level `require.main === module` expression crashes with `ReferenceError`. No test verifies safe import in both CJS and ESM environments.
-- **Fix**: Add a test that verifies the module can be imported without throwing. Alternatively, fix the entry-point detection (C19-CR-01) and add a test that mocks `import.meta.url` and `require.main`.
-- **Confidence**: High
+The body size guard only checks `Content-Length`. There is no test verifying behavior when `Transfer-Encoding: chunked` is present. A test with a chunked request body exceeding `MAX_SEMANTIC_BODY_BYTES` would reveal the bypass.
 
-### C19-TEST-02 (LOW): `check-public-route-rate-limit.test.ts` does not test exact-prefix helper names
+**Fix**: Add a unit test that mocks a Request with `Transfer-Encoding: chunked` and a large body, verifying it is rejected.
 
-- **Source**: `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`
-- **Issue**: No test verifies that a helper named exactly `preIncrement()` (no suffix) is detected. The regex `[A-Za-z0-9_]+` requires at least one suffix character. If a future route uses a generic `preIncrement` helper, the lint gate would fail it.
-- **Fix**: Add a test case with `export const POST = async () => { if (preIncrement('1.2.3.4')) return { status: 429 }; ... }` and assert it passes.
-- **Confidence**: Medium
+---
 
-### C19-TEST-03 (LOW): No test for `getImageByShareKeyCached` purity vs `getSharedGroupCached` side effects
+### C21-TEST-02 (MEDIUM): No test for queue quiescence with active jobs
+**File**: `apps/web/src/lib/image-queue.ts`
+**Confidence**: HIGH
 
-- **Source**: `apps/web/src/lib/data.ts`
-- **Issue**: No test verifies that `getImageByShareKey` does NOT buffer view counts, or that `getSharedGroup` DOES buffer them when `incrementViewCount` is enabled. The misplaced comment (C19-DOC-01) could lead to incorrect assumptions.
-- **Fix**: Add unit tests that spy on `bufferGroupViewCount` and verify it is called by `getSharedGroup` but NOT by `getImageByShareKey`.
-- **Confidence**: Low
+`quiesceImageProcessingQueueForRestore` is not tested for the scenario where a job is actively running. The existing tests likely mock `queue.onPendingZero()` to resolve immediately, masking the race condition.
+
+**Fix**: Add a test that enqueues a slow job, calls quiescence, and verifies it waits for the job to complete.
+
+---
+
+### C21-TEST-03 (LOW): No test for `decrementRateLimit` race condition
+**File**: `apps/web/src/lib/rate-limit.ts`
+**Confidence**: MEDIUM
+
+The UPDATE+DELETE sequence in `decrementRateLimit` is not tested for concurrent access. A test with two concurrent operations (decrement + increment) could demonstrate the lost-update behavior.
+
+**Fix**: Add an integration test that simulates concurrent decrement and increment on the same rate-limit bucket.
+
+---
+
+### C21-TEST-04 (LOW): No test for HTML cache growth in service worker
+**File**: `apps/web/src/public/sw.js`
+**Confidence**: LOW
+
+The HTML cache has no eviction policy. There is no test verifying cache size limits or eviction behavior under repeated page visits.
+
+**Fix**: Add a service worker test that visits many pages and verifies the HTML cache does not exceed a reasonable size.
+
+---
+
+### C21-TEST-05 (LOW): No test for semantic search stub mode warning
+**File**: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/lib/clip-inference.ts`
+**Confidence**: MEDIUM
+
+There is no test verifying that the semantic search endpoint behaves differently when in stub mode vs. real mode. The current tests likely pass because the stub produces deterministic output, but they don't verify semantic correctness.
+
+**Fix**: Add a test that verifies the response includes a warning header or log when stub mode is active.
 
 ---
 
 ## Test coverage confirmed adequate
-
-- `check-public-route-rate-limit.test.ts`: 13 test cases covering function exports, variable exports, export specifiers, exempt tags, string-literal false positives, commented-out helpers.
-- `data-tag-names-sql.test.ts`: Locks the `GROUP_CONCAT` shape.
-- `touch-target-audit.test.ts`: Enforces 44px minimum.
-- `process-image-blur-wiring.test.ts`: Locks producer-side blur validation.
-- `action-origin.test.ts`: Scans all mutating server actions.
-- `api-auth.test.ts`: Verifies admin API routes wrap with `withAdminAuth`.
+- `check-public-route-rate-limit.test.ts`: Comprehensive coverage maintained.
+- `data-tag-names-sql.test.ts`: GROUP_CONCAT shape locked.
+- `touch-target-audit.test.ts`: 44px minimum enforced.
+- `process-image-blur-wiring.test.ts`: Producer-side blur validation locked.
+- `action-origin.test.ts`: Server action origin scanning enforced.
+- `api-auth.test.ts`: Admin API route auth wrapping verified.

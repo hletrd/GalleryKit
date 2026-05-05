@@ -1,44 +1,60 @@
-# Cycle 18 — Architect Review
+# Architect Review — Cycle 21
 
-Date: 2026-05-06
-Scope: Full repository, post-cycle-17 fixes
-Focus: Architectural/design risks, coupling, layering
+## Review Scope
+Architectural/design risks, coupling, layering, and long-term maintainability of new features (semantic search, smart collections) and existing pipelines.
 
-## Verified Prior Fixes
+## Findings
 
-- C17-ARCH-01 (ImageProcessingJob weak contract): Partially addressed by 38077b9 — fields now passed, but type remains optional.
-- C17-ARCH-02 (icc_profile_name schema gap): FIXED in 4d1f323 — column added.
-- C17-ARCH-03 (SW metadata store): Still present, deferred.
-- C17-ARCH-04 (single-writer topology): Documented, accepted.
+### C21-ARCH-01: Semantic Search Is Fully Wired but Produces Meaningless Results
+**File**: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/lib/clip-inference.ts`
+**Severity**: High
+**Confidence**: High
 
----
+The semantic search feature is architecturally complete (endpoint, schema, embeddings table, backfill action, admin toggle) but the inference layer is a stub that produces deterministic but semantically meaningless embeddings. This creates a "trapdoor" architecture: everything appears to work, but the output is random.
 
-## New Findings
-
-### HIGH SEVERITY
-
-**C18-HIGH-01: Checkout idempotency key design trade-off broken by overcorrection**
-- **File:** `apps/web/src/app/api/checkout/[imageId]/route.ts:150-151`
-- **Confidence:** HIGH
-- **Problem:** The original design used a deterministic key (`imageId-ip-minute`) to deduplicate rapid duplicate clicks. C17-SEC-01 identified that `ip='unknown'` causes cross-user collision. The fix (adding randomUUID) traded off deduplication for uniqueness. But deduplication is the PRIMARY purpose of an idempotency key — without it, the key has no value. The architecture now has a mechanism with no function.
-- **Suggested fix:** Use a hierarchical key: deterministic per-session component + minute window. If no session, fall back to IP + User-Agent hash. If IP is 'unknown', accept that deduplication is unavailable (document this in deployment requirements).
+**Risk**: Admins enable the feature expecting it to work. Users see random results. The engineering team may not prioritize replacing the stub because "the feature already works."
+**Fix**: Add an explicit `semantic_search_mode` config with values `'disabled' | 'stub' | 'production'`. Default to `'disabled'`. Only allow `'production'` when a real ONNX model is detected. Make `'stub'` require an explicit opt-in with a warning banner in the admin UI.
 
 ---
 
-### MEDIUM SEVERITY
+### C21-ARCH-02: `quiesceImageProcessingQueueForRestore` Has Race Condition with Active Jobs
+**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
+**Severity**: Medium
+**Confidence**: High
 
-**C18-MED-01: Service Worker cache abstraction leaks implementation details**
-- **File:** `apps/web/public/sw.template.js`
-- **Confidence:** MEDIUM
-- **Problem:** The `recordAndEvict` function manipulates both a metadata Map and the Cache API, but the key types differ (string vs Request). This is a leaky abstraction — the LRU tracker assumes its keys match the cache keys, but they don't. The architecture should either: (a) use string URLs consistently for both metadata and cache keys, or (b) store Request objects in metadata.
-- **Suggested fix:** Refactor `staleWhileRevalidateImage` to use `request.url` as the cache key for both `put` and `match`, making it consistent with `delete`.
+The queue quiescence abstraction is broken: it waits for `onPendingZero()` which does NOT include active jobs. This is an architectural mismatch between what "quiesce" means (stop all work) and what the implementation does (stop queued work only).
+
+**Risk**: DB restore can proceed while image processing is actively writing files and DB rows, violating the assumed invariant that quiescence means "nothing is happening."
+**Fix**: Change the abstraction to track active job promises and wait for them. Or rename to `pauseQueueForRestore` and document that active jobs may still complete.
 
 ---
 
-### LOW SEVERITY
+### C21-ARCH-03: Smart Collection AST Compiler Uses Raw `sql` for Tag Predicates
+**File**: `apps/web/src/lib/smart-collections.ts` (lines 248-272)
+**Severity**: Low
+**Confidence**: Medium
 
-**C18-LOW-01: Semantic search endpoint mixes validation concerns**
-- **File:** `apps/web/src/app/api/search/semantic/route.ts`
-- **Confidence:** LOW
-- **Problem:** The route performs body parsing, rate limiting, feature-gate checking, embedding computation, and result enrichment all in one handler. While acceptable for a prototype endpoint, the tight coupling makes unit testing difficult — every test must mock the full pipeline.
-- **Suggested fix:** Extract validation, embedding, and enrichment into separate functions. Deferred until semantic search graduates from stub to real ONNX inference.
+The tag predicate compiler uses `sql`${images.id} IN (SELECT ...)` with raw SQL template literals. While the table/column references come from Drizzle constants (safe), the overall pattern introduces a raw SQL surface that could drift from the rest of the codebase's pure-Drizzle style.
+
+**Risk**: Future maintenance could introduce unsafe interpolation if a developer modifies the raw SQL without understanding the parameterized boundary.
+**Fix**: Refactor to use Drizzle's subquery builder (`db.select().from(imageTags).$dynamic()`) instead of raw SQL template. Deferred until smart collections are more mature.
+
+---
+
+### C21-ARCH-04: Rate Limit Decrement is Not Atomic
+**File**: `apps/web/src/lib/rate-limit.ts` (lines 427-454)
+**Severity**: Low
+**Confidence**: Medium
+
+The UPDATE+DELETE sequence for decrementing rate limits is not architecturally atomic. This violates the principle that rate-limit counters should be monotonically increasing within a window, with decrements being safe.
+
+**Risk**: Under high concurrency, rollback decrements can accidentally delete incremented counts, allowing more requests than intended.
+**Fix**: Use a single atomic statement or stored procedure.
+
+---
+
+## No new architectural risks detected in:
+- Image processing pipeline (well-structured, versioned)
+- Auth layer (defense in depth, multiple checks)
+- Data access layer (compile-time privacy guards)
+- Upload pipeline (path traversal prevention, symlink rejection)

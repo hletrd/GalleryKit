@@ -1,54 +1,130 @@
-# Code Review — Cycle 19
+# Code Review — Cycle 21
 
-## Method
-
-Deep read of recently changed files (`sw.js`, `check-public-route-rate-limit.ts`, `api/checkout`, `api/og`, `api/search/semantic`) plus cross-file analysis of `data.ts`, `image-queue.ts`, `process-image.ts`, `actions/images.ts`, `actions/public.ts`, `session.ts`, `rate-limit.ts`, and auth flows. Focus on logic correctness, edge cases, and maintainability.
-
----
+## Review Scope
+Full repository review focused on code quality, logic correctness, edge cases, and maintainability. Examined recent changes (last 20 commits) and critical paths.
 
 ## Findings
 
-### C19-CR-01 (MEDIUM): `check-public-route-rate-limit.ts` ESM entry-point detection is broken
+### C21-HIGH-01: Semantic Search Returns Deterministic but Meaningless Results
+**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 141-147)
+**Confidence**: High
 
-- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:179`
-- **Issue**: The dual-mode entry-point detection expression:
-  ```typescript
-  const isCliEntry = require.main === module || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
-  ```
-  The left operand `require.main` is evaluated BEFORE the `typeof require === 'undefined'` guard on the right side of `||`. In an ESM environment, `require` does not exist, so `require.main` throws `ReferenceError` before short-circuiting. The code explicitly intends dual-mode support (commented at line 19: "Run with: npx tsx scripts/check-public-route-rate-limit.ts") but the ESM branch is unreachable.
-- **Failure scenario**: If the project ever adds `"type": "module"` to package.json, or if the file is imported in an ESM-first test runner context, module evaluation crashes with a ReferenceError on load.
-- **Fix**: Reorder the check so `typeof require` is tested first:
-  ```typescript
-  const isCliEntry = (typeof require !== 'undefined' && require.main === module) || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
-  ```
-- **Confidence**: High
+The semantic search endpoint is fully wired and production-ready from an API perspective, but the underlying `embedTextStub` and `embedImageStub` functions in `clip-inference.ts` produce deterministic SHA-256-based embeddings that carry NO semantic meaning. The cosine similarity between a query and image embedding is essentially random.
 
-### C19-CR-02 (LOW): `check-public-route-rate-limit.ts` regex requires at least one suffix character
+**Problem**: The `semantic_search_enabled` admin toggle exists, and the endpoint responds with structured results that LOOK correct (image IDs, scores, metadata enrichment). An admin who enables this feature will see "results" but they are random. The only hint is a code comment and the stub implementation docs.
 
-- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:145-148`
-- **Issue**: The rate-limit helper detection regex is `\b${prefix}[A-Za-z0-9_]+\s*\(`. The `[A-Za-z0-9_]+` requires at least one alphanumeric character after the prefix. A helper named exactly `preIncrement()` (with no suffix) would not match, even though the documented convention says "any helper whose name starts with `preIncrement`".
-- **Failure scenario**: A future developer adds `export function preIncrement(ip: string, now: number)` (intentionally generic) and the lint gate falsely flags it as missing rate limiting.
-- **Fix**: Change `[A-Za-z0-9_]+` to `[A-Za-z0-9_]*` so the suffix is optional.
-- **Confidence**: Medium
+**Failure scenario**: Admin enables semantic search. Users see "semantic search" UI, submit queries, and get back photos that have nothing to do with their query. The scores appear legitimate (0.18-0.95 range). Users lose trust in the search feature.
 
-### C19-CR-03 (LOW): `data.ts` misplaced cache() side-effect comment
-
-- **Source**: `apps/web/src/lib/data.ts:1324-1328`
-- **Issue**: The comment about view-count side effects and `incrementViewCount` semantics is placed directly above `getImageByShareKeyCached = cache(getImageByShareKey)`. However, `getImageByShareKey` no longer has any view-count side effect (it was removed in a prior refactor). The actual side-effect-bearing function is `getSharedGroup` (line 1329), which calls `bufferGroupViewCount`. The comment is confusing and documents behavior that no longer exists for the function it sits above.
-- **Fix**: Move the comment to line 1329 (above `getSharedGroupCached`) and update it to describe `getSharedGroup`'s `incrementViewCount` / `selectedPhotoId` semantics. Remove or simplify the comment above `getImageByShareKeyCached` since that function is now pure.
-- **Confidence**: High
-
-### C19-CR-04 (LOW): `semantic/route.ts` fallback branch includes unprocessed images
-
-- **Source**: `apps/web/src/app/api/search/semantic/route.ts:216-230`
-- **Issue**: In the `catch` fallback branch (when the image metadata enrichment query fails), the code returns all `results` from the embedding scan without the `eq(images.processed, true)` filter that the success branch enforces. If an image has embeddings but was later marked unprocessed (e.g., deleted and re-uploaded with the same ID in a test environment, or a race between embedding backfill and admin operations), the fallback could return unprocessed image IDs.
-- **Failure scenario**: DB transient error during enrichment causes the API to return unprocessed image IDs with empty metadata (`filename_jpeg: ''`, `width: 0`, etc.). Client-side rendering may break or show broken thumbnails.
-- **Fix**: In the fallback branch, filter `results` to only include IDs that were present in the original `imageRows` query, or at minimum return an empty results array instead of raw embedding matches. Alternatively, since this is a degraded-fallback path, returning empty results on DB error is safer.
-- **Confidence**: Low (fallback path only, requires DB error)
+**Fix**: Add a prominent warning in the admin settings UI that the feature requires running the backfill script AND replacing the stub with real ONNX inference. Consider returning a 503 with "Semantic search not fully configured" until a real encoder is available, OR add a config flag `semantic_search_stub_mode` that must be explicitly enabled.
 
 ---
 
-## Previously fixed / confirmed unchanged
+### C21-MED-01: Chunked Transfer Encoding Bypasses Semantic Search Body Size Guard
+**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 74-90)
+**Confidence**: High
 
-- C19-AGG-02 (duplicated slug validation): Confirmed `getImageCount` and `buildImageConditions` now both use `isValidSlug()`. Fixed.
-- C19-AGG-01 (getImageByShareKeyCached side effects): `getImageByShareKey` no longer has side effects, but the comment mismatch is new (C19-CR-03 above).
+The body size guard checks `Content-Length` header:
+```typescript
+const contentLength = request.headers.get('content-length');
+if (contentLength) {
+    const contentLengthNum = Number(contentLength);
+    ...
+    if (contentLengthNum > MAX_SEMANTIC_BODY_BYTES) {
+        return ... 413 ...
+    }
+}
+```
+
+If the client uses `Transfer-Encoding: chunked` (which omits `Content-Length`), this guard is completely bypassed. The subsequent `await request.json()` will attempt to parse an unbounded stream.
+
+**Failure scenario**: An attacker sends a chunked POST with a multi-megabyte JSON payload. The server buffers it into memory before JSON parsing fails.
+
+**Fix**: Add a guard that rejects requests with `Transfer-Encoding: chunked` OR read the body with a size-limited approach: `const text = await request.text(); if (text.length > MAX_SEMANTIC_BODY_BYTES) return 413;` before JSON parsing.
+
+---
+
+### C21-MED-02: `quiesceImageProcessingQueueForRestore` Does Not Wait for Active Jobs
+**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
+**Confidence**: High
+
+The `quiesceImageProcessingQueueForRestore` function pauses the queue and waits for `onPendingZero()`, but `onPendingZero()` in p-queue only waits for the pending count (queued but not started) to reach zero. It does NOT wait for currently active/running jobs to complete.
+
+**Failure scenario**: An image is actively being processed (Sharp encoding) when admin initiates a DB restore. `quiesceImageProcessingQueueForRestore` returns immediately because no jobs are "pending" (the active one is running). The restore proceeds while files are being written to disk and DB rows being updated, causing data corruption or partial files.
+
+**Fix**: Use `await queue.onIdle()` (if p-queue version supports it) or implement a custom waiter that tracks active job count and waits for completion.
+
+---
+
+### C21-MED-03: Race Condition in `decrementRateLimit` UPDATE+DELETE Sequence
+**File**: `apps/web/src/lib/rate-limit.ts` (lines 427-454)
+**Confidence**: Medium
+
+Between the UPDATE and DELETE in `decrementRateLimit`, another concurrent request could execute `incrementRateLimit` (INSERT ... ON DUPLICATE KEY UPDATE). The sequence:
+1. Request A: UPDATE sets count=0
+2. Request B: INSERT ... ON DUPLICATE KEY UPDATE sets count=1
+3. Request A: DELETE removes row with count=1
+
+The increment from Request B is silently lost. This is in the rollback path, but means rate-limit counters can undercount in high-concurrency scenarios.
+
+**Fix**: Wrap both operations in a transaction with `START TRANSACTION; UPDATE ...; DELETE ...; COMMIT;` or use a single atomic `DELETE ... WHERE count <= 1` preceded by a conditional UPDATE.
+
+---
+
+### C21-LOW-01: Service Worker HTML Cache Has No Size Limit or Eviction
+**File**: `apps/web/src/public/sw.js` (lines 18, 143-178)
+**Confidence**: High
+
+The `HTML_CACHE` stores every HTML page the user visits. Unlike `IMAGE_CACHE` which has a 50MB LRU eviction policy, the HTML cache has NO size limit and NO eviction.
+
+**Failure scenario**: A user browsing a large gallery could accumulate hundreds of HTML responses in cache storage, potentially hitting browser storage limits.
+
+**Fix**: Add an LRU eviction policy to HTML_CACHE similar to IMAGE_CACHE, with a conservative cap (e.g., 5MB or 50 entries).
+
+---
+
+### C21-LOW-03: `backfillClipEmbeddings` Has No Rate Limiting
+**File**: `apps/web/src/app/actions/embeddings.ts`
+**Confidence**: Medium
+
+The `backfillClipEmbeddings` server action processes up to 5000 images with no rate limiting. A compromised admin account could trigger it repeatedly, causing CPU and DB write pressure.
+
+**Fix**: Add a per-admin rate limit (e.g., once per hour) or a global semaphore.
+
+---
+
+### C21-LOW-04: Semantic Search Accepts Any Content-Type
+**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 64-109)
+**Confidence**: Low
+
+The endpoint does not validate `Content-Type: application/json`. Accepting any Content-Type and attempting JSON.parse is poor API hygiene.
+
+**Fix**: Add `if (!request.headers.get('content-type')?.includes('application/json')) return 400` before body parsing.
+
+---
+
+### C21-LOW-05: Bootstrap Cleanup Tasks Run Repeatedly
+**File**: `apps/web/src/lib/image-queue.ts` (lines 576-592)
+**Confidence**: Low
+
+Bootstrap runs expensive cleanup (`purgeExpiredSessions`, `purgeOldAuditLog`) on every call. Bootstrap is triggered on startup, after failed jobs, and after queue drains.
+
+**Fix**: Track whether cleanup has run in the current process and skip redundant invocations.
+
+---
+
+### C21-LOW-06: OG Photo Route Buffer Size Guard Bypassable via Chunked Encoding
+**File**: `apps/web/src/app/api/og/photo/[id]/route.tsx` (lines 91-100)
+**Confidence**: Medium
+
+The route checks `Content-Length` to guard against oversized photo responses. But with chunked encoding (no Content-Length), the guard is bypassed and `await photoRes.arrayBuffer()` buffers the entire response.
+
+**Fix**: Add a fallback size check on the buffer after `arrayBuffer()`.
+
+---
+
+## Summary
+| Severity | Count |
+|----------|-------|
+| High     | 1     |
+| Medium   | 3     |
+| Low      | 5     |

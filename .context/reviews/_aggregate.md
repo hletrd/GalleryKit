@@ -1,98 +1,123 @@
-# Aggregate Review — Cycle 19
+# Aggregate Review — Cycle 21
 
 ## Review method
+Direct deep review of all source files by a single agent with multi-perspective analysis. All key modules examined: rate-limit, image-queue, data, semantic search, smart collections, service worker, OG image generation, checkout, Stripe webhook, auth, upload pipeline, and recently changed files.
 
-Direct deep review of all source files by a single agent with multi-perspective
-analysis. All key modules examined: rate-limit, image-queue, data, sanitize,
-validation, proxy, session, auth, api-auth, action-guards, images actions,
-public actions, sharing, admin-users, db-actions, settings, content-security-policy,
-request-origin, bounded-map, csv-escape, safe-json-ld, advisory-locks,
-upload-tracker-state, schema. Particular attention to recently changed files
-(`sw.js`, `check-public-route-rate-limit.ts`, `api/checkout`, `api/og`,
-`api/search/semantic`).
-
-## Verified prior fixes (from cycle 18)
+## Verified prior fixes (from cycle 19)
 
 | ID | Status | Notes |
 |----|--------|-------|
-| C18-HIGH-01 (checkout idempotency randomUUID) | FIXED | `route.ts:153` now uses deterministic key without randomUUID. |
-| C18-MED-01 (SW cache key mismatch) | FIXED | `sw.js:116` uses `request.url` string for both `put` and `delete`. |
-| C18-MED-02 (semantic search codepoints) | FIXED | `route.ts:114` now uses `countCodePoints(query) < 3`. |
-| C18-LOW-01 (caption/embedding hook race) | UNCHANGED | Still present, low impact, acceptable. |
-| C18-LOW-02 (SW HTML route navigate mode) | UNCHANGED | Still present, low impact. |
-| C18-LOW-03 (semantic search negative Content-Length) | UNCHANGED | Still present, low impact. |
+| C19-AGG-01 (ESM entry-point detection) | FIXED | `typeof require !== 'undefined'` guard reordered in cycle 20. |
+| C19-AGG-02 (misplaced cache() comment) | FIXED | Comment moved to `getSharedGroupCached` in cycle 20. |
+| C19-AGG-03 (regex suffix optional) | FIXED | `[A-Za-z0-9_]+` changed to `[A-Za-z0-9_]*` in cycle 20. |
+| C19-AGG-04 (semantic fallback unfiltered) | FIXED | Fallback now returns empty results in cycle 20. |
+| C19-AGG-05 (sw.js build script comment) | FIXED | Comment updated in cycle 20. |
 
 ---
 
 ## Findings (sorted by severity)
 
+### HIGH severity
+
+#### C21-AGG-01: Semantic search is fully wired but returns random results
+
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:141-147`, `apps/web/src/lib/clip-inference.ts`
+- **Cross-agent agreement**: C21-HIGH-01 (code-reviewer), C21-SEC-04 (security), C21-ARCH-01 (architect), C21-CT-01 (critic), C21-DEBUG-01 (debugger) — 5 agents agree
+- **Issue**: The semantic search endpoint is fully operational (admin toggle, public API, result enrichment, rate limiting, backfill script). However, `embedTextStub` and `embedImageStub` produce deterministic SHA-256-based embeddings with NO semantic meaning. Cosine similarity scores are mathematically valid but random. An admin enabling the feature sees apparently-working search results that are completely unrelated to queries.
+- **Failure scenario**: Admin enables semantic search. Users submit queries like "sunset beach" and receive random photos of buildings, portraits, or documents. The scores look legitimate (0.2-0.9 range). Users lose trust in the search feature and file support tickets about "bad search quality" rather than recognizing the feature is non-functional.
+- **Fix**: Add a `semantic_search_mode` config (`disabled` | `stub` | `production`). Default to `disabled`. Only allow `production` when a real ONNX model is detected. Make `stub` require explicit opt-in with a warning banner.
+- **Confidence**: High
+
+---
+
 ### MEDIUM severity
 
-#### C19-AGG-01: `check-public-route-rate-limit.ts` ESM entry-point detection is broken — throws ReferenceError
+#### C21-AGG-02: Chunked transfer encoding bypasses semantic search body size guard
 
-- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:179`
-- **Cross-agent agreement**: C19-CR-01, C19-SR-01, C19-DEBUG-01, C19-CT-01 (4 agents agree)
-- **Issue**: The dual-mode entry-point guard `require.main === module || (typeof require === 'undefined' && ...)` evaluates `require.main` BEFORE the `typeof require === 'undefined'` short-circuit can protect it. In ESM, `require` does not exist, so the left operand throws `ReferenceError` immediately. The file is imported by `check-public-route-rate-limit.test.ts`; if the test runner or project ever switches to ESM mode, the lint gate crashes on load instead of running.
-- **Failure scenario**: Adding `"type": "module"` to package.json, or running vitest in ESM mode, causes `ReferenceError: require is not defined` on module import. CI pipeline fails before tests run, bypassing the lint gate.
-- **Fix**: Reorder to test `typeof require !== 'undefined'` BEFORE accessing `require.main`:
-  ```typescript
-  const isCliEntry = (typeof require !== 'undefined' && require.main === module) || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
-  ```
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:74-90`
+- **Cross-agent agreement**: C21-MED-01 (code-reviewer), C21-SEC-01 (security), C21-CT-03 (critic) — 3 agents agree
+- **Issue**: The body size guard only checks `Content-Length`. When `Transfer-Encoding: chunked` is used (no Content-Length), the guard is bypassed and `request.json()` buffers an unbounded stream.
+- **Failure scenario**: Attacker sends chunked POST with multi-megabyte JSON body. Server buffers it into memory before JSON parsing fails. DoS via memory exhaustion.
+- **Fix**: Read body as text with explicit length cap: `const text = await request.text(); if (text.length > MAX_SEMANTIC_BODY_BYTES) return 413;` then `JSON.parse(text)`.
 - **Confidence**: High
+
+#### C21-AGG-03: `quiesceImageProcessingQueueForRestore` does not wait for active jobs
+
+- **Source**: `apps/web/src/lib/image-queue.ts:604-625`
+- **Cross-agent agreement**: C21-MED-02 (code-reviewer), C21-ARCH-02 (architect), C21-CT-02 (critic), C21-DEBUG-02 (debugger) — 4 agents agree
+- **Issue**: The function waits for `queue.onPendingZero()` which only tracks queued (not active) jobs. An actively running Sharp processing job can continue while restore proceeds.
+- **Failure scenario**: Admin initiates DB restore. Quiescence returns immediately because no jobs are queued (one is actively running). Restore drops tables. Active job finishes and tries to UPDATE the now-restored `images` table or write files, causing corruption.
+- **Fix**: Use `await queue.onIdle()` if p-queue supports it, or track active job promises and await them.
+- **Confidence**: High
+
+#### C21-AGG-04: Race condition in `decrementRateLimit` UPDATE+DELETE sequence
+
+- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
+- **Cross-agent agreement**: C21-MED-03 (code-reviewer), C21-SEC-02 (security), C21-ARCH-04 (architect), C21-DEBUG-03 (debugger) — 4 agents agree
+- **Issue**: Between UPDATE (sets count=0) and DELETE (removes row), a concurrent `incrementRateLimit` can set count=1. The DELETE then removes the row, losing the increment.
+- **Failure scenario**: High-concurrency rollback + new request on same IP/window. Rate limit counter undercounts, allowing more requests than configured.
+- **Fix**: Wrap UPDATE+DELETE in a transaction, or use a single atomic operation.
+- **Confidence**: Medium
+
+---
 
 ### LOW severity
 
-#### C19-AGG-02: `data.ts` misplaced `cache()` side-effect comment documents wrong function
+#### C21-AGG-05: Service worker HTML cache has no size limit or eviction
 
-- **Source**: `apps/web/src/lib/data.ts:1324-1328`
-- **Cross-agent agreement**: C19-CR-03, C19-DEBUG-02, C19-DOC-01, C19-CT-02 (4 agents agree)
-- **Issue**: The comment warning about `incrementViewCount` side effects and `cache()` deduplication is placed above `getImageByShareKeyCached`, but `getImageByShareKey` no longer has any view-count side effect. The actual side-effect-bearing function is `getSharedGroup` (cached on the next line, line 1329) which calls `bufferGroupViewCount`. The comment is confusing and documents behavior that no longer exists for the function it sits above.
-- **Fix**: Move the comment to line 1329 (above `getSharedGroupCached`). Add a simple "Pure function — safe to cache" comment above `getImageByShareKeyCached`.
+- **Source**: `apps/web/src/public/sw.js:18,143-178`
+- **Cross-agent agreement**: C21-LOW-01 (code-reviewer), C21-PERF-01 (perf-reviewer), C21-DEBUG-04 (debugger)
+- **Issue**: HTML_CACHE stores every visited page with no eviction. Unlike IMAGE_CACHE (50MB LRU), HTML cache grows indefinitely within a version.
+- **Fix**: Add LRU eviction policy with conservative cap (e.g., 5MB or 50 entries).
 - **Confidence**: High
 
-#### C19-AGG-03: `check-public-route-rate-limit.ts` regex requires at least one suffix character
+#### C21-AGG-06: `backfillClipEmbeddings` lacks rate limiting
 
-- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:145-148`
-- **Cross-agent agreement**: C19-CR-02, C19-TEST-02 (2 agents agree)
-- **Issue**: The rate-limit helper detection regex `\b${prefix}[A-Za-z0-9_]+\s*\(` requires at least one alphanumeric character after the prefix. A helper named exactly `preIncrement()` (with no suffix) would not match, even though the documented convention says "any helper whose name starts with `preIncrement`".
-- **Failure scenario**: Future developer adds a generic `preIncrement` helper and the lint gate falsely flags the route as missing rate limiting.
-- **Fix**: Change `[A-Za-z0-9_]+` to `[A-Za-z0-9_]*` so the suffix is optional.
+- **Source**: `apps/web/src/app/actions/embeddings.ts`
+- **Cross-agent agreement**: C21-LOW-03 (code-reviewer), C21-SEC-03 (security), C21-CT-04 (critic)
+- **Issue**: Admin-only action processes up to 5000 images with no rate limiting. Repeated invocation causes CPU and DB pressure.
+- **Fix**: Add per-admin rate limit (e.g., once per hour) or global semaphore.
 - **Confidence**: Medium
 
-#### C19-AGG-04: Semantic search fallback branch returns unfiltered embedding results
+#### C21-AGG-07: OG photo route buffer size guard bypassable via chunked encoding
 
-- **Source**: `apps/web/src/app/api/search/semantic/route.ts:216-230`
-- **Cross-agent agreement**: C19-CR-04, C19-DEBUG-03, C19-CT-03 (3 agents agree)
-- **Issue**: In the `catch` fallback branch (when the image metadata enrichment query fails), the code returns all `results` from the embedding scan without the `eq(images.processed, true)` filter that the success branch enforces. The returned objects have empty metadata (`filename_jpeg: ''`, `width: 0`) which may break client rendering.
-- **Fix**: Return `{ results: [] }` in the fallback branch instead of raw embedding matches. This is consistent with other endpoints (e.g., `loadMoreImages` returns structured error on DB failure).
-- **Confidence**: Low (fallback path only, requires DB error)
+- **Source**: `apps/web/src/app/api/og/photo/[id]/route.tsx:91-100`
+- **Cross-agent agreement**: C21-LOW-06 (code-reviewer), C21-SEC-05 (security), C21-DEBUG-04 (debugger)
+- **Issue**: Internal fetch size guard relies on Content-Length. With chunked encoding, `arrayBuffer()` buffers full response unchecked.
+- **Fix**: Add post-fetch buffer size validation: `if (photoBuffer.length > OG_PHOTO_MAX_BYTES) return fallback`.
+- **Confidence**: Medium
 
-#### C19-AGG-05: `sw.js` comment references non-existent `scripts/build-sw.ts`
+#### C21-AGG-08: Bootstrap cleanup tasks run repeatedly
 
-- **Source**: `apps/web/public/sw.js:11`
-- **Cross-agent agreement**: C19-DOC-02
-- **Issue**: The comment says `e04a331 is replaced at build time by scripts/build-sw.ts`. No such script exists in the repository. The `SW_VERSION` is hardcoded.
-- **Fix**: Update the comment to reflect the actual build process.
+- **Source**: `apps/web/src/lib/image-queue.ts:576-592`
+- **Cross-agent agreement**: C21-LOW-05 (code-reviewer), C21-PERF-02 (perf-reviewer), C21-DEBUG-05 (debugger)
+- **Issue**: `purgeExpiredSessions` and `purgeOldAuditLog` run on every bootstrap call. Bootstrap triggered on startup, after failed jobs, and after queue drains.
+- **Fix**: Gate cleanup to run at most once per process lifetime or per hour.
 - **Confidence**: Low
 
-### DEFERRED / INFORMATIONAL
+#### C21-AGG-09: Semantic search accepts any Content-Type
 
-- C19-PERF-01: SW `recordAndEvict` O(n log n) sort on every image update — informational, acceptable at personal-gallery scale.
-- C19-SR-03: `semantic/route.ts` same-origin check without method verification — informational, no active GET handler.
-- C19-DOC-03: `check-public-route-rate-limit.ts` references internal ticket IDs — informational, code is self-explanatory.
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:64-109`
+- **Cross-agent agreement**: C21-LOW-04 (code-reviewer)
+- **Issue**: Endpoint does not validate `Content-Type: application/json`.
+- **Fix**: Add `if (!request.headers.get('content-type')?.includes('application/json')) return 400`.
+- **Confidence**: Low
 
-## Previously fixed findings (confirmed still fixed)
+#### C21-AGG-10: Semantic search endpoint comment understates stub randomness
 
-- C18-HIGH-01: checkout idempotency randomUUID — FIXED
-- C18-MED-01: SW cache key mismatch — FIXED
-- C18-MED-02: semantic search codepoints — FIXED
-- C18-TEST-01/02/03: prior test gaps — addressed by fixes above
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:17-19`
+- **Cross-agent agreement**: C21-DOC-01 (document-specialist)
+- **Issue**: Comment says "not semantically meaningful" but should say "returns RANDOM results".
+- **Fix**: Update comment to be more emphatic.
+- **Confidence**: Low
+
+---
+
+## No new regressions detected
+- All cycle-20 fixes are clean and stable.
+- No new failure modes introduced by recent commits.
 
 ## Carry-forward (unchanged — existing deferred backlog)
-
 - C16-HIGH-01: SW metadata cache read-modify-write race — deferred
-- C16-LOW-03: getRateLimitBucketStart truncates sub-second windows — deferred
-- C16-LOW-04: SW caches non-image responses — deferred
-- C16-LOW-05: Analytics record functions don't validate entity existence — deferred
 - C17-ARCH-03: SW metadata store uses single shared JSON blob — deferred
 - C17-PERF-02: getImagesLitePage COUNT(*) OVER() — deferred
