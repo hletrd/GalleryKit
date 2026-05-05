@@ -285,6 +285,11 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             </SelectContent>
                         </Select>
                     </div>
+                    {settings.semantic_search_mode === 'production' && (
+                        <p className="text-xs text-amber-600 font-medium">
+                            {t('settings.semanticSearchProductionWarning')}
+                        </p>
+                    )}
                 </CardContent>
             </Card>
         </div>
