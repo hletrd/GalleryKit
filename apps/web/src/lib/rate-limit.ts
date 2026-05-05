@@ -420,8 +420,9 @@ export async function resetRateLimit(
 
 /**
  * Decrement the rate limit counter for an IP in the current window.
- * Unlike resetRateLimit (which deletes the whole entry), this atomically
- * reduces the count by 1 so concurrent rollbacks don't lose counts.
+ * Unlike resetRateLimit (which deletes the whole entry), this wraps
+ * decrement and cleanup in a transaction so concurrent increments are
+ * not lost between UPDATE and DELETE.
  * If the count would drop to 0 or below, the row is deleted instead.
  */
 export async function decrementRateLimit(
@@ -432,26 +433,28 @@ export async function decrementRateLimit(
 ): Promise<void> {
     const start = bucketStart;
 
-    // Atomically decrement; if count drops to 0 or below, delete the row
-    await db.update(rateLimitBuckets)
-        .set({ count: sql`GREATEST(${rateLimitBuckets.count} - 1, 0)` })
-        .where(
+    await db.transaction(async (tx) => {
+        // Decrement first
+        await tx.update(rateLimitBuckets)
+            .set({ count: sql`GREATEST(${rateLimitBuckets.count} - 1, 0)` })
+            .where(
+                and(
+                    eq(rateLimitBuckets.ip, ip),
+                    eq(rateLimitBuckets.bucketType, type),
+                    eq(rateLimitBuckets.bucketStart, start),
+                ),
+            );
+
+        // Clean up zero-count rows to avoid accumulation
+        await tx.delete(rateLimitBuckets).where(
             and(
                 eq(rateLimitBuckets.ip, ip),
                 eq(rateLimitBuckets.bucketType, type),
                 eq(rateLimitBuckets.bucketStart, start),
+                sql`${rateLimitBuckets.count} <= 0`,
             ),
         );
-
-    // Clean up zero-count rows to avoid accumulation
-    await db.delete(rateLimitBuckets).where(
-        and(
-            eq(rateLimitBuckets.ip, ip),
-            eq(rateLimitBuckets.bucketType, type),
-            eq(rateLimitBuckets.bucketStart, start),
-            sql`${rateLimitBuckets.count} <= 0`,
-        ),
-    );
+    });
 }
 
 /**
