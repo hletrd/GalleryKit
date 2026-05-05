@@ -1321,11 +1321,12 @@ export const getTopicBySlugCached = cache(getTopicBySlug);
 export const getTopicsCached = cache(getTopics);
 export const getTagsCached = cache(_getTags);
 export const getTopicsWithAliasesCached = cache(getTopicsWithAliases);
+// Pure function — safe to cache.
+export const getImageByShareKeyCached = cache(getImageByShareKey);
 // cache() deduplicates calls by arguments within a single request. Shared-group
 // lookups may buffer a view-count side effect unless called with
 // incrementViewCount:false or a valid selectedPhotoId. Do not call the cached
 // wrapper twice with different count semantics in the same render path.
-export const getImageByShareKeyCached = cache(getImageByShareKey);
 export const getSharedGroupCached = cache(getSharedGroup);
 
 // ── SEO Settings ──────────────────────────────────────────────────────────────
