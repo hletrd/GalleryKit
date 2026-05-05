@@ -43,7 +43,7 @@ const SEMANTIC_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const SEMANTIC_RATE_LIMIT_MAX_KEYS = 2000;
 const semanticRateLimit = createResetAtBoundedMap<string>(SEMANTIC_RATE_LIMIT_MAX_KEYS);
 
-function checkAndIncrementSemanticRateLimit(ip: string, now: number): boolean {
+export function checkAndIncrementSemanticRateLimit(ip: string, now: number): boolean {
     semanticRateLimit.prune(now);
     const entry = semanticRateLimit.get(ip);
     if (!entry || entry.resetAt <= now) {
@@ -52,6 +52,10 @@ function checkAndIncrementSemanticRateLimit(ip: string, now: number): boolean {
         entry.count++;
     }
     return (semanticRateLimit.get(ip)?.count ?? 0) > SEMANTIC_RATE_LIMIT_MAX;
+}
+
+export function resetSemanticRateLimitForTests(): void {
+    semanticRateLimit.clear();
 }
 
 const NO_STORE_HEADERS = {
