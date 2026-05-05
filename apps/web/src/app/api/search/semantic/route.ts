@@ -138,7 +138,13 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Embed query
-    const queryEmbedding = embedTextStub(query);
+    let queryEmbedding: Float32Array;
+    try {
+        queryEmbedding = embedTextStub(query);
+    } catch {
+        rollbackSemanticAttempt(ip);
+        return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
+    }
 
     // Scan up to SEMANTIC_SCAN_LIMIT most-recent embeddings (HARD cap)
     let rows: { imageId: number; embedding: string | null }[];
