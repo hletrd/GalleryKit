@@ -14,6 +14,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { sizedImageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embeddings';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
 
 interface SearchProps {
@@ -76,7 +77,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 const resp = await fetch('/api/search/semantic', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: searchQuery, topK: 20 }),
+                    body: JSON.stringify({ query: searchQuery, topK: SEMANTIC_TOP_K_DEFAULT }),
                 });
                 if (requestId !== requestIdRef.current) return;
                 if (resp.status === 429) {
