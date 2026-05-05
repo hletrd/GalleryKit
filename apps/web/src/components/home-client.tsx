@@ -193,7 +193,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                         <div
                             key={image.id}
                             className={cn(
-                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 mb-4"
+                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 mb-4 w-full"
                             )}
                             style={{
                                 aspectRatio: `${image.width} / ${image.height}`,

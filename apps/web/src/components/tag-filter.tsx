@@ -54,7 +54,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
     // base Badge already applies `px-2 py-0.5`; we override with a wider
     // padding plus an explicit min-height so the tappable region is
     // unambiguous. (F-1, supersedes AGG3R-03 / C3R-RPL-03)
-    const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-2";
+    const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-1";
 
     // F-5 / AGG1L-LOW-01: tag slugs canonically use `_` to separate
     // words; render those as spaces via the shared `humanizeTagLabel`

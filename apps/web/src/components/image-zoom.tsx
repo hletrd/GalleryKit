@@ -312,7 +312,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
     // Determine cursor style
     const cursorClass = isZoomed
         ? (isMouseDragging ? 'cursor-grabbing' : 'cursor-grab')
-        : 'cursor-zoom-in';
+        : 'cursor-auto';
 
     return (
         <div

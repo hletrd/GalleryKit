@@ -25,7 +25,7 @@ export function clampZoom(level: number): number {
 }
 
 export function wheelStep(current: number, deltaY: number): number {
-    const factor = deltaY > 0 ? 0.9 : 1.1;
+    const factor = deltaY > 0 ? 0.95 : 1.05;
     return clampZoom(current * factor);
 }
 
