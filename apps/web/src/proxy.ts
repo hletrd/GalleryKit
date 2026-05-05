@@ -30,7 +30,6 @@ function applyProductionCsp(request: NextRequest, response: NextResponse): NextR
   }
 
   response.headers.set('Content-Security-Policy', cspHeader);
-  response.headers.set('x-nonce', nonce);
   return response;
 }
 
