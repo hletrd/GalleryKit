@@ -208,7 +208,7 @@ async function releaseImageProcessingClaim(jobId: number, lockConnection: PoolCo
 
 export async function shutdownImageProcessingQueue(
     state: ProcessingQueueState = getProcessingQueueState(),
-    queue: Pick<PQueue, 'pause' | 'clear' | 'onPendingZero'> = state.queue,
+    queue: Pick<PQueue, 'pause' | 'clear' | 'onIdle'> = state.queue,
 ) {
     await drainProcessingQueueForShutdown(state, queue);
 }
@@ -603,10 +603,10 @@ export const bootstrapImageProcessingQueue = async () => {
 
 export async function quiesceImageProcessingQueueForRestore(
     state: ProcessingQueueState = getProcessingQueueState(),
-    queue: Pick<PQueue, 'pause' | 'clear' | 'onPendingZero'> = state.queue,
+    queue: Pick<PQueue, 'pause' | 'clear' | 'onIdle'> = state.queue,
 ) {
     queue.pause();
-    await queue.onPendingZero();
+    await queue.onIdle();
     queue.clear();
     state.enqueued.clear();
     state.retryCounts.clear();

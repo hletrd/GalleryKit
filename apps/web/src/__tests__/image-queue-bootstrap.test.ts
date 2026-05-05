@@ -42,7 +42,6 @@ async function loadQueueModule({
             onIdle = queueOnIdleMock;
             pause = vi.fn();
             clear = vi.fn();
-            onPendingZero = vi.fn(async () => {});
             start = vi.fn();
         },
     }));

@@ -1,7 +1,7 @@
 export type QueueShutdownLike = {
     pause: () => void;
     clear: () => void;
-    onPendingZero: () => Promise<void>;
+    onIdle: () => Promise<void>;
 };
 
 export type QueueShutdownStateLike = {
@@ -30,7 +30,7 @@ export async function drainProcessingQueueForShutdown(
         queue.pause();
         queue.clear();
         state.enqueued.clear();
-        await queue.onPendingZero();
+        await queue.onIdle();
     })();
 
     await state.shutdownPromise;

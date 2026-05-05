@@ -6,7 +6,7 @@ describe('drainProcessingQueueForShutdown', () => {
     it('pauses the queue, clears queued work, and waits for in-flight jobs', async () => {
         const pause = vi.fn();
         const clear = vi.fn();
-        const onPendingZero = vi.fn().mockResolvedValue(undefined);
+        const onIdle = vi.fn().mockResolvedValue(undefined);
         const state = {
             enqueued: new Set([1, 2, 3]),
             shuttingDown: false,
@@ -15,14 +15,14 @@ describe('drainProcessingQueueForShutdown', () => {
         await drainProcessingQueueForShutdown(state, {
             pause,
             clear,
-            onPendingZero,
+            onIdle,
         });
 
         expect(state.shuttingDown).toBe(true);
         expect(state.enqueued.size).toBe(0);
         expect(pause).toHaveBeenCalledTimes(1);
         expect(clear).toHaveBeenCalledTimes(1);
-        expect(onPendingZero).toHaveBeenCalledTimes(1);
+        expect(onIdle).toHaveBeenCalledTimes(1);
     });
 
     it('reuses the same shutdown promise when called repeatedly', async () => {
@@ -37,7 +37,7 @@ describe('drainProcessingQueueForShutdown', () => {
         const queue = {
             pause: vi.fn(),
             clear: vi.fn(),
-            onPendingZero: vi.fn().mockReturnValue(pending),
+            onIdle: vi.fn().mockReturnValue(pending),
         };
 
         const firstCall = drainProcessingQueueForShutdown(state, queue);
@@ -48,6 +48,6 @@ describe('drainProcessingQueueForShutdown', () => {
 
         expect(queue.pause).toHaveBeenCalledTimes(1);
         expect(queue.clear).toHaveBeenCalledTimes(1);
-        expect(queue.onPendingZero).toHaveBeenCalledTimes(1);
+        expect(queue.onIdle).toHaveBeenCalledTimes(1);
     });
 });
