@@ -50,6 +50,13 @@ const NO_STORE_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
 };
 
+/** Clamp the user-supplied topK parameter to the valid range [1, SEMANTIC_TOP_K_MAX].
+ *  Falls back to SEMANTIC_TOP_K_DEFAULT for missing, non-finite, or non-numeric values. */
+export function clampSemanticTopK(raw: unknown): number {
+    const topKRaw = raw !== undefined ? Number(raw) : SEMANTIC_TOP_K_DEFAULT;
+    return Math.min(Math.max(Number.isFinite(topKRaw) ? Math.floor(topKRaw) : SEMANTIC_TOP_K_DEFAULT, 1), SEMANTIC_TOP_K_MAX);
+}
+
 /** Maximum acceptable request body size in bytes. Semantic queries are short
  *  strings (< 200 code points), so a multi-KB body is always malicious. */
 const MAX_SEMANTIC_BODY_BYTES = 8192;
@@ -87,8 +94,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         }
         const bodyObj = body as Record<string, unknown>;
         query = (bodyObj.query as string).trim();
-        const topKRaw = bodyObj.topK !== undefined ? Number(bodyObj.topK) : SEMANTIC_TOP_K_DEFAULT;
-        topKParam = Math.min(Math.max(Number.isFinite(topKRaw) ? Math.floor(topKRaw) : SEMANTIC_TOP_K_DEFAULT, 1), SEMANTIC_TOP_K_MAX);
+        topKParam = clampSemanticTopK(bodyObj.topK);
     } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400, headers: NO_STORE_HEADERS });
     }
