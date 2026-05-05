@@ -66,7 +66,6 @@ interface GalleryImage {
     tag_names?: string | null;
     topic?: string;
     user_filename?: string | null;
-    reaction_count?: number | null;
 }
 
 interface GalleryTag {
@@ -203,11 +202,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                         >
                             <Link
                                 href={localizePath(locale, `/p/${image.id}`)}
-                                aria-label={
-                                    image.reaction_count && image.reaction_count > 0
-                                        ? `${t('aria.viewPhoto', { title: displayTitle })} · ${t('reaction.likeCount', { count: image.reaction_count })}`
-                                        : t('aria.viewPhoto', { title: displayTitle })
-                                }
+                                aria-label={t('aria.viewPhoto', { title: displayTitle })}
                             >
                                 <div className="relative w-full">
                                     <picture>
