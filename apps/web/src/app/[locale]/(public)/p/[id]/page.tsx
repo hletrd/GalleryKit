@@ -165,6 +165,20 @@ export default async function PhotoPage({ params, searchParams }: {
 
     if (!image) return notFound();
 
+    // Preload adjacent images for instant prev/next navigation
+    const [prevImage, nextImage] = await Promise.all([
+        image.prevId ? getImageCached(image.prevId) : null,
+        image.nextId ? getImageCached(image.nextId) : null,
+    ]);
+    const preloadSize = findNearestImageSize(config.imageSizes, 1536);
+    const preloadUrls: string[] = [];
+    for (const adj of [prevImage, nextImage]) {
+        if (adj?.filename_jpeg) {
+            const base = adj.filename_jpeg.replace(/\.jpg$/i, '');
+            preloadUrls.push(absoluteImageUrl(`/uploads/jpeg/${base}_${preloadSize}.jpg`, seo.url));
+        }
+    }
+
     // Fire-and-forget view recording: do not block render on analytics insert.
     // recordPhotoView is a void server action — errors are swallowed internally.
     void recordPhotoView(image.id);
@@ -246,6 +260,9 @@ export default async function PhotoPage({ params, searchParams }: {
 
     return (
         <>
+            {preloadUrls.map((url) => (
+                <link key={url} rel="preload" as="image" href={url} />
+            ))}
             <script
                 type="application/ld+json"
                 nonce={nonce}
@@ -273,7 +290,6 @@ export default async function PhotoPage({ params, searchParams }: {
                 shareBaseUrl={seo.url}
                 untitledFallbackTitle={t('titleWithId', { id: image.id })}
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
-                reactionsEnabled={config.reactionsEnabled}
                 licensePrices={config.licensePrices}
                 checkoutStatus={checkoutStatus}
             />
