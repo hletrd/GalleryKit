@@ -359,7 +359,6 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'original_format', 'ALTER TABLE images ADD COLUMN original_format varchar(10) DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'original_file_size', 'ALTER TABLE images ADD COLUMN original_file_size bigint DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'blur_data_url', 'ALTER TABLE images ADD COLUMN blur_data_url text');
-    await ensureColumn(connection, dbName, 'images', 'reaction_count', 'ALTER TABLE images ADD COLUMN reaction_count int NOT NULL DEFAULT 0');
     await ensureColumn(connection, dbName, 'images', 'license_tier', "ALTER TABLE images ADD COLUMN license_tier ENUM('none','editorial','commercial','rm') NOT NULL DEFAULT 'none'");
     await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
@@ -477,18 +476,6 @@ async function reconcileLegacySchema(connection, dbName) {
             CONSTRAINT admin_tokens_user_fk FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE,
             INDEX admin_tokens_token_hash_idx (token_hash),
             INDEX admin_tokens_user_idx (user_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    await ensureTable(connection, `
-        CREATE TABLE IF NOT EXISTS image_reactions (
-            id int AUTO_INCREMENT PRIMARY KEY,
-            image_id int NOT NULL,
-            visitor_id_hash varchar(64) NOT NULL,
-            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT image_reactions_image_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE,
-            UNIQUE INDEX image_reactions_image_visitor_unique (image_id, visitor_id_hash),
-            INDEX image_reactions_image_id_idx (image_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
