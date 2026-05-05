@@ -1,27 +1,27 @@
-# Security Review — Cycle 14 (2026-05-06)
+# Security Review — Cycle 15 (2026-05-06)
 
 **Reviewer angle**: OWASP Top 10, auth/authz, injection, XSS, CSRF, secrets, unsafe patterns
-**Scope**: Authentication, authorization, input validation, output encoding, rate limiting, CSP, service worker, upload pipeline, database queries
+**Scope**: Authentication, authorization, input validation, output encoding, rate limiting, CSP, upload pipeline, database queries
 **Gates**: All green
 
 ---
 
 ## Executive Summary
 
-Security posture remains strong. No new findings in cycle 14. The C13-LOW-01 CSP nonce leak has been verified as fixed. All three automated security lint gates pass.
+Security posture remains strong. No new findings in cycle 15. The C13-LOW-01 CSP nonce leak fix has been re-verified as intact. All three automated security lint gates pass.
 
 ## Findings
 
-No new findings in cycle 14.
+No new findings in cycle 15.
 
-## Security Posture Verification (Cycle 14 Re-check)
+## Security Posture Verification (Cycle 15 Re-check)
 
 ### Authentication & Session Management
 - Argon2id with memory-hard parameters (verified in `lib/password-hashing.ts`)
 - Session tokens: HMAC-SHA256, verified with `timingSafeEqual` (verified in `lib/session.ts`)
 - Cookie attributes: `httpOnly`, `secure` (when HTTPS or production), `sameSite: lax`, `path: /`
 - Session fixation protection: existing sessions invalidated on new login (transaction-wrapped)
-- Production refuses DB-stored session secret fallback
+- Production refuses DB-stored session secret fallback (throws on missing SESSION_SECRET)
 
 ### Authorization
 - `isAdmin()` verifies session via DB lookup (not just cookie presence)
@@ -45,19 +45,20 @@ No new findings in cycle 14.
 ### Rate Limiting
 - Login: per-IP (5/15min) + per-account (5/15min) with DB backup
 - Public routes: semantic search, OG images, checkout, share keys all rate-limited
-- Pattern 2 rollback correctly applied
+- Pattern 2 rollback correctly applied for public read paths
 - All public mutating routes either carry rate-limit helper or explicit exemption (verified by `lint:public-route-rate-limit` gate)
 
 ### Privacy
 - `publicSelectFields` omits PII (latitude, longitude, filename_original, user_filename)
 - Compile-time guards prevent accidental field leakage
 - GPS coordinates excluded from public API responses
+- `stripGpsFromOriginal` rewrites original files when admin toggle is enabled
 
-### CSP (Post-C13 Fix)
-- Verified: `proxy.ts` no longer sets `x-nonce` in response headers
+### CSP (Post-C13 Fix Re-verified)
+- `proxy.ts` no longer sets `x-nonce` in response headers
 - Nonce is generated per-request, embedded in `<script nonce="...">` attributes
 - CSP policy correctly uses `script-src 'nonce-...'` directive
 
 ## Conclusion
 
-No new security findings in cycle 14. Posture remains strong.
+No new security findings in cycle 15. Posture remains strong.

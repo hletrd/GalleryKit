@@ -1,4 +1,4 @@
-# Architecture Review — Cycle 14 (2026-05-06)
+# Architecture Review — Cycle 15 (2026-05-06)
 
 **Reviewer angle**: Architectural/design risks, coupling, layering
 **Scope**: Module boundaries, data flow, deployment topology, i18n, build pipeline
@@ -8,11 +8,11 @@
 
 ## Executive Summary
 
-Architecture remains clean and well-layered. No new architectural risks in cycle 14.
+Architecture remains clean and well-layered. No new architectural risks in cycle 15.
 
 ## Findings
 
-No new findings in cycle 14.
+No new findings in cycle 15.
 
 ## Verified Architecture
 
@@ -26,6 +26,8 @@ No new findings in cycle 14.
 
 5. **Storage abstraction**: `@/lib/storage` exists as internal abstraction but local filesystem is the only wired backend. Not exposed as a user-facing toggle — correctly documented.
 
+6. **Lint gate architecture**: Three security-critical lint gates (api-auth, action-origin, public-route-rate-limit) each have fixture tests that validate the scanner itself, creating a self-testing enforcement layer.
+
 ## Conclusion
 
-No architectural concerns in cycle 14.
+No architectural concerns in cycle 15.

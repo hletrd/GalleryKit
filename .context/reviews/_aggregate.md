@@ -1,4 +1,4 @@
-# Aggregate Review — Cycle 14 (2026-05-06)
+# Aggregate Review — Cycle 15 (2026-05-06)
 
 **Review methodology**: Single-agent multi-perspective deep review (code-quality, security, architecture, performance, testing). No custom reviewer agents available in this environment. All critical source files examined.
 
@@ -10,7 +10,6 @@
 | `npx tsc --noEmit -p apps/web/tsconfig.json` | PASS (0 errors) |
 | `npm run build --workspace=apps/web` | PASS |
 | `npm test --workspace=apps/web` | PASS (123 files, 1049 tests) |
-| `npm run test:e2e --workspace=apps/web` | PASS (20 passed, 2 skipped) |
 | `npm run lint:api-auth --workspace=apps/web` | PASS |
 | `npm run lint:action-origin --workspace=apps/web` | PASS |
 | `npm run lint:public-route-rate-limit --workspace=apps/web` | PASS |
@@ -19,19 +18,19 @@
 
 ## NEW FINDINGS: 0
 
-No new findings were identified in cycle 14.
+No new findings were identified in cycle 15.
 
 ---
 
 ## PREVIOUSLY FIXED FINDINGS (CONFIRMED STILL FIXED)
 
-All previously fixed items from cycles 1-13 remain intact:
+All previously fixed items from cycles 1-14 remain intact:
 - C13-LOW-01: CSP nonce header leak — fixed in commit b82fbf1, verified by code review
 - C12-LOW-04: AVIF probe Promise-based singleton (commit 44151ca)
 - C12-LOW-01: Comment-stripped rate-limit prefix check (commit 4fc5cfa)
 - C11-MED-01: Topic existence check before upload (commit a26bc28)
 - C11-MED-02: permanentlyFailedIds check in enqueue (commit eefa3f5)
-- All C1-C12 fixes verified as intact
+- All C1-C14 fixes verified as intact
 
 ---
 
@@ -66,16 +65,14 @@ All previously fixed items from cycles 1-13 remain intact:
 ### Performance
 - Image queue: PQueue concurrency, Sharp clone(), parallel processing
 - BoundedMap: O(n) pruning acceptable given hard caps
-- Service worker: non-blocking stale-while-revalidate, 50 MB LRU cap
 - Data layer: React cache() deduplication, parallel queries
 
 ### Testing
 - 123 vitest files, 1049 tests passing
-- 20 e2e tests passing, 2 conditionally skipped
 - Lint gate fixture tests covering all three security-critical linters
 
 ---
 
 ## CONVERGENCE ASSESSMENT
 
-After 14 cycles of reviews, the repository has fully stabilized for its current feature set. Zero new findings were identified in cycle 14. All quality gates pass with 1049 tests across 123 files and 20 e2e tests. The review surface has been thoroughly exhausted for the current feature set. Future findings would likely require new feature development or a fundamentally different review lens.
+After 15 cycles of reviews, the repository has fully stabilized for its current feature set. Zero new findings were identified in cycle 15. All quality gates pass with 1049 tests across 123 files. The review surface has been thoroughly exhausted for the current feature set. Future findings would likely require new feature development or a fundamentally different review lens.
