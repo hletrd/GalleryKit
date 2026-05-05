@@ -8,12 +8,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 responses: never cached.
  *
- * 1a97faf is replaced at build time by scripts/build-sw.ts.
+ * f72b007 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '1a97faf';
+const SW_VERSION = 'f72b007';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -162,7 +162,7 @@ async function networkFirstHtml(request) {
       const dateHeader = cached.headers.get('sw-cached-at');
       if (dateHeader) {
         const age = Date.now() - Number(dateHeader);
-        if (age > HTML_MAX_AGE_MS) {
+        if (!Number.isNaN(age) && age > HTML_MAX_AGE_MS) {
           await htmlCache.delete(request);
           return new Response('Offline', { status: 503 });
         }

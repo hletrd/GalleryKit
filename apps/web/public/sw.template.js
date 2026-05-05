@@ -162,7 +162,7 @@ async function networkFirstHtml(request) {
       const dateHeader = cached.headers.get('sw-cached-at');
       if (dateHeader) {
         const age = Date.now() - Number(dateHeader);
-        if (age > HTML_MAX_AGE_MS) {
+        if (!Number.isNaN(age) && age > HTML_MAX_AGE_MS) {
           await htmlCache.delete(request);
           return new Response('Offline', { status: 503 });
         }
