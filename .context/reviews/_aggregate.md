@@ -1,55 +1,98 @@
-# Cycle 18 — Review Aggregate
+# Aggregate Review — Cycle 19
 
-**Date:** 2026-05-06
-**Source:** code-reviewer, security-reviewer, perf-reviewer, debugger, test-engineer, architect, critic
+## Review method
 
----
+Direct deep review of all source files by a single agent with multi-perspective
+analysis. All key modules examined: rate-limit, image-queue, data, sanitize,
+validation, proxy, session, auth, api-auth, action-guards, images actions,
+public actions, sharing, admin-users, db-actions, settings, content-security-policy,
+request-origin, bounded-map, csv-escape, safe-json-ld, advisory-locks,
+upload-tracker-state, schema. Particular attention to recently changed files
+(`sw.js`, `check-public-route-rate-limit.ts`, `api/checkout`, `api/og`,
+`api/search/semantic`).
 
-## Actionable Findings (NEW this cycle)
+## Verified prior fixes (from cycle 18)
 
-| ID | Severity | Confidence | File | Description | Action |
-|----|----------|------------|------|-------------|--------|
-| C18-HIGH-01 | HIGH | HIGH | `apps/web/src/app/api/checkout/[imageId]/route.ts:150-151` | Stripe checkout idempotency key includes `randomUUID()`, making every request's key unique. Stripe deduplication is completely disabled. A double-click creates two checkout sessions. Introduced by fix for C17-SEC-01 (commit 80a1956). | Remove randomUUID; use deterministic per-user key (session hash or IP+UA fingerprint + imageId + minute). |
-| C18-MED-01 | MEDIUM | MEDIUM | `apps/web/public/sw.template.js:94` / `sw.js:94` | `imageCache.delete(entry.url)` uses string URL, but entries stored via `imageCache.put(request, ...)`. Cache API may not match string to Request key. LRU eviction may fail to remove actual entries, causing unbounded cache growth. | Use consistent key types — store Request in metadata or use string URLs for both put and delete. |
-| C18-MED-02 | MEDIUM | MEDIUM | `apps/web/src/app/api/search/semantic/route.ts:111` | `query.length < 3` uses UTF-16 code units instead of `countCodePoints`. Inconsistent with rest of codebase. Emoji queries can bypass minimum-length gate. | Import `countCodePoints` and use it for the min-length check. |
-| C18-LOW-01 | LOW | LOW | `apps/web/src/lib/image-queue.ts:351-400` | Fire-and-forget caption/embedding hooks run after `processed=true` commit without checking image existence. If admin deletes image in the narrow window, hooks waste CPU on non-existent rows. | Optional: add existence guard before DB UPDATE in hooks. |
-| C18-LOW-02 | LOW | LOW | `apps/web/public/sw.template.js:42` / `sw.js:42` | `isHtmlRoute` only checks `Accept: text/html`. Some navigation contexts send `Accept: */*`, causing HTML routes to bypass network-first strategy. Offline fallback lost. | Add `request.mode === 'navigate'` as fallback check. |
-| C18-LOW-03 | LOW | LOW | `apps/web/src/app/api/search/semantic/route.ts:76-90` | Content-Length guard accepts negative values (protocol-illegal but not rejected). | Add `contentLengthNum < 0` to rejection condition. |
-
----
-
-## Verified Prior Fixes (from cycle 17, confirmed in codebase)
-
-| ID | Status | Commit |
-|----|--------|--------|
-| C17-MED-01 (missing EXIF hints in upload) | FIXED | 38077b9 |
-| C17-MED-02 (missing iccProfileName in upload) | FIXED | 38077b9 |
-| C17-MED-03 (icc_profile_name schema gap) | FIXED | 4d1f323 |
-| C17-LOW-01 (SW NaN age check) | FIXED | 0d243db |
-| C17-SEC-01 (checkout idempotency collision) | ADDRESSED but REGRESSED — see C18-HIGH-01 | 80a1956 |
+| ID | Status | Notes |
+|----|--------|-------|
+| C18-HIGH-01 (checkout idempotency randomUUID) | FIXED | `route.ts:153` now uses deterministic key without randomUUID. |
+| C18-MED-01 (SW cache key mismatch) | FIXED | `sw.js:116` uses `request.url` string for both `put` and `delete`. |
+| C18-MED-02 (semantic search codepoints) | FIXED | `route.ts:114` now uses `countCodePoints(query) < 3`. |
+| C18-LOW-01 (caption/embedding hook race) | UNCHANGED | Still present, low impact, acceptable. |
+| C18-LOW-02 (SW HTML route navigate mode) | UNCHANGED | Still present, low impact. |
+| C18-LOW-03 (semantic search negative Content-Length) | UNCHANGED | Still present, low impact. |
 
 ---
 
-## Cross-Agent Agreement
+## Findings (sorted by severity)
 
-- **C18-HIGH-01**: 7/7 agents — universal agreement. The randomUUID in idempotency key is a functional regression.
-- **C18-MED-01**: 3/7 agents (code-reviewer, perf-reviewer, debugger) — cache key mismatch is a real correctness issue.
-- **C18-MED-02**: 2/7 agents (code-reviewer, critic) — consistency issue, easily fixed.
-- **C18-LOW-01**: 2/7 agents (code-reviewer, debugger) — minor race, low impact.
+### MEDIUM severity
 
----
+#### C19-AGG-01: `check-public-route-rate-limit.ts` ESM entry-point detection is broken — throws ReferenceError
 
-## Agent Failures
+- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:179`
+- **Cross-agent agreement**: C19-CR-01, C19-SR-01, C19-DEBUG-01, C19-CT-01 (4 agents agree)
+- **Issue**: The dual-mode entry-point guard `require.main === module || (typeof require === 'undefined' && ...)` evaluates `require.main` BEFORE the `typeof require === 'undefined'` short-circuit can protect it. In ESM, `require` does not exist, so the left operand throws `ReferenceError` immediately. The file is imported by `check-public-route-rate-limit.test.ts`; if the test runner or project ever switches to ESM mode, the lint gate crashes on load instead of running.
+- **Failure scenario**: Adding `"type": "module"` to package.json, or running vitest in ESM mode, causes `ReferenceError: require is not defined` on module import. CI pipeline fails before tests run, bypassing the lint gate.
+- **Fix**: Reorder to test `typeof require !== 'undefined'` BEFORE accessing `require.main`:
+  ```typescript
+  const isCliEntry = (typeof require !== 'undefined' && require.main === module) || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
+  ```
+- **Confidence**: High
 
-None.
+### LOW severity
 
----
+#### C19-AGG-02: `data.ts` misplaced `cache()` side-effect comment documents wrong function
 
-## Deferred Items (carry-forward from prior cycles)
+- **Source**: `apps/web/src/lib/data.ts:1324-1328`
+- **Cross-agent agreement**: C19-CR-03, C19-DEBUG-02, C19-DOC-01, C19-CT-02 (4 agents agree)
+- **Issue**: The comment warning about `incrementViewCount` side effects and `cache()` deduplication is placed above `getImageByShareKeyCached`, but `getImageByShareKey` no longer has any view-count side effect. The actual side-effect-bearing function is `getSharedGroup` (cached on the next line, line 1329) which calls `bufferGroupViewCount`. The comment is confusing and documents behavior that no longer exists for the function it sits above.
+- **Fix**: Move the comment to line 1329 (above `getSharedGroupCached`). Add a simple "Pure function — safe to cache" comment above `getImageByShareKeyCached`.
+- **Confidence**: High
 
-- **C16-HIGH-01:** SW metadata cache read-modify-write race — deferred, requires SW architecture refactor.
-- **C16-LOW-03:** getRateLimitBucketStart truncates sub-second windows — deferred, all current windows are whole-second.
-- **C16-LOW-04:** Service Worker caches non-image responses as images — deferred, requires Content-Type verification.
-- **C16-LOW-05:** Analytics record functions don't validate entity existence — deferred, extra SELECTs would add latency.
-- **C17-ARCH-03:** SW metadata store uses single shared JSON blob — deferred.
-- **C17-PERF-02:** getImagesLitePage COUNT(*) OVER() may be expensive at scale — deferred.
+#### C19-AGG-03: `check-public-route-rate-limit.ts` regex requires at least one suffix character
+
+- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:145-148`
+- **Cross-agent agreement**: C19-CR-02, C19-TEST-02 (2 agents agree)
+- **Issue**: The rate-limit helper detection regex `\b${prefix}[A-Za-z0-9_]+\s*\(` requires at least one alphanumeric character after the prefix. A helper named exactly `preIncrement()` (with no suffix) would not match, even though the documented convention says "any helper whose name starts with `preIncrement`".
+- **Failure scenario**: Future developer adds a generic `preIncrement` helper and the lint gate falsely flags the route as missing rate limiting.
+- **Fix**: Change `[A-Za-z0-9_]+` to `[A-Za-z0-9_]*` so the suffix is optional.
+- **Confidence**: Medium
+
+#### C19-AGG-04: Semantic search fallback branch returns unfiltered embedding results
+
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:216-230`
+- **Cross-agent agreement**: C19-CR-04, C19-DEBUG-03, C19-CT-03 (3 agents agree)
+- **Issue**: In the `catch` fallback branch (when the image metadata enrichment query fails), the code returns all `results` from the embedding scan without the `eq(images.processed, true)` filter that the success branch enforces. The returned objects have empty metadata (`filename_jpeg: ''`, `width: 0`) which may break client rendering.
+- **Fix**: Return `{ results: [] }` in the fallback branch instead of raw embedding matches. This is consistent with other endpoints (e.g., `loadMoreImages` returns structured error on DB failure).
+- **Confidence**: Low (fallback path only, requires DB error)
+
+#### C19-AGG-05: `sw.js` comment references non-existent `scripts/build-sw.ts`
+
+- **Source**: `apps/web/public/sw.js:11`
+- **Cross-agent agreement**: C19-DOC-02
+- **Issue**: The comment says `e04a331 is replaced at build time by scripts/build-sw.ts`. No such script exists in the repository. The `SW_VERSION` is hardcoded.
+- **Fix**: Update the comment to reflect the actual build process.
+- **Confidence**: Low
+
+### DEFERRED / INFORMATIONAL
+
+- C19-PERF-01: SW `recordAndEvict` O(n log n) sort on every image update — informational, acceptable at personal-gallery scale.
+- C19-SR-03: `semantic/route.ts` same-origin check without method verification — informational, no active GET handler.
+- C19-DOC-03: `check-public-route-rate-limit.ts` references internal ticket IDs — informational, code is self-explanatory.
+
+## Previously fixed findings (confirmed still fixed)
+
+- C18-HIGH-01: checkout idempotency randomUUID — FIXED
+- C18-MED-01: SW cache key mismatch — FIXED
+- C18-MED-02: semantic search codepoints — FIXED
+- C18-TEST-01/02/03: prior test gaps — addressed by fixes above
+
+## Carry-forward (unchanged — existing deferred backlog)
+
+- C16-HIGH-01: SW metadata cache read-modify-write race — deferred
+- C16-LOW-03: getRateLimitBucketStart truncates sub-second windows — deferred
+- C16-LOW-04: SW caches non-image responses — deferred
+- C16-LOW-05: Analytics record functions don't validate entity existence — deferred
+- C17-ARCH-03: SW metadata store uses single shared JSON blob — deferred
+- C17-PERF-02: getImagesLitePage COUNT(*) OVER() — deferred

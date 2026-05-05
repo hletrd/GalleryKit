@@ -1,34 +1,38 @@
-# Cycle 18 — Performance Reviewer Findings
+# Performance Review — Cycle 19
 
-Date: 2026-05-06
-Scope: Full repository, post-cycle-17 fixes
-Focus: CPU/memory, concurrency, UI responsiveness, database query efficiency
+## Method
+
+Analyzed service worker cache efficiency, React cache() deduplication, semantic search CPU profile, image processing pipeline concurrency, and DB query patterns. Verified prior fixes from cycle 18.
+
+---
 
 ## Verified Prior Fixes
 
-- C17-PERF-01 (missing iccProfileName): FIXED in 38077b9 — P3/10-bit path now correctly triggered.
-- C17-PERF-02 (COUNT(*) OVER()): Still present, deferred.
-- C17-PERF-03 (searchImages over-fetch): Still present, acceptable at current scale.
+- C18-PERF-01 (SW cache key mismatch): FIXED — `sw.js` now uses `request.url` (string) consistently for both `put` and `delete`.
+- C18-PERF-02 (semantic search CPU): No change — still scans up to 5000 embeddings, but rate-limit and same-origin keep it bounded.
 
 ---
 
-## New Findings
+## Findings
 
-### MEDIUM SEVERITY
+### C19-PERF-01 (LOW): SW `recordAndEvict` sorts entire metadata array on every image cache update
 
-**C18-PERF-01: Service Worker LRU eviction may not actually delete cache entries**
-- **File:** `apps/web/public/sw.template.js:94` / `apps/web/public/sw.js:94`
-- **Confidence:** MEDIUM
-- **Cross-reference:** C18-MED-01 (code-reviewer)
-- **Problem:** `imageCache.delete(entry.url)` uses a string URL, but entries were stored with `imageCache.put(request, ...)`. The Cache API may not match string URLs against Request-keyed entries. This means the LRU eviction logic updates its metadata but fails to free actual cache storage. On a gallery with many images, the browser cache grows beyond the 50 MB budget, consuming device storage and potentially triggering quota eviction that removes entries unpredictably.
-- **Fix:** Use consistent key types. Store the URL string as the cache key throughout, or store the Request object in metadata and use it for deletion.
+- **Source**: `apps/web/public/sw.js:79-106`
+- **Issue**: Every time a new image is cached, `recordAndEvict` sorts ALL metadata entries by timestamp (`Array.from(entries.values()).sort((a, b) => a.timestamp - b.timestamp)`). For a gallery with hundreds of images viewed in a session, this is O(n log n) on every single image fetch. At n=500, that's ~500*9=4500 comparisons per image. For a page with 30 images, that's 135k comparisons.
+- **Mitigation**: At the personal-gallery scale this is imperceptible (~1-2ms per sort in JavaScript). The 50MB cap keeps n bounded (~100-200 images at 250KB each). Not worth fixing unless scaling beyond this range.
+- **Confidence**: Low (informational)
+
+### C19-PERF-02 (LOW): `getImagesLite` GROUP BY + LEFT JOIN on tag-heavy galleries
+
+- **Source**: `apps/web/src/lib/data.ts:624-654`
+- **Issue**: The masonry listing queries use `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` with `LEFT JOIN imageTags` and `LEFT JOIN tags`, plus `GROUP BY images.id`. For images with many tags, this GROUP BY is expensive. The comment acknowledges this is acceptable at personal-gallery scale.
+- **No new finding** — this is documented trade-off, unchanged from prior cycles.
 
 ---
 
-### LOW SEVERITY
+## No new performance regressions detected
 
-**C18-PERF-02: Semantic search scans up to 5000 embeddings with full cosine computation**
-- **File:** `apps/web/src/app/api/search/semantic/route.ts:145-169`
-- **Confidence:** LOW
-- **Problem:** For every semantic search query, the endpoint fetches up to 5000 embeddings from the DB and computes cosine similarity in JavaScript. At 5000 rows * 512-dim float32 vectors, this is ~10 MB of base64-decoded data and ~25 million floating-point operations per request. With 30 requests/minute, this is ~750M ops/min. While within Node.js capability on modern hardware, it is the most CPU-intensive public endpoint.
-- **Mitigation:** The rate limit (30/min/IP) and same-origin check provide adequate throttling. No immediate action needed, but this surface should be monitored if semantic search is enabled at scale.
+- Image processing concurrency is capped at `Math.max(1, Math.floor((cpuCount - 1) / 3))`.
+- `sharp.cache(false)` prevents libvips buffer accumulation.
+- `React.cache()` deduplicates `getImageCached`, `getTopicBySlugCached`, etc.
+- Connection pool is capped at 10 with queue limit 20.

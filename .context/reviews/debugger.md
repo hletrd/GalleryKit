@@ -1,73 +1,49 @@
-# Cycle 18 — Debugger Review
+# Debugger Review — Cycle 19
 
-Date: 2026-05-06
-Scope: Full repository, post-cycle-17 fixes
-Focus: Latent bug surface, failure modes, regressions
+## Method
 
-## Verified Prior Fixes
-
-- C17-DEBUG-01 (wrong AVIF colorspace for fresh uploads): FIXED in 38077b9 — `iccProfileName` now passed.
-- C17-DEBUG-02 (missing caption hints): FIXED in 38077b9 — `camera_model`/`capture_date` now passed.
-- C17-DEBUG-03 (SW NaN age): FIXED in 0d243db — `!Number.isNaN(age)` validated.
-- C17-DEBUG-04 (checkout idempotency collision): Addressed by 80a1956, but see C18-HIGH-01 for regression.
+Traced execution paths for failure modes, race conditions, and edge cases. Focused on: service worker cache consistency, rate-limit entry-point detection, ESM/CJS dual-mode hazards, React cache() side-effect suppression, and semantic search fallback paths.
 
 ---
 
-## New Findings
+## Findings
 
-### HIGH SEVERITY
+### C19-DEBUG-01 (MEDIUM): `check-public-route-rate-limit.ts` ReferenceError on ESM import
 
-**C18-HIGH-01: Checkout idempotency key randomness defeats Stripe deduplication — double-session bug**
-- **File:** `apps/web/src/app/api/checkout/[imageId]/route.ts:150-151`
-- **Confidence:** HIGH
-- **Failure scenario:**
-  1. Visitor clicks "Buy" on a photo. Browser sends POST to `/api/checkout/123`.
-  2. Server generates idempotency key with randomUUID: `checkout-123-203.0.113.1-12345678-abc...`
-  3. Network hiccup or double-click: a second POST arrives 50ms later.
-  4. Server generates a DIFFERENT randomUUID: `checkout-123-203.0.113.1-12345678-def...`
-  5. Stripe sees two distinct keys and creates TWO Checkout sessions.
-  6. Visitor is redirected to the first session URL; the second sits unpaid in Stripe dashboard.
-  7. Gallery operator sees a false-positive "abandoned checkout" alert.
-- **Root cause:** Commit 80a1956 added randomUUID to prevent cross-user collision (C17-SEC-01), but the fix was too broad. It removed ALL deduplication, including same-user double-clicks.
-- **Detection:** Stripe dashboard shows duplicate sessions with identical metadata but different session IDs.
+- **Source**: `apps/web/scripts/check-public-route-rate-limit.ts:179`
+- **Confidence**: HIGH
+- **Failure scenario**:
+  1. Project adds `"type": "module"` to package.json (or a future Node.js LTS changes default module behavior).
+  2. Vitest or tsx loads `check-public-route-rate-limit.ts` in ESM mode.
+  3. Module top-level code evaluates `const isCliEntry = require.main === module || ...`
+  4. `require` is undefined in ESM. `require.main` throws `ReferenceError: require is not defined`.
+  5. Test suite or CI pipeline crashes before any assertions run.
+  6. Lint gate is bypassed because the script cannot execute.
+- **Root cause**: Short-circuit evaluation in `||` does NOT prevent the left operand from being evaluated first. The `typeof require === 'undefined'` guard on the right is never reached.
+- **Detection**: Would manifest as a hard crash on module import in ESM environments.
+- **Fix**: Reorder to test `typeof require !== 'undefined'` before accessing `require.main`.
 
----
+### C19-DEBUG-02 (LOW): `getImageByShareKeyCached` comment describes wrong function
 
-### MEDIUM SEVERITY
+- **Source**: `apps/web/src/lib/data.ts:1324-1328`
+- **Confidence**: HIGH
+- **Failure scenario**:
+  1. Future developer reads comment above `getImageByShareKeyCached` and believes it has view-count side effects.
+  2. Developer avoids calling it in a component that needs fresh data, or incorrectly expects view counting.
+  3. Actual side-effect function (`getSharedGroupCached`, line 1329) has no comment warning about its `bufferGroupViewCount` behavior.
+  4. Developer calls `getSharedGroupCached` twice with different `incrementViewCount` semantics in the same render; React cache() deduplicates the second call, suppressing the view-count increment.
+- **Impact**: View count undercounting for shared groups. Only affects analytics, not security.
+- **Fix**: Move comment to `getSharedGroupCached`. Add "Pure function" comment above `getImageByShareKeyCached`.
 
-**C18-MED-01: Service Worker cache key mismatch — silent unbounded growth**
-- **File:** `apps/web/public/sw.template.js:94`
-- **Confidence:** MEDIUM
-- **Failure scenario:**
-  1. User browses gallery; images are cached via `imageCache.put(request, response)`.
-  2. Cache exceeds 50 MB budget; LRU eviction triggers.
-  3. `recordAndEvict` calls `imageCache.delete(entry.url)` with a string URL.
-  4. Cache API does NOT match the string URL against the Request-object key (different matching semantics).
-  5. Entry remains in cache; metadata Map thinks it was deleted.
-  6. Repeated browsing adds more entries; cache grows without bound.
-  7. Eventually browser quota eviction clears everything, but until then storage is wasted.
-- **Detection:** Hard to detect in production. Could be caught by monitoring `caches.keys()` size or by a SW self-test.
+### C19-DEBUG-03 (LOW): Semantic search fallback returns raw embedding results
 
-**C18-MED-02: Semantic search length gate inconsistency — emoji queries bypass minimum**
-- **File:** `apps/web/src/app/api/search/semantic/route.ts:111`
-- **Confidence:** MEDIUM
-- **Failure scenario:**
-  1. Attacker sends semantic search query with two emoji: "🚀🌙".
-  2. `query.length` is 4 (UTF-16 code units), so `4 < 3` is false — passes gate.
-  3. `countCodePoints` would be 2, which should fail a "3 characters" minimum.
-  4. Query proceeds to embedding computation and DB scan.
-  5. Impact is low (rate-limited, same-origin required), but the gate is inconsistent with other endpoints.
-
----
-
-### LOW SEVERITY
-
-**C18-LOW-01: Caption/embedding hooks target deleted image — wasted DB round-trip**
-- **File:** `apps/web/src/lib/image-queue.ts:351-400`
-- **Confidence:** LOW
-- **Failure scenario:**
-  1. Image processing completes; `processed=true` committed.
-  2. Admin deletes the image in the narrow window before hooks fire.
-  3. `generateCaption` or embedding IIFE attempts DB UPDATE on non-existent row.
-  4. Error caught and logged at warn level. No user-visible impact.
-  5. One wasted DB round-trip and CPU cycle per race.
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:216-230`
+- **Confidence**: LOW
+- **Failure scenario**:
+  1. DB connection pool exhausted or transient error during image enrichment query.
+  2. Route falls through to `catch` branch.
+  3. Fallback returns ALL embedding-scan results with dummy metadata (`filename_jpeg: ''`, `width: 0`).
+  4. Client receives image IDs with empty filenames and attempts to render `<img src="/uploads/jpeg/" />`.
+  5. Browser requests invalid URL; server returns 404.
+- **Impact**: Degraded UX during DB stress. No security impact.
+- **Fix**: Return `{ results: [] }` in the fallback branch, or pre-filter results against the successful imageRows set.
