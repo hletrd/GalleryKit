@@ -5,6 +5,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
+import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rate-limit';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -33,12 +34,21 @@ export async function GET(
 ) {
     const { id } = await params;
 
+    // C7-SEC-01: rate-limit the CPU-intensive OG image generation endpoint.
+    // Budget: 30 requests / 60s / IP (same as main /api/og route).
+    const ip = getClientIp(req.headers);
+    if (preIncrementOgAttempt(ip, Date.now())) {
+        return new Response('Rate limited', { status: 429, headers: { 'Cache-Control': 'no-store' } });
+    }
+
     // Validate id is a positive integer
     if (!/^\d+$/.test(id)) {
+        rollbackOgAttempt(ip);
         return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL);
     }
     const imageId = parseInt(id, 10);
     if (isNaN(imageId) || imageId <= 0 || !Number.isInteger(imageId)) {
+        rollbackOgAttempt(ip);
         return buildFallbackResponse(req, OG_ERROR_CACHE_CONTROL);
     }
 
@@ -53,6 +63,7 @@ export async function GET(
         // getImageCached already filters WHERE processed = true, so a non-null
         // result is guaranteed to be processed.
         if (!image) {
+            rollbackOgAttempt(ip);
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
 
@@ -71,12 +82,20 @@ export async function GET(
         // without a second HTTP round-trip during rendering.
         // C1-BUG-06: 10-second timeout so a hung internal fetch does not hold
         // the OG request open indefinitely.
+        // C7-PERF-01: guard against oversized responses before buffering.
         const photoRes = await fetch(photoUrl, { signal: AbortSignal.timeout(10000) });
         if (!photoRes.ok) {
+            rollbackOgAttempt(ip);
+            return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
+        }
+        const contentLength = photoRes.headers.get('Content-Length');
+        if (contentLength && parseInt(contentLength, 10) > OG_PHOTO_MAX_BYTES) {
+            rollbackOgAttempt(ip);
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const photoBuffer = Buffer.from(await photoRes.arrayBuffer());
         if (photoBuffer.length > OG_PHOTO_MAX_BYTES) {
+            rollbackOgAttempt(ip);
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const photoDataUrl = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
@@ -173,6 +192,7 @@ export async function GET(
             },
         );
     } catch (e: unknown) {
+        rollbackOgAttempt(ip);
         if (e instanceof Error) {
             console.error(`[og/photo] ${e.message}`);
         }
