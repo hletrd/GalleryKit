@@ -214,19 +214,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                 }))
                 .sort((a, b) => b.score - a.score);
         } catch {
-            // Fallback to bare results if image fetch fails
-            enrichedResults = results.map(r => ({
-                imageId: r.imageId,
-                score: r.score,
-                title: null,
-                description: null,
-                filename_jpeg: '',
-                width: 0,
-                height: 0,
-                topic: '',
-                topic_label: null,
-                camera_model: null,
-            }));
+            // Fallback to empty results if image enrichment query fails
+            enrichedResults = [];
         }
     }
 
