@@ -25,8 +25,9 @@ export interface WindowEntry {
 export type RateLimitEntry = ResetAtEntry | WindowEntry;
 
 /**
- * A bounded Map that automatically prunes expired entries and evicts
- * oldest entries when the hard cap is exceeded.
+ * A bounded Map that prunes expired entries and evicts oldest entries
+ * when `prune()` is called. Consumers should invoke `prune()` before
+ * reads and writes to enforce the hard cap and expiry policy.
  */
 export class BoundedMap<K, V> {
     private readonly map = new Map<K, V>();
