@@ -142,7 +142,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         report.passed.push(`OK: ${relative} (uses rate-limit helper)`);
     } else {
         report.failed.push(
-            `MISSING RATE LIMIT: ${relative} exports mutating handler(s) ${mutatingHandlers.join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit helper (preIncrement* / checkAndIncrement* / @/lib/{reaction,auth}-rate-limit).`
+            `MISSING RATE LIMIT: ${relative} exports mutating handler(s) ${mutatingHandlers.join(', ')} but neither carries '${EXEMPT_TAG}: <reason>' nor calls a rate-limit helper (preIncrement* / checkAndIncrement* / @/lib/auth-rate-limit).`
         );
     }
 
