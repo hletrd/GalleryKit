@@ -45,10 +45,10 @@ describe('cycle 6 RPF / checkout source-contracts', () => {
         // SAME call (i.e. appears AFTER `stripe.checkout.sessions.create(`
         // and BEFORE the next semicolon).
         expect(CHECKOUT_SRC).toMatch(/stripe\.checkout\.sessions\.create\(/);
-        // C17-SEC-01: pattern now includes a random nonce suffix to prevent
-        // collision when IP is 'unknown'.
+        // C18-HIGH-01: the key is deterministic per user: checkout-<imageId>-<ip>-<minute>.
+        // No random nonce — deduplication is the primary purpose of idempotency keys.
         expect(CHECKOUT_SRC).toMatch(
-            /idempotencyKey\s*=\s*`checkout-\$\{image\.id\}-\$\{ip\}-\$\{Math\.floor\(Date\.now\(\)\s*\/\s*60_000\)\}-\$\{idempotencyNonce\}`/,
+            /idempotencyKey\s*=\s*`checkout-\$\{image\.id\}-\$\{ip\}-\$\{Math\.floor\(Date\.now\(\)\s*\/\s*60_000\)\}`/,
         );
         const callIndex = CHECKOUT_SRC.indexOf('stripe.checkout.sessions.create(');
         expect(callIndex).toBeGreaterThan(-1);
