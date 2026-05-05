@@ -6,6 +6,10 @@
  *   (b) calls one of the documented rate-limit pre-increment helpers
  *       from `@/lib/rate-limit`.
  *
+ * IMPORTANT: GET handlers are NOT scanned by this gate. Expensive GET
+ * routes (e.g., ImageResponse, file generation) must be audited separately
+ * or opt out with `@public-no-rate-limit-required: <reason>`.
+ *
  * Cycle 3 / D-101-15: closes the cycle 2 RPF C2RPF-CROSS-LOW-03 gap —
  * a future PR that adds a fourth public-mutating route must consciously
  * opt out of rate limiting (with a documented reason) or wire in the
