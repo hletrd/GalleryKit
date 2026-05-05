@@ -10,6 +10,8 @@
 
 import { db, images, imageEmbeddings } from '@/db';
 import { eq, notExists, and } from 'drizzle-orm';
+import { getTranslations } from 'next-intl/server';
+import { isAdmin } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, CLIP_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
@@ -22,6 +24,8 @@ export type BackfillEmbeddingsResult =
     | { status: 'unauthorized' | 'error'; message: string };
 
 export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult> {
+    const t = await getTranslations('serverActions');
+    if (!(await isAdmin())) return { status: 'unauthorized', message: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { status: 'unauthorized', message: originError };
 
