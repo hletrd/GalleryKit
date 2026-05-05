@@ -177,6 +177,7 @@ export async function POST(
         );
     }
 
+    let committed = false;
     try {
         // Check image exists
         const imageRow = await db
@@ -236,6 +237,8 @@ export async function POST(
             reactionCount = (imageRow[0].reactionCount ?? 0) + 1;
         }
 
+        committed = true;
+
         const response = NextResponse.json({ reactionCount, liked }, { headers: NO_STORE_HEADERS });
 
         // Set visitor cookie if new or refreshed
@@ -255,8 +258,10 @@ export async function POST(
 
         return response;
     } catch (err) {
-        rollbackVisitorReaction(visitorIdHash);
-        rollbackIpReaction(ip);
+        if (!committed) {
+            rollbackVisitorReaction(visitorIdHash);
+            rollbackIpReaction(ip);
+        }
         console.error('Reaction toggle failed:', err);
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
