@@ -70,16 +70,15 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
-    const [showLightbox, setShowLightbox] = useState(false);
+    const [showLightbox, setShowLightbox] = useState(() => {
+        try {
+            const auto = sessionStorage.getItem('gallery_auto_lightbox') === 'true';
+            if (auto) sessionStorage.removeItem('gallery_auto_lightbox');
+            return auto;
+        } catch { return false; }
+    });
     const [isSharingPhoto, setIsSharingPhoto] = useState(false);
     const [isCheckingOut, setIsCheckingOut] = useState(false);
-    useEffect(() => {
-        try {
-            if (sessionStorage.getItem('gallery_auto_lightbox') === 'true') {
-                setShowLightbox(true);
-            }
-        } catch { console.debug('sessionStorage read failed') }
-    }, []);
 
     /**
      * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02:
@@ -358,7 +357,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
     return (
-        <div className="flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container">
+        <div className={cn("flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container", showLightbox && "hidden")}>
             {/* Accessible H1 for heading-based SR navigation.
                 Keeping visually hidden because the viewer surfaces the title
                 in the toolbar/info sidebar already; the goal is to ensure

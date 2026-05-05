@@ -101,6 +101,9 @@ export default async function RootLayout({
       data-gallery-title={seo.title}
       data-gallery-nav-title={seo.nav_title || seo.title}
     >
+      <head>
+        <link rel="preconnect" href={seo.url} crossOrigin="anonymous" />
+      </head>
       <body
         suppressHydrationWarning
         className="antialiased min-h-screen bg-background font-sans flex flex-col"
