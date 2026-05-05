@@ -125,6 +125,8 @@ export type ProcessingQueueState = {
     enqueued: Set<number>;
     retryCounts: Map<number, number>;
     claimRetryCounts: Map<number, number>;
+    /** C7-DEBUG-01: last error message per job ID for permanent-failure diagnostics. */
+    lastErrors: Map<number, string>;
     /** C1F-DB-02: IDs of images that have permanently failed processing (MAX_RETRIES exceeded).
      *  These are excluded from bootstrap re-scans to prevent infinite re-enqueue loops. */
     permanentlyFailedIds: Set<number>;
@@ -152,6 +154,7 @@ export const getProcessingQueueState = (): ProcessingQueueState => {
             enqueued: new Set<number>(),
             retryCounts: new Map<number, number>(),
             claimRetryCounts: new Map<number, number>(),
+            lastErrors: new Map<number, string>(),
             permanentlyFailedIds: new Set<number>(),
             bootstrapped: false,
             shuttingDown: false,
@@ -398,7 +401,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
             console.debug(`[Queue] Job ${job.id} complete`);
         } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
             console.error(`Background processing failed for ${job.id}`, err);
+            state.lastErrors.set(job.id, errorMsg);
             const retries = (state.retryCounts.get(job.id) || 0) + 1;
             if (retries < MAX_RETRIES) {
                 state.retryCounts.set(job.id, retries);
@@ -409,7 +414,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 return;
             }
             state.retryCounts.delete(job.id);
-            console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up`);
+            const lastErrorMsg = state.lastErrors.get(job.id) ?? 'unknown';
+            console.error(`[Queue] Job ${job.id} failed ${MAX_RETRIES} times, giving up. Last error: ${lastErrorMsg}`);
             // C1F-DB-02: Track permanently failed IDs so the bootstrap query
             // can exclude them, preventing infinite re-enqueue loops. The set
             // is capped (MAX_PERMANENTLY_FAILED_IDS) with FIFO eviction to
@@ -425,6 +431,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     // tracked as permanently failed.
                     state.claimRetryCounts.delete(oldest);
                     state.retryCounts.delete(oldest);
+                    state.lastErrors.delete(oldest);
                 }
             }
             // Reschedule bootstrap to discover other pending images. The
@@ -443,6 +450,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             if (!retried) {
                 state.enqueued.delete(job.id);
                 state.retryCounts.delete(job.id);
+                state.lastErrors.delete(job.id);
                 if (!claimRetryScheduled) {
                     state.claimRetryCounts.delete(job.id);
                 }
@@ -597,6 +605,7 @@ export async function quiesceImageProcessingQueueForRestore(
     state.enqueued.clear();
     state.retryCounts.clear();
     state.claimRetryCounts.clear();
+    state.lastErrors.clear();
     // C1F-DB-02: clear permanently-failed IDs on restore — the DB restore
     // may fix the underlying issue (e.g., corrupt original file replaced).
     state.permanentlyFailedIds.clear();
