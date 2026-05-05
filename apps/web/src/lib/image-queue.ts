@@ -69,6 +69,8 @@ async function cleanOrphanedTmpFiles(): Promise<void> {
 }
 
 const processingQueueKey = Symbol.for('gallerykit.imageProcessingQueue');
+/** Tracks whether one-time bootstrap cleanup has run in this process. */
+let bootstrapCleanupRun = false;
 const CLAIM_RETRY_DELAY_MS = 5000;
 const BOOTSTRAP_BATCH_SIZE = 500;
 const BOOTSTRAP_RETRY_DELAY_MS = 30_000;
@@ -580,9 +582,12 @@ export const bootstrapImageProcessingQueue = async () => {
         cleanOrphanedTopicTempFiles().catch(err => console.debug('cleanOrphanedTopicTempFiles failed:', err));
 
         // US-004: Purge expired sessions, stale rate-limit buckets, and old audit log entries on startup and periodically
-        purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
-        purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
-        purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
+        if (!bootstrapCleanupRun) {
+            bootstrapCleanupRun = true;
+            purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
+            purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
+            purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
+        }
         if (state.gcInterval) clearInterval(state.gcInterval);
         state.gcInterval = setInterval(() => {
             purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
