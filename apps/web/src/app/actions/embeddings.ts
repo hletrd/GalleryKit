@@ -11,13 +11,32 @@
 import { db, images, imageEmbeddings } from '@/db';
 import { eq, notExists, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
-import { isAdmin } from '@/app/actions/auth';
+import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, CLIP_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
+import { createResetAtBoundedMap } from '@/lib/bounded-map';
 
 const BACKFILL_CONCURRENCY = 2;
 const BACKFILL_BATCH_SIZE = 100;
+const BACKFILL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const BACKFILL_MAX_KEYS = 100;
+const backfillRateLimit = createResetAtBoundedMap<string>(BACKFILL_MAX_KEYS);
+
+function pruneBackfillRateLimit(now: number) {
+    backfillRateLimit.prune(now);
+}
+
+function preIncrementBackfillAttempt(key: string, now: number): boolean {
+    pruneBackfillRateLimit(now);
+    const entry = backfillRateLimit.get(key);
+    if (!entry || entry.resetAt <= now) {
+        backfillRateLimit.set(key, { count: 1, resetAt: now + BACKFILL_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    return (backfillRateLimit.get(key)?.count ?? 0) > 1;
+}
 
 export type BackfillEmbeddingsResult =
     | { status: 'ok'; processed: number; skipped: number }
@@ -28,6 +47,13 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
     if (!(await isAdmin())) return { status: 'unauthorized', message: t('unauthorized') };
     const originError = await requireSameOriginAdmin();
     if (originError) return { status: 'unauthorized', message: originError };
+
+    // Rate-limit: once per hour per admin user
+    const user = await getCurrentUser();
+    const rateLimitKey = user?.id ? `backfill:${user.id}` : 'backfill:anonymous';
+    if (preIncrementBackfillAttempt(rateLimitKey, Date.now())) {
+        return { status: 'error', message: t('backfillRateLimited') };
+    }
 
     try {
         // Select processed images without an embedding row (up to SEMANTIC_SCAN_LIMIT to bound the operation)

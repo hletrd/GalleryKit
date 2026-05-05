@@ -372,6 +372,7 @@
   },
   "serverActions": {
     "unauthorized": "권한이 없습니다",
+    "backfillRateLimited": "백필 작업이 속도 제한되었습니다. 잠시 후 다시 시도해 주세요.",
     "invalidCurrentSlug": "잘못된 슬러그입니다",
     "labelSlugRequired": "이름과 슬러그를 입력해야 합니다.",
     "invalidSlugFormat": "슬러그 형식이 올바르지 않습니다.",
@@ -615,7 +616,8 @@
     "semanticSearchMode": "시맨틱 검색 모드",
     "semanticSearchModeDisabled": "비활성화",
     "semanticSearchModeStub": "스텁 (테스트 전용)",
-    "semanticSearchModeProduction": "프로덕션 (ONNX 필요)"
+    "semanticSearchModeProduction": "프로덕션 (ONNX 필요)",
+    "semanticSearchProductionWarning": "경고: 프로덕션 모드에는 실제 ONNX CLIP 모델이 필요합니다. 없으면 검색 결과가 의미론적으로 무작위가 됩니다."
   },
   "footer": {
     "admin": "관리자"

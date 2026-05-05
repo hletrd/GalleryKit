@@ -372,6 +372,7 @@
   },
   "serverActions": {
     "unauthorized": "Not authorized",
+    "backfillRateLimited": "Backfill is rate-limited. Please wait before retrying.",
     "invalidCurrentSlug": "Invalid slug",
     "labelSlugRequired": "Name and slug are required.",
     "invalidSlugFormat": "Invalid slug format.",
@@ -615,7 +616,8 @@
     "semanticSearchMode": "Semantic Search Mode",
     "semanticSearchModeDisabled": "Disabled",
     "semanticSearchModeStub": "Stub (testing only)",
-    "semanticSearchModeProduction": "Production (requires ONNX)"
+    "semanticSearchModeProduction": "Production (requires ONNX)",
+    "semanticSearchProductionWarning": "Warning: Production mode requires a real ONNX CLIP model. Without it, search results will be semantically random."
   },
   "footer": {
     "admin": "Admin"
