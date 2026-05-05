@@ -145,7 +145,7 @@ async function networkFirstHtml(request) {
       // check on cache fallback (line ~148) is actually reachable.
       const headers = new Headers(networkResponse.headers);
       headers.set('sw-cached-at', String(Date.now()));
-      const responseToCache = new Response(networkResponse.body, {
+      const responseToCache = new Response(networkResponse.clone().body, {
         status: networkResponse.status,
         statusText: networkResponse.statusText,
         headers,
