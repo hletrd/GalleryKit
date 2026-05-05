@@ -20,6 +20,7 @@ const META_CACHE = 'gk-meta-' + SW_VERSION;
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024; // 50 MB
 const HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 h
+const MAX_HTML_ENTRIES = 50; // cap HTML cache to avoid unbounded growth
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,11 @@ function isSensitiveResponse(response) {
   if (response.status === 401 || response.status === 403) return true;
   const cc = response.headers.get('Cache-Control') ?? '';
   return cc.includes('no-store');
+}
+
+function hasAdminSession(request) {
+  const cookie = request.headers.get('Cookie') || '';
+  return cookie.includes('admin_session=');
 }
 
 // ─── Metadata store (LRU tracking) ──────────────────────────────────────────
@@ -105,6 +111,25 @@ async function recordAndEvict(url, newSize) {
   await setMeta(entries);
 }
 
+async function evictHtmlCacheIfNeeded() {
+  const htmlCache = await caches.open(HTML_CACHE);
+  const keys = await htmlCache.keys();
+  if (keys.length <= MAX_HTML_ENTRIES) return;
+
+  const entries = [];
+  for (const key of keys) {
+    const resp = await htmlCache.match(key);
+    const ts = Number(resp?.headers?.get('sw-cached-at')) || 0;
+    entries.push({ key, ts });
+  }
+
+  entries.sort((a, b) => a.ts - b.ts);
+  const toDelete = entries.slice(0, entries.length - MAX_HTML_ENTRIES);
+  for (const { key } of toDelete) {
+    await htmlCache.delete(key);
+  }
+}
+
 // ─── Fetch strategies ────────────────────────────────────────────────────────
 
 async function staleWhileRevalidateImage(request) {
@@ -144,7 +169,7 @@ async function networkFirstHtml(request) {
   try {
     const networkResponse = await fetch(request.clone());
     if (isSensitiveResponse(networkResponse)) return networkResponse;
-    if (networkResponse.ok) {
+    if (networkResponse.ok && !hasAdminSession(request)) {
       const htmlCache = await caches.open(HTML_CACHE);
       // Stamp the cached response with a timestamp so the 24 h max-age
       // check on cache fallback (line ~148) is actually reachable.
@@ -156,6 +181,7 @@ async function networkFirstHtml(request) {
         headers,
       });
       await htmlCache.put(request, responseToCache);
+      await evictHtmlCacheIfNeeded();
     }
     return networkResponse;
   } catch {
