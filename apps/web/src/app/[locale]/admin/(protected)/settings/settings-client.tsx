@@ -11,7 +11,7 @@ import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
-import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Heart, Brain, Search } from 'lucide-react';
+import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search } from 'lucide-react';
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -189,34 +189,6 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             {t('settings.uploadContractLocked')}
                         </p>
                     )}
-                </CardContent>
-            </Card>
-
-            {/* Reactions */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Heart className="h-5 w-5" />
-                        {t('settings.reactionsTitle')}
-                    </CardTitle>
-                    <CardDescription>{t('settings.reactionsDesc')}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <Label htmlFor="reactions-enabled">{t('settings.reactionsEnabled')}</Label>
-                            <p id="reactions-enabled-help" className="text-xs text-muted-foreground">
-                                {t('settings.reactionsEnabledHint')}
-                            </p>
-                        </div>
-                        <Switch
-                            id="reactions-enabled"
-                            checked={settings.reactions_enabled !== 'false'}
-                            onCheckedChange={(checked) => handleChange('reactions_enabled', checked ? 'true' : 'false')}
-                            aria-describedby="reactions-enabled-help"
-                            aria-label={t('settings.reactionsEnabled')}
-                        />
-                    </div>
                 </CardContent>
             </Card>
 
