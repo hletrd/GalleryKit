@@ -174,6 +174,19 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('POST');
     });
 
+    it('passes with exact-prefix helper name (no suffix) (C19-AGG-03)', () => {
+        const source = `
+            import { preIncrement } from '@/lib/rate-limit';
+            export async function POST(request) {
+                if (preIncrement('1.2.3.4')) return { status: 429 };
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
+    });
+
     it('detects PUT/PATCH/DELETE as mutating handlers', () => {
         const source = `
             export async function PUT(request) {
