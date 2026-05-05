@@ -50,7 +50,7 @@ export async function createSmartCollection(formData: FormData) {
             return { error: t('slugAlreadyExists') };
         }
         console.error('Failed to create smart collection', e);
-        return { error: t('invalidInput') };
+        return { error: t('failedToCreateCollection') };
     }
 }
 
@@ -93,7 +93,7 @@ export async function updateSmartCollection(id: number, formData: FormData) {
             return { error: t('slugAlreadyExists') };
         }
         console.error('Failed to update smart collection', e);
-        return { error: t('invalidInput') };
+        return { error: t('failedToUpdateCollection') };
     }
 }
 
@@ -112,7 +112,7 @@ export async function deleteSmartCollection(id: number) {
         return { success: true as const };
     } catch (e) {
         console.error('Failed to delete smart collection', e);
-        return { error: t('invalidInput') };
+        return { error: t('failedToDeleteCollection') };
     }
 }
 
