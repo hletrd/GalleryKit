@@ -16,6 +16,7 @@ const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
 
 // Target the medium derivative — large enough for 1200px OG, well below 5 MB cap.
 const OG_PHOTO_TARGET_SIZE = 1536;
+const OG_PHOTO_MAX_BYTES = 1024 * 1024; // 1 MB — guard against oversized derivatives in base64
 
 /**
  * Strip Unicode bidi/invisible formatting characters from a display string
@@ -75,6 +76,9 @@ export async function GET(
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const photoBuffer = Buffer.from(await photoRes.arrayBuffer());
+        if (photoBuffer.length > OG_PHOTO_MAX_BYTES) {
+            return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
+        }
         const photoDataUrl = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
 
         return new ImageResponse(
