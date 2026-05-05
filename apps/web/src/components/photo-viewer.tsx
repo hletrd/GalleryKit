@@ -357,6 +357,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
     return (
+        <>
         <div className={cn("flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container", showLightbox && "hidden")}>
             {/* Accessible H1 for heading-based SR navigation.
                 Keeping visually hidden because the viewer surfaces the title
@@ -798,33 +799,34 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     )}
                 </div>
             </div>
-
-            {showLightbox && (
-                <Lightbox
-                    image={image}
-                    prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
-                    nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
-                    onClose={() => setShowLightbox(false)}
-                    onNavigate={navigate}
-                    onSlideshowAdvance={() => {
-                        if (images.length <= 1) return;
-                        const nextIndex = (currentIndex + 1) % images.length;
-                        setCurrentImageId(images[nextIndex].id);
-                    }}
-                    imageSizes={imageSizes}
-                    slideshowIntervalSeconds={slideshowIntervalSeconds}
-                    currentIndex={currentIndex}
-                    totalCount={images.length}
-                />
-            )}
-
-            <InfoBottomSheet
-                image={image}
-                isOpen={showBottomSheet}
-                onClose={() => setShowBottomSheet(false)}
-                isAdmin={isAdmin}
-                untitledFallbackTitle={untitledFallbackTitle}
-            />
         </div>
+
+        {showLightbox && (
+            <Lightbox
+                image={image}
+                prevId={prevId ?? (images[currentIndex - 1]?.id || null)}
+                nextId={nextId ?? (images[currentIndex + 1]?.id || null)}
+                onClose={() => setShowLightbox(false)}
+                onNavigate={navigate}
+                onSlideshowAdvance={() => {
+                    if (images.length <= 1) return;
+                    const nextIndex = (currentIndex + 1) % images.length;
+                    setCurrentImageId(images[nextIndex].id);
+                }}
+                imageSizes={imageSizes}
+                slideshowIntervalSeconds={slideshowIntervalSeconds}
+                currentIndex={currentIndex}
+                totalCount={images.length}
+            />
+        )}
+
+        <InfoBottomSheet
+            image={image}
+            isOpen={showBottomSheet}
+            onClose={() => setShowBottomSheet(false)}
+            isAdmin={isAdmin}
+            untitledFallbackTitle={untitledFallbackTitle}
+        />
+    </>
     );
 }

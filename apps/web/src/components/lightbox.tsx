@@ -375,7 +375,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     }, []);
 
     return (
-        <FocusTrap focusTrapOptions={{ allowOutsideClick: true }}>
+        <FocusTrap focusTrapOptions={{ allowOutsideClick: true, fallbackFocus: () => closeButtonRef.current || document.body }}>
         <div
             ref={dialogRef}
             role="dialog"
