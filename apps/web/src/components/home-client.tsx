@@ -149,7 +149,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
     const initialLoadMoreCursor = useMemo(() => getClientImageListCursor(images.at(-1)), [images]);
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 w-full">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex flex-col space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight">
@@ -177,7 +177,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
             {/* F-15: at 2560px the `xl:columns-4` cap leaves ~500px gutters
                 on each side, so add a 5th column at the `2xl` breakpoint
                 (1536px+) to make better use of widescreen real estate. */}
-            <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 space-y-4">
+            <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 w-full">
                 {orderedImages.map((image, index) => {
                     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is
                     // now baked into `getPhotoDisplayTitleFromTagNames` and
@@ -193,7 +193,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                         <div
                             key={image.id}
                             className={cn(
-                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2"
+                                "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 mb-4"
                             )}
                             style={{
                                 aspectRatio: `${image.width} / ${image.height}`,
