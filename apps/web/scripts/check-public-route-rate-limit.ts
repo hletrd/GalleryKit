@@ -130,12 +130,21 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
+    // C12-LOW-01: strip comments for the prefix check so commented-out helper
+    // calls do not falsely satisfy the gate. The exempt-tag check above
+    // intentionally does NOT strip comments because the tag lives in comments.
+    const withoutStringsAndComments = withoutStrings
+        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments /* ... */
+        .replace(/\/\/.*$/gm, '');           // line comments // ...
+
     // Check for any rate-limit helper invocation by name prefix.
     // C3-F02: scan the string-stripped content so a literal containing the
     // helper name does not falsely satisfy the gate.
+    // C12-LOW-01: also scans comment-stripped content so a commented-out
+    // helper call cannot bypass the gate.
     const usesPrefixHelper = RATE_LIMIT_NAME_PREFIXES.some((prefix) => {
         const re = new RegExp(`\\b${prefix}[A-Za-z0-9_]+\\s*\\(`);
-        return re.test(withoutStrings);
+        return re.test(withoutStringsAndComments);
     });
     // C8-F03: ignore commented-out imports so a developer cannot accidentally
     // pass the lint by leaving a disabled import in the file.
