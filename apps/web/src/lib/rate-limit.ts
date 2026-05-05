@@ -296,6 +296,48 @@ export function resetCheckoutRateLimitForTests() {
     checkoutRateLimit.clear();
 }
 
+// ── Semantic search rate-limit helpers ────────────────────────────────
+
+export const SEMANTIC_RATE_LIMIT_MAX = 30;
+export const SEMANTIC_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+export const SEMANTIC_RATE_LIMIT_MAX_KEYS = 2000;
+const semanticRateLimit = createResetAtBoundedMap<string>(SEMANTIC_RATE_LIMIT_MAX_KEYS);
+
+export function pruneSemanticRateLimit(now: number) {
+    semanticRateLimit.prune(now);
+}
+
+/** Pre-increment the semantic search rate-limit counter. Returns `true` when the
+ *  bucket is over the limit AFTER the increment. Callers must invoke
+ *  `rollbackSemanticAttempt(ip)` on every early-return path before expensive work. */
+export function preIncrementSemanticAttempt(ip: string, now: number = Date.now()): boolean {
+    pruneSemanticRateLimit(now);
+    const entry = semanticRateLimit.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        semanticRateLimit.set(ip, { count: 1, resetAt: now + SEMANTIC_RATE_LIMIT_WINDOW_MS });
+    } else {
+        entry.count++;
+    }
+    return (semanticRateLimit.get(ip)?.count ?? 0) > SEMANTIC_RATE_LIMIT_MAX;
+}
+
+/** Roll back a pre-incremented semantic search rate-limit counter. Used when the
+ *  request was rejected before the expensive embedding work ran (e.g.,
+ *  semantic search disabled, invalid body, query too short) — Pattern 2
+ *  (rollback on validation failure) per the docstring at the top of this file. */
+export function rollbackSemanticAttempt(ip: string) {
+    const currentEntry = semanticRateLimit.get(ip);
+    if (currentEntry && currentEntry.count > 1) {
+        currentEntry.count--;
+    } else {
+        semanticRateLimit.delete(ip);
+    }
+}
+
+export function resetSemanticRateLimitForTests(): void {
+    semanticRateLimit.clear();
+}
+
 // ── MySQL-backed persistent rate limiting ──────────────────────────────
 
 /**

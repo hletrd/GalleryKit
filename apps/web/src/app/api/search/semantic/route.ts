@@ -9,6 +9,11 @@
  *   - Scans up to SEMANTIC_SCAN_LIMIT (5000) most-recent embeddings
  *   - Returns top-K image IDs with cosine score above COSINE_THRESHOLD (0.18)
  *
+ * Rate-limit posture: Pattern 2 (rollback on validation failure). The counter
+ * is consumed AFTER cheap validation gates (same-origin, maintenance,
+ * semantic-enabled, body shape, query length) and rolled back on any
+ * early-return path before expensive embedding work begins.
+ *
  * NOTE: The stub encoder produces deterministic but NOT semantically meaningful
  * embeddings. Enable semantic_search_enabled only after running the backfill
  * script and (in a future cycle) replacing the stub with real ONNX inference.
@@ -20,7 +25,10 @@ import { db, imageEmbeddings, images, topics } from '@/db';
 import { desc, eq, and, inArray } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
 import { getClientIp } from '@/lib/rate-limit';
-import { createResetAtBoundedMap } from '@/lib/bounded-map';
+import {
+    preIncrementSemanticAttempt,
+    rollbackSemanticAttempt,
+} from '@/lib/rate-limit';
 import {
     cosineSimilarity,
     bufferToEmbedding,
@@ -37,31 +45,14 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export const dynamic = 'force-dynamic';
 
-// Per-IP rate-limit: 30 requests / minute
-const SEMANTIC_RATE_LIMIT_MAX = 30;
-const SEMANTIC_RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const SEMANTIC_RATE_LIMIT_MAX_KEYS = 2000;
-const semanticRateLimit = createResetAtBoundedMap<string>(SEMANTIC_RATE_LIMIT_MAX_KEYS);
-
-export function checkAndIncrementSemanticRateLimit(ip: string, now: number): boolean {
-    semanticRateLimit.prune(now);
-    const entry = semanticRateLimit.get(ip);
-    if (!entry || entry.resetAt <= now) {
-        semanticRateLimit.set(ip, { count: 1, resetAt: now + SEMANTIC_RATE_LIMIT_WINDOW_MS });
-    } else {
-        entry.count++;
-    }
-    return (semanticRateLimit.get(ip)?.count ?? 0) > SEMANTIC_RATE_LIMIT_MAX;
-}
-
-export function resetSemanticRateLimitForTests(): void {
-    semanticRateLimit.clear();
-}
-
 const NO_STORE_HEADERS = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
     'X-Content-Type-Options': 'nosniff',
 };
+
+/** Maximum acceptable request body size in bytes. Semantic queries are short
+ *  strings (< 200 code points), so a multi-KB body is always malicious. */
+const MAX_SEMANTIC_BODY_BYTES = 8192;
 
 export async function POST(request: NextRequest): Promise<Response> {
     // Same-origin check
@@ -73,28 +64,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Maintenance' }, { status: 503, headers: NO_STORE_HEADERS });
     }
 
-    // Rate-limit
-    const requestHeaders = await headers();
-    const ip = getClientIp(requestHeaders);
-    const now = Date.now();
-    const overLimit = checkAndIncrementSemanticRateLimit(ip, now);
-    if (overLimit) {
+    // Body size guard — reject oversized payloads before parsing
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && Number.parseInt(contentLength, 10) > MAX_SEMANTIC_BODY_BYTES) {
         return NextResponse.json(
-            { error: 'Rate limited' },
-            { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+            { error: 'Request body too large' },
+            { status: 413, headers: NO_STORE_HEADERS },
         );
-    }
-
-    // Check semantic search is enabled
-    let semanticEnabled = false;
-    try {
-        const config = await getGalleryConfig();
-        semanticEnabled = config.semanticSearchEnabled;
-    } catch {
-        // fail closed
-    }
-    if (!semanticEnabled) {
-        return NextResponse.json({ error: 'Semantic search is not enabled' }, { status: 403, headers: NO_STORE_HEADERS });
     }
 
     // Parse body
@@ -121,6 +97,30 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
+    // Check semantic search is enabled
+    let semanticEnabled = false;
+    try {
+        const config = await getGalleryConfig();
+        semanticEnabled = config.semanticSearchEnabled;
+    } catch {
+        // fail closed
+    }
+    if (!semanticEnabled) {
+        return NextResponse.json({ error: 'Semantic search is not enabled' }, { status: 403, headers: NO_STORE_HEADERS });
+    }
+
+    // Rate-limit — consumed AFTER all cheap validation gates (Pattern 2)
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    const now = Date.now();
+    const overLimit = preIncrementSemanticAttempt(ip, now);
+    if (overLimit) {
+        return NextResponse.json(
+            { error: 'Rate limited' },
+            { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+        );
+    }
+
     // Embed query
     const queryEmbedding = embedTextStub(query);
 
@@ -133,6 +133,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             .orderBy(desc(imageEmbeddings.updatedAt))
             .limit(SEMANTIC_SCAN_LIMIT);
     } catch {
+        rollbackSemanticAttempt(ip);
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
