@@ -138,23 +138,20 @@ async function flushGroupViewCounts() {
             viewCountFlushTimer.unref?.();
         }
 
-        // C3-AGG-04: prune stale entries from viewCountRetryCount. Entries
-        // whose group IDs are no longer in the buffer (and are not being
-        // actively re-buffered) are leftover from deleted groups or from
-        // retries that succeeded on a later flush. Pruning prevents
-        // unbounded growth of this Map over time.
+        // C3-AGG-04: When the buffer is empty, all retry entries are stale —
+        // clear the entire Map. This happens after a successful flush where
+        // every group either succeeded or was dropped after max retries.
         if (viewCountRetryCount.size > 0 && viewCountBuffer.size === 0) {
             viewCountRetryCount.clear();
-        }
-        // C5-AGG-02: enforce hard cap on viewCountRetryCount. During a
-        // sustained DB outage where the buffer never empties, the
-        // pruning-at-empty-buffer path above never fires. Evict oldest
-        // entries (FIFO) to keep the Map bounded.
-        // C9-MED-01: collect-then-delete pattern (matching BoundedMap.prune()
-        // and C8-MED-01) for consistency with the project convention. ES6
-        // guarantees Map deletion during for-of iteration is safe, but the
-        // explicit collect-then-delete pattern is clearer for reviewers.
-        if (viewCountRetryCount.size > MAX_VIEW_COUNT_RETRY_SIZE) {
+        } else if (viewCountRetryCount.size > MAX_VIEW_COUNT_RETRY_SIZE) {
+            // C5-AGG-02: enforce hard cap on viewCountRetryCount. During a
+            // sustained DB outage where the buffer never empties, the
+            // pruning-at-empty-buffer path above never fires. Evict oldest
+            // entries (FIFO) to keep the Map bounded.
+            // C9-MED-01: collect-then-delete pattern (matching BoundedMap.prune()
+            // and C8-MED-01) for consistency with the project convention. ES6
+            // guarantees Map deletion during for-of iteration is safe, but the
+            // explicit collect-then-delete pattern is clearer for reviewers.
             const excess = viewCountRetryCount.size - MAX_VIEW_COUNT_RETRY_SIZE;
             const evictKeys: number[] = [];
             for (const key of viewCountRetryCount.keys()) {
@@ -1138,6 +1135,13 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     if (limit <= 0) return [];
     const effectiveLimit = Math.min(Math.max(limit, 1), 100);
 
+    // R2C11-LOW-06: LIKE escaping assumes backslash escape semantics
+    // (standard MySQL default). If the server runs with
+    // NO_BACKSLASH_ESCAPES SQL mode, the escaping below would be weakened
+    // because backslash would no longer be treated as an escape character.
+    // At personal-gallery scale this is an acceptable risk; for
+    // multi-tenant or hardened deployments, consider using parameterized
+    // full-text search or a dedicated search engine instead.
     const escaped = query.trim().replace(/[%_\\]/g, '\\$&');
     const searchTerm = `%${escaped}%`;
 
