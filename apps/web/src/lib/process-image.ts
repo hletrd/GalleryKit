@@ -977,7 +977,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
  * does not leak GPS; only the download-original path remains at risk.
  */
 export async function stripGpsFromOriginal(filePath: string): Promise<void> {
-    const tmpPath = filePath + '.gps-strip.tmp';
+    const tmpPath = filePath + '.gps-strip.' + randomUUID() + '.tmp';
     try {
         // Read orientation from the original so we can preserve it.
         const meta = await sharp(filePath).metadata();
