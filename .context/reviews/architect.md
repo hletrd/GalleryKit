@@ -1,60 +1,40 @@
-# Architect Review — Cycle 21
+# Architectural Review — Cycle 22
 
-## Review Scope
-Architectural/design risks, coupling, layering, and long-term maintainability of new features (semantic search, smart collections) and existing pipelines.
+## Method
+Reviewed layering, coupling, and lifecycle management across the queue, rate-limit, service worker, and semantic search modules.
 
 ## Findings
 
-### C21-ARCH-01: Semantic Search Is Fully Wired but Produces Meaningless Results
-**File**: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/lib/clip-inference.ts`
-**Severity**: High
-**Confidence**: High
+### HIGH
 
-The semantic search feature is architecturally complete (endpoint, schema, embeddings table, backfill action, admin toggle) but the inference layer is a stub that produces deterministic but semantically meaningless embeddings. This creates a "trapdoor" architecture: everything appears to work, but the output is random.
+#### C22-ARCH-01: `decrementRateLimit` violates atomicity expectation
+- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
+- **Cross-reference**: C22-HIGH-01
+- **Issue**: The architecture assumes DB-backed rate limits are the source of truth, but `decrementRateLimit` is not atomic. This breaks the invariant that "the DB is the source of truth" because concurrent operations can lose updates.
+- **Fix**: Use a transaction or single atomic statement.
+- **Confidence**: High
 
-**Risk**: Admins enable the feature expecting it to work. Users see random results. The engineering team may not prioritize replacing the stub because "the feature already works."
-**Fix**: Add an explicit `semantic_search_mode` config with values `'disabled' | 'stub' | 'production'`. Default to `'disabled'`. Only allow `'production'` when a real ONNX model is detected. Make `'stub'` require an explicit opt-in with a warning banner in the admin UI.
+### MEDIUM
 
----
+#### C22-ARCH-02: Bootstrap cleanup responsibility is not single-responsibility
+- **Source**: `apps/web/src/lib/image-queue.ts:576-592`
+- **Issue**: The image processing queue bootstrap function also manages session purging, rate-limit bucket purging, audit log purging, and orphaned tmp file cleanup. These are orthogonal concerns that should be managed by a dedicated lifecycle/scheduler, not entangled with image queue bootstrap.
+- **Fix**: Extract cleanup scheduling into a separate `schedulePeriodicCleanup()` module that runs independently of queue bootstrap.
+- **Confidence**: Medium
 
-### C21-ARCH-02: `quiesceImageProcessingQueueForRestore` Has Race Condition with Active Jobs
-**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
-**Severity**: Medium
-**Confidence**: High
+#### C22-ARCH-03: Semantic search client hardcodes server constant
+- **Source**: `apps/web/src/components/search.tsx:79`, `apps/web/src/lib/clip-embeddings.ts:12`
+- **Issue**: The client component hardcodes `topK: 20` while the server defines `SEMANTIC_TOP_K_DEFAULT = 20`. This creates a fragile coupling where changing the server default requires a parallel client change.
+- **Fix**: Export the constant from a shared module (or derive from an API response).
+- **Confidence**: Medium
 
-The queue quiescence abstraction is broken: it waits for `onPendingZero()` which does NOT include active jobs. This is an architectural mismatch between what "quiesce" means (stop all work) and what the implementation does (stop queued work only).
+### LOW
 
-**Risk**: DB restore can proceed while image processing is actively writing files and DB rows, violating the assumed invariant that quiescence means "nothing is happening."
-**Fix**: Change the abstraction to track active job promises and wait for them. Or rename to `pauseQueueForRestore` and document that active jobs may still complete.
+#### C22-ARCH-04: Service worker version bumps invalidate all caches
+- **Source**: `apps/web/public/sw.js:188-208`
+- **Issue**: Every SW version change purges all image, HTML, and meta caches. For frequent deployments, this means users re-download all cached images even if the images themselves haven't changed.
+- **Mitigation**: The image cache key includes the SW version, which is intentional for cache consistency. However, a more granular approach (content-hash or image-filename based) would allow longer-lived image caching across deployments.
+- **Confidence**: Low — this is a known trade-off for the current architecture.
 
----
-
-### C21-ARCH-03: Smart Collection AST Compiler Uses Raw `sql` for Tag Predicates
-**File**: `apps/web/src/lib/smart-collections.ts` (lines 248-272)
-**Severity**: Low
-**Confidence**: Medium
-
-The tag predicate compiler uses `sql`${images.id} IN (SELECT ...)` with raw SQL template literals. While the table/column references come from Drizzle constants (safe), the overall pattern introduces a raw SQL surface that could drift from the rest of the codebase's pure-Drizzle style.
-
-**Risk**: Future maintenance could introduce unsafe interpolation if a developer modifies the raw SQL without understanding the parameterized boundary.
-**Fix**: Refactor to use Drizzle's subquery builder (`db.select().from(imageTags).$dynamic()`) instead of raw SQL template. Deferred until smart collections are more mature.
-
----
-
-### C21-ARCH-04: Rate Limit Decrement is Not Atomic
-**File**: `apps/web/src/lib/rate-limit.ts` (lines 427-454)
-**Severity**: Low
-**Confidence**: Medium
-
-The UPDATE+DELETE sequence for decrementing rate limits is not architecturally atomic. This violates the principle that rate-limit counters should be monotonically increasing within a window, with decrements being safe.
-
-**Risk**: Under high concurrency, rollback decrements can accidentally delete incremented counts, allowing more requests than intended.
-**Fix**: Use a single atomic statement or stored procedure.
-
----
-
-## No new architectural risks detected in:
-- Image processing pipeline (well-structured, versioned)
-- Auth layer (defense in depth, multiple checks)
-- Data access layer (compile-time privacy guards)
-- Upload pipeline (path traversal prevention, symlink rejection)
+## Final Sweep
+No new layering violations. The queue-shutdown abstraction (queue-shutdown.ts) is clean and properly decoupled. Semantic search is properly gated behind config.

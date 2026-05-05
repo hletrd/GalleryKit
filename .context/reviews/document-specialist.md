@@ -1,49 +1,52 @@
-# Document Specialist Review — Cycle 21
+# Document Specialist Review — Cycle 22
 
 ## Method
 Compared code against inline comments, CLAUDE.md references, and cross-file documentation. Focused on comments that no longer match implementation, stale references, and misleading documentation.
 
 ## Findings
 
-### C21-DOC-01 (LOW): Semantic search endpoint comment understates the stub problem
-**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 17-19)
-**Confidence**: HIGH
+### MEDIUM
 
-The comment says:
+#### C22-DOC-01: `decrementRateLimit` lacks warning about non-atomicity
+- **Source**: `apps/web/src/lib/rate-limit.ts:422-426`
+- **Confidence**: HIGH
+
+The docstring for `decrementRateLimit` says:
 ```
-NOTE: The stub encoder produces deterministic but NOT semantically meaningful
-embeddings. Enable semantic_search_enabled only after running the backfill
-script and (in a future cycle) replacing the stub with real ONNX inference.
+Unlike resetRateLimit (which deletes the whole entry), this atomically
+reduces the count by 1 so concurrent rollbacks don't lose counts.
 ```
 
-This is accurate but understated. The problem is not just that embeddings are "not semantically meaningful" — it is that the entire endpoint returns RANDOM results that look legitimate. A developer skimming the comment might think "ok, results won't be great" rather than "results are completely unrelated to the query."
+This is misleading. The function is NOT atomic — the UPDATE and DELETE are separate statements. The comment claims atomicity, which is false.
 
-**Fix**: Change comment to: "WARNING: The stub encoder returns RANDOM results. Do NOT enable semantic_search_enabled in production until the stub is replaced with real ONNX inference."
+**Fix**: Update the comment to accurately describe the behavior, or fix the function to be atomic and keep the comment.
 
 ---
 
-### C21-DOC-02 (LOW): `quiesceImageProcessingQueueForRestore` name contradicts behavior
-**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
-**Confidence**: HIGH
+#### C22-DOC-02: `clip-inference.ts` TODO remains untracked
+- **Source**: `apps/web/src/lib/clip-inference.ts:9-13`
+- **Confidence**: MEDIUM
 
-The function name "quiesce" implies bringing to a complete stop. The implementation does not wait for active jobs. This is a documentation/semantics mismatch that could confuse operators reading logs or admin documentation.
+The TODO comment references deferred work (ONNX inference, model download) but there is still no ticket reference or GitHub issue after multiple cycles.
 
-**Fix**: Rename to `pauseQueueForRestore` or add a docstring explaining that active jobs may still complete.
+**Fix**: Add a cycle reference or ticket ID to the TODO.
 
 ---
 
-### C21-DOC-03 (LOW): `clip-inference.ts` TODO is not tracked
-**File**: `apps/web/src/lib/clip-inference.ts` (lines 9-13)
-**Confidence**: MEDIUM
+### LOW
 
-The TODO comment references deferred work (ONNX inference, model download) but there is no ticket reference or GitHub issue. In a project with many cycles, untracked TODOs are often forgotten.
+#### C22-DOC-03: `caption-generator.ts` stub note could be more prominent
+- **Source**: `apps/web/src/lib/caption-generator.ts:1-18`
+- **Confidence**: LOW
 
-**Fix**: Create a tracking issue or add a ticket ID to the TODO.
+The module header clearly documents that this is a stub, but the exported function name (`generateCaption`) and its return value do not indicate stub-ness. A developer using autocomplete would not know the captions are EXIF-derived placeholders.
+
+**Fix**: No code change needed; documentation is clear in the header.
 
 ---
 
 ## Documentation confirmed accurate
-- Rate-limit pattern docstring in `rate-limit.ts`: Accurate.
+- Rate-limit pattern docstring in `rate-limit.ts`: Accurate (except C22-DOC-01).
 - CLAUDE.md "Security Architecture" section: Matches implementation.
-- `process-image.ts` ICC profile resolution matrix: Matches implementation.
-- Privacy field comments in `data.ts`: Correct.
+- Semantic search route comments: Accurate and appropriately emphatic.
+- `queue-shutdown.ts` abstraction: Clean, well-documented.

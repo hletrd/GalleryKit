@@ -1,62 +1,67 @@
-# Critic Review — Cycle 21
+# Critic Review — Cycle 22
 
 ## Method
 Multi-perspective critique: (1) whether prior fixes introduced regressions, (2) whether defensive patterns are consistently applied, (3) whether comments and code tell the same story, (4) edge case symmetry across similar functions.
 
+## Verified Prior Fixes
+- C21-CT-01 (semantic stub): FIXED — semantic_search_mode now requires explicit opt-in
+- C21-CT-02 (quiesce naming): FIXED — now uses `onIdle` (semantically correct)
+- C21-CT-03 (chunked encoding): FIXED — body read as text with cap
+- C21-CT-04 (backfill guards): PARTIALLY FIXED — auth added, rate limiting still missing
+
 ## Findings
 
-### C21-CT-01 (HIGH): Semantic Search Is a "Working" Feature That Does Not Work
-**File**: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/lib/clip-inference.ts`
-**Confidence**: HIGH
-**Cross-file agreement**: C21-HIGH-01 (code-reviewer), C21-SEC-04 (security), C21-ARCH-01 (architect)
+### HIGH
 
-The semantic search feature is architecturally complete and fully wired. It has an admin toggle, a public API endpoint, result enrichment, rate limiting, and a backfill script. But the actual embeddings are SHA-256 hashes of strings — mathematically valid cosine similarity scores on completely random vectors. This is worse than a broken feature: it is a feature that appears to work but produces nonsense. From a product perspective, this damages user trust more than a 503 error would.
+#### C22-CT-01: `decrementRateLimit` Race Is a Defensive Pattern Gap
+- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
+- **Confidence**: HIGH
+- **Cross-file agreement**: C22-HIGH-01 (code-reviewer), C22-SEC-01 (security), C22-ARCH-01 (architect), C22-DEBUG-01 (debugger)
 
-**Critique**: The codebase values correctness and explicitness everywhere else (compile-time privacy guards, TOCTOU fixes, race-condition protections). The semantic search stub breaks that pattern by silently shipping randomness. The comment at the top of `semantic/route.ts` says "NOTE: The stub encoder produces deterministic but NOT semantically meaningful embeddings" — but comments are not user-facing warnings.
+The codebase is otherwise meticulous about atomicity: advisory locks for restores, `INSERT IGNORE` for session secrets, `onDuplicateKeyUpdate` for rate-limit increments, transactions for topic slug renames. But `decrementRateLimit` breaks this pattern with a non-atomic UPDATE+DELETE. This asymmetry is surprising and error-prone.
 
-**Fix**: Make the stub mode require explicit opt-in. Return 503 or show a warning banner when semantic search is enabled but no real model is present.
+**Critique**: A developer adding a new rate-limit type would reasonably copy `decrementRateLimit` as a reference. They would inherit the race condition. The pattern is not marked with a warning comment.
 
----
-
-### C21-CT-02 (MEDIUM): Queue Quiescence Does Not Mean What It Says
-**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
-**Confidence**: HIGH
-**Cross-file agreement**: C21-MED-02 (code-reviewer), C21-ARCH-02 (architect)
-
-The function is named `quiesceImageProcessingQueueForRestore`. "Quiesce" means to bring to a state of rest. But the implementation only waits for the pending queue to empty, not for active jobs to finish. This is a naming/semantics mismatch that creates a false sense of safety.
-
-**Critique**: The restore flow assumes quiescence means "safe to restore." If an admin initiates restore after quiescence returns, they believe the system is idle. An active Sharp job could be mid-write to the filesystem or mid-UPDATE to the database.
-
-**Fix**: Rename to `pauseQueueForRestore` (accurate) or fix to wait for active jobs.
+**Fix**: Add atomicity or a prominent TODO comment warning about the race.
 
 ---
 
-### C21-CT-03 (MEDIUM): Body Size Guard Is Patterned Incorrectly for HTTP/1.1
-**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 74-90)
-**Confidence**: HIGH
-**Cross-file agreement**: C21-MED-01 (code-reviewer), C21-SEC-01 (security)
+#### C22-CT-02: SW HTML Cache Is the Only Uncapped Cache
+- **Source**: `apps/web/public/sw.js`
+- **Confidence**: HIGH
+- **Cross-file agreement**: C22-HIGH-02 (code-reviewer), C22-PERF-02 (perf-reviewer)
 
-The body size guard only checks `Content-Length`. In HTTP/1.1, chunked transfer encoding is common and does not include Content-Length. A body-size guard that only checks Content-Length is incomplete by design.
+IMAGE_CACHE has 50MB LRU + metadata tracking. META_CACHE is tiny (one JSON blob). HTML_CACHE has no cap at all. The asymmetry is striking: the team carefully designed LRU eviction for images but left HTML completely unbounded.
 
-**Critique**: The codebase is otherwise thorough about edge cases (NO_BACKSLASH_ESCAPES noted in search, IPv6 bracket parsing in rate-limit, etc.). The chunked-encoding gap stands out as an incomplete pattern.
-
-**Fix**: Add chunked-encoding awareness to the guard.
+**Critique**: This looks like an oversight, not a deliberate design choice. The fix is straightforward (add entry-count LRU) and should mirror the image cache pattern.
 
 ---
 
-### C21-CT-04 (LOW): `backfillClipEmbeddings` Has No Operational Guardrails
-**File**: `apps/web/src/app/actions/embeddings.ts`
-**Confidence**: MEDIUM
-**Cross-file agreement**: C21-LOW-03 (code-reviewer), C21-SEC-03 (security)
+### MEDIUM
 
-A backfill operation that processes 5000 images with no rate limiting, no progress reporting, and no continuation token is operationally risky. If it fails at image 4999, the next call starts from the beginning.
+#### C22-CT-03: Bootstrap Cleanup Is Not Idempotent in Intent
+- **Source**: `apps/web/src/lib/image-queue.ts:583-585`
+- **Confidence**: MEDIUM
+- **Cross-file agreement**: C22-MED-02 (code-reviewer), C22-PERF-01 (perf-reviewer)
 
-**Critique**: The backfill is idempotent (stub embeddings are deterministic, ON DUPLICATE KEY UPDATE handles re-runs), but it is inefficient. At gallery scale this is fine; at larger scale it is wasteful.
+The cleanup functions are idempotent in effect (deleting expired rows twice is harmless), but they are not idempotent in cost. Running `purgeExpiredSessions` (which may scan a large sessions table) on every bootstrap during a recovery loop is wasteful. The intent of bootstrap is to discover pending images, not to run garbage collection.
 
-**Fix**: Add a `processed_up_to_id` tracking parameter or rate limit.
+**Fix**: Move cleanup out of bootstrap entirely, or gate it with a "hasRunThisHour" flag.
+
+---
+
+### LOW
+
+#### C22-CT-04: Semantic Search Client Constant Duplication
+- **Source**: `apps/web/src/components/search.tsx:79`, `apps/web/src/lib/clip-embeddings.ts:12`
+- **Confidence**: MEDIUM
+
+Hardcoding `topK: 20` in the client while the server exports `SEMANTIC_TOP_K_DEFAULT = 20` violates the DRY principle. If the server default is tuned (e.g., lowered to 10 for performance), the client will silently continue requesting 20.
+
+**Fix**: Share the constant through a client-safe module.
 
 ---
 
 ## No regressions from prior fixes detected
-- All cycle-20 fixes are clean.
-- No new patterns of the broken `require.main === module` form were found.
+- All cycle-21 fixes are clean.
+- No new patterns of incomplete HTTP guards were found.

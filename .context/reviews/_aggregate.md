@@ -1,17 +1,18 @@
-# Aggregate Review — Cycle 21
+# Aggregate Review — Cycle 22
 
 ## Review method
-Direct deep review of all source files by a single agent with multi-perspective analysis. All key modules examined: rate-limit, image-queue, data, semantic search, smart collections, service worker, OG image generation, checkout, Stripe webhook, auth, upload pipeline, and recently changed files.
+Direct deep review of all source files by a single agent with multi-perspective analysis. Focused on verifying cycle-21 fix status and finding new issues in recently changed code (semantic search, image queue, service worker, settings, navigation).
 
-## Verified prior fixes (from cycle 19)
+## Verified prior fixes (from cycle 21)
 
 | ID | Status | Notes |
 |----|--------|-------|
-| C19-AGG-01 (ESM entry-point detection) | FIXED | `typeof require !== 'undefined'` guard reordered in cycle 20. |
-| C19-AGG-02 (misplaced cache() comment) | FIXED | Comment moved to `getSharedGroupCached` in cycle 20. |
-| C19-AGG-03 (regex suffix optional) | FIXED | `[A-Za-z0-9_]+` changed to `[A-Za-z0-9_]*` in cycle 20. |
-| C19-AGG-04 (semantic fallback unfiltered) | FIXED | Fallback now returns empty results in cycle 20. |
-| C19-AGG-05 (sw.js build script comment) | FIXED | Comment updated in cycle 20. |
+| C21-AGG-01 (semantic stub) | FIXED | `semantic_search_mode` enum added; endpoint rejects non-production |
+| C21-AGG-02 (chunked encoding) | FIXED | Body read as text with cap; chunked encoding rejected |
+| C21-AGG-03 (quiesce onIdle) | FIXED | `image-queue.ts:609` uses `onIdle` |
+| C21-AGG-07 (OG photo buffer) | FIXED | `route.tsx:96-100` post-fetch buffer length check |
+| C21-AGG-09 (Content-Type) | FIXED | `route.ts:75-78` validates Content-Type |
+| C21-AGG-10 (comment) | FIXED | Comment now reads "returns RANDOM results" |
 
 ---
 
@@ -19,102 +20,90 @@ Direct deep review of all source files by a single agent with multi-perspective 
 
 ### HIGH severity
 
-#### C21-AGG-01: Semantic search is fully wired but returns random results
+#### C22-AGG-01: Race condition in `decrementRateLimit` UPDATE+DELETE sequence (carry-over C21-AGG-04)
 
-- **Source**: `apps/web/src/app/api/search/semantic/route.ts:141-147`, `apps/web/src/lib/clip-inference.ts`
-- **Cross-agent agreement**: C21-HIGH-01 (code-reviewer), C21-SEC-04 (security), C21-ARCH-01 (architect), C21-CT-01 (critic), C21-DEBUG-01 (debugger) — 5 agents agree
-- **Issue**: The semantic search endpoint is fully operational (admin toggle, public API, result enrichment, rate limiting, backfill script). However, `embedTextStub` and `embedImageStub` produce deterministic SHA-256-based embeddings with NO semantic meaning. Cosine similarity scores are mathematically valid but random. An admin enabling the feature sees apparently-working search results that are completely unrelated to queries.
-- **Failure scenario**: Admin enables semantic search. Users submit queries like "sunset beach" and receive random photos of buildings, portraits, or documents. The scores look legitimate (0.2-0.9 range). Users lose trust in the search feature and file support tickets about "bad search quality" rather than recognizing the feature is non-functional.
-- **Fix**: Add a `semantic_search_mode` config (`disabled` | `stub` | `production`). Default to `disabled`. Only allow `production` when a real ONNX model is detected. Make `stub` require explicit opt-in with a warning banner.
+- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
+- **Cross-agent agreement**: C22-HIGH-01 (code-reviewer), C22-SEC-01 (security), C22-ARCH-01 (architect), C22-CT-01 (critic), C22-DEBUG-01 (debugger) — 5 agents agree
+- **Issue**: Between UPDATE (sets count=0) and DELETE (removes row), a concurrent `incrementRateLimit` can set count=1 via `onDuplicateKeyUpdate`. The DELETE then removes the row, losing the increment. This undermines the DB-as-source-of-truth invariant for rate limiting.
+- **Failure scenario**: High-concurrency rollback + new request on same IP/window. Rate limit counter undercounts, allowing more requests than configured. Weakens brute-force protection.
+- **Fix**: Wrap UPDATE+DELETE in a transaction, or replace with a single atomic DELETE that includes the decrement condition.
+- **Confidence**: High
+
+#### C22-AGG-02: Service Worker HTML cache has no size limit or eviction
+
+- **Source**: `apps/web/public/sw.js:143-178`
+- **Cross-agent agreement**: C22-HIGH-02 (code-reviewer), C22-PERF-02 (perf-reviewer), C22-CT-02 (critic) — 3 agents agree
+- **Issue**: HTML_CACHE stores every visited HTML page with no entry-count cap. Only time-based eviction (24h). Unlike IMAGE_CACHE which has 50MB LRU, HTML cache grows indefinitely within a version. A user browsing many pages could accumulate a large cache, potentially triggering browser quota eviction that also wipes the image cache.
+- **Fix**: Add LRU eviction with conservative cap (e.g., 50 entries or 5MB), mirroring the image cache pattern.
 - **Confidence**: High
 
 ---
 
 ### MEDIUM severity
 
-#### C21-AGG-02: Chunked transfer encoding bypasses semantic search body size guard
+#### C22-AGG-03: `backfillClipEmbeddings` lacks rate limiting (carry-over C21-AGG-06)
 
-- **Source**: `apps/web/src/app/api/search/semantic/route.ts:74-90`
-- **Cross-agent agreement**: C21-MED-01 (code-reviewer), C21-SEC-01 (security), C21-CT-03 (critic) — 3 agents agree
-- **Issue**: The body size guard only checks `Content-Length`. When `Transfer-Encoding: chunked` is used (no Content-Length), the guard is bypassed and `request.json()` buffers an unbounded stream.
-- **Failure scenario**: Attacker sends chunked POST with multi-megabyte JSON body. Server buffers it into memory before JSON parsing fails. DoS via memory exhaustion.
-- **Fix**: Read body as text with explicit length cap: `const text = await request.text(); if (text.length > MAX_SEMANTIC_BODY_BYTES) return 413;` then `JSON.parse(text)`.
+- **Source**: `apps/web/src/app/actions/embeddings.ts:26-89`
+- **Cross-agent agreement**: C22-MED-01 (code-reviewer), C22-SEC-03 (security), C22-CT-04 (critic) — 3 agents agree
+- **Issue**: While `isAdmin()` and `requireSameOriginAdmin()` were added in cycle 21, the action itself has no invocation rate limiting. An admin (or compromised admin session) can invoke it repeatedly, causing up to 5000 embed operations per call. Creates sustained CPU (SHA-256) and DB write pressure.
+- **Fix**: Add a per-admin or global rate limit (e.g., once per hour) using existing in-memory Maps or DB-backed buckets.
 - **Confidence**: High
 
-#### C21-AGG-03: `quiesceImageProcessingQueueForRestore` does not wait for active jobs
+#### C22-AGG-04: Bootstrap cleanup tasks run synchronously on every bootstrap call
 
-- **Source**: `apps/web/src/lib/image-queue.ts:604-625`
-- **Cross-agent agreement**: C21-MED-02 (code-reviewer), C21-ARCH-02 (architect), C21-CT-02 (critic), C21-DEBUG-02 (debugger) — 4 agents agree
-- **Issue**: The function waits for `queue.onPendingZero()` which only tracks queued (not active) jobs. An actively running Sharp processing job can continue while restore proceeds.
-- **Failure scenario**: Admin initiates DB restore. Quiescence returns immediately because no jobs are queued (one is actively running). Restore drops tables. Active job finishes and tries to UPDATE the now-restored `images` table or write files, causing corruption.
-- **Fix**: Use `await queue.onIdle()` if p-queue supports it, or track active job promises and await them.
-- **Confidence**: High
+- **Source**: `apps/web/src/lib/image-queue.ts:583-585`
+- **Cross-agent agreement**: C22-MED-02 (code-reviewer), C22-PERF-01 (perf-reviewer), C22-CT-03 (critic), C22-DEBUG-03 (debugger) — 4 agents agree
+- **Issue**: `purgeExpiredSessions`, `purgeOldBuckets`, and `purgeOldAuditLog` execute synchronously on every `bootstrapImageProcessingQueue` call. During active processing with many batches, bootstrap runs repeatedly (every 500 images + continuation). The cleanup functions are idempotent in effect but generate unnecessary DB load. The hourly `gcInterval` (lines 587-592) already handles periodic cleanup.
+- **Failure scenario**: During DB recovery, bootstrap retries every 30 seconds. Cleanup runs each time, amplifying load on a recovering system.
+- **Fix**: Gate synchronous cleanup to run only once per process lifetime, or only on the first bootstrap.
+- **Confidence**: Medium
 
-#### C21-AGG-04: Race condition in `decrementRateLimit` UPDATE+DELETE sequence
+#### C22-AGG-05: Semantic search client hardcodes `topK: 20`
 
-- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
-- **Cross-agent agreement**: C21-MED-03 (code-reviewer), C21-SEC-02 (security), C21-ARCH-04 (architect), C21-DEBUG-03 (debugger) — 4 agents agree
-- **Issue**: Between UPDATE (sets count=0) and DELETE (removes row), a concurrent `incrementRateLimit` can set count=1. The DELETE then removes the row, losing the increment.
-- **Failure scenario**: High-concurrency rollback + new request on same IP/window. Rate limit counter undercounts, allowing more requests than configured.
-- **Fix**: Wrap UPDATE+DELETE in a transaction, or use a single atomic operation.
+- **Source**: `apps/web/src/components/search.tsx:79`
+- **Cross-agent agreement**: C22-MED-03 (code-reviewer), C22-ARCH-03 (architect), C22-CT-04 (critic) — 3 agents agree
+- **Issue**: The search component hardcodes `topK: 20` instead of using the shared `SEMANTIC_TOP_K_DEFAULT` constant from `clip-embeddings.ts`. If the server-side default changes, the client and server will silently disagree.
+- **Fix**: Import `SEMANTIC_TOP_K_DEFAULT` and use it.
 - **Confidence**: Medium
 
 ---
 
 ### LOW severity
 
-#### C21-AGG-05: Service worker HTML cache has no size limit or eviction
+#### C22-AGG-06: Semantic search settings UI allows `production` without ONNX validation
 
-- **Source**: `apps/web/src/public/sw.js:18,143-178`
-- **Cross-agent agreement**: C21-LOW-01 (code-reviewer), C21-PERF-01 (perf-reviewer), C21-DEBUG-04 (debugger)
-- **Issue**: HTML_CACHE stores every visited page with no eviction. Unlike IMAGE_CACHE (50MB LRU), HTML cache grows indefinitely within a version.
-- **Fix**: Add LRU eviction policy with conservative cap (e.g., 5MB or 50 entries).
+- **Source**: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:274-286`
+- **Issue**: The admin dropdown allows setting `semantic_search_mode` to `production` with no validation that a real ONNX model is installed. An admin can accidentally enable the feature, causing the public endpoint to serve semantically meaningless results to users.
+- **Fix**: Add a warning in the admin UI or validate on save that `production` requires model presence.
+- **Confidence**: Medium
+
+#### C22-AGG-07: SW HTML cache can cache logged-in state
+
+- **Source**: `apps/web/public/sw.js:233-235`
+- **Cross-agent agreement**: C22-SEC-02 (security), C22-DEBUG-02 (debugger) — 2 agents agree
+- **Issue**: The SW caches HTML responses without checking for auth cookies. If an admin browses public pages while logged in, cached HTML includes authenticated nav state. A subsequent anonymous visitor on the same device receives the logged-in HTML, leaking the existence of an admin session.
+- **Fix**: Bypass cache for requests with `admin_session` cookie, or add `Vary: Cookie` handling.
+- **Confidence**: Medium
+
+#### C22-AGG-08: Caption stub may mislead admins
+
+- **Source**: `apps/web/src/lib/caption-generator.ts:32-38`
+- **Issue**: The stub returns EXIF-derived strings like "Photo taken with Canon EOS R5" that look like AI-generated captions. Admins may not realize these are placeholders.
+- **Fix**: Prefix stub captions with `[AUTO]` or similar marker.
+- **Confidence**: Low
+
+#### C22-AGG-09: `decrementRateLimit` docstring falsely claims atomicity
+
+- **Source**: `apps/web/src/lib/rate-limit.ts:422-426`
+- **Cross-agent agreement**: C22-DOC-01 (document-specialist)
+- **Issue**: The docstring says "this atomically reduces the count" but the implementation is non-atomic. Misleading documentation.
+- **Fix**: Update comment to match behavior, or make the function atomic.
 - **Confidence**: High
-
-#### C21-AGG-06: `backfillClipEmbeddings` lacks rate limiting
-
-- **Source**: `apps/web/src/app/actions/embeddings.ts`
-- **Cross-agent agreement**: C21-LOW-03 (code-reviewer), C21-SEC-03 (security), C21-CT-04 (critic)
-- **Issue**: Admin-only action processes up to 5000 images with no rate limiting. Repeated invocation causes CPU and DB pressure.
-- **Fix**: Add per-admin rate limit (e.g., once per hour) or global semaphore.
-- **Confidence**: Medium
-
-#### C21-AGG-07: OG photo route buffer size guard bypassable via chunked encoding
-
-- **Source**: `apps/web/src/app/api/og/photo/[id]/route.tsx:91-100`
-- **Cross-agent agreement**: C21-LOW-06 (code-reviewer), C21-SEC-05 (security), C21-DEBUG-04 (debugger)
-- **Issue**: Internal fetch size guard relies on Content-Length. With chunked encoding, `arrayBuffer()` buffers full response unchecked.
-- **Fix**: Add post-fetch buffer size validation: `if (photoBuffer.length > OG_PHOTO_MAX_BYTES) return fallback`.
-- **Confidence**: Medium
-
-#### C21-AGG-08: Bootstrap cleanup tasks run repeatedly
-
-- **Source**: `apps/web/src/lib/image-queue.ts:576-592`
-- **Cross-agent agreement**: C21-LOW-05 (code-reviewer), C21-PERF-02 (perf-reviewer), C21-DEBUG-05 (debugger)
-- **Issue**: `purgeExpiredSessions` and `purgeOldAuditLog` run on every bootstrap call. Bootstrap triggered on startup, after failed jobs, and after queue drains.
-- **Fix**: Gate cleanup to run at most once per process lifetime or per hour.
-- **Confidence**: Low
-
-#### C21-AGG-09: Semantic search accepts any Content-Type
-
-- **Source**: `apps/web/src/app/api/search/semantic/route.ts:64-109`
-- **Cross-agent agreement**: C21-LOW-04 (code-reviewer)
-- **Issue**: Endpoint does not validate `Content-Type: application/json`.
-- **Fix**: Add `if (!request.headers.get('content-type')?.includes('application/json')) return 400`.
-- **Confidence**: Low
-
-#### C21-AGG-10: Semantic search endpoint comment understates stub randomness
-
-- **Source**: `apps/web/src/app/api/search/semantic/route.ts:17-19`
-- **Cross-agent agreement**: C21-DOC-01 (document-specialist)
-- **Issue**: Comment says "not semantically meaningful" but should say "returns RANDOM results".
-- **Fix**: Update comment to be more emphatic.
-- **Confidence**: Low
 
 ---
 
 ## No new regressions detected
-- All cycle-20 fixes are clean and stable.
+- All cycle-21 fixes are clean and stable.
 - No new failure modes introduced by recent commits.
 
 ## Carry-forward (unchanged — existing deferred backlog)

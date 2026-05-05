@@ -1,81 +1,48 @@
-# Security Review — Cycle 21
+# Security Review — Cycle 22
 
-## Review Scope
-OWASP Top 10, auth/authz, secrets, unsafe patterns, injection risks, and data leakage paths. Focused on recently modified security-critical code.
+## Method
+Reviewed auth flows, rate-limit implementations, service worker caching, semantic search surface, and admin settings mutations. Focus on OWASP Top 10 and data leakage.
+
+## Verified Prior Fixes
+- C21-AGG-02 (chunked encoding bypass): FIXED — body read as text with explicit cap
+- C21-AGG-04 (decrementRateLimit race): STILL OPEN — see C22-HIGH-01
+- C21-AGG-06 (backfill rate limit): PARTIALLY FIXED — auth added, rate limit still missing
+- C21-AGG-07 (OG buffer guard): FIXED — post-fetch buffer length validation
 
 ## Findings
 
-### C21-SEC-01: Semantic Search Body Size Guard Bypass via Chunked Encoding
-**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 74-90)
-**Severity**: Medium
-**Confidence**: High
-**OWASP**: A05:2021 - Security Misconfiguration
+### HIGH
 
-The `Content-Length`-based body size guard is bypassed when `Transfer-Encoding: chunked` is used. An attacker can send an arbitrarily large chunked request body that gets buffered before JSON parsing fails.
+#### C22-SEC-01: Rate-limit decrement race allows undercounting
+- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
+- **Cross-reference**: C22-HIGH-01 (code-reviewer)
+- **Issue**: The UPDATE+DELETE sequence in `decrementRateLimit` is non-atomic. A concurrent `incrementRateLimit` (which uses `onDuplicateKeyUpdate`) can interleave between UPDATE and DELETE, causing the incremented value to be lost. This weakens brute-force protection.
+- **Attack scenario**: Attacker triggers rapid login attempts from multiple connections. Concurrent rollback of rate-limit counters (e.g., from legitimate users retrying after a transient error) interleaves with new increments, causing the bucket to undercount and allowing more attempts than configured.
+- **Fix**: Wrap in transaction or use single atomic operation.
+- **Confidence**: High
 
-**Impact**: Memory exhaustion / DoS on the semantic search endpoint.
-**Fix**: Add chunked encoding rejection OR read body as text with explicit length cap before JSON.parse.
+#### C22-SEC-02: SW HTML cache stores admin responses if admin browses while logged in
+- **Source**: `apps/web/public/sw.js:224-237`
+- **Issue**: The fetch handler returns early for admin routes (`isAdminRoute`), but this only applies to `/admin/*` and `/api/admin/*`. If an admin browses public pages while logged in, those HTML responses (which may contain user-specific admin state in JS hydration or CSRF tokens) are cached. The next visitor (different user, same device/browser) could receive cached HTML with stale admin-specific state.
+- **Note**: Next.js App Router renders HTML on the server; logged-in vs anonymous HTML may differ (e.g., nav state). The SW caches the logged-in version.
+- **Fix**: Add `Cache-Control: no-store` to admin-session-specific HTML responses, or bypass cache for requests with `admin_session` cookie.
+- **Confidence**: Medium
 
----
+### MEDIUM
 
-### C21-SEC-02: `decrementRateLimit` Race Condition Allows Count Manipulation
-**File**: `apps/web/src/lib/rate-limit.ts` (lines 427-454)
-**Severity**: Low
-**Confidence**: Medium
-**OWASP**: A01:2021 - Broken Access Control
+#### C22-SEC-03: `backfillClipEmbeddings` lacks invocation rate limiting
+- **Source**: `apps/web/src/app/actions/embeddings.ts:26-89`
+- **Cross-reference**: C22-MED-01 (code-reviewer)
+- **Issue**: No rate limiting on an admin action that processes up to 5000 images. A compromised admin session can repeatedly invoke this to exhaust CPU and DB resources.
+- **Fix**: Add per-admin invocation rate limit.
+- **Confidence**: High
 
-The non-atomic UPDATE+DELETE sequence in `decrementRateLimit` creates a window where concurrent `incrementRateLimit` calls can have their counts silently deleted. In high-concurrency scenarios, this could allow more requests through than the configured limit.
+### LOW
 
-**Impact**: Rate limit bypass under high concurrency.
-**Fix**: Wrap in a transaction or use a single atomic operation.
+#### C22-SEC-04: Semantic search enrichment query returns `camera_model`
+- **Source**: `apps/web/src/app/api/search/semantic/route.ts:216-226`
+- **Issue**: The enrichment query selects `camera_model` which is EXIF-derived data. While consistent with regular search (which also returns this), it slightly expands the PII surface of the semantic endpoint. No regression from existing behavior.
+- **Confidence**: Low
 
----
-
-### C21-SEC-03: `backfillClipEmbeddings` Lacks Rate Limiting
-**File**: `apps/web/src/app/actions/embeddings.ts`
-**Severity**: Low
-**Confidence**: High
-**OWASP**: A05:2021 - Security Misconfiguration
-
-Admin-only action with no rate limiting. Processing 5000 images involves significant CPU (SHA-256 hashing) and DB writes. Repeated invocation could degrade service.
-
-**Impact**: DoS via admin action repetition.
-**Fix**: Add per-admin or global rate limiting.
-
----
-
-### C21-SEC-04: Semantic Search Stub Returns Random Results That Appear Legitimate
-**File**: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/lib/clip-inference.ts`
-**Severity**: Low
-**Confidence**: High
-**OWASP**: A07:2021 - Identification and Authentication Failures (trust boundary)
-
-The semantic search endpoint returns structured, enriched results with cosine similarity scores that appear mathematically valid but are semantically meaningless. An admin enabling this feature may not realize it produces random results, leading to confused users and potential data leakage (random photos shown for sensitive queries).
-
-**Impact**: Loss of user trust; potential inappropriate content exposure.
-**Fix**: Add explicit stub-mode warning or require real ONNX model before enabling.
-
----
-
-### C21-SEC-05: OG Photo Route Internal Fetch Without Size Cap on Chunked Responses
-**File**: `apps/web/src/app/api/og/photo/[id]/route.tsx` (lines 86-100)
-**Severity**: Low
-**Confidence**: Medium
-**OWASP**: A05:2021 - Security Misconfiguration
-
-The internal fetch for JPEG derivatives relies on `Content-Length` for size guarding. With chunked responses, the `arrayBuffer()` call buffers the full response unchecked. While the origin is same-origin (internal `/uploads/jpeg`), a misconfiguration or symlink attack could cause an unexpectedly large response.
-
-**Impact**: Memory pressure from large response buffering.
-**Fix**: Add post-fetch buffer size validation.
-
----
-
-## No-Security-Finding Confirmation
-The following areas were reviewed and found adequately protected:
-- Auth flows (Argon2, session rotation, same-origin guards)
-- Upload path traversal prevention (SAFE_SEGMENT, symlink rejection)
-- SQL injection (Drizzle parameterization throughout)
-- XSS (output encoding, CSP headers)
-- PII leakage (publicSelectFields compile-time guards)
-- Stripe webhook signature verification
-- Admin token hashing
+## Final Sweep
+No new SQL injection surfaces. No new path traversal. No secrets in code. Same-origin guards intact. Session security unchanged.

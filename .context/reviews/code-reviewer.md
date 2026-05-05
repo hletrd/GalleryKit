@@ -1,130 +1,69 @@
-# Code Review — Cycle 21
+# Code Review — Cycle 22
 
-## Review Scope
-Full repository review focused on code quality, logic correctness, edge cases, and maintainability. Examined recent changes (last 20 commits) and critical paths.
+## Method
+Systematic review of all files changed since cycle 21 and targeted deep-dive into open cycle-21 findings. Verified fix status of each prior finding against HEAD.
+
+## Verified Prior Fixes (Cycle 21)
+
+| ID | Status | Evidence |
+|----|--------|----------|
+| C21-AGG-01 (semantic stub) | FIXED | `semantic_search_mode` enum in gallery-config-shared.ts; route rejects non-production |
+| C21-AGG-02 (chunked encoding) | FIXED | `route.ts:81-84` rejects chunked; `route.ts:105-116` reads body as text with cap |
+| C21-AGG-03 (quiesce onIdle) | FIXED | `image-queue.ts:609` uses `onIdle` |
+| C21-AGG-07 (OG photo buffer) | FIXED | `route.tsx:96-100` post-fetch buffer length check |
+| C21-AGG-09 (Content-Type) | FIXED | `route.ts:75-78` validates Content-Type |
+| C21-AGG-10 (comment) | FIXED | Comment now reads "returns RANDOM results" |
 
 ## Findings
 
-### C21-HIGH-01: Semantic Search Returns Deterministic but Meaningless Results
-**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 141-147)
-**Confidence**: High
+### HIGH
 
-The semantic search endpoint is fully wired and production-ready from an API perspective, but the underlying `embedTextStub` and `embedImageStub` functions in `clip-inference.ts` produce deterministic SHA-256-based embeddings that carry NO semantic meaning. The cosine similarity between a query and image embedding is essentially random.
+#### C22-HIGH-01: `decrementRateLimit` UPDATE+DELETE race condition (carry-over C21-AGG-04)
+- **Source**: `apps/web/src/lib/rate-limit.ts:427-454`
+- **Issue**: `decrementRateLimit` runs UPDATE then DELETE as two separate SQL statements. Between them, a concurrent `incrementRateLimit` can set count=1 via its atomic `onDuplicateKeyUpdate`. The subsequent DELETE then removes the row, losing the increment. This undercounts rate-limit usage.
+- **Fix**: Wrap UPDATE+DELETE in a single transaction, or replace with a single conditional DELETE (`DELETE ... WHERE count <= 1` before decrement, or use `DELETE ... WHERE count <= 0` after a single UPDATE that sets count=count-1).
+- **Confidence**: High
 
-**Problem**: The `semantic_search_enabled` admin toggle exists, and the endpoint responds with structured results that LOOK correct (image IDs, scores, metadata enrichment). An admin who enables this feature will see "results" but they are random. The only hint is a code comment and the stub implementation docs.
+#### C22-HIGH-02: Service Worker HTML cache has no entry count limit
+- **Source**: `apps/web/public/sw.js:143-178`
+- **Issue**: `networkFirstHtml` stores every visited HTML page with no entry-count cap. Only time-based eviction (24h). Unlike IMAGE_CACHE which has a 50MB LRU cap, HTML_CACHE grows indefinitely within a version.
+- **Failure scenario**: A user browsing 100+ pages over a day accumulates a large HTML cache. On slow connections or constrained devices, this wastes storage and may trigger browser quota eviction that also wipes the image cache.
+- **Fix**: Add LRU eviction with a conservative cap (e.g., 50 entries or 5MB).
+- **Confidence**: High
 
-**Failure scenario**: Admin enables semantic search. Users see "semantic search" UI, submit queries, and get back photos that have nothing to do with their query. The scores appear legitimate (0.18-0.95 range). Users lose trust in the search feature.
+### MEDIUM
 
-**Fix**: Add a prominent warning in the admin settings UI that the feature requires running the backfill script AND replacing the stub with real ONNX inference. Consider returning a 503 with "Semantic search not fully configured" until a real encoder is available, OR add a config flag `semantic_search_stub_mode` that must be explicitly enabled.
+#### C22-MED-01: `backfillClipEmbeddings` lacks rate limiting (carry-over C21-AGG-06)
+- **Source**: `apps/web/src/app/actions/embeddings.ts:26-89`
+- **Issue**: While `isAdmin()` and `requireSameOriginAdmin()` were added in cycle 21, the action itself has no rate limiting. An admin (or compromised admin session) can invoke it repeatedly, causing up to 5000 embed operations per call with bounded concurrency of 2. This creates sustained CPU and DB load.
+- **Fix**: Add a per-admin or global rate limit (e.g., once per hour) using the existing in-memory Maps or DB-backed buckets.
+- **Confidence**: High
 
----
+#### C22-MED-02: Bootstrap cleanup tasks run synchronously on every bootstrap call
+- **Source**: `apps/web/src/lib/image-queue.ts:583-585`
+- **Issue**: `purgeExpiredSessions`, `purgeOldBuckets`, and `purgeOldAuditLog` execute synchronously on every `bootstrapImageProcessingQueue` call. When there are many pending images, bootstrap is called repeatedly (every batch of 500 + continuation). The cleanup functions are idempotent but generate unnecessary DB load. The hourly `gcInterval` (lines 587-592) already handles periodic cleanup; the synchronous calls are redundant.
+- **Fix**: Gate the synchronous cleanup to run only once per process lifetime, or only on the first bootstrap.
+- **Confidence**: Medium
 
-### C21-MED-01: Chunked Transfer Encoding Bypasses Semantic Search Body Size Guard
-**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 74-90)
-**Confidence**: High
+#### C22-MED-03: Semantic search hardcodes `topK: 20` in client
+- **Source**: `apps/web/src/components/search.tsx:79`
+- **Issue**: The search component hardcodes `topK: 20` instead of using the shared `SEMANTIC_TOP_K_DEFAULT` constant from `clip-embeddings.ts`. If the server-side default changes, the client and server will disagree.
+- **Fix**: Import `SEMANTIC_TOP_K_DEFAULT` and use it.
+- **Confidence**: Medium
 
-The body size guard checks `Content-Length` header:
-```typescript
-const contentLength = request.headers.get('content-length');
-if (contentLength) {
-    const contentLengthNum = Number(contentLength);
-    ...
-    if (contentLengthNum > MAX_SEMANTIC_BODY_BYTES) {
-        return ... 413 ...
-    }
-}
-```
+### LOW
 
-If the client uses `Transfer-Encoding: chunked` (which omits `Content-Length`), this guard is completely bypassed. The subsequent `await request.json()` will attempt to parse an unbounded stream.
+#### C22-LOW-01: Semantic search settings UI allows `production` without ONNX validation
+- **Source**: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:274-286`
+- **Issue**: The admin dropdown allows setting `semantic_search_mode` to `production` with no validation that a real ONNX model is installed. An admin can accidentally enable the feature, causing the public endpoint to serve random results (even though stub embeddings are deterministic, they are semantically meaningless).
+- **Fix**: Add a warning in the UI or validate on save that `production` requires model presence.
+- **Confidence**: Medium
 
-**Failure scenario**: An attacker sends a chunked POST with a multi-megabyte JSON payload. The server buffers it into memory before JSON parsing fails.
+#### C22-LOW-02: Caption stub may mislead admins into believing AI is running
+- **Source**: `apps/web/src/lib/caption-generator.ts:32-38`
+- **Issue**: The stub caption generator returns strings like "Photo taken with Canon EOS R5" which look like AI-generated descriptions. When `auto_alt_text_enabled` is true, admins may not realize these are EXIF-derived stubs.
+- **Fix**: Prefix stub captions with `[AUTO]` or similar marker, or add a UI indicator in the admin bulk editor.
+- **Confidence**: Low
 
-**Fix**: Add a guard that rejects requests with `Transfer-Encoding: chunked` OR read the body with a size-limited approach: `const text = await request.text(); if (text.length > MAX_SEMANTIC_BODY_BYTES) return 413;` before JSON parsing.
-
----
-
-### C21-MED-02: `quiesceImageProcessingQueueForRestore` Does Not Wait for Active Jobs
-**File**: `apps/web/src/lib/image-queue.ts` (lines 604-625)
-**Confidence**: High
-
-The `quiesceImageProcessingQueueForRestore` function pauses the queue and waits for `onPendingZero()`, but `onPendingZero()` in p-queue only waits for the pending count (queued but not started) to reach zero. It does NOT wait for currently active/running jobs to complete.
-
-**Failure scenario**: An image is actively being processed (Sharp encoding) when admin initiates a DB restore. `quiesceImageProcessingQueueForRestore` returns immediately because no jobs are "pending" (the active one is running). The restore proceeds while files are being written to disk and DB rows being updated, causing data corruption or partial files.
-
-**Fix**: Use `await queue.onIdle()` (if p-queue version supports it) or implement a custom waiter that tracks active job count and waits for completion.
-
----
-
-### C21-MED-03: Race Condition in `decrementRateLimit` UPDATE+DELETE Sequence
-**File**: `apps/web/src/lib/rate-limit.ts` (lines 427-454)
-**Confidence**: Medium
-
-Between the UPDATE and DELETE in `decrementRateLimit`, another concurrent request could execute `incrementRateLimit` (INSERT ... ON DUPLICATE KEY UPDATE). The sequence:
-1. Request A: UPDATE sets count=0
-2. Request B: INSERT ... ON DUPLICATE KEY UPDATE sets count=1
-3. Request A: DELETE removes row with count=1
-
-The increment from Request B is silently lost. This is in the rollback path, but means rate-limit counters can undercount in high-concurrency scenarios.
-
-**Fix**: Wrap both operations in a transaction with `START TRANSACTION; UPDATE ...; DELETE ...; COMMIT;` or use a single atomic `DELETE ... WHERE count <= 1` preceded by a conditional UPDATE.
-
----
-
-### C21-LOW-01: Service Worker HTML Cache Has No Size Limit or Eviction
-**File**: `apps/web/src/public/sw.js` (lines 18, 143-178)
-**Confidence**: High
-
-The `HTML_CACHE` stores every HTML page the user visits. Unlike `IMAGE_CACHE` which has a 50MB LRU eviction policy, the HTML cache has NO size limit and NO eviction.
-
-**Failure scenario**: A user browsing a large gallery could accumulate hundreds of HTML responses in cache storage, potentially hitting browser storage limits.
-
-**Fix**: Add an LRU eviction policy to HTML_CACHE similar to IMAGE_CACHE, with a conservative cap (e.g., 5MB or 50 entries).
-
----
-
-### C21-LOW-03: `backfillClipEmbeddings` Has No Rate Limiting
-**File**: `apps/web/src/app/actions/embeddings.ts`
-**Confidence**: Medium
-
-The `backfillClipEmbeddings` server action processes up to 5000 images with no rate limiting. A compromised admin account could trigger it repeatedly, causing CPU and DB write pressure.
-
-**Fix**: Add a per-admin rate limit (e.g., once per hour) or a global semaphore.
-
----
-
-### C21-LOW-04: Semantic Search Accepts Any Content-Type
-**File**: `apps/web/src/app/api/search/semantic/route.ts` (lines 64-109)
-**Confidence**: Low
-
-The endpoint does not validate `Content-Type: application/json`. Accepting any Content-Type and attempting JSON.parse is poor API hygiene.
-
-**Fix**: Add `if (!request.headers.get('content-type')?.includes('application/json')) return 400` before body parsing.
-
----
-
-### C21-LOW-05: Bootstrap Cleanup Tasks Run Repeatedly
-**File**: `apps/web/src/lib/image-queue.ts` (lines 576-592)
-**Confidence**: Low
-
-Bootstrap runs expensive cleanup (`purgeExpiredSessions`, `purgeOldAuditLog`) on every call. Bootstrap is triggered on startup, after failed jobs, and after queue drains.
-
-**Fix**: Track whether cleanup has run in the current process and skip redundant invocations.
-
----
-
-### C21-LOW-06: OG Photo Route Buffer Size Guard Bypassable via Chunked Encoding
-**File**: `apps/web/src/app/api/og/photo/[id]/route.tsx` (lines 91-100)
-**Confidence**: Medium
-
-The route checks `Content-Length` to guard against oversized photo responses. But with chunked encoding (no Content-Length), the guard is bypassed and `await photoRes.arrayBuffer()` buffers the entire response.
-
-**Fix**: Add a fallback size check on the buffer after `arrayBuffer()`.
-
----
-
-## Summary
-| Severity | Count |
-|----------|-------|
-| High     | 1     |
-| Medium   | 3     |
-| Low      | 5     |
+## Final Sweep
+No logic bugs in recently changed search/nav/settings components. No TypeScript errors visible in reviewed files. All prior cycle-21 fixes verified clean.
