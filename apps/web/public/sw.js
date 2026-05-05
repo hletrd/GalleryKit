@@ -8,12 +8,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 responses: never cached.
  *
- * 2d8f821 is replaced at build time by scripts/build-sw.ts.
+ * 181b1c1 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '2d8f821';
+const SW_VERSION = '181b1c1';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -91,8 +91,13 @@ async function recordAndEvict(url, newSize) {
     );
     for (const entry of sorted) {
       if (total <= MAX_IMAGE_BYTES) break;
-      await imageCache.delete(entry.url);
-      total -= entry.size;
+      const deleted = await imageCache.delete(entry.url);
+      // Only adjust the running total if the entry was actually present
+      // in the cache. Browser quota evictions may have removed it
+      // independently of our metadata Map.
+      if (deleted) {
+        total -= entry.size;
+      }
       entries.delete(entry.url);
     }
   }
@@ -136,7 +141,16 @@ async function networkFirstHtml(request) {
     if (isSensitiveResponse(networkResponse)) return networkResponse;
     if (networkResponse.ok) {
       const htmlCache = await caches.open(HTML_CACHE);
-      await htmlCache.put(request, networkResponse.clone());
+      // Stamp the cached response with a timestamp so the 24 h max-age
+      // check on cache fallback (line ~148) is actually reachable.
+      const headers = new Headers(networkResponse.headers);
+      headers.set('sw-cached-at', String(Date.now()));
+      const responseToCache = new Response(networkResponse.body, {
+        status: networkResponse.status,
+        statusText: networkResponse.statusText,
+        headers,
+      });
+      await htmlCache.put(request, responseToCache);
     }
     return networkResponse;
   } catch {

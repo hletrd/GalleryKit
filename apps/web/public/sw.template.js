@@ -91,8 +91,13 @@ async function recordAndEvict(url, newSize) {
     );
     for (const entry of sorted) {
       if (total <= MAX_IMAGE_BYTES) break;
-      await imageCache.delete(entry.url);
-      total -= entry.size;
+      const deleted = await imageCache.delete(entry.url);
+      // Only adjust the running total if the entry was actually present
+      // in the cache. Browser quota evictions may have removed it
+      // independently of our metadata Map.
+      if (deleted) {
+        total -= entry.size;
+      }
       entries.delete(entry.url);
     }
   }
@@ -136,7 +141,16 @@ async function networkFirstHtml(request) {
     if (isSensitiveResponse(networkResponse)) return networkResponse;
     if (networkResponse.ok) {
       const htmlCache = await caches.open(HTML_CACHE);
-      await htmlCache.put(request, networkResponse.clone());
+      // Stamp the cached response with a timestamp so the 24 h max-age
+      // check on cache fallback (line ~148) is actually reachable.
+      const headers = new Headers(networkResponse.headers);
+      headers.set('sw-cached-at', String(Date.now()));
+      const responseToCache = new Response(networkResponse.body, {
+        status: networkResponse.status,
+        statusText: networkResponse.statusText,
+        headers,
+      });
+      await htmlCache.put(request, responseToCache);
     }
     return networkResponse;
   } catch {
