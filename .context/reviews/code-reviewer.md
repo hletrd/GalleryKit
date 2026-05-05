@@ -1,168 +1,51 @@
-# Cycle 4 Review — Comprehensive Single-Agent Review
+# Code Review — Cycle 13 (2026-05-05)
 
-**Scope**: Full codebase review following cycles 1–3 implementation. Focus on recent commits
-(`3bbb252` reaction removal, `b4323fe` image-zoom/photo-viewer UX, `f4d402f` lightbox flicker fix)
-and their cross-file impacts.
-
-**Agent Note**: No review-agent infrastructure (`Agent` tool, `.claude/agents/`) was registered in
-this environment. This review was performed manually by examining all affected files and running
-every configured quality gate.
+**Reviewer angle**: Code quality, logic correctness, edge cases, maintainability
+**Scope**: Entire repository, focus on recently changed files and complex async paths
+**Gates**: All green (eslint, tsc, vitest 1049 tests, playwright e2e 20 passed, lint:api-auth, lint:action-origin, lint:public-route-rate-limit)
 
 ---
 
-## C4R-08: TypeScript build errors — `reactionsEnabled` prop passed to removed interface
-**Severity**: High | **Confidence**: High | **Type**: correctness / regression
+## Executive Summary
 
-**Files**:
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`, line 160
-- `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx`, line 126
+After 13+ review cycles and 1000+ tests, the codebase has converged to a highly stable state. Only one new finding of LOW severity was identified. All prior MEDIUM/HIGH findings have been resolved. The code quality is excellent with thorough documentation, defensive patterns, and comprehensive error handling.
 
-**Problem**: Commit `3bbb252` removed `reactionsEnabled` from `PhotoViewerProps` in
-`photo-viewer.tsx`, but the shared-group page (`g/[key]/page.tsx`) and shared-link page
-(`s/[key]/page.tsx`) still pass `reactionsEnabled={false}` (or similar) to `<PhotoViewer>`.
-This causes `tsc --noEmit` to fail with:
+## Findings
 
-```
-Property 'reactionsEnabled' does not exist on type 'IntrinsicAttributes & PhotoViewerProps'
-```
+### C13-LOW-01: `x-nonce` CSP nonce propagated to HTTP response headers
+- **File+line**: `apps/web/src/proxy.ts:33-34`
+- **Severity**: LOW
+- **Confidence**: HIGH
+- **Problem**: `applyProductionCsp` sets `x-nonce` in response headers. The nonce is intended for server-side use (read from request headers by `csp-nonce.ts`) and for embedding in `<script nonce="...">` HTML attributes. Exposing it as a response header makes it readable by same-origin JavaScript via `fetch()`/`XMLHttpRequest`, slightly weakening CSP's inline-script injection protection.
+- **Failure scenario**: An attacker with DOM XSS makes a same-origin fetch, reads `x-nonce`, then injects `<script nonce="stolen">...</script>` that bypasses CSP.
+- **Suggested fix**: Remove `response.headers.set('x-nonce', nonce)` from `applyProductionCsp`. Server components already read the nonce from request headers; clients read it from DOM attributes. The response header serves no legitimate purpose.
+- **Cross-reference**: Verified no client-side code reads `x-nonce` from response headers. `csp-nonce.ts` imports from `next/headers` (request headers only).
 
-**Failure scenario**: The app cannot build for production. Any CI pipeline running `npm run build`
-(or `npm run typecheck`) will fail.
+## Verified Correct Patterns
 
-**Fix**: Remove the `reactionsEnabled` prop from both `<PhotoViewer>` call sites.
+The following complex areas were examined and found correct:
 
----
+1. **Semantic search route** (`app/api/search/semantic/route.ts`): Rate-limit rollback correctly placed after all cheap validation gates and before expensive embedding work. Body size guard, same-origin check, and maintenance check all precede rate-limit consumption. Pattern 2 rollback (rollback on infrastructure error) is correctly implemented.
 
-## C4R-07: Unit test regression — `wheelStep` factor changed without updating tests
-**Severity**: High | **Confidence**: High | **Type**: correctness / test drift
+2. **AVIF high-bitdepth probe** (`lib/process-image.ts:50-76`): Promise-based singleton correctly prevents concurrent probe races. The first caller triggers the probe; all concurrent callers await the same promise. If probe fails, the promise resolves to `false` and all callers get `false`.
 
-**Files**:
-- `apps/web/src/lib/image-zoom-math.ts`, line 28 (changed from `0.9 / 1.1` to `0.95 / 1.05`)
-- `apps/web/src/__tests__/image-zoom-math.test.ts`, lines 70–77
+3. **Image queue bootstrap** (`lib/image-queue.ts:510-596`): GC interval is properly cleared before creating a new one (line 580). Permanently-failed IDs are excluded from bootstrap queries. Connection-refused errors trigger retry with backoff.
 
-**Problem**: Commit `b4323fe` reduced the zoom wheel-step factor from 10 % to 5 % (0.95/1.05),
-but the corresponding unit tests still assert the old 10 % behavior:
-- `expect(wheelStep(2.0, 100)).toBeCloseTo(1.8)` — now returns 1.9
-- `expect(wheelStep(2.0, -100)).toBeCloseTo(2.2)` — now returns 2.1
+4. **Upload tracker** (`lib/upload-tracker.ts`): The `settleUploadTrackerClaim` reconciliation math correctly handles partial failures: `currentEntry.count = Math.max(0, currentEntry.count + (successCount - claimedCount))`.
 
-**Failure scenario**: `npm test` fails every run. This is a blocking gate regression.
+5. **View count flush** (`lib/data.ts:63-166`): The atomic Map swap pattern prevents lost increments during flush. Retry cap with backoff, chunking, and post-flush buffer enforcement are all correct.
 
-**Fix**: Update the two test expectations to match the new 5 % step (1.9 and 2.1 respectively),
-or revert the factor change if the 10 % step was intentional.
+## Areas Examined With No Issues Found
 
----
+- `lib/data.ts` — cursor-based pagination, search deduplication, privacy field guards
+- `lib/process-image.ts` — EXIF extraction, ICC profile parsing, color pipeline
+- `lib/rate-limit.ts` — all rate-limit helpers, rollback patterns, IP normalization
+- `lib/image-queue.ts` — claim locks, retry logic, bootstrap continuation
+- `app/actions/auth.ts` — login flow, session management, password change
+- `app/actions/images.ts` — upload flow, tag processing, cleanup
+- `proxy.ts` — middleware auth guard, CSP request handling (minus the header leak)
+- `public/sw.js` — cache strategies, LRU eviction, admin bypass
 
-## C4R-01: Reaction feature removal is incomplete — dead code remains across stack
-**Severity**: Medium | **Confidence**: High | **Type**: maintainability / dead code
+## Conclusion
 
-**Problem**: Commit `3bbb252` stripped the heart/like UI from `photo-viewer.tsx` and `lightbox.tsx`,
-but the backend and configuration surface for reactions was left intact. This creates confusion
-for admins (a settings toggle that does nothing) and leaves unmaintained code paths.
-
-**Affected files/regions**:
-- `apps/web/src/app/api/reactions/[imageId]/route.ts` — entire API route still serves GET/POST
-- `apps/web/src/lib/reaction-rate-limit.ts` — entire rate-limit module still imported by the route
-- `apps/web/src/db/schema.ts` — `imageReactions` table and `images.reaction_count` column still exist
-- `apps/web/src/lib/gallery-config-shared.ts` — `reactions_enabled` in `GALLERY_SETTING_KEYS`, `DEFAULTS`, and `VALIDATORS`
-- `apps/web/src/lib/gallery-config.ts` — `reactionsEnabled: boolean` still in `GalleryConfig` type
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx` — entire Reactions card still rendered (lines 195–221)
-- `apps/web/messages/en.json` — `settings.reactionsTitle`, `settings.reactionsDesc`, `settings.reactionsEnabled`, `settings.reactionsEnabledHint`, `reaction.*`
-- `apps/web/messages/ko.json` — same keys as above
-- `apps/web/src/components/home-client.tsx` — `GalleryImage.reaction_count?: number | null` and aria-label append logic (lines 69, 207–210)
-- `apps/web/src/components/map/map-client.tsx` — `gallery_auto_lightbox` sessionStorage key still set on marker click
-
-**Failure scenario**: An admin toggles "Enable Reactions" in settings, expecting the heart button
-to appear on photos. Nothing happens. The dead code also increases bundle size (unused translations),
-migration surface (unused DB table/column), and attack surface (unused public API route with cookie handling).
-
-**Fix**: Either (a) fully remove all reaction infrastructure (DB table, column, API route,
-rate-limit module, config keys, translations, admin UI, aria-label references), or (b) restore
-the UI if the removal was accidental. Given the commit message says "remove like/reaction feature",
-option (a) is the intended fix.
-
----
-
-## C4R-05: Admin settings page renders a dead "Reactions" card
-**Severity**: Low | **Confidence**: High | **Type**: UX / dead UI
-
-**File**: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`, lines 195–221
-
-**Problem**: The Reactions settings card with a Heart icon and a toggle switch is still rendered
-in the admin dashboard, even though the photo viewer no longer shows reactions. The toggle has
-no user-visible effect.
-
-**Failure scenario**: Admin confusion; wasted vertical space in settings page.
-
-**Fix**: Remove the Reactions card block from the settings client.
-
----
-
-## C4R-03: `home-client.tsx` declares and references unfetched `reaction_count`
-**Severity**: Low | **Confidence**: High | **Type**: dead code / a11y drift
-
-**File**: `apps/web/src/components/home-client.tsx`, lines 69 and 207–210
-
-**Problem**: The `GalleryImage` interface includes `reaction_count?: number | null`, and the
-masonry card `aria-label` logic appends a reaction count string when `image.reaction_count > 0`.
-However, `adminSelectFields` in `lib/data.ts` (which drives the public queries via
-`publicSelectFields`) does NOT include `reaction_count`. Therefore the field is always
-`undefined`/`null` at runtime, and the reaction-count branch of the aria-label is never reached.
-The code is effectively dead.
-
-**Failure scenario**: Screen-reader users never hear reaction counts (which is fine since the
-feature is removed), but the dead code creates maintenance burden and misleading type contracts.
-
-**Fix**: Remove `reaction_count` from the `GalleryImage` interface and the conditional aria-label
-append logic.
-
----
-
-## C4R-02: Orphaned i18n translation keys for reactions
-**Severity**: Low | **Confidence**: High | **Type**: i18n / dead strings
-
-**Files**:
-- `apps/web/messages/en.json`, lines 604–607, 617–625
-- `apps/web/messages/ko.json`, equivalent keys
-
-**Problem**: Translation keys for reaction UI remain in both language files even though no
-component renders them anymore.
-
-**Failure scenario**: Bundle bloat (minor), translator confusion if new locales are added.
-
-**Fix**: Remove all `settings.reactionsTitle`, `settings.reactionsDesc`, `settings.reactionsEnabled`,
-`settings.reactionsEnabledHint`, and `reaction.*` keys.
-
----
-
-## C4R-04: `gallery-config-shared.ts` still validates the `reactions_enabled` setting
-**Severity**: Low | **Confidence**: High | **Type**: maintainability / dead config
-
-**File**: `apps/web/src/lib/gallery-config-shared.ts`, lines 24, 69, 95
-
-**Problem**: `reactions_enabled` is still present in `GALLERY_SETTING_KEYS`, `DEFAULTS`, and
-`VALIDATORS`. The `GalleryConfig` type in `gallery-config.ts` also still exposes `reactionsEnabled: boolean`.
-
-**Fix**: Remove `reactions_enabled` from all three config structures. Remove `reactionsEnabled`
-from `GalleryConfig` type.
-
----
-
-## C4R-06: Image-zoom cursor changed from `cursor-zoom-in` to `cursor-auto`
-**Severity**: Low | **Confidence**: Medium | **Type**: UX / affordance
-
-**File**: `apps/web/src/components/image-zoom.tsx`, line 315
-
-**Problem**: Commit `b4323fe` changed the non-zoomed cursor from `cursor-zoom-in` to `cursor-auto`.
-This removes the visual hint that clicking the image will zoom. Users may not discover the zoom
-feature without the magnifying-glass cursor.
-
-**Failure scenario**: Users on desktop miss the zoom capability because there's no visual cue.
-
-**Fix**: Either restore `cursor-zoom-in` or add an explicit zoom button/hint.
-
----
-
-## AGENT FAILURES
-
-No agent failures — the `Agent` tool was not registered in this environment, so the review was
-performed manually by the cycle subagent.
+The codebase is in excellent shape. One LOW-severity security finding (CSP nonce header leak) was identified. No correctness bugs, race conditions, or memory leaks were found in the critical paths.
