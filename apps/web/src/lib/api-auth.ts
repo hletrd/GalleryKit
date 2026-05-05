@@ -97,7 +97,13 @@ export function withAdminAuth<T extends unknown[]>(
         }
         // C17-LOW-04: add nosniff to successful handler responses if not
         // already present. Error paths already set it via NO_STORE_HEADERS.
+        // C7-SEC-02: also add no-store Cache-Control on success so admin API
+        // responses (e.g., DB backups) are never cached by browsers/CDNs.
         const response = await handler(...args);
+        if (!response.headers.has('Cache-Control')) {
+            response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+            response.headers.set('Pragma', 'no-cache');
+        }
         if (!response.headers.has('X-Content-Type-Options')) {
             response.headers.set('X-Content-Type-Options', 'nosniff');
         }
