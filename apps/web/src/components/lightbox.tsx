@@ -370,7 +370,9 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         closeButtonRef.current?.focus();
         return () => {
             document.body.style.overflow = prev;
-            previouslyFocusedRef.current?.focus();
+            if (previouslyFocusedRef.current && document.body.contains(previouslyFocusedRef.current)) {
+                previouslyFocusedRef.current.focus();
+            }
         };
     }, []);
 

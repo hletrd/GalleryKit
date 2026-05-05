@@ -337,6 +337,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
                 cursorClass,
                 className
             )}
+            style={{ touchAction: isZoomed ? 'none' : 'auto' }}
             onClick={handleClick}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
