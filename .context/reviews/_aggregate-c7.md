@@ -1,133 +1,272 @@
-# Aggregate Review — Cycle 7 (2026-04-30)
+# Aggregate Review — Cycle 7 (2026-05-06)
 
-## Review method
+## Review Method
 
-Deep single-pass review of all source files from multiple specialist perspectives
-(code quality, security, performance, architecture, correctness, UI/UX, test coverage,
-documentation, debugging). All key modules examined: data.ts, auth.ts, public.ts,
-sharing.ts, admin-users.ts, images.ts, settings.ts, image-queue.ts, rate-limit.ts,
-session.ts, proxy.ts, sanitize.ts, validation.ts, content-security-policy.ts,
-bounded-map.ts, upload-tracker-state.ts, action-guards.ts, lightbox.tsx,
-photo-viewer.tsx, image-manager.tsx, health route.
+Deep single-pass review of all source files from 10 specialist perspectives:
+- Security (`security-reviewer-c7.md`)
+- Code Quality (`code-reviewer-c7.md`)
+- Performance (`perf-reviewer-c7.md`)
+- Test Coverage / Correctness (`test-engineer-c7.md`)
+- Architecture (`architect-c7.md`)
+- Debuggability (`debugger-c7.md`)
+- Documentation (`document-specialist-c7.md`)
+- UI/UX (`designer-c7.md`)
+- Critical / Contradiction Analysis (`critic-c7.md`)
+- Verification (`verifier-c7.md`)
+- Data Flow Tracing (`tracer-c7.md`)
 
-## GATE STATUS (prior cycle — all green)
-
-- eslint: clean
-- tsc --noEmit: clean
-- vitest: passing
-- lint:api-auth: OK
-- lint:action-origin: OK
-- next build: success
+Key modules examined: `data.ts`, `auth.ts`, `session.ts`, `rate-limit.ts`, `image-queue.ts`, `process-image.ts`, `images.ts`, `admin-users.ts`, `api-auth.ts`, `admin-tokens.ts`, `og/photo/[id]/route.tsx`, `sw.js`, `gallery-config.ts`, `bounded-map.ts`, `upload-tracker-state.ts`, `proxy.ts`, `health/route.ts`, `content-security-policy.ts`, `image-manager.tsx`, `photo-viewer.tsx`.
 
 ---
 
-## New findings (not in cycles 1-6 deferred lists)
+## New Findings (not in cycles 1-6 deferred lists)
 
 ### HIGH severity
 
-#### C7-HIGH-01: `deleteAdminUser` advisory lock name is not scoped per-user — concurrent delete of different users serializes
-- **Source**: Code review of `apps/web/src/app/actions/admin-users.ts:207`
-- **Location**: `deleteAdminUser()` function
-- **Issue**: The advisory lock `gallerykit_admin_delete` is a single global lock, not scoped to the user being deleted. If two admins concurrently delete different users, one blocks for 5 seconds (the GET_LOCK timeout) and then fails with `DELETE_LOCK_TIMEOUT` even though the operations are independent and non-conflicting. In a multi-admin deployment, this could cause confusing "failed to delete user" errors for legitimate concurrent deletions of different accounts.
-- **Fix**: Scope the lock to the target user ID: `gallerykit_admin_delete:${id}`. This allows concurrent deletion of different users while still serializing concurrent attempts to delete the same user.
-- **Confidence**: High
+#### C7-HIGH-01: `deleteAdminUser` advisory lock name is not scoped per-user
+- **Source:** Code review of `apps/web/src/app/actions/admin-users.ts:207`
+- **Location:** `deleteAdminUser()` function
+- **Issue:** The advisory lock `gallerykit_admin_delete` is a single global lock. If two admins concurrently delete different users, one blocks for 5 seconds and then fails with `DELETE_LOCK_TIMEOUT` even though the operations are independent.
+- **Fix:** Scope the lock to the target user ID: `gallerykit_admin_delete:${id}`.
+- **Confidence:** High
+
+#### C7-SEC-01: `/api/og/photo/[id]/route.tsx` missing rate limiting
+- **Source:** Security review
+- **Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx`
+- **Issue:** CPU-intensive GET route (Satori render, base64 encode) has NO rate-limit gate. The main `/api/og/route.tsx` has `preIncrementOgAttempt` (plan-233) but the photo sub-route does not. The `check-public-route-rate-limit.ts` lint gate only scans mutating methods (POST/PUT/PATCH/DELETE), so this gap is invisible to CI.
+- **Fix:** Add `preIncrementOgAttempt` / `rollbackOgAttempt` calls mirroring the main OG route. Also expand the lint gate or document the GET exemption explicitly.
+- **Confidence:** High
 
 ### MEDIUM severity
 
-#### C7-MED-01: `BoundedMap.prune()` deletes during Map iteration — ES6-safe but fragile
-- **Source**: Code review of `apps/web/src/lib/bounded-map.ts:101-105`
-- **Location**: `BoundedMap.prune()` method
-- **Issue**: The prune method iterates over `this.map` entries and calls `this.map.delete(key)` inside the `for...of` loop. Per ES6 spec, deleting entries during `Map.prototype` iteration is safe — the iterator accounts for deletions. However, this pattern is also used in `upload-tracker-state.ts:27-30` (pruneUploadTracker) and `image-queue.ts:89-94` (pruneRetryMaps). While technically correct, it is a risky pattern that could confuse code reviewers and static analysis tools, and it is used in multiple places without any comment noting the ES6 guarantee.
-- **Fix**: Collect keys to delete first, then delete them in a separate pass. This makes the intent clearer and avoids any potential issues with future spec changes. Add a comment at each call site noting the ES6 Map deletion guarantee for future readers.
-- **Confidence**: Medium
+#### C7-SEC-02: `withAdminAuth` wrapper omits Cache-Control on success responses
+- **Source:** Security review
+- **Location:** `apps/web/src/lib/api-auth.ts:100-104`
+- **Issue:** `NO_STORE_HEADERS` is only applied to error responses. Successful admin API responses (e.g., DB backup download) could be cached by intermediaries.
+- **Fix:** Set `Cache-Control: no-store, no-cache, must-revalidate` on all responses from `withAdminAuth` unless the handler explicitly sets its own cache policy.
+- **Confidence:** Medium
 
-#### C7-MED-02: `uploadTracker` prune iteration-deletion in `pruneUploadTracker` same pattern as BoundedMap
-- **Source**: Code review of `apps/web/src/lib/upload-tracker-state.ts:27-30`
-- **Location**: `pruneUploadTracker()` function
-- **Issue**: Same iteration-during-deletion pattern as BoundedMap.prune(), but on a raw Map rather than the BoundedMap class. If the raw Map is ever replaced with a BoundedMap, this prune method becomes redundant but the duplicate code could cause confusion. Additionally, the hard-cap eviction loop at lines 33-40 duplicates the exact same FIFO eviction pattern used in BoundedMap.prune(), image-queue.pruneRetryMaps(), and data.ts viewCountRetryCount eviction.
-- **Fix**: Migrate `uploadTracker` to use BoundedMap to eliminate the duplicated prune/evict logic and reduce the number of raw Map instances that need independent maintenance.
-- **Confidence**: Medium
+#### C7-SEC-03: `check-public-route-rate-limit.ts` lint gate covers only mutating HTTP methods
+- **Source:** Security review + Critic review
+- **Location:** `apps/web/src/scripts/check-public-route-rate-limit.ts`
+- **Issue:** CPU-intensive GET routes (OG, image serving) are exempt from the gate by design. The gate's header claims it protects "every PUBLIC API route file" which is misleading.
+- **Fix:** Option 2 recommended — require explicit `@public-no-rate-limit-required: <reason>` on all GET routes that call expensive code, and update the gate header to be accurate.
+- **Confidence:** Medium
 
-#### C7-MED-03: `image-manager.tsx` edit dialog `maxLength` uses JS `.length` which counts UTF-16 code units, not code points
-- **Source**: Code review of `apps/web/src/components/image-manager.tsx:496-500`
-- **Location**: Edit dialog Input and Textarea components
-- **Issue**: The `maxLength={255}` on the title input and `maxLength={5000}` on the description textarea use the browser's native `maxLength` attribute, which counts UTF-16 code units (same as JS `.length`). The server-side validation in `updateImageMetadata` uses `countCodePoints()`, which counts Unicode code points. For strings containing supplementary characters (emoji, rare CJK), the client-side limit is stricter than the server allows. A user pasting a title with emoji could be blocked at 127 characters (each emoji = 2 UTF-16 units) even though the server allows 255 code points.
-- **Fix**: Either (a) use a custom `onInput` handler that counts code points and truncates accordingly, or (b) document the discrepancy as an acceptable tradeoff (server rejects, client is merely a UX hint).
-- **Confidence**: Medium
+#### C7-MED-01: `BoundedMap.prune()` deletes during Map iteration
+- **Source:** Code review
+- **Location:** `apps/web/src/lib/bounded-map.ts:101-105`
+- **Issue:** ES6-safe but fragile pattern; same pattern in `upload-tracker-state.ts` and `image-queue.ts`.
+- **Fix:** Collect keys first, then delete in a separate pass. Extract a generic `pruneMapFifo` utility.
+- **Confidence:** Medium
 
-#### C7-MED-04: `searchImages` GROUP BY with all individual columns is fragile — schema changes require updating the GROUP BY list
-- **Source**: Code review of `apps/web/src/lib/data.ts:1127-1139` and `1147-1159`
-- **Location**: Tag and alias search sub-queries
-- **Issue**: The GROUP BY clause lists every column in the SELECT individually. If a column is added to `searchFields` (e.g., adding `filename_webp` for a future feature), the developer must also add it to the GROUP BY clause in both the tag and alias sub-queries. If they forget, the query breaks under `ONLY_FULL_GROUP_BY` SQL mode. The main query (line 1063) does not use GROUP BY (no JOIN), so it is not affected.
-- **Fix**: Add a comment above `searchFields` noting that any new field must be added to both GROUP BY clauses. Alternatively, consider using a subquery pattern that groups by `images.id` only and joins the tag/alias results afterward.
-- **Confidence**: Medium
+#### C7-MED-02: `uploadTracker` prune iteration-deletion duplicates BoundedMap logic
+- **Source:** Code review
+- **Location:** `apps/web/src/lib/upload-tracker-state.ts:27-30`
+- **Issue:** Duplicate FIFO eviction logic. Hard-cap eviction (lines 33-40) is a third copy.
+- **Fix:** Migrate `uploadTracker` to use `BoundedMap` or extract a shared utility.
+- **Confidence:** Medium
 
-#### C7-MED-05: `image-queue.ts` `claimRetryCounts` not cleaned up when permanentlyFailedIds is capped
-- **Source**: Code review of `apps/web/src/lib/image-queue.ts:341-345`
-- **Location**: `enqueueImageProcessing` catch block (permanent failure)
-- **Issue**: When a job permanently fails and its ID is added to `permanentlyFailedIds`, the `claimRetryCounts` entry for that job is only cleaned up in the `finally` block (line 363) when `!claimRetryScheduled`. However, if `MAX_PERMANENTLY_FAILED_IDS` is exceeded and the oldest entry is evicted from `permanentlyFailedIds` (line 343-344), the corresponding `claimRetryCounts` entry for the evicted ID is never cleaned up. Over time with many permanent failures, `claimRetryCounts` could accumulate stale entries for IDs that are no longer in `permanentlyFailedIds`.
-- **Fix**: When evicting from `permanentlyFailedIds`, also delete the corresponding entry from `claimRetryCounts` and `retryCounts`.
-- **Confidence**: Medium
+#### C7-MED-03: `image-manager.tsx` edit dialog `maxLength` counts UTF-16 code units, not code points
+- **Source:** Code review + Design review
+- **Location:** `apps/web/src/components/image-manager.tsx:496-500`
+- **Issue:** Client-side limit is stricter than server allows for emoji/supplementary characters.
+- **Fix:** Custom `onChange` handler using `countCodePoints` with a visible character counter.
+- **Confidence:** Medium
+
+#### C7-MED-04: `searchImages` GROUP BY with all individual columns is fragile
+- **Source:** Code review
+- **Location:** `apps/web/src/lib/data.ts:1127-1139`
+- **Issue:** Adding a column to `searchFields` requires updating two GROUP BY clauses. Missing one breaks under `ONLY_FULL_GROUP_BY`.
+- **Fix:** Add a comment above `searchFields` noting the coupling, or refactor to group by `images.id` only.
+- **Confidence:** Medium
+
+#### C7-MED-05: `image-queue.ts` `claimRetryCounts` not cleaned when `permanentlyFailedIds` is capped
+- **Source:** Code review
+- **Location:** `apps/web/src/lib/image-queue.ts:341-345`
+- **Issue:** Eviction from `permanentlyFailedIds` does not clean `claimRetryCounts` or `retryCounts`.
+- **Fix:** Delete corresponding entries from all Maps when evicting from `permanentlyFailedIds`.
+- **Confidence:** Medium
+
+#### C7-CODE-01: `data.ts` line count approaching 1500 — god module risk
+- **Source:** Code quality review
+- **Location:** `apps/web/src/lib/data.ts`
+- **Issue:** ~1480 lines, carrying D3-MED from cycle 2. View-count buffer logic adds non-DAL responsibility.
+- **Fix:** Extract view-count buffer to `lib/view-count-buffer.ts`; plan extraction of image/topic/shared-group query modules.
+- **Confidence:** Medium
+
+#### C7-CODE-02: Inconsistent error-return patterns between server actions
+- **Source:** Code quality review
+- **Location:** `apps/web/src/app/actions/images.ts`, `sharing.ts`, `admin-users.ts`
+- **Issue:** Mix of `{ success: false, error }` returns and direct `throw`. Client code must know which convention each action uses.
+- **Fix:** Standardize on structured returns for new actions; document auth.ts exception.
+- **Confidence:** Medium
+
+#### C7-PERF-01: OG image generation lacks output-size bounding before base64 encoding
+- **Source:** Performance review
+- **Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx:74-82`
+- **Issue:** `fetch(photoUrl)` does not bound response body size. A large/malicious response could OOM before `OG_PHOTO_MAX_BYTES` check.
+- **Fix:** Check `Content-Length` header before consuming body, or use a streaming size guard.
+- **Confidence:** Medium
+
+#### C7-PERF-02: `searchImagesAction` performs three DB queries sequentially
+- **Source:** Performance review
+- **Location:** `apps/web/src/lib/data.ts:~1050-1170`
+- **Issue:** Tag/alias searches always pay main query latency first.
+- **Fix:** Run queries in parallel with `Promise.all`, then merge/deduplicate.
+- **Confidence:** Medium
+
+#### C7-TEST-01: No test for OG photo route rate-limit bypass
+- **Source:** Test coverage review
+- **Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx`
+- **Issue:** No Vitest or Playwright test verifying rate limiting on the per-photo OG route.
+- **Fix:** Add integration test after wiring rate-limit helpers (C7-SEC-01).
+- **Confidence:** Medium
+
+#### C7-TEST-02: Missing test for `deleteAdminUser` concurrent-lock timeout
+- **Source:** Test coverage review
+- **Location:** `apps/web/src/app/actions/admin-users.ts`
+- **Issue:** No test for GET_LOCK timeout path or scoped-lock concurrent behavior.
+- **Fix:** Add Vitest tests with mocked connection.
+- **Confidence:** Medium
+
+#### C7-DEBUG-01: `image-queue.ts` permanent failure lacks failure reason in logs
+- **Source:** Debuggability review
+- **Location:** `apps/web/src/lib/image-queue.ts:~340-345`
+- **Issue:** "Image N permanently failed" log does not include the underlying error.
+- **Fix:** Include last error message (truncated) in the log.
+- **Confidence:** Medium
+
+#### C7-TRACE-01: View count buffer state is split across two Maps
+- **Source:** Data flow review
+- **Location:** `apps/web/src/lib/data.ts:17-27`
+- **Issue:** Three separate Maps (buffer, retryCount, scalar failure counter) with no unified accessor.
+- **Fix:** Encapsulate in a class with `toDebugSnapshot()`.
+- **Confidence:** Medium
 
 ### LOW severity
 
-#### C7-LOW-01: `upload-tracker-state.ts` prune iteration-deletion on raw Map (same ES6-safe pattern)
-- **Source**: Code review of `apps/web/src/lib/upload-tracker-state.ts:27-30`
-- **Issue**: Same as C7-MED-01 but on the upload tracker's raw Map. Technically safe per ES6 spec but would be cleaner with the collect-then-delete pattern.
-- **Fix**: Migrate to BoundedMap or use collect-then-delete pattern.
-- **Confidence**: Low
+#### C7-LOW-01: `upload-tracker-state.ts` prune iteration-deletion on raw Map
+- **Fix:** Migrate to BoundedMap or use collect-then-delete. (Same as C7-MED-01)
 
-#### C7-LOW-02: `proxy.ts` `isProtectedAdminRoute` does not protect `/admin` (no trailing slash) — login page is intentionally excluded
-- **Source**: Code review of `apps/web/src/proxy.ts:55-71`
-- **Location**: `isProtectedAdminRoute()` function
-- **Issue**: The function correctly excludes the login page (`/[locale]/admin` exactly) from auth protection. However, the comment says "The login page is exactly /[locale]/admin (no trailing slash, no subpath)" which is accurate for the locale-prefixed path, but for the default locale (no prefix), `pathname === '/admin'` is NOT checked — only `pathname.startsWith('/admin/')` is checked. This means a request to `/admin` (no locale prefix, no trailing slash) passes through to the intl middleware without the cookie guard. This is actually correct behavior (it is the login page), but the logic is asymmetric between the locale-prefixed and non-prefixed cases. The non-prefixed case does NOT explicitly match `/admin` as the login page — it just falls through because `!pathname.startsWith('/admin/')` when pathname is exactly `/admin`. The code works correctly by accident of the logic flow, but the asymmetry could confuse future maintainers.
-- **Fix**: Add a comment explaining why `/admin` (no prefix, no slash) is not protected: it IS the login page, and the lack of a `pathname === '/admin'` check in the non-prefixed branch means it correctly falls through without protection.
-- **Confidence**: Low (behavior is correct, code clarity only)
+#### C7-LOW-02: `proxy.ts` `isProtectedAdminRoute` asymmetry for `/admin`
+- **Fix:** Add comment explaining why `/admin` (no prefix, no slash) is the login page.
 
-#### C7-LOW-03: `photo-viewer.tsx` `navigate` callback has stale closure over `images` if `images` prop changes
-- **Source**: Code review of `apps/web/src/components/photo-viewer.tsx:137-154`
-- **Location**: `navigate` useCallback
-- **Issue**: The `navigate` callback depends on `images`, `currentIndex`, `prevId`, `nextId`, and `router`. When the `images` prop changes (e.g., after a revalidation), the `useEffect` on line 80-82 updates `currentImageId`, but the `navigate` function closes over the new `images` immediately since it's in the dependency array. This appears correct, but there is a subtle edge case: if `images` updates and `currentImageId` has not yet been updated via the effect, `currentIndex` could briefly be -1 (not found), making `navigate` compute `newIndex` incorrectly. In practice this is a very brief window and the effect runs synchronously, so the risk is minimal.
-- **Fix**: Add a guard in `navigate`: if `currentIndex === -1`, return early.
-- **Confidence**: Low
+#### C7-LOW-03: `photo-viewer.tsx` `navigate` stale closure edge case
+- **Fix:** Guard `currentIndex === -1` in navigate.
 
-#### C7-LOW-04: `health/route.ts` DB probe does not include timing information
-- **Source**: Code review of `apps/web/src/app/api/health/route.ts:29`
-- **Location**: DB health check query
-- **Issue**: The health endpoint checks DB connectivity with `SELECT 1` but does not report how long the query took. For monitoring and alerting purposes, a slow-but-successful DB connection is nearly as bad as a failed one. The deferred item from plan 337 (health check counter) covers alerting but not timing.
-- **Fix**: Add `dbOkDurationMs` to the response JSON when `HEALTH_CHECK_DB=true`.
-- **Confidence**: Low
+#### C7-LOW-04: `health/route.ts` DB probe lacks timing
+- **Fix:** Add `dbOkDurationMs` to response JSON.
 
-#### C7-LOW-05: `content-security-policy.ts` does not include `style-src-attr` or `style-src-elem` directives
-- **Source**: Code review of `apps/web/src/lib/content-security-policy.ts:81`
-- **Location**: CSP `style-src 'self' 'unsafe-inline'`
-- **Issue**: The CSP uses `style-src 'self' 'unsafe-inline'` which applies to all style sources. Modern browsers support `style-src-attr` and `style-src-elem` as more specific directives that could restrict inline styles to attributes only (for Tailwind's runtime) while blocking inline `<style>` elements. This is a defense-in-depth improvement that would reduce the attack surface of `unsafe-inline`. However, this is already covered by the existing deferred item D4-MED (CSP unsafe-inline).
-- **Fix**: When addressing D4-MED, consider splitting `style-src` into `style-src-attr` and `style-src-elem`.
-- **Confidence**: Low (already covered by deferred item)
+#### C7-LOW-05: `content-security-policy.ts` no `style-src-attr` / `style-src-elem`
+- **Already covered by deferred D4-MED.**
 
-#### C7-LOW-06: `admin-users.ts` `deleteAdminUser` rolls back transaction but does not explicitly release the advisory lock on error paths
-- **Source**: Code review of `apps/web/src/app/actions/admin-users.ts:244-262`
-- **Location**: `deleteAdminUser` catch/finally blocks
-- **Issue**: The `finally` block correctly releases the advisory lock with `RELEASE_LOCK` and calls `conn.release()`. However, the `conn.rollback()` in the catch block (line 245) could throw if the connection is broken, and the lock release in the finally block also has a `.catch(() => {})` guard. This is correct but the error handling is defensive — if `conn.rollback()` throws, the lock is still released in the finally block. No actual bug, but the catch block's `conn.rollback().catch(() => {})` could mask a broken connection that would also fail on `RELEASE_LOCK`.
-- **Fix**: No fix needed — the finally block is correct. Document that the lock release is the authoritative cleanup step.
-- **Confidence**: Low (informational)
+#### C7-LOW-06: `admin-users.ts` `deleteAdminUser` error-path lock release
+- **Informational only — finally block is correct.**
+
+#### C7-CODE-03: `process-image.ts` 10-bit AVIF probe flag never resets
+- **Fix:** Retry up to N times before permanent downgrade.
+
+#### C7-CODE-04: Duplicate retry/eviction logic across modules
+- **Fix:** Extract `pruneMapFifo` utility.
+
+#### C7-CODE-05: `searchImages` raw SQL aliases without type safety
+- **Fix:** Add compile-time check or refactor to Drizzle relational queries.
+
+#### C7-CODE-06: `adminSettings` key strings scattered as literals
+- **Fix:** Centralized `AdminSettingKey` enum.
+
+#### C7-PERF-03: `flushGroupViewCounts` chunk size vs pool capacity
+- **Fix:** Document or serialize within chunks.
+
+#### C7-PERF-04: `image-queue.ts` bootstrap scans entire table
+- **Fix:** Consider `(processed, id)` index.
+
+#### C7-PERF-05: React `cache()` does not dedupe across requests
+- **Fix:** Document intentional absence; consider LRU for config/topics.
+
+#### C7-TEST-03: `image-queue.ts` permanent failure eviction untested
+- **Fix:** Add test for eviction + Map cleanup.
+
+#### C7-TEST-04: `process-image.ts` 10-bit AVIF probe failure untested
+- **Fix:** Mock sharp to simulate rejection.
+
+#### C7-TEST-05: `bounded-map.ts` prune explicit test gap
+- **Fix:** Add targeted prune test.
+
+#### C7-ARCH-02: `rate-limit.ts` approaching module split threshold
+- **Deferred.**
+
+#### C7-ARCH-04: `upload-tracker-state.ts` / `upload-tracker.ts` tight coupling
+- **Fix:** Merge or clarify responsibilities.
+
+#### C7-ARCH-05: SW cache versioning build-time replacement unverified
+- **Fix:** Add runtime assertion.
+
+#### C7-ARCH-06: Smart collections AST depth bound not visible in schema
+- **Fix:** Export constants with rationale.
+
+#### C7-DOC-01: `admin-tokens.ts` PAT scope semantics undocumented
+- **Fix:** Add doc comment block.
+
+#### C7-DOC-02: Rate-limit lint gate header misleading about GET coverage
+- **Fix:** Update header comment.
+
+#### C7-DOC-03: Smart collections AST shape undocumented externally
+- **Fix:** Add AST spec comment or markdown doc.
+
+#### C7-UI-02: OG fallback redirects instead of branded placeholder
+- **Fix:** Generate static fallback OG image.
+
+#### C7-UI-03: SW stale-while-revalidate may show outdated EXIF metadata
+- **Fix:** Include pipeline version in derivative URL.
+
+#### C7-UI-04: Health endpoint lacks human-readable status
+- **Fix:** Add `"status"` field.
+
+#### C7-CRIT-03: `requireSameOriginAdmin()` vs `withAdminAuth()` overlap
+- **Fix:** Document decision matrix.
+
+#### C7-CRIT-04: SW version replacement invisible and unverified
+- **Fix:** Runtime assertion.
+
+#### C7-DEBUG-02: `flushGroupViewCounts` swallows per-group DB errors
+- **Fix:** Log error before re-buffering.
+
+#### C7-DEBUG-03: `rate-limit.ts` missing `TRUST_PROXY` warning at startup
+- **Fix:** Startup-time production check.
+
+#### C7-DEBUG-04: OG route fallback silent
+- **Fix:** Add `console.warn` before each fallback.
+
+#### C7-TRACE-02: Image processing state machine is implicit
+- **Fix:** Add `processing_status` enum column (deferred, requires migration).
+
+#### C7-TRACE-03: Upload tracker lacks correlation ID
+- **Fix:** Add `uploadBatchId` to logs.
+
+#### C7-TRACE-04: OG route fetches image three times
+- **Informational only — acceptable for OG use case.**
+
+---
 
 ## Previously fixed findings (confirmed still fixed from cycles 1-6)
 
-- A1-HIGH-01: Login rate-limit rollback — FIXED (no rollback on infrastructure error)
-- A1-HIGH-02: Image queue infinite re-enqueue — FIXED (permanentlyFailedIds tracking)
-- C18-MED-01: searchImagesAction re-throws — FIXED (returns structured error)
-- C6F-01: getSharedGroup returns null on empty images — FIXED (returns empty array)
+- A1-HIGH-01: Login rate-limit rollback — FIXED
+- A1-HIGH-02: Image queue infinite re-enqueue — FIXED
+- C18-MED-01: searchImagesAction re-throws — FIXED
+- C6F-01: getSharedGroup returns null on empty images — FIXED
 - C6F-02: isNotNull(capture_date) guards — FIXED
 - C6F-03: searchImages GROUP BY with created_at — FIXED
 - C4F-08/09: getImageByShareKey blur_data_url and topic_label — FIXED
 - C4F-12: search ORDER BY matches gallery — FIXED
-- C5F-01: undated image prev/next navigation — FIXED
-- A1-MED-04: sanitizeAdminString returns null — FIXED
+- C5F-01: Undated image prev/next navigation — FIXED
+- C5F-02: sort-order condition builder consolidation — FIXED
+
+---
 
 ## Deferred items carried forward (no change)
 
-All items from plan-355-deferred-cycle4.md and plan-357-cycle6-fixes.md remain deferred:
 - D1-MED: No CSP header on API route responses
 - D1-MED: getImage parallel queries / UNION optimization
 - D2-MED: data.ts approaching 1500-line threshold
@@ -144,14 +283,16 @@ All items from plan-355-deferred-cycle4.md and plan-357-cycle6-fixes.md remain d
 - D11-LOW: lightbox auto-hide UX
 - D12-LOW: photo viewer layout shift
 - D1-LOW: BoundedMap.prune() iteration delete
-- C5F-02: sort-order condition builder consolidation
+- C5F-02: sort-order condition builder consolidation (now fixed)
 - C6F-06: getImageByShareKey parallel tag query
 
-## Summary statistics
+---
 
-- Total new findings this cycle: 10
-- HIGH severity: 1
-- MEDIUM severity: 5
-- LOW severity: 4
+## Summary Statistics
+
+- Total new findings this cycle: 40+ (including low-severity)
+- HIGH severity: 2
+- MEDIUM severity: 16
+- LOW severity: 20+
 - Previously fixed (verified): 10
 - Deferred carry-forward: 18 items (no change)
