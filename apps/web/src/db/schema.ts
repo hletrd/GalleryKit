@@ -55,9 +55,6 @@ export const images = mysqlTable("images", {
     license_tier: varchar('license_tier', { length: 16 }).notNull().default('none'),
     blur_data_url: text('blur_data_url'),
 
-    // US-P31: denormalized like count, updated atomically with image_reactions inserts/deletes
-    reaction_count: int('reaction_count').notNull().default(0),
-
     // US-P52: AI-generated alt text suggestion. NULL until caption hook runs.
     // PUBLIC field — used as <img alt> fallback when image.title is empty (SEO + a11y).
     // Admin-set alt (title/description) always takes precedence; this is never auto-applied.
@@ -165,19 +162,6 @@ export const adminTokens = mysqlTable("admin_tokens", {
 }, (table) => ({
     tokenHashIdx: index("admin_tokens_token_hash_idx").on(table.tokenHash),
     userIdx: index("admin_tokens_user_idx").on(table.userId),
-}));
-
-// US-P31: Anonymous visitor reactions (heart/like).
-// visitor_id_hash = SHA-256(visitor_uuid + YYYY-MM-DD) — no PII stored.
-// reaction_count on images is updated atomically inside a transaction.
-export const imageReactions = mysqlTable("image_reactions", {
-    id: int("id").autoincrement().primaryKey(),
-    imageId: int("image_id").references(() => images.id, { onDelete: 'cascade' }).notNull(),
-    visitorIdHash: varchar("visitor_id_hash", { length: 64 }).notNull(),
-    createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-}, (table) => ({
-    imageVisitorUnique: uniqueIndex("image_reactions_image_visitor_unique").on(table.imageId, table.visitorIdHash),
-    imageIdIdx: index("image_reactions_image_id_idx").on(table.imageId),
 }));
 
 export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
