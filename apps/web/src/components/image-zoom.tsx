@@ -178,6 +178,21 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         }
     }, [applyTransform, resetZoom]);
 
+    // R2C10-MED-01: Dedicated keyboard handler — do not delegate to handleClick
+    // because handleClick's target.closest('[role="button"]') guard matches the
+    // zoom container itself (which has role="button"), preventing keyboard users
+    // from toggling zoom.
+    const handleKeyboardToggle = useCallback(() => {
+        if (zoomLevelRef.current > MIN_ZOOM) {
+            resetZoom(true);
+        } else {
+            const targetLevel = lastPinchLevelRef.current > MIN_ZOOM ? lastPinchLevelRef.current : DEFAULT_ZOOM;
+            zoomLevelRef.current = targetLevel;
+            setIsZoomed(true);
+            applyTransform(targetLevel, 0, 0, true);
+        }
+    }, [applyTransform, resetZoom]);
+
     // --- Touch: double-tap to toggle zoom ---
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         const now = Date.now();
@@ -332,7 +347,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             role="button"
             tabIndex={0}
             aria-label={isZoomed ? t('aria.zoomOut') : t('aria.zoomIn')}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(e as unknown as React.MouseEvent); } }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleKeyboardToggle(); } }}
         >
             <div
                 ref={innerRef}
