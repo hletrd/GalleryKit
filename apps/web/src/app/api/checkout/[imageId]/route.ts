@@ -20,7 +20,6 @@
  *     Referer so the visitor lands back on the same locale they came from.
  */
 
-import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { images, adminSettings } from '@/db/schema';
@@ -145,10 +144,13 @@ export async function POST(
         // (`checkout-${imageId}-${ip}-${minute}`) collapses rapid duplicates
         // while keeping distinct legitimate buys at minute N+1 separate.
         // Mirrors the cycle 5 P388-01 refund idempotency-key pattern.
-        // C17-SEC-01: include a random nonce so concurrent requests from
-        // different users cannot collide even when IP is 'unknown'.
-        const idempotencyNonce = randomUUID();
-        const idempotencyKey = `checkout-${image.id}-${ip}-${Math.floor(Date.now() / 60_000)}-${idempotencyNonce}`;
+        // C18-HIGH-01: the key MUST be deterministic per user context. Adding
+        // randomness (e.g. randomUUID) defeats deduplication entirely. When
+        // TRUST_PROXY is not set, IP becomes 'unknown' and all users share
+        // the same key — this is a deployment-configuration issue, not a
+        // code bug. Operators should set TRUST_PROXY=true when behind a
+        // reverse proxy so per-IP keys work correctly.
+        const idempotencyKey = `checkout-${image.id}-${ip}-${Math.floor(Date.now() / 60_000)}`;
         const session = await stripe.checkout.sessions.create(
             {
                 mode: 'payment',
