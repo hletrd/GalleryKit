@@ -143,7 +143,7 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
     // C12-LOW-01: also scans comment-stripped content so a commented-out
     // helper call cannot bypass the gate.
     const usesPrefixHelper = RATE_LIMIT_NAME_PREFIXES.some((prefix) => {
-        const re = new RegExp(`\\b${prefix}[A-Za-z0-9_]+\\s*\\(`);
+        const re = new RegExp(`\\b${prefix}[A-Za-z0-9_]*\\s*\\(`);
         return re.test(withoutStringsAndComments);
     });
     // C8-F03: ignore commented-out imports so a developer cannot accidentally
@@ -176,7 +176,7 @@ function checkRouteFile(file: string): boolean {
     return report.failed.length > 0;
 }
 
-const isCliEntry = require.main === module || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
+const isCliEntry = (typeof require !== 'undefined' && require.main === module) || (typeof require === 'undefined' && import.meta?.url?.includes('check-public-route-rate-limit'));
 if (isCliEntry) {
     const allRoutes = findRouteFiles(API_DIR).filter((f) => !f.startsWith(ADMIN_PREFIX));
     if (allRoutes.length === 0) {
