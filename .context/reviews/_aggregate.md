@@ -1,35 +1,37 @@
-# Aggregate Review — Cycle 3
+# Aggregate Review — Cycle 4
 
 **Date**: 2026-05-05
-**Review Type**: Deep multi-agent review (direct thread, no sub-agent fan-out available)
-**Focus**: Delta and critical surfaces
+**Review Type**: Comprehensive single-agent review (no sub-agent fan-out available)
+**Focus**: Post-cycle-3 delta, reaction removal completeness, gate regressions, TypeScript correctness
 
 ## Agent Failures
 
-- The Task/Agent fan-out tool is not exposed in this environment. All reviewer roles were performed directly in this thread and written to per-role files for provenance.
+- The `Agent` tool is not exposed in this environment. `.claude/agents/` does not exist.
+- A single comprehensive review was performed manually, covering code quality, security,
+  performance, correctness, tests, and UX angles.
 
 ## Unified Findings
 
-| Unified ID | Source IDs | Description | Severity | Confidence | Cross-Agent |
-|------------|------------|-------------|----------|------------|-------------|
-| C3-F01 | code-reviewer F1, perf-reviewer F1, security-reviewer F1, critic F1, verifier C1, debugger B1, tracer T1 | SW `networkFirstHtml` consumes `networkResponse.body` before returning it, causing blank HTML pages on network success | High | High | 7 agents |
-| C3-F02 | code-reviewer F2, security-reviewer F2, critic F2, verifier C2, tracer T3, quality-reviewer F1 | `check-public-route-rate-limit.ts` regex scans raw content without stripping strings/comments, allowing false passes | Medium | Medium | 6 agents |
-| C3-F03 | code-reviewer F3, security-reviewer F3, critic F3, verifier C3, debugger B2, tracer T2 | Reactions route catch-block rolls back rate-limit counters after successful DB transaction | Low | Medium | 6 agents |
-| C3-F04 | code-reviewer F4, perf-reviewer F2, critic F4, debugger B3, architect F3, test-engineer G3 | OG photo route has no size cap before base64 encoding; memory spike risk | Low | Medium | 6 agents |
-| C3-F05 | perf-reviewer F3 | Semantic search computes cosine similarity in JS for up to 5000 embeddings; CPU-bound | Medium | Medium | 1 agent |
-| C3-F06 | architect F1, quality-reviewer F2 | SW cache cleanup hard-codes prefixes; naming says LRU but eviction is FIFO | Low | Medium | 2 agents |
-| C3-F07 | designer F1 | OG images are always dark-themed regardless of site configuration | Low | Medium | 1 agent |
-| C3-F08 | document-specialist D1 | SW comment incompletely describes `isSensitiveResponse` coverage | Low | High | 1 agent |
-| C3-F09 | document-specialist D2 | `check-public-route-rate-limit.ts` docstring incompletely documents accepted prefixes | Low | High | 1 agent |
+| Unified ID | Source IDs | Description | Severity | Confidence | Status |
+|------------|------------|-------------|----------|------------|--------|
+| C4R-08 | code-reviewer C4R-08 | TypeScript build errors: `g/[key]/page.tsx` and `s/[key]/page.tsx` pass removed `reactionsEnabled` prop to `<PhotoViewer>` | High | High | NEW |
+| C4R-07 | code-reviewer C4R-07 | Unit test regression: `wheelStep` factor changed from 0.9/1.1 to 0.95/1.05 but tests still expect 10 % steps | High | High | NEW |
+| C4R-01 | code-reviewer C4R-01 | Incomplete reaction removal: backend API, DB schema, rate-limit module, config, translations, admin UI, and home-client aria-labels still exist after UI was removed | Medium | High | NEW |
+| C4R-05 | code-reviewer C4R-05 | Admin settings page renders dead "Reactions" card with non-functional toggle | Low | High | NEW |
+| C4R-03 | code-reviewer C4R-03 | `home-client.tsx` declares and references `reaction_count` which is never fetched by the data layer | Low | High | NEW |
+| C4R-02 | code-reviewer C4R-02 | Orphaned i18n translation keys for reactions in `en.json` and `ko.json` | Low | High | NEW |
+| C4R-04 | code-reviewer C4R-04 | `gallery-config-shared.ts` still validates `reactions_enabled` setting; `GalleryConfig` type still includes `reactionsEnabled` | Low | High | NEW |
+| C4R-06 | code-reviewer C4R-06 | Image-zoom cursor changed from `cursor-zoom-in` to `cursor-auto`, removing zoom affordance | Low | Medium | NEW |
 
 ## Cross-Agent Agreement
 
-The highest-signal finding is **C3-F01** (SW body consumption), flagged by 7 of 12 agents. This is a confirmed correctness bug with a one-line fix.
-
-**C3-F02** (lint gate regex fragility) is the second-highest signal, flagged by 6 agents. It is a maintainability/security risk for future routes.
-
-**C3-F03** (reactions rollback after commit) and **C3-F04** (OG photo size cap) both have 6-agent agreement but are lower severity.
+N/A — single-agent review.
 
 ## Deferred Items
 
-None of the findings above are deferred this cycle. All real issues are scheduled for implementation in the plan phase.
+None. All findings are scheduled for implementation in the plan phase.
+
+## Previous-Cycle Status
+
+- Cycle 3 findings C3-F01 through C3-F09 were all implemented in prior cycles.
+- No carry-over defects from cycle 3 remain unfixed.
