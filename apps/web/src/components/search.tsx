@@ -31,6 +31,7 @@ interface SearchResult {
     topic: string;
     topic_label: string | null;
     camera_model: string | null;
+    lens_model: string | null;
     capture_date: string | null;
 }
 
@@ -88,7 +89,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                     setResults([]);
                     setSearchStatus('error');
                 } else {
-                    const json = await resp.json() as { results?: { imageId: number; score: number; title?: string | null; description?: string | null; filename_jpeg?: string; width?: number; height?: number; topic?: string; topic_label?: string | null; camera_model?: string | null; capture_date?: string | null }[] };
+                    const json = await resp.json() as { results?: { imageId: number; score: number; title?: string | null; description?: string | null; filename_jpeg?: string; width?: number; height?: number; topic?: string; topic_label?: string | null; camera_model?: string | null; lens_model?: string | null; capture_date?: string | null }[] };
                     const semanticResults: SearchResult[] = (json.results ?? []).map(r => ({
                         id: r.imageId,
                         title: r.title ?? null,
@@ -99,6 +100,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                         topic: r.topic ?? '',
                         topic_label: r.topic_label ?? null,
                         camera_model: r.camera_model ?? null,
+                        lens_model: r.lens_model ?? null,
                         capture_date: r.capture_date ?? null,
                     }));
                     setResults(semanticResults);
@@ -313,7 +315,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                                 {image.title || image.description || `${t('common.photo')} ${image.id}`}
                                             </p>
                                             <p className="text-xs text-muted-foreground truncate">
-                                                {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model, formatStoredExifDate(image.capture_date, locale)].filter(Boolean).join(' \u00b7 ')}
+                                                {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model, image.lens_model, formatStoredExifDate(image.capture_date, locale)].filter(Boolean).join(' \u00b7 ')}
                                             </p>
                                         </div>
                                     </Link>

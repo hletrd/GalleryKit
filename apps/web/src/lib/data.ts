@@ -1121,6 +1121,7 @@ interface SearchResult {
     topic: string;
     topic_label: string | null;
     camera_model: string | null;
+    lens_model: string | null;
     capture_date: string | null;
     created_at: Date;
 }
@@ -1158,6 +1159,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
         id: images.id, title: images.title, description: images.description,
         filename_jpeg: images.filename_jpeg, width: images.width, height: images.height,
         topic: images.topic, topic_label: topics.label, camera_model: images.camera_model,
+        lens_model: images.lens_model,
         capture_date: images.capture_date, created_at: images.created_at,
     };
 
@@ -1178,6 +1180,7 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
                 like(images.title, searchTerm),
                 like(images.description, searchTerm),
                 like(images.camera_model, searchTerm),
+                like(images.lens_model, searchTerm),
                 like(images.topic, searchTerm),
                 like(topics.label, searchTerm),
             )

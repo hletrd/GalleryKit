@@ -292,7 +292,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             {hasExifData(image.f_number) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.aperture')}</p>
-                                    <p className="font-medium">f/{image.f_number}</p>
+                                    <p className="font-medium">f/{Number(image.f_number).toFixed(1)}</p>
                                 </div>
                             )}
                             {/* C8-MED-01: use hasExifData guard matching desktop sidebar pattern

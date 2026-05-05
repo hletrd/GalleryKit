@@ -694,7 +694,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     {hasExifData(image.f_number) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.aperture')}</p>
-                                            <p className="font-medium">f/{image.f_number}</p>
+                                            <p className="font-medium">f/{Number(image.f_number).toFixed(1)}</p>
                                         </div>
                                     )}
                                     {hasExifData(image.exposure_time) && (
