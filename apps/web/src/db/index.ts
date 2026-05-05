@@ -38,12 +38,12 @@ const poolConnection = mysql.createPool({
 //       SEO settings.
 // C4R-RPL2-01 (aggregated finding AGG4R2-01).
 //
-// Type note: mysql2/promise declares the 'connection' event arg as its own
-// promise-based PoolConnection (which lacks `.promise()` in types). At
-// runtime the listener receives the base callback-style PoolConnection from
-// the mysql2 (non-promise) module, which does expose `.promise()`. Cast
-// through `CallbackPoolConnection` so the cast is explicit and documented.
-const connectionInitPromises = new WeakMap<CallbackPoolConnection, Promise<void>>();
+// C6R-04: Use a well-known Symbol property on the connection object itself
+// instead of a WeakMap keyed by callback-style PoolConnection. The 'connection'
+// event handler and getConnection() may see different wrapper objects (callback
+// vs promise-style), so WeakMap lookups can silently fail. A Symbol property
+// travels with the object reference that getConnection() returns.
+const connectionInitSymbol = Symbol.for('gallerykit.db.connectionInit');
 
 poolConnection.on('connection', (connection) => {
     const callbackConnection = connection as unknown as CallbackPoolConnection;
@@ -52,14 +52,13 @@ poolConnection.on('connection', (connection) => {
         .catch((err: unknown) => {
             console.error('[db] Failed to set group_concat_max_len on pooled connection:', err);
         });
-    connectionInitPromises.set(callbackConnection, initPromise);
+    (connection as unknown as Record<symbol, Promise<void>>)[connectionInitSymbol] = initPromise;
 });
 
 const originalGetConnection = poolConnection.getConnection.bind(poolConnection);
 poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection.getConnection>) => {
     const connection = await originalGetConnection(...args);
-    const callbackConnection = connection as unknown as CallbackPoolConnection;
-    const initPromise = connectionInitPromises.get(callbackConnection);
+    const initPromise = (connection as unknown as Record<symbol, Promise<void> | undefined>)[connectionInitSymbol];
     if (initPromise) {
         await initPromise;
     }

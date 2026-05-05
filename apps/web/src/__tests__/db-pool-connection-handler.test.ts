@@ -30,9 +30,8 @@ describe('db/index.ts — pool-connection listener', () => {
         expect(source).toMatch(/poolConnection\.on\(\s*['"]connection['"]\s*,/);
     });
 
-    it('stores a per-connection init promise and awaits it in getConnection()', () => {
-        expect(source).toMatch(/new WeakMap<CallbackPoolConnection,\s*Promise<void>>\(\)/);
-        expect(source).toMatch(/connectionInitPromises\.set\(/);
+    it('stores a per-connection init promise via Symbol property and awaits it in getConnection()', () => {
+        expect(source).toMatch(/Symbol\.for\(['"]gallerykit\.db\.connectionInit['"]\)/);
         expect(source).toMatch(/const originalGetConnection = poolConnection\.getConnection\.bind\(poolConnection\)/);
         expect(source).toMatch(/await originalGetConnection\(/);
         expect(source).toMatch(/await initPromise/);
