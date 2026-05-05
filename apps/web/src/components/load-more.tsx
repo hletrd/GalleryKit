@@ -28,6 +28,8 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
     const observerRef = useRef<IntersectionObserver | null>(null);
     const loadingRef = useRef(false);
     const queryVersionRef = useRef(0);
+    const maintenanceCooldownRef = useRef<number>(0);
+    const MAINTENANCE_COOLDOWN_MS = 5000;
     const [statusMessage, setStatusMessage] = useState('');
 
     const loadMore = useCallback(async () => {
@@ -63,7 +65,11 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
             if (page.status === 'rateLimited') {
                 toast.error(t('home.loadMoreRateLimited'));
             } else if (page.status === 'maintenance') {
-                toast.error(t('home.loadMoreMaintenance'));
+                const now = Date.now();
+                if (now - maintenanceCooldownRef.current > MAINTENANCE_COOLDOWN_MS) {
+                    maintenanceCooldownRef.current = now;
+                    toast.error(t('home.loadMoreMaintenance'));
+                }
             } else if (page.status === 'error') {
                 toast.error(t('home.loadMoreFailed'));
             }
