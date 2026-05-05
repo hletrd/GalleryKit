@@ -20,7 +20,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { headers } from 'next/headers';
 import { db, imageEmbeddings, images, topics } from '@/db';
 import { desc, eq, and, inArray } from 'drizzle-orm';
 import { hasTrustedSameOrigin } from '@/lib/request-origin';
@@ -128,8 +127,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Rate-limit — consumed AFTER all cheap validation gates (Pattern 2)
-    const requestHeaders = await headers();
-    const ip = getClientIp(requestHeaders);
+    const ip = getClientIp(request.headers);
     const now = Date.now();
     const overLimit = preIncrementSemanticAttempt(ip, now);
     if (overLimit) {
