@@ -149,7 +149,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                     <button
                         onClick={() => setTheme(nextTheme((theme ?? 'system') as StoredTheme))}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"
-                        aria-label={t('aria.cycleTheme', { theme: theme ?? 'system' })}
+                        aria-label={t('aria.toggleTheme')}
                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
                     >
                         {(theme === 'light') && <Sun className="h-4 w-4" />}
