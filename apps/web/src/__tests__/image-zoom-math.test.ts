@@ -67,13 +67,13 @@ describe('snap threshold', () => {
 });
 
 describe('wheelStep', () => {
-    it('zoom out (deltaY > 0) reduces level by ~10%', () => {
+    it('zoom out (deltaY > 0) reduces level by ~5%', () => {
         const result = wheelStep(2.0, 100);
-        expect(result).toBeCloseTo(1.8);
+        expect(result).toBeCloseTo(1.9);
     });
-    it('zoom in (deltaY < 0) increases level by ~10%', () => {
+    it('zoom in (deltaY < 0) increases level by ~5%', () => {
         const result = wheelStep(2.0, -100);
-        expect(result).toBeCloseTo(2.2);
+        expect(result).toBeCloseTo(2.1);
     });
     it('does not go below MIN_ZOOM', () => {
         expect(wheelStep(MIN_ZOOM, 100)).toBe(MIN_ZOOM);
