@@ -127,10 +127,12 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         return report;
     }
 
-    // Check for any rate-limit helper invocation by name prefix
+    // Check for any rate-limit helper invocation by name prefix.
+    // C3-F02: scan the string-stripped content so a literal containing the
+    // helper name does not falsely satisfy the gate.
     const usesPrefixHelper = RATE_LIMIT_NAME_PREFIXES.some((prefix) => {
         const re = new RegExp(`\\b${prefix}[A-Za-z0-9_]+\\s*\\(`);
-        return re.test(content);
+        return re.test(withoutStrings);
     });
     const importsRateLimitModule = RATE_LIMIT_MODULE_HINTS.some((mod) => {
         const re = new RegExp(`from\\s+['\"]@/lib/${mod}['\"]`);
