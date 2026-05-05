@@ -34,6 +34,9 @@ describe('db/index.ts — pool-connection listener', () => {
         expect(source).toMatch(/Symbol\.for\(['"]gallerykit\.db\.connectionInit['"]\)/);
         expect(source).toMatch(/const originalGetConnection = poolConnection\.getConnection\.bind\(poolConnection\)/);
         expect(source).toMatch(/await originalGetConnection\(/);
+        // C8-F01: Verify the symbol is accessed via the wrapper's .connection
+        // property, not directly on the PromisePoolConnection wrapper.
+        expect(source).toMatch(/\}\)\.connection/);
         expect(source).toMatch(/await initPromise/);
     });
 

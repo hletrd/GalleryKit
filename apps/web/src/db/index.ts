@@ -58,7 +58,12 @@ poolConnection.on('connection', (connection) => {
 const originalGetConnection = poolConnection.getConnection.bind(poolConnection);
 poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection.getConnection>) => {
     const connection = await originalGetConnection(...args);
-    const initPromise = (connection as unknown as Record<symbol, Promise<void> | undefined>)[connectionInitSymbol];
+    // C8-F01: The symbol property is attached to the underlying callback
+    // Connection in the 'connection' event handler, but getConnection()
+    // returns a PromisePoolConnection wrapper. Access the symbol via the
+    // wrapper's .connection property so the init promise is actually awaited.
+    const underlying = (connection as unknown as { connection?: Record<symbol, Promise<void> | undefined> }).connection;
+    const initPromise = underlying?.[connectionInitSymbol];
     if (initPromise) {
         await initPromise;
     }
