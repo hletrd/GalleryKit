@@ -41,7 +41,7 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 // Future routes are expected to use the `preIncrement` shape, but we don't
 // force a refactor on the existing code for this lint gate.
 const RATE_LIMIT_NAME_PREFIXES = ['preIncrement', 'checkAndIncrement'];
-const RATE_LIMIT_MODULE_HINTS = ['auth-rate-limit'];
+const RATE_LIMIT_MODULE_HINTS = ['auth-rate-limit', 'rate-limit'];
 
 const EXEMPT_TAG = '@public-no-rate-limit-required';
 
