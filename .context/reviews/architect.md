@@ -1,39 +1,44 @@
-# Cycle 17 Architect Review — architect
+# Cycle 18 — Architect Review
 
 Date: 2026-05-06
-Scope: Full repository, post-cycle-16 state
+Scope: Full repository, post-cycle-17 fixes
 Focus: Architectural/design risks, coupling, layering
 
-## Findings
+## Verified Prior Fixes
+
+- C17-ARCH-01 (ImageProcessingJob weak contract): Partially addressed by 38077b9 — fields now passed, but type remains optional.
+- C17-ARCH-02 (icc_profile_name schema gap): FIXED in 4d1f323 — column added.
+- C17-ARCH-03 (SW metadata store): Still present, deferred.
+- C17-ARCH-04 (single-writer topology): Documented, accepted.
+
+---
+
+## New Findings
+
+### HIGH SEVERITY
+
+**C18-HIGH-01: Checkout idempotency key design trade-off broken by overcorrection**
+- **File:** `apps/web/src/app/api/checkout/[imageId]/route.ts:150-151`
+- **Confidence:** HIGH
+- **Problem:** The original design used a deterministic key (`imageId-ip-minute`) to deduplicate rapid duplicate clicks. C17-SEC-01 identified that `ip='unknown'` causes cross-user collision. The fix (adding randomUUID) traded off deduplication for uniqueness. But deduplication is the PRIMARY purpose of an idempotency key — without it, the key has no value. The architecture now has a mechanism with no function.
+- **Suggested fix:** Use a hierarchical key: deterministic per-session component + minute window. If no session, fall back to IP + User-Agent hash. If IP is 'unknown', accept that deduplication is unavailable (document this in deployment requirements).
+
+---
 
 ### MEDIUM SEVERITY
 
-**C17-ARCH-01: ImageProcessingJob is a bag-of-fields with weak producer contracts**
-- **File:** `apps/web/src/lib/image-queue.ts` (lines 107-121)
-- **Confidence:** High
-- **Problem:** `ImageProcessingJob` declares `camera_model?`, `capture_date?`, `iccProfileName?`, `quality?`, and `imageSizes?` as all optional. There is no compile-time or runtime enforcement that producers pass consistent sets of fields. The bootstrap query and `uploadImages` have already diverged twice (cycle 16 fixed bootstrap only; cycle 17 must fix upload). Optional fields for data that is always available at the producer create a footgun.
-- **Fix:** Split into `ImageProcessingJobRequired` (always-present fields) and `ImageProcessingJobOptional` (truly conditional fields), or use a builder pattern that validates completeness before enqueuing.
+**C18-MED-01: Service Worker cache abstraction leaks implementation details**
+- **File:** `apps/web/public/sw.template.js`
+- **Confidence:** MEDIUM
+- **Problem:** The `recordAndEvict` function manipulates both a metadata Map and the Cache API, but the key types differ (string vs Request). This is a leaky abstraction — the LRU tracker assumes its keys match the cache keys, but they don't. The architecture should either: (a) use string URLs consistently for both metadata and cache keys, or (b) store Request objects in metadata.
+- **Suggested fix:** Refactor `staleWhileRevalidateImage` to use `request.url` as the cache key for both `put` and `match`, making it consistent with `delete`.
 
-**C17-ARCH-02: iccProfileName is not persisted, creating a bootstrapping gap**
-- **File:** `apps/web/src/db/schema.ts`
-- **Confidence:** High
-- **Problem:** The `images` table has `color_space` (from EXIF) but no `icc_profile_name` (from Sharp ICC parsing). The queue's `processImageFormats` needs `iccProfileName` to decide AVIF colorspace, but bootstrapped jobs can never receive it because it's not in the DB. This forces a design split: fresh uploads COULD pass it, but bootstrapped jobs never can.
-- **Fix:** Add `icc_profile_name` to the schema and persist it at upload time. This closes the gap and makes bootstrap behavior match fresh-upload behavior.
+---
 
 ### LOW SEVERITY
 
-**C17-ARCH-03: Service Worker metadata store uses a single shared JSON blob**
-- **File:** `apps/web/public/sw.js` (lines 54-75)
-- **Confidence:** Medium
-- **Problem:** The metadata store (`getMeta`/`setMeta`) serializes the entire LRU Map to a single JSON blob stored under `/__meta__` in the Cache API. This creates a serialization bottleneck and the read-modify-write race (C16-HIGH-01). Per-URL metadata keys would eliminate the race and reduce serialization overhead.
-- **Fix:** Store each entry as a separate Cache API item with the URL as the key.
-
-**C17-ARCH-04: Module-level singletons rely on single-writer topology**
-- **File:** `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/data.ts`
-- **Confidence:** Low
-- **Problem:** The processing queue state (`getProcessingQueueState`), rate-limit Maps, and view-count buffer are all module-level singletons. The CLAUDE.md documents this as intentional for the single-instance topology, but it means horizontal scaling is blocked without significant refactoring.
-- **Fix:** Documented and accepted by project rules. No action needed.
-
-## Verdict
-
-The architecture is sound for its intended single-instance deployment model. The main risk is the weak contract around `ImageProcessingJob` fields, which has already caused two cycles of partial fixes. Adding `icc_profile_name` to the schema would be a structural improvement that eliminates a persistent data-flow gap.
+**C18-LOW-01: Semantic search endpoint mixes validation concerns**
+- **File:** `apps/web/src/app/api/search/semantic/route.ts`
+- **Confidence:** LOW
+- **Problem:** The route performs body parsing, rate limiting, feature-gate checking, embedding computation, and result enrichment all in one handler. While acceptable for a prototype endpoint, the tight coupling makes unit testing difficult — every test must mock the full pipeline.
+- **Suggested fix:** Extract validation, embedding, and enrichment into separate functions. Deferred until semantic search graduates from stub to real ONNX inference.

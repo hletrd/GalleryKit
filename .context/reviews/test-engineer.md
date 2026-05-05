@@ -1,43 +1,45 @@
-# Cycle 17 Test Engineering Review — test-engineer
+# Cycle 18 — Test Engineer Review
 
 Date: 2026-05-06
-Scope: Full repository, post-cycle-16 state
+Scope: Full repository, post-cycle-17 fixes
 Focus: Test coverage gaps, fixture contracts, flaky tests, TDD opportunities
 
-## Findings
+## Verified Prior Fixes
+
+- C17-TEST-01 / C17-TEST-02 (EXIF/ICC propagation tests): Addressed by 38077b9 and 4d1f323. New fixture tests should be added to lock the behavior.
+- C17-TEST-03 (SW NaN age): Addressed by 0d243db. Unit test should verify NaN eviction.
+- C17-TEST-04 (checkout idempotency): See C18-HIGH-01 — new test needed for deterministic key.
+
+---
+
+## New Findings
 
 ### MEDIUM SEVERITY
 
-**C17-TEST-01: No test verifies enqueueImageProcessing receives correct EXIF/ICC fields from uploadImages**
-- **File:** `apps/web/src/app/actions/images.ts` (lines 407-421)
-- **Confidence:** High
-- **Problem:** There is no unit or integration test that asserts the `enqueueImageProcessing` call in `uploadImages` passes `camera_model`, `capture_date`, and `iccProfileName`. The bootstrap query tests (added in cycle 16) verify the DB-to-queue path, but the upload-to-queue path is untested. The `ImageProcessingJob` type includes these fields, yet the call site silently omits them.
-- **Fix:** Add a test that mocks `enqueueImageProcessing` and asserts the job object includes `camera_model`, `capture_date`, and `iccProfileName` when the source image/metadata provides them.
+**C18-TEST-01: No test verifies checkout idempotency key is deterministic per user**
+- **File:** `apps/web/src/app/api/checkout/[imageId]/route.ts:150-151`
+- **Confidence:** HIGH
+- **Problem:** The fix for C17-SEC-01 (adding randomUUID) introduced C18-HIGH-01 (non-deterministic key). There is no test asserting that two requests from the same user within the same minute generate the SAME idempotency key. Without such a test, future "fixes" for collision could re-introduce randomness.
+- **Fix:** Add a unit test that mocks `getClientIp` to return a fixed IP, calls the POST handler twice within the same minute, and asserts the idempotency keys are identical (or differ only in a controlled session-derived component).
 
-**C17-TEST-02: No test for iccProfileName propagation through the upload pipeline**
-- **File:** `apps/web/src/lib/process-image.ts` / `apps/web/src/app/actions/images.ts`
-- **Confidence:** High
-- **Problem:** The `saveOriginalAndGetMetadata` function extracts `iccProfileName` from Sharp metadata, but there is no end-to-end test verifying that this value flows through to `processImageFormats` and influences the AVIF colorspace decision.
-- **Fix:** Add an integration test with a P3-tagged test image that verifies the queue processes it with `iccProfileName` set correctly.
+**C18-TEST-02: No test for Service Worker cache key consistency**
+- **File:** `apps/web/public/sw.template.js`
+- **Confidence:** MEDIUM
+- **Problem:** The mismatch between `cache.put(request)` and `cache.delete(url)` (C18-MED-01) has no test coverage. The SW tests (`sw-cache.test.ts`) verify cache hit/miss but not LRU eviction mechanics.
+- **Fix:** Add a test that simulates exceeding the 50 MB budget and asserts that `caches.open(IMAGE_CACHE).keys()` length decreases after eviction.
+
+**C18-TEST-03: Semantic search min-length gate lacks codepoint-aware test**
+- **File:** `apps/web/src/app/api/search/semantic/route.ts:111`
+- **Confidence:** MEDIUM
+- **Problem:** The `query.length < 3` check is not tested with emoji or surrogate-pair inputs. A test with "🚀🌙" (2 code points, 4 UTF-16 units) would document the current behavior and catch regressions if the gate is tightened.
+- **Fix:** Add a test case in `semantic-search-route.test.ts` with emoji input.
+
+---
 
 ### LOW SEVERITY
 
-**C17-TEST-03: SW networkFirstHtml NaN age path is untested**
-- **File:** `apps/web/public/sw.js` (lines 162-169)
-- **Confidence:** Medium
-- **Problem:** The stale-HTML eviction logic has no test for malformed `sw-cached-at` headers. A corrupted cache entry would produce `NaN` age, bypassing eviction.
-- **Fix:** Add a SW test that injects a corrupted cache entry and asserts it is evicted.
-
-**C17-TEST-04: checkout route idempotency key collision is untested**
-- **File:** `apps/web/src/app/api/checkout/[imageId]/route.ts` (line 147)
-- **Confidence:** Medium
-- **Problem:** The idempotency key uses `ip` which becomes `'unknown'` when TRUST_PROXY is unset. There is no test verifying behavior when multiple requests for the same image arrive with `'unknown'` IP.
-- **Fix:** Add a test that simulates concurrent checkout requests without TRUST_PROXY and asserts they receive distinct session URLs.
-
-## Previously Deferred Test Items
-
-- None specific from prior cycles.
-
-## Verdict
-
-The most critical gap is the upload-to-queue field propagation (C17-TEST-01 and C17-TEST-02). These are exactly the kinds of integration gaps that regression tests should catch — the type system allows optional fields, and the call site compiles fine while silently dropping data.
+**C18-TEST-04: No test for caption/embedding hook race with deletion**
+- **File:** `apps/web/src/lib/image-queue.ts:351-400`
+- **Confidence:** LOW
+- **Problem:** The fire-and-forget hooks after `processed=true` commit are not tested for the deletion-race scenario.
+- **Fix:** Optional: add a test that mocks DB update failure (row not found) and asserts graceful logging.

@@ -1,37 +1,34 @@
-# Cycle 17 Performance Review — perf-reviewer
+# Cycle 18 — Performance Reviewer Findings
 
 Date: 2026-05-06
-Scope: Full repository, post-cycle-16 state
+Scope: Full repository, post-cycle-17 fixes
 Focus: CPU/memory, concurrency, UI responsiveness, database query efficiency
 
-## Findings
+## Verified Prior Fixes
+
+- C17-PERF-01 (missing iccProfileName): FIXED in 38077b9 — P3/10-bit path now correctly triggered.
+- C17-PERF-02 (COUNT(*) OVER()): Still present, deferred.
+- C17-PERF-03 (searchImages over-fetch): Still present, acceptable at current scale.
+
+---
+
+## New Findings
 
 ### MEDIUM SEVERITY
 
-**C17-PERF-01: uploadImages loses ICC profile info, causing incorrect color-space decisions in queue**
-- **File:** `apps/web/src/app/actions/images.ts` (lines 407-421)
-- **Confidence:** High
-- **Problem:** Missing `iccProfileName` in `enqueueImageProcessing` means `processImageFormats` defaults to sRGB for all queue-processed fresh uploads. For P3 sources, this skips the `pipelineColorspace('rgb16')` path and 10-bit AVIF encoding (process-image.ts lines 656-692). The result is smaller files (8-bit sRGB) but the visual quality loss is the actual bug. From a perf perspective, the wider-gamut path (16-bit pipeline + 10-bit AVIF) is MORE expensive, so omitting it actually saves CPU. However, this is a correctness bug masquerading as a performance difference.
-- **Fix:** Pass `iccProfileName` so the correct (more expensive but higher-quality) path is taken when appropriate.
+**C18-PERF-01: Service Worker LRU eviction may not actually delete cache entries**
+- **File:** `apps/web/public/sw.template.js:94` / `apps/web/public/sw.js:94`
+- **Confidence:** MEDIUM
+- **Cross-reference:** C18-MED-01 (code-reviewer)
+- **Problem:** `imageCache.delete(entry.url)` uses a string URL, but entries were stored with `imageCache.put(request, ...)`. The Cache API may not match string URLs against Request-keyed entries. This means the LRU eviction logic updates its metadata but fails to free actual cache storage. On a gallery with many images, the browser cache grows beyond the 50 MB budget, consuming device storage and potentially triggering quota eviction that removes entries unpredictably.
+- **Fix:** Use consistent key types. Store the URL string as the cache key throughout, or store the Request object in metadata and use it for deletion.
+
+---
 
 ### LOW SEVERITY
 
-**C17-PERF-02: getImagesLitePage uses COUNT(*) OVER() which may be expensive on large tables**
-- **File:** `apps/web/src/lib/data.ts` (lines 694)
-- **Confidence:** Medium
-- **Problem:** The window function `COUNT(*) OVER()` computes the total count for every row returned. On a 100-row page, this repeats the total count 100 times. For a table with tens of thousands of images, this adds overhead compared to a separate `SELECT COUNT(*)` query.
-- **Fix:** Consider separate count query if table grows beyond ~50k rows.
-
-**C17-PERF-03: searchImages runs up to 3 queries in parallel with potential over-fetch**
-- **File:** `apps/web/src/lib/data.ts` (lines 1235-1255)
-- **Confidence:** Low
-- **Problem:** When the main query doesn't fill the limit, tag and alias queries run in parallel. Each can fetch up to `remainingLimit` rows. Worst-case total rows fetched: `effectiveLimit + 2 * remainingLimit`. For a limit of 20, this is at most 60 rows — negligible at personal-gallery scale.
-- **Fix:** No action needed at current scale.
-
-## Previously Deferred Performance Items
-
-- C16-LOW-03 (rate-limit sub-second truncation): Still deferred, latent only.
-
-## Verdict
-
-No new performance regressions. The missing `iccProfileName` propagation actually reduces CPU per image (by skipping 16-bit pipeline + 10-bit AVIF) but degrades output quality — fix it for correctness, not performance.
+**C18-PERF-02: Semantic search scans up to 5000 embeddings with full cosine computation**
+- **File:** `apps/web/src/app/api/search/semantic/route.ts:145-169`
+- **Confidence:** LOW
+- **Problem:** For every semantic search query, the endpoint fetches up to 5000 embeddings from the DB and computes cosine similarity in JavaScript. At 5000 rows * 512-dim float32 vectors, this is ~10 MB of base64-decoded data and ~25 million floating-point operations per request. With 30 requests/minute, this is ~750M ops/min. While within Node.js capability on modern hardware, it is the most CPU-intensive public endpoint.
+- **Mitigation:** The rate limit (30/min/IP) and same-origin check provide adequate throttling. No immediate action needed, but this surface should be monitored if semantic search is enabled at scale.
