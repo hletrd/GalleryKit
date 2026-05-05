@@ -541,6 +541,7 @@ export const bootstrapImageProcessingQueue = async () => {
             topic: images.topic,
             capture_date: images.capture_date,
             camera_model: images.camera_model,
+            icc_profile_name: images.icc_profile_name,
         })
             .from(images)
             .where(pendingWhere)
@@ -557,6 +558,7 @@ export const bootstrapImageProcessingQueue = async () => {
                 topic: image.topic,
                 capture_date: image.capture_date,
                 camera_model: image.camera_model,
+                iccProfileName: image.icc_profile_name,
             });
 
         }

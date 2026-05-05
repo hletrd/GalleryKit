@@ -331,6 +331,7 @@ export async function uploadImages(formData: FormData) {
                     processed: false,
                     ...exifDb,
                     color_space: data.iccProfileName || exifDb.color_space,
+                    icc_profile_name: data.iccProfileName,
                     bit_depth: data.bitDepth,
                     // C22-AGG-02: .slice(0, 10) is safe on UTF-16 code units because
                     // getSafeExtension() in process-image.ts guarantees ASCII-only
@@ -418,6 +419,9 @@ export async function uploadImages(formData: FormData) {
                             jpeg: uploadConfig.imageQualityJpeg,
                         },
                         imageSizes: uploadConfig.imageSizes.length > 0 ? uploadConfig.imageSizes : undefined,
+                        camera_model: exifDb.camera_model,
+                        capture_date: exifDb.capture_date,
+                        iccProfileName: data.iccProfileName,
                     });
 
                     successCount++;
