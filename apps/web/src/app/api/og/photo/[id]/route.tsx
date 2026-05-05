@@ -68,7 +68,9 @@ export async function GET(
 
         // Fetch the photo and convert to base64 data URL so Satori embeds it
         // without a second HTTP round-trip during rendering.
-        const photoRes = await fetch(photoUrl);
+        // C1-BUG-06: 10-second timeout so a hung internal fetch does not hold
+        // the OG request open indefinitely.
+        const photoRes = await fetch(photoUrl, { signal: AbortSignal.timeout(10000) });
         if (!photoRes.ok) {
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
