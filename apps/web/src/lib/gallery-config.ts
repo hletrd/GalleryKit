@@ -58,9 +58,6 @@ export interface GalleryConfig {
     // Slideshow
     slideshowIntervalSeconds: number;
 
-    // US-P31: Reactions
-    reactionsEnabled: boolean;
-
     // US-P52: Auto alt-text (ONNX stub, opt-in)
     autoAltTextEnabled: boolean;
 
@@ -99,11 +96,6 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 return raw === 'true';
             })(),
             slideshowIntervalSeconds: parseSlideshowInterval(getSetting(map, 'slideshow_interval_seconds')),
-            reactionsEnabled: (() => {
-                const raw = getSetting(map, 'reactions_enabled');
-                if (!isValidSettingValue('reactions_enabled', raw)) return DEFAULTS.reactions_enabled !== 'false';
-                return raw !== 'false';
-            })(),
             autoAltTextEnabled: (() => {
                 const raw = getSetting(map, 'auto_alt_text_enabled');
                 if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
@@ -131,7 +123,6 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             imageSizes: parseImageSizes(DEFAULTS.image_sizes),
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
-            reactionsEnabled: DEFAULTS.reactions_enabled !== 'false',
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
             semanticSearchEnabled: DEFAULTS.semantic_search_enabled === 'true',
             licensePrices: {

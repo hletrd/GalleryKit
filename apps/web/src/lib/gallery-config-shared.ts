@@ -20,9 +20,6 @@ export const GALLERY_SETTING_KEYS = [
     // Slideshow
     'slideshow_interval_seconds',
 
-    // US-P31: Reactions
-    'reactions_enabled',
-
     // US-P52: Auto alt-text via local Florence-2 (ONNX stub, default off)
     'auto_alt_text_enabled',
 
@@ -65,8 +62,6 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     image_sizes: DEFAULT_IMAGE_SIZE_VALUES.join(','),
     strip_gps_on_upload: 'false',
     slideshow_interval_seconds: String(SLIDESHOW_INTERVAL_DEFAULT),
-    // US-P31: reactions enabled by default
-    reactions_enabled: 'true',
 
     // US-P52: auto alt-text disabled by default (heavy ONNX model, opt-in)
     auto_alt_text_enabled: 'false',
@@ -91,8 +86,6 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     image_sizes: (v) => normalizeConfiguredImageSizes(v) !== null,
     strip_gps_on_upload: (v) => v === 'true' || v === 'false',
     slideshow_interval_seconds: (v) => { const n = Number(v); return Number.isInteger(n) && n >= SLIDESHOW_INTERVAL_MIN && n <= SLIDESHOW_INTERVAL_MAX; },
-    // US-P31
-    reactions_enabled: (v) => v === 'true' || v === 'false',
 
     // US-P52
     auto_alt_text_enabled: (v) => v === 'true' || v === 'false',
