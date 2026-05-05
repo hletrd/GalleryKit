@@ -100,6 +100,57 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('MISSING RATE LIMIT');
     });
 
+    it('fails when rate-limit helper is only in a line comment (C12-LOW-01)', () => {
+        const source = `
+            // preIncrementSemanticAttempt(ip, now);
+            export async function POST(request) {
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when rate-limit helper is only in a block comment (C12-LOW-01)', () => {
+        const source = `
+            /* preIncrementCheckoutAttempt(ip) */
+            export async function POST(request) {
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('fails when rate-limit helper spans inside a multi-line block comment (C12-LOW-01)', () => {
+        const source = `
+            /*
+             * preIncrementSemanticAttempt(ip, now);
+             */
+            export async function POST(request) {
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('MISSING RATE LIMIT');
+    });
+
+    it('passes when rate-limit helper is actually called (not commented)', () => {
+        const source = `
+            import { preIncrementSemanticAttempt } from '@/lib/rate-limit';
+            export async function POST(request) {
+                if (preIncrementSemanticAttempt('1.2.3.4', Date.now())) return { status: 429 };
+                return { status: 200 };
+            }
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('uses rate-limit helper'))).toBe(true);
+    });
+
     it('passes when no mutating handlers exist', () => {
         const source = `
             export async function GET(request) {
