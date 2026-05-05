@@ -33,12 +33,11 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // Recognized rate-limit invocation shapes. We accept any helper whose
 // name starts with `preIncrement` (the documented Pattern 2 shape) plus
-// the bespoke helpers used by older route files (`checkAndIncrement…`,
-// `reaction-rate-limit` module). Future routes are expected to use the
-// `preIncrement` shape, but we don't force a refactor on the existing
-// code for this lint gate.
+// the bespoke helpers used by older route files (`checkAndIncrement…`).
+// Future routes are expected to use the `preIncrement` shape, but we don't
+// force a refactor on the existing code for this lint gate.
 const RATE_LIMIT_NAME_PREFIXES = ['preIncrement', 'checkAndIncrement'];
-const RATE_LIMIT_MODULE_HINTS = ['reaction-rate-limit', 'auth-rate-limit'];
+const RATE_LIMIT_MODULE_HINTS = ['auth-rate-limit'];
 
 const EXEMPT_TAG = '@public-no-rate-limit-required';
 
