@@ -11,6 +11,7 @@ CREATE TABLE `image_views` (
   CONSTRAINT `image_views_image_id_images_id_fk` FOREIGN KEY (`image_id`) REFERENCES `images`(`id`) ON DELETE CASCADE,
   INDEX `idx_image_views_image_id_viewed_at` (`image_id`, `viewed_at`)
 );
+--> statement-breakpoint
 
 -- topic_views: per-topic view events
 CREATE TABLE `topic_views` (
@@ -24,6 +25,7 @@ CREATE TABLE `topic_views` (
   CONSTRAINT `topic_views_topic_topics_slug_fk` FOREIGN KEY (`topic`) REFERENCES `topics`(`slug`) ON DELETE CASCADE,
   INDEX `idx_topic_views_topic_viewed_at` (`topic`, `viewed_at`)
 );
+--> statement-breakpoint
 
 -- shared_group_views: durable per-shared-group view events
 -- The existing sharedGroups.view_count denormalized column is kept for
