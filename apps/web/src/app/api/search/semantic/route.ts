@@ -73,11 +73,20 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Body size guard — reject oversized payloads before parsing
     const contentLength = request.headers.get('content-length');
-    if (contentLength && Number.parseInt(contentLength, 10) > MAX_SEMANTIC_BODY_BYTES) {
-        return NextResponse.json(
-            { error: 'Request body too large' },
-            { status: 413, headers: NO_STORE_HEADERS },
-        );
+    if (contentLength) {
+        const contentLengthNum = Number(contentLength);
+        if (!Number.isFinite(contentLengthNum)) {
+            return NextResponse.json(
+                { error: 'Invalid Content-Length' },
+                { status: 400, headers: NO_STORE_HEADERS },
+            );
+        }
+        if (contentLengthNum > MAX_SEMANTIC_BODY_BYTES) {
+            return NextResponse.json(
+                { error: 'Request body too large' },
+                { status: 413, headers: NO_STORE_HEADERS },
+            );
+        }
     }
 
     // Parse body
