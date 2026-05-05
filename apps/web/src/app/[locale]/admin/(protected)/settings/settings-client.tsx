@@ -11,6 +11,13 @@ import { updateGallerySettings } from '@/app/actions/settings';
 import { getSettingDefaults, normalizeConfiguredImageSizes } from '@/lib/gallery-config-shared';
 import type { GallerySettingKey } from '@/lib/gallery-config-shared';
 import { Switch } from '@/components/ui/switch';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search } from 'lucide-react';
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
@@ -259,18 +266,24 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                 <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
                         <div>
-                            <Label htmlFor="semantic-search-enabled">{t('settings.semanticSearchEnabled')}</Label>
-                            <p id="semantic-search-enabled-help" className="text-xs text-muted-foreground">
+                            <Label htmlFor="semantic-search-mode">{t('settings.semanticSearchMode')}</Label>
+                            <p id="semantic-search-mode-help" className="text-xs text-muted-foreground">
                                 {t('settings.semanticSearchEnabledHint')}
                             </p>
                         </div>
-                        <Switch
-                            id="semantic-search-enabled"
-                            checked={settings.semantic_search_enabled === 'true'}
-                            onCheckedChange={(checked) => handleChange('semantic_search_enabled', checked ? 'true' : 'false')}
-                            aria-describedby="semantic-search-enabled-help"
-                            aria-label={t('settings.semanticSearchEnabled')}
-                        />
+                        <Select
+                            value={settings.semantic_search_mode || 'disabled'}
+                            onValueChange={(value) => handleChange('semantic_search_mode', value)}
+                        >
+                            <SelectTrigger id="semantic-search-mode" className="w-[200px]" aria-describedby="semantic-search-mode-help">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="disabled">{t('settings.semanticSearchModeDisabled')}</SelectItem>
+                                <SelectItem value="stub">{t('settings.semanticSearchModeStub')}</SelectItem>
+                                <SelectItem value="production">{t('settings.semanticSearchModeProduction')}</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                 </CardContent>
             </Card>

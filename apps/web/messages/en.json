@@ -611,7 +611,11 @@
     "semanticSearchTitle": "Semantic Search",
     "semanticSearchDesc": "Enable CLIP-based semantic image search (stub; real ONNX inference is a future feature). Run the backfill script after enabling.",
     "semanticSearchEnabled": "Enable Semantic Search",
-    "semanticSearchEnabledHint": "When enabled, shows a semantic search toggle in the search box. Requires the embedding backfill to complete first. (Stub active — embeddings are deterministic but not semantically meaningful.)"
+    "semanticSearchEnabledHint": "When enabled, shows a semantic search toggle in the search box. Requires the embedding backfill to complete first. (Stub active — embeddings are deterministic but not semantically meaningful.)",
+    "semanticSearchMode": "Semantic Search Mode",
+    "semanticSearchModeDisabled": "Disabled",
+    "semanticSearchModeStub": "Stub (testing only)",
+    "semanticSearchModeProduction": "Production (requires ONNX)"
   },
   "footer": {
     "admin": "Admin"

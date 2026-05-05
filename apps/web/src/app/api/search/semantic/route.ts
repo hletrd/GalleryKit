@@ -14,9 +14,9 @@
  * semantic-enabled, body shape, query length) and rolled back on any
  * early-return path before expensive embedding work begins.
  *
- * NOTE: The stub encoder produces deterministic but NOT semantically meaningful
- * embeddings. Enable semantic_search_enabled only after running the backfill
- * script and (in a future cycle) replacing the stub with real ONNX inference.
+ * WARNING: The stub encoder returns RANDOM results. Do NOT enable
+ * semantic_search_mode in production until the stub is replaced with real ONNX
+ * inference. This endpoint rejects requests when mode is not 'production'.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -139,16 +139,19 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
-    // Check semantic search is enabled
-    let semanticEnabled = false;
+    // Check semantic search mode — only 'production' serves public requests
+    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
     try {
         const config = await getGalleryConfig();
-        semanticEnabled = config.semanticSearchEnabled;
+        semanticMode = config.semanticSearchMode;
     } catch {
         // fail closed
     }
-    if (!semanticEnabled) {
-        return NextResponse.json({ error: 'Semantic search is not enabled' }, { status: 403, headers: NO_STORE_HEADERS });
+    if (semanticMode !== 'production') {
+        return NextResponse.json(
+            { error: 'Semantic search is not fully configured' },
+            { status: 503, headers: NO_STORE_HEADERS },
+        );
     }
 
     // Rate-limit — consumed AFTER all cheap validation gates (Pattern 2)

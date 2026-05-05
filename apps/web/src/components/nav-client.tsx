@@ -20,11 +20,12 @@ interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
     navTitle: string;
     imageSizes: number[];
+    semanticSearchMode?: string;
 }
 
 const MD_BREAKPOINT = 768;
 
-export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
+export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = 'disabled' }: NavClientProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const locale = useLocale();
@@ -145,7 +146,7 @@ export function NavClient({ topics, navTitle, imageSizes }: NavClientProps) {
                     "items-center gap-1 shrink-0",
                     isExpanded ? "flex w-full mt-2" : "hidden md:flex"
                 )}>
-                    <Search previewImageSizes={imageSizes} />
+                    <Search previewImageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
                     <button
                         onClick={() => setTheme(nextTheme((theme ?? 'system') as StoredTheme))}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors"

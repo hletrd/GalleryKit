@@ -61,8 +61,8 @@ export interface GalleryConfig {
     // US-P52: Auto alt-text (ONNX stub, opt-in)
     autoAltTextEnabled: boolean;
 
-    // US-P51: CLIP semantic search (ONNX stub, opt-in; default off until backfill completes)
-    semanticSearchEnabled: boolean;
+    // US-P51: CLIP semantic search mode (disabled | stub | production)
+    semanticSearchMode: 'disabled' | 'stub' | 'production';
 
     // US-P54: license tier prices in cents (0 = not for sale)
     licensePrices: Record<string, number>;
@@ -101,10 +101,10 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('auto_alt_text_enabled', raw)) return DEFAULTS.auto_alt_text_enabled === 'true';
                 return raw === 'true';
             })(),
-            semanticSearchEnabled: (() => {
-                const raw = getSetting(map, 'semantic_search_enabled');
-                if (!isValidSettingValue('semantic_search_enabled', raw)) return DEFAULTS.semantic_search_enabled === 'true';
-                return raw === 'true';
+            semanticSearchMode: (() => {
+                const raw = getSetting(map, 'semantic_search_mode');
+                if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
+                return raw as 'disabled' | 'stub' | 'production';
             })(),
             licensePrices: {
                 editorial: validatedNumber(map, 'license_price_editorial_cents'),
@@ -124,7 +124,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
-            semanticSearchEnabled: DEFAULTS.semantic_search_enabled === 'true',
+            semanticSearchMode: DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production',
             licensePrices: {
                 editorial: Number(DEFAULTS.license_price_editorial_cents),
                 commercial: Number(DEFAULTS.license_price_commercial_cents),

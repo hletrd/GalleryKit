@@ -23,8 +23,8 @@ export const GALLERY_SETTING_KEYS = [
     // US-P52: Auto alt-text via local Florence-2 (ONNX stub, default off)
     'auto_alt_text_enabled',
 
-    // US-P51: CLIP semantic search (ONNX stub, default off until backfill completes)
-    'semantic_search_enabled',
+    // US-P51: CLIP semantic search mode (disabled | stub | production)
+    'semantic_search_mode',
 
     // US-P54: Stripe license tier pricing (in cents; 0 = free/not for sale)
     'license_price_editorial_cents',
@@ -67,7 +67,7 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     auto_alt_text_enabled: 'false',
 
     // US-P51: semantic search disabled by default until backfill completes
-    semantic_search_enabled: 'false',
+    semantic_search_mode: 'disabled',
 
     // US-P54: license tier prices default to 0 (not for sale)
     license_price_editorial_cents: '0',
@@ -90,8 +90,8 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     // US-P52
     auto_alt_text_enabled: (v) => v === 'true' || v === 'false',
 
-    // US-P51
-    semantic_search_enabled: (v) => v === 'true' || v === 'false',
+    // US-P51: must be one of the three allowed modes
+    semantic_search_mode: (v) => v === 'disabled' || v === 'stub' || v === 'production',
 
     // US-P54: license tier prices must be non-negative integers (cents)
     license_price_editorial_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },

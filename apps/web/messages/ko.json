@@ -611,7 +611,11 @@
     "semanticSearchTitle": "시맨틱 검색",
     "semanticSearchDesc": "CLIP 기반 시맨틱 이미지 검색을 활성화합니다 (스텁; 실제 ONNX 추론은 향후 기능). 활성화 후 백필 스크립트를 실행하세요.",
     "semanticSearchEnabled": "시맨틱 검색 사용",
-    "semanticSearchEnabledHint": "활성화하면 검색창에 시맨틱 검색 토글이 표시됩니다. 먼저 임베딩 백필을 완료해야 합니다. (스텁 활성 — 임베딩은 결정론적이나 의미론적으로 유의미하지 않습니다.)"
+    "semanticSearchEnabledHint": "활성화하면 검색창에 시맨틱 검색 토글이 표시됩니다. 먼저 임베딩 백필을 완료해야 합니다. (스텁 활성 — 임베딩은 결정론적이나 의미론적으로 유의미하지 않습니다.)",
+    "semanticSearchMode": "시맨틱 검색 모드",
+    "semanticSearchModeDisabled": "비활성화",
+    "semanticSearchModeStub": "스텁 (테스트 전용)",
+    "semanticSearchModeProduction": "프로덕션 (ONNX 필요)"
   },
   "footer": {
     "admin": "관리자"

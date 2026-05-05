@@ -69,8 +69,8 @@ import { POST } from '@/app/api/search/semantic/route';
 
 function mockRequest(body: unknown, headersInit: Record<string, string> = {}): NextRequest {
     return {
-        headers: new Headers(headersInit),
-        json: async () => body,
+        headers: new Headers({ 'content-type': 'application/json', ...headersInit }),
+        text: async () => JSON.stringify(body),
     } as unknown as NextRequest;
 }
 
@@ -79,7 +79,7 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         vi.clearAllMocks();
         hasTrustedSameOriginMock.mockReturnValue(true);
         isRestoreMaintenanceActiveMock.mockReturnValue(false);
-        getGalleryConfigMock.mockResolvedValue({ semanticSearchEnabled: true });
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
         getClientIpMock.mockReturnValue('203.0.113.50');
         preIncrementSemanticAttemptMock.mockReturnValue(false);
         embedTextStubMock.mockReturnValue(new Float32Array(512).fill(0.1));
@@ -140,8 +140,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
 
     it('returns 400 for invalid JSON body', async () => {
         const req = {
-            headers: new Headers(),
-            json: async () => { throw new Error('Unexpected token'); },
+            headers: new Headers({ 'content-type': 'application/json' }),
+            text: async () => '{ invalid json }',
         } as unknown as NextRequest;
 
         const response = await POST(req);
@@ -164,13 +164,13 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Query must be at least 3 characters' });
     });
 
-    it('returns 403 when semantic search is disabled', async () => {
-        getGalleryConfigMock.mockResolvedValue({ semanticSearchEnabled: false });
+    it('returns 503 when semantic search is not in production mode', async () => {
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'disabled' });
 
         const response = await POST(mockRequest({ query: 'mountain landscape' }));
 
-        expect(response.status).toBe(403);
-        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not enabled' });
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
     });
 
     it('returns 429 when rate limit is exceeded', async () => {

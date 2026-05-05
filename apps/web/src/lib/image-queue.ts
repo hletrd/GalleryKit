@@ -367,16 +367,16 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
             // US-P51: Fire-and-forget embedding hook. MUST NOT block the queue job.
             // Runs after Sharp processing + processed=true is committed. Gated by
-            // semantic_search_enabled admin setting so it is a no-op by default.
+            // semantic_search_mode admin setting so it is a no-op by default.
             void (async () => {
-                let semanticEnabled = false;
+                let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
                 try {
                     const cfg = await getGalleryConfig();
-                    semanticEnabled = cfg.semanticSearchEnabled;
+                    semanticMode = cfg.semanticSearchMode;
                 } catch {
                     // DB unavailable — skip silently
                 }
-                if (!semanticEnabled) return;
+                if (semanticMode === 'disabled') return;
                 try {
                     const embedding = embedImageStub(job.id);
                     const buf = embeddingToBuffer(embedding);

@@ -18,7 +18,7 @@ import { formatStoredExifDate } from '@/lib/exif-datetime';
 
 interface SearchProps {
     previewImageSizes?: number[];
-    semanticSearchEnabled?: boolean;
+    semanticSearchMode?: string;
 }
 
 interface SearchResult {
@@ -35,7 +35,7 @@ interface SearchResult {
     capture_date: string | null;
 }
 
-export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearchEnabled = false }: SearchProps) {
+export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearchMode = 'disabled' }: SearchProps) {
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -336,7 +336,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             <kbd className="px-1.5 py-0.5 text-xs bg-muted rounded">{isMac ? '\u2318' : 'Ctrl+'}K</kbd> {t('search.toggleHint')}
                         </p>
                     </div>
-                    {semanticSearchEnabled && (
+                    {semanticSearchMode !== 'disabled' && (
                         <div className="p-3 border-t flex items-center justify-between gap-3">
                             <Label
                                 htmlFor="semantic-search-toggle"

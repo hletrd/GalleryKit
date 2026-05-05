@@ -8,7 +8,7 @@ export async function Nav() {
 
     return (
         <Suspense>
-            <NavClient topics={topics} navTitle={seo.nav_title} imageSizes={config.imageSizes} />
+            <NavClient topics={topics} navTitle={seo.nav_title} imageSizes={config.imageSizes} semanticSearchMode={config.semanticSearchMode} />
         </Suspense>
     );
 }
