@@ -950,7 +950,7 @@ export function extractExifForDb(exifData: ExifDataRaw) {
 }
 
 /**
- * PP-BUG-3: Strip GPS EXIF from the on-disk original file.
+ * PP-BUG-3: Best-effort strip GPS EXIF from the on-disk original file.
  *
  * The admin `strip_gps_on_upload` toggle previously only nulled the DB
  * latitude/longitude columns, leaving the original at
@@ -958,11 +958,16 @@ export function extractExifForDb(exifData: ExifDataRaw) {
  * endpoint streams that file byte-for-byte, leaking wildlife/conflict
  * photographers' protected locations.
  *
- * This function re-writes the original in-place, using Sharp's
+ * This function attempts to re-write the original in-place, using Sharp's
  * `.withMetadata({ orientation })` which keeps only the orientation tag
  * (and ICC if present) while stripping GPS, camera serial, etc. The
  * file is written to a temp path then atomically renamed over the
  * original so concurrent readers never see a partial write.
+ *
+ * Best-effort only: if Sharp throws (corrupt file, unsupported format,
+ * disk full), the function catches the error and returns without modifying
+ * the original. The DB columns are already nulled, so the public gallery
+ * does not leak GPS; only the download-original path remains at risk.
  */
 export async function stripGpsFromOriginal(filePath: string): Promise<void> {
     const tmpPath = filePath + '.gps-strip.tmp';
