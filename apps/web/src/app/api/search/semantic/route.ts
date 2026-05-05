@@ -42,6 +42,7 @@ import {
 import { embedTextStub } from '@/lib/clip-inference';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
+import { countCodePoints } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const contentLength = request.headers.get('content-length');
     if (contentLength) {
         const contentLengthNum = Number(contentLength);
-        if (!Number.isFinite(contentLengthNum)) {
+        if (!Number.isFinite(contentLengthNum) || contentLengthNum < 0) {
             return NextResponse.json(
                 { error: 'Invalid Content-Length' },
                 { status: 400, headers: NO_STORE_HEADERS },
@@ -108,7 +109,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
-    if (query.length < 3) {
+    // C18-MED-02: use countCodePoints for consistent codepoint-aware length
+    // validation, matching the pattern used in public.ts and process-image.ts.
+    if (countCodePoints(query) < 3) {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
