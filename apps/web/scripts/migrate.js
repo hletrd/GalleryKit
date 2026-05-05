@@ -361,6 +361,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'blur_data_url', 'ALTER TABLE images ADD COLUMN blur_data_url text');
     await ensureColumn(connection, dbName, 'images', 'license_tier', "ALTER TABLE images ADD COLUMN license_tier ENUM('none','editorial','commercial','rm') NOT NULL DEFAULT 'none'");
     await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
+    await ensureColumn(connection, dbName, 'images', 'icc_profile_name', 'ALTER TABLE images ADD COLUMN icc_profile_name varchar(255) DEFAULT NULL');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');

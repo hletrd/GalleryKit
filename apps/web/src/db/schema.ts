@@ -43,6 +43,7 @@ export const images = mysqlTable("images", {
     latitude: double("latitude"),
     longitude: double("longitude"),
     color_space: varchar("color_space", { length: 255 }),
+    icc_profile_name: varchar("icc_profile_name", { length: 255 }),
     white_balance: varchar('white_balance', { length: 50 }),
     metering_mode: varchar('metering_mode', { length: 50 }),
     exposure_compensation: varchar('exposure_compensation', { length: 20 }),
