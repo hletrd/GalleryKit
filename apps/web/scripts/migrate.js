@@ -359,6 +359,10 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'original_format', 'ALTER TABLE images ADD COLUMN original_format varchar(10) DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'original_file_size', 'ALTER TABLE images ADD COLUMN original_file_size bigint DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'blur_data_url', 'ALTER TABLE images ADD COLUMN blur_data_url text');
+    await ensureColumn(connection, dbName, 'images', 'reaction_count', 'ALTER TABLE images ADD COLUMN reaction_count int NOT NULL DEFAULT 0');
+    await ensureColumn(connection, dbName, 'images', 'license_tier', "ALTER TABLE images ADD COLUMN license_tier ENUM('none','editorial','commercial','rm') NOT NULL DEFAULT 'none'");
+    await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
+    await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');
     if (captureDateInfo && captureDateInfo.DATA_TYPE !== 'datetime') {
@@ -459,6 +463,121 @@ async function reconcileLegacySchema(connection, dbName) {
             WHERE sgi.position = 0
         `);
     }
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS admin_tokens (
+            id int AUTO_INCREMENT PRIMARY KEY,
+            user_id int NOT NULL,
+            label varchar(255) NOT NULL,
+            token_hash varchar(64) NOT NULL,
+            scopes text,
+            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_used_at timestamp NULL,
+            expires_at timestamp NULL,
+            CONSTRAINT admin_tokens_user_fk FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE,
+            INDEX admin_tokens_token_hash_idx (token_hash),
+            INDEX admin_tokens_user_idx (user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS image_reactions (
+            id int AUTO_INCREMENT PRIMARY KEY,
+            image_id int NOT NULL,
+            visitor_id_hash varchar(64) NOT NULL,
+            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT image_reactions_image_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE,
+            UNIQUE INDEX image_reactions_image_visitor_unique (image_id, visitor_id_hash),
+            INDEX image_reactions_image_id_idx (image_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS smart_collections (
+            id int AUTO_INCREMENT PRIMARY KEY,
+            slug varchar(255) NOT NULL,
+            name varchar(255) NOT NULL,
+            query_json text NOT NULL,
+            is_public boolean NOT NULL DEFAULT false,
+            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT smart_collections_slug_unique UNIQUE (slug),
+            INDEX idx_smart_collections_public (is_public)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS image_views (
+            id int NOT NULL AUTO_INCREMENT,
+            image_id int NOT NULL,
+            viewed_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            referrer_host varchar(128) NOT NULL DEFAULT 'direct',
+            country_code varchar(2) NOT NULL DEFAULT 'XX',
+            bot boolean NOT NULL DEFAULT false,
+            PRIMARY KEY (id),
+            CONSTRAINT image_views_image_id_images_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE,
+            INDEX idx_image_views_image_id_viewed_at (image_id, viewed_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS topic_views (
+            id int NOT NULL AUTO_INCREMENT,
+            topic varchar(255) NOT NULL,
+            viewed_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            referrer_host varchar(128) NOT NULL DEFAULT 'direct',
+            country_code varchar(2) NOT NULL DEFAULT 'XX',
+            bot boolean NOT NULL DEFAULT false,
+            PRIMARY KEY (id),
+            CONSTRAINT topic_views_topic_topics_slug_fk FOREIGN KEY (topic) REFERENCES topics(slug) ON DELETE CASCADE,
+            INDEX idx_topic_views_topic_viewed_at (topic, viewed_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS shared_group_views (
+            id int NOT NULL AUTO_INCREMENT,
+            group_id int NOT NULL,
+            viewed_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            referrer_host varchar(128) NOT NULL DEFAULT 'direct',
+            country_code varchar(2) NOT NULL DEFAULT 'XX',
+            bot boolean NOT NULL DEFAULT false,
+            PRIMARY KEY (id),
+            CONSTRAINT shared_group_views_group_id_shared_groups_id_fk FOREIGN KEY (group_id) REFERENCES shared_groups(id) ON DELETE CASCADE,
+            INDEX idx_shared_group_views_group_id_viewed_at (group_id, viewed_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS image_embeddings (
+            image_id int NOT NULL,
+            embedding mediumblob NOT NULL,
+            model_version varchar(32) NOT NULL,
+            updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (image_id),
+            CONSTRAINT image_embeddings_image_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS entitlements (
+            id int NOT NULL AUTO_INCREMENT,
+            image_id int NOT NULL,
+            tier varchar(16) NOT NULL,
+            customer_email varchar(255) NOT NULL,
+            session_id varchar(255) NOT NULL,
+            amount_total_cents int NOT NULL,
+            download_token_hash varchar(64),
+            downloaded_at timestamp NULL,
+            expires_at timestamp NOT NULL,
+            refunded tinyint(1) NOT NULL DEFAULT 0,
+            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY entitlements_session_id_unique (session_id),
+            INDEX idx_entitlements_image_id (image_id),
+            INDEX idx_entitlements_token_hash (download_token_hash),
+            CONSTRAINT entitlements_image_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
     await ensureIndex(connection, dbName, 'image_tags', 'idx_image_tags_tag_id', 'CREATE INDEX idx_image_tags_tag_id ON image_tags (tag_id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_capture_date', 'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at)');
