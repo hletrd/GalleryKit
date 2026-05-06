@@ -14,6 +14,7 @@ const config: Config = {
         'md:columns-1', 'md:columns-2', 'md:columns-3',
         'xl:columns-1', 'xl:columns-2', 'xl:columns-3', 'xl:columns-4',
         '2xl:columns-1', '2xl:columns-2', '2xl:columns-3', '2xl:columns-4', '2xl:columns-5',
+        'py-0.5',
     ],
     theme: {
         extend: {
