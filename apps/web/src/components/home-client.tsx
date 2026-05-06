@@ -130,6 +130,15 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
 
     const columnCount = useColumnCount();
     const orderedImages = allImages;
+    const itemCount = orderedImages.length;
+
+    // Limit column count to actual item count so empty columns don't leave
+    // unused whitespace on the right side of the masonry grid.
+    const colBase = Math.min(itemCount, 1);
+    const colSm = Math.min(itemCount, 2);
+    const colMd = Math.min(itemCount, 3);
+    const colXl = Math.min(itemCount, 4);
+    const col2xl = Math.min(itemCount, 5);
     const topicsMap = useMemo(() => {
         const map: Record<string, string> = {};
         for (const t of topics || []) map[t.slug] = t.label;
@@ -175,8 +184,10 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
             <h2 className="sr-only">{t('home.photosHeading')}</h2>
             {/* F-15: at 2560px the `xl:columns-4` cap leaves ~500px gutters
                 on each side, so add a 5th column at the `2xl` breakpoint
-                (1536px+) to make better use of widescreen real estate. */}
-            <div className="columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5 gap-4 w-full">
+                (1536px+) to make better use of widescreen real estate.
+                When fewer items than the breakpoint's max columns exist,
+                clamp to the item count so the grid fills its width. */}
+            <div className={`columns-${colBase} sm:columns-${colSm} md:columns-${colMd} xl:columns-${colXl} 2xl:columns-${col2xl} gap-4 w-full`}>
                 {orderedImages.map((image, index) => {
                     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is
                     // now baked into `getPhotoDisplayTitleFromTagNames` and
@@ -186,7 +197,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                     const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled'));
                     const altText = getConcisePhotoAltText(image, t('common.photo'));
 
-                    const isAboveFold = index < columnCount;
+                    const isAboveFold = index < Math.min(columnCount, itemCount);
 
                     return (
                         <div

@@ -8,6 +8,13 @@ const config: Config = {
         "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
         "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
     ],
+    safelist: [
+        'columns-1', 'columns-2', 'columns-3', 'columns-4', 'columns-5',
+        'sm:columns-1', 'sm:columns-2',
+        'md:columns-1', 'md:columns-2', 'md:columns-3',
+        'xl:columns-1', 'xl:columns-2', 'xl:columns-3', 'xl:columns-4',
+        '2xl:columns-1', '2xl:columns-2', '2xl:columns-3', '2xl:columns-4', '2xl:columns-5',
+    ],
     theme: {
         extend: {
             colors: {
