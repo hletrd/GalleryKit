@@ -59,7 +59,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
             <Badge
                 asChild
                 variant={currentTags.length === 0 ? "default" : "outline"}
-                className={cn("cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-0.5", currentTags.length === 0 && "bg-primary text-primary-foreground")}
+                className={cn("cursor-pointer hover:bg-primary/90 min-h-[32px] px-3 py-1", currentTags.length === 0 && "bg-primary text-primary-foreground")}
             >
                 <button
                     type="button"
@@ -76,7 +76,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                     asChild
                     variant={currentTags.includes(tag.slug) ? "default" : "outline"}
                     className={cn(
-                        "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-0.5",
+                        "cursor-pointer hover:bg-primary/90 min-h-[32px] px-3 py-1",
                         "flex gap-1",
                         currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
                     )}
