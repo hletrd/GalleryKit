@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
 import { useTranslation } from "@/components/i18n-provider";
 import { OptimisticImage } from './optimistic-image';
@@ -12,6 +13,8 @@ import { localizePath } from '@/lib/locale-path';
 import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames, humanizeTagLabel } from '@/lib/photo-title';
+
+const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
 function useColumnCount() {
     const [count, setCount] = useState(2);
@@ -104,11 +107,52 @@ interface HomeClientProps {
 
 export function HomeClient({ images, tags, topics, currentTags, topicSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES }: HomeClientProps) {
     const { t, locale } = useTranslation();
+    const pathname = usePathname();
     const [allImages, setAllImages] = useState(images);
     const queryVersionRef = useRef(0);
     const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
         setAllImages(prev => [...prev, ...newImages]);
     }, []);
+
+    const scrollKey = useMemo(() => `${SCROLL_STORAGE_PREFIX}${pathname}`, [pathname]);
+
+    const saveScrollPosition = useCallback(() => {
+        try {
+            sessionStorage.setItem(scrollKey, String(window.scrollY));
+        } catch {
+            // sessionStorage may be unavailable in privacy modes
+        }
+    }, [scrollKey]);
+
+    // Restore scroll position on mount when returning to a list view that
+    // was previously visited. We wait a tick for the masonry layout to
+    // settle before scrolling so the saved Y maps to the correct content.
+    useEffect(() => {
+        let saved: number | null = null;
+        try {
+            const raw = sessionStorage.getItem(scrollKey);
+            if (raw !== null) saved = Number(raw);
+            sessionStorage.removeItem(scrollKey);
+        } catch {
+            // ignore
+        }
+        if (saved == null || Number.isNaN(saved) || saved <= 0) return;
+
+        let cancelled = false;
+        const restore = () => {
+            if (cancelled) return;
+            window.scrollTo({ top: saved!, behavior: 'auto' });
+        };
+        const r1 = requestAnimationFrame(restore);
+        const r2 = requestAnimationFrame(() => requestAnimationFrame(restore));
+        const t1 = setTimeout(restore, 100);
+        return () => {
+            cancelled = true;
+            cancelAnimationFrame(r1);
+            cancelAnimationFrame(r2);
+            clearTimeout(t1);
+        };
+    }, [scrollKey]);
 
     // Reset allImages when the images prop changes (e.g. topic/filter change)
     // Increment version so stale in-flight load-more responses are discarded
@@ -214,6 +258,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
                             <Link
                                 href={localizePath(locale, `/p/${image.id}`)}
                                 aria-label={t('aria.viewPhoto', { title: displayTitle })}
+                                onClick={saveScrollPosition}
                             >
                                 <div className="relative w-full">
                                     <picture>
