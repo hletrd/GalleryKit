@@ -25,7 +25,9 @@ export function clampZoom(level: number): number {
 }
 
 export function wheelStep(current: number, deltaY: number): number {
-    const factor = deltaY > 0 ? 0.95 : 1.05;
+    // Less sensitive than the previous 5% step so trackpad scrolls don't
+    // jump the zoom level — 2.5% per tick keeps wheel zoom feel smooth.
+    const factor = deltaY > 0 ? 0.975 : 1.025;
     return clampZoom(current * factor);
 }
 
