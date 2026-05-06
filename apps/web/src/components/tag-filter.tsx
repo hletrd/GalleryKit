@@ -48,14 +48,6 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
         }
     };
 
-    // Interactive pills must clear the 44x44 touch-target floor recommended
-    // by WCAG 2.5.5 AAA / Apple HIG / Google MDN. WCAG 2.5.8 AA only requires
-    // 24x24, but real-world thumb targets need 44 px to avoid mis-taps. The
-    // base Badge already applies `px-2 py-0.5`; we override with a wider
-    // padding plus an explicit min-height so the tappable region is
-    // unambiguous. (F-1, supersedes AGG3R-03 / C3R-RPL-03)
-    const interactivePillClass = "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-0.5";
-
     // F-5 / AGG1L-LOW-01: tag slugs canonically use `_` to separate
     // words; render those as spaces via the shared `humanizeTagLabel`
     // utility so all consumers (visible UI, alt text, JSON-LD `name`)
@@ -67,7 +59,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
             <Badge
                 asChild
                 variant={currentTags.length === 0 ? "default" : "outline"}
-                className={cn(interactivePillClass, currentTags.length === 0 && "bg-primary text-primary-foreground")}
+                className={cn("cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-0.5", currentTags.length === 0 && "bg-primary text-primary-foreground")}
             >
                 <button
                     type="button"
@@ -84,7 +76,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                     asChild
                     variant={currentTags.includes(tag.slug) ? "default" : "outline"}
                     className={cn(
-                        interactivePillClass,
+                        "cursor-pointer hover:bg-primary/90 min-h-[44px] px-3 py-0.5",
                         "flex gap-1",
                         currentTags.includes(tag.slug) && "bg-primary text-primary-foreground"
                     )}
