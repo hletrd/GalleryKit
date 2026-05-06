@@ -865,7 +865,14 @@ export async function getImage(id: number) {
             .where(eq(imageTags.imageId, id)),
 
         // Prev: the nearest row before this image in gallery grid order
-        db.select({ id: images.id })
+        db.select({
+            id: images.id,
+            filename_avif: images.filename_avif,
+            filename_webp: images.filename_webp,
+            filename_jpeg: images.filename_jpeg,
+            width: images.width,
+            height: images.height,
+        })
             .from(images)
             .where(
                 and(
@@ -877,7 +884,14 @@ export async function getImage(id: number) {
             .limit(1),
 
         // Next: the nearest row after this image in the same grid order
-        db.select({ id: images.id })
+        db.select({
+            id: images.id,
+            filename_avif: images.filename_avif,
+            filename_webp: images.filename_webp,
+            filename_jpeg: images.filename_jpeg,
+            width: images.width,
+            height: images.height,
+        })
             .from(images)
             .where(
                 and(
@@ -896,7 +910,9 @@ export async function getImage(id: number) {
         ...image,
         tags: imageTagsResult,
         prevId: prevImage?.id ?? null,
-        nextId: nextImage?.id ?? null
+        nextId: nextImage?.id ?? null,
+        prevImage: prevImage ?? null,
+        nextImage: nextImage ?? null,
     };
 }
 

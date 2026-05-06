@@ -251,6 +251,28 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         };
     }, [prevId, nextId, buildPhotoPath, router]);
 
+    // Preload prev/next image files so they appear instantly on navigation.
+    useEffect(() => {
+        const imgs = [image?.prevImage, image?.nextImage].filter(Boolean) as Array<NonNullable<typeof image.prevImage>>;
+        if (imgs.length === 0) return;
+
+        const links: HTMLLinkElement[] = [];
+        for (const img of imgs) {
+            const link = document.createElement('link');
+            link.rel = 'preload';
+            link.as = 'image';
+            link.href = imageUrl(`/uploads/jpeg/${img.filename_jpeg}`);
+            document.head.appendChild(link);
+            links.push(link);
+        }
+
+        return () => {
+            for (const link of links) {
+                if (link.parentNode) link.parentNode.removeChild(link);
+            }
+        };
+    }, [image]);
+
     useEffect(() => {
         if (!syncPhotoQueryBasePath || !image) return;
         router.replace(`${syncPhotoQueryBasePath}?photoId=${image.id}`, { scroll: false });

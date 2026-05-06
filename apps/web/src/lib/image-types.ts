@@ -40,7 +40,18 @@ export interface ImageDetail {
     longitude?: number | null;
     prevId?: number | null;
     nextId?: number | null;
+    prevImage?: ImageLite | null;
+    nextImage?: ImageLite | null;
     created_at?: string | Date | null;
+}
+
+export interface ImageLite {
+    id: number;
+    filename_avif: string | null;
+    filename_webp: string | null;
+    filename_jpeg: string;
+    width: number;
+    height: number;
 }
 
 export interface TagInfo {
