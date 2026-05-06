@@ -165,17 +165,36 @@ export default async function PhotoPage({ params, searchParams }: {
 
     if (!image) return notFound();
 
-    // Preload adjacent images for instant prev/next navigation
+    // Preload adjacent images for instant prev/next navigation. Issue both
+    // AVIF (modern browsers) and JPEG (fallback) preloads with explicit
+    // `type` so the browser only fetches the variant it actually needs.
     const [prevImage, nextImage] = await Promise.all([
         image.prevId ? getImageCached(image.prevId) : null,
         image.nextId ? getImageCached(image.nextId) : null,
     ]);
     const preloadSize = findNearestImageSize(config.imageSizes, 1536);
-    const preloadUrls: string[] = [];
+    type PreloadHint = { href: string; type?: string };
+    const preloadHints: PreloadHint[] = [];
     for (const adj of [prevImage, nextImage]) {
-        if (adj?.filename_jpeg) {
-            const base = adj.filename_jpeg.replace(/\.jpg$/i, '');
-            preloadUrls.push(absoluteImageUrl(`/uploads/jpeg/${base}_${preloadSize}.jpg`, seo.url));
+        if (!adj?.filename_jpeg) continue;
+        const baseJpeg = adj.filename_jpeg.replace(/\.jpg$/i, '');
+        preloadHints.push({
+            href: absoluteImageUrl(`/uploads/jpeg/${baseJpeg}_${preloadSize}.jpg`, seo.url),
+            type: 'image/jpeg',
+        });
+        if (adj.filename_avif) {
+            const baseAvif = adj.filename_avif.replace(/\.avif$/i, '');
+            preloadHints.push({
+                href: absoluteImageUrl(`/uploads/avif/${baseAvif}_${preloadSize}.avif`, seo.url),
+                type: 'image/avif',
+            });
+        }
+        if (adj.filename_webp) {
+            const baseWebp = adj.filename_webp.replace(/\.webp$/i, '');
+            preloadHints.push({
+                href: absoluteImageUrl(`/uploads/webp/${baseWebp}_${preloadSize}.webp`, seo.url),
+                type: 'image/webp',
+            });
         }
     }
 
@@ -260,8 +279,15 @@ export default async function PhotoPage({ params, searchParams }: {
 
     return (
         <>
-            {preloadUrls.map((url) => (
-                <link key={url} rel="preload" as="image" href={url} />
+            {preloadHints.map((hint) => (
+                <link
+                    key={hint.href}
+                    rel="preload"
+                    as="image"
+                    href={hint.href}
+                    type={hint.type}
+                    fetchPriority="high"
+                />
             ))}
             <script
                 type="application/ld+json"
