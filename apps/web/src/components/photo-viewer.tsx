@@ -18,7 +18,7 @@ import { ImageZoom } from '@/components/image-zoom';
 import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
-import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
+import { ImageDetail, TagInfo, hasExifData, hasAnyCameraExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
@@ -745,6 +745,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         </div>
                                     )}
                                 </div>
+                                {!hasAnyCameraExifData(image) && (
+                                    <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
+                                )}
                                 {image.filename_jpeg && (
                                     <div className="mt-4 border-t pt-4">
                                         <Histogram

@@ -56,6 +56,24 @@ export function hasExifData(val: string | number | null | undefined): boolean {
     return false;
 }
 
+/** Check if an image has any camera-related EXIF metadata. */
+export function hasAnyCameraExifData(image: ImageDetail): boolean {
+    return hasExifData(image.camera_model) ||
+        hasExifData(image.lens_model) ||
+        hasExifData(image.focal_length) ||
+        hasExifData(image.f_number) ||
+        hasExifData(image.exposure_time) ||
+        hasExifData(image.iso) ||
+        hasExifData(image.color_space) ||
+        hasExifData(image.original_format) ||
+        hasExifData(image.white_balance) ||
+        hasExifData(image.metering_mode) ||
+        hasExifData(image.exposure_compensation) ||
+        hasExifData(image.exposure_program) ||
+        hasExifData(image.flash) ||
+        hasExifData(image.bit_depth);
+}
+
 /** Convert null to undefined for HTML attributes that accept string | undefined. */
 export function nu(val: string | null | undefined): string | undefined {
     return val ?? undefined;

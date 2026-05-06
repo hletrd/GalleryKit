@@ -297,7 +297,8 @@
     "downloadJpeg": "JPEG 다운로드",
     "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, Space 슬라이드쇼 토글.",
     "slideshowOn": "슬라이드쇼 시작",
-    "slideshowOff": "슬라이드쇼 중지"
+    "slideshowOff": "슬라이드쇼 중지",
+    "noMetadata": "이 사진에 카메라 메타데이터가 없습니다."
   },
   "shared": {
     "viewGallery": "갤러리 보기",

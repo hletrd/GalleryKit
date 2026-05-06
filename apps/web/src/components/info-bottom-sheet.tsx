@@ -5,7 +5,7 @@ import FocusTrap from '@/components/lazy-focus-trap';
 import { Info, MapPin, Calendar, Clock, X, Download } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
-import { ImageDetail, TagInfo, hasExifData, nu, formatShutterSpeed } from '@/lib/image-types';
+import { ImageDetail, TagInfo, hasExifData, hasAnyCameraExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { getPhotoDisplayTitle, humanizeTagLabel } from '@/lib/photo-title';
 import { imageUrl } from '@/lib/image-url';
@@ -402,6 +402,9 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                 </div>
                             )}
                         </div>
+                        {!hasAnyCameraExifData(image) && (
+                            <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
+                        )}
 
                         {/* Capture date/time */}
                         <div className="mt-4 text-sm">
