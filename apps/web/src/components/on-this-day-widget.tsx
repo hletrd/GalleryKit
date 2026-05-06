@@ -29,8 +29,8 @@ export async function OnThisDayWidget() {
     const smallSize = findNearestImageSize(config.imageSizes ?? DEFAULT_IMAGE_SIZES, 640);
 
     return (
-        <aside aria-label={t('widgetLabel')}>
-            <div className="flex items-center justify-between mb-3">
+        <aside aria-label={t('widgetLabel')} className="border-t pt-8">
+            <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold">{t('title')}</h2>
                 <Link
                     href={localizePath(locale, '/timeline')}
@@ -39,7 +39,7 @@ export async function OnThisDayWidget() {
                     {t('viewTimeline')}
                 </Link>
             </div>
-            <ul className="space-y-2" role="list">
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" role="list">
                 {photos.map((photo) => {
                     const displayTitle = getPhotoDisplayTitleFromTagNames(photo, t('untitledPhoto'));
                     const altText = getConcisePhotoAltText(photo, t('photo'));

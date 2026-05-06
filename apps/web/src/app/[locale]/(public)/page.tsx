@@ -190,13 +190,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
           }}
         />
       )}
-      <div className="flex flex-col lg:flex-row gap-8">
-        <div className="flex-1 min-w-0">
-          <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
-        </div>
-        <div className="lg:w-64 xl:w-72 flex-shrink-0">
-          <OnThisDayWidget />
-        </div>
+      <div className="space-y-12">
+        <HomeClient images={images} tags={allTags} topics={allTopics} currentTags={tagSlugs} hasMore={hasMore} totalCount={totalCount} imageSizes={config.imageSizes} />
+        <OnThisDayWidget />
       </div>
     </>
   );
