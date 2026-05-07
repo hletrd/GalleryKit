@@ -5,7 +5,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardDescription, CardFooter } from "@/components/ui/card";
-import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, PanelRightOpen, PanelRightClose, ShoppingCart } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, ChevronDown, PanelRightOpen, PanelRightClose, ShoppingCart } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
 import { useTranslation } from "@/components/i18n-provider";
@@ -178,6 +184,20 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const downloadFilename = image?.filename_jpeg;
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
+    const avifDownloadHref = image?.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
+    const hdrAvifFilename = image?.filename_avif ? image.filename_avif.replace(/\.avif$/i, '_hdr.avif') : null;
+    const hdrDownloadHref = hdrAvifFilename ? imageUrl(`/uploads/avif/${hdrAvifFilename}`) : null;
+    const isWideGamutSource = Boolean(image?.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
+    const [hdrExists, setHdrExists] = useState(false);
+    useEffect(() => {
+        if (!hdrDownloadHref || !image?.is_hdr) {
+            setHdrExists(false);
+            return;
+        }
+        fetch(hdrDownloadHref, { method: 'HEAD' })
+            .then((r) => setHdrExists(r.status === 200))
+            .catch(() => setHdrExists(false));
+    }, [hdrDownloadHref, image?.is_hdr]);
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
 
@@ -814,14 +834,57 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 below the metadata block. */}
                             {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
                                 <CardFooter>
-                                    <Button asChild className="w-full gap-2">
-                                        <a
-                                            href={downloadHref}
-                                            download={`photo-${image.id}.${downloadExt}`}
-                                        >
-                                            <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
-                                        </a>
-                                    </Button>
+                                    {isWideGamutSource && avifDownloadHref ? (
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button className="w-full gap-2 min-h-11">
+                                                    <Download className="h-4 w-4" />
+                                                    {t('viewer.downloadJpeg')}
+                                                    <ChevronDown className="h-4 w-4 ml-auto" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="min-w-[12rem]">
+                                                <DropdownMenuItem asChild className="min-h-11">
+                                                    <a
+                                                        href={downloadHref}
+                                                        download={`photo-${image.id}.${downloadExt}`}
+                                                        className="flex items-center gap-2"
+                                                    >
+                                                        {t('viewer.downloadSrgbJpeg')}
+                                                    </a>
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem asChild className="min-h-11">
+                                                    <a
+                                                        href={avifDownloadHref}
+                                                        download={`photo-${image.id}.avif`}
+                                                        className="flex items-center gap-2"
+                                                    >
+                                                        {t('viewer.downloadP3Avif')}
+                                                    </a>
+                                                </DropdownMenuItem>
+                                                {hdrExists && hdrDownloadHref && (
+                                                    <DropdownMenuItem asChild className="min-h-11">
+                                                        <a
+                                                            href={hdrDownloadHref}
+                                                            download={`photo-${image.id}_hdr.avif`}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            {t('viewer.downloadHdrAvif')}
+                                                        </a>
+                                                    </DropdownMenuItem>
+                                                )}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    ) : (
+                                        <Button asChild className="w-full gap-2 min-h-11">
+                                            <a
+                                                href={downloadHref}
+                                                download={`photo-${image.id}.${downloadExt}`}
+                                            >
+                                                <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
+                                            </a>
+                                        </Button>
+                                    )}
                                 </CardFooter>
                             )}
                         </Card>
