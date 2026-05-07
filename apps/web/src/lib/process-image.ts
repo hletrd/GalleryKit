@@ -641,19 +641,9 @@ export async function processImageFormats(
     // which is used as the "base" filename for backward compatibility.
     const sortedSizes = [...sizes].sort((a, b) => a - b);
 
-    // Use file path so Sharp can mmap/stream instead of buffering on the heap.
-    // CM-HIGH-3: failOn:'error' rejects truncated/corrupt input; sequentialRead:true
-    // streams large files instead of random-access reading them.
-    // CM-HIGH-4: autoOrient:true rotates/flips per EXIF Orientation before
-    // resize so derivatives are always served upright with no orientation tag.
-    const image = sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true });
-    const qualityWebp = quality?.webp ?? 90;
-    const qualityAvif = quality?.avif ?? 85;
-    const qualityJpeg = quality?.jpeg ?? 90;
-
-    // CM-CRIT-1 / US-CM03: resolve the OUTPUT colorspace decision for AVIF.
-    // 'p3' = exact Display-P3 source; 'p3-from-wide' = Adobe/ProPhoto/Rec.2020
-    // converted to P3 via rgb16 pipeline; 'srgb' = everything else.
+    // CM-CRIT-1 / US-CM03: resolve the OUTPUT colorspace decision first so
+    // WI-15 can cap source dimensions and WI-12 can detect DCI-P3 before
+    // creating the Sharp instance.
     const avifDecision = resolveAvifIccProfile(iccProfileName);
     const isWideGamutSource = avifDecision === 'p3' || avifDecision === 'p3-from-wide';
     // The actual ICC profile to embed: always 'p3' for both P3 and p3-from-wide.
@@ -663,6 +653,33 @@ export async function processImageFormats(
     // gamut (P3 or wider) and forceSrgbDerivatives is false (default), emit
     // P3-tagged derivatives so P3-capable browsers render the full gamut.
     const targetIcc: 'p3' | 'srgb' = (isWideGamutSource && !forceSrgbDerivatives) ? 'p3' : 'srgb';
+
+    // WI-12: detect DCI-P3 sources for white-point adaptation.
+    const isDciP3 = iccProfileName?.toLowerCase() === 'dci-p3' || iccProfileName?.toLowerCase().startsWith('dci-p3');
+
+    // WI-15: cap source dimension for wide-gamut to prevent OOM in rgb16 pipeline.
+    // Sources wider than 6000px are downscaled to an intermediate before fan-out.
+    const WIDE_GAMUT_MAX_SOURCE_WIDTH = 6000;
+    let processingInputPath = inputPath;
+    let processingBaseWidth = baseWidth;
+    if (isWideGamutSource && baseWidth > WIDE_GAMUT_MAX_SOURCE_WIDTH) {
+        const tmpPath = inputPath + '.wi15.tmp';
+        await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
+            .resize({ width: WIDE_GAMUT_MAX_SOURCE_WIDTH, withoutEnlargement: true })
+            .toFile(tmpPath);
+        processingInputPath = tmpPath;
+        processingBaseWidth = WIDE_GAMUT_MAX_SOURCE_WIDTH;
+    }
+
+    // Use file path so Sharp can mmap/stream instead of buffering on the heap.
+    // CM-HIGH-3: failOn:'error' rejects truncated/corrupt input; sequentialRead:true
+    // streams large files instead of random-access reading them.
+    // CM-HIGH-4: autoOrient:true rotates/flips per EXIF Orientation before
+    // resize so derivatives are always served upright with no orientation tag.
+    const image = sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true });
+    const qualityWebp = quality?.webp ?? 90;
+    const qualityAvif = quality?.avif ?? 85;
+    const qualityJpeg = quality?.jpeg ?? 90;
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -675,7 +692,7 @@ export async function processImageFormats(
 
         for (const size of sortedSizes) {
             // Don't upscale if original is smaller.
-            const resizeWidth = baseWidth < size ? baseWidth : size;
+            const resizeWidth = processingBaseWidth < size ? processingBaseWidth : size;
 
             // Suffix based filename: id_2048.webp
             const sizedFilename = `${name}_${size}${ext}`;
@@ -701,9 +718,17 @@ export async function processImageFormats(
                 // the edge halos/desaturation that gamma-space resize
                 // introduces. Only paid on the wide-gamut path because it
                 // doubles peak RAM during resize.
-                const isWideGamutSource = avifIcc === 'p3';
-                const base = isWideGamutSource
-                    ? image.clone().pipelineColorspace('rgb16').resize({ width: resizeWidth })
+                // WI-12: DCI-P3 sources skip rgb16 pipeline so the source ICC
+                // profile (with DCI white point) is preserved for the
+                // toColorspace('p3') transform, which then does the correct
+                // Bradford adaptation to D65.
+                // WI-14: rgb16 path uses a fresh sharp instance per format to
+                // eliminate shared-state risk between parallel encodes.
+                const needsRgb16 = isWideGamutSource && !isDciP3;
+                const base = needsRgb16
+                    ? sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
+                        .pipelineColorspace('rgb16')
+                        .resize({ width: resizeWidth })
                     : image.clone().resize({ width: resizeWidth });
 
                 if (format === 'webp') {
@@ -812,15 +837,15 @@ export async function processImageFormats(
         }
     };
 
-    // Generate all three formats in parallel
-    await Promise.all([
-        generateForFormat('webp', UPLOAD_DIR_WEBP, filenameWebp),
-        generateForFormat('avif', UPLOAD_DIR_AVIF, filenameAvif),
-        generateForFormat('jpeg', UPLOAD_DIR_JPEG, filenameJpeg),
-    ]);
-
-    // Verify all three output format base files are not empty
     try {
+        // Generate all three formats in parallel
+        await Promise.all([
+            generateForFormat('webp', UPLOAD_DIR_WEBP, filenameWebp),
+            generateForFormat('avif', UPLOAD_DIR_AVIF, filenameAvif),
+            generateForFormat('jpeg', UPLOAD_DIR_JPEG, filenameJpeg),
+        ]);
+
+        // Verify all three output format base files are not empty
         const [webpStats, avifStats, jpegStats] = await Promise.all([
             fs.stat(path.join(UPLOAD_DIR_WEBP, filenameWebp)),
             fs.stat(path.join(UPLOAD_DIR_AVIF, filenameAvif)),
@@ -829,9 +854,11 @@ export async function processImageFormats(
         if (webpStats.size === 0) throw new Error('Generated WebP file is empty');
         if (avifStats.size === 0) throw new Error('Generated AVIF file is empty');
         if (jpegStats.size === 0) throw new Error('Generated JPEG file is empty');
-    } catch (e) {
-        console.error('File verification failed:', e);
-        throw new Error('Image processing failed: generated file could not be verified');
+    } finally {
+        // WI-15: clean up downscaled intermediate if one was created.
+        if (processingInputPath !== inputPath) {
+            await fs.unlink(processingInputPath).catch(() => {});
+        }
     }
 }
 
