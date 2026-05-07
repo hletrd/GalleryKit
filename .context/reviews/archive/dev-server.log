@@ -1,0 +1,794 @@
+
+> web@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.30.61.1:3000
+- Environments: .env.local
+✓ Ready in 821ms
+⚠ Turbopack's filesystem cache has been deleted because we previously detected an internal error in Turbopack. Builds or page loads may be slower as a result.
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: "266mb"
+  · serverActions
+
+ GET /en 200 in 3.7s (next.js: 3.3s, proxy.ts: 37ms, application-code: 280ms)
+ GET /manifest.webmanifest 200 in 338ms (next.js: 318ms, application-code: 20ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 1174ms (next.js: 1092ms, proxy.ts: 4ms, application-code: 77ms)
+ GET /en/apple-icon 200 in 985ms (next.js: 905ms, proxy.ts: 3ms, application-code: 78ms)
+ GET /en/p/53 200 in 1689ms (next.js: 1632ms, proxy.ts: 6ms, application-code: 51ms)
+ GET /manifest.webmanifest 200 in 13ms (next.js: 6ms, application-code: 7ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 93ms (next.js: 10ms, proxy.ts: 2ms, application-code: 82ms)
+ GET /en/apple-icon 200 in 90ms (next.js: 48ms, proxy.ts: 1548µs, application-code: 40ms)
+ GET /manifest.webmanifest 200 in 17ms (next.js: 8ms, application-code: 9ms)
+ GET /en 200 in 114ms (next.js: 16ms, proxy.ts: 4ms, application-code: 93ms)
+ GET /en/apple-icon 200 in 107ms (next.js: 11ms, proxy.ts: 1590µs, application-code: 94ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 108ms (next.js: 34ms, proxy.ts: 2ms, application-code: 72ms)
+ GET /manifest.webmanifest 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /en/admin 200 in 1240ms (next.js: 1115ms, proxy.ts: 4ms, application-code: 121ms)
+ GET /en/apple-icon 200 in 89ms (next.js: 8ms, proxy.ts: 1281µs, application-code: 80ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 89ms (next.js: 32ms, proxy.ts: 1397µs, application-code: 56ms)
+ GET /manifest.webmanifest 200 in 12ms (next.js: 4ms, application-code: 8ms)
+ GET /en 200 in 96ms (next.js: 12ms, proxy.ts: 3ms, application-code: 81ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 107ms (next.js: 34ms, proxy.ts: 1501µs, application-code: 72ms)
+ GET /en/apple-icon 200 in 108ms (next.js: 10ms, proxy.ts: 1411µs, application-code: 96ms)
+ GET /manifest.webmanifest 200 in 14ms (next.js: 5ms, application-code: 9ms)
+ GET /en 200 in 104ms (next.js: 13ms, proxy.ts: 6ms, application-code: 84ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en" notFound={{...}} forbidden={undefined} unauthorized={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 115ms (next.js: 9ms, proxy.ts: 3ms, application-code: 102ms)
+ GET /en/apple-icon 200 in 116ms (next.js: 33ms, proxy.ts: 3ms, application-code: 80ms)
+ GET /manifest.webmanifest 200 in 16ms (next.js: 6ms, application-code: 10ms)
+ GET /en/p/1 200 in 135ms (next.js: 16ms, proxy.ts: 4ms, application-code: 115ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 106ms (next.js: 9ms, proxy.ts: 4ms, application-code: 93ms)
+ GET /en/apple-icon 200 in 102ms (next.js: 44ms, proxy.ts: 1103µs, application-code: 56ms)
+ GET /manifest.webmanifest 200 in 12ms (next.js: 5ms, application-code: 7ms)
+ GET /en 200 in 96ms (next.js: 14ms, proxy.ts: 5ms, application-code: 78ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 97ms (next.js: 8ms, proxy.ts: 3ms, application-code: 87ms)
+ GET /en/apple-icon 200 in 70ms (next.js: 13ms, proxy.ts: 14ms, application-code: 43ms)
+ GET /manifest.webmanifest 200 in 13ms (next.js: 3ms, application-code: 10ms)
+ GET /en/p/53 200 in 123ms (next.js: 14ms, proxy.ts: 6ms, application-code: 104ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en/p/53" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en/p/53" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 109ms (next.js: 12ms, proxy.ts: 2ms, application-code: 95ms)
+ GET /en/apple-icon 200 in 106ms (next.js: 53ms, proxy.ts: 2ms, application-code: 51ms)
+ GET /manifest.webmanifest 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /en/admin 200 in 92ms (next.js: 14ms, proxy.ts: 5ms, application-code: 72ms)
+ GET /en/apple-icon 200 in 101ms (next.js: 28ms, proxy.ts: 3ms, application-code: 69ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 101ms (next.js: 7ms, proxy.ts: 3ms, application-code: 91ms)
+ GET /manifest.webmanifest 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /en/p/53 200 in 110ms (next.js: 11ms, proxy.ts: 5ms, application-code: 94ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en/p/53" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en/p/53" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/apple-icon 200 in 66ms (next.js: 12ms, proxy.ts: 15ms, application-code: 39ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 98ms (next.js: 8ms, proxy.ts: 2ms, application-code: 87ms)
+ GET /manifest.webmanifest 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /en/admin 200 in 84ms (next.js: 11ms, proxy.ts: 5ms, application-code: 68ms)
+ GET /en/apple-icon 200 in 108ms (next.js: 35ms, proxy.ts: 1830µs, application-code: 71ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 109ms (next.js: 9ms, proxy.ts: 1835µs, application-code: 98ms)
+ GET /manifest.webmanifest 200 in 10ms (next.js: 3ms, application-code: 7ms)
+ GET /en/p/53 200 in 105ms (next.js: 14ms, proxy.ts: 3ms, application-code: 88ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en/p/53" notFound={{...}} forbidden={undefined} unauthorized={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en/p/53" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/apple-icon 200 in 103ms (next.js: 54ms, proxy.ts: 3ms, application-code: 46ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 109ms (next.js: 15ms, proxy.ts: 3ms, application-code: 91ms)
+ GET /manifest.webmanifest 200 in 12ms (next.js: 4ms, application-code: 7ms)
+ GET /en 200 in 103ms (next.js: 13ms, proxy.ts: 5ms, application-code: 85ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/apple-icon 200 in 94ms (next.js: 9ms, proxy.ts: 4ms, application-code: 81ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 94ms (next.js: 36ms, proxy.ts: 4ms, application-code: 54ms)
+ GET /manifest.webmanifest 200 in 11ms (next.js: 4ms, application-code: 7ms)
+ GET /ko 200 in 114ms (next.js: 14ms, proxy.ts: 5ms, application-code: 95ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/ko" notFound={{...}} forbidden={undefined} unauthorized={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/ko" tree={[...]} params={{locale:"ko"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="메인 내비게이션" className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="테마 전환"
++                             title="라이트"
+-                             title="시스템"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 93ms (next.js: 9ms, proxy.ts: 4ms, application-code: 80ms)
+ GET /en/apple-icon 200 in 90ms (next.js: 29ms, proxy.ts: 2ms, application-code: 59ms)
+ GET /manifest.webmanifest 200 in 13ms (next.js: 4ms, application-code: 9ms)
+ GET /en/p/53 200 in 103ms (next.js: 9ms, proxy.ts: 3ms, application-code: 91ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en/p/53" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en/p/53" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 100ms (next.js: 12ms, proxy.ts: 2ms, application-code: 86ms)
+ GET /en/apple-icon 200 in 97ms (next.js: 47ms, proxy.ts: 3ms, application-code: 47ms)
+ GET /manifest.webmanifest 200 in 11ms (next.js: 3ms, application-code: 8ms)
+ GET /en 200 in 88ms (next.js: 13ms, proxy.ts: 3ms, application-code: 72ms)
+ GET /en/icon?deaa2ca2780fb9ef= 200 in 95ms (next.js: 10ms, proxy.ts: 2ms, application-code: 83ms)
+ GET /en/apple-icon 200 in 96ms (next.js: 40ms, proxy.ts: 2ms, application-code: 53ms)
+[browser] Uncaught Error: Hydration failed because the server rendered HTML didn't match the client. As a result this tree will be regenerated on the client. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HTTPAccessFallbackErrorBoundary pathname="/en" notFound={<SegmentViewNode>} forbidden={undefined} ...>
+      <RedirectBoundary>
+        <RedirectErrorBoundary router={{...}}>
+          <InnerLayoutRouter url="/en" tree={[...]} params={{locale:"en"}} cacheNode={{rsc:{...}, ...}} ...>
+            <SegmentViewNode type="layout" pagePath="[locale]/(...">
+              <SegmentTrieNode>
+              <script>
+              <script>
+              <script>
+              <PublicLayout>
+                <a>
+                <Nav>
+                  <Suspense>
+                    <NavClient topics={[...]} navTitle="GalleryKit" imageSizes={[...]} semanticSearchMode="disabled">
+                      <nav aria-label="Main navig..." className="sticky top...">
+                        <div className="container ...">
+                          <div>
+                          <button>
+                          <div>
+                          <div id="primary-na..." className="items-cent...">
+                            <Search>
+                            <button
+                              onClick={function onClick}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent ro..."
+                              aria-label="Toggle theme"
++                             title="Light"
+-                             title="System"
+                            >
+                              <Sun className="h-4 w-4">
+                                <svg
+                                  ref={null}
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width={24}
+                                  height={24}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
++                                 className="lucide lucide-sun h-4 w-4"
+-                                 className="lucide lucide-monitor h-4 w-4"
+                                  aria-hidden="true"
+                                >
++                                 <circle cx="12" cy="12" r="4">
+-                                 <rect width="20" height="14" x="2" y="3" rx="2">
+                                  ...
+                            ...
+                ...
+          ...
+
+    at <unknown> (https://react.dev/link/hydration-mismatch)
+    at circle (<anonymous>)
+    at Array.map (<anonymous>)
+    at NavClient (src/components/nav-client.tsx:156:49)
+    at Nav (src/components/nav.tsx:11:13)
+    at PublicLayout (src/app/[locale]/(public)/layout.tsx:13:13)
+  154 |                         title={t(`theme.${(theme ?? 'system') as StoredTheme}`)}
+  155 |                     >
+> 156 |                         {(theme === 'light') && <Sun className="h-4 w-4" />}
+      |                                                 ^
+  157 |                         {(theme === 'dark') && <Moon className="h-4 w-4" />}
+  158 |                         {(theme === 'oled') && <Circle className="h-4 w-4 fill-current" />}
+  159 |                         {(!theme || theme === 'system') && <Monitor className="h-4 w-4" />}
+✓ Compiled in 74ms
+✓ Compiled in 15ms
+✓ Compiled in 14ms
+✓ Compiled in 24ms
+✓ Compiled in 35ms
+ GET /en 200 in 67ms (next.js: 27ms, proxy.ts: 1191µs, application-code: 39ms)
+ GET /en 200 in 49ms (next.js: 8ms, proxy.ts: 1521µs, application-code: 39ms)
+ GET /en 200 in 88ms (next.js: 7ms, proxy.ts: 1826µs, application-code: 79ms)
+ GET /en 200 in 53ms (next.js: 10ms, proxy.ts: 1368µs, application-code: 41ms)
+ GET /en 200 in 40ms (next.js: 5ms, proxy.ts: 1000µs, application-code: 34ms)
+ GET /_nxt/static/cunks/apps_wb_sc_app_%5Blocal%5D_globals_0qqosnp.css 404 in 241ms (next.js: 221ms, application-code: 20ms)
+ GET /en 200 in 46ms (next.js: 10ms, proxy.ts: 1288µs, application-code: 34ms)
+ GET /_nxt/static/cunks/apps_wb_sc_app_%5Blocal%5D_globals_0qqosnp.css 404 in 25ms (next.js: 11ms, application-code: 14ms)
+ GET /en 200 in 37ms (next.js: 5ms, proxy.ts: 1289µs, application-code: 31ms)
+ GET /en 200 in 43ms (next.js: 8ms, proxy.ts: 1173µs, application-code: 34ms)
+✓ Compiled in 70ms
+✓ Compiled in 75ms
+✓ Compiled in 43ms
+✓ Compiled in 30ms

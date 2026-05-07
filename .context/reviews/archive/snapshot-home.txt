@@ -1,0 +1,59 @@
+- link "Skip to content" [ref=e1]
+- link "Skip to content" [ref=e2]
+- navigation "Main navigation" [ref=e3]
+  - link "GalleryKit" [ref=e5]
+    - StaticText "GalleryKit"
+  - link "E2E Smoke" [ref=e10]
+    - StaticText "E2E Smoke"
+  - generic
+    - button "Search photos" [expanded=false, ref=e11]
+    - button "Toggle theme" [ref=e12]
+    - button "Switch language to 한국어" [ref=e13]
+      - StaticText "KO"
+- main
+  - heading "Latest" [level=1, ref=e6]
+  - paragraph
+    - StaticText "2 photos"
+  - group "Filter by tag"
+    - button "All" [ref=e14]
+    - button "e2e (2)" [ref=e15]
+      - StaticText "e2e"
+      - StaticText "("
+      - StaticText "2"
+      - StaticText ")"
+    - button "landscape (1)" [ref=e16]
+      - StaticText "landscape"
+      - StaticText "("
+      - StaticText "1"
+      - StaticText ")"
+    - button "portrait (1)" [ref=e17]
+      - StaticText "portrait"
+      - StaticText "("
+      - StaticText "1"
+      - StaticText ")"
+  - heading "Photos" [level=2, ref=e7]
+  - link "View photo: E2E Landscape" [ref=e18]
+    - generic
+      - image "E2E Landscape"
+      - generic
+        - heading "E2E Landscape" [level=3, ref=e21]
+        - paragraph
+          - StaticText "E2E Smoke"
+  - link "View photo: E2E Portrait" [ref=e19]
+    - generic
+      - image "E2E Portrait"
+      - generic
+        - heading "E2E Portrait" [level=3, ref=e22]
+        - paragraph
+          - StaticText "E2E Smoke"
+- contentinfo
+  - paragraph
+    - StaticText "Powered by GalleryKit"
+  - link "GitHub" [ref=e8]
+    - image
+    - StaticText "GitHub"
+  - link "Admin" [ref=e9]
+- region "Notifications alt+T" [ref=e4]
+- button "Open Next.js Dev Tools" [expanded=false, ref=e20]
+  - image
+- alert

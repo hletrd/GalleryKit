@@ -1,0 +1,19 @@
+- link "Skip to content" [ref=e1]
+- link "Skip to content" [ref=e2]
+- main
+  - heading "Admin" [level=1, ref=e4]
+  - StaticText "Sign in to manage your gallery"
+  - generic
+    - LabelText
+      - StaticText "Username"
+    - textbox "Username" [required, ref=e5]
+    - LabelText
+      - StaticText "Password"
+    - generic
+      - textbox "Password" [required, ref=e7]
+      - button "Show password" [ref=e8]
+    - button "Sign in" [ref=e6]
+- region "Notifications alt+T" [ref=e3]
+- button "Open Next.js Dev Tools" [expanded=false, ref=e9]
+  - image
+- alert

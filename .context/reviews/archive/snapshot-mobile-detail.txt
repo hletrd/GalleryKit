@@ -1,0 +1,35 @@
+- link "Skip to content" [ref=e1]
+- link "Skip to content" [ref=e2]
+- navigation "Main navigation" [ref=e3]
+  - link "GalleryKit" [ref=e5]
+    - StaticText "GalleryKit"
+  - button "Expand menu" [expanded=false, ref=e6]
+  - link "E2E Smoke" [ref=e13]
+    - StaticText "E2E Smoke"
+- main
+  - heading "E2E Landscape" [level=1, ref=e7]
+  - link "Back to E2E Smoke" [ref=e8]
+  - button "Open fullscreen view" [ref=e9]
+  - button "Info" [ref=e10]
+  - generic
+    - button "Previous photo" [ref=e14]
+    - StaticText "Photo navigation available"
+    - button "Click to zoom in" [ref=e15]
+      - image "E2E Landscape"
+- contentinfo
+  - paragraph
+    - StaticText "Powered by GalleryKit"
+  - link "GitHub" [ref=e11]
+    - image
+    - StaticText "GitHub"
+  - link "Admin" [ref=e12]
+- region "Notifications alt+T" [ref=e4]
+- generic
+  - button "Open Next.js Dev Tools" [expanded=false, ref=e16]
+    - image
+  - button "Open issues overlay" [ref=e17]
+    - StaticText "1"
+    - StaticText "Issue"
+  - button "Collapse issues badge" [ref=e18]
+    - image
+- alert

@@ -1,0 +1,36 @@
+- link "Skip to content" [ref=e1]
+- link "Skip to content" [ref=e2]
+- navigation "Main navigation" [ref=e3]
+  - link "GalleryKit" [ref=e5]
+    - StaticText "GalleryKit"
+  - link "E2E Smoke" [ref=e12]
+    - StaticText "E2E Smoke"
+  - generic
+    - button "Search photos" [expanded=false, ref=e13]
+    - button "Toggle theme" [ref=e14]
+    - button "Switch language to 한국어" [ref=e15]
+      - StaticText "KO"
+- main
+  - heading "E2E Landscape" [level=1, ref=e6]
+  - paragraph
+    - StaticText "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, Space to toggle slideshow."
+  - link "Back to E2E Smoke" [ref=e7]
+  - button "Open fullscreen view" [ref=e8]
+  - button "Info" [ref=e9]
+  - generic
+    - button "Previous photo" [ref=e16]
+    - StaticText "Photo navigation available"
+    - button "Click to zoom in" [ref=e17]
+      - image "E2E Landscape"
+- contentinfo
+  - paragraph
+    - StaticText "Powered by GalleryKit"
+  - link "GitHub" [ref=e10]
+    - image
+    - StaticText "GitHub"
+  - link "Admin" [ref=e11]
+- region "Notifications alt+T" [ref=e4]
+- button "Open Next.js Dev Tools" [expanded=false, ref=e18]
+  - image
+- alert
+  - StaticText "E2E Landscape — GalleryKit"
