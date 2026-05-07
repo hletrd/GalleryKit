@@ -30,6 +30,9 @@ export const GALLERY_SETTING_KEYS = [
     'license_price_editorial_cents',
     'license_price_commercial_cents',
     'license_price_rm_cents',
+
+    // US-CM02: force sRGB derivatives for legacy embedder compatibility
+    'force_srgb_derivatives',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -73,6 +76,9 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
     license_price_editorial_cents: '0',
     license_price_commercial_cents: '0',
     license_price_rm_cents: '0',
+
+    // US-CM02: default off — P3-tagged WebP/JPEG for P3 sources
+    force_srgb_derivatives: 'false',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -97,6 +103,9 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     license_price_editorial_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },
     license_price_commercial_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },
     license_price_rm_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },
+
+    // US-CM02: boolean toggle
+    force_srgb_derivatives: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */

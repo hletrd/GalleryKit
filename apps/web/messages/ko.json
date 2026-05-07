@@ -627,7 +627,9 @@
     "licensePriceEditorial": "에디토리얼 라이선스 (센트)",
     "licensePriceCommercial": "상업용 라이선스 (센트)",
     "licensePriceRm": "권리 관리 라이선스 (센트)",
-    "licensePriceHint": "미국 센트 단위 가격. 예: 5000 = $50.00. 해당 등급을 비활성화하려면 0으로 설정하세요."
+    "licensePriceHint": "미국 센트 단위 가격. 예: 5000 = $50.00. 해당 등급을 비활성화하려면 0으로 설정하세요.",
+    "forceSrgbDerivatives": "sRGB 강제 적용",
+    "forceSrgbDerivativesHint": "켜면 WebP와 JPEG 변환본이 원본 색 공간과 상관없이 항상 sRGB로 생성됩니다. 레거시 임베더나 특정 클라이언트가 sRGB JPEG을 필요로 할 때만 사용하세요. AVIF 변환본은 원본 감마를 유지합니다."
   },
   "footer": {
     "admin": "관리자"

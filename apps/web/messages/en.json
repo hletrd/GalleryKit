@@ -627,7 +627,9 @@
     "licensePriceEditorial": "Editorial License (cents)",
     "licensePriceCommercial": "Commercial License (cents)",
     "licensePriceRm": "Rights-Managed License (cents)",
-    "licensePriceHint": "Price in US cents. For example, 5000 = $50.00. Leave 0 to disable that tier."
+    "licensePriceHint": "Price in US cents. For example, 5000 = $50.00. Leave 0 to disable that tier.",
+    "forceSrgbDerivatives": "Force sRGB Derivatives",
+    "forceSrgbDerivativesHint": "When ON, WebP and JPEG variants are always sRGB regardless of source color space. Use this only if downstream consumers (legacy embedders, specific clients) require sRGB JPEGs. AVIF variants always carry their original gamut."
   },
   "footer": {
     "admin": "Admin"

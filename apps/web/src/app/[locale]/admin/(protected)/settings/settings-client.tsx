@@ -162,6 +162,22 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             {hasExistingImages ? t('settings.imageSizesLockedHint') : t('settings.imageSizesHint')}
                         </p>
                     </div>
+
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label htmlFor="force-srgb-derivatives">{t('settings.forceSrgbDerivatives')}</Label>
+                            <p id="force-srgb-derivatives-help" className="text-xs text-muted-foreground">
+                                {t('settings.forceSrgbDerivativesHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="force-srgb-derivatives"
+                            checked={settings.force_srgb_derivatives === 'true'}
+                            onCheckedChange={(checked) => handleChange('force_srgb_derivatives', checked ? 'true' : 'false')}
+                            aria-describedby="force-srgb-derivatives-help"
+                            aria-label={t('settings.forceSrgbDerivatives')}
+                        />
+                    </div>
                 </CardContent>
             </Card>
 

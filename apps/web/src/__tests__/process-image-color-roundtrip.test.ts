@@ -193,8 +193,33 @@ describe('color round-trip — Display-P3 source', () => {
         const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
         expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
 
-        // WebP/JPEG must carry sRGB even when source was P3 — explicit
-        // gamut compression for universal compat.
+        // US-CM02: WebP/JPEG now carry P3 ICC when source was P3 and
+        // forceSrgbDerivatives is false (default). P3-capable browsers
+        // render full gamut; non-capable browsers safely clip to sRGB.
+        const webpProfile = await readOutputIccName(path.join(UPLOAD_DIR_WEBP, `${id}.webp`));
+        const jpegProfile = await readOutputIccName(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`));
+        expect(webpProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(jpegProfile?.toLowerCase()).toMatch(/p3|display p3/);
+    });
+
+    it('P3 source with forceSrgbDerivatives=true: WebP/JPEG carry sRGB', async () => {
+        const srcPath = path.join(tmpDir, 'p3-source-force-srgb.tif');
+        await makeWideGamutLabelledTiff('Display P3', srcPath);
+
+        const id = trackId('rt-p3-force-srgb');
+        await processImageFormats(
+            srcPath,
+            `${id}.webp`,
+            `${id}.avif`,
+            `${id}.jpg`,
+            8,
+            { webp: 80, avif: 80, jpeg: 90 },
+            [8],
+            'Display P3',
+            true, // forceSrgbDerivatives
+        );
+
+        const { UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG } = await import('@/lib/upload-paths');
         const webpProfile = await readOutputIccName(path.join(UPLOAD_DIR_WEBP, `${id}.webp`));
         const jpegProfile = await readOutputIccName(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`));
         expect(webpProfile?.toLowerCase()).toMatch(/srgb|iec61966/);

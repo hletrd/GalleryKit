@@ -66,6 +66,9 @@ export interface GalleryConfig {
 
     // US-P54: license tier prices in cents (0 = not for sale)
     licensePrices: Record<string, number>;
+
+    // US-CM02: force sRGB derivatives for legacy embedder compatibility
+    forceSrgbDerivatives: boolean;
 }
 
 /**
@@ -111,6 +114,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 commercial: validatedNumber(map, 'license_price_commercial_cents'),
                 rm: validatedNumber(map, 'license_price_rm_cents'),
             },
+            forceSrgbDerivatives: (() => {
+                const raw = getSetting(map, 'force_srgb_derivatives');
+                if (!isValidSettingValue('force_srgb_derivatives', raw)) return DEFAULTS.force_srgb_derivatives === 'true';
+                return raw === 'true';
+            })(),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -130,6 +138,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 commercial: Number(DEFAULTS.license_price_commercial_cents),
                 rm: Number(DEFAULTS.license_price_rm_cents),
             },
+            forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
         };
     }
 }

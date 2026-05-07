@@ -103,7 +103,7 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
  *       by format fan-out.
  */
-export const IMAGE_PIPELINE_VERSION = 3;
+export const IMAGE_PIPELINE_VERSION = 4;
 
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
@@ -654,6 +654,7 @@ export async function processImageFormats(
     quality?: ImageQualitySettings, // Admin-configured quality overrides
     sizes: number[] = DEFAULT_OUTPUT_SIZES, // Admin-configured output sizes
     iccProfileName?: string | null, // Source ICC profile name for AVIF P3 tagging
+    forceSrgbDerivatives?: boolean, // US-CM02: when true, force sRGB on WebP/JPEG even for P3 sources
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
@@ -673,6 +674,13 @@ export async function processImageFormats(
     // ICC name. Strict P3 detection — only true Display-P3 sources stay in
     // P3; everything else converts to sRGB pixels with a matching sRGB tag.
     const avifIcc = resolveAvifIccProfile(iccProfileName);
+
+    // US-CM02: target colorspace for WebP and JPEG. When the source is P3 and
+    // forceSrgbDerivatives is false (default), emit P3-tagged derivatives so
+    // P3-capable browsers render the full gamut. Legacy embedders or consumers
+    // that don't color-manage will see the same colors as today (sRGB-clipped).
+    const isWideGamutSource = avifIcc === 'p3';
+    const targetIcc: 'p3' | 'srgb' = (isWideGamutSource && !forceSrgbDerivatives) ? 'p3' : 'srgb';
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -717,10 +725,12 @@ export async function processImageFormats(
                     : image.clone().resize({ width: resizeWidth });
 
                 if (format === 'webp') {
-                    // WebP is always sRGB for universal compatibility.
+                    // US-CM02: P3-tagged when source is P3 and forceSrgbDerivatives
+                    // is false (default). P3-capable browsers render full gamut;
+                    // non-capable browsers safely fall back to sRGB clipping.
                     await base
-                        .toColorspace('srgb')
-                        .withIccProfile('srgb')
+                        .toColorspace(targetIcc)
+                        .withIccProfile(targetIcc)
                         .webp({ quality: qualityWebp })
                         .toFile(outputPath);
                 } else if (format === 'avif') {
@@ -765,15 +775,15 @@ export async function processImageFormats(
                         }
                     }
                 } else {
-                    // JPEG is always sRGB for universal compatibility (matches
-                    // the gratis "Download JPEG" UX expectation).
+                    // US-CM02: P3-tagged when source is P3 and forceSrgbDerivatives
+                    // is false (default), same as WebP above.
                     // CM-MED-3: wide-gamut sources benefit from 4:4:4 chroma
-                    // subsampling; the gamut compression compounds chroma
-                    // resolution loss otherwise. sRGB sources stay at the
-                    // Sharp default for tighter file sizes.
+                    // subsampling regardless of target colorspace (the source
+                    // gamut is wide even when forced to sRGB). sRGB sources stay
+                    // at the Sharp default for tighter file sizes.
                     await base
-                        .toColorspace('srgb')
-                        .withIccProfile('srgb')
+                        .toColorspace(targetIcc)
+                        .withIccProfile(targetIcc)
                         .jpeg({
                             quality: qualityJpeg,
                             ...(isWideGamutSource ? { chromaSubsampling: '4:4:4' as const } : {}),
