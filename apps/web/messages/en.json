@@ -310,6 +310,7 @@
     "colorDetails": "Color details",
     "colorPrimaries": "Color primaries",
     "transferFunction": "Transfer function",
+    "colorPipelineDecision": "Color pipeline",
     "hdrBadge": "HDR",
     "colorUnknown": "Unknown",
     "calibrationTooltip": "Display calibration affects color accuracy. Uncalibrated displays may render saturation and white balance differently than the photographer intended.",

@@ -65,6 +65,19 @@ function humanizeTransferFunction(value: string | null | undefined): string {
     }
 }
 
+function humanizeColorPipelineDecision(value: string | null | undefined): string {
+    switch (value) {
+        case 'srgb': return 'sRGB';
+        case 'p3-from-displayp3': return 'P3 (from Display P3)';
+        case 'p3-from-dcip3': return 'P3 (from DCI-P3)';
+        case 'p3-from-adobergb': return 'P3 (from Adobe RGB)';
+        case 'p3-from-prophoto': return 'P3 (from ProPhoto)';
+        case 'p3-from-rec2020': return 'P3 (from Rec. 2020)';
+        case 'srgb-from-unknown': return 'sRGB (unknown source)';
+        default: return '';
+    }
+}
+
 import { useRouter } from 'next/navigation';
 import siteConfig from '@/site-config.json';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize, getPhotoViewerImageSizes } from '@/lib/gallery-config-shared';
@@ -845,6 +858,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                     <div>
                                                         <p className="text-muted-foreground text-xs">{t('viewer.transferFunction')}</p>
                                                         <p className="font-medium">{humanizeTransferFunction(image.transfer_function) || t('viewer.colorUnknown')}</p>
+                                                    </div>
+                                                )}
+                                                {(isAdmin && image.color_pipeline_decision) && (
+                                                    <div>
+                                                        <p className="text-muted-foreground text-xs">{t('viewer.colorPipelineDecision')}</p>
+                                                        <p className="font-medium">{humanizeColorPipelineDecision(image.color_pipeline_decision) || t('viewer.colorUnknown')}</p>
                                                     </div>
                                                 )}
                                                 {image.is_hdr && (
