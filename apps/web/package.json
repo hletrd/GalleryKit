@@ -36,6 +36,7 @@
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "@types/geoip-lite": "^1.4.4",
     "argon2": "^0.44.0",
     "class-variance-authority": "^0.7.1",

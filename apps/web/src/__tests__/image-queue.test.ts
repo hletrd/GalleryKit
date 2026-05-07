@@ -23,6 +23,7 @@ vi.mock('@/db', () => ({
 vi.mock('@/lib/process-image', () => ({
     processImageFormats: vi.fn(),
     deleteImageVariants: vi.fn(),
+    IMAGE_PIPELINE_VERSION: 5,
 }));
 
 vi.mock('@/lib/upload-paths', () => ({

@@ -11,6 +11,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { ArrowLeft, Share2, Info, MapPin, Calendar, Clock, Download, ChevronDown, PanelRightOpen, PanelRightClose, ShoppingCart } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { toast } from "sonner";
@@ -821,9 +822,16 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         >
                                             <ChevronDown className={`h-4 w-4 transition-transform ${showColorDetails ? 'rotate-180' : ''}`} />
                                             {t('viewer.colorDetails')}
-                                            <span title={t('viewer.calibrationTooltip')} className="inline-flex">
-                                                <Info className="h-4 w-4 text-muted-foreground/60" />
-                                            </span>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <span className="inline-flex">
+                                                        <Info className="h-4 w-4 text-muted-foreground/60" />
+                                                    </span>
+                                                </TooltipTrigger>
+                                                <TooltipContent>
+                                                    {t('viewer.calibrationTooltip')}
+                                                </TooltipContent>
+                                            </Tooltip>
                                         </button>
                                         {showColorDetails && (
                                             <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 pl-6">

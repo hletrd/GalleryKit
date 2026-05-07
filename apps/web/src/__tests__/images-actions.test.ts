@@ -98,6 +98,7 @@ vi.mock('@/lib/process-image', () => ({
     saveOriginalAndGetMetadata: saveOriginalAndGetMetadataMock,
     extractExifForDb: extractExifForDbMock,
     deleteImageVariants: vi.fn(),
+    IMAGE_PIPELINE_VERSION: 5,
 }));
 
 vi.mock('@/lib/image-queue', () => ({

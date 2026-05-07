@@ -5,7 +5,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, images, sessions, imageEmbeddings } from '@/db';
 import { eq, and, sql, asc, gt, notInArray } from 'drizzle-orm';
-import { processImageFormats, deleteImageVariants } from '@/lib/process-image';
+import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -337,7 +337,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
 
             // US-001: Conditional update — only mark processed if still unprocessed (not deleted)
             const [updateResult] = await db.update(images)
-                .set({ processed: true })
+                .set({ processed: true, pipeline_version: IMAGE_PIPELINE_VERSION })
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
 
             if (updateResult.affectedRows === 0) {

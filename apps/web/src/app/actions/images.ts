@@ -4,7 +4,7 @@ import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { eq, inArray, and } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
@@ -338,6 +338,7 @@ export async function uploadImages(formData: FormData) {
                     transfer_function: data.colorSignals?.transferFunction ?? null,
                     matrix_coefficients: data.colorSignals?.matrixCoefficients ?? null,
                     is_hdr: data.colorSignals?.isHdr ?? false,
+                    pipeline_version: IMAGE_PIPELINE_VERSION,
                     // C22-AGG-02: .slice(0, 10) is safe on UTF-16 code units because
                     // getSafeExtension() in process-image.ts guarantees ASCII-only
                     // output ([a-z0-9.]), so .length == countCodePoints and slice
