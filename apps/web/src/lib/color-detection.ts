@@ -125,15 +125,19 @@ interface CicpTriplet {
 const NCLX_PRIMARIES_MAP: Record<number, ColorSignals['colorPrimaries']> = {
     1: 'bt709',
     9: 'bt2020',
+    11: 'dci-p3',
     12: 'p3-d65',
 };
 
 const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     1: 'srgb',
     2: 'gamma22',
-    13: 'pq',
-    14: 'hlg',
-    18: 'gamma18',
+    6: 'gamma22',
+    13: 'srgb',    // sRGB IEC 61966-2-1 (was wrongly mapped to 'pq')
+    14: 'gamma22', // BT.2020 10-bit (was wrongly mapped to 'hlg')
+    15: 'gamma22', // BT.2020 12-bit
+    16: 'pq',      // PQ / SMPTE ST 2084 (was missing)
+    18: 'hlg',     // ARIB STD-B67 (was wrongly mapped to 'gamma18')
 };
 
 const NCLX_MATRIX_MAP: Record<number, ColorSignals['matrixCoefficients']> = {
