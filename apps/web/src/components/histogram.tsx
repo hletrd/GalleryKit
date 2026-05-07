@@ -40,6 +40,22 @@ const AVIF_PROBE_DATA_URL = 'data:image/avif;base64,AAAAIGZ0eXBhdmlmAAAAAGF2aWZt
 
 const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
 
+// C1: cache Canvas-P3 + AVIF probe at module scope (singleton, runs once per process).
+let _cachedAvifSupported: boolean | null = null;
+function getAvifSupported(): boolean {
+    if (_cachedAvifSupported !== null) return _cachedAvifSupported;
+    const img = new Image();
+    img.onload = () => { _cachedAvifSupported = true; };
+    img.onerror = () => { _cachedAvifSupported = false; };
+    img.src = AVIF_PROBE_DATA_URL;
+    // Return false optimistically until the probe resolves; the next render will pick up the cached value.
+    return false;
+}
+
+const _cachedSupportsCanvasP3 = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(color-gamut: p3)').matches;
+
 interface HistogramProps {
     imageUrl: string;
     avifUrl?: string;
@@ -233,7 +249,6 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
     const { t } = useTranslation();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme === 'dark';
-    const [avifSupported, setAvifSupported] = useState(false);
     const [histogramState, setHistogramState] = useState<{ imageUrl: string | null; data: HistogramData | null }>({
         imageUrl: null,
         data: null,
@@ -243,20 +258,10 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
 
-    // US-CM06: probe AVIF decode support once per mount.
-    useEffect(() => {
-        const img = new Image();
-        img.onload = () => setAvifSupported(true);
-        img.onerror = () => setAvifSupported(false);
-        img.src = AVIF_PROBE_DATA_URL;
-    }, []);
-
-    const supportsCanvasP3 = typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(color-gamut: p3)').matches;
+    const avifSupported = getAvifSupported();
 
     const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
-    const preferAvif = isWideGamut && avifSupported && supportsCanvasP3 && Boolean(avifUrl);
+    const preferAvif = isWideGamut && avifSupported && _cachedSupportsCanvasP3 && Boolean(avifUrl);
     const effectiveUrl = preferAvif ? avifUrl! : imageUrl;
     const isClipped = isWideGamut && !preferAvif;
 

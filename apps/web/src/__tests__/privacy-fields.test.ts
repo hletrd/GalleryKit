@@ -10,6 +10,7 @@ const SENSITIVE_KEYS = [
     'processed',
     'original_format',
     'original_file_size',
+    'color_pipeline_decision',
 ] as const;
 
 describe('Privacy field separation', () => {

@@ -306,6 +306,8 @@ const {
     original_file_size: _omitOriginalFileSize,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     processed: _omitProcessed,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally: color pipeline is admin-only
+    color_pipeline_decision: _omitColorPipelineDecision,
     ...publicSelectFieldCore
 } = adminSelectFields;
 
@@ -331,6 +333,8 @@ const {
     original_file_size: _omitOriginalFileSizeMap,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     processed: _omitProcessedMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally: color pipeline is admin-only
+    color_pipeline_decision: _omitColorPipelineDecisionMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
 
@@ -356,7 +360,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -364,7 +368,7 @@ void _privacyGuard;
 // Compile-time guard for publicMapSelectFields: it must NOT contain any admin-only
 // field beyond latitude and longitude. The allowed set is exactly publicSelectFields
 // UNION {latitude, longitude}. If any OTHER sensitive key leaks in, this guard fires.
-type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size';
+type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision';
 type _MapSensitiveKeysInPublicMap = Extract<keyof typeof publicMapSelectFields, _MapSensitiveKeys>;
 const _mapPrivacyGuard: _MapSensitiveKeysInPublicMap extends never ? true : [_MapSensitiveKeysInPublicMap, 'ERROR: privacy-sensitive field found in publicMapSelectFields — must only add latitude/longitude vs publicSelectFields'] = true;
 void _mapPrivacyGuard;

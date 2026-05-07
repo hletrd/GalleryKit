@@ -657,18 +657,23 @@ export async function processImageFormats(
     // WI-12: detect DCI-P3 sources for white-point adaptation.
     const isDciP3 = iccProfileName?.toLowerCase() === 'dci-p3' || iccProfileName?.toLowerCase().startsWith('dci-p3');
 
-    // WI-15: cap source dimension for wide-gamut to prevent OOM in rgb16 pipeline.
-    // Sources wider than 6000px are downscaled to an intermediate before fan-out.
-    const WIDE_GAMUT_MAX_SOURCE_WIDTH = 6000;
+    // WI-15: cap source pixel count for wide-gamut to prevent OOM in rgb16 pipeline.
+    // Sources exceeding 50MP are downscaled proportionally to an intermediate before fan-out.
+    const WIDE_GAMUT_MAX_SOURCE_PIXELS = 50_000_000;
     let processingInputPath = inputPath;
     let processingBaseWidth = baseWidth;
-    if (isWideGamutSource && baseWidth > WIDE_GAMUT_MAX_SOURCE_WIDTH) {
+    const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true }).metadata();
+    const baseHeight = (inputMeta.height && inputMeta.height > 0) ? inputMeta.height : 0;
+    const basePixels = baseWidth * baseHeight;
+    if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
+        const scale = Math.sqrt(WIDE_GAMUT_MAX_SOURCE_PIXELS / basePixels);
+        const targetWidth = Math.max(1, Math.round(baseWidth * scale));
         const tmpPath = inputPath + '.wi15.tmp';
         await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
-            .resize({ width: WIDE_GAMUT_MAX_SOURCE_WIDTH, withoutEnlargement: true })
+            .resize({ width: targetWidth, withoutEnlargement: true })
             .toFile(tmpPath);
         processingInputPath = tmpPath;
-        processingBaseWidth = WIDE_GAMUT_MAX_SOURCE_WIDTH;
+        processingBaseWidth = targetWidth;
     }
 
     // Use file path so Sharp can mmap/stream instead of buffering on the heap.

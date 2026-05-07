@@ -190,16 +190,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const hdrAvifFilename = image?.filename_avif ? image.filename_avif.replace(/\.avif$/i, '_hdr.avif') : null;
     const hdrDownloadHref = hdrAvifFilename ? imageUrl(`/uploads/avif/${hdrAvifFilename}`) : null;
     const isWideGamutSource = Boolean(image?.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
-    const [hdrExists, setHdrExists] = useState(false);
-    useEffect(() => {
-        if (!hdrDownloadHref || !image?.is_hdr) {
-            setHdrExists(false);
-            return;
-        }
-        fetch(hdrDownloadHref, { method: 'HEAD' })
-            .then((r) => setHdrExists(r.status === 200))
-            .catch(() => setHdrExists(false));
-    }, [hdrDownloadHref, image?.is_hdr]);
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
 
@@ -867,7 +857,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                         {t('viewer.downloadP3Avif')}
                                                     </a>
                                                 </DropdownMenuItem>
-                                                {hdrExists && hdrDownloadHref && (
+                                                {image?.is_hdr && hdrDownloadHref && (
                                                     <DropdownMenuItem asChild className="min-h-11">
                                                         <a
                                                             href={hdrDownloadHref}
