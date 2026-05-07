@@ -51,6 +51,12 @@ export const images = mysqlTable("images", {
     flash: varchar('flash', { length: 50 }),
     bit_depth: int('bit_depth'),
     color_pipeline_decision: varchar('color_pipeline_decision', { length: 64 }),
+    // US-CM04: CICP/HDR foundation — stored at upload time for future
+    // HDR delivery and gamut-aware UI without requiring schema migration later.
+    color_primaries: varchar('color_primaries', { length: 32 }),
+    transfer_function: varchar('transfer_function', { length: 16 }),
+    matrix_coefficients: varchar('matrix_coefficients', { length: 16 }),
+    is_hdr: boolean('is_hdr').notNull().default(false),
     original_format: varchar('original_format', { length: 10 }),
     original_file_size: bigint('original_file_size', { mode: 'number' }),
     // US-P41: license tier for bulk metadata editor. Validated as enum at action layer.

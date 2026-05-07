@@ -13,6 +13,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG 
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
+import { detectColorSignals, type ColorSignals } from '@/lib/color-detection';
 
 const cpuCount = typeof os.availableParallelism === 'function'
     ? os.availableParallelism()
@@ -302,6 +303,7 @@ export interface ImageProcessingResult {
     iccProfileName?: string | null;
     bitDepth?: number | null;
     colorPipelineDecision?: ColorPipelineDecision | null;
+    colorSignals?: ColorSignals | null;
 }
 
 const MAX_DB_VARCHAR_BYTES = 255;
@@ -645,6 +647,9 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     const iccProfileName = extractIccProfileName(metadata.icc);
     const colorPipelineDecision = resolveColorPipelineDecision(iccProfileName);
 
+    // US-CM04: detect CICP-equivalent color signals for future HDR delivery.
+    const colorSignals = await detectColorSignals(originalPath, image, metadata);
+
     // CM-LOW-1: Sharp's metadata.depth is a string union ('uchar', 'ushort',
     // 'float', etc.), not a numeric string. The pre-fix code did
     // parseInt('uchar', 10) → NaN → null, so the bit_depth column was
@@ -675,6 +680,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         iccProfileName,
         bitDepth,
         colorPipelineDecision,
+        colorSignals,
     };
 }
 

@@ -334,6 +334,10 @@ export async function uploadImages(formData: FormData) {
                     icc_profile_name: data.iccProfileName,
                     bit_depth: data.bitDepth,
                     color_pipeline_decision: data.colorPipelineDecision,
+                    color_primaries: data.colorSignals?.colorPrimaries ?? null,
+                    transfer_function: data.colorSignals?.transferFunction ?? null,
+                    matrix_coefficients: data.colorSignals?.matrixCoefficients ?? null,
+                    is_hdr: data.colorSignals?.isHdr ?? false,
                     // C22-AGG-02: .slice(0, 10) is safe on UTF-16 code units because
                     // getSafeExtension() in process-image.ts guarantees ASCII-only
                     // output ([a-z0-9.]), so .length == countCodePoints and slice

@@ -18,9 +18,11 @@ describe('force_srgb_derivatives setting', () => {
 });
 
 describe('targetIcc decision matrix (US-CM02)', () => {
-    // Mirror the logic from processImageFormats for pure-function testing
-    function getTargetIcc(avifIcc: 'p3' | 'srgb', forceSrgbDerivatives: boolean): 'p3' | 'srgb' {
-        const isWideGamutSource = avifIcc === 'p3';
+    // Mirror the logic from processImageFormats for pure-function testing.
+    // US-CM03: 'p3-from-wide' (Adobe RGB / ProPhoto / Rec.2020) is treated
+    // as wide-gamut same as 'p3' for derivative tagging purposes.
+    function getTargetIcc(avifIcc: import('@/lib/process-image').AvifIccDecision, forceSrgbDerivatives: boolean): 'p3' | 'srgb' {
+        const isWideGamutSource = avifIcc === 'p3' || avifIcc === 'p3-from-wide';
         return (isWideGamutSource && !forceSrgbDerivatives) ? 'p3' : 'srgb';
     }
 

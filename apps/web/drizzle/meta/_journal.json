@@ -113,6 +113,13 @@
       "when": 1747142400000,
       "tag": "0015_color_pipeline_decision",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1747149600000,
+      "tag": "0016_cicp_columns",
+      "breakpoints": true
     }
   ]
 }
