@@ -301,6 +301,7 @@ export interface ImageProcessingResult {
     blurDataUrl?: string | null;
     iccProfileName?: string | null;
     bitDepth?: number | null;
+    colorPipelineDecision?: ColorPipelineDecision | null;
 }
 
 const MAX_DB_VARCHAR_BYTES = 255;
@@ -379,6 +380,61 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
  *
  * @returns 'p3' | 'srgb'
  */
+export type ColorPipelineDecision =
+    | 'srgb'
+    | 'srgb-from-unknown'
+    | 'p3-from-displayp3'
+    | 'p3-from-dcip3'
+    | 'srgb-from-adobergb'
+    | 'srgb-from-prophoto'
+    | 'srgb-from-rec2020';
+
+/**
+ * Resolve the color pipeline decision label for observability.
+ * This is stored in `images.color_pipeline_decision` so operators can audit
+ * wide-gamut coverage and unknown-profile rates.
+ *
+ * Decision matrix
+ * ───────────────────────────────────────────────────────────────────────────
+ * Source ICC name                 │ Decision          │ Rationale
+ * ────────────────────────────────┼───────────────────┼──────────────────────
+ * 'Display P3'                    │ p3-from-displayp3 │ exact match
+ * 'DCI-P3'                        │ p3-from-dcip3     │ same primaries, DCI WP
+ * 'P3-D65'                        │ p3-from-displayp3 │ alias for Display P3
+ * 'Adobe RGB (1998)' / 'AdobeRGB' │ srgb-from-adobergb│ currently sRGB clip
+ * 'ProPhoto RGB' / 'ProPhoto'     │ srgb-from-prophoto│ currently sRGB clip
+ * 'ITU-R BT.2020' / 'Rec.2020'    │ srgb-from-rec2020 │ currently sRGB clip
+ * 'sRGB IEC61966-2.1' / sRGB ICC  │ srgb              │ exact match
+ * null / unknown                  │ srgb-from-unknown │ safe default
+ * ───────────────────────────────────────────────────────────────────────────
+ */
+export function resolveColorPipelineDecision(iccProfileName: string | null | undefined): ColorPipelineDecision {
+    if (!iccProfileName) return 'srgb-from-unknown';
+
+    const name = iccProfileName.toLowerCase();
+
+    if (name.includes('display p3') || name === 'p3-d65' || name.startsWith('p3-d65')) {
+        return 'p3-from-displayp3';
+    }
+    if (name === 'dci-p3' || name.startsWith('dci-p3')) {
+        return 'p3-from-dcip3';
+    }
+    if (name.includes('adobe rgb') || name.includes('adobergb')) {
+        return 'srgb-from-adobergb';
+    }
+    if (name.includes('prophoto')) {
+        return 'srgb-from-prophoto';
+    }
+    if (name.includes('rec.2020') || name.includes('bt.2020') || name.includes('rec2020') || name.includes('bt2020')) {
+        return 'srgb-from-rec2020';
+    }
+    if (name.includes('srgb')) {
+        return 'srgb';
+    }
+
+    return 'srgb-from-unknown';
+}
+
 export function resolveAvifIccProfile(iccProfileName: string | null | undefined): 'p3' | 'srgb' {
     if (!iccProfileName) return 'srgb';
 
@@ -548,6 +604,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     }
 
     const iccProfileName = extractIccProfileName(metadata.icc);
+    const colorPipelineDecision = resolveColorPipelineDecision(iccProfileName);
 
     // CM-LOW-1: Sharp's metadata.depth is a string union ('uchar', 'ushort',
     // 'float', etc.), not a numeric string. The pre-fix code did
@@ -578,6 +635,7 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         blurDataUrl,
         iccProfileName,
         bitDepth,
+        colorPipelineDecision,
     };
 }
 

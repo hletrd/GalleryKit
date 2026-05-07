@@ -50,6 +50,7 @@ export const images = mysqlTable("images", {
     exposure_program: varchar('exposure_program', { length: 50 }),
     flash: varchar('flash', { length: 50 }),
     bit_depth: int('bit_depth'),
+    color_pipeline_decision: varchar('color_pipeline_decision', { length: 64 }),
     original_format: varchar('original_format', { length: 10 }),
     original_file_size: bigint('original_file_size', { mode: 'number' }),
     // US-P41: license tier for bulk metadata editor. Validated as enum at action layer.
