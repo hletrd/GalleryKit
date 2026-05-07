@@ -16,8 +16,8 @@
  *
  * Idempotency
  * ───────────
- * Images with pipeline_version >= 5 are skipped. Re-running after a
- * successful pass is a no-op (all rows already at version 5).
+ * Images with pipeline_version >= 5 are skipped by default. Re-running after
+ * a successful pass is a no-op (all rows already at version 5).
  *
  * The serve-upload route emits an ETag containing IMAGE_PIPELINE_VERSION
  * (CM-HIGH-5), so once an image is reprocessed any cached client copy
@@ -39,7 +39,7 @@ dotenv.config({ path: '.env.local' });
 import fs from 'fs/promises';
 import PQueue from 'p-queue';
 import type { RowDataPacket } from 'mysql2';
-import { processImageFormats } from '../src/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION } from '../src/lib/process-image';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
 
@@ -53,7 +53,8 @@ export interface ImageRow {
     filename_avif: string;
     filename_webp: string;
     filename_jpeg: string;
-    color_space: string | null;
+    icc_profile_name: string | null;
+    color_pipeline_decision: string | null;
     width: number;
 }
 
@@ -78,7 +79,7 @@ export async function reprocessRow(row: ImageRow): Promise<'processed' | 'skippe
             row.width,
             undefined,
             undefined,
-            row.color_space,
+            row.icc_profile_name,
         );
         return 'processed';
     } catch (err) {
@@ -92,6 +93,8 @@ export async function reprocessRow(row: ImageRow): Promise<'processed' | 'skippe
 // ---------------------------------------------------------------------------
 
 async function main() {
+    const forceReencode = process.argv.includes('--force-reencode');
+
     const { db, connection } = await import('../src/db');
     const { sql } = await import('drizzle-orm');
 
@@ -122,18 +125,25 @@ async function main() {
 
     console.log('[backfill-color-pipeline] Lock acquired. Fetching candidate rows…');
 
-    // Fetch processed images with pipeline_version < 5 (or NULL).
+    // Fetch processed images with pipeline_version < IMAGE_PIPELINE_VERSION (or NULL).
+    // A2: skip rows that already have a non-null color_pipeline_decision
+    // unless --force-reencode is passed — these rows were already correctly
+    // labelled by a prior run and re-encoding is unnecessary.
+    let whereClause = sql`processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < ${IMAGE_PIPELINE_VERSION})`;
+    if (!forceReencode) {
+        whereClause = sql`${whereClause} AND (color_pipeline_decision IS NULL)`;
+    }
+
     const rawRows = await db.execute(sql`
         SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
-               color_space, width
+               icc_profile_name, color_pipeline_decision, width
         FROM images
-        WHERE processed = TRUE
-          AND (pipeline_version IS NULL OR pipeline_version < 5)
+        WHERE ${whereClause}
         ORDER BY id ASC
     `);
     const rows = rawRows as unknown as ImageRow[];
 
-    console.log(`[backfill-color-pipeline] ${rows.length} candidate image(s) found.`);
+    console.log(`[backfill-color-pipeline] ${rows.length} candidate image(s) found. (force=${forceReencode})`);
 
     if (rows.length === 0) {
         console.log('[backfill-color-pipeline] Nothing to do. Exiting.');
@@ -153,9 +163,9 @@ async function main() {
             const outcome = await reprocessRow(row);
             if (outcome === 'processed') {
                 processed++;
-                // Mark this row as pipeline version 5.
+                // Mark this row as pipeline version current.
                 await db.execute(sql`
-                    UPDATE images SET pipeline_version = 5 WHERE id = ${row.id}
+                    UPDATE images SET pipeline_version = ${IMAGE_PIPELINE_VERSION} WHERE id = ${row.id}
                 `);
             } else if (outcome === 'skipped') {
                 skipped++;
