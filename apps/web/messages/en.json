@@ -307,6 +307,11 @@
     "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, Space to toggle slideshow.",
     "slideshowOn": "Slideshow started",
     "slideshowOff": "Slideshow stopped",
+    "colorDetails": "Color details",
+    "colorPrimaries": "Color primaries",
+    "transferFunction": "Transfer function",
+    "hdrBadge": "HDR",
+    "colorUnknown": "Unknown",
     "noMetadata": "No camera metadata available for this photo."
   },
   "shared": {
