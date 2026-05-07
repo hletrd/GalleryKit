@@ -11,7 +11,6 @@ import { imageUrl } from '@/lib/image-url';
 import { isEditableTarget } from '@/components/photo-viewer';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize, SLIDESHOW_INTERVAL_DEFAULT } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText } from '@/lib/photo-title';
-import { HDR_FEATURE_ENABLED } from '@/lib/feature-flags';
 
 interface LightboxProps {
     image: ImageDetail;
@@ -327,19 +326,13 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         ? {}
         : { tabIndex: -1, 'aria-hidden': true as const };
 
-    const { avifSrcSet, webpSrcSet, jpegSrc, hdrAvifSrcSet } = useMemo(() => {
+    const { avifSrcSet, webpSrcSet, jpegSrc } = useMemo(() => {
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
 
         const avifSrcSet = baseAvif
             ? imageSizes
                   .map((w) => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`)
-                  .join(', ')
-            : undefined;
-
-        const hdrAvifSrcSet = baseAvif && image.is_hdr
-            ? imageSizes
-                  .map((w) => `${imageUrl(`/uploads/avif/${baseAvif}_hdr_${w}.avif`)} ${w}w`)
                   .join(', ')
             : undefined;
 
@@ -354,8 +347,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         const jpegSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
         const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${jpegSize}.jpg`)}`) : undefined;
 
-        return { avifSrcSet, webpSrcSet, jpegSrc, hdrAvifSrcSet };
-    }, [image.filename_avif, image.filename_webp, image.filename_jpeg, image.is_hdr, imageSizes]);
+        return { avifSrcSet, webpSrcSet, jpegSrc };
+    }, [image.filename_avif, image.filename_webp, image.filename_jpeg, imageSizes]);
 
     const transitionStyle = shouldReduceMotion
         ? {}
@@ -415,14 +408,6 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         : undefined
                 }
             >
-                {HDR_FEATURE_ENABLED && image.is_hdr && hdrAvifSrcSet && (
-                    <source
-                        type="image/avif"
-                        srcSet={hdrAvifSrcSet}
-                        sizes="100vw"
-                        media="(dynamic-range: high)"
-                    />
-                )}
                 {avifSrcSet && (
                     <source
                         type="image/avif"

@@ -24,7 +24,6 @@ import { createPhotoShareLink } from '@/app/actions';
 import { ImageZoom } from '@/components/image-zoom';
 import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
-import { HDR_FEATURE_ENABLED } from '@/lib/feature-flags';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail, TagInfo, hasExifData, hasAnyCameraExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
@@ -410,14 +409,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
         return (
             <picture className="w-full h-full flex items-center justify-center">
-                {HDR_FEATURE_ENABLED && image.is_hdr && baseAvif && (
-                    <source
-                        type="image/avif"
-                        srcSet={imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_hdr_${w}.avif`)} ${w}w`).join(', ')}
-                        sizes={photoViewerSizes}
-                        media="(dynamic-range: high)"
-                    />
-                )}
                 <source
                     type="image/avif"
                     srcSet={imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}

@@ -9,7 +9,6 @@ import { OptimisticImage } from './optimistic-image';
 import { LoadMore } from '@/components/load-more';
 import { cn } from '@/lib/utils';
 import { imageUrl } from '@/lib/image-url';
-import { HDR_FEATURE_ENABLED } from '@/lib/feature-flags';
 import { localizePath } from '@/lib/locale-path';
 import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -70,7 +69,6 @@ interface GalleryImage {
     tag_names?: string | null;
     topic?: string;
     user_filename?: string | null;
-    is_hdr?: boolean | null;
 }
 
 interface GalleryTag {
@@ -273,20 +271,9 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                                 // Use the two smallest configured sizes for masonry grid thumbnails
                                                 const smallSize = imageSizes.length >= 2 ? imageSizes[0] : findNearestImageSize(imageSizes, 640);
                                                 const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
-                                                const hdrAvifSrcSet = HDR_FEATURE_ENABLED && image.is_hdr
-                                                    ? `${imageUrl(`/uploads/avif/${baseAvif}_hdr_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_hdr_${mediumSize}.avif`)} ${mediumSize}w`
-                                                    : undefined;
                                                 const masonrySizes = "(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw";
                                                 return (
                                                     <>
-                                                        {hdrAvifSrcSet && (
-                                                            <source
-                                                                type="image/avif"
-                                                                srcSet={hdrAvifSrcSet}
-                                                                sizes={masonrySizes}
-                                                                media="(dynamic-range: high)"
-                                                            />
-                                                        )}
                                                         <source
                                                             type="image/avif"
                                                             srcSet={`${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`}
