@@ -81,7 +81,7 @@ export function hasAnyCameraExifData(image: ImageDetail): boolean {
         hasExifData(image.f_number) ||
         hasExifData(image.exposure_time) ||
         hasExifData(image.iso) ||
-        hasExifData(image.color_space) ||
+        hasExifData(image.icc_profile_name) ||
         hasExifData(image.original_format) ||
         hasExifData(image.white_balance) ||
         hasExifData(image.metering_mode) ||

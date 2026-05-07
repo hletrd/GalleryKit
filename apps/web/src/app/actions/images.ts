@@ -330,7 +330,6 @@ export async function uploadImages(formData: FormData) {
                     blur_data_url: assertBlurDataUrl(data.blurDataUrl),
                     processed: false,
                     ...exifDb,
-                    color_space: data.iccProfileName || exifDb.color_space,
                     icc_profile_name: data.iccProfileName,
                     bit_depth: data.bitDepth,
                     color_pipeline_decision: data.colorPipelineDecision,
