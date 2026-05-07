@@ -233,8 +233,8 @@ describe('color round-trip — Display-P3 source', () => {
 // convert or label as sRGB.
 // ---------------------------------------------------------------------------
 
-describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-1)', () => {
-    it('Adobe RGB source: AVIF output is NOT labeled Display-P3 (must convert or fall back to sRGB)', async () => {
+describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (US-CM03)', () => {
+    it('Adobe RGB source: AVIF output IS P3-tagged (p3-from-wide conversion)', async () => {
         const srcPath = path.join(tmpDir, 'adobergb-src.tif');
         await makeWideGamutLabelledTiff('Adobe RGB (1998)', srcPath);
 
@@ -250,15 +250,17 @@ describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-
             'Adobe RGB (1998)',
         );
 
-        const { UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
-        const profileName = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
-        // Strict P3 detection: an Adobe RGB source must NOT be falsely
-        // labelled with any P3-family ICC. After PR 4 the fix converts
-        // to sRGB and tags accordingly.
-        expect(profileName?.toLowerCase() ?? '').not.toMatch(/p3|sp3c/);
+        const { UPLOAD_DIR_AVIF, UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG } = await import('@/lib/upload-paths');
+        const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
+        const webpProfile = await readOutputIccName(path.join(UPLOAD_DIR_WEBP, `${id}.webp`));
+        const jpegProfile = await readOutputIccName(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`));
+        // US-CM03: wider-than-P3 sources are converted to P3 (better than sRGB clip).
+        expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(webpProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(jpegProfile?.toLowerCase()).toMatch(/p3|display p3/);
     });
 
-    it('ProPhoto source: AVIF output is NOT labeled Display-P3', async () => {
+    it('ProPhoto source: AVIF output IS P3-tagged (p3-from-wide conversion)', async () => {
         const srcPath = path.join(tmpDir, 'prophoto-src.tif');
         await makeWideGamutLabelledTiff('ProPhoto RGB', srcPath);
 
@@ -274,12 +276,16 @@ describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-
             'ProPhoto RGB',
         );
 
-        const { UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
-        const profileName = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
-        expect(profileName?.toLowerCase() ?? '').not.toMatch(/p3|sp3c/);
+        const { UPLOAD_DIR_AVIF, UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG } = await import('@/lib/upload-paths');
+        const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
+        const webpProfile = await readOutputIccName(path.join(UPLOAD_DIR_WEBP, `${id}.webp`));
+        const jpegProfile = await readOutputIccName(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`));
+        expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(webpProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(jpegProfile?.toLowerCase()).toMatch(/p3|display p3/);
     });
 
-    it('Rec.2020 source: AVIF output is NOT labeled Display-P3', async () => {
+    it('Rec.2020 source: AVIF output IS P3-tagged (p3-from-wide conversion)', async () => {
         const srcPath = path.join(tmpDir, 'rec2020-src.tif');
         await makeWideGamutLabelledTiff('ITU-R BT.2020', srcPath);
 
@@ -295,9 +301,13 @@ describe('color round-trip — Adobe RGB / ProPhoto / Rec.2020 sources (CM-CRIT-
             'ITU-R BT.2020',
         );
 
-        const { UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
-        const profileName = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
-        expect(profileName?.toLowerCase() ?? '').not.toMatch(/p3|sp3c/);
+        const { UPLOAD_DIR_AVIF, UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG } = await import('@/lib/upload-paths');
+        const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
+        const webpProfile = await readOutputIccName(path.join(UPLOAD_DIR_WEBP, `${id}.webp`));
+        const jpegProfile = await readOutputIccName(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`));
+        expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(webpProfile?.toLowerCase()).toMatch(/p3|display p3/);
+        expect(jpegProfile?.toLowerCase()).toMatch(/p3|display p3/);
     });
 });
 

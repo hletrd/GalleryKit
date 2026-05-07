@@ -55,28 +55,27 @@ describe('resolveAvifIccProfile — ICC decision matrix', () => {
         expect(resolveAvifIccProfile('P3-D65')).toBe('p3');
     });
 
-    // CM-CRIT-1 fix: wider-than-sRGB gamuts now return 'srgb' (not 'p3').
-    // The encode chain converts these pixels to sRGB explicitly so the AVIF
-    // ICC tag matches the actual pixel colorspace. Mapping them to 'p3'
-    // without a pixel transform was the source of the colorimetric bug.
-    it('returns srgb for Adobe RGB (1998) (CM-CRIT-1: pixels converted, not just relabelled)', () => {
-        expect(resolveAvifIccProfile('Adobe RGB (1998)')).toBe('srgb');
+    // US-CM03: wider-than-P3 gamuts return 'p3-from-wide' — the encoder
+    // converts pixels to P3 via pipelineColorspace('rgb16') before tagging
+    // as P3. This preserves more saturated colors than sRGB clipping.
+    it('returns p3-from-wide for Adobe RGB (1998)', () => {
+        expect(resolveAvifIccProfile('Adobe RGB (1998)')).toBe('p3-from-wide');
     });
 
-    it('returns srgb for AdobeRGB (CM-CRIT-1: pixels converted, not just relabelled)', () => {
-        expect(resolveAvifIccProfile('AdobeRGB')).toBe('srgb');
+    it('returns p3-from-wide for AdobeRGB', () => {
+        expect(resolveAvifIccProfile('AdobeRGB')).toBe('p3-from-wide');
     });
 
-    it('returns srgb for ProPhoto RGB (CM-CRIT-1: pixels converted, not just relabelled)', () => {
-        expect(resolveAvifIccProfile('ProPhoto RGB')).toBe('srgb');
+    it('returns p3-from-wide for ProPhoto RGB', () => {
+        expect(resolveAvifIccProfile('ProPhoto RGB')).toBe('p3-from-wide');
     });
 
-    it('returns srgb for ITU-R BT.2020 (CM-CRIT-1: pixels converted, not just relabelled)', () => {
-        expect(resolveAvifIccProfile('ITU-R BT.2020')).toBe('srgb');
+    it('returns p3-from-wide for ITU-R BT.2020', () => {
+        expect(resolveAvifIccProfile('ITU-R BT.2020')).toBe('p3-from-wide');
     });
 
-    it('returns srgb for Rec.2020 (CM-CRIT-1: pixels converted, not just relabelled)', () => {
-        expect(resolveAvifIccProfile('Rec.2020')).toBe('srgb');
+    it('returns p3-from-wide for Rec.2020', () => {
+        expect(resolveAvifIccProfile('Rec.2020')).toBe('p3-from-wide');
     });
 
     // sRGB / unknown → 'srgb'

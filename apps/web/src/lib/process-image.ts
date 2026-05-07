@@ -103,7 +103,7 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
  *       by format fan-out.
  */
-export const IMAGE_PIPELINE_VERSION = 4;
+export const IMAGE_PIPELINE_VERSION = 5;
 
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
@@ -435,13 +435,40 @@ export function resolveColorPipelineDecision(iccProfileName: string | null | und
     return 'srgb-from-unknown';
 }
 
-export function resolveAvifIccProfile(iccProfileName: string | null | undefined): 'p3' | 'srgb' {
+export type AvifIccDecision = 'p3' | 'p3-from-wide' | 'srgb';
+
+/**
+ * Resolve the OUTPUT ICC profile for AVIF derivatives.
+ *
+ * STRICT P3 DETECTION (CM-CRIT-1): only true Display-P3 sources get 'p3'.
+ * Wider-than-P3 gamuts (Adobe RGB / ProPhoto / Rec.2020) now return
+ * 'p3-from-wide' — the encoder converts pixels to P3 gamut with an
+ * explicit pipelineColorspace('rgb16') resize before tagging as P3.
+ *
+ * This is a quality improvement over the previous sRGB clip: P3 preserves
+ * more saturated colors than sRGB while still being deliverable to modern
+ * displays and browsers.
+ *
+ * Decision matrix
+ * ───────────────────────────────────────────────────────────────────────────
+ * Source ICC name                 │ AVIF decision   │ Rationale
+ * ────────────────────────────────┼─────────────────┼──────────────────────
+ * 'Display P3'                    │ p3              │ exact match
+ * 'DCI-P3'                        │ p3              │ same primaries, D65 WP
+ * 'P3-D65'                        │ p3              │ alias for Display P3
+ * 'Adobe RGB (1998)' / 'AdobeRGB' │ p3-from-wide    │ ProPhoto-aware → P3
+ * 'ProPhoto RGB' / 'ProPhoto'     │ p3-from-wide    │ ProPhoto-aware → P3
+ * 'ITU-R BT.2020' / 'Rec.2020'    │ p3-from-wide    │ Rec.2020-aware → P3
+ * 'sRGB IEC61966-2.1' / sRGB ICC  │ srgb            │ stays sRGB
+ * null / unknown                  │ srgb            │ safe default
+ * ───────────────────────────────────────────────────────────────────────────
+ */
+export function resolveAvifIccProfile(iccProfileName: string | null | undefined): AvifIccDecision {
     if (!iccProfileName) return 'srgb';
 
     const name = iccProfileName.toLowerCase();
 
-    // Explicit P3 families ONLY. Wider-gamut sources fall through to 'srgb'
-    // because the encoder does an explicit .toColorspace('srgb') for them.
+    // True P3 families — exact gamut match, no conversion needed.
     if (
         name.includes('display p3') ||
         name.includes('p3-d65') ||
@@ -449,6 +476,18 @@ export function resolveAvifIccProfile(iccProfileName: string | null | undefined)
         name.startsWith('dci-p3')
     ) {
         return 'p3';
+    }
+
+    // Wider-than-P3 gamuts — convert to P3 via rgb16 pipeline for best
+    // color preservation. Smaller loss than clipping to sRGB.
+    if (name.includes('adobe rgb') || name.includes('adobergb')) {
+        return 'p3-from-wide';
+    }
+    if (name.includes('prophoto')) {
+        return 'p3-from-wide';
+    }
+    if (name.includes('rec.2020') || name.includes('bt.2020') || name.includes('rec2020') || name.includes('bt2020')) {
+        return 'p3-from-wide';
     }
 
     return 'srgb';
@@ -670,16 +709,17 @@ export async function processImageFormats(
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
 
-    // CM-CRIT-1: resolve the OUTPUT colorspace for AVIF based on the SOURCE
-    // ICC name. Strict P3 detection — only true Display-P3 sources stay in
-    // P3; everything else converts to sRGB pixels with a matching sRGB tag.
-    const avifIcc = resolveAvifIccProfile(iccProfileName);
+    // CM-CRIT-1 / US-CM03: resolve the OUTPUT colorspace decision for AVIF.
+    // 'p3' = exact Display-P3 source; 'p3-from-wide' = Adobe/ProPhoto/Rec.2020
+    // converted to P3 via rgb16 pipeline; 'srgb' = everything else.
+    const avifDecision = resolveAvifIccProfile(iccProfileName);
+    const isWideGamutSource = avifDecision === 'p3' || avifDecision === 'p3-from-wide';
+    // The actual ICC profile to embed: always 'p3' for both P3 and p3-from-wide.
+    const avifIcc: 'p3' | 'srgb' = isWideGamutSource ? 'p3' : 'srgb';
 
-    // US-CM02: target colorspace for WebP and JPEG. When the source is P3 and
-    // forceSrgbDerivatives is false (default), emit P3-tagged derivatives so
-    // P3-capable browsers render the full gamut. Legacy embedders or consumers
-    // that don't color-manage will see the same colors as today (sRGB-clipped).
-    const isWideGamutSource = avifIcc === 'p3';
+    // US-CM02: target colorspace for WebP and JPEG. When the source is wide
+    // gamut (P3 or wider) and forceSrgbDerivatives is false (default), emit
+    // P3-tagged derivatives so P3-capable browsers render the full gamut.
     const targetIcc: 'p3' | 'srgb' = (isWideGamutSource && !forceSrgbDerivatives) ? 'p3' : 'srgb';
 
     const generateForFormat = async (
