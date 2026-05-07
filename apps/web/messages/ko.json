@@ -288,6 +288,7 @@
     "histogramGamutAdobeRgb": "(어도비 RGB)",
     "histogramGamutProPhoto": "(ProPhoto)",
     "histogramGamutSrgb": "(sRGB)",
+    "histogramSrgbClipped": "sRGB 클리핑",
     "fullscreen": "전체 화면",
     "fullscreenUnavailable": "전체 화면을 사용할 수 없습니다",
     "bottomSheet": "사진 정보",

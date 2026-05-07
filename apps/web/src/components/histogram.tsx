@@ -251,8 +251,14 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
         img.src = AVIF_PROBE_DATA_URL;
     }, []);
 
+    const supportsCanvasP3 = typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(color-gamut: p3)').matches;
+
     const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
-    const effectiveUrl = (isWideGamut && avifSupported && avifUrl) ? avifUrl : imageUrl;
+    const preferAvif = isWideGamut && avifSupported && supportsCanvasP3 && Boolean(avifUrl);
+    const effectiveUrl = preferAvif ? avifUrl! : imageUrl;
+    const isClipped = isWideGamut && !preferAvif;
 
     const histogramData = histogramState.imageUrl === effectiveUrl ? histogramState.data : null;
     const loading = Boolean(effectiveUrl) && histogramState.imageUrl !== effectiveUrl;
@@ -332,6 +338,7 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
                     {t('viewer.histogram')}
                     {gamutLabel && <span className="ml-1 opacity-70">{gamutLabel}</span>}
+                    {isClipped && <span className="ml-1 opacity-60">({t('viewer.histogramSrgbClipped')})</span>}
                 </span>
                 <button
                     type="button"
