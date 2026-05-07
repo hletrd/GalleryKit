@@ -348,7 +348,7 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
                 <button
                     type="button"
                     onClick={() => setCollapsed((v) => !v)}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center text-xs text-muted-foreground hover:text-foreground transition-colors px-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     aria-label={collapsed ? t('aria.expandHistogram') : t('aria.collapseHistogram')}
                 >
                     {collapsed ? '▸' : '▾'}

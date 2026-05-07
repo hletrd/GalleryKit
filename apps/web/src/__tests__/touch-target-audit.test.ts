@@ -160,6 +160,9 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // these do NOT trip FORBIDDEN. Documented as 0 to keep the file
     // visible in case the override is removed.
     'components/photo-navigation.tsx': 0,
+    // histogram: collapse and cycle-mode buttons both carry min-h-11
+    // / min-w-11. Listed as 0 for visibility.
+    'components/histogram.tsx': 0,
     //
     // === Admin route group (cycle 1 RPF loop AGG1-M01) ===
     //

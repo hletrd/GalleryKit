@@ -168,6 +168,18 @@
 .gamut-p3-badge { display: none; }
 @media (color-gamut: p3) { .gamut-p3-badge { display: inline-block; } }
 
+/* Forced-colors (Windows high-contrast) adjustments for color surfaces */
+@media (forced-colors: active) {
+  .hdr-badge {
+    border: 1px solid CanvasText;
+    forced-color-adjust: none;
+  }
+  .gamut-p3-badge {
+    border: 1px solid CanvasText;
+    forced-color-adjust: none;
+  }
+}
+
 /* Orientation-aware layout: landscape mobile */
 @media (orientation: landscape) and (max-width: 767px) {
   .photo-viewer-image {
@@ -186,13 +198,6 @@
   .photo-viewer-container {
     min-height: 100vh;
     padding: 0;
-  }
-}
-
-/* Orientation-aware layout: landscape tablet */
-@media (orientation: landscape) and (min-width: 768px) and (max-width: 1023px) {
-  .photo-viewer-grid {
-    grid-template-columns: 1fr 300px;
   }
 }
 

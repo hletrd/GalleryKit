@@ -314,6 +314,7 @@
     "transferFunction": "Transfer function",
     "colorPipelineDecision": "Color pipeline",
     "hdrBadge": "HDR",
+    "hdrBadgeAriaLabel": "HDR (High Dynamic Range)",
     "colorUnknown": "Unknown",
     "calibrationTooltip": "Display calibration affects color accuracy. Uncalibrated displays may render saturation and white balance differently than the photographer intended.",
     "noMetadata": "No camera metadata available for this photo."

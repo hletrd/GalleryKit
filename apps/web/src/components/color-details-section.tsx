@@ -60,6 +60,8 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
     const iccName = image.icc_profile_name || '';
     const primariesMatchIcc = primariesHuman && iccName && primariesHuman.toLowerCase() === iccName.toLowerCase();
 
+    const colorDetailsId = `color-details-${image.id}`;
+
     return (
         <div className="mt-3">
             {/* B2: tooltip trigger is sibling button, not nested inside accordion button */}
@@ -67,7 +69,9 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                 <button
                     type="button"
                     onClick={() => setShowColorDetails(!showColorDetails)}
-                    className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
+                    aria-expanded={showColorDetails}
+                    aria-controls={colorDetailsId}
+                    className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                 >
                     <ChevronDown className={`h-4 w-4 transition-transform ${showColorDetails ? 'rotate-180' : ''}`} />
                     {t('viewer.colorDetails')}
@@ -88,7 +92,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                 </Tooltip>
             </div>
             {showColorDetails && (
-                <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 pl-6">
+                <div id={colorDetailsId} className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 pl-6">
                     {/* B3: deduplicate ICC profile + primaries */}
                     {primariesMatchIcc ? (
                         <div>
@@ -125,7 +129,11 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                     )}
                     {image.is_hdr && (
                         <div className="col-span-2">
-                            <span className="hdr-badge items-center gap-1 px-2 py-1 text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 rounded">
+                            <span
+                                className="hdr-badge items-center gap-1 px-2 py-1 text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800"
+                                aria-label={t('viewer.hdrBadgeAriaLabel')}
+                                role="img"
+                            >
                                 {t('viewer.hdrBadge')}
                             </span>
                         </div>
