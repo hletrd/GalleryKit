@@ -107,7 +107,7 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
 export const IMAGE_PIPELINE_VERSION = 5;
 
 const ALLOWED_EXTENSIONS = new Set([
-    '.jpg', '.jpeg', '.png', '.webp', '.avif', '.arw', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
+    '.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
 ]);
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024;

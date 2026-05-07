@@ -821,6 +821,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         >
                                             <ChevronDown className={`h-4 w-4 transition-transform ${showColorDetails ? 'rotate-180' : ''}`} />
                                             {t('viewer.colorDetails')}
+                                            <span title={t('viewer.calibrationTooltip')} className="inline-flex">
+                                                <Info className="h-4 w-4 text-muted-foreground/60" />
+                                            </span>
                                         </button>
                                         {showColorDetails && (
                                             <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 pl-6">
