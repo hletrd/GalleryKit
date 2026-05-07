@@ -53,6 +53,14 @@ export const images = mysqlTable("images", {
     color_pipeline_decision: varchar('color_pipeline_decision', { length: 64 }),
     // US-CM04: CICP/HDR foundation — stored at upload time for future
     // HDR delivery and gamut-aware UI without requiring schema migration later.
+    //
+    // US-CM12 (deferred): HDR AVIF delivery and rendering intent are deferred.
+    // Sharp 0.34.5 does not expose CICP signaling in the avif() encoder API,
+    // so PQ/HLG transfer functions cannot be written into AVIF CICP boxes.
+    // Rendering intent (perceptual/saturated/relative-colorimetric) and black-
+    // point compensation are also unavailable via Sharp's toColorspace().
+    // The schema columns below provide the foundation for future HDR delivery
+    // when the upstream API or an alternative encoder binding becomes viable.
     color_primaries: varchar('color_primaries', { length: 32 }),
     transfer_function: varchar('transfer_function', { length: 16 }),
     matrix_coefficients: varchar('matrix_coefficients', { length: 16 }),
