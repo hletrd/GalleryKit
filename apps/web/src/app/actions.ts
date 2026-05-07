@@ -25,7 +25,7 @@ export { createPhotoShareLink, createGroupShareLink, revokePhotoShareLink, delet
 export { getAdminUsers, createAdminUser, deleteAdminUser } from './actions/admin-users';
 
 // Public
-export { loadMoreImages, searchImagesAction } from './actions/public';
+export { loadMoreImages, loadMoreSmartCollectionImages, searchImagesAction } from './actions/public';
 
 // SEO
 export { getSeoSettingsAdmin, updateSeoSettings } from './actions/seo';

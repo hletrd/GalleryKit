@@ -99,13 +99,14 @@ interface HomeClientProps {
     topics?: GalleryTopic[];
     currentTags?: string[];
     topicSlug?: string;
+    smartCollectionSlug?: string;
     heading?: string;
     hasMore?: boolean;
     totalCount?: number;
     imageSizes?: number[];
 }
 
-export function HomeClient({ images, tags, topics, currentTags, topicSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES }: HomeClientProps) {
+export function HomeClient({ images, tags, topics, currentTags, topicSlug, smartCollectionSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES }: HomeClientProps) {
     const { t, locale } = useTranslation();
     const pathname = usePathname();
     const [allImages, setAllImages] = useState(images);
@@ -333,6 +334,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, headi
             {hasMore && (
                 <LoadMore
                     topicSlug={topicSlug}
+                    smartCollectionSlug={smartCollectionSlug}
                     tagSlugs={currentTags}
                     initialOffset={images.length}
                     initialCursor={initialLoadMoreCursor}

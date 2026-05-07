@@ -1,7 +1,8 @@
 'use server';
 
 import { headers } from 'next/headers';
-import { getImagesLite, normalizeImageListCursor, searchImages, type ImageListCursorInput } from '@/lib/data';
+import { getImagesLite, normalizeImageListCursor, searchImages, getSmartCollectionBySlugCached, getImagesForSmartCollection, type ImageListCursorInput } from '@/lib/data';
+import { parseSmartCollectionQuery, compileSmartCollection } from '@/lib/smart-collections';
 import { db, imageViews, topicViews, sharedGroupViews } from '@/db';
 import { isBot, lookupCountry, sanitizeReferrerHost } from '@/lib/analytics';
 
@@ -147,6 +148,69 @@ export async function loadMoreImages(topicSlug?: string, tagSlugs?: string[], of
         // structured response lets the client handle the error gracefully
         // with a toast notification while keeping the button functional.
         console.error('loadMoreImages failed:', err);
+        return { status: 'error', images: [], hasMore: true };
+    }
+}
+
+export async function loadMoreSmartCollectionImages(
+    slug: string,
+    offsetOrCursor: number | ImageListCursorInput = 0,
+    limit: number = 30,
+): Promise<LoadMoreImagesResult> {
+    if (isRestoreMaintenanceActive()) return { status: 'maintenance', images: [], hasMore: true };
+    if (!isValidSlug(slug)) return { status: 'invalid', images: [], hasMore: false };
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
+    // Smart collections use offset-based pagination only (cursor support not yet implemented)
+    const safeOffset = Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0);
+    if (safeOffset > 10000) {
+        return { status: 'invalid', images: [], hasMore: false };
+    }
+
+    const requestHeaders = await headers();
+    const ip = getClientIp(requestHeaders);
+    const now = Date.now();
+    const bucketStart = getRateLimitBucketStart(now, LOAD_MORE_WINDOW_MS);
+
+    const overLimitInMemory = preIncrementLoadMoreAttempt(ip, now);
+    try {
+        await incrementRateLimit(ip, 'load_more', LOAD_MORE_WINDOW_MS, bucketStart);
+    } catch {
+        // DB unavailable — keep the in-memory pre-increment
+    }
+
+    try {
+        const dbLimit = await checkRateLimit(ip, 'load_more', LOAD_MORE_MAX_REQUESTS, LOAD_MORE_WINDOW_MS, bucketStart);
+        if (overLimitInMemory || isRateLimitExceeded(dbLimit.count, LOAD_MORE_MAX_REQUESTS, true)) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'rateLimited', images: [], hasMore: true };
+        }
+    } catch {
+        if (overLimitInMemory) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'rateLimited', images: [], hasMore: true };
+        }
+    }
+
+    try {
+        const collection = await getSmartCollectionBySlugCached(slug);
+        if (!collection || !collection.is_public) {
+            rollbackLoadMoreAttempt(ip, bucketStart);
+            return { status: 'invalid', images: [], hasMore: false };
+        }
+
+        const ast = parseSmartCollectionQuery(collection.query_json);
+        const compiledCondition = compileSmartCollection(ast);
+        const { images: rows, hasMore } = await getImagesForSmartCollection(compiledCondition, safeLimit + 1, safeOffset);
+
+        return {
+            status: 'ok',
+            images: rows.slice(0, safeLimit),
+            hasMore,
+        };
+    } catch (err) {
+        rollbackLoadMoreAttempt(ip, bucketStart);
+        console.error('loadMoreSmartCollectionImages failed:', err);
         return { status: 'error', images: [], hasMore: true };
     }
 }

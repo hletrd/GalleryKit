@@ -572,6 +572,9 @@
     "browsePhotosWithTag": "{topic} 카테고리에서 {tags} 사진 찾아보기",
     "photosInTopic": "{topic} 카테고리의 사진"
   },
+  "smartCollection": {
+    "ogDescription": "{name}의 사진 — {site}"
+  },
   "error": {
     "title": "오류",
     "description": "페이지를 불러오는 중 문제가 발생했습니다.",

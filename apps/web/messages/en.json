@@ -572,6 +572,9 @@
     "browsePhotosWithTag": "Browse {tags} photos in {topic} category",
     "photosInTopic": "Photos in {topic} category"
   },
+  "smartCollection": {
+    "ogDescription": "Photos in {name} — {site}"
+  },
   "error": {
     "title": "Error",
     "description": "Something went wrong loading this page.",

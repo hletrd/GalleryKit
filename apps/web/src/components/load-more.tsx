@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { loadMoreImages } from '@/app/actions';
+import { loadMoreImages, loadMoreSmartCollectionImages } from '@/app/actions';
 import type { LoadMoreImagesResult } from '@/app/actions/public';
 import type { ImageListCursorInput } from '@/lib/data';
 import { Loader2 } from 'lucide-react';
@@ -11,6 +11,7 @@ import { useTranslation } from '@/components/i18n-provider';
 
 interface LoadMoreProps {
     topicSlug?: string;
+    smartCollectionSlug?: string;
     tagSlugs?: string[];
     initialOffset: number;
     initialCursor?: ImageListCursorInput | null;
@@ -19,7 +20,7 @@ interface LoadMoreProps {
     onLoadMore: (images: Extract<LoadMoreImagesResult, { status: 'ok' }>['images']) => void;
 }
 
-export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = null, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
+export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffset, initialCursor = null, hasMore: initialHasMore, limit = 30, onLoadMore }: LoadMoreProps) {
     const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [hasMore, setHasMore] = useState(initialHasMore);
@@ -39,7 +40,9 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
         setStatusMessage(t('home.loadingMore'));
         const version = queryVersionRef.current;
         try {
-            const page = await loadMoreImages(topicSlug, tagSlugs, cursor ?? offset, limit);
+            const page = smartCollectionSlug
+                ? await loadMoreSmartCollectionImages(smartCollectionSlug, cursor ?? offset, limit)
+                : await loadMoreImages(topicSlug, tagSlugs, cursor ?? offset, limit);
             if (version !== queryVersionRef.current) return;
             if (page.status === 'ok') {
                 setHasMore(page.hasMore);
@@ -82,13 +85,13 @@ export function LoadMore({ topicSlug, tagSlugs, initialOffset, initialCursor = n
                 setLoading(false);
             }
         }
-    }, [hasMore, cursor, offset, limit, topicSlug, tagSlugs, onLoadMore, t]);
+    }, [hasMore, cursor, offset, limit, topicSlug, smartCollectionSlug, tagSlugs, onLoadMore, t]);
 
     // Use a ref for the loadMore callback to avoid re-creating the observer
     // on every state change (loading/offset updates cause callback churn).
     const loadMoreRef = useRef(loadMore);
     loadMoreRef.current = loadMore;
-    const queryKey = `${topicSlug ?? ''}::${(tagSlugs ?? []).join(',')}`;
+    const queryKey = `${topicSlug ?? ''}::${smartCollectionSlug ?? ''}::${(tagSlugs ?? []).join(',')}`;
 
     useEffect(() => {
         queryVersionRef.current++;

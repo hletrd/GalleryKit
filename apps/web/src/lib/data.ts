@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings } from '@/db';
+import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull, isNotNull } from 'drizzle-orm';
 import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
@@ -1119,6 +1119,60 @@ export async function getTopicBySlug(slug: string) {
         .limit(1);
 
     return aliasMatch || null;
+}
+
+// ── Smart Collections ─────────────────────────────────────────────────────────
+
+export async function getSmartCollectionBySlug(slug: string) {
+    if (!isValidSlug(slug)) return null;
+    const [row] = await db
+        .select({
+            id: smartCollections.id,
+            slug: smartCollections.slug,
+            name: smartCollections.name,
+            query_json: smartCollections.query_json,
+            is_public: smartCollections.is_public,
+            created_at: smartCollections.created_at,
+        })
+        .from(smartCollections)
+        .where(eq(smartCollections.slug, slug))
+        .limit(1);
+    return row || null;
+}
+
+export const getSmartCollectionBySlugCached = cache(getSmartCollectionBySlug);
+
+/**
+ * Execute a compiled smart-collection SQL condition against the images table,
+ * returning paginated public-facing results with tag names.
+ */
+export async function getImagesForSmartCollection(
+    compiledCondition: SQL,
+    pageSize: number = 30,
+    offset: number = 0,
+) {
+    const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE);
+
+    const baseQuery = db.select({
+        ...publicSelectFields,
+        tag_names: tagNamesAgg,
+        total_count: sql<number>`COUNT(*) OVER()`,
+    })
+        .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .groupBy(images.id)
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
+
+    const query = baseQuery.where(and(compiledCondition, eq(images.processed, true)));
+    const rows = await query.limit(normalizedPageSize + 1).offset(offset);
+    const { rows: pageRows, totalCount, hasMore } = normalizePaginatedRows(rows, normalizedPageSize);
+
+    return {
+        images: pageRows,
+        totalCount,
+        hasMore,
+    };
 }
 
 // PRIVACY: SearchResult omits filename_webp and filename_avif to minimize
