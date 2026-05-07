@@ -38,3 +38,6 @@ export const LOCK_ADMIN_DELETE = 'gallerykit_admin_delete';
  */
 export const getImageProcessingLockName = (jobId: number) =>
     `gallerykit:image-processing:${jobId}`;
+
+/** Lock serializes color pipeline backfill operations (one backfill at a time). */
+export const LOCK_COLOR_PIPELINE_BACKFILL = 'gallerykit_color_pipeline_backfill';

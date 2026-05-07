@@ -57,6 +57,8 @@ export const images = mysqlTable("images", {
     transfer_function: varchar('transfer_function', { length: 16 }),
     matrix_coefficients: varchar('matrix_coefficients', { length: 16 }),
     is_hdr: boolean('is_hdr').notNull().default(false),
+    // US-CM11: pipeline version marker for idempotent backfill.
+    pipeline_version: int('pipeline_version'),
     original_format: varchar('original_format', { length: 10 }),
     original_file_size: bigint('original_file_size', { mode: 'number' }),
     // US-P41: license tier for bulk metadata editor. Validated as enum at action layer.
