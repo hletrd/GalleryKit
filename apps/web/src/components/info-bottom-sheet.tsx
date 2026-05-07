@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import FocusTrap from '@/components/lazy-focus-trap';
-import { Info, MapPin, Calendar, Clock, X, Download } from "lucide-react";
+import { Info, MapPin, Calendar, Clock, X, Download, ChevronDown } from "lucide-react";
 import { useTranslation } from "@/components/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { ImageDetail, TagInfo, hasExifData, hasAnyCameraExifData, nu, formatShutterSpeed } from '@/lib/image-types';
@@ -10,6 +10,15 @@ import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime'
 import { getPhotoDisplayTitle, humanizeTagLabel } from '@/lib/photo-title';
 import { imageUrl } from '@/lib/image-url';
 import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Histogram } from '@/components/histogram';
+import ColorDetailsSection from '@/components/color-details-section';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
@@ -17,13 +26,14 @@ interface InfoBottomSheetProps {
     onClose: () => void;
     isAdmin?: boolean;
     untitledFallbackTitle?: string;
+    imageSizes?: number[];
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false, untitledFallbackTitle }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -142,6 +152,10 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     const formattedShutterSpeed = formatShutterSpeed(image.exposure_time);
     const formattedCaptureDate = formatStoredExifDate(image.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image.capture_date, locale);
+    const downloadExt = image.filename_jpeg ? image.filename_jpeg.split('.').pop() || 'jpg' : 'jpg';
+    const downloadHref = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
+    const avifDownloadHref = image.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
+    const isWideGamutSource = Boolean(image.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
 
     return (
         <>
@@ -406,6 +420,23 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                         )}
 
+                        {/* Color details accordion — mirrors desktop sidebar */}
+                        <ColorDetailsSection image={image} isAdmin={isAdminProp} t={t} />
+
+                        {/* Histogram */}
+                        {image.filename_jpeg && (
+                            <div className="mt-4 border-t pt-4">
+                                <Histogram
+                                    imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
+                                    avifUrl={image.filename_avif
+                                        ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
+                                        : undefined}
+                                    colorPrimaries={image.color_primaries}
+                                    className="w-full"
+                                />
+                            </div>
+                        )}
+
                         {/* Capture date/time */}
                         <div className="mt-4 text-sm">
                             <p className="text-muted-foreground text-xs mb-1">{t('viewer.capturedAt')}</p>
@@ -421,21 +452,53 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             )}
                         </div>
 
-                        {/* Download JPEG button — mirrors desktop sidebar logic.
+                        {/* Gamut-aware download — mirrors desktop sidebar logic.
                             Hidden when the photo has a paid license tier so the
                             free download doesn't undermine the licensing intent. */}
-                        {image.filename_jpeg && (!image.license_tier || image.license_tier === 'none') && (
+                        {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
                             <div className="mt-4 pt-4 border-t">
-                                <Button asChild className="w-full gap-2">
-                                    <a
-                                        href={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                        download={`photo-${image.id}.${image.filename_jpeg.split('.').pop() || 'jpg'}`}
-                                    >
-                                        <Download className="h-4 w-4" /> {image.color_pipeline_decision?.startsWith('p3-from-')
-                                            ? t('viewer.downloadP3Jpeg')
-                                            : t('viewer.downloadJpeg')}
-                                    </a>
-                                </Button>
+                                {isWideGamutSource && avifDownloadHref ? (
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button className="w-full gap-2 min-h-11">
+                                                <Download className="h-4 w-4" />
+                                                {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                    ? t('viewer.downloadP3Jpeg')
+                                                    : t('viewer.downloadJpeg')}
+                                                <ChevronDown className="h-4 w-4 ml-auto" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="min-w-[12rem]">
+                                            <DropdownMenuItem asChild className="min-h-11">
+                                                <a
+                                                    href={downloadHref}
+                                                    download={`photo-${image.id}.${downloadExt}`}
+                                                    className="flex items-center gap-2"
+                                                >
+                                                    {t('viewer.downloadSrgbJpeg')}
+                                                </a>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem asChild className="min-h-11">
+                                                <a
+                                                    href={avifDownloadHref}
+                                                    download={`photo-${image.id}.avif`}
+                                                    className="flex items-center gap-2"
+                                                >
+                                                    {t('viewer.downloadP3Avif')}
+                                                </a>
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                ) : (
+                                    <Button asChild className="w-full gap-2 min-h-11">
+                                        <a
+                                            href={downloadHref}
+                                            download={`photo-${image.id}.${downloadExt}`}
+                                        >
+                                            <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
+                                        </a>
+                                    </Button>
+                                )}
                             </div>
                         )}
                     </div>
