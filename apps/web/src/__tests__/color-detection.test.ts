@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectColorSignals } from '@/lib/color-detection';
+import { detectColorSignals, parseCicpFromHeif } from '@/lib/color-detection';
 
 // ---------------------------------------------------------------------------
 // Helpers — build mock Sharp metadata objects
@@ -121,5 +121,126 @@ describe('detectColorSignals', () => {
         const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
         expect(signals.iccProfileName).toBe('sRGB');
         expect(signals.colorPrimaries).toBe('bt709');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// US-CM05: parseCicpFromHeif — ISOBMFF nclx box walker
+// ---------------------------------------------------------------------------
+
+function makeBox(type: string, data: Buffer): Buffer {
+    const size = 8 + data.length;
+    const buf = Buffer.alloc(size);
+    buf.writeUInt32BE(size, 0);
+    buf.write(type, 4, 4, 'ascii');
+    data.copy(buf, 8);
+    return buf;
+}
+
+function makeFullBox(type: string, version: number, flags: number, data: Buffer): Buffer {
+    const size = 12 + data.length;
+    const buf = Buffer.alloc(size);
+    buf.writeUInt32BE(size, 0);
+    buf.write(type, 4, 4, 'ascii');
+    buf.writeUInt8(version, 8);
+    buf.writeUInt8((flags >> 16) & 0xFF, 9);
+    buf.writeUInt8((flags >> 8) & 0xFF, 10);
+    buf.writeUInt8(flags & 0xFF, 11);
+    data.copy(buf, 12);
+    return buf;
+}
+
+function makeColrNclx(primaries: number, transfer: number, matrix: number): Buffer {
+    // colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 11
+    const data = Buffer.alloc(11);
+    data.write('nclx', 0, 4, 'ascii');
+    data.writeUInt16BE(primaries, 4);
+    data.writeUInt16BE(transfer, 6);
+    data.writeUInt16BE(matrix, 8);
+    data.writeUInt8(0x80, 10); // full_range = 1
+    return makeFullBox('colr', 0, 0, data);
+}
+
+function makeColrProf(): Buffer {
+    // colour_type = 'prof' with dummy ICC data
+    const data = Buffer.alloc(8);
+    data.write('prof', 0, 4, 'ascii');
+    data.writeUInt32BE(0, 4);
+    return makeFullBox('colr', 0, 0, data);
+}
+
+function makeMeta(children: Buffer[]): Buffer {
+    return makeFullBox('meta', 0, 0, Buffer.concat(children));
+}
+
+function makeIprp(children: Buffer[]): Buffer {
+    return makeBox('iprp', Buffer.concat(children));
+}
+
+function makeIpco(children: Buffer[]): Buffer {
+    return makeBox('ipco', Buffer.concat(children));
+}
+
+describe('parseCicpFromHeif', () => {
+    it('finds nclx in a flat colr box', () => {
+        const buf = makeColrNclx(12, 1, 0); // P3-D65, sRGB, identity
+        const result = parseCicpFromHeif(buf);
+        expect(result).not.toBeNull();
+        expect(result!.colourPrimaries).toBe(12);
+        expect(result!.transferCharacteristics).toBe(1);
+        expect(result!.matrixCoefficients).toBe(0);
+    });
+
+    it('finds nclx inside meta → iprp → ipco', () => {
+        const ipco = makeIpco([makeColrNclx(9, 13, 9)]); // BT.2020, PQ, BT.2020-ncl
+        const iprp = makeIprp([ipco]);
+        const meta = makeMeta([iprp]);
+        const result = parseCicpFromHeif(meta);
+        expect(result).not.toBeNull();
+        expect(result!.colourPrimaries).toBe(9);
+        expect(result!.transferCharacteristics).toBe(13);
+        expect(result!.matrixCoefficients).toBe(9);
+    });
+
+    it('returns null for malformed colr box (too small)', () => {
+        // colr FullBox with only 3 bytes of data — too small for colour_type
+        const buf = makeFullBox('colr', 0, 0, Buffer.from([0, 0, 0]));
+        const result = parseCicpFromHeif(buf);
+        expect(result).toBeNull();
+    });
+
+    it('skips prof colr and finds later nclx colr (nclx wins)', () => {
+        const ipco = makeIpco([makeColrProf(), makeColrNclx(12, 14, 0)]); // prof then P3/HLG
+        const iprp = makeIprp([ipco]);
+        const meta = makeMeta([iprp]);
+        const result = parseCicpFromHeif(meta);
+        expect(result).not.toBeNull();
+        expect(result!.colourPrimaries).toBe(12);
+        expect(result!.transferCharacteristics).toBe(14); // HLG
+    });
+
+    it('returns null when colr has prof type and no nclx', () => {
+        const ipco = makeIpco([makeColrProf()]);
+        const iprp = makeIprp([ipco]);
+        const meta = makeMeta([iprp]);
+        const result = parseCicpFromHeif(meta);
+        expect(result).toBeNull();
+    });
+
+    it('returns null when no colr box exists', () => {
+        const meta = makeMeta([makeBox('pitm', Buffer.from([0, 0, 0, 1]))]);
+        const result = parseCicpFromHeif(meta);
+        expect(result).toBeNull();
+    });
+
+    it('respects depth bound — stops at >5 levels', () => {
+        // Nest iprp → ipco 6 levels deep (exceeds MAX_DEPTH=5)
+        let deep = makeIpco([makeColrNclx(1, 1, 1)]) as Buffer;
+        for (let i = 0; i < 6; i++) {
+            deep = makeIprp([deep]);
+        }
+        const meta = makeMeta([deep]);
+        const result = parseCicpFromHeif(meta);
+        expect(result).toBeNull();
     });
 });

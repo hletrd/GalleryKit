@@ -11,6 +11,7 @@
  */
 
 import type { Metadata } from 'sharp';
+import { open } from 'fs/promises';
 
 export interface ColorSignals {
     /** Canonical ICC profile name parsed from the file. */
@@ -110,14 +111,116 @@ function inferMatrixCoefficients(iccProfileName: string | null): ColorSignals['m
     return 'unknown';
 }
 
+// ---------------------------------------------------------------------------
+// US-CM05: CICP nclx box parsing for HEIF/AVIF containers (ISOBMFF walker)
+// ---------------------------------------------------------------------------
+
+interface CicpTriplet {
+    colourPrimaries: number;
+    transferCharacteristics: number;
+    matrixCoefficients: number;
+}
+
+const NCLX_PRIMARIES_MAP: Record<number, ColorSignals['colorPrimaries']> = {
+    1: 'bt709',
+    9: 'bt2020',
+    12: 'p3-d65',
+};
+
+const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
+    1: 'srgb',
+    2: 'gamma22',
+    13: 'pq',
+    14: 'hlg',
+    18: 'gamma18',
+};
+
+const NCLX_MATRIX_MAP: Record<number, ColorSignals['matrixCoefficients']> = {
+    0: 'identity',
+    1: 'bt709',
+    9: 'bt2020-ncl',
+};
+
+/**
+ * Walk an ISOBMFF buffer to find a 'colr' box with colour_type 'nclx' and
+ * extract the CICP triplet (primaries, transfer, matrix).
+ *
+ * Bounded: max depth 5 levels, max scan 1 MB, rejects malformed boxes.
+ * Returns null when no nclx colr is found.
+ */
+export function parseCicpFromHeif(buffer: Buffer): CicpTriplet | null {
+    const MAX_SCAN_BYTES = 1024 * 1024;
+    const MAX_DEPTH = 5;
+
+    function walk(offset: number, end: number, depth: number): CicpTriplet | null {
+        if (depth > MAX_DEPTH) return null;
+
+        let pos = offset;
+        const limit = Math.min(end, offset + MAX_SCAN_BYTES, buffer.length);
+
+        while (pos + 8 <= limit) {
+            let size = buffer.readUInt32BE(pos);
+            const type = buffer.toString('ascii', pos + 4, pos + 8);
+
+            let headerSize = 8;
+            let dataStart = pos + 8;
+
+            if (size === 1) {
+                if (pos + 16 > buffer.length) break;
+                size = Number(buffer.readBigUInt64BE(pos + 8));
+                headerSize = 16;
+                dataStart = pos + 16;
+            } else if (size === 0) {
+                size = buffer.length - pos;
+            }
+
+            if (size < headerSize || pos + size > buffer.length) break;
+
+            const boxEnd = pos + size;
+            const dataSize = size - headerSize;
+
+            if (type === 'colr') {
+                // colr is a FullBox: version(1) + flags(3) + colour_type(4) + ...
+                if (dataSize >= 11) {
+                    const colourType = buffer.toString('ascii', dataStart + 4, dataStart + 8);
+                    if (colourType === 'nclx' && dataSize >= 15) {
+                        // FullBox(4) + colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 15
+                        return {
+                            colourPrimaries: buffer.readUInt16BE(dataStart + 8),
+                            transferCharacteristics: buffer.readUInt16BE(dataStart + 10),
+                            matrixCoefficients: buffer.readUInt16BE(dataStart + 12),
+                        };
+                    }
+                }
+            }
+
+            // Recurse into container boxes.
+            // meta is a FullBox → skip version+flags. iprp / ipco are regular boxes.
+            if (type === 'meta' || type === 'iprp' || type === 'ipco') {
+                const contentOffset = type === 'meta' && dataSize >= 4
+                    ? dataStart + 4
+                    : dataStart;
+                const result = walk(contentOffset, boxEnd, depth + 1);
+                if (result) return result;
+            }
+
+            pos = boxEnd;
+        }
+
+        return null;
+    }
+
+    return walk(0, buffer.length, 0);
+}
+
 /**
  * Detect color signals from a Sharp-loaded image.
  *
- * @param _filepath — reserved for future nclx box parsing (US-CM05)
+ * @param filepath  — path to the saved original (used for nclx parsing on HEIF/AVIF)
  * @param metadata  — Sharp metadata() result (icc, depth, etc.)
  */
 export async function detectColorSignals(
-    _filepath: string,
+    filepath: string,
     _image: unknown,
     metadata: Metadata,
 ): Promise<ColorSignals> {
@@ -130,15 +233,43 @@ export async function detectColorSignals(
     } else if (typeof metadata.icc === 'string') {
         iccName = metadata.icc;
     }
-    void _filepath; // reserved for future nclx box parsing (US-CM05)
+    void _image;
 
-    const colorPrimaries = inferColorPrimaries(iccName);
     const bitDepth = typeof metadata.depth === 'string'
         ? ({ uchar: 8, char: 8, ushort: 16, short: 16, uint: 32, int: 32, float: 32, complex: 64, double: 64, dpcomplex: 128 } as Record<string, number>)[metadata.depth] ?? null
         : (typeof metadata.depth === 'number' && Number.isFinite(metadata.depth) ? metadata.depth : null);
 
-    const transferFunction = inferTransferFunction(iccName, null, bitDepth);
-    const matrixCoefficients = inferMatrixCoefficients(iccName);
+    // US-CM05: CICP nclx box parsing for HEIF/AVIF containers.
+    // When nclx is present it takes precedence over ICC-derived values.
+    let nclxCicp: CicpTriplet | null = null;
+    const format = metadata.format?.toLowerCase();
+    if (format === 'heif' || format === 'avif') {
+        try {
+            const fileHandle = await open(filepath, 'r');
+            try {
+                const header = Buffer.alloc(1024 * 1024); // 1 MB cap
+                const { bytesRead } = await fileHandle.read(header, 0, header.length, 0);
+                if (bytesRead > 0) {
+                    nclxCicp = parseCicpFromHeif(header.subarray(0, bytesRead));
+                }
+            } finally {
+                await fileHandle.close();
+            }
+        } catch {
+            // Non-critical: fall back to ICC-based detection
+        }
+    }
+
+    let colorPrimaries = inferColorPrimaries(iccName);
+    let transferFunction = inferTransferFunction(iccName, null, bitDepth);
+    let matrixCoefficients = inferMatrixCoefficients(iccName);
+
+    if (nclxCicp) {
+        colorPrimaries = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries] ?? 'unknown';
+        transferFunction = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics] ?? 'unknown';
+        matrixCoefficients = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients] ?? 'unknown';
+    }
+
     const isHdr = transferFunction === 'pq' || transferFunction === 'hlg';
 
     return {
