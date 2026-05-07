@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
+import sharp from 'sharp';
 import { getImageCached, getSeoSettings } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -26,6 +27,22 @@ const OG_PHOTO_MAX_BYTES = 1024 * 1024; // 1 MB — guard against oversized deri
  */
 function sanitizeForOg(value: string): string {
     return value.replace(UNICODE_FORMAT_CHARS, '');
+}
+
+const WIDE_GAMUT_PRIMARIES = ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'];
+
+/**
+ * Post-process Satori PNG output through Sharp to embed the correct ICC profile.
+ * US-CM08: wide-gamut sources get P3-tagged JPEG; sRGB/unknown get sRGB-tagged JPEG.
+ */
+async function postProcessOgImage(pngBuffer: Buffer, colorPrimaries: string | null | undefined): Promise<Buffer> {
+    const isWideGamut = colorPrimaries && WIDE_GAMUT_PRIMARIES.includes(colorPrimaries);
+    const targetIcc = isWideGamut ? 'p3' : 'srgb';
+    return sharp(pngBuffer)
+        .toColorspace(targetIcc)
+        .withIccProfile(targetIcc)
+        .jpeg({ quality: 88 })
+        .toBuffer();
 }
 
 export async function GET(
@@ -100,7 +117,9 @@ export async function GET(
         }
         const photoDataUrl = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
 
-        return new ImageResponse(
+        // US-CM08: generate OG as PNG via Satori, then post-process through
+        // Sharp to embed the correct ICC profile and re-encode as JPEG.
+        const ogResponse = new ImageResponse(
             (
                 <div
                     style={{
@@ -186,11 +205,17 @@ export async function GET(
             {
                 width: 1200,
                 height: 630,
-                headers: {
-                    'Cache-Control': OG_SUCCESS_CACHE_CONTROL,
-                },
             },
         );
+
+        const pngBuffer = Buffer.from(await ogResponse.arrayBuffer());
+        const jpegBuffer = await postProcessOgImage(pngBuffer, image.color_primaries);
+        return new Response(new Uint8Array(jpegBuffer), {
+            headers: {
+                'Content-Type': 'image/jpeg',
+                'Cache-Control': OG_SUCCESS_CACHE_CONTROL,
+            },
+        });
     } catch (e: unknown) {
         rollbackOgAttempt(ip);
         if (e instanceof Error) {
