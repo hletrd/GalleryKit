@@ -381,9 +381,9 @@ export type ColorPipelineDecision =
     | 'srgb-from-unknown'
     | 'p3-from-displayp3'
     | 'p3-from-dcip3'
-    | 'srgb-from-adobergb'
-    | 'srgb-from-prophoto'
-    | 'srgb-from-rec2020';
+    | 'p3-from-adobergb'
+    | 'p3-from-prophoto'
+    | 'p3-from-rec2020';
 
 /**
  * Resolve the color pipeline decision label for observability.
@@ -397,9 +397,9 @@ export type ColorPipelineDecision =
  * 'Display P3'                    │ p3-from-displayp3 │ exact match
  * 'DCI-P3'                        │ p3-from-dcip3     │ same primaries, DCI WP
  * 'P3-D65'                        │ p3-from-displayp3 │ alias for Display P3
- * 'Adobe RGB (1998)' / 'AdobeRGB' │ srgb-from-adobergb│ currently sRGB clip
- * 'ProPhoto RGB' / 'ProPhoto'     │ srgb-from-prophoto│ currently sRGB clip
- * 'ITU-R BT.2020' / 'Rec.2020'    │ srgb-from-rec2020 │ currently sRGB clip
+ * 'Adobe RGB (1998)' / 'AdobeRGB' │ p3-from-adobergb  │ P3 gamut-mapped
+ * 'ProPhoto RGB' / 'ProPhoto'     │ p3-from-prophoto  │ P3 gamut-mapped
+ * 'ITU-R BT.2020' / 'Rec.2020'    │ p3-from-rec2020   │ P3 gamut-mapped
  * 'sRGB IEC61966-2.1' / sRGB ICC  │ srgb              │ exact match
  * null / unknown                  │ srgb-from-unknown │ safe default
  * ───────────────────────────────────────────────────────────────────────────
@@ -416,13 +416,13 @@ export function resolveColorPipelineDecision(iccProfileName: string | null | und
         return 'p3-from-dcip3';
     }
     if (name.includes('adobe rgb') || name.includes('adobergb')) {
-        return 'srgb-from-adobergb';
+        return 'p3-from-adobergb';
     }
     if (name.includes('prophoto')) {
-        return 'srgb-from-prophoto';
+        return 'p3-from-prophoto';
     }
     if (name.includes('rec.2020') || name.includes('bt.2020') || name.includes('rec2020') || name.includes('bt2020')) {
-        return 'srgb-from-rec2020';
+        return 'p3-from-rec2020';
     }
     if (name.includes('srgb')) {
         return 'srgb';

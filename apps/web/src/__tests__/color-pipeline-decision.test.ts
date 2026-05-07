@@ -12,17 +12,17 @@ describe('resolveColorPipelineDecision', () => {
         ['DCI-P3', 'p3-from-dcip3'],
         ['dci-p3', 'p3-from-dcip3'],
 
-        // Wider gamuts (currently sRGB clip path)
-        ['Adobe RGB (1998)', 'srgb-from-adobergb'],
-        ['AdobeRGB', 'srgb-from-adobergb'],
-        ['adobe rgb', 'srgb-from-adobergb'],
-        ['ProPhoto RGB', 'srgb-from-prophoto'],
-        ['ProPhoto', 'srgb-from-prophoto'],
-        ['prophoto rgb', 'srgb-from-prophoto'],
-        ['Rec.2020', 'srgb-from-rec2020'],
-        ['BT.2020', 'srgb-from-rec2020'],
-        ['rec.2020', 'srgb-from-rec2020'],
-        ['bt.2020', 'srgb-from-rec2020'],
+        // Wider gamuts (P3 gamut-mapped path)
+        ['Adobe RGB (1998)', 'p3-from-adobergb'],
+        ['AdobeRGB', 'p3-from-adobergb'],
+        ['adobe rgb', 'p3-from-adobergb'],
+        ['ProPhoto RGB', 'p3-from-prophoto'],
+        ['ProPhoto', 'p3-from-prophoto'],
+        ['prophoto rgb', 'p3-from-prophoto'],
+        ['Rec.2020', 'p3-from-rec2020'],
+        ['BT.2020', 'p3-from-rec2020'],
+        ['rec.2020', 'p3-from-rec2020'],
+        ['bt.2020', 'p3-from-rec2020'],
 
         // sRGB
         ['sRGB IEC61966-2.1', 'srgb'],
@@ -44,7 +44,7 @@ describe('resolveColorPipelineDecision', () => {
         const result = resolveColorPipelineDecision('Display P3');
         const allowed: ColorPipelineDecision[] = [
             'srgb', 'srgb-from-unknown', 'p3-from-displayp3', 'p3-from-dcip3',
-            'srgb-from-adobergb', 'srgb-from-prophoto', 'srgb-from-rec2020',
+            'p3-from-adobergb', 'p3-from-prophoto', 'p3-from-rec2020',
         ];
         expect(allowed).toContain(result);
     });
