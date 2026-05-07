@@ -29,18 +29,16 @@ function sanitizeForOg(value: string): string {
     return value.replace(UNICODE_FORMAT_CHARS, '');
 }
 
-const WIDE_GAMUT_PRIMARIES = ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'];
-
 /**
- * Post-process Satori PNG output through Sharp to embed the correct ICC profile.
- * US-CM08: wide-gamut sources get P3-tagged JPEG; sRGB/unknown get sRGB-tagged JPEG.
+ * Post-process Satori PNG output through Sharp to embed sRGB ICC.
+ * WI-04: Satori internally flattens to sRGB via resvg. Writing a P3 ICC
+ * tag over sRGB-clipped pixels would mislead color-managed viewers.
+ * Always emit sRGB JPEG regardless of source gamut.
  */
-async function postProcessOgImage(pngBuffer: Buffer, colorPrimaries: string | null | undefined): Promise<Buffer> {
-    const isWideGamut = colorPrimaries && WIDE_GAMUT_PRIMARIES.includes(colorPrimaries);
-    const targetIcc = isWideGamut ? 'p3' : 'srgb';
+async function postProcessOgImage(pngBuffer: Buffer): Promise<Buffer> {
     return sharp(pngBuffer)
-        .toColorspace(targetIcc)
-        .withIccProfile(targetIcc)
+        .toColorspace('srgb')
+        .withIccProfile('srgb')
         .jpeg({ quality: 88 })
         .toBuffer();
 }
@@ -209,7 +207,7 @@ export async function GET(
         );
 
         const pngBuffer = Buffer.from(await ogResponse.arrayBuffer());
-        const jpegBuffer = await postProcessOgImage(pngBuffer, image.color_primaries);
+        const jpegBuffer = await postProcessOgImage(pngBuffer);
         return new Response(new Uint8Array(jpegBuffer), {
             headers: {
                 'Content-Type': 'image/jpeg',
