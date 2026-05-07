@@ -50,7 +50,7 @@
     "isbot": "^5.1.39",
     "leaflet": "^1.9.4",
     "leaflet-defaulticon-compatibility": "^0.1.2",
-    "lucide-react": "^0.562.0",
+    "lucide-react": "^1.14.0",
     "mysql2": "^3.22.0",
     "next": "^16.2.3",
     "next-intl": "^4.9.1",
