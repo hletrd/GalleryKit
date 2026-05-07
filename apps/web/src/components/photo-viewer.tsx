@@ -607,7 +607,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                      showInfo ? "lg:opacity-100 lg:translate-x-0" : "lg:opacity-0 lg:translate-x-10 lg:w-0 lg:p-0"
                 )}>
                     {showInfo && (
-                        <Card className="h-full border-none shadow-none bg-transparent lg:border lg:bg-card lg:shadow-sm">
+                        <Card className="h-full border-none shadow-none bg-transparent lg:border lg:bg-card lg:shadow-sm overflow-y-auto">
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <Badge variant="outline">{image.topic}</Badge>

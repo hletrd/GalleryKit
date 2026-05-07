@@ -88,7 +88,7 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                         aria-pressed={currentTags.includes(tag.slug)}
                     >
                         {displayName(tag.name)}
-                        <span className="opacity-60 text-[10px]">({tag.count})</span>
+                        <span className="text-xs text-muted-foreground">({tag.count})</span>
                     </button>
                 </Badge>
             ))}

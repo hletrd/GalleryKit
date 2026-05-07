@@ -8,12 +8,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 responses: never cached.
  *
- * 838e15b is replaced at build time by scripts/build-sw.ts.
+ * cb9bbf5e is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '838e15b';
+const SW_VERSION = 'cb9bbf5e';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -37,12 +37,6 @@ function isImageDerivative(pathname) {
     pathname.startsWith('/uploads/webp/') ||
     pathname.startsWith('/uploads/jpeg/')
   );
-}
-
-function isHdrVariant(pathname) {
-  // WI-11: HDR AVIF variants should not be cached in the 50 MB LRU
-  // to avoid starving SDR entries. Pass through to network.
-  return pathname.includes('_hdr.avif');
 }
 
 function isHtmlRoute(request) {
@@ -258,8 +252,6 @@ self.addEventListener('fetch', (event) => {
 
   // Image derivatives — stale-while-revalidate
   if (isImageDerivative(pathname)) {
-    // WI-11: HDR variants bypass SW cache to avoid starving SDR entries
-    if (isHdrVariant(pathname)) return;
     event.respondWith(staleWhileRevalidateImage(request));
     return;
   }
