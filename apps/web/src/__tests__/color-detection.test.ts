@@ -127,53 +127,43 @@ describe('detectColorSignals', () => {
         expect(signals.colorPrimaries).toBe('bt709');
     });
 
-    // A1: verify NCLX mapped enum values through detectColorSignals
-    it('maps nclx transfer=16 to pq and marks HDR', async () => {
-        const tmpFile = path.join(os.tmpdir(), `gk-cicp-16-${Date.now()}.avif`);
-        const ipco = makeIpco([makeColrNclx(9, 16, 9)]);
+    // A1: verify NCLX mapped enum values through detectColorSignals.
+    // Helper writes a synthetic ISOBMFF with an nclx colr box to a temp file,
+    // runs detectColorSignals, and cleans up.
+    async function detectFromNclx(
+        primaries: number, transfer: number, matrix: number,
+    ): Promise<ReturnType<typeof detectColorSignals>> {
+        const tmpFile = path.join(os.tmpdir(), `gk-cicp-${primaries}-${transfer}-${Date.now()}.avif`);
+        const ipco = makeIpco([makeColrNclx(primaries, transfer, matrix)]);
         const iprp = makeIprp([ipco]);
         const metaBuf = makeMeta([iprp]);
         await fs.writeFile(tmpFile, metaBuf);
         try {
-            const signals = await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
-            expect(signals.transferFunction).toBe('pq');
-            expect(signals.isHdr).toBe(true);
-            expect(signals.colorPrimaries).toBe('bt2020');
+            return await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
         } finally {
             await fs.unlink(tmpFile).catch(() => {});
         }
+    }
+
+    it('maps nclx transfer=16 to pq and marks HDR', async () => {
+        const signals = await detectFromNclx(9, 16, 9);
+        expect(signals.transferFunction).toBe('pq');
+        expect(signals.isHdr).toBe(true);
+        expect(signals.colorPrimaries).toBe('bt2020');
     });
 
     it('maps nclx transfer=18 to hlg and marks HDR', async () => {
-        const tmpFile = path.join(os.tmpdir(), `gk-cicp-18-${Date.now()}.avif`);
-        const ipco = makeIpco([makeColrNclx(9, 18, 9)]);
-        const iprp = makeIprp([ipco]);
-        const metaBuf = makeMeta([iprp]);
-        await fs.writeFile(tmpFile, metaBuf);
-        try {
-            const signals = await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
-            expect(signals.transferFunction).toBe('hlg');
-            expect(signals.isHdr).toBe(true);
-            expect(signals.colorPrimaries).toBe('bt2020');
-        } finally {
-            await fs.unlink(tmpFile).catch(() => {});
-        }
+        const signals = await detectFromNclx(9, 18, 9);
+        expect(signals.transferFunction).toBe('hlg');
+        expect(signals.isHdr).toBe(true);
+        expect(signals.colorPrimaries).toBe('bt2020');
     });
 
     it('maps nclx primaries=11 to dci-p3', async () => {
-        const tmpFile = path.join(os.tmpdir(), `gk-cicp-11-${Date.now()}.avif`);
-        const ipco = makeIpco([makeColrNclx(11, 1, 1)]);
-        const iprp = makeIprp([ipco]);
-        const metaBuf = makeMeta([iprp]);
-        await fs.writeFile(tmpFile, metaBuf);
-        try {
-            const signals = await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
-            expect(signals.colorPrimaries).toBe('dci-p3');
-            expect(signals.transferFunction).toBe('srgb');
-            expect(signals.isHdr).toBe(false);
-        } finally {
-            await fs.unlink(tmpFile).catch(() => {});
-        }
+        const signals = await detectFromNclx(11, 1, 1);
+        expect(signals.colorPrimaries).toBe('dci-p3');
+        expect(signals.transferFunction).toBe('srgb');
+        expect(signals.isHdr).toBe(false);
     });
 });
 
