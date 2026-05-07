@@ -935,7 +935,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <DropdownMenuTrigger asChild>
                                                 <Button className="w-full gap-2 min-h-11">
                                                     <Download className="h-4 w-4" />
-                                                    {t('viewer.downloadJpeg')}
+                                                    {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                        ? t('viewer.downloadP3Jpeg')
+                                                        : t('viewer.downloadJpeg')}
                                                     <ChevronDown className="h-4 w-4 ml-auto" />
                                                 </Button>
                                             </DropdownMenuTrigger>

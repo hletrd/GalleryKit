@@ -431,7 +431,9 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                         href={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                         download={`photo-${image.id}.${image.filename_jpeg.split('.').pop() || 'jpg'}`}
                                     >
-                                        <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
+                                        <Download className="h-4 w-4" /> {image.color_pipeline_decision?.startsWith('p3-from-')
+                                            ? t('viewer.downloadP3Jpeg')
+                                            : t('viewer.downloadJpeg')}
                                     </a>
                                 </Button>
                             </div>

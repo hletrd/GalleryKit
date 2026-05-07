@@ -303,6 +303,7 @@
     },
     "downloadJpeg": "JPEG 다운로드",
     "downloadSrgbJpeg": "다운로드 (sRGB JPEG)",
+    "downloadP3Jpeg": "다운로드 (Display P3 JPEG)",
     "downloadP3Avif": "다운로드 (Display P3 AVIF)",
     "downloadHdrAvif": "다운로드 (HDR AVIF)",
     "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, Space 슬라이드쇼 토글.",

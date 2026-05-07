@@ -303,6 +303,7 @@
     },
     "downloadJpeg": "Download JPEG",
     "downloadSrgbJpeg": "Download (sRGB JPEG)",
+    "downloadP3Jpeg": "Download (Display P3 JPEG)",
     "downloadP3Avif": "Download (Display P3 AVIF)",
     "downloadHdrAvif": "Download (HDR AVIF)",
     "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, Space to toggle slideshow.",
