@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { detectColorSignals, parseCicpFromHeif } from '@/lib/color-detection';
+import { extractIccProfileName as extractFromShared } from '@/lib/icc-extractor';
 
 // ---------------------------------------------------------------------------
 // Helpers — build mock Sharp metadata objects
@@ -244,5 +245,35 @@ describe('parseCicpFromHeif', () => {
         const meta = makeMeta([deep]);
         const result = parseCicpFromHeif(meta);
         expect(result).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// WI-02: extractIccProfileName consolidation — shared module correctness
+// ---------------------------------------------------------------------------
+
+describe('extractIccProfileName (shared module)', () => {
+    it('parses sRGB ICC profile name from minimal valid buffer', () => {
+        const buf = Buffer.alloc(256);
+        buf.write('acsp', 36); // profile header magic at offset 36
+        buf.writeUInt32BE(1, 128); // tag count
+        buf.writeUInt32BE(0x64657363, 132); // 'desc' tag sig
+        buf.writeUInt32BE(144, 136); // tag data offset
+        buf.writeUInt32BE(20, 140); // tag data size
+        buf.writeUInt32BE(0x64657363, 144); // 'desc' type
+        buf.writeUInt32BE(0, 148); // reserved
+        buf.writeUInt32BE(6, 152); // ascii count (including null)
+        buf.write('sRGB\x00', 156); // ascii string
+        expect(extractFromShared(buf)).toBe('sRGB');
+    });
+
+    it('returns null for non-Buffer input', () => {
+        expect(extractFromShared(null)).toBeNull();
+        expect(extractFromShared(undefined)).toBeNull();
+        expect(extractFromShared('string' as unknown as Buffer)).toBeNull();
+    });
+
+    it('returns null for buffer too short', () => {
+        expect(extractFromShared(Buffer.alloc(100))).toBeNull();
     });
 });

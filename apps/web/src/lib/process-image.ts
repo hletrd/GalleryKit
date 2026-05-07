@@ -14,6 +14,8 @@ import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { detectColorSignals, type ColorSignals } from '@/lib/color-detection';
+import { extractIccProfileName } from '@/lib/icc-extractor';
+export { extractIccProfileName } from '@/lib/icc-extractor';
 
 const cpuCount = typeof os.availableParallelism === 'function'
     ? os.availableParallelism()
@@ -324,14 +326,6 @@ function clampUtf8Bytes(value: string, maxBytes: number = MAX_DB_VARCHAR_BYTES):
     return output.trim();
 }
 
-// C3-AGG-02: Use TextDecoder for correct UTF-16BE decoding including
-// surrogate pairs. The prior String.fromCharCode approach produced
-// unpaired surrogates for supplementary Unicode characters (emoji,
-// rare CJK) in ICC profile names.
-function decodeUtf16BE(buffer: Buffer): string {
-    return new TextDecoder('utf-16be').decode(buffer);
-}
-
 function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_BYTES): string | null {
     if (value === undefined || value === null) return null;
     const s = String(value).replace(/\0/g, '').trim();
@@ -495,64 +489,6 @@ export function resolveAvifIccProfile(iccProfileName: string | null | undefined)
     return 'srgb';
 }
 
-export function extractIccProfileName(icc?: Buffer | null): string | null {
-    if (!icc || icc.length <= 132) return null;
-
-    try {
-        const iccLen = icc.length;
-        // ICC profile structure: 128-byte header, then tag table. Bound the
-        // tag count so malformed profiles cannot force large loops.
-        const tagCount = Math.min(icc.readUInt32BE(128), 100);
-        for (let i = 0; i < tagCount; i++) {
-            const tagOffset = 132 + i * 12;
-            if (tagOffset + 12 > iccLen) break;
-            const tagSig = icc.subarray(tagOffset, tagOffset + 4).toString('ascii');
-            if (tagSig !== 'desc') continue;
-
-            const dataOffset = icc.readUInt32BE(tagOffset + 4);
-            const dataSize = icc.readUInt32BE(tagOffset + 8);
-            if (dataOffset + 12 > iccLen || dataSize < 12 || dataOffset + dataSize > iccLen) break;
-
-            const descType = icc.subarray(dataOffset, dataOffset + 4).toString('ascii');
-            if (descType === 'desc') {
-                const declaredLength = icc.readUInt32BE(dataOffset + 8);
-                if (declaredLength === 0) break;
-                const strLen = Math.min(declaredLength, dataSize - 12, 1024);
-                const strStart = dataOffset + 12;
-                const strEnd = strStart + Math.max(0, strLen - 1);
-                if (strEnd > iccLen || strStart >= strEnd) break;
-                return cleanMetadataString(icc.subarray(strStart, strEnd).toString('ascii'));
-            }
-
-            if (descType === 'mluc') {
-                // Multi-localized Unicode: type/reserved, record count, record
-                // size, then records. Text is UTF-16BE per ICC, not UTF-16LE.
-                const numRecords = Math.min(icc.readUInt32BE(dataOffset + 8), 100);
-                const recordSize = icc.readUInt32BE(dataOffset + 12);
-                if (recordSize < 12) break;
-                const recordsStart = dataOffset + 16;
-                for (let recordIndex = 0; recordIndex < numRecords; recordIndex++) {
-                    const recOffset = recordsStart + recordIndex * recordSize;
-                    if (recOffset + 12 > iccLen || recOffset + 12 > dataOffset + dataSize) break;
-                    const recLen = Math.min(icc.readUInt32BE(recOffset + 4), 1024);
-                    const recTextOffset = icc.readUInt32BE(recOffset + 8);
-                    const strStart = dataOffset + recTextOffset;
-                    const strEnd = strStart + recLen;
-                    if (strEnd > iccLen || strEnd > dataOffset + dataSize || strStart >= strEnd) continue;
-                    const decoded = decodeUtf16BE(icc.subarray(strStart, strEnd));
-                    const cleaned = cleanMetadataString(decoded);
-                    if (cleaned) return cleaned;
-                }
-            }
-
-            break;
-        }
-    } catch {
-        // ICC parsing is best-effort.
-    }
-
-    return null;
-}
 
 export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProcessingResult> {
     if (file.size > MAX_FILE_SIZE) {

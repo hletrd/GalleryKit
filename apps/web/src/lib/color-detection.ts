@@ -12,6 +12,7 @@
 
 import type { Metadata } from 'sharp';
 import { open } from 'fs/promises';
+import { extractIccProfileName } from '@/lib/icc-extractor';
 
 export interface ColorSignals {
     /** Canonical ICC profile name parsed from the file. */
@@ -282,94 +283,3 @@ export async function detectColorSignals(
     };
 }
 
-// ---------------------------------------------------------------------------
-// Shared ICC profile name extractor (duplicated here to keep color-detection
-// self-contained and avoid a circular import with process-image.ts).
-// ---------------------------------------------------------------------------
-
-const ICC_TAG_TABLE = {
-    desc: 0x64657363,
-    dmdd: 0x646D6464,
-    dmnd: 0x646D6E64,
-};
-
-function readTagCount(buf: Buffer, offset: number): number {
-    return buf.readUInt32BE(offset + 128);
-}
-
-function readTagEntry(buf: Buffer, tableOffset: number, index: number): { sig: number; offset: number; size: number } | null {
-    const entryOffset = tableOffset + 4 + index * 12;
-    if (entryOffset + 12 > buf.length) return null;
-    return {
-        sig: buf.readUInt32BE(entryOffset),
-        offset: buf.readUInt32BE(entryOffset + 4),
-        size: buf.readUInt32BE(entryOffset + 8),
-    };
-}
-
-function readAsciiFromTag(buf: Buffer, entry: { offset: number; size: number }, maxLen: number): string {
-    const start = entry.offset;
-    const maxRead = Math.min(entry.size, maxLen);
-    if (start + maxRead > buf.length) return '';
-
-    const typeSig = buf.readUInt32BE(start);
-    let strOffset = start;
-    let strLen = maxRead;
-
-    if (typeSig === 0x64657363) {
-        // 'desc' — ICC profile description tag
-        strOffset = start + 12;
-        const asciiCount = buf.readUInt32BE(start + 8);
-        strLen = Math.min(asciiCount, maxRead - 12);
-    } else if (typeSig === 0x74657874) {
-        // 'text' — literal ASCII
-        strOffset = start + 8;
-        strLen = maxRead - 8;
-    } else if (typeSig === 0x6D6C7563) {
-        // 'mluc' — multi-localized Unicode; skip to first ASCII fallback
-        const recCount = buf.readUInt32BE(start + 8);
-        if (recCount > 0) {
-            const recOffset = start + 16;
-            const recSize = buf.readUInt32BE(recOffset + 8);
-            strOffset = recOffset + 12;
-            strLen = Math.min(recSize, maxRead - (recOffset - start) - 12);
-        }
-    }
-
-    if (strOffset + strLen > buf.length) strLen = Math.max(0, buf.length - strOffset);
-    if (strLen <= 0) return '';
-
-    const slice = buf.subarray(strOffset, strOffset + strLen);
-    let out = '';
-    for (let i = 0; i < slice.length; i++) {
-        const b = slice[i];
-        if (b === 0) break;
-        out += String.fromCharCode(b);
-    }
-    return out.trim();
-}
-
-// Internal copy — process-image.ts is the canonical export source.
-function extractIccProfileName(iccBuffer: Buffer | null | undefined): string | null {
-    if (!iccBuffer || !Buffer.isBuffer(iccBuffer) || iccBuffer.length < 132) {
-        return null;
-    }
-
-    try {
-        const tagCount = readTagCount(iccBuffer, 0);
-        if (tagCount > 1024) return null;
-        const tableOffset = 128;
-
-        for (let i = 0; i < Math.min(tagCount, 1024); i++) {
-            const entry = readTagEntry(iccBuffer, tableOffset, i);
-            if (!entry) continue;
-            if (entry.sig === ICC_TAG_TABLE.desc || entry.sig === ICC_TAG_TABLE.dmdd || entry.sig === ICC_TAG_TABLE.dmnd) {
-                return readAsciiFromTag(iccBuffer, entry, 256) || null;
-            }
-        }
-    } catch {
-        // Defensive: malformed ICC buffer
-    }
-
-    return null;
-}
