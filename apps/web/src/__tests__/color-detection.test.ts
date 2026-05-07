@@ -7,6 +7,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { detectColorSignals, parseCicpFromHeif } from '@/lib/color-detection';
 import { extractIccProfileName as extractFromShared } from '@/lib/icc-extractor';
 
@@ -122,6 +125,55 @@ describe('detectColorSignals', () => {
         const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
         expect(signals.iccProfileName).toBe('sRGB');
         expect(signals.colorPrimaries).toBe('bt709');
+    });
+
+    // A1: verify NCLX mapped enum values through detectColorSignals
+    it('maps nclx transfer=16 to pq and marks HDR', async () => {
+        const tmpFile = path.join(os.tmpdir(), `gk-cicp-16-${Date.now()}.avif`);
+        const ipco = makeIpco([makeColrNclx(9, 16, 9)]);
+        const iprp = makeIprp([ipco]);
+        const metaBuf = makeMeta([iprp]);
+        await fs.writeFile(tmpFile, metaBuf);
+        try {
+            const signals = await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
+            expect(signals.transferFunction).toBe('pq');
+            expect(signals.isHdr).toBe(true);
+            expect(signals.colorPrimaries).toBe('bt2020');
+        } finally {
+            await fs.unlink(tmpFile).catch(() => {});
+        }
+    });
+
+    it('maps nclx transfer=18 to hlg and marks HDR', async () => {
+        const tmpFile = path.join(os.tmpdir(), `gk-cicp-18-${Date.now()}.avif`);
+        const ipco = makeIpco([makeColrNclx(9, 18, 9)]);
+        const iprp = makeIprp([ipco]);
+        const metaBuf = makeMeta([iprp]);
+        await fs.writeFile(tmpFile, metaBuf);
+        try {
+            const signals = await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
+            expect(signals.transferFunction).toBe('hlg');
+            expect(signals.isHdr).toBe(true);
+            expect(signals.colorPrimaries).toBe('bt2020');
+        } finally {
+            await fs.unlink(tmpFile).catch(() => {});
+        }
+    });
+
+    it('maps nclx primaries=11 to dci-p3', async () => {
+        const tmpFile = path.join(os.tmpdir(), `gk-cicp-11-${Date.now()}.avif`);
+        const ipco = makeIpco([makeColrNclx(11, 1, 1)]);
+        const iprp = makeIprp([ipco]);
+        const metaBuf = makeMeta([iprp]);
+        await fs.writeFile(tmpFile, metaBuf);
+        try {
+            const signals = await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
+            expect(signals.colorPrimaries).toBe('dci-p3');
+            expect(signals.transferFunction).toBe('srgb');
+            expect(signals.isHdr).toBe(false);
+        } finally {
+            await fs.unlink(tmpFile).catch(() => {});
+        }
     });
 });
 
