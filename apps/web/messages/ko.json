@@ -618,7 +618,13 @@
     "semanticSearchModeDisabled": "비활성화",
     "semanticSearchModeStub": "스텁 (테스트 전용)",
     "semanticSearchModeProduction": "프로덕션 (ONNX 필요)",
-    "semanticSearchProductionWarning": "경고: 프로덕션 모드에는 실제 ONNX CLIP 모델이 필요합니다. 없으면 검색 결과가 의미론적으로 무작위가 됩니다."
+    "semanticSearchProductionWarning": "경고: 프로덕션 모드에는 실제 ONNX CLIP 모델이 필요합니다. 없으면 검색 결과가 의미론적으로 무작위가 됩니다.",
+    "licensePricingTitle": "라이선스 가격",
+    "licensePricingDesc": "유료 다운로드 라이선스 등급별 가격을 설정합니다 (미국 센트 단위). 0 = 판매하지 않음.",
+    "licensePriceEditorial": "에디토리얼 라이선스 (센트)",
+    "licensePriceCommercial": "상업용 라이선스 (센트)",
+    "licensePriceRm": "권리 관리 라이선스 (센트)",
+    "licensePriceHint": "미국 센트 단위 가격. 예: 5000 = $50.00. 해당 등급을 비활성화하려면 0으로 설정하세요."
   },
   "footer": {
     "admin": "관리자"

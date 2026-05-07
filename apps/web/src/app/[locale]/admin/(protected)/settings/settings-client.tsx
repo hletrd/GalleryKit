@@ -18,7 +18,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search } from 'lucide-react';
+import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, ShoppingCart } from 'lucide-react';
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -290,6 +290,58 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             {t('settings.semanticSearchProductionWarning')}
                         </p>
                     )}
+                </CardContent>
+            </Card>
+
+            {/* License Pricing */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <ShoppingCart className="h-5 w-5" />
+                        {t('settings.licensePricingTitle')}
+                    </CardTitle>
+                    <CardDescription>{t('settings.licensePricingDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="license-price-editorial">{t('settings.licensePriceEditorial')}</Label>
+                            <Input
+                                id="license-price-editorial"
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={settings.license_price_editorial_cents || ''}
+                                onChange={(e) => handleChange('license_price_editorial_cents', e.target.value)}
+                                placeholder={getPlaceholder('license_price_editorial_cents')}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="license-price-commercial">{t('settings.licensePriceCommercial')}</Label>
+                            <Input
+                                id="license-price-commercial"
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={settings.license_price_commercial_cents || ''}
+                                onChange={(e) => handleChange('license_price_commercial_cents', e.target.value)}
+                                placeholder={getPlaceholder('license_price_commercial_cents')}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="license-price-rm">{t('settings.licensePriceRm')}</Label>
+                            <Input
+                                id="license-price-rm"
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={settings.license_price_rm_cents || ''}
+                                onChange={(e) => handleChange('license_price_rm_cents', e.target.value)}
+                                placeholder={getPlaceholder('license_price_rm_cents')}
+                            />
+                        </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t('settings.licensePriceHint')}</p>
                 </CardContent>
             </Card>
         </div>

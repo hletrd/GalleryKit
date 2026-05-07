@@ -618,7 +618,13 @@
     "semanticSearchModeDisabled": "Disabled",
     "semanticSearchModeStub": "Stub (testing only)",
     "semanticSearchModeProduction": "Production (requires ONNX)",
-    "semanticSearchProductionWarning": "Warning: Production mode requires a real ONNX CLIP model. Without it, search results will be semantically random."
+    "semanticSearchProductionWarning": "Warning: Production mode requires a real ONNX CLIP model. Without it, search results will be semantically random.",
+    "licensePricingTitle": "License Pricing",
+    "licensePricingDesc": "Set prices for paid download license tiers (in USD cents). 0 = not for sale.",
+    "licensePriceEditorial": "Editorial License (cents)",
+    "licensePriceCommercial": "Commercial License (cents)",
+    "licensePriceRm": "Rights-Managed License (cents)",
+    "licensePriceHint": "Price in US cents. For example, 5000 = $50.00. Leave 0 to disable that tier."
   },
   "footer": {
     "admin": "Admin"
