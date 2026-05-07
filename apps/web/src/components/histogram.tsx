@@ -35,8 +35,15 @@ interface HistogramWorkerLike {
     postMessage(message: { requestId: number } & HistogramWorkerPayload, transfer: Transferable[]): void;
 }
 
+// Minimal 1x1 AVIF data URL for client-side decode support probing.
+const AVIF_PROBE_DATA_URL = 'data:image/avif;base64,AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADybWV0YQAAAAAAAAAoaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAGxpYmF2aWYAAAAADnBpdG0AAAAAACAAAAAocGJhbHlydXJseXNvcF9jMwAAAAAAAQAAAAAQcGFzcwAAAAABAAAAAQAAAAAccG9zcwAAAAABAAAAAQAAAAAcc3ZjYwAAAAABAAAAAQAAAAAcc2JwcwAAAAABAAAAAQAAAAAccmVsbAAAAA8AAAA6AAAAOHN0ckAAAABzcHRsAAAAAFB0ciBzdGlsbCBwaWN0dXJlAAAAAAABAAAAAAAIc2N2eAAAAA8AAAA6AAAAOHN0Ym0AAAAAUGZiIHN0aWxsIHBpY3R1cmUAAAAAAAEAAAAAAAg=';
+
+const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
+
 interface HistogramProps {
     imageUrl: string;
+    avifUrl?: string;
+    colorPrimaries?: string | null;
     className?: string;
 }
 
@@ -210,10 +217,23 @@ function drawHistogram(
     }
 }
 
-export function Histogram({ imageUrl, className }: HistogramProps) {
+function getGamutLabel(primaries: string | null | undefined, t: (key: string) => string): string {
+    switch (primaries) {
+        case 'p3-d65': return t('viewer.histogramGamutP3');
+        case 'dci-p3': return t('viewer.histogramGamutDciP3');
+        case 'bt2020': return t('viewer.histogramGamutRec2020');
+        case 'adobergb': return t('viewer.histogramGamutAdobeRgb');
+        case 'prophoto': return t('viewer.histogramGamutProPhoto');
+        case 'bt709': return t('viewer.histogramGamutSrgb');
+        default: return '';
+    }
+}
+
+export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: HistogramProps) {
     const { t } = useTranslation();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme === 'dark';
+    const [avifSupported, setAvifSupported] = useState(false);
     const [histogramState, setHistogramState] = useState<{ imageUrl: string | null; data: HistogramData | null }>({
         imageUrl: null,
         data: null,
@@ -222,8 +242,20 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
     const [collapsed, setCollapsed] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
-    const histogramData = histogramState.imageUrl === imageUrl ? histogramState.data : null;
-    const loading = Boolean(imageUrl) && histogramState.imageUrl !== imageUrl;
+
+    // US-CM06: probe AVIF decode support once per mount.
+    useEffect(() => {
+        const img = new Image();
+        img.onload = () => setAvifSupported(true);
+        img.onerror = () => setAvifSupported(false);
+        img.src = AVIF_PROBE_DATA_URL;
+    }, []);
+
+    const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
+    const effectiveUrl = (isWideGamut && avifSupported && avifUrl) ? avifUrl : imageUrl;
+
+    const histogramData = histogramState.imageUrl === effectiveUrl ? histogramState.data : null;
+    const loading = Boolean(effectiveUrl) && histogramState.imageUrl !== effectiveUrl;
     const modeLabels: Record<HistogramMode, string> = {
         luminance: t('viewer.histogramModes.luminance'),
         rgb: t('viewer.histogramModes.color'),
@@ -231,6 +263,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
         g: t('viewer.histogramModes.green'),
         b: t('viewer.histogramModes.blue'),
     };
+    const gamutLabel = getGamutLabel(colorPrimaries, t);
 
     useEffect(() => {
         workerRef.current = new Worker('/histogram-worker.js?v=1');
@@ -241,7 +274,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
     }, []);
 
     useEffect(() => {
-        if (!imageUrl) return;
+        if (!effectiveUrl) return;
         let aborted = false;
         const abortController = new AbortController();
 
@@ -251,27 +284,27 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
             if (aborted) return;
             const worker = workerRef.current;
             if (!worker) {
-                setHistogramState({ imageUrl, data: null });
+                setHistogramState({ imageUrl: effectiveUrl, data: null });
                 return;
             }
             computeHistogramAsync(img, worker, abortController.signal)
                 .then((data) => {
                     if (!aborted) {
-                        setHistogramState({ imageUrl, data });
+                        setHistogramState({ imageUrl: effectiveUrl, data });
                     }
                 })
                 .catch(() => {
                     // Canvas tainted or worker error — silently fail
                     if (!aborted && !abortController.signal.aborted) {
-                        setHistogramState({ imageUrl, data: null });
+                        setHistogramState({ imageUrl: effectiveUrl, data: null });
                     }
                 });
         };
         img.onerror = () => {
             if (aborted) return;
-            setHistogramState({ imageUrl, data: null });
+            setHistogramState({ imageUrl: effectiveUrl, data: null });
         };
-        img.src = imageUrl;
+        img.src = effectiveUrl;
         return () => {
             aborted = true;
             abortController.abort();
@@ -279,7 +312,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
             img.onerror = null;
             img.src = '';
         };
-    }, [imageUrl]);
+    }, [effectiveUrl]);
 
     useEffect(() => {
         if (!histogramData || !canvasRef.current || collapsed) return;
@@ -298,6 +331,7 @@ export function Histogram({ imageUrl, className }: HistogramProps) {
             <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
                     {t('viewer.histogram')}
+                    {gamutLabel && <span className="ml-1 opacity-70">{gamutLabel}</span>}
                 </span>
                 <button
                     type="button"

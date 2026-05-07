@@ -282,6 +282,12 @@
       "green": "초록",
       "blue": "파랑"
     },
+    "histogramGamutP3": "(P3)",
+    "histogramGamutDciP3": "(DCI-P3)",
+    "histogramGamutRec2020": "(Rec.2020)",
+    "histogramGamutAdobeRgb": "(어도비 RGB)",
+    "histogramGamutProPhoto": "(ProPhoto)",
+    "histogramGamutSrgb": "(sRGB)",
     "fullscreen": "전체 화면",
     "fullscreenUnavailable": "전체 화면을 사용할 수 없습니다",
     "bottomSheet": "사진 정보",

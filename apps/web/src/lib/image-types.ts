@@ -21,6 +21,12 @@ export interface ImageDetail {
     exposure_time: string | null;
     focal_length: number | null;
     color_space: string | null;
+    icc_profile_name?: string | null;
+    color_pipeline_decision?: string | null;
+    color_primaries?: string | null;
+    transfer_function?: string | null;
+    matrix_coefficients?: string | null;
+    is_hdr?: boolean | null;
     white_balance: string | null;
     metering_mode: string | null;
     exposure_compensation: string | null;

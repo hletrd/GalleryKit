@@ -282,6 +282,12 @@
       "green": "Green",
       "blue": "Blue"
     },
+    "histogramGamutP3": "(P3)",
+    "histogramGamutDciP3": "(DCI-P3)",
+    "histogramGamutRec2020": "(Rec.2020)",
+    "histogramGamutAdobeRgb": "(Adobe RGB)",
+    "histogramGamutProPhoto": "(ProPhoto)",
+    "histogramGamutSrgb": "(sRGB)",
     "fullscreen": "Fullscreen",
     "fullscreenUnavailable": "Fullscreen is not available",
     "bottomSheet": "Photo Info",
