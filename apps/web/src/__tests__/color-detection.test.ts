@@ -152,21 +152,23 @@ function makeFullBox(type: string, version: number, flags: number, data: Buffer)
 
 function makeColrNclx(primaries: number, transfer: number, matrix: number): Buffer {
     // colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 11
+    // colr is a regular Box (not FullBox) per ISOBMFF.
     const data = Buffer.alloc(11);
     data.write('nclx', 0, 4, 'ascii');
     data.writeUInt16BE(primaries, 4);
     data.writeUInt16BE(transfer, 6);
     data.writeUInt16BE(matrix, 8);
     data.writeUInt8(0x80, 10); // full_range = 1
-    return makeFullBox('colr', 0, 0, data);
+    return makeBox('colr', data);
 }
 
 function makeColrProf(): Buffer {
     // colour_type = 'prof' with dummy ICC data
+    // colr is a regular Box (not FullBox) per ISOBMFF.
     const data = Buffer.alloc(8);
     data.write('prof', 0, 4, 'ascii');
     data.writeUInt32BE(0, 4);
-    return makeFullBox('colr', 0, 0, data);
+    return makeBox('colr', data);
 }
 
 function makeMeta(children: Buffer[]): Buffer {

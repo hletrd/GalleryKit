@@ -180,15 +180,16 @@ export function parseCicpFromHeif(buffer: Buffer): CicpTriplet | null {
             const dataSize = size - headerSize;
 
             if (type === 'colr') {
-                // colr is a FullBox: version(1) + flags(3) + colour_type(4) + ...
+                // colr is a regular Box per ISOBMFF (not a FullBox).
+                // colour_type FOURCC starts immediately after the box header.
                 if (dataSize >= 11) {
-                    const colourType = buffer.toString('ascii', dataStart + 4, dataStart + 8);
-                    if (colourType === 'nclx' && dataSize >= 15) {
-                        // FullBox(4) + colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 15
+                    const colourType = buffer.toString('ascii', dataStart, dataStart + 4);
+                    if (colourType === 'nclx' && dataSize >= 11) {
+                        // colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 11
                         return {
-                            colourPrimaries: buffer.readUInt16BE(dataStart + 8),
-                            transferCharacteristics: buffer.readUInt16BE(dataStart + 10),
-                            matrixCoefficients: buffer.readUInt16BE(dataStart + 12),
+                            colourPrimaries: buffer.readUInt16BE(dataStart + 4),
+                            transferCharacteristics: buffer.readUInt16BE(dataStart + 6),
+                            matrixCoefficients: buffer.readUInt16BE(dataStart + 8),
                         };
                     }
                 }
