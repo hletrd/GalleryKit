@@ -147,18 +147,11 @@ function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
                             <span className="font-medium">{pipeline || t('viewer.colorUnknown')}</span>
                         </div>
                     )}
-                    {isHdr && (
-                        <div className="flex justify-between gap-3 items-center">
-                            <span className="opacity-70">{t('viewer.hdrBadge')}</span>
-                            <span
-                                className="hdr-badge px-2 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm"
-                                aria-label={t('viewer.hdrBadgeAriaLabel')}
-                                role="img"
-                            >
-                                HDR
-                            </span>
-                        </div>
-                    )}
+                    {/* C5-A1 / C5-COL-MED-1 / C5-HDR-MED-1 / C5-UX-MED-1
+                        (3-way cross-angle): the HDR pill rendered in the
+                        closed-pip button row above already conveys the HDR
+                        signal; duplicating it here as a label/value row
+                        added redundancy with no information gain. */}
                 </div>
             )}
         </div>
