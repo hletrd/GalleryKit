@@ -215,6 +215,7 @@ const adminSelectFields = {
     transfer_function: images.transfer_function,
     matrix_coefficients: images.matrix_coefficients,
     is_hdr: images.is_hdr,
+    has_gain_map: images.has_gain_map,
     white_balance: images.white_balance,
     metering_mode: images.metering_mode,
     exposure_compensation: images.exposure_compensation,
@@ -282,6 +283,7 @@ const {
     processed: _omitProcessed,
     color_pipeline_decision: _omitColorPipelineDecision,
     is_hdr: _omitIsHdr,
+    has_gain_map: _omitHasGainMap,
     transfer_function: _omitTransferFunction,
     matrix_coefficients: _omitMatrixCoefficients,
     ...publicSelectFieldCore
@@ -306,6 +308,7 @@ const {
     processed: _omitProcessedMap,
     color_pipeline_decision: _omitColorPipelineDecisionMap,
     is_hdr: _omitIsHdrMap,
+    has_gain_map: _omitHasGainMapMap,
     transfer_function: _omitTransferFunctionMap,
     matrix_coefficients: _omitMatrixCoefficientsMap,
     ...publicMapSelectFieldCore
@@ -333,7 +336,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'transfer_function' | 'matrix_coefficients';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'transfer_function' | 'matrix_coefficients';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -341,7 +344,7 @@ void _privacyGuard;
 // Compile-time guard for publicMapSelectFields: it must NOT contain any admin-only
 // field beyond latitude and longitude. The allowed set is exactly publicSelectFields
 // UNION {latitude, longitude}. If any OTHER sensitive key leaks in, this guard fires.
-type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'transfer_function' | 'matrix_coefficients';
+type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'transfer_function' | 'matrix_coefficients';
 type _MapSensitiveKeysInPublicMap = Extract<keyof typeof publicMapSelectFields, _MapSensitiveKeys>;
 const _mapPrivacyGuard: _MapSensitiveKeysInPublicMap extends never ? true : [_MapSensitiveKeysInPublicMap, 'ERROR: privacy-sensitive field found in publicMapSelectFields — must only add latitude/longitude vs publicSelectFields'] = true;
 void _mapPrivacyGuard;

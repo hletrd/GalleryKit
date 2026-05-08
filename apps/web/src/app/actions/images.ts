@@ -361,6 +361,7 @@ export async function uploadImages(formData: FormData) {
                     transfer_function: data.colorSignals?.transferFunction ?? null,
                     matrix_coefficients: data.colorSignals?.matrixCoefficients ?? null,
                     is_hdr: data.colorSignals?.isHdr ?? false,
+                    has_gain_map: data.colorSignals?.hasGainMap ?? false,
                     pipeline_version: IMAGE_PIPELINE_VERSION,
                     // C22-AGG-02: .slice(0, 10) is safe on UTF-16 code units because
                     // getSafeExtension() in process-image.ts guarantees ASCII-only

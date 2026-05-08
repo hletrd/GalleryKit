@@ -13,6 +13,7 @@
 import type { Metadata } from 'sharp';
 import { open } from 'fs/promises';
 import { extractIccProfileName } from '@/lib/icc-extractor';
+import { hasGainMap as parseGainMapFromHeif } from '@/lib/gain-map-detection';
 
 export interface ColorSignals {
     /** Canonical ICC profile name parsed from the file. */
@@ -25,6 +26,17 @@ export interface ColorSignals {
     matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'identity' | 'unknown';
     /** Whether the image is HDR (PQ or HLG transfer). */
     isHdr: boolean;
+    /**
+     * P4-A1 / R4-H1: whether the source carries an Apple-style HDR gain map
+     * auxiliary item. Set when an HEIF / AVIF container declares either a
+     * 'urim' infe with the Apple gain map URI or a 'tmap' infe (ISO 21496-1),
+     * including the auxl-iref-only shape. Independent of `isHdr`: many
+     * Apple HDR HEICs carry an SDR base + gain map without flipping the
+     * transfer function on the primary item, so detection here is the only
+     * honest way to surface "this source was authored as HDR" in the audit
+     * panel until WI-09 wires the gain map through to delivery.
+     */
+    hasGainMap: boolean;
 }
 
 // C3-A1 / C3-COL-LOW-1 / C3-ARCH-MED-2: canonical wide-gamut primaries set
@@ -277,7 +289,10 @@ export async function detectColorSignals(
 
     // US-CM05: CICP nclx box parsing for HEIF/AVIF containers.
     // When nclx is present it takes precedence over ICC-derived values.
+    // P4-A1 / R4-H1: gain map detection shares the 1 MB header read so
+    // the upload pipeline only opens the file once for color-signal probes.
     let nclxCicp: CicpTriplet | null = null;
+    let hasGainMap = false;
     const format = metadata.format?.toLowerCase();
     if (format === 'heif' || format === 'avif') {
         try {
@@ -286,7 +301,9 @@ export async function detectColorSignals(
                 const header = Buffer.alloc(1024 * 1024); // 1 MB cap
                 const { bytesRead } = await fileHandle.read(header, 0, header.length, 0);
                 if (bytesRead > 0) {
-                    nclxCicp = parseCicpFromHeif(header.subarray(0, bytesRead));
+                    const headerSlice = header.subarray(0, bytesRead);
+                    nclxCicp = parseCicpFromHeif(headerSlice);
+                    hasGainMap = parseGainMapFromHeif(headerSlice);
                 }
             } finally {
                 await fileHandle.close();
@@ -314,6 +331,7 @@ export async function detectColorSignals(
         transferFunction,
         matrixCoefficients,
         isHdr,
+        hasGainMap,
     };
 }
 

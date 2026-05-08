@@ -263,6 +263,23 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             </span>
                         </div>
                     )}
+                    {/* P4-A1 / R4-H1: admin-only Apple HDR gain map audit row.
+                        The SDR base + gain map shape ships an HDR scene authored
+                        by the photographer; GalleryKit currently delivers the
+                        SDR base only. Surfacing the row honestly tells the
+                        admin that the source has an HDR layer the pipeline
+                        is not yet passing through (WI-09). */}
+                    {isAdmin && image.has_gain_map && (
+                        <div className="col-span-2">
+                            <p className="text-muted-foreground text-xs">{t('viewer.gainMap')}</p>
+                            <p className="font-medium">
+                                {t('viewer.gainMapPresent')}
+                                <span className="ml-2 text-xs italic text-amber-700 dark:text-amber-300">
+                                    {t('viewer.gainMapDeliveredAsSdr')}
+                                </span>
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
         </div>

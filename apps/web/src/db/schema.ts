@@ -65,6 +65,11 @@ export const images = mysqlTable("images", {
     transfer_function: varchar('transfer_function', { length: 16 }),
     matrix_coefficients: varchar('matrix_coefficients', { length: 16 }),
     is_hdr: boolean('is_hdr').notNull().default(false),
+    // P4-A1 / R4-H1: Apple HDR gain map detection. Admin-only column;
+    // surfaced in the Color Details audit panel so the photographer is
+    // told when the source carries an HDR layer the SDR-only delivery
+    // pipeline is not yet passing through (WI-09).
+    has_gain_map: boolean('has_gain_map').notNull().default(false),
     // US-CM11: pipeline version marker for idempotent backfill.
     pipeline_version: int('pipeline_version'),
     original_format: varchar('original_format', { length: 10 }),

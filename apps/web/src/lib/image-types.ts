@@ -27,6 +27,7 @@ export interface ImageDetail {
     transfer_function?: string | null;    // admin only (P3-3)
     matrix_coefficients?: string | null;   // admin only (P3-3)
     is_hdr?: boolean | null;               // admin only (P3-3)
+    has_gain_map?: boolean | null;         // admin only (P4-A1)
     white_balance: string | null;
     metering_mode: string | null;
     exposure_compensation: string | null;
