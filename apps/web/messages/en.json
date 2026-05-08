@@ -316,7 +316,6 @@
     "downloadP3Jpeg": "Download (Display P3 JPEG)",
     "downloadP3Avif": "Download (Display P3 AVIF)",
     "downloadP3AvifDesc": "Smaller file, wider gamut — modern browsers only",
-    "downloadHdrAvif": "Download (HDR AVIF)",
     "shortcutsHint": "Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, C color details, H histogram, Space to toggle slideshow.",
     "slideshowOn": "Slideshow started",
     "slideshowOff": "Slideshow stopped",
