@@ -189,6 +189,17 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="font-medium">{humanizeColorPipelineDecision(image.color_pipeline_decision, t) || t('viewer.colorUnknown')}</p>
                         </div>
                     )}
+                    {/* C4-A2: source bit depth co-located with the delivered row so
+                        the source-vs-delivered comparison is instant in the audit
+                        panel. The EXIF grid still shows source bit depth for the
+                        camera-capture audit lens; here it sits beside the delivered
+                        ceiling. */}
+                    {image.bit_depth != null && image.bit_depth > 0 && (
+                        <div>
+                            <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
+                            <p className="font-medium">{image.bit_depth}-bit</p>
+                        </div>
+                    )}
                     {/* P3-5: delivered bit depth per format */}
                     {image.color_pipeline_decision && (
                         <div>
