@@ -40,12 +40,19 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
             expect(SOURCE).toContain("t('viewer.deliveredBitDepth')");
         });
 
-        it('switches between viewer.deliveredBitDepthP3 and viewer.deliveredBitDepthSrgb based on decision prefix', () => {
-            // The conditional is: decision.startsWith('p3') → P3 string;
-            // else → sRGB string. Locks the contract so a refactor can't
-            // silently flip the keys.
+        it('switches between viewer.deliveredBitDepthP3 and viewer.deliveredBitDepthSrgb based on the isP3Pipeline helper', () => {
+            // C7-A1 / C7-COL-MED-1 / C7-UX-MED-1 / C7-CRIT-MED-1: lock the
+            // helper-call pattern instead of the inline literal. The helper
+            // (`isP3Pipeline`) lives in `@/lib/color-pipeline-decisions` and
+            // is locked for enum coverage by `is-p3-pipeline.test.ts`.
+            //
+            // Pre-cycle-7 this row used a bare `decision.startsWith('p3')`
+            // predicate — functionally equivalent on every shipping enum
+            // value but semantically diverging from the cycle-6 helper
+            // (which matches only `p3-from-*`). C7-A1 closed the gap so all
+            // four call sites of the predicate share one source of truth.
             expect(SOURCE).toMatch(
-                /image\.color_pipeline_decision\.startsWith\('p3'\)[\s\S]*?t\('viewer\.deliveredBitDepthP3'\)[\s\S]*?t\('viewer\.deliveredBitDepthSrgb'\)/,
+                /isP3Pipeline\s*\(\s*image\.color_pipeline_decision\s*\)[\s\S]*?t\('viewer\.deliveredBitDepthP3'\)[\s\S]*?t\('viewer\.deliveredBitDepthSrgb'\)/,
             );
         });
     });

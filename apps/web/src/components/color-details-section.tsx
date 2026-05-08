@@ -3,6 +3,7 @@
 import { useState, useImperativeHandle } from 'react';
 import { Info, ChevronDown } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { ImageDetail } from '@/lib/image-types';
 
 /**
@@ -227,7 +228,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.deliveredBitDepth')}</p>
                             <p className="font-medium">
-                                {image.color_pipeline_decision.startsWith('p3')
+                                {isP3Pipeline(image.color_pipeline_decision)
                                     ? t('viewer.deliveredBitDepthP3')
                                     : t('viewer.deliveredBitDepthSrgb')}
                             </p>
