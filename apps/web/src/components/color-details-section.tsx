@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useImperativeHandle } from 'react';
 import { Info, ChevronDown } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ImageDetail } from '@/lib/image-types';
@@ -58,7 +58,7 @@ interface ColorDetailsSectionProps {
     image: ImageDetail;
     isAdmin?: boolean;
     t: (key: string) => string;
-    toggleRef?: React.MutableRefObject<(() => void) | null>;
+    toggleRef?: React.RefObject<(() => void) | null>;
 }
 
 export default function ColorDetailsSection({ image, isAdmin = false, t, toggleRef }: ColorDetailsSectionProps) {
@@ -70,9 +70,11 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     );
     const [showColorDetails, setShowColorDetails] = useState(isNonTrivialColor);
 
-    if (toggleRef) {
-        toggleRef.current = () => setShowColorDetails((prev) => !prev);
-    }
+    // C1-CRIT-1 (cycle 1 RPF): use useImperativeHandle to expose the toggle to
+    // the parent's keyboard handler. Direct ref.current = ... mutation during
+    // render violates React 19's react-hooks/refs rule and breaks under
+    // concurrent rendering / StrictMode mount-unmount-mount.
+    useImperativeHandle(toggleRef, () => () => setShowColorDetails((prev) => !prev), []);
 
     const hasColorDetails = Boolean(
         image.color_primaries || image.transfer_function || image.is_hdr || (isAdmin && image.color_pipeline_decision),
