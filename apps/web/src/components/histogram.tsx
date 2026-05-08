@@ -52,9 +52,19 @@ function getAvifSupported(): boolean {
     return false;
 }
 
-const _cachedSupportsCanvasP3 = typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(color-gamut: p3)').matches;
+let _cachedSupportsCanvasP3: boolean | null = null;
+
+function getSupportsCanvasP3(): boolean {
+    if (_cachedSupportsCanvasP3 !== null) return _cachedSupportsCanvasP3;
+    try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { colorSpace: 'display-p3' as PredefinedColorSpace });
+        _cachedSupportsCanvasP3 = ctx !== null && ctx.getContextAttributes().colorSpace === 'display-p3';
+    } catch {
+        _cachedSupportsCanvasP3 = false;
+    }
+    return _cachedSupportsCanvasP3;
+}
 
 interface HistogramProps {
     imageUrl: string;
@@ -138,9 +148,7 @@ function computeHistogramAsync(
     // CM-MED-6: request a Display-P3 2D context on P3-capable displays so a
     // P3-tagged AVIF/JPEG composites without sRGB clipping. On non-P3
     // displays we fall through to the default sRGB context.
-    const supportsP3 = typeof window !== 'undefined'
-        && typeof window.matchMedia === 'function'
-        && window.matchMedia('(color-gamut: p3)').matches;
+    const supportsP3 = getSupportsCanvasP3();
     const ctxOptions: CanvasRenderingContext2DSettings | undefined = supportsP3
         ? { colorSpace: 'display-p3' as PredefinedColorSpace }
         : undefined;
@@ -261,7 +269,7 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
     const avifSupported = getAvifSupported();
 
     const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
-    const preferAvif = isWideGamut && avifSupported && _cachedSupportsCanvasP3 && Boolean(avifUrl);
+    const preferAvif = isWideGamut && avifSupported && getSupportsCanvasP3() && Boolean(avifUrl);
     const effectiveUrl = preferAvif ? avifUrl! : imageUrl;
     const isClipped = isWideGamut && !preferAvif;
 
