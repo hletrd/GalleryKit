@@ -31,8 +31,28 @@ function cleanString(value: string): string | null {
     return clampUtf8Bytes(s, 255) || null;
 }
 
-export function extractIccProfileName(icc?: Buffer | null): string | null {
+/**
+ * Extract the human-readable description string from an ICC profile.
+ *
+ * @param icc — embedded ICC bytes (or null / undefined for a no-op).
+ * @param locale — optional 2-letter language code (e.g. 'ko', 'en').
+ *   When supplied, the `mluc` tag walker prefers the record whose
+ *   language code matches; otherwise it returns the first non-empty
+ *   record. The locale parameter is the IETF language tag's primary
+ *   subtag — only the first 2 letters are compared, case-insensitive,
+ *   per ICC.1:2010 §10.13 (mluc tag, language code is ISO 639-1).
+ */
+export function extractIccProfileName(
+    icc?: Buffer | null,
+    locale?: string,
+): string | null {
     if (!icc || icc.length <= 132) return null;
+
+    // P4-E1 / LATENT-L1: normalize the requested locale once. Empty /
+    // missing locale falls through the existing first-non-empty path.
+    const wantedLang = locale && locale.length >= 2
+        ? locale.slice(0, 2).toLowerCase()
+        : null;
 
     try {
         const iccLen = icc.length;
@@ -67,9 +87,15 @@ export function extractIccProfileName(icc?: Buffer | null): string | null {
                 const recordSize = icc.readUInt32BE(dataOffset + 12);
                 if (recordSize < 12) break;
                 const recordsStart = dataOffset + 16;
+                let firstNonEmpty: string | null = null;
                 for (let recordIndex = 0; recordIndex < numRecords; recordIndex++) {
                     const recOffset = recordsStart + recordIndex * recordSize;
                     if (recOffset + 12 > iccLen || recOffset + 12 > dataOffset + dataSize) break;
+                    // Record header: language(2) + country(2) + length(4) + offset(4).
+                    // P4-E1: read the 2-byte language code so we can prefer the
+                    // record matching the caller's requested locale.
+                    const langCodeBytes = icc.subarray(recOffset, recOffset + 2);
+                    const recordLang = langCodeBytes.toString('ascii').toLowerCase();
                     const recLen = Math.min(icc.readUInt32BE(recOffset + 4), 1024);
                     const recTextOffset = icc.readUInt32BE(recOffset + 8);
                     const strStart = dataOffset + recTextOffset;
@@ -77,8 +103,18 @@ export function extractIccProfileName(icc?: Buffer | null): string | null {
                     if (strEnd > iccLen || strEnd > dataOffset + dataSize || strStart >= strEnd) continue;
                     const decoded = decodeUtf16BE(icc.subarray(strStart, strEnd));
                     const cleaned = cleanString(decoded);
-                    if (cleaned) return cleaned;
+                    if (!cleaned) continue;
+                    if (wantedLang && recordLang === wantedLang) {
+                        return cleaned;
+                    }
+                    if (firstNonEmpty === null) {
+                        firstNonEmpty = cleaned;
+                    }
                 }
+                // P4-E1: locale didn't match any record (or no locale was
+                // requested) — fall through to the first non-empty record,
+                // matching the historical behavior.
+                if (firstNonEmpty !== null) return firstNonEmpty;
             }
 
             break;

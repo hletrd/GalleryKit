@@ -29,6 +29,47 @@ function makeMlucIcc(text: string) {
 }
 
 /**
+ * Build a multi-record `mluc` ICC fixture (P4-E1).
+ * Each entry contributes one record: lang/country code + UTF-16BE text.
+ */
+function makeMultiLocaleMlucIcc(entries: { lang: string; country: string; text: string }[]) {
+    const dataOffset = 144;
+    const recordSize = 12;
+    const numRecords = entries.length;
+    // All record headers come first, then text payloads.
+    const headerEnd = 16 + recordSize * numRecords;
+    const encodedTexts = entries.map((e) => utf16beFull(e.text));
+    const totalTextBytes = encodedTexts.reduce((sum, e) => sum + e.length, 0);
+    const dataSize = headerEnd + totalTextBytes;
+    const buffer = Buffer.alloc(dataOffset + dataSize);
+
+    buffer.writeUInt32BE(1, 128);
+    buffer.write('desc', 132, 'ascii');
+    buffer.writeUInt32BE(dataOffset, 136);
+    buffer.writeUInt32BE(dataSize, 140);
+
+    buffer.write('mluc', dataOffset, 'ascii');
+    buffer.writeUInt32BE(0, dataOffset + 4);
+    buffer.writeUInt32BE(numRecords, dataOffset + 8);
+    buffer.writeUInt32BE(recordSize, dataOffset + 12);
+
+    let textCursor = headerEnd;
+    for (let i = 0; i < numRecords; i++) {
+        const entry = entries[i];
+        const encoded = encodedTexts[i];
+        const recOffset = dataOffset + 16 + i * recordSize;
+        buffer.write(entry.lang, recOffset, 'ascii');
+        buffer.write(entry.country, recOffset + 2, 'ascii');
+        buffer.writeUInt32BE(encoded.length, recOffset + 4);
+        buffer.writeUInt32BE(textCursor, recOffset + 8);
+        encoded.copy(buffer, dataOffset + textCursor);
+        textCursor += encoded.length;
+    }
+
+    return buffer;
+}
+
+/**
  * Encode a string as UTF-16BE, properly handling supplementary characters
  * (code points > 0xFFFF) by encoding them as surrogate pairs.
  */
@@ -76,6 +117,39 @@ describe('process-image metadata normalization', () => {
         const mixed = 'A\u{1F600}Z';
         const result = extractIccProfileName(makeMlucIcc(mixed));
         expect(result).toBe(mixed);
+    });
+
+    // P4-E1 / LATENT-L1: mluc locale-matched record selection.
+    it('returns the Korean record when locale="ko" is requested (P4-E1)', () => {
+        const icc = makeMultiLocaleMlucIcc([
+            { lang: 'en', country: 'US', text: 'Display P3' },
+            { lang: 'ko', country: 'KR', text: 'Display P3 한국어' },
+            { lang: 'ja', country: 'JP', text: 'Display P3 日本語' },
+        ]);
+        expect(extractIccProfileName(icc, 'ko')).toBe('Display P3 한국어');
+    });
+
+    it('returns the English record when locale="en" is requested (P4-E1)', () => {
+        const icc = makeMultiLocaleMlucIcc([
+            { lang: 'ko', country: 'KR', text: 'Display P3 한국어' },
+            { lang: 'en', country: 'US', text: 'Display P3' },
+            { lang: 'ja', country: 'JP', text: 'Display P3 日本語' },
+        ]);
+        expect(extractIccProfileName(icc, 'en')).toBe('Display P3');
+    });
+
+    it('falls back to the first non-empty record when no locale matches (P4-E1)', () => {
+        const icc = makeMultiLocaleMlucIcc([
+            { lang: 'ko', country: 'KR', text: 'Display P3 한국어' },
+            { lang: 'en', country: 'US', text: 'Display P3' },
+        ]);
+        expect(extractIccProfileName(icc, 'fr')).toBe('Display P3 한국어');
+    });
+
+    it('preserves single-record behavior when no locale is requested (P4-E1)', () => {
+        const icc = makeMlucIcc('Display P3');
+        // No locale arg → first non-empty (existing behavior).
+        expect(extractIccProfileName(icc)).toBe('Display P3');
     });
 
     it('byte-bounds EXIF strings before DB insertion', () => {
