@@ -1,36 +1,23 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { useDisplayCapability } from '@/lib/use-display-capability';
 
 interface WideGamutHintProps {
     colorPrimaries?: string | null;
     t: (key: string) => string;
 }
 
-// C1-CRIT-3 (cycle 1 RPF): use useSyncExternalStore for matchMedia
-// subscription. The previous useState + useEffect with synchronous setState
-// in the effect body triggered the react-hooks/set-state-in-effect lint rule
-// (cascading render anti-pattern).
-function subscribeToP3Mq(callback: () => void): () => void {
-    const mq = window.matchMedia('(color-gamut: p3)');
-    mq.addEventListener('change', callback);
-    return () => mq.removeEventListener('change', callback);
-}
-function getP3Snapshot(): boolean {
-    return window.matchMedia('(color-gamut: p3)').matches;
-}
-function getServerSnapshot(): boolean {
-    // Default to P3-capable at SSR. The hint shows only when isSrgbDisplay=true
-    // (i.e. !isP3Display), so SSR HTML never includes the hint — it is the
-    // safe default for an SDR-only hint.
-    return true;
-}
-
+// P4-B1 / R4-M1: replaced the inline `(color-gamut: p3)` MQ subscription
+// with the unified `useDisplayCapability` hook. The hook covers the same
+// browsers via the same MQ + adds `screen.colorGamut` (Chromium 121+,
+// Safari 18+ TP) for the most accurate signal, plus a canvas-P3 probe so
+// Firefox 124+ on macOS internal-P3 displays no longer falsely flags
+// 'sRGB' (no MQ support in Firefox today).
 export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps) {
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
-    const isP3Display = useSyncExternalStore(subscribeToP3Mq, getP3Snapshot, getServerSnapshot);
-    const isSrgbDisplay = !isP3Display;
+    const { colorGamut } = useDisplayCapability();
+    const isSrgbDisplay = colorGamut === 'srgb';
 
     if (!isWideGamut || !isSrgbDisplay) return null;
 

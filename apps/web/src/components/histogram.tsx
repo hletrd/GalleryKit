@@ -5,6 +5,7 @@ import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { useDisplayCapability } from '@/lib/use-display-capability';
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 
@@ -339,7 +340,16 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
     }, []);
 
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
-    const preferAvif = isWideGamut && avifSupported === true && getSupportsCanvasP3() && Boolean(avifUrl);
+    // P4-B1 / R4-M1: route the P3-display decision through the unified
+    // `useDisplayCapability` hook so Firefox 124+ on macOS internal P3 lights
+    // up the AVIF preference. Previously the gate used `getSupportsCanvasP3()`
+    // alone, which works for Chrome / Safari / Edge (where canvas P3 is
+    // gated on a P3 display) but was conservative on Firefox where the
+    // canvas P3 context is available regardless of display gamut. The hook
+    // adds `screen.colorGamut` + MQ + canvas-P3 layered detection.
+    const { colorGamut } = useDisplayCapability();
+    const isP3Display = colorGamut !== 'srgb';
+    const preferAvif = isWideGamut && avifSupported === true && isP3Display && getSupportsCanvasP3() && Boolean(avifUrl);
     const effectiveUrl = preferAvif ? avifUrl! : imageUrl;
     // C3-A4: only show "(sRGB clipped)" when the AVIF probe has actually
     // resolved AND came back as `false`. While avifSupported === null
