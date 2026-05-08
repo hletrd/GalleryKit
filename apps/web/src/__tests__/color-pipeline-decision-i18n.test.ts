@@ -28,28 +28,22 @@ const ENUM_VALUES: ColorPipelineDecision[] = [
     'p3-from-rec2020',
 ];
 
-interface ViewerMessages {
-    [key: string]: string;
+// next-intl message tables are deeply-typed unions of strings + nested
+// objects (e.g. viewer.histogramModes is itself an object). For this fixture
+// we only need the leaf string entries under `viewer.*`, so we narrow to
+// `Record<string, unknown>` and only use values that are string at runtime.
+const enViewer = (enMessages as unknown as { viewer: Record<string, unknown> }).viewer;
+const koViewer = (koMessages as unknown as { viewer: Record<string, unknown> }).viewer;
+
+function lookup(table: Record<string, unknown>, key: string): string {
+    const segments = key.split('.');
+    if (segments[0] !== 'viewer' || !segments[1]) return '';
+    const value = table[segments[1]];
+    return typeof value === 'string' ? value : '';
 }
 
-const enViewer = (enMessages as { viewer: ViewerMessages }).viewer;
-const koViewer = (koMessages as { viewer: ViewerMessages }).viewer;
-
-const enT = (key: string): string => {
-    const segments = key.split('.');
-    if (segments[0] === 'viewer' && segments[1]) {
-        return enViewer[segments[1]] ?? '';
-    }
-    return '';
-};
-
-const koT = (key: string): string => {
-    const segments = key.split('.');
-    if (segments[0] === 'viewer' && segments[1]) {
-        return koViewer[segments[1]] ?? '';
-    }
-    return '';
-};
+const enT = (key: string): string => lookup(enViewer, key);
+const koT = (key: string): string => lookup(koViewer, key);
 
 describe('humanizeColorPipelineDecision — i18n enum coverage', () => {
     it.each(ENUM_VALUES)('returns non-empty English string for %s', (value) => {
