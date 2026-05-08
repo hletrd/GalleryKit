@@ -175,7 +175,9 @@
 /* Forced-colors (Windows high-contrast) adjustments for color surfaces */
 @media (forced-colors: active) {
   .hdr-badge {
-    border: 1px solid CanvasText;
+    background: Highlight;
+    color: HighlightText;
+    border: none;
     forced-color-adjust: none;
   }
   .gamut-p3-badge {

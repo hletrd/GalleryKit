@@ -144,7 +144,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                     {image.is_hdr && (
                         <div className="col-span-2">
                             <span
-                                className="hdr-badge items-center gap-1 px-2 py-1 text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800"
+                                className="hdr-badge items-center gap-1 px-3 py-1.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white shadow-sm rounded"
                                 aria-label={t('viewer.hdrBadgeAriaLabel')}
                                 title={t('viewer.hdrBadgeAriaLabel')}
                                 role="img"
