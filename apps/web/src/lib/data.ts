@@ -239,43 +239,24 @@ const adminSelectFields = {
 // for the grid display. Uses the same destructuring pattern as publicSelectFields
 // to maintain the derivation relationship with adminSelectFields.
 const {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     camera_model: _omitCameraModel,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     lens_model: _omitLensModel,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     iso: _omitIso,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     f_number: _omitFNumber,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     exposure_time: _omitExposureTime,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     focal_length: _omitFocalLength,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     latitude: _omitLatitudeAdmin,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     longitude: _omitLongitudeAdmin,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     color_space: _omitColorSpace,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     white_balance: _omitWhiteBalance,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     metering_mode: _omitMeteringMode,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     exposure_compensation: _omitExposureCompensation,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     exposure_program: _omitExposureProgram,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     flash: _omitFlash,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     bit_depth: _omitBitDepth,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     original_format: _omitOriginalFormatAdmin,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     original_file_size: _omitOriginalFileSizeAdmin,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     original_width: _omitOriginalWidth,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for listing performance
     original_height: _omitOriginalHeight,
     ...adminListSelectFieldCore
 } = adminSelectFields;
@@ -292,27 +273,16 @@ const adminListSelectFields = {
 // This is the primary privacy enforcement mechanism: any developer adding a sensitive
 // field to adminSelectFields must consciously decide whether to also include it here.
 const {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
     latitude: _omitLatitude,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
     longitude: _omitLongitude,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
     filename_original: _omitFilenameOriginal,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
     user_filename: _omitUserFilename,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     original_format: _omitOriginalFormat,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     original_file_size: _omitOriginalFileSize,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     processed: _omitProcessed,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally: color pipeline is admin-only
     color_pipeline_decision: _omitColorPipelineDecision,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: HDR fields are admin-only until WI-09 ships
     is_hdr: _omitIsHdr,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: transfer_function is admin-only
     transfer_function: _omitTransferFunction,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: matrix_coefficients is admin-only
     matrix_coefficients: _omitMatrixCoefficients,
     ...publicSelectFieldCore
 } = adminSelectFields;
@@ -329,23 +299,14 @@ const publicSelectFields = {
 //
 // DO NOT use this field set without the map_visible topic filter.
 const {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy (same as publicSelectFields)
     filename_original: _omitFilenameOriginalMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally for privacy
     user_filename: _omitUserFilenameMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     original_format: _omitOriginalFormatMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     original_file_size: _omitOriginalFileSizeMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally from public payloads
     processed: _omitProcessedMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally: color pipeline is admin-only
     color_pipeline_decision: _omitColorPipelineDecisionMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: HDR fields are admin-only until WI-09 ships
     is_hdr: _omitIsHdrMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: transfer_function is admin-only
     transfer_function: _omitTransferFunctionMap,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: matrix_coefficients is admin-only
     matrix_coefficients: _omitMatrixCoefficientsMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
@@ -998,7 +959,6 @@ export async function getImageByShareKey(key: string) {
     }
 
     // Destructure to strip tag_concat from the return value
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- intentionally stripped from return value
     const { tag_concat: _tagConcat, ...imageFields } = result;
 
     return {
