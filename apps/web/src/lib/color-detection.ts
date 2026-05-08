@@ -106,10 +106,33 @@ function inferTransferFunction(
     if (name.includes('adobe') || name.includes('adobergb')) return 'gamma22';
     if (name.includes('prophoto')) return 'gamma18';
 
+    // Display P3 ICC profiles use sRGB transfer per IEC 61966-2-1; this is
+    // the documented Apple Display-P3 contract, not a guess.
+    if (name.includes('displayp3') || name.includes('p3d65')) return 'srgb';
+
+    // DCI-P3 (cinema) is gamma-2.6 by SMPTE EG 432-2; treat as gamma22 as
+    // the closest available enum until a dedicated 'gamma26' value lands.
+    if (name.includes('dcip3')) return 'gamma22';
+
+    // BT.2020 / Rec.2020 SDR uses BT.1886-style transfer (gamma-2.4-ish);
+    // we report 'srgb' for the SDR companion case where the ICC name says
+    // Rec.2020 but no PQ/HLG hint is present. HDR Rec.2020 sources flow
+    // through the explicit PQ/HLG branches above.
+    if (name.includes('bt2020') || name.includes('rec2020') || name.includes('iturbt2020')) return 'srgb';
+
     // 16-bit+ with no other clues → could be HDR; mark unknown rather than guess
     if (bitDepth && bitDepth >= 10) return 'unknown';
 
-    return 'srgb';
+    // C3-A7 / C3-HDR-MED-3: previously returned 'srgb' as a fallback for
+    // unknown 8-bit profiles. That was a guess — for unrecognized ICC
+    // profiles (custom calibration, off-brand RGB working spaces) we cannot
+    // know the transfer characteristic. Return 'unknown' so the audit panel
+    // shows nothing rather than lying about the transfer.
+    //
+    // isHdr stays false for 'unknown' (only PQ / HLG flip the flag), so this
+    // does not change HDR detection. It only changes the audit label for
+    // unrecognized profiles from a misleading 'sRGB' to an honest 'unknown'.
+    return 'unknown';
 }
 
 /**

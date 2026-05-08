@@ -32,13 +32,26 @@ function makeMockMeta(partial: Partial<import('sharp').Metadata> = {}): import('
 // ---------------------------------------------------------------------------
 
 describe('detectColorSignals', () => {
-    it('returns sRGB for untagged / null ICC', async () => {
+    // C3-A7 / C3-HDR-MED-3: untagged / null ICC at 8-bit reports
+    // transferFunction='unknown' (not the previous lie of 'srgb'). isHdr
+    // stays false because only PQ / HLG flip the HDR flag — so this does
+    // NOT change HDR detection. It changes the audit label for unrecognized
+    // profiles from a misleading 'sRGB' to an honest 'unknown'.
+    it('returns unknown transfer for untagged / null ICC', async () => {
         const signals = await detectColorSignals('/tmp/fake.jpg', {}, makeMockMeta({ icc: undefined }));
         expect(signals.colorPrimaries).toBe('unknown');
-        expect(signals.transferFunction).toBe('srgb');
+        expect(signals.transferFunction).toBe('unknown');
         expect(signals.matrixCoefficients).toBe('unknown');
         expect(signals.isHdr).toBe(false);
         expect(signals.iccProfileName).toBeNull();
+    });
+
+    it('returns unknown transfer for unrecognized 8-bit ICC profile', async () => {
+        // ICC name doesn't match sRGB / Adobe / ProPhoto / P3 / Rec2020 / PQ / HLG.
+        const meta = makeMockMeta({ icc: 'Custom Calibration Profile v3' as unknown as Buffer });
+        const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
+        expect(signals.transferFunction).toBe('unknown');
+        expect(signals.isHdr).toBe(false);
     });
 
     it('returns bt709 for sRGB ICC name', async () => {
