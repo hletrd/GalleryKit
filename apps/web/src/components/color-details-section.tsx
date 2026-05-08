@@ -45,6 +45,15 @@ export function humanizeColorPipelineDecision(
     }
 }
 
+function normalizeForCompare(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/\s*\([^)]*\)\s*$/g, '')
+        .replace(/\s*icc\s*profile\s*$/g, '')
+        .replace(/\s*profile\s*$/g, '')
+        .trim();
+}
+
 interface ColorDetailsSectionProps {
     image: ImageDetail;
     isAdmin?: boolean;
@@ -67,7 +76,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
 
     const primariesHuman = humanizeColorPrimaries(image.color_primaries);
     const iccName = image.icc_profile_name || '';
-    const primariesMatchIcc = primariesHuman && iccName && primariesHuman.toLowerCase() === iccName.toLowerCase();
+    const primariesMatchIcc = primariesHuman && iccName && normalizeForCompare(primariesHuman) === normalizeForCompare(iccName);
 
     const colorDetailsId = `color-details-${image.id}`;
 
@@ -106,14 +115,28 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                     {primariesMatchIcc ? (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                            <p className="font-medium">{iccName}</p>
+                            <p className="font-medium">
+                                {iccName}
+                                {iccName.toLowerCase().includes('p3') && (
+                                    <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
+                                        P3
+                                    </span>
+                                )}
+                            </p>
                         </div>
                     ) : (
                         <>
                             {iccName && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                    <p className="font-medium">{iccName}</p>
+                                    <p className="font-medium">
+                                        {iccName}
+                                        {iccName.toLowerCase().includes('p3') && (
+                                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
+                                                P3
+                                            </span>
+                                        )}
+                                    </p>
                                 </div>
                             )}
                             {image.color_primaries && (

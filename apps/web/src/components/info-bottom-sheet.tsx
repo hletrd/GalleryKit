@@ -278,6 +278,10 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             </p>
                         )}
 
+                        {/* Color details accordion — mirrors desktop sidebar */}
+                        <ColorDetailsSection image={image} isAdmin={isAdminProp} t={t} />
+                        <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
+
                         {/* EXIF section header */}
                         <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
                             <Info className="h-4 w-4" />
@@ -328,14 +332,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             {hasExifData(image.icc_profile_name) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                    <p className="font-medium">
-                                        {image.icc_profile_name}
-                                        {image.icc_profile_name && image.icc_profile_name.toLowerCase().includes('p3') && (
-                                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
-                                                P3
-                                            </span>
-                                        )}
-                                    </p>
+                                    <p className="font-medium">{image.icc_profile_name}</p>
                                 </div>
                             )}
                             {(image.width > 0 && image.height > 0) && (
@@ -420,10 +417,6 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                         {!hasAnyCameraExifData(image) && (
                             <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                         )}
-
-                        {/* Color details accordion — mirrors desktop sidebar */}
-                        <ColorDetailsSection image={image} isAdmin={isAdminProp} t={t} />
-                        <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
 
                         {/* Histogram */}
                         {image.filename_jpeg && (

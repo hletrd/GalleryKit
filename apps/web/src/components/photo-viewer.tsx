@@ -655,6 +655,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
                             </CardHeader>
                             <CardContent>
+                                <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} />
+                                <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
                                 <h3 className="font-semibold mb-3 flex items-center gap-2"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
                                     {hasExifData(image.camera_model) && (
@@ -696,14 +698,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     {hasExifData(image.icc_profile_name) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                            <p className="font-medium">
-                                                {image.icc_profile_name}
-                                                {image.icc_profile_name && image.icc_profile_name.toLowerCase().includes('p3') && (
-                                                    <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
-                                                        P3
-                                                    </span>
-                                                )}
-                                            </p>
+                                            <p className="font-medium">{image.icc_profile_name}</p>
                                         </div>
                                     )}
                                     {(image.width > 0 && image.height > 0) && (
@@ -787,8 +782,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         </div>
                                     )}
                                 </div>
-                                <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} />
-                                <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
                                 {!hasAnyCameraExifData(image) && (
                                     <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                                 )}
