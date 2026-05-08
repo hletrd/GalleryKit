@@ -209,7 +209,31 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                     {(isAdmin && image.color_pipeline_decision) && (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.colorPipelineDecision')}</p>
-                            <p className="font-medium">{humanizeColorPipelineDecision(image.color_pipeline_decision, t) || t('viewer.colorUnknown')}</p>
+                            <p className="font-medium flex items-center gap-1">
+                                {humanizeColorPipelineDecision(image.color_pipeline_decision, t) || t('viewer.colorUnknown')}
+                                {/* P4-C2 / R4-M3 / UX-M2: shorten the DCI-P3 label
+                                    (now "Display P3 (from DCI-P3)") and surface the
+                                    Bradford D50→D65 white-point-adaptation rationale
+                                    in a tooltip. The label was previously inline
+                                    (and noisy); the tooltip keeps the audit-grade
+                                    detail one focus / hover away. */}
+                                {image.color_pipeline_decision === 'p3-from-dcip3' && (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                type="button"
+                                                className="ml-1 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                                aria-label={t('viewer.colorPipelineP3FromDcip3Tooltip')}
+                                            >
+                                                <Info className="h-3 w-3" />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {t('viewer.colorPipelineP3FromDcip3Tooltip')}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                )}
+                            </p>
                         </div>
                     )}
                     {/* C4-A2: source bit depth co-located with the delivered row so
