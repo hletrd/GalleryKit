@@ -127,6 +127,13 @@
       "when": 1747156800000,
       "tag": "0017_pipeline_version",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1778587200000,
+      "tag": "0018_has_gain_map",
+      "breakpoints": true
     }
   ]
 }

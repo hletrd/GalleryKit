@@ -141,28 +141,22 @@ function formatError(error) {
     return { message: String(error) };
 }
 
-function getLatestMigration(migrationsFolder) {
+function getAllJournalMigrations(migrationsFolder) {
     const journalPath = path.join(migrationsFolder, 'meta', '_journal.json');
     const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
-    const latestEntry = journal.entries[journal.entries.length - 1];
-    if (!latestEntry) {
+    if (!Array.isArray(journal.entries) || journal.entries.length === 0) {
         throw new Error(`No migration entries found in ${journalPath}`);
     }
 
-    const migrationPath = path.join(migrationsFolder, `${latestEntry.tag}.sql`);
-    const migrationSql = fs.readFileSync(migrationPath, 'utf8');
-
-    // Use the maximum timestamp across ALL journal entries, not just the last one.
-    // Migration timestamps may not be monotonically increasing (e.g. entries added
-    // out of order), so the baseline must cover the latest timestamp to prevent
-    // drizzle from re-running earlier migrations with later timestamps.
-    const maxMillis = Math.max(...journal.entries.map(e => e.when));
-
-    return {
-        tag: latestEntry.tag,
-        folderMillis: maxMillis,
-        hash: crypto.createHash('sha256').update(migrationSql).digest('hex'),
-    };
+    return journal.entries.map((entry) => {
+        const migrationPath = path.join(migrationsFolder, `${entry.tag}.sql`);
+        const migrationSql = fs.readFileSync(migrationPath, 'utf8');
+        return {
+            tag: entry.tag,
+            folderMillis: entry.when,
+            hash: crypto.createHash('sha256').update(migrationSql).digest('hex'),
+        };
+    });
 }
 
 async function queryOne(connection, sql, params) {
@@ -237,13 +231,6 @@ async function ensureMigrationTable(connection) {
             created_at bigint
         )
     `);
-}
-
-async function getLatestRecordedMigration(connection) {
-    return queryOne(
-        connection,
-        'SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1'
-    );
 }
 
 async function hasAnyGalleryTables(connection, dbName) {
@@ -588,40 +575,94 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureForeignKey(connection, dbName, 'audit_log', 'audit_log_user_id_admin_users_id_fk', 'ALTER TABLE audit_log ADD CONSTRAINT audit_log_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id)');
 }
 
-async function baselineLatestMigrationIfNeeded(connection, latestMigration) {
-    const latestRecorded = await getLatestRecordedMigration(connection);
-    if (latestRecorded && Number(latestRecorded.created_at) >= latestMigration.folderMillis) {
-        return false;
-    }
-
-    await connection.query(
-        'INSERT INTO __drizzle_migrations (`hash`, `created_at`) VALUES (?, ?)',
-        [latestMigration.hash, latestMigration.folderMillis]
-    );
-    console.log(`[Migration] Baseline recorded for ${latestMigration.tag}.`);
-    return true;
+async function getRecordedHashes(connection) {
+    const [rows] = await connection.query('SELECT hash FROM __drizzle_migrations');
+    return new Set(rows.map((r) => r.hash));
 }
 
-async function prepareLegacyDatabaseIfNeeded(connection, dbName, latestMigration) {
+/**
+ * Insert one __drizzle_migrations row per journal entry that isn't already
+ * recorded. Each row carries the migration's specific hash + its journal
+ * `when` timestamp so drizzle's MAX(created_at) cursor lands on the
+ * highest journal `when`, not on a synthetic max-of-all baseline.
+ *
+ * Drizzle's MySQL migrator (node_modules/drizzle-orm/mysql-core/dialect.cjs)
+ * decides whether to apply each migration by:
+ *
+ *     if (lastDbMigration.created_at < migration.folderMillis) apply
+ *
+ * The journal in this repo has non-monotonic `when` timestamps (idx 6 lands
+ * in 2026-04 while idx 7-17 land in 2025-05). The previous baseline strategy
+ * inserted a single row with `Math.max(...whens)` — that row's created_at
+ * ended up greater than every entry 7-17's folderMillis, so drizzle silently
+ * skipped them on every deploy.
+ *
+ * Per-entry baselining keeps drizzle's own hash check authoritative: each
+ * journal entry's hash is in the table, so drizzle short-circuits the apply
+ * step. New migrations (added later with a strictly-greater `when`) pass the
+ * cursor check and apply normally.
+ */
+async function baselineAllJournalMigrations(connection, migrations) {
+    const haveHashes = await getRecordedHashes(connection);
+    const inserts = migrations.filter((m) => !haveHashes.has(m.hash));
+    if (inserts.length === 0) {
+        return 0;
+    }
+
+    for (const m of inserts) {
+        await connection.query(
+            'INSERT INTO __drizzle_migrations (`hash`, `created_at`) VALUES (?, ?)',
+            [m.hash, m.folderMillis]
+        );
+    }
+    console.log(`[Migration] Baseline inserted ${inserts.length} migration row(s) for already-reconciled schema.`);
+    return inserts.length;
+}
+
+async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     await ensureMigrationTable(connection);
     const hasGalleryTables = await hasAnyGalleryTables(connection, dbName);
     if (!hasGalleryTables) {
         return;
     }
 
-    const latestRecorded = await getLatestRecordedMigration(connection);
-    if (latestRecorded && Number(latestRecorded.created_at) >= latestMigration.folderMillis) {
+    const haveHashes = await getRecordedHashes(connection);
+    const journalCovered = migrations.every((m) => haveHashes.has(m.hash));
+    if (journalCovered) {
+        // Every committed migration is already in __drizzle_migrations.
+        // No legacy-schema reconcile needed; drizzle.migrate() will be a no-op.
         return;
     }
 
+    // The DB carries gallery tables but the migration log is incomplete (or the
+    // legacy single-row baseline poisoned the cursor). Reconcile the schema we
+    // know about idempotently, then baseline every journal entry whose schema
+    // state is now reflected in the DB.
     await reconcileLegacySchema(connection, dbName);
-    await baselineLatestMigrationIfNeeded(connection, latestMigration);
+    await baselineAllJournalMigrations(connection, migrations);
 }
 
-async function runMigrations(connection, migrationsFolder) {
+async function runMigrations(connection, migrationsFolder, expectedMigrations) {
     const db = drizzle(connection);
     console.log(`[Migration] Applying committed migrations from ${migrationsFolder}`);
     await migrate(db, { migrationsFolder });
+
+    // Post-condition: every journal entry must have a corresponding hash row in
+    // __drizzle_migrations. Drizzle's MySQL migrator uses MAX(created_at) as a
+    // cursor, so a non-monotonic journal can silently leave migrations un-applied
+    // (and un-recorded). Surface that here so a deploy fails loudly rather than
+    // booting on a half-applied schema.
+    const recordedHashes = await getRecordedHashes(connection);
+    const missing = expectedMigrations.filter((m) => !recordedHashes.has(m.hash));
+    if (missing.length > 0) {
+        const tags = missing.map((m) => m.tag).join(', ');
+        throw new Error(
+            `[Migration] Drizzle silently skipped ${missing.length} migration(s): ${tags}. ` +
+            `This usually means the journal "when" timestamps are non-monotonic, or the ` +
+            `__drizzle_migrations table has a poisoned baseline row. Apply the missing ` +
+            `migrations manually or insert baseline hash rows.`
+        );
+    }
 }
 
 async function seedAdmin(connection) {
@@ -653,7 +694,7 @@ async function seedAdmin(connection) {
     assertLegacyOriginalUploadsCleared(appRoot);
     const migrationsFolder = path.join(appRoot, 'drizzle');
     const dbName = getRequiredEnv('DB_NAME');
-    const latestMigration = getLatestMigration(migrationsFolder);
+    const journalMigrations = getAllJournalMigrations(migrationsFolder);
     let connection;
 
     try {
@@ -662,8 +703,8 @@ async function seedAdmin(connection) {
             database: dbName,
         }));
 
-        await prepareLegacyDatabaseIfNeeded(connection, dbName, latestMigration);
-        await runMigrations(connection, migrationsFolder);
+        await prepareLegacyDatabaseIfNeeded(connection, dbName, journalMigrations);
+        await runMigrations(connection, migrationsFolder, journalMigrations);
         await seedAdmin(connection);
         console.log('[Migration] Complete.');
     } catch (error) {
