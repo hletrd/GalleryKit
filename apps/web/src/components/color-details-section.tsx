@@ -52,7 +52,12 @@ interface ColorDetailsSectionProps {
 }
 
 export default function ColorDetailsSection({ image, isAdmin = false, t }: ColorDetailsSectionProps) {
-    const [showColorDetails, setShowColorDetails] = useState(false);
+    const isNonTrivialColor = Boolean(
+        (image.color_primaries && image.color_primaries !== 'bt709') ||
+        (isAdmin && image.is_hdr) ||
+        (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
+    );
+    const [showColorDetails, setShowColorDetails] = useState(isNonTrivialColor);
 
     const hasColorDetails = Boolean(
         image.color_primaries || image.transfer_function || image.is_hdr || (isAdmin && image.color_pipeline_decision),
