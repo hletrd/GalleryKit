@@ -14,6 +14,7 @@ import type { Metadata } from 'sharp';
 import { open } from 'fs/promises';
 import { extractIccProfileName } from '@/lib/icc-extractor';
 import { hasGainMap as parseGainMapFromHeif } from '@/lib/gain-map-detection';
+import { detectGamutFromIccChromaticity } from '@/lib/icc-chromaticity';
 
 export interface ColorSignals {
     /** Canonical ICC profile name parsed from the file. */
@@ -316,6 +317,24 @@ export async function detectColorSignals(
     let colorPrimaries = inferColorPrimaries(iccName);
     let transferFunction = inferTransferFunction(iccName, null, bitDepth);
     let matrixCoefficients = inferMatrixCoefficients(iccName);
+
+    // P4-A2 / R4-H2: ICC chromaticity-based detection upgrades primaries when
+    // the ICC name is opaque. Custom monitor profiles (Eizo, BenQ, calibrated
+    // workflow) often carry arbitrary description strings, but the embedded
+    // wtpt / rXYZ / gXYZ / bXYZ tags identify the actual gamut geometry.
+    // Precedence: NCLX > ICC chromaticity > ICC name (heuristic).
+    if (colorPrimaries === 'unknown' && metadata.icc && Buffer.isBuffer(metadata.icc)) {
+        const chromaticity = detectGamutFromIccChromaticity(metadata.icc);
+        if (chromaticity && chromaticity.primary !== 'unknown' && chromaticity.confidence !== 'low') {
+            colorPrimaries = chromaticity.primary;
+            // Backfill matrix coefficients when chromaticity identifies an RGB
+            // working space — the inferMatrixCoefficients pass already returned
+            // 'unknown' because the name was opaque.
+            if (matrixCoefficients === 'unknown') {
+                matrixCoefficients = chromaticity.primary === 'bt2020' ? 'bt2020-ncl' : 'identity';
+            }
+        }
+    }
 
     if (nclxCicp) {
         colorPrimaries = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries] ?? 'unknown';

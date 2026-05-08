@@ -179,6 +179,53 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    // P4-A2 / R4-H2: ICC chromaticity-based detection promotes a custom
+    // (opaquely-named) ICC to the correct gamut when wtpt/rXYZ/gXYZ/bXYZ tags
+    // land on a canonical preset within tolerance. Without this fallback the
+    // "Custom Calibration Profile v3" string would resolve to colorPrimaries
+    // 'unknown' (the description doesn't match any allowlist token).
+    it('promotes opaquely-named ICC to adobergb via chromaticity fallback', async () => {
+        // Build a minimal ICC profile with AdobeRGB chromaticities and an
+        // opaque description that the name-allowlist will not recognize.
+        const iccBuf = Buffer.alloc(360);
+        iccBuf.write('acsp', 36, 4, 'ascii');
+        iccBuf.writeUInt32BE(5, 128); // tag count = 5 (desc + wtpt + rXYZ + gXYZ + bXYZ)
+
+        // desc tag
+        iccBuf.writeUInt32BE(0x64657363, 132);
+        iccBuf.writeUInt32BE(192, 136);
+        iccBuf.writeUInt32BE(36, 140);
+        iccBuf.writeUInt32BE(0x64657363, 192);
+        iccBuf.writeUInt32BE(0, 196);
+        iccBuf.writeUInt32BE(15, 200);
+        iccBuf.write('CG2700X v3.icc\x00', 204);
+
+        // wtpt / rXYZ / gXYZ / bXYZ tag table entries (sig, offset, size 20)
+        const tagOffsets: { sig: string; tagIndex: number; payloadOffset: number; xyz: { x: number; y: number; z: number } }[] = [
+            { sig: 'wtpt', tagIndex: 1, payloadOffset: 240, xyz: { x: 0.9504, y: 1.0, z: 1.0888 } }, // D65
+            { sig: 'rXYZ', tagIndex: 2, payloadOffset: 260, xyz: { x: 0.640 / 0.330, y: 1, z: (1 - 0.640 - 0.330) / 0.330 } },
+            { sig: 'gXYZ', tagIndex: 3, payloadOffset: 280, xyz: { x: 0.210 / 0.710, y: 1, z: (1 - 0.210 - 0.710) / 0.710 } },
+            { sig: 'bXYZ', tagIndex: 4, payloadOffset: 300, xyz: { x: 0.150 / 0.060, y: 1, z: (1 - 0.150 - 0.060) / 0.060 } },
+        ];
+        for (const t of tagOffsets) {
+            const tagOffset = 132 + t.tagIndex * 12;
+            iccBuf.write(t.sig, tagOffset, 4, 'ascii');
+            iccBuf.writeUInt32BE(t.payloadOffset, tagOffset + 4);
+            iccBuf.writeUInt32BE(20, tagOffset + 8);
+            iccBuf.write('XYZ ', t.payloadOffset, 4, 'ascii');
+            iccBuf.writeUInt32BE(0, t.payloadOffset + 4);
+            iccBuf.writeInt32BE(Math.round(t.xyz.x * 65536), t.payloadOffset + 8);
+            iccBuf.writeInt32BE(Math.round(t.xyz.y * 65536), t.payloadOffset + 12);
+            iccBuf.writeInt32BE(Math.round(t.xyz.z * 65536), t.payloadOffset + 16);
+        }
+
+        const meta = makeMockMeta({ icc: iccBuf });
+        const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
+        // The description is opaque enough that name-only inference returns
+        // 'unknown'. Chromaticity must rescue this to AdobeRGB.
+        expect(signals.colorPrimaries).toBe('adobergb');
+    });
+
     // C2-A7 / C2-HDR-LOW-2: when ICC name and NCLX disagree, NCLX must win.
     // NCLX is the authoritative container-level signal; the ICC name is a
     // human-readable label that may not reflect the actual transfer.
