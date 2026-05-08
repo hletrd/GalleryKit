@@ -157,6 +157,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     const downloadHref = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
     const avifDownloadHref = image.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
     const isWideGamutSource = Boolean(image.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
+    const isNonTrivialColor = Boolean(
+        (image.color_primaries && image.color_primaries !== 'bt709') ||
+        (isAdminProp && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')) ||
+        (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
+    );
 
     return (
         <>
@@ -281,6 +286,90 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                         {/* Color details accordion — mirrors desktop sidebar */}
                         <ColorDetailsSection image={image} isAdmin={isAdminProp} t={t} />
                         <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
+
+                        {/* P3-28: for non-trivial (wide-gamut/HDR) sources, show
+                            Histogram + Capture date + Download BEFORE EXIF so
+                            color-relevant content surfaces first on mobile. */}
+                        {isNonTrivialColor && (
+                            <>
+                                {/* Histogram */}
+                                {image.filename_jpeg && (
+                                    <div className="mt-4 border-t pt-4">
+                                        <Histogram
+                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
+                                            avifUrl={image.filename_avif
+                                                ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
+                                                : undefined}
+                                            colorPrimaries={image.color_primaries}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Capture date/time */}
+                                <div className="mt-4 text-sm">
+                                    <p className="text-muted-foreground text-xs mb-1">{t('viewer.capturedAt')}</p>
+                                    <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
+                                        <Calendar className="w-3 h-3" />
+                                        {formattedCaptureDate || t('common.unknown')}
+                                    </p>
+                                    {formattedCaptureTime && (
+                                        <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>
+                                            <Clock className="w-3 h-3" />
+                                            {formattedCaptureTime}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Gamut-aware download */}
+                                {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
+                                    <div className="mt-4 pt-4 border-t">
+                                        {isWideGamutSource && avifDownloadHref ? (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button className="w-full gap-2 min-h-11">
+                                                        <Download className="h-4 w-4" />
+                                                        {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                            ? t('viewer.downloadP3Jpeg')
+                                                            : t('viewer.downloadJpeg')}
+                                                        <ChevronDown className="h-4 w-4 ml-auto" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end" className="min-w-[12rem]">
+                                                    <DropdownMenuItem asChild className="min-h-11">
+                                                        <a
+                                                            href={downloadHref}
+                                                            download={`photo-${image.id}.${downloadExt}`}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            {t('viewer.downloadSrgbJpeg')}
+                                                        </a>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem asChild className="min-h-11">
+                                                        <a
+                                                            href={avifDownloadHref}
+                                                            download={`photo-${image.id}.avif`}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            {t('viewer.downloadP3Avif')}
+                                                        </a>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        ) : (
+                                            <Button asChild className="w-full gap-2 min-h-11">
+                                                <a
+                                                    href={downloadHref}
+                                                    download={`photo-${image.id}.${downloadExt}`}
+                                                >
+                                                    <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
+                                                </a>
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        )}
 
                         {/* EXIF section header */}
                         <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
@@ -418,83 +507,87 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                         )}
 
-                        {/* Histogram */}
-                        {image.filename_jpeg && (
-                            <div className="mt-4 border-t pt-4">
-                                <Histogram
-                                    imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
-                                    avifUrl={image.filename_avif
-                                        ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
-                                        : undefined}
-                                    colorPrimaries={image.color_primaries}
-                                    className="w-full"
-                                />
-                            </div>
-                        )}
+                        {/* P3-28: for sRGB sources, keep existing order:
+                            EXIF first, then Histogram + Capture + Download. */}
+                        {!isNonTrivialColor && (
+                            <>
+                                {/* Histogram */}
+                                {image.filename_jpeg && (
+                                    <div className="mt-4 border-t pt-4">
+                                        <Histogram
+                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
+                                            avifUrl={image.filename_avif
+                                                ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
+                                                : undefined}
+                                            colorPrimaries={image.color_primaries}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                )}
 
-                        {/* Capture date/time */}
-                        <div className="mt-4 text-sm">
-                            <p className="text-muted-foreground text-xs mb-1">{t('viewer.capturedAt')}</p>
-                            <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
-                                <Calendar className="w-3 h-3" />
-                                {formattedCaptureDate || t('common.unknown')}
-                            </p>
-                            {formattedCaptureTime && (
-                                <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>
-                                    <Clock className="w-3 h-3" />
-                                    {formattedCaptureTime}
-                                </p>
-                            )}
-                        </div>
+                                {/* Capture date/time */}
+                                <div className="mt-4 text-sm">
+                                    <p className="text-muted-foreground text-xs mb-1">{t('viewer.capturedAt')}</p>
+                                    <p className="font-medium flex items-center gap-1" suppressHydrationWarning>
+                                        <Calendar className="w-3 h-3" />
+                                        {formattedCaptureDate || t('common.unknown')}
+                                    </p>
+                                    {formattedCaptureTime && (
+                                        <p className="font-medium flex items-center gap-1 text-xs text-muted-foreground mt-1" suppressHydrationWarning>
+                                            <Clock className="w-3 h-3" />
+                                            {formattedCaptureTime}
+                                        </p>
+                                    )}
+                                </div>
 
-                        {/* Gamut-aware download — mirrors desktop sidebar logic.
-                            Hidden when the photo has a paid license tier so the
-                            free download doesn't undermine the licensing intent. */}
-                        {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
-                            <div className="mt-4 pt-4 border-t">
-                                {isWideGamutSource && avifDownloadHref ? (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button className="w-full gap-2 min-h-11">
-                                                <Download className="h-4 w-4" />
-                                                {image.color_pipeline_decision?.startsWith('p3-from-')
-                                                    ? t('viewer.downloadP3Jpeg')
-                                                    : t('viewer.downloadJpeg')}
-                                                <ChevronDown className="h-4 w-4 ml-auto" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="min-w-[12rem]">
-                                            <DropdownMenuItem asChild className="min-h-11">
+                                {/* Gamut-aware download */}
+                                {downloadHref && (!image.license_tier || image.license_tier === 'none') && (
+                                    <div className="mt-4 pt-4 border-t">
+                                        {isWideGamutSource && avifDownloadHref ? (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button className="w-full gap-2 min-h-11">
+                                                        <Download className="h-4 w-4" />
+                                                        {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                            ? t('viewer.downloadP3Jpeg')
+                                                            : t('viewer.downloadJpeg')}
+                                                        <ChevronDown className="h-4 w-4 ml-auto" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end" className="min-w-[12rem]">
+                                                    <DropdownMenuItem asChild className="min-h-11">
+                                                        <a
+                                                            href={downloadHref}
+                                                            download={`photo-${image.id}.${downloadExt}`}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            {t('viewer.downloadSrgbJpeg')}
+                                                        </a>
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem asChild className="min-h-11">
+                                                        <a
+                                                            href={avifDownloadHref}
+                                                            download={`photo-${image.id}.avif`}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            {t('viewer.downloadP3Avif')}
+                                                        </a>
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        ) : (
+                                            <Button asChild className="w-full gap-2 min-h-11">
                                                 <a
                                                     href={downloadHref}
                                                     download={`photo-${image.id}.${downloadExt}`}
-                                                    className="flex items-center gap-2"
                                                 >
-                                                    {t('viewer.downloadSrgbJpeg')}
+                                                    <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
                                                 </a>
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem asChild className="min-h-11">
-                                                <a
-                                                    href={avifDownloadHref}
-                                                    download={`photo-${image.id}.avif`}
-                                                    className="flex items-center gap-2"
-                                                >
-                                                    {t('viewer.downloadP3Avif')}
-                                                </a>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                ) : (
-                                    <Button asChild className="w-full gap-2 min-h-11">
-                                        <a
-                                            href={downloadHref}
-                                            download={`photo-${image.id}.${downloadExt}`}
-                                        >
-                                            <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
-                                        </a>
-                                    </Button>
+                                            </Button>
+                                        )}
+                                    </div>
                                 )}
-                            </div>
+                            </>
                         )}
                     </div>
                 )}
