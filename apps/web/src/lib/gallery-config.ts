@@ -23,8 +23,8 @@ export {
     parseSlideshowInterval,
 } from './gallery-config-shared';
 
-import { GALLERY_SETTING_KEYS, getSettingDefaults, isValidSettingValue, parseImageSizes, parseSlideshowInterval } from './gallery-config-shared';
-import type { GallerySettingKey } from './gallery-config-shared';
+import { GALLERY_SETTING_KEYS, getSettingDefaults, isJpegChromaSubsampling, isValidSettingValue, parseImageSizes, parseSlideshowInterval } from './gallery-config-shared';
+import type { GallerySettingKey, JpegChromaSubsampling } from './gallery-config-shared';
 
 // ── Defaults (imported from shared module to avoid duplication) ────────────────
 const DEFAULTS = getSettingDefaults();
@@ -77,13 +77,13 @@ export interface GalleryConfig {
     forceShowColorChips: boolean;
 
     // P3-20: JPEG chroma subsampling for wide-gamut sources
-    wideGamutJpegChroma: string;
+    wideGamutJpegChroma: JpegChromaSubsampling;
 
     // P3-21: AVIF encoding effort (4-9)
     avifEffort: number;
 
     // C2-A5 / C2-COL-MED-2: JPEG chroma subsampling for sRGB / non-wide-gamut sources
-    sdrJpegChroma: string;
+    sdrJpegChroma: JpegChromaSubsampling;
 
     // C2-A6 / C2-INT-MED-1: max source pixel count before WI-15 downscale
     wideGamutMaxSourcePixels: number;
@@ -149,15 +149,20 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             })(),
             wideGamutJpegChroma: (() => {
                 const raw = getSetting(map, 'wide_gamut_jpeg_chroma');
-                if (!isValidSettingValue('wide_gamut_jpeg_chroma', raw)) return DEFAULTS.wide_gamut_jpeg_chroma;
-                return raw;
+                // C3-A6: validator already enforces the union; the runtime
+                // guard re-narrows the type so consumers see
+                // JpegChromaSubsampling instead of `string`.
+                if (isJpegChromaSubsampling(raw)) return raw;
+                const fallback = DEFAULTS.wide_gamut_jpeg_chroma;
+                return isJpegChromaSubsampling(fallback) ? fallback : '4:4:4';
             })(),
             avifEffort: validatedNumber(map, 'avif_effort'),
             // C2-A5: SDR JPEG chroma — defaults to 4:2:0 for backward-compat file size
             sdrJpegChroma: (() => {
                 const raw = getSetting(map, 'sdr_jpeg_chroma');
-                if (!isValidSettingValue('sdr_jpeg_chroma', raw)) return DEFAULTS.sdr_jpeg_chroma;
-                return raw;
+                if (isJpegChromaSubsampling(raw)) return raw;
+                const fallback = DEFAULTS.sdr_jpeg_chroma;
+                return isJpegChromaSubsampling(fallback) ? fallback : '4:2:0';
             })(),
             // C2-A6: wide-gamut max source pixels — defaults to 50 MP
             wideGamutMaxSourcePixels: validatedNumber(map, 'wide_gamut_max_source_pixels'),
@@ -183,9 +188,13 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
             allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
             forceShowColorChips: DEFAULTS.force_show_color_chips === 'true',
-            wideGamutJpegChroma: DEFAULTS.wide_gamut_jpeg_chroma,
+            wideGamutJpegChroma: isJpegChromaSubsampling(DEFAULTS.wide_gamut_jpeg_chroma)
+                ? DEFAULTS.wide_gamut_jpeg_chroma
+                : '4:4:4',
             avifEffort: Number(DEFAULTS.avif_effort),
-            sdrJpegChroma: DEFAULTS.sdr_jpeg_chroma,
+            sdrJpegChroma: isJpegChromaSubsampling(DEFAULTS.sdr_jpeg_chroma)
+                ? DEFAULTS.sdr_jpeg_chroma
+                : '4:2:0',
             wideGamutMaxSourcePixels: Number(DEFAULTS.wide_gamut_max_source_pixels),
         };
     }

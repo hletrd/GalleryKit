@@ -121,6 +121,21 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
 
+/**
+ * C3-A6 / C3-INT-MED-1: shared narrow type for JPEG chroma subsampling
+ * settings (wide_gamut_jpeg_chroma, sdr_jpeg_chroma). Sharp's
+ * chromaSubsampling parameter accepts only these three values; the runtime
+ * `as` cast at the encode site previously hid drift between validator and
+ * encoder if the validator ever widened. Threading this type through
+ * gallery-config.ts → image-queue.ts → process-image.ts removes the cast.
+ */
+export type JpegChromaSubsampling = '4:4:4' | '4:2:2' | '4:2:0';
+
+/** Runtime guard for narrowing a string to JpegChromaSubsampling. */
+export function isJpegChromaSubsampling(v: string): v is JpegChromaSubsampling {
+    return v === '4:4:4' || v === '4:2:2' || v === '4:2:0';
+}
+
 // ── Validators ────────────────────────────────────────────────────────────────
 
 const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {

@@ -7,6 +7,7 @@ import { connection, db, images, sessions, imageEmbeddings } from '@/db';
 import { eq, and, sql, asc, gt, notInArray } from 'drizzle-orm';
 import { processImageFormats, deleteImageVariants, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import type { ImageQualitySettings } from '@/lib/process-image';
+import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, resolveOriginalUploadPath } from '@/lib/upload-paths';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
@@ -296,10 +297,13 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             let imageSizes: number[] | undefined = job.imageSizes;
             let autoAltTextEnabled = false;
             let forceSrgbDerivatives = false;
-            let wideGamutJpegChroma: string | undefined;
+            // C3-A6: chroma values flow as the narrow JpegChromaSubsampling
+            // union end-to-end (gallery-config → here → process-image) so
+            // process-image's encode site no longer needs the runtime cast.
+            let wideGamutJpegChroma: JpegChromaSubsampling | undefined;
             let avifEffort: number | undefined;
             // C2-A5 / C2-A6: SDR JPEG chroma + wide-gamut max source pixels
-            let sdrJpegChroma: string | undefined;
+            let sdrJpegChroma: JpegChromaSubsampling | undefined;
             let wideGamutMaxSourcePixels: number | undefined;
             if (!quality && !imageSizes) {
                 try {

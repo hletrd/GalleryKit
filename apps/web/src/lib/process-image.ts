@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { detectColorSignals, type ColorSignals } from '@/lib/color-detection';
@@ -671,9 +672,9 @@ export async function processImageFormats(
     iccProfileName?: string | null, // Source ICC profile name for AVIF P3 tagging
     forceSrgbDerivatives?: boolean, // US-CM02: when true, force sRGB on WebP/JPEG even for P3 sources
     signals?: { colorPrimaries?: string | null } | null, // P3-11: NCLX fallback for ICC-less sources
-    wideGamutJpegChroma?: string, // P3-20: chroma subsampling for wide-gamut JPEG
+    wideGamutJpegChroma?: JpegChromaSubsampling, // P3-20 / C3-A6: chroma subsampling for wide-gamut JPEG
     avifEffort?: number, // P3-21: AVIF encoding effort (4-9)
-    sdrJpegChroma?: string, // C2-A5: chroma subsampling for SDR / non-wide-gamut JPEG
+    sdrJpegChroma?: JpegChromaSubsampling, // C2-A5 / C3-A6: chroma subsampling for SDR / non-wide-gamut JPEG
     wideGamutMaxSourcePixels?: number, // C2-A6: max source pixel count before WI-15 downscale
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
@@ -727,11 +728,11 @@ export async function processImageFormats(
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
-    const effectiveChroma = wideGamutJpegChroma ?? '4:4:4';
+    const effectiveChroma: JpegChromaSubsampling = wideGamutJpegChroma ?? '4:4:4';
     const effectiveEffort = avifEffort ?? 6;
     // C2-A5: SDR JPEG chroma — Sharp default behavior was 4:2:0; preserve that
     // unless the admin opts into a different value via sdr_jpeg_chroma.
-    const effectiveSdrChroma = sdrJpegChroma ?? '4:2:0';
+    const effectiveSdrChroma: JpegChromaSubsampling = sdrJpegChroma ?? '4:2:0';
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -846,14 +847,15 @@ export async function processImageFormats(
                     // SDR defaults to 4:2:0 (Sharp default; preserves prior file
                     // sizes). Photographer admins who export crisp red text from
                     // an SDR editor can opt sdr_jpeg_chroma to 4:4:4.
+                    // C3-A6: chromaSubsampling type now flows through end-to-end
+                    // as JpegChromaSubsampling; the runtime cast at this site is
+                    // no longer required.
                     await base
                         .toColorspace(targetIcc)
                         .withIccProfile(targetIcc)
                         .jpeg({
                             quality: qualityJpeg,
-                            chromaSubsampling: (isWideGamutSource
-                                ? effectiveChroma
-                                : effectiveSdrChroma) as '4:4:4' | '4:2:2' | '4:2:0',
+                            chromaSubsampling: isWideGamutSource ? effectiveChroma : effectiveSdrChroma,
                         })
                         .toFile(outputPath);
                 }
