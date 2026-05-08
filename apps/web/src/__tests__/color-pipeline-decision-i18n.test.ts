@@ -61,6 +61,16 @@ describe('humanizeColorPipelineDecision — i18n enum coverage', () => {
     it('returns empty string for unknown / null / undefined', () => {
         expect(humanizeColorPipelineDecision(null, enT)).toBe('');
         expect(humanizeColorPipelineDecision(undefined, enT)).toBe('');
-        expect(humanizeColorPipelineDecision('not-an-enum', enT)).toBe('');
+        // P4-E3: parameter type tightened to `ColorPipelineDecision | null
+        // | undefined`; the runtime contract still accepts unknown strings
+        // via the `default` arm. The cast here exercises that runtime
+        // tolerance — a future caller passing a stale enum from a DB
+        // backfill should still get the empty fallback.
+        expect(
+            humanizeColorPipelineDecision(
+                'not-an-enum' as unknown as Parameters<typeof humanizeColorPipelineDecision>[0],
+                enT,
+            ),
+        ).toBe('');
     });
 });

@@ -8,6 +8,7 @@ import {
     humanizeTransferFunction,
     humanizeColorPipelineDecision,
 } from '@/components/color-details-section';
+import type { ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
 import { findNearestImageSize, DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface LightboxColorPipProps {
@@ -35,7 +36,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
 
     const primaries = humanizeColorPrimaries(image.color_primaries);
     const transfer = humanizeTransferFunction(image.transfer_function, t);
-    const pipeline = humanizeColorPipelineDecision(image.color_pipeline_decision, t);
+    const pipeline = humanizeColorPipelineDecision(image.color_pipeline_decision as ColorPipelineDecision | null | undefined, t);
     // C3-A3 / C3-UX-MED-2: surface the HDR flag in the lightbox color pip.
     // C4-A3 / C4-HDR-MED-2: gate on transfer_function — same convention as the
     // sidebar Color Details accordion (color-details-section.tsx :88). The

@@ -323,10 +323,15 @@ export async function detectColorSignals(
     // workflow) often carry arbitrary description strings, but the embedded
     // wtpt / rXYZ / gXYZ / bXYZ tags identify the actual gamut geometry.
     // Precedence: NCLX > ICC chromaticity > ICC name (heuristic).
+    //
+    // The chromaticity module reports 'srgb' for sRGB-equivalent primaries;
+    // map that to the ColorSignals 'bt709' enum at the boundary so the
+    // schema (`color_primaries varchar`) keeps the canonical CIE / ITU-T
+    // value. Other gamut names align between the two modules.
     if (colorPrimaries === 'unknown' && metadata.icc && Buffer.isBuffer(metadata.icc)) {
         const chromaticity = detectGamutFromIccChromaticity(metadata.icc);
         if (chromaticity && chromaticity.primary !== 'unknown' && chromaticity.confidence !== 'low') {
-            colorPrimaries = chromaticity.primary;
+            colorPrimaries = chromaticity.primary === 'srgb' ? 'bt709' : chromaticity.primary;
             // Backfill matrix coefficients when chromaticity identifies an RGB
             // working space — the inferMatrixCoefficients pass already returned
             // 'unknown' because the name was opaque.

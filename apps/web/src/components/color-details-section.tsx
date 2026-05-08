@@ -4,7 +4,7 @@ import { useState, useImperativeHandle } from 'react';
 import { Info, ChevronDown, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
+import { isP3Pipeline, type ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
 import { ImageDetail } from '@/lib/image-types';
 
 /**
@@ -54,8 +54,17 @@ export function humanizeTransferFunction(
     }
 }
 
+/**
+ * P4-E3 / LATENT-L2 / cycle-8 deferred C8-D15: parameter type tightened
+ * from `string | null | undefined` to `ColorPipelineDecision | null |
+ * undefined`. The function itself still accepts unknown strings (the
+ * `default` arm returns the empty fallback), so the runtime contract is
+ * unchanged — but the type signature now documents the intended caller
+ * surface and lets TypeScript catch a future caller that passes a raw
+ * unrelated string.
+ */
 export function humanizeColorPipelineDecision(
-    value: string | null | undefined,
+    value: ColorPipelineDecision | null | undefined,
     t: (key: string) => string,
 ): string {
     switch (value) {
@@ -251,7 +260,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.colorPipelineDecision')}</p>
                             <p className="font-medium flex items-center gap-1">
-                                {humanizeColorPipelineDecision(image.color_pipeline_decision, t) || t('viewer.colorUnknown')}
+                                {humanizeColorPipelineDecision(image.color_pipeline_decision as ColorPipelineDecision | null | undefined, t) || t('viewer.colorUnknown')}
                                 {/* P4-C2 / R4-M3 / UX-M2: shorten the DCI-P3 label
                                     (now "Display P3 (from DCI-P3)") and surface the
                                     Bradford D50→D65 white-point-adaptation rationale
