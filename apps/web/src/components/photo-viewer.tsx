@@ -186,8 +186,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
     const avifDownloadHref = image?.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
-    const hdrAvifFilename = image?.filename_avif ? image.filename_avif.replace(/\.avif$/i, '_hdr.avif') : null;
-    const hdrDownloadHref = hdrAvifFilename ? imageUrl(`/uploads/avif/${hdrAvifFilename}`) : null;
     const isWideGamutSource = Boolean(image?.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
@@ -856,17 +854,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                         {t('viewer.downloadP3Avif')}
                                                     </a>
                                                 </DropdownMenuItem>
-                                                {image?.is_hdr && hdrDownloadHref && (
-                                                    <DropdownMenuItem asChild className="min-h-11">
-                                                        <a
-                                                            href={hdrDownloadHref}
-                                                            download={`photo-${image.id}_hdr.avif`}
-                                                            className="flex items-center gap-2"
-                                                        >
-                                                            {t('viewer.downloadHdrAvif')}
-                                                        </a>
-                                                    </DropdownMenuItem>
-                                                )}
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     ) : (
