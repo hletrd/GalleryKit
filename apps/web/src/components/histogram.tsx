@@ -239,6 +239,40 @@ function drawHistogram(
     } else if (mode === 'b') {
         drawChannel(data.b, '#3b82f6', 1.0);
     }
+
+    // P3-9: grid lines at 0/64/128/192/255
+    ctx.save();
+    ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 1;
+    const gridPositions = [0, 64, 128, 192, 255];
+    for (const pos of gridPositions) {
+        const x = (pos / 255) * W;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // P3-9: red clip blink strips when shadow/highlight bins exceed 0.5%
+    const clipBins = mode === 'luminance' ? data.l : mode === 'r' ? data.r : mode === 'g' ? data.g : mode === 'b' ? data.b : data.l;
+    const total = clipBins.reduce((sum, v) => sum + v, 0);
+    const CLIP_THRESHOLD = 0.005;
+    if (total > 0) {
+        const belowBlack = clipBins[0] / total;
+        const aboveWhite = clipBins[255] / total;
+        if (belowBlack > CLIP_THRESHOLD || aboveWhite > CLIP_THRESHOLD) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.35)'; // red-500 at 35% opacity
+            if (belowBlack > CLIP_THRESHOLD) {
+                ctx.fillRect(0, 0, 3, H);
+            }
+            if (aboveWhite > CLIP_THRESHOLD) {
+                ctx.fillRect(W - 3, 0, 3, H);
+            }
+            ctx.restore();
+        }
+    }
 }
 
 function getGamutLabel(primaries: string | null | undefined, t: (key: string) => string): string {
@@ -380,6 +414,28 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
                             aria-label={t('aria.histogramLabel', { mode: modeLabels[mode] })}
                         />
                     </div>
+                    {/* P3-9: clip percentage labels */}
+                    {histogramData && (() => {
+                        const clipBins = mode === 'luminance' ? histogramData.l : mode === 'r' ? histogramData.r : mode === 'g' ? histogramData.g : mode === 'b' ? histogramData.b : histogramData.l;
+                        const total = clipBins.reduce((sum, v) => sum + v, 0);
+                        if (total === 0) return null;
+                        const belowBlack = (clipBins[0] / total) * 100;
+                        const aboveWhite = (clipBins[255] / total) * 100;
+                        const threshold = 0.5;
+                        const showBelow = belowBlack > threshold;
+                        const showAbove = aboveWhite > threshold;
+                        if (!showBelow && !showAbove) return null;
+                        return (
+                            <div className="flex gap-2 text-xs">
+                                {showBelow && (
+                                    <span className="text-red-500">{t('viewer.histogramBelowBlack', { pct: belowBlack.toFixed(1) })}</span>
+                                )}
+                                {showAbove && (
+                                    <span className="text-red-500">{t('viewer.histogramAboveWhite', { pct: aboveWhite.toFixed(1) })}</span>
+                                )}
+                            </div>
+                        );
+                    })()}
                     <button
                         type="button"
                         onClick={cycleMode}

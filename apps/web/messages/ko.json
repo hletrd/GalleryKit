@@ -288,6 +288,8 @@
     "histogramGamutAdobeRgb": "(어도비 RGB)",
     "histogramGamutProPhoto": "(ProPhoto)",
     "histogramGamutSrgb": "(sRGB)",
+    "histogramBelowBlack": "블랙 이하: {pct}%",
+    "histogramAboveWhite": "화이트 이상: {pct}%",
     "histogramSrgbClipped": "sRGB 클리핑",
     "fullscreen": "전체 화면",
     "fullscreenUnavailable": "전체 화면을 사용할 수 없습니다",

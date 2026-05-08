@@ -288,6 +288,8 @@
     "histogramGamutAdobeRgb": "(Adobe RGB)",
     "histogramGamutProPhoto": "(ProPhoto)",
     "histogramGamutSrgb": "(sRGB)",
+    "histogramBelowBlack": "Below black: {pct}%",
+    "histogramAboveWhite": "Above white: {pct}%",
     "histogramSrgbClipped": "sRGB clipped",
     "fullscreen": "Fullscreen",
     "fullscreenUnavailable": "Fullscreen is not available",
