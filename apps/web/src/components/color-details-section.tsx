@@ -68,13 +68,35 @@ export function humanizeColorPipelineDecision(
     }
 }
 
-function normalizeForCompare(name: string): string {
+/**
+ * P3-30 / C4-A6: lower-cases, strips trailing parenthesized suffix
+ * (e.g. "Display P3 (ACES)") plus trailing "ICC profile" / "profile" words,
+ * then trims. Used by `primariesMatchIcc` to deduplicate the ICC profile
+ * row vs. the primaries row when both denote the same gamut.
+ *
+ * Exported for fixture-style testing in
+ * `__tests__/color-details-primaries-match-icc.test.ts`.
+ */
+export function normalizeForCompare(name: string): string {
     return name
         .toLowerCase()
         .replace(/\s*\([^)]*\)\s*$/g, '')
         .replace(/\s*icc\s*profile\s*$/g, '')
         .replace(/\s*profile\s*$/g, '')
         .trim();
+}
+
+/**
+ * C4-A6: shared dedup helper exposed for fixture-style testing. Returns true
+ * when the human-readable primaries label and the ICC profile name normalize
+ * to the same string (e.g. both reduce to "display p3").
+ */
+export function primariesMatchIccName(
+    primariesHuman: string | null | undefined,
+    iccName: string | null | undefined,
+): boolean {
+    if (!primariesHuman || !iccName) return false;
+    return normalizeForCompare(primariesHuman) === normalizeForCompare(iccName);
 }
 
 interface ColorDetailsSectionProps {
@@ -106,7 +128,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
 
     const primariesHuman = humanizeColorPrimaries(image.color_primaries);
     const iccName = image.icc_profile_name || '';
-    const primariesMatchIcc = primariesHuman && iccName && normalizeForCompare(primariesHuman) === normalizeForCompare(iccName);
+    const primariesMatchIcc = primariesMatchIccName(primariesHuman, iccName);
 
     const colorDetailsId = `color-details-${image.id}`;
 
