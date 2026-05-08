@@ -268,6 +268,7 @@ export async function uploadImages(formData: FormData) {
         const failedFiles: string[] = [];
         const warnings: string[] = [];
         let hdrRejectedCount = 0;
+        let hdrWarningCount = 0;
 
         for (const file of files) {
             // Track saved original filename for cleanup on DB insert failure
@@ -290,6 +291,11 @@ export async function uploadImages(formData: FormData) {
                     failedFiles.push(file.name);
                     hdrRejectedCount++;
                     continue;
+                }
+
+                // P3-14: warn when HDR is accepted
+                if (data.colorSignals?.isHdr && uploadConfig.allowHdrIngest) {
+                    hdrWarningCount++;
                 }
 
                 // Extract EXIF
@@ -481,7 +487,8 @@ export async function uploadImages(formData: FormData) {
             success: true,
             count: successCount,
             failed: failedFiles,
-            warnings
+            warnings,
+            hdrWarningCount,
         };
     } finally {
         await uploadContractLock.release();

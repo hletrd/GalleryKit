@@ -196,6 +196,7 @@ export function UploadDropzone({
             let successCount = 0;
             const failedFiles: File[] = [];
             const uploadWarnings: string[] = [];
+            let hdrWarningCount = 0;
             const totalFiles = files.length;
             let completedSoFar = 0;
 
@@ -223,6 +224,9 @@ export function UploadDropzone({
                         failedFiles.push(file);
                     } else {
                         successCount++;
+                        if (res?.hdrWarningCount) {
+                            hdrWarningCount += res.hdrWarningCount;
+                        }
                         if (res?.warnings?.length) {
                             uploadWarnings.push(...res.warnings);
                             setFileErrors(prev => ({ ...prev, [fileId]: res.warnings.join(' ') }));
@@ -277,6 +281,11 @@ export function UploadDropzone({
                 if (successCount > 0) {
                     router.refresh();
                 }
+            }
+
+            // P3-14: surface HDR warning toast when HDR uploads are accepted
+            if (hdrWarningCount > 0) {
+                toast.warning(t('upload.hdrWarning', { count: hdrWarningCount }));
             }
         } catch {
             toast.error(t('upload.failed'));
