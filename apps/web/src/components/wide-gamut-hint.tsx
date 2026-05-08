@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 
 const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
 
@@ -9,21 +9,29 @@ interface WideGamutHintProps {
     t: (key: string) => string;
 }
 
+// C1-CRIT-3 (cycle 1 RPF): use useSyncExternalStore for matchMedia
+// subscription. The previous useState + useEffect with synchronous setState
+// in the effect body triggered the react-hooks/set-state-in-effect lint rule
+// (cascading render anti-pattern).
+function subscribeToP3Mq(callback: () => void): () => void {
+    const mq = window.matchMedia('(color-gamut: p3)');
+    mq.addEventListener('change', callback);
+    return () => mq.removeEventListener('change', callback);
+}
+function getP3Snapshot(): boolean {
+    return window.matchMedia('(color-gamut: p3)').matches;
+}
+function getServerSnapshot(): boolean {
+    // Default to P3-capable at SSR. The hint shows only when isSrgbDisplay=true
+    // (i.e. !isP3Display), so SSR HTML never includes the hint — it is the
+    // safe default for an SDR-only hint.
+    return true;
+}
+
 export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps) {
     const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
-    const [isSrgbDisplay, setIsSrgbDisplay] = useState(false);
-
-    useEffect(() => {
-        const mq = window.matchMedia('(color-gamut: p3)');
-        setIsSrgbDisplay(!mq.matches);
-
-        const handler = (e: MediaQueryListEvent) => {
-            setIsSrgbDisplay(!e.matches);
-        };
-
-        mq.addEventListener('change', handler);
-        return () => mq.removeEventListener('change', handler);
-    }, []);
+    const isP3Display = useSyncExternalStore(subscribeToP3Mq, getP3Snapshot, getServerSnapshot);
+    const isSrgbDisplay = !isP3Display;
 
     if (!isWideGamut || !isSrgbDisplay) return null;
 
