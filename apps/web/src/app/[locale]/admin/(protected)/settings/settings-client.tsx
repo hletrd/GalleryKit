@@ -194,6 +194,22 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             aria-label={t('settings.allowHdrIngest')}
                         />
                     </div>
+
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label htmlFor="force-show-color-chips">{t('settings.forceShowColorChips')}</Label>
+                            <p id="force-show-color-chips-help" className="text-xs text-muted-foreground">
+                                {t('settings.forceShowColorChipsHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="force-show-color-chips"
+                            checked={settings.force_show_color_chips === 'true'}
+                            onCheckedChange={(checked) => handleChange('force_show_color_chips', checked ? 'true' : 'false')}
+                            aria-describedby="force-show-color-chips-help"
+                            aria-label={t('settings.forceShowColorChips')}
+                        />
+                    </div>
                 </CardContent>
             </Card>
 

@@ -317,6 +317,7 @@ export default async function PhotoPage({ params, searchParams }: {
                 untitledFallbackTitle={t('titleWithId', { id: image.id })}
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
                 licensePrices={config.licensePrices}
+                forceShowColorChips={config.forceShowColorChips}
                 checkoutStatus={checkoutStatus}
             />
             {/* Prefetch adjacent photos for instant navigation */}

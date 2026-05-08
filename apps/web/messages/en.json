@@ -666,7 +666,9 @@
     "forceSrgbDerivatives": "Force sRGB Derivatives",
     "forceSrgbDerivativesHint": "When ON, WebP and JPEG variants are always sRGB regardless of source color space. Use this only if downstream consumers (legacy embedders, specific clients) require sRGB JPEGs. AVIF variants always carry their original gamut.",
     "allowHdrIngest": "Allow HDR Ingest",
-    "allowHdrIngestHint": "When ON, PQ and HLG source images can be uploaded. When OFF (default), HDR uploads are rejected to prevent accidental ingestion of unsupported wide-gamut + high-dynamic-range files."
+    "allowHdrIngestHint": "When ON, PQ and HLG source images can be uploaded. When OFF (default), HDR uploads are rejected to prevent accidental ingestion of unsupported wide-gamut + high-dynamic-range files.",
+    "forceShowColorChips": "Force Show Color Chips",
+    "forceShowColorChipsHint": "When ON, the P3 gamut badge and HDR badge are always visible in the photo viewer, even on sRGB displays. Useful for photographers who want to verify color metadata regardless of the visitor's display."
   },
   "footer": {
     "admin": "Admin"

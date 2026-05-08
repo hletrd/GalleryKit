@@ -172,6 +172,10 @@
 .hdr-badge { display: none; align-items: center; gap: 0.25rem; }
 @media (dynamic-range: high) { .hdr-badge { display: inline-flex; } }
 
+/* P3-26: force color gamut/HDR chips visible even on sRGB displays */
+:root[data-force-show-color-chips="true"] .gamut-p3-badge { display: inline-block !important; }
+:root[data-force-show-color-chips="true"] .hdr-badge { display: inline-flex !important; }
+
 /* Forced-colors (Windows high-contrast) adjustments for color surfaces */
 @media (forced-colors: active) {
   .hdr-badge {

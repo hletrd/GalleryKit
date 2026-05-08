@@ -64,6 +64,8 @@ interface PhotoViewerProps {
     slideshowIntervalSeconds?: number;
     /** US-P54: per-tier prices in cents (0 = not for sale). Used to show Buy/Download button. */
     licensePrices?: Record<string, number>;
+    /** P3-26: force color gamut/HDR chips visible even on sRGB displays. */
+    forceShowColorChips?: boolean;
     /**
      * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02: Stripe Checkout
      * post-redirect status. Surfaced as a toast on first mount so the
@@ -73,7 +75,7 @@ interface PhotoViewerProps {
     checkoutStatus?: 'success' | 'cancel' | null;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, licensePrices, checkoutStatus = null }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, licensePrices, checkoutStatus = null, forceShowColorChips = false }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -287,6 +289,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         if (!syncPhotoQueryBasePath || !image) return;
         router.replace(`${syncPhotoQueryBasePath}?photoId=${image.id}`, { scroll: false });
     }, [image, router, syncPhotoQueryBasePath]);
+
+    // P3-26: set document root attribute so CSS can force-show color chips
+    useEffect(() => {
+        document.documentElement.setAttribute('data-force-show-color-chips', forceShowColorChips ? 'true' : 'false');
+        return () => {
+            document.documentElement.removeAttribute('data-force-show-color-chips');
+        };
+    }, [forceShowColorChips]);
 
     // Sync info state across breakpoints: mobile bottom sheet ↔ desktop sidebar
     useEffect(() => {

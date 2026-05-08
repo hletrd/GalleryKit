@@ -331,7 +331,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                     <p className="font-medium">
                                         {image.icc_profile_name}
                                         {image.icc_profile_name && image.icc_profile_name.toLowerCase().includes('p3') && (
-                                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded">
+                                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
                                                 P3
                                             </span>
                                         )}
