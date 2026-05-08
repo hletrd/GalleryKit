@@ -298,6 +298,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             let forceSrgbDerivatives = false;
             let wideGamutJpegChroma: string | undefined;
             let avifEffort: number | undefined;
+            // C2-A5 / C2-A6: SDR JPEG chroma + wide-gamut max source pixels
+            let sdrJpegChroma: string | undefined;
+            let wideGamutMaxSourcePixels: number | undefined;
             if (!quality && !imageSizes) {
                 try {
                     const config = await getGalleryConfig();
@@ -311,6 +314,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     forceSrgbDerivatives = config.forceSrgbDerivatives;
                     wideGamutJpegChroma = config.wideGamutJpegChroma;
                     avifEffort = config.avifEffort;
+                    sdrJpegChroma = config.sdrJpegChroma;
+                    wideGamutMaxSourcePixels = config.wideGamutMaxSourcePixels;
                 } catch {
                     // DB unavailable during processing — use Sharp defaults (90/85/90)
                 }
@@ -328,6 +333,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 job.colorSignals,
                 wideGamutJpegChroma,
                 avifEffort,
+                sdrJpegChroma,
+                wideGamutMaxSourcePixels,
             );
 
             // Verify all 3 output formats exist and are non-zero before marking processed

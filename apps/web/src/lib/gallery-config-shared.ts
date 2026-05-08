@@ -45,6 +45,14 @@ export const GALLERY_SETTING_KEYS = [
 
     // P3-21: AVIF encoding effort (4-9, default 6)
     'avif_effort',
+
+    // C2-A5 / C2-COL-MED-2: JPEG chroma subsampling for sRGB / non-wide-gamut
+    // sources (4:4:4 / 4:2:2 / 4:2:0). Default 4:2:0 preserves prior behavior.
+    'sdr_jpeg_chroma',
+
+    // C2-A6 / C2-INT-MED-1: pixel-count cap above which wide-gamut sources are
+    // downscaled before the rgb16 pipeline (memory cap; WI-15).
+    'wide_gamut_max_source_pixels',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -103,6 +111,12 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
     // P3-21: default 6 — balanced file size vs CPU
     avif_effort: '6',
+
+    // C2-A5: default 4:2:0 — preserves Sharp default file size for SDR sources
+    sdr_jpeg_chroma: '4:2:0',
+
+    // C2-A6: default 50 MP — historical hardcoded WIDE_GAMUT_MAX_SOURCE_PIXELS
+    wide_gamut_max_source_pixels: '50000000',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -142,6 +156,15 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
 
     // P3-21: must be an integer between 4 and 9
     avif_effort: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 4 && n <= 9; },
+
+    // C2-A5: must be a valid chroma subsampling string
+    sdr_jpeg_chroma: (v) => v === '4:4:4' || v === '4:2:2' || v === '4:2:0',
+
+    // C2-A6: integer in [10_000_000, 200_000_000]; clamps memory headroom
+    wide_gamut_max_source_pixels: (v) => {
+        const n = Number(v);
+        return Number.isInteger(n) && n >= 10_000_000 && n <= 200_000_000;
+    },
 };
 
 /** Validate a setting value. Returns true if valid. */

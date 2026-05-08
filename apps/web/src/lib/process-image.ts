@@ -673,6 +673,8 @@ export async function processImageFormats(
     signals?: { colorPrimaries?: string | null } | null, // P3-11: NCLX fallback for ICC-less sources
     wideGamutJpegChroma?: string, // P3-20: chroma subsampling for wide-gamut JPEG
     avifEffort?: number, // P3-21: AVIF encoding effort (4-9)
+    sdrJpegChroma?: string, // C2-A5: chroma subsampling for SDR / non-wide-gamut JPEG
+    wideGamutMaxSourcePixels?: number, // C2-A6: max source pixel count before WI-15 downscale
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
@@ -695,9 +697,11 @@ export async function processImageFormats(
     // WI-12: detect DCI-P3 sources for white-point adaptation.
     const isDciP3 = iccProfileName?.toLowerCase() === 'dci-p3' || iccProfileName?.toLowerCase().startsWith('dci-p3');
 
-    // WI-15: cap source pixel count for wide-gamut to prevent OOM in rgb16 pipeline.
-    // Sources exceeding 50MP are downscaled proportionally to an intermediate before fan-out.
-    const WIDE_GAMUT_MAX_SOURCE_PIXELS = 50_000_000;
+    // WI-15 / C2-A6: cap source pixel count for wide-gamut to prevent OOM in rgb16
+    // pipeline. Sources exceeding the cap are downscaled proportionally to an
+    // intermediate before fan-out. Default 50 MP; admin-tunable via the
+    // wide_gamut_max_source_pixels setting.
+    const WIDE_GAMUT_MAX_SOURCE_PIXELS = wideGamutMaxSourcePixels ?? 50_000_000;
     let processingInputPath = inputPath;
     let processingBaseWidth = baseWidth;
     const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true }).metadata();
@@ -725,6 +729,9 @@ export async function processImageFormats(
     const qualityJpeg = quality?.jpeg ?? 90;
     const effectiveChroma = wideGamutJpegChroma ?? '4:4:4';
     const effectiveEffort = avifEffort ?? 6;
+    // C2-A5: SDR JPEG chroma — Sharp default behavior was 4:2:0; preserve that
+    // unless the admin opts into a different value via sdr_jpeg_chroma.
+    const effectiveSdrChroma = sdrJpegChroma ?? '4:2:0';
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -833,12 +840,20 @@ export async function processImageFormats(
                     // subsampling regardless of target colorspace (the source
                     // gamut is wide even when forced to sRGB). sRGB sources stay
                     // at the Sharp default for tighter file sizes.
+                    // C2-A5 / C2-COL-MED-2: chroma subsampling is now admin-tunable
+                    // for both wide-gamut and SDR sources. Wide-gamut defaults to
+                    // 4:4:4 (full chroma fidelity matters more on wide gamut);
+                    // SDR defaults to 4:2:0 (Sharp default; preserves prior file
+                    // sizes). Photographer admins who export crisp red text from
+                    // an SDR editor can opt sdr_jpeg_chroma to 4:4:4.
                     await base
                         .toColorspace(targetIcc)
                         .withIccProfile(targetIcc)
                         .jpeg({
                             quality: qualityJpeg,
-                            ...(isWideGamutSource ? { chromaSubsampling: effectiveChroma as '4:4:4' | '4:2:2' | '4:2:0' } : {}),
+                            chromaSubsampling: (isWideGamutSource
+                                ? effectiveChroma
+                                : effectiveSdrChroma) as '4:4:4' | '4:2:2' | '4:2:0',
                         })
                         .toFile(outputPath);
                 }

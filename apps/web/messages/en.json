@@ -679,7 +679,11 @@
     "avifEffortHint": "Higher values produce smaller files at the cost of slower encoding. 6 is the default balance. 9 is the slowest/smallest.",
     "chroma444": "4:4:4 (best quality)",
     "chroma422": "4:2:2 (balanced)",
-    "chroma420": "4:2:0 (smallest file)"
+    "chroma420": "4:2:0 (smallest file)",
+    "sdrJpegChroma": "SDR JPEG Chroma",
+    "sdrJpegChromaHint": "Chroma subsampling for sRGB / non-wide-gamut JPEG derivatives. Default 4:2:0 (smaller files; mild red-edge smear on saturated colors). Choose 4:4:4 for crisp saturated colors at the cost of file size.",
+    "wideGamutMaxSourcePixels": "Wide-Gamut Max Source Pixels",
+    "wideGamutMaxSourcePixelsHint": "Pixel-count cap above which wide-gamut sources are downscaled before the rgb16 pipeline. Default 50,000,000 (50 MP). Higher values use more memory; only raise on hosts with several GB of RAM."
   },
   "footer": {
     "admin": "Admin"

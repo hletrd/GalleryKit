@@ -247,6 +247,42 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             <p className="text-xs text-muted-foreground">{t('settings.avifEffortHint')}</p>
                         </div>
                     </div>
+
+                    {/* C2-A5 / C2-COL-MED-2 + C2-A6 / C2-INT-MED-1 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="sdr-jpeg-chroma">{t('settings.sdrJpegChroma')}</Label>
+                            <Select
+                                value={settings.sdr_jpeg_chroma || ''}
+                                onValueChange={(value) => handleChange('sdr_jpeg_chroma', value)}
+                            >
+                                <SelectTrigger id="sdr-jpeg-chroma">
+                                    <SelectValue placeholder={getPlaceholder('sdr_jpeg_chroma')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="4:4:4">{t('settings.chroma444')}</SelectItem>
+                                    <SelectItem value="4:2:2">{t('settings.chroma422')}</SelectItem>
+                                    <SelectItem value="4:2:0">{t('settings.chroma420')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">{t('settings.sdrJpegChromaHint')}</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="wide-gamut-max-source-pixels">{t('settings.wideGamutMaxSourcePixels')}</Label>
+                            <Input
+                                id="wide-gamut-max-source-pixels"
+                                type="number"
+                                inputMode="numeric"
+                                min={10000000}
+                                max={200000000}
+                                step={1000000}
+                                value={settings.wide_gamut_max_source_pixels || ''}
+                                placeholder={getPlaceholder('wide_gamut_max_source_pixels')}
+                                onChange={(e) => handleChange('wide_gamut_max_source_pixels', e.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">{t('settings.wideGamutMaxSourcePixelsHint')}</p>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
 
