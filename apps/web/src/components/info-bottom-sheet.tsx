@@ -421,12 +421,8 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                     <p className="font-medium">{image.iso}</p>
                                 </div>
                             )}
-                            {hasExifData(image.icc_profile_name) && (
-                                <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                    <p className="font-medium">{image.icc_profile_name}</p>
-                                </div>
-                            )}
+                            {/* P3-32 / C4-A1: ICC profile name and gamut chip live
+                                exclusively in the Color Details accordion. */}
                             {(image.width > 0 && image.height > 0) && (
                                 <div>
                                     <p className="text-muted-foreground text-xs">{t('viewer.dimensions')}</p>

@@ -706,12 +706,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <p className="font-medium">{image.iso}</p>
                                         </div>
                                     )}
-                                    {hasExifData(image.icc_profile_name) && (
-                                        <div>
-                                            <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
-                                            <p className="font-medium">{image.icc_profile_name}</p>
-                                        </div>
-                                    )}
+                                    {/* P3-32 / C4-A1: ICC profile name and gamut chip live exclusively
+                                        in the Color Details accordion above. The accordion auto-opens
+                                        for non-trivial color (P3-25), so duplicating the row in the EXIF
+                                        grid below is visual redundancy. */}
                                     {(image.width > 0 && image.height > 0) && (
                                         <div>
                                             <p className="text-muted-foreground text-xs">{t('viewer.dimensions')}</p>
