@@ -66,7 +66,11 @@ function extractOuterCatchBody(source: string, fnHeader: string): string | null 
     const openBrace = source.indexOf('{', headerIdx);
     if (openBrace === -1) return null;
 
-    let depth = 0;
+    // C1-LOW (cycle 1 RPF): the original loop tracked a brace `depth`
+    // counter that was never read. Removed the dead counter to silence the
+    // @typescript-eslint/no-unused-vars warning. The string/comment skipping
+    // remains necessary so braces inside strings/comments don't perturb the
+    // later `}\\s*catch\\s*\\(` regex scan over `source.slice(headerIdx, fnEnd)`.
     let i = openBrace;
     let inString: '"' | "'" | '`' | null = null;
     let inLineComment = false;
@@ -97,10 +101,6 @@ function extractOuterCatchBody(source: string, fnHeader: string): string | null 
             i++;
         } else if (ch === '"' || ch === "'" || ch === '`') {
             inString = ch;
-        } else if (ch === '{') {
-            depth++;
-        } else if (ch === '}') {
-            depth--;
         }
         i++;
     }
