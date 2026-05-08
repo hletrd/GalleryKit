@@ -5,6 +5,15 @@ import { Info, ChevronDown } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ImageDetail } from '@/lib/image-types';
 
+/**
+ * humanizeColorPrimaries: returns Latinate names (BT.709, Display P3, DCI-P3,
+ * Rec. 2020, Adobe RGB, ProPhoto RGB) that are universally recognizable
+ * across locales. Convention (per cycle-3 RPF C3-D2): primaries names stay
+ * un-translated; only transfer functions get translated via
+ * humanizeTransferFunction(value, t). Photographers across en/ko locales
+ * read the same Latinate technical names that match camera vendor docs and
+ * browser CSS spec.
+ */
 export function humanizeColorPrimaries(value: string | null | undefined): string {
     switch (value) {
         case 'bt709': return 'BT.709';
@@ -17,14 +26,28 @@ export function humanizeColorPrimaries(value: string | null | undefined): string
     }
 }
 
-export function humanizeTransferFunction(value: string | null | undefined): string {
+/**
+ * C3-A2 / C3-COL-MED-1 / C3-UX-MED-3: route transfer-function names through
+ * the i18n callback so the lightbox color pip and Color Details accordion
+ * display Korean transfer text on Korean locales (e.g. "감마 2.2" instead of
+ * "Gamma 2.2") rather than mixing English humanizer output with localized
+ * panel labels.
+ *
+ * Latinate technical names (sRGB, PQ, HLG) stay identical across locales —
+ * they match SMPTE / ITU-T spec wording and camera-vendor docs. Descriptive
+ * names (Gamma 2.2, Gamma 1.8, Linear) are translated.
+ */
+export function humanizeTransferFunction(
+    value: string | null | undefined,
+    t: (key: string) => string,
+): string {
     switch (value) {
-        case 'srgb': return 'sRGB';
-        case 'gamma22': return 'Gamma 2.2';
-        case 'gamma18': return 'Gamma 1.8';
-        case 'pq': return 'PQ (ST 2084)';
-        case 'hlg': return 'HLG';
-        case 'linear': return 'Linear';
+        case 'srgb': return t('viewer.transferSrgb');
+        case 'gamma22': return t('viewer.transferGamma22');
+        case 'gamma18': return t('viewer.transferGamma18');
+        case 'pq': return t('viewer.transferPq');
+        case 'hlg': return t('viewer.transferHlg');
+        case 'linear': return t('viewer.transferLinear');
         default: return '';
     }
 }
@@ -157,7 +180,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                     {image.transfer_function && (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.transferFunction')}</p>
-                            <p className="font-medium">{humanizeTransferFunction(image.transfer_function) || t('viewer.colorUnknown')}</p>
+                            <p className="font-medium">{humanizeTransferFunction(image.transfer_function, t) || t('viewer.colorUnknown')}</p>
                         </div>
                     )}
                     {(isAdmin && image.color_pipeline_decision) && (

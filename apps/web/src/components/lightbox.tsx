@@ -87,7 +87,7 @@ function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
     if (!hasData) return null;
 
     const primaries = humanizeColorPrimaries(image.color_primaries);
-    const transfer = humanizeTransferFunction(image.transfer_function);
+    const transfer = humanizeTransferFunction(image.transfer_function, t);
     const pipeline = humanizeColorPipelineDecision(image.color_pipeline_decision, t);
     // C3-A3 / C3-UX-MED-2: surface the HDR flag in the lightbox color pip.
     // image.is_hdr is admin-only via privacy field separation, so public
