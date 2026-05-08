@@ -93,6 +93,16 @@ function getSupportsCanvasP3(): boolean {
 interface HistogramProps {
     imageUrl: string;
     avifUrl?: string;
+    /**
+     * Optional last-resort URL when the sized derivative (640 px JPEG / AVIF)
+     * 404s — typically the base filename (largest configured size, the only
+     * variant the encoder guarantees via the atomic-rename pattern in
+     * `process-image.ts`). Photos uploaded before the current `imageSizes`
+     * config may be missing the 640 px sized variant; the fallback ensures
+     * the histogram still renders (at the cost of a slightly larger
+     * download — the histogram canvas down-scales to 256 px regardless).
+     */
+    fallbackImageUrl?: string;
     colorPrimaries?: string | null;
     className?: string;
     cycleModeRef?: React.RefObject<(() => void) | null>;
@@ -312,7 +322,7 @@ function getGamutLabel(primaries: string | null | undefined, t: (key: string) =>
     }
 }
 
-export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleModeRef }: HistogramProps) {
+export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries, className, cycleModeRef }: HistogramProps) {
     const { t } = useTranslation();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme === 'dark';
@@ -324,6 +334,18 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
     const [collapsed, setCollapsed] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
+    // Tracks URLs whose <img> load failed (404 / decode error). The URL
+    // resolver below skips failed URLs and falls through to the next
+    // candidate in priority order: AVIF → sized JPEG → fallback (base).
+    const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(() => new Set());
+    const markFailed = useCallback((url: string) => {
+        setFailedUrls((prev) => {
+            if (prev.has(url)) return prev;
+            const next = new Set(prev);
+            next.add(url);
+            return next;
+        });
+    }, []);
 
     // C3-A4: avifSupported flips from null → true|false when the probe
     // Promise resolves. Render is null-aware: while the probe is pending
@@ -350,7 +372,14 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
     const { colorGamut } = useDisplayCapability();
     const isP3Display = colorGamut !== 'srgb';
     const preferAvif = isWideGamut && avifSupported === true && isP3Display && getSupportsCanvasP3() && Boolean(avifUrl);
-    const effectiveUrl = preferAvif ? avifUrl! : imageUrl;
+    // Priority chain: AVIF (if preferred) → sized JPEG → fallback base JPEG.
+    // We skip any URL that has already failed an <img> load so older photos
+    // missing a sized derivative (legacy `imageSizes` config) cleanly fall
+    // through to the base filename instead of leaving the histogram blank.
+    const candidateUrls: (string | undefined)[] = preferAvif
+        ? [avifUrl, imageUrl, fallbackImageUrl]
+        : [imageUrl, fallbackImageUrl];
+    const effectiveUrl = candidateUrls.find((u): u is string => Boolean(u) && !failedUrls.has(u as string)) ?? null;
     // C3-A4: only show "(sRGB clipped)" when the AVIF probe has actually
     // resolved AND came back as `false`. While avifSupported === null
     // (probe pending), suppress the hint to avoid the first-render flicker
@@ -405,6 +434,10 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
         };
         img.onerror = () => {
             if (aborted) return;
+            // Mark this URL as failed so the next render falls through to
+            // the next candidate (AVIF → sized JPEG → base fallback). This
+            // is the path for legacy photos missing a 640 px derivative.
+            markFailed(effectiveUrl);
             setHistogramState({ imageUrl: effectiveUrl, data: null });
         };
         img.src = effectiveUrl;
@@ -415,7 +448,7 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
             img.onerror = null;
             img.src = '';
         };
-    }, [effectiveUrl]);
+    }, [effectiveUrl, markFailed]);
 
     useEffect(() => {
         if (!histogramData || !canvasRef.current || collapsed) return;

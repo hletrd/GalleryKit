@@ -802,6 +802,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             avifUrl={image.filename_avif
                                                 ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
                                                 : undefined}
+                                            fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                             colorPrimaries={image.color_primaries}
                                             className="w-full"
                                             cycleModeRef={histogramCycleRef}

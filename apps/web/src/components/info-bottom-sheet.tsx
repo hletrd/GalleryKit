@@ -302,6 +302,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                             avifUrl={image.filename_avif
                                                 ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
                                                 : undefined}
+                                            fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                             colorPrimaries={image.color_primaries}
                                             className="w-full"
                                         />
@@ -519,6 +520,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                             avifUrl={image.filename_avif
                                                 ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
                                                 : undefined}
+                                            fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                             colorPrimaries={image.color_primaries}
                                             className="w-full"
                                         />
