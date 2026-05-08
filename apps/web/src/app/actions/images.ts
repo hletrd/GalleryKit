@@ -437,6 +437,7 @@ export async function uploadImages(formData: FormData) {
                         camera_model: exifDb.camera_model,
                         capture_date: exifDb.capture_date,
                         iccProfileName: data.iccProfileName,
+                        colorSignals: data.colorSignals,
                     });
 
                     successCount++;

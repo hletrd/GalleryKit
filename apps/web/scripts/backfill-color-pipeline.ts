@@ -55,6 +55,7 @@ export interface ImageRow {
     filename_jpeg: string;
     icc_profile_name: string | null;
     color_pipeline_decision: string | null;
+    color_primaries: string | null;
     width: number;
 }
 
@@ -80,6 +81,8 @@ export async function reprocessRow(row: ImageRow): Promise<'processed' | 'skippe
             undefined,
             undefined,
             row.icc_profile_name,
+            undefined,
+            row.color_primaries ? { colorPrimaries: row.color_primaries } : null,
         );
         return 'processed';
     } catch (err) {
@@ -136,7 +139,7 @@ async function main() {
 
     const rawRows = await db.execute(sql`
         SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
-               icc_profile_name, color_pipeline_decision, width
+               icc_profile_name, color_pipeline_decision, color_primaries, width
         FROM images
         WHERE ${whereClause}
         ORDER BY id ASC

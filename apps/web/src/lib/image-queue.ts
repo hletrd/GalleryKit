@@ -117,6 +117,8 @@ export type ImageProcessingJob = {
     quality?: ImageQualitySettings;
     imageSizes?: number[];
     iccProfileName?: string | null;
+    // P3-11: NCLX-derived color signals for ICC-less fallback in processImageFormats
+    colorSignals?: { colorPrimaries?: string | null } | null;
     // US-P52: EXIF hints for caption stub / future ONNX inference
     camera_model?: string | null;
     capture_date?: string | null;
@@ -319,6 +321,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 imageSizes,
                 job.iccProfileName,
                 forceSrgbDerivatives,
+                job.colorSignals,
             );
 
             // Verify all 3 output formats exist and are non-zero before marking processed

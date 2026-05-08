@@ -404,8 +404,21 @@ export type ColorPipelineDecision =
  * null / unknown                  │ srgb-from-unknown │ safe default
  * ───────────────────────────────────────────────────────────────────────────
  */
-export function resolveColorPipelineDecision(iccProfileName: string | null | undefined): ColorPipelineDecision {
-    if (!iccProfileName) return 'srgb-from-unknown';
+export function resolveColorPipelineDecision(
+    iccProfileName: string | null | undefined,
+    signals?: { colorPrimaries?: string | null } | null,
+): ColorPipelineDecision {
+    if (!iccProfileName) {
+        // P3-11: fall back to NCLX-derived primaries when ICC name is absent
+        const primaries = signals?.colorPrimaries;
+        if (primaries === 'p3-d65') return 'p3-from-displayp3';
+        if (primaries === 'dci-p3') return 'p3-from-dcip3';
+        if (primaries === 'adobergb') return 'p3-from-adobergb';
+        if (primaries === 'prophoto') return 'p3-from-prophoto';
+        if (primaries === 'bt2020') return 'p3-from-rec2020';
+        if (primaries === 'bt709') return 'srgb';
+        return 'srgb-from-unknown';
+    }
 
     const name = iccProfileName.toLowerCase();
 
@@ -459,8 +472,18 @@ export type AvifIccDecision = 'p3' | 'p3-from-wide' | 'srgb';
  * null / unknown                  │ srgb            │ safe default
  * ───────────────────────────────────────────────────────────────────────────
  */
-export function resolveAvifIccProfile(iccProfileName: string | null | undefined): AvifIccDecision {
-    if (!iccProfileName) return 'srgb';
+export function resolveAvifIccProfile(
+    iccProfileName: string | null | undefined,
+    signals?: { colorPrimaries?: string | null } | null,
+): AvifIccDecision {
+    if (!iccProfileName) {
+        // P3-11: fall back to NCLX-derived primaries when ICC name is absent
+        const primaries = signals?.colorPrimaries;
+        if (primaries === 'p3-d65' || primaries === 'dci-p3') return 'p3';
+        if (primaries === 'adobergb' || primaries === 'prophoto' || primaries === 'bt2020') return 'p3-from-wide';
+        if (primaries === 'bt709') return 'srgb';
+        return 'srgb';
+    }
 
     const name = iccProfileName.toLowerCase();
 
@@ -581,10 +604,12 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     }
 
     const iccProfileName = extractIccProfileName(metadata.icc);
-    const colorPipelineDecision = resolveColorPipelineDecision(iccProfileName);
 
     // US-CM04: detect CICP-equivalent color signals for future HDR delivery.
+    // P3-11: compute before pipeline decision so NCLX-derived primaries can
+    // be used as fallback when ICC name is absent.
     const colorSignals = await detectColorSignals(originalPath, image, metadata);
+    const colorPipelineDecision = resolveColorPipelineDecision(iccProfileName, colorSignals);
 
     // CM-LOW-1: Sharp's metadata.depth is a string union ('uchar', 'ushort',
     // 'float', etc.), not a numeric string. The pre-fix code did
@@ -636,6 +661,7 @@ export async function processImageFormats(
     sizes: number[] = DEFAULT_OUTPUT_SIZES, // Admin-configured output sizes
     iccProfileName?: string | null, // Source ICC profile name for AVIF P3 tagging
     forceSrgbDerivatives?: boolean, // US-CM02: when true, force sRGB on WebP/JPEG even for P3 sources
+    signals?: { colorPrimaries?: string | null } | null, // P3-11: NCLX fallback for ICC-less sources
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
@@ -644,7 +670,8 @@ export async function processImageFormats(
     // CM-CRIT-1 / US-CM03: resolve the OUTPUT colorspace decision first so
     // WI-15 can cap source dimensions and WI-12 can detect DCI-P3 before
     // creating the Sharp instance.
-    const avifDecision = resolveAvifIccProfile(iccProfileName);
+    // P3-11: pass signals so NCLX-derived primaries fill in when ICC name is absent.
+    const avifDecision = resolveAvifIccProfile(iccProfileName, signals);
     const isWideGamutSource = avifDecision === 'p3' || avifDecision === 'p3-from-wide';
     // The actual ICC profile to embed: always 'p3' for both P3 and p3-from-wide.
     const avifIcc: 'p3' | 'srgb' = isWideGamutSource ? 'p3' : 'srgb';
