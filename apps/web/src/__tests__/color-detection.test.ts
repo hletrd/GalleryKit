@@ -165,6 +165,47 @@ describe('detectColorSignals', () => {
         expect(signals.transferFunction).toBe('srgb');
         expect(signals.isHdr).toBe(false);
     });
+
+    // C2-A7 / C2-HDR-LOW-2: when ICC name and NCLX disagree, NCLX must win.
+    // NCLX is the authoritative container-level signal; the ICC name is a
+    // human-readable label that may not reflect the actual transfer.
+    // This regression test locks the precedence so a future refactor can't
+    // silently flip the order. Failure scenario the test guards against:
+    // an iPhone HDR HEIF tagged with NCLX 9/16/9 (Rec.2020 / PQ / BT.2020-NCL)
+    // but with an Apple-overwritten ICC name "Display P3" — naive ICC-name-wins
+    // detection would miss the HDR transfer and ship malformed SDR pixels
+    // through the upload pipeline without giving the admin a chance to opt
+    // into allow_hdr_ingest.
+    it('NCLX wins when ICC name and NCLX disagree on transfer (PQ vs sRGB)', async () => {
+        const tmpFile = path.join(os.tmpdir(), `gk-cicp-conflict-pq-${Date.now()}.avif`);
+        const ipco = makeIpco([makeColrNclx(9, 16, 9)]); // Rec.2020 / PQ / BT.2020-NCL
+        const iprp = makeIprp([ipco]);
+        const metaBuf = makeMeta([iprp]);
+        await fs.writeFile(tmpFile, metaBuf);
+        try {
+            // Simulate Sharp returning a misleading ICC profile name.
+            // Build a synthetic ICC buffer with name "Display P3" so the
+            // ICC-name path would otherwise infer p3-d65 / srgb (not HDR).
+            const iccBuf = Buffer.alloc(256);
+            iccBuf.write('acsp', 36);
+            iccBuf.writeUInt32BE(1, 128);
+            iccBuf.writeUInt32BE(0x64657363, 132);
+            iccBuf.writeUInt32BE(144, 136);
+            iccBuf.writeUInt32BE(28, 140);
+            iccBuf.writeUInt32BE(0x64657363, 144);
+            iccBuf.writeUInt32BE(0, 148);
+            iccBuf.writeUInt32BE(11, 152);
+            iccBuf.write('Display P3\x00', 156);
+            const meta = makeMockMeta({ format: 'avif', icc: iccBuf });
+            const signals = await detectColorSignals(tmpFile, {}, meta);
+            expect(signals.transferFunction).toBe('pq');
+            expect(signals.isHdr).toBe(true);
+            // Primaries are also resolved from NCLX (Rec.2020).
+            expect(signals.colorPrimaries).toBe('bt2020');
+        } finally {
+            await fs.unlink(tmpFile).catch(() => {});
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
