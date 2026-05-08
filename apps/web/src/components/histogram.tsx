@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
@@ -71,7 +71,7 @@ interface HistogramProps {
     avifUrl?: string;
     colorPrimaries?: string | null;
     className?: string;
-    cycleModeRef?: React.MutableRefObject<(() => void) | null>;
+    cycleModeRef?: React.RefObject<(() => void) | null>;
 }
 
 const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
@@ -380,9 +380,10 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
         });
     }, []);
 
-    if (cycleModeRef) {
-        cycleModeRef.current = cycleMode;
-    }
+    // C1-CRIT-2 (cycle 1 RPF): use useImperativeHandle to expose the cycle
+    // function. Direct ref.current = ... during render violates React 19's
+    // react-hooks/refs rule.
+    useImperativeHandle(cycleModeRef, () => cycleMode, [cycleMode]);
 
     return (
         <div className={cn('flex flex-col gap-1', className)}>
