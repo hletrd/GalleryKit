@@ -17,6 +17,14 @@ const ADMIN_ONLY_SENSITIVE = [
     'processed',
     'original_format',
     'original_file_size',
+    // C5R-RPL-01 / P3-3 / C2-A1: admin-only color / HDR fields. Compile-time
+    // _PrivacySensitiveKeys guard already locks these out of publicSelectFields
+    // at the central definition. The runtime tests below provide belt-and-braces
+    // coverage in case a future call site imports adminSelectFields directly.
+    'color_pipeline_decision',
+    'is_hdr',
+    'transfer_function',
+    'matrix_coefficients',
 ] as const;
 
 describe('publicMapSelectFields privacy contract', () => {
@@ -34,6 +42,15 @@ describe('publicMapSelectFields privacy contract', () => {
 
     it('publicSelectFields (non-map) still excludes GPS — regression guard', () => {
         for (const key of GPS_KEYS) {
+            expect(publicSelectFieldKeys).not.toContain(key);
+        }
+    });
+
+    it('publicSelectFields (non-map) excludes admin-only HDR / pipeline fields', () => {
+        // C2-A1: runtime guard parallel to the compile-time _PrivacySensitiveKeys
+        // assert in data.ts. Catches accidental re-introduction of is_hdr /
+        // transfer_function / matrix_coefficients / color_pipeline_decision.
+        for (const key of ADMIN_ONLY_SENSITIVE) {
             expect(publicSelectFieldKeys).not.toContain(key);
         }
     });
