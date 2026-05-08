@@ -298,6 +298,10 @@
     "exposureProgram": "노출 모드",
     "flash": "플래시",
     "bitDepth": "비트 심도",
+    "sourceBitDepth": "원본 비트 심도",
+    "deliveredBitDepth": "출력 비트 심도",
+    "deliveredBitDepthSrgb": "8비트 (모든 포맷)",
+    "deliveredBitDepthP3": "10비트 AVIF, 8비트 WebP/JPEG",
     "topics": {
       "default": "갤러리"
     },

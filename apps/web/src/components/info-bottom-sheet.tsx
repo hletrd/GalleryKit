@@ -393,7 +393,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                             )}
                             {hasExifData(image.bit_depth) && (
                                 <div>
-                                    <p className="text-muted-foreground text-xs">{t('viewer.bitDepth')}</p>
+                                    <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
                                     <p className="font-medium">{image.bit_depth}-bit</p>
                                 </div>
                             )}

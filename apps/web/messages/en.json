@@ -298,6 +298,10 @@
     "exposureProgram": "Exposure Mode",
     "flash": "Flash",
     "bitDepth": "Bit Depth",
+    "sourceBitDepth": "Source bit depth",
+    "deliveredBitDepth": "Delivered",
+    "deliveredBitDepthSrgb": "8-bit (all formats)",
+    "deliveredBitDepthP3": "10-bit AVIF, 8-bit WebP/JPEG",
     "topics": {
       "default": "Gallery"
     },

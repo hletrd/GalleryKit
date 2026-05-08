@@ -130,6 +130,17 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                             <p className="font-medium">{humanizeColorPipelineDecision(image.color_pipeline_decision, t) || t('viewer.colorUnknown')}</p>
                         </div>
                     )}
+                    {/* P3-5: delivered bit depth per format */}
+                    {image.color_pipeline_decision && (
+                        <div>
+                            <p className="text-muted-foreground text-xs">{t('viewer.deliveredBitDepth')}</p>
+                            <p className="font-medium">
+                                {image.color_pipeline_decision.startsWith('p3')
+                                    ? t('viewer.deliveredBitDepthP3')
+                                    : t('viewer.deliveredBitDepthSrgb')}
+                            </p>
+                        </div>
+                    )}
                     {image.is_hdr && (
                         <div className="col-span-2">
                             <span

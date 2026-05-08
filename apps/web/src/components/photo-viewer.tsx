@@ -751,7 +751,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     )}
                                     {hasExifData(image.bit_depth) && (
                                         <div>
-                                            <p className="text-muted-foreground text-xs">{t('viewer.bitDepth')}</p>
+                                            <p className="text-muted-foreground text-xs">{t('viewer.sourceBitDepth')}</p>
                                             <p className="font-medium">{image.bit_depth}-bit</p>
                                         </div>
                                     )}
