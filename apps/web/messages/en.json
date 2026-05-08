@@ -345,6 +345,8 @@
     "gainMap": "Gain map",
     "gainMapPresent": "Apple HDR gain map detected",
     "gainMapDeliveredAsSdr": "Delivered as SDR base only — gain map not yet passed through.",
+    "copyColorMetadata": "Copy color metadata",
+    "colorMetadataCopied": "Color metadata copied",
     "noMetadata": "No camera metadata available for this photo."
   },
   "shared": {

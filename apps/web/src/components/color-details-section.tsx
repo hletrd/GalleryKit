@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useImperativeHandle } from 'react';
-import { Info, ChevronDown } from 'lucide-react';
+import { Info, ChevronDown, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { ImageDetail } from '@/lib/image-types';
@@ -133,6 +134,34 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
 
     const colorDetailsId = `color-details-${image.id}`;
 
+    // P4-C6 / R4-UX-L6: copy a JSON snapshot of the audit-grade color
+    // metadata to the clipboard. Useful for paste-into-forum / paste-into-
+    // support-ticket workflows where the photographer wants to share the
+    // full pipeline decision + ICC + transfer + decision in a machine-
+    // parseable form.
+    async function copyColorMetadata() {
+        const data = {
+            iccProfileName: image.icc_profile_name ?? null,
+            primaries: image.color_primaries ?? null,
+            transfer: image.transfer_function ?? null,
+            matrix: image.matrix_coefficients ?? null,
+            decision: image.color_pipeline_decision ?? null,
+            isHdr: image.is_hdr ?? null,
+            hasGainMap: image.has_gain_map ?? null,
+            sourceBitDepth: image.bit_depth ?? null,
+        };
+        try {
+            const text = JSON.stringify(data, null, 2);
+            if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+                throw new Error('clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(text);
+            toast.success(t('viewer.colorMetadataCopied'));
+        } catch {
+            toast.error(t('imageManager.copyFailed'));
+        }
+    }
+
     return (
         <div className="mt-3">
             {/* B2: tooltip trigger is sibling button, not nested inside accordion button */}
@@ -161,6 +190,18 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                         {t('viewer.calibrationTooltip')}
                     </TooltipContent>
                 </Tooltip>
+                {/* P4-C6: clipboard copy. JSON-stringified so the receiving
+                    side (forum, support ticket, etc.) can re-parse the
+                    structured fields rather than re-extracting from prose. */}
+                <button
+                    type="button"
+                    onClick={copyColorMetadata}
+                    aria-label={t('viewer.copyColorMetadata')}
+                    title={t('viewer.copyColorMetadata')}
+                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                    <Copy className="h-4 w-4" />
+                </button>
             </div>
             {showColorDetails && (
                 <div id={colorDetailsId} className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 transition-all">
