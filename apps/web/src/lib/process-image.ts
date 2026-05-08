@@ -105,8 +105,15 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  *       10-bit AVIF for wide-gamut, 4:4:4 JPEG chroma for wide-gamut,
  *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
  *       by format fan-out.
- *   6 — tunable encoder parameters: wide_gamut_jpeg_chroma and avif_effort
- *       are now admin-configurable instead of hardcoded.
+ *   4 — DCI-P3 white-point Bradford adaptation (WI-12). DCI-P3 sources
+ *       skip rgb16 to preserve the source ICC for the toColorspace('p3')
+ *       transform, then convert to D65 with Bradford CAT.
+ *   5 — 50 MP wide-gamut downscale gate (WI-15) + lazy 10-bit AVIF probe.
+ *       Sources beyond WIDE_GAMUT_MAX_SOURCE_PIXELS pass through a one-shot
+ *       resize to keep the rgb16 pipeline within memory; the 10-bit probe
+ *       runs once per process to avoid encoder thrash.
+ *   6 — tunable encoder parameters (P3-20 / P3-21): wide_gamut_jpeg_chroma
+ *       and avif_effort are now admin-configurable instead of hardcoded.
  */
 export const IMAGE_PIPELINE_VERSION = 6;
 
