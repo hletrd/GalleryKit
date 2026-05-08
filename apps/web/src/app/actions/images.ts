@@ -267,6 +267,7 @@ export async function uploadImages(formData: FormData) {
         let uploadedBytes = 0;
         const failedFiles: string[] = [];
         const warnings: string[] = [];
+        let hdrRejectedCount = 0;
 
         for (const file of files) {
             // Track saved original filename for cleanup on DB insert failure
@@ -281,6 +282,15 @@ export async function uploadImages(formData: FormData) {
                 // Phase 1: Save original and get metadata (fast)
                 const data = await saveOriginalAndGetMetadata(file);
                 savedOriginalFilename = data.filenameOriginal;
+
+                // P3-2: Reject HDR ingest when admin setting is disabled (default)
+                if (data.colorSignals?.isHdr && !uploadConfig.allowHdrIngest) {
+                    await deleteOriginalUploadFile(savedOriginalFilename);
+                    savedOriginalFilename = null;
+                    failedFiles.push(file.name);
+                    hdrRejectedCount++;
+                    continue;
+                }
 
                 // Extract EXIF
                 const exifDb = extractExifForDb(data.exifData);
@@ -445,6 +455,10 @@ export async function uploadImages(formData: FormData) {
 
         if (failedFiles.length > 0 && successCount === 0) {
             settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
+            // P3-2: return specific error when HDR ingest is disallowed
+            if (hdrRejectedCount > 0) {
+                return { error: t('hdrNotSupported') };
+            }
             return { error: t('allUploadsFailed') };
         }
 

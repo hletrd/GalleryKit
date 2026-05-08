@@ -33,6 +33,9 @@ export const GALLERY_SETTING_KEYS = [
 
     // US-CM02: force sRGB derivatives for legacy embedder compatibility
     'force_srgb_derivatives',
+
+    // P3-2: allow HDR (PQ/HLG) source ingest (default false)
+    'allow_hdr_ingest',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -79,6 +82,9 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
     // US-CM02: default off — P3-tagged WebP/JPEG for P3 sources
     force_srgb_derivatives: 'false',
+
+    // P3-2: default off — reject PQ/HLG source uploads
+    allow_hdr_ingest: 'false',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -106,6 +112,9 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
 
     // US-CM02: boolean toggle
     force_srgb_derivatives: (v) => v === 'true' || v === 'false',
+
+    // P3-2: boolean toggle
+    allow_hdr_ingest: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */

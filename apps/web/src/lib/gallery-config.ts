@@ -69,6 +69,9 @@ export interface GalleryConfig {
 
     // US-CM02: force sRGB derivatives for legacy embedder compatibility
     forceSrgbDerivatives: boolean;
+
+    // P3-2: allow HDR (PQ/HLG) source ingest
+    allowHdrIngest: boolean;
 }
 
 /**
@@ -119,6 +122,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('force_srgb_derivatives', raw)) return DEFAULTS.force_srgb_derivatives === 'true';
                 return raw === 'true';
             })(),
+            allowHdrIngest: (() => {
+                const raw = getSetting(map, 'allow_hdr_ingest');
+                if (!isValidSettingValue('allow_hdr_ingest', raw)) return DEFAULTS.allow_hdr_ingest === 'true';
+                return raw === 'true';
+            })(),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -139,6 +147,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 rm: Number(DEFAULTS.license_price_rm_cents),
             },
             forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
+            allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
         };
     }
 }

@@ -178,6 +178,22 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             aria-label={t('settings.forceSrgbDerivatives')}
                         />
                     </div>
+
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label htmlFor="allow-hdr-ingest">{t('settings.allowHdrIngest')}</Label>
+                            <p id="allow-hdr-ingest-help" className="text-xs text-muted-foreground">
+                                {t('settings.allowHdrIngestHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="allow-hdr-ingest"
+                            checked={settings.allow_hdr_ingest === 'true'}
+                            onCheckedChange={(checked) => handleChange('allow_hdr_ingest', checked ? 'true' : 'false')}
+                            aria-describedby="allow-hdr-ingest-help"
+                            aria-label={t('settings.allowHdrIngest')}
+                        />
+                    </div>
                 </CardContent>
             </Card>
 

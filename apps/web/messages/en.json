@@ -490,6 +490,7 @@
     "failedToWriteBackup": "Failed to write backup file",
     "backupFailed": "Database backup failed",
     "backupExitedWithCode": "Backup exited with code {code}",
+    "hdrNotSupported": "HDR images (PQ/HLG) are not supported. Enable 'Allow HDR Ingest' in Settings to upload this file.",
     "restoreInProgress": "Another restore is already in progress",
     "noFileProvided": "No file provided",
     "fileTooLarge": "File too large (max 250MB)",
@@ -648,7 +649,9 @@
     "licensePriceRm": "Rights-Managed License (cents)",
     "licensePriceHint": "Price in US cents. For example, 5000 = $50.00. Leave 0 to disable that tier.",
     "forceSrgbDerivatives": "Force sRGB Derivatives",
-    "forceSrgbDerivativesHint": "When ON, WebP and JPEG variants are always sRGB regardless of source color space. Use this only if downstream consumers (legacy embedders, specific clients) require sRGB JPEGs. AVIF variants always carry their original gamut."
+    "forceSrgbDerivativesHint": "When ON, WebP and JPEG variants are always sRGB regardless of source color space. Use this only if downstream consumers (legacy embedders, specific clients) require sRGB JPEGs. AVIF variants always carry their original gamut.",
+    "allowHdrIngest": "Allow HDR Ingest",
+    "allowHdrIngestHint": "When ON, PQ and HLG source images can be uploaded. When OFF (default), HDR uploads are rejected to prevent accidental ingestion of unsupported wide-gamut + high-dynamic-range files."
   },
   "footer": {
     "admin": "Admin"

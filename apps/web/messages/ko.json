@@ -490,6 +490,7 @@
     "failedToWriteBackup": "백업 파일 쓰기에 실패했습니다",
     "backupFailed": "데이터베이스 백업에 실패했습니다",
     "backupExitedWithCode": "백업이 코드 {code}(으)로 종료되었습니다",
+    "hdrNotSupported": "HDR 이미지(PQ/HLG)는 지원하지 않습니다. 이 파일을 업로드하려면 설정에서 'HDR 업로드 허용'을 켜세요.",
     "restoreInProgress": "다른 복원 작업이 이미 진행 중입니다",
     "noFileProvided": "파일이 제공되지 않았습니다",
     "fileTooLarge": "파일이 너무 큽니다 (최대 250MB)",
@@ -648,7 +649,9 @@
     "licensePriceRm": "권리 관리 라이선스 (센트)",
     "licensePriceHint": "미국 센트 단위 가격. 예: 5000 = $50.00. 해당 등급을 비활성화하려면 0으로 설정하세요.",
     "forceSrgbDerivatives": "sRGB 강제 적용",
-    "forceSrgbDerivativesHint": "켜면 WebP와 JPEG 변환본이 원본 색 공간과 상관없이 항상 sRGB로 생성됩니다. 레거시 임베더나 특정 클라이언트가 sRGB JPEG을 필요로 할 때만 사용하세요. AVIF 변환본은 원본 감마를 유지합니다."
+    "forceSrgbDerivativesHint": "켜면 WebP와 JPEG 변환본이 원본 색 공간과 상관없이 항상 sRGB로 생성됩니다. 레거시 임베더나 특정 클라이언트가 sRGB JPEG을 필요로 할 때만 사용하세요. AVIF 변환본은 원본 감마를 유지합니다.",
+    "allowHdrIngest": "HDR 업로드 허용",
+    "allowHdrIngestHint": "켜면 PQ 및 HLG 원본 이미지를 업로드할 수 있습니다. 꺼져 있으면(기본값) 지원되지 않는 와이드 감마 + 고역동 범위 파일의 우발적 업로드를 방지합니다."
   },
   "footer": {
     "admin": "관리자"
