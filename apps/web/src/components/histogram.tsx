@@ -71,6 +71,7 @@ interface HistogramProps {
     avifUrl?: string;
     colorPrimaries?: string | null;
     className?: string;
+    cycleModeRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 const MODE_CYCLE: HistogramMode[] = ['luminance', 'rgb', 'r', 'g', 'b'];
@@ -287,7 +288,7 @@ function getGamutLabel(primaries: string | null | undefined, t: (key: string) =>
     }
 }
 
-export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: HistogramProps) {
+export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleModeRef }: HistogramProps) {
     const { t } = useTranslation();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme === 'dark';
@@ -378,6 +379,10 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
             return MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
         });
     }, []);
+
+    if (cycleModeRef) {
+        cycleModeRef.current = cycleMode;
+    }
 
     return (
         <div className={cn('flex flex-col gap-1', className)}>

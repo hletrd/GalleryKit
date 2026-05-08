@@ -269,6 +269,8 @@ export async function uploadImages(formData: FormData) {
         const warnings: string[] = [];
         let hdrRejectedCount = 0;
         let hdrWarningCount = 0;
+        let wideGamutDownscaleWarningCount = 0;
+        const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
 
         for (const file of files) {
             // Track saved original filename for cleanup on DB insert failure
@@ -296,6 +298,12 @@ export async function uploadImages(formData: FormData) {
                 // P3-14: warn when HDR is accepted
                 if (data.colorSignals?.isHdr && uploadConfig.allowHdrIngest) {
                     hdrWarningCount++;
+                }
+
+                // P3-24: warn when wide-gamut source exceeds 50 MP cap
+                const isWideGamutSource = WIDE_GAMUT_PRIMARIES.has(data.colorSignals?.colorPrimaries ?? '');
+                if (isWideGamutSource && data.width * data.height > 50_000_000) {
+                    wideGamutDownscaleWarningCount++;
                 }
 
                 // Extract EXIF
@@ -489,6 +497,7 @@ export async function uploadImages(formData: FormData) {
             failed: failedFiles,
             warnings,
             hdrWarningCount,
+            wideGamutDownscaleWarningCount,
         };
     } finally {
         await uploadContractLock.release();

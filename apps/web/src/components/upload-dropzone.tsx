@@ -197,6 +197,7 @@ export function UploadDropzone({
             const failedFiles: File[] = [];
             const uploadWarnings: string[] = [];
             let hdrWarningCount = 0;
+            let wideGamutDownscaleWarningCount = 0;
             const totalFiles = files.length;
             let completedSoFar = 0;
 
@@ -226,6 +227,9 @@ export function UploadDropzone({
                         successCount++;
                         if (res?.hdrWarningCount) {
                             hdrWarningCount += res.hdrWarningCount;
+                        }
+                        if (res?.wideGamutDownscaleWarningCount) {
+                            wideGamutDownscaleWarningCount += res.wideGamutDownscaleWarningCount;
                         }
                         if (res?.warnings?.length) {
                             uploadWarnings.push(...res.warnings);
@@ -286,6 +290,10 @@ export function UploadDropzone({
             // P3-14: surface HDR warning toast when HDR uploads are accepted
             if (hdrWarningCount > 0) {
                 toast.warning(t('upload.hdrWarning', { count: hdrWarningCount }));
+            }
+            // P3-24: surface wide-gamut downscale warning toast
+            if (wideGamutDownscaleWarningCount > 0) {
+                toast.warning(t('upload.wideGamutDownscaleWarning', { count: wideGamutDownscaleWarningCount }));
             }
         } catch {
             toast.error(t('upload.failed'));

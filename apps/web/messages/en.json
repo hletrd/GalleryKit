@@ -144,7 +144,8 @@
     "tagsForFile": "Tags for {file}",
     "fileError": "{file}: {error}",
     "warningSuccess": "Uploaded {count} file(s), with {warnings} warning(s).",
-    "hdrWarning": "{count, plural, one {1 HDR image uploaded — may not display correctly on all devices.} other {# HDR images uploaded — may not display correctly on all devices.}}"
+    "hdrWarning": "{count, plural, one {1 HDR image uploaded — may not display correctly on all devices.} other {# HDR images uploaded — may not display correctly on all devices.}}",
+    "wideGamutDownscaleWarning": "{count, plural, one {1 wide-gamut image exceeds 50 MP — will be downscaled during processing.} other {# wide-gamut images exceed 50 MP — will be downscaled during processing.}}"
   },
   "imageManager": {
     "selected": "{count} selected",
@@ -305,6 +306,7 @@
     "deliveredBitDepth": "Delivered",
     "deliveredBitDepthSrgb": "8-bit (all formats)",
     "deliveredBitDepthP3": "10-bit AVIF, 8-bit WebP/JPEG",
+    "deliveredFormats": "Delivered formats",
     "topics": {
       "default": "Gallery"
     },

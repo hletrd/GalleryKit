@@ -58,9 +58,10 @@ interface ColorDetailsSectionProps {
     image: ImageDetail;
     isAdmin?: boolean;
     t: (key: string) => string;
+    toggleRef?: React.MutableRefObject<(() => void) | null>;
 }
 
-export default function ColorDetailsSection({ image, isAdmin = false, t }: ColorDetailsSectionProps) {
+export default function ColorDetailsSection({ image, isAdmin = false, t, toggleRef }: ColorDetailsSectionProps) {
     const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
@@ -68,6 +69,10 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
         (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
     );
     const [showColorDetails, setShowColorDetails] = useState(isNonTrivialColor);
+
+    if (toggleRef) {
+        toggleRef.current = () => setShowColorDetails((prev) => !prev);
+    }
 
     const hasColorDetails = Boolean(
         image.color_primaries || image.transfer_function || image.is_hdr || (isAdmin && image.color_pipeline_decision),
@@ -110,7 +115,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                 </Tooltip>
             </div>
             {showColorDetails && (
-                <div id={colorDetailsId} className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 pl-6">
+                <div id={colorDetailsId} className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-2 transition-all">
                     {/* B3: deduplicate ICC profile + primaries */}
                     {primariesMatchIcc ? (
                         <div>
@@ -167,6 +172,23 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                                 {image.color_pipeline_decision.startsWith('p3')
                                     ? t('viewer.deliveredBitDepthP3')
                                     : t('viewer.deliveredBitDepthSrgb')}
+                            </p>
+                        </div>
+                    )}
+                    {/* P3-22: delivered formats */}
+                    {(image.filename_webp || image.filename_avif || image.filename_jpeg) && (
+                        <div>
+                            <p className="text-muted-foreground text-xs">{t('viewer.deliveredFormats')}</p>
+                            <p className="font-medium flex gap-1">
+                                {[
+                                    image.filename_webp && 'WebP',
+                                    image.filename_avif && 'AVIF',
+                                    image.filename_jpeg && 'JPEG',
+                                ].filter(Boolean).map((fmt) => (
+                                    <span key={fmt} className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-muted rounded">
+                                        {fmt}
+                                    </span>
+                                ))}
                             </p>
                         </div>
                     )}

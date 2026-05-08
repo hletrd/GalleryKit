@@ -124,6 +124,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const showLightboxRef = useRef(showLightbox);
     useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
     const [showBottomSheet, setShowBottomSheet] = useState(false);
+    const colorDetailsToggleRef = useRef<(() => void) | null>(null);
+    const histogramCycleRef = useRef<(() => void) | null>(null);
 
     // Persist info sidebar pin state across photo navigation
     const [isPinned, setIsPinned] = useState(() => {
@@ -337,6 +339,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     setIsPinned(prev => !prev);
                 } else {
                     setShowBottomSheet(prev => !prev);
+                }
+            } else if (e.key === 'c' || e.key === 'C') {
+                if (colorDetailsToggleRef.current) {
+                    colorDetailsToggleRef.current();
+                }
+            } else if (e.key === 'h' || e.key === 'H') {
+                if (histogramCycleRef.current) {
+                    histogramCycleRef.current();
                 }
             }
         };
@@ -655,7 +665,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} />
+                                <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} />
                                 <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
                                 <h3 className="font-semibold mb-3 flex items-center gap-2"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
@@ -794,6 +804,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                 : undefined}
                                             colorPrimaries={image.color_primaries}
                                             className="w-full"
+                                            cycleModeRef={histogramCycleRef}
                                         />
                                     </div>
                                 )}
