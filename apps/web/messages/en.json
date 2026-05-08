@@ -330,6 +330,7 @@
     "colorPipelineSrgbFromUnknown": "sRGB (unknown source)",
     "colorUnknown": "Unknown",
     "calibrationTooltip": "Display calibration affects color accuracy. Uncalibrated displays may render saturation and white balance differently than the photographer intended.",
+    "wideGamutHint": "This photo uses a wide color gamut. Your display may not show all colors accurately.",
     "noMetadata": "No camera metadata available for this photo."
   },
   "shared": {

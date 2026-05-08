@@ -25,6 +25,7 @@ import { Lightbox, LightboxTrigger } from '@/components/lightbox';
 import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
 import ColorDetailsSection from '@/components/color-details-section';
+import WideGamutHint from '@/components/wide-gamut-hint';
 import { ImageDetail, TagInfo, hasExifData, hasAnyCameraExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
@@ -777,6 +778,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                     )}
                                 </div>
                                 <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} />
+                                <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
                                 {!hasAnyCameraExifData(image) && (
                                     <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                                 )}

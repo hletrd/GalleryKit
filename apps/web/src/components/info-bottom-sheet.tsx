@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Histogram } from '@/components/histogram';
 import ColorDetailsSection from '@/components/color-details-section';
+import WideGamutHint from '@/components/wide-gamut-hint';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface InfoBottomSheetProps {
@@ -422,6 +423,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
 
                         {/* Color details accordion — mirrors desktop sidebar */}
                         <ColorDetailsSection image={image} isAdmin={isAdminProp} t={t} />
+                        <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
 
                         {/* Histogram */}
                         {image.filename_jpeg && (
