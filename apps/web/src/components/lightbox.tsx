@@ -90,11 +90,16 @@ function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
     const transfer = humanizeTransferFunction(image.transfer_function, t);
     const pipeline = humanizeColorPipelineDecision(image.color_pipeline_decision, t);
     // C3-A3 / C3-UX-MED-2: surface the HDR flag in the lightbox color pip.
-    // image.is_hdr is admin-only via privacy field separation, so public
-    // viewers will not see this row even when bypassed at the component
-    // level. Admin photographers demoing in lightbox mode see the
-    // prominent HDR pill matching the sidebar Color Details badge.
-    const isHdr = image.is_hdr === true;
+    // C4-A3 / C4-HDR-MED-2: gate on transfer_function — same convention as the
+    // sidebar Color Details accordion (color-details-section.tsx :88). The
+    // schema invariant is_hdr === (transfer_function === 'pq' || 'hlg') holds,
+    // so behavior is unchanged for current rows; harmonizing the gate
+    // future-proofs against new transfer values (HDR10+ / Dolby Vision) and
+    // keeps the audit logic consistent across both entry points. Both
+    // image.transfer_function and image.is_hdr are admin-only via privacy
+    // field separation in data.ts, so this row stays hidden for public
+    // viewers either way.
+    const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
 
     return (
         <div className="pointer-events-auto absolute bottom-4 left-4 z-10">
