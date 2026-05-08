@@ -169,8 +169,8 @@
 @media (color-gamut: p3) { .gamut-p3-badge { display: inline-block; } }
 
 /* E3: Only show HDR badge on HDR-capable displays */
-.hdr-badge { display: none; }
-@media (dynamic-range: high) { .hdr-badge { display: inline-flex !important; } }
+.hdr-badge { display: none; align-items: center; gap: 0.25rem; }
+@media (dynamic-range: high) { .hdr-badge { display: inline-flex; } }
 
 /* Forced-colors (Windows high-contrast) adjustments for color surfaces */
 @media (forced-colors: active) {

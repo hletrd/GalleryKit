@@ -385,7 +385,7 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className }: Hist
                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
                     {t('viewer.histogram')}
                     {gamutLabel && <span className="ml-1 opacity-70">{gamutLabel}</span>}
-                    {isClipped && <span className="ml-1 opacity-60">({t('viewer.histogramSrgbClipped')})</span>}
+                    {isClipped && <span className="ml-1 text-amber-700 font-medium">({t('viewer.histogramSrgbClipped')})</span>}
                 </span>
                 <button
                     type="button"
