@@ -1,8 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-
-const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
+import { isWideGamutPrimary } from '@/lib/color-detection';
 
 interface WideGamutHintProps {
     colorPrimaries?: string | null;
@@ -29,7 +28,7 @@ function getServerSnapshot(): boolean {
 }
 
 export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps) {
-    const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
+    const isWideGamut = isWideGamutPrimary(colorPrimaries);
     const isP3Display = useSyncExternalStore(subscribeToP3Mq, getP3Snapshot, getServerSnapshot);
     const isSrgbDisplay = !isP3Display;
 

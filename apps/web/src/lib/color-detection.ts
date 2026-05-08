@@ -27,6 +27,28 @@ export interface ColorSignals {
     isHdr: boolean;
 }
 
+/**
+ * C3-A1 / C3-COL-LOW-1 / C3-ARCH-MED-2: canonical wide-gamut primaries set
+ * shared across the upload pipeline (process-image.ts, actions/images.ts) and
+ * the viewer surface (photo-viewer.tsx, histogram.tsx). Adding a new
+ * wide-gamut primary in only ONE call site (e.g. when WI-09 lands rec2100)
+ * silently breaks histogram / preview / chroma decisions on the others, so
+ * the source of truth lives here.
+ */
+export const WIDE_GAMUT_PRIMARIES: ReadonlySet<ColorSignals['colorPrimaries']> = new Set([
+    'p3-d65',
+    'dci-p3',
+    'adobergb',
+    'prophoto',
+    'bt2020',
+]);
+
+/** Convenience helper. Returns false on null / undefined / unknown / sRGB. */
+export function isWideGamutPrimary(p: string | null | undefined): boolean {
+    if (!p) return false;
+    return (WIDE_GAMUT_PRIMARIES as ReadonlySet<string>).has(p);
+}
+
 function normalizeName(name: string | null | undefined): string {
     return (name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }

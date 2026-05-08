@@ -32,6 +32,7 @@ import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, humanizeTagLabel } from '@/lib/photo-title';
 import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
+import { isWideGamutPrimary } from '@/lib/color-detection';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -191,7 +192,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
     const avifDownloadHref = image?.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
-    const isWideGamutSource = Boolean(image?.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
+    const isWideGamutSource = isWideGamutPrimary(image?.color_primaries);
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
 

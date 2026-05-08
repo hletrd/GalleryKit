@@ -19,6 +19,7 @@ import {
 import { Histogram } from '@/components/histogram';
 import ColorDetailsSection from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
+import { isWideGamutPrimary } from '@/lib/color-detection';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface InfoBottomSheetProps {
@@ -156,7 +157,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     const downloadExt = image.filename_jpeg ? image.filename_jpeg.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
     const avifDownloadHref = image.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
-    const isWideGamutSource = Boolean(image.color_primaries && ['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3'].includes(image.color_primaries));
+    const isWideGamutSource = isWideGamutPrimary(image.color_primaries);
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
         (isAdminProp && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')) ||

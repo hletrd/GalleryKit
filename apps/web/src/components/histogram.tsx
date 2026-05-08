@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'r
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
+import { isWideGamutPrimary } from '@/lib/color-detection';
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 
@@ -37,8 +38,6 @@ interface HistogramWorkerLike {
 
 // Minimal 1x1 AVIF data URL for client-side decode support probing.
 const AVIF_PROBE_DATA_URL = 'data:image/avif;base64,AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADybWV0YQAAAAAAAAAoaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAGxpYmF2aWYAAAAADnBpdG0AAAAAACAAAAAocGJhbHlydXJseXNvcF9jMwAAAAAAAQAAAAAQcGFzcwAAAAABAAAAAQAAAAAccG9zcwAAAAABAAAAAQAAAAAcc3ZjYwAAAAABAAAAAQAAAAAcc2JwcwAAAAABAAAAAQAAAAAccmVsbAAAAA8AAAA6AAAAOHN0ckAAAABzcHRsAAAAAFB0ciBzdGlsbCBwaWN0dXJlAAAAAAABAAAAAAAIc2N2eAAAAA8AAAA6AAAAOHN0Ym0AAAAAUGZiIHN0aWxsIHBpY3R1cmUAAAAAAAEAAAAAAAg=';
-
-const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
 
 // C1: cache Canvas-P3 + AVIF probe at module scope (singleton, runs once per process).
 let _cachedAvifSupported: boolean | null = null;
@@ -303,7 +302,7 @@ export function Histogram({ imageUrl, avifUrl, colorPrimaries, className, cycleM
 
     const avifSupported = getAvifSupported();
 
-    const isWideGamut = Boolean(colorPrimaries && WIDE_GAMUT_PRIMARIES.has(colorPrimaries));
+    const isWideGamut = isWideGamutPrimary(colorPrimaries);
     const preferAvif = isWideGamut && avifSupported && getSupportsCanvasP3() && Boolean(avifUrl);
     const effectiveUrl = preferAvif ? avifUrl! : imageUrl;
     const isClipped = isWideGamut && !preferAvif;

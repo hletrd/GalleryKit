@@ -25,6 +25,7 @@ import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
+import { isWideGamutPrimary } from '@/lib/color-detection';
 import { headers } from 'next/headers';
 import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
 import type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
@@ -270,7 +271,6 @@ export async function uploadImages(formData: FormData) {
         let hdrRejectedCount = 0;
         let hdrWarningCount = 0;
         let wideGamutDownscaleWarningCount = 0;
-        const WIDE_GAMUT_PRIMARIES = new Set(['p3-d65', 'bt2020', 'adobergb', 'prophoto', 'dci-p3']);
 
         for (const file of files) {
             // Track saved original filename for cleanup on DB insert failure
@@ -301,7 +301,7 @@ export async function uploadImages(formData: FormData) {
                 }
 
                 // P3-24: warn when wide-gamut source exceeds 50 MP cap
-                const isWideGamutSource = WIDE_GAMUT_PRIMARIES.has(data.colorSignals?.colorPrimaries ?? '');
+                const isWideGamutSource = isWideGamutPrimary(data.colorSignals?.colorPrimaries);
                 if (isWideGamutSource && data.width * data.height > 50_000_000) {
                     wideGamutDownscaleWarningCount++;
                 }
