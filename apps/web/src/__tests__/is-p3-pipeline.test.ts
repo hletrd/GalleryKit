@@ -68,9 +68,18 @@ describe('isP3Pipeline — enum coverage (Part 1, runtime correctness)', () => {
 });
 
 describe('isP3Pipeline — call-site lock (Part 2, source inspection)', () => {
+    // C7-A2 / C7-COL-MED-1 / C7-UX-MED-1 / C7-CRIT-MED-1: extend the
+    // consumer list to include `color-details-section.tsx`. C6-A1
+    // consolidated the predicate at three sites in `info-bottom-sheet.tsx`
+    // and `photo-viewer.tsx`, but missed the fourth site at
+    // `color-details-section.tsx:230` (driving the "Delivered bit depth"
+    // row label). C7-A1 fixed the fourth site; this lock prevents
+    // regression and ensures any future consolidation audit treats all
+    // four consumers as a unit.
     const consumerPaths: ReadonlyArray<readonly [name: string, path: string]> = [
         ['info-bottom-sheet.tsx', resolve(__dirname, '../components/info-bottom-sheet.tsx')],
         ['photo-viewer.tsx', resolve(__dirname, '../components/photo-viewer.tsx')],
+        ['color-details-section.tsx', resolve(__dirname, '../components/color-details-section.tsx')],
     ];
 
     it.each(consumerPaths)('imports isP3Pipeline from @/lib/color-pipeline-decisions (%s)', (_name, path) => {
@@ -85,7 +94,8 @@ describe('isP3Pipeline — call-site lock (Part 2, source inspection)', () => {
     it.each(consumerPaths)('contains at least one isP3Pipeline call (%s)', (_name, path) => {
         const src = readFileSync(path, 'utf8');
         // Lock that the helper is actually used after being imported.
-        // (info-bottom-sheet.tsx has 2 call sites, photo-viewer.tsx has 1.)
+        // (info-bottom-sheet.tsx has 2 call sites, photo-viewer.tsx has 1,
+        // color-details-section.tsx has 1.)
         expect(src).toMatch(/isP3Pipeline\s*\(/);
     });
 
@@ -98,5 +108,17 @@ describe('isP3Pipeline — call-site lock (Part 2, source inspection)', () => {
         // helper itself (`@/lib/color-pipeline-decisions`); the consumer
         // files must not re-inline it.
         expect(src).not.toMatch(/\.startsWith\(\s*['"]p3-from-['"]\s*\)/);
+    });
+
+    it.each(consumerPaths)('does NOT contain bare inline startsWith p3 literal (%s)', (_name, path) => {
+        const src = readFileSync(path, 'utf8');
+        // C7-A2: lock against re-introduction of the cycle-6-incomplete
+        // shape. Pre-cycle-7 `color-details-section.tsx` carried a bare
+        //   image.color_pipeline_decision.startsWith('p3')
+        // predicate, which was functionally equivalent on every shipping
+        // enum value but semantically diverged from `isP3Pipeline` (which
+        // matches only `p3-from-*`). C7-A1 replaced it with the helper.
+        // This lock prevents regression on every consumer of the predicate.
+        expect(src).not.toMatch(/\.startsWith\(\s*['"]p3['"]\s*\)/);
     });
 });
