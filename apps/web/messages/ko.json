@@ -317,7 +317,7 @@
     "downloadP3Avif": "다운로드 (Display P3 AVIF)",
     "downloadP3AvifDesc": "파일은 작고 색 영역은 넓습니다 — 최신 브라우저",
     "downloadHdrAvif": "다운로드 (HDR AVIF)",
-    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, Space 슬라이드쇼 토글.",
+    "shortcutsHint": "단축키: ←/→ 사진 이동, F 라이트박스 토글, I 정보 패널 토글, C 색상 정보, H 히스토그램, Space 슬라이드쇼 토글.",
     "slideshowOn": "슬라이드쇼 시작",
     "slideshowOff": "슬라이드쇼 중지",
     "colorDetails": "색상 정보",
