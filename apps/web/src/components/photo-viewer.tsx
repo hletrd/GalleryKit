@@ -841,22 +841,24 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                 </Button>
                                             </DropdownMenuTrigger>
                                             <DropdownMenuContent align="end" className="min-w-[12rem]">
-                                                <DropdownMenuItem asChild className="min-h-11">
+                                                <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                     <a
                                                         href={downloadHref}
                                                         download={`photo-${image.id}.${downloadExt}`}
-                                                        className="flex items-center gap-2"
+                                                        className="flex flex-col"
                                                     >
-                                                        {t('viewer.downloadSrgbJpeg')}
+                                                        <span>{t('viewer.downloadSrgbJpeg')}</span>
+                                                        <span className="text-xs text-muted-foreground">{t('viewer.downloadSrgbJpegDesc')}</span>
                                                     </a>
                                                 </DropdownMenuItem>
-                                                <DropdownMenuItem asChild className="min-h-11">
+                                                <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                     <a
                                                         href={avifDownloadHref}
                                                         download={`photo-${image.id}.avif`}
-                                                        className="flex items-center gap-2"
+                                                        className="flex flex-col"
                                                     >
-                                                        {t('viewer.downloadP3Avif')}
+                                                        <span>{t('viewer.downloadP3Avif')}</span>
+                                                        <span className="text-xs text-muted-foreground">{t('viewer.downloadP3AvifDesc')}</span>
                                                     </a>
                                                 </DropdownMenuItem>
                                             </DropdownMenuContent>
