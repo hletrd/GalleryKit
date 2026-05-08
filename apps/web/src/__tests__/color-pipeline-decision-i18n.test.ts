@@ -11,22 +11,22 @@
  *
  * Companion to existing `color-pipeline-decision.test.ts` which covers
  * the resolver side (`resolveColorPipelineDecision`).
+ *
+ * C5-A3 / C5-COL-MED-2: walks the canonical `COLOR_PIPELINE_DECISIONS`
+ * array from `@/lib/color-pipeline-decisions` rather than an inline
+ * literal list. The cycle-4 inline list could drift from the resolver
+ * source; the cycle-5 import locks the test against silent enum drift —
+ * a new decision added to the canonical module that lacks a translation
+ * key now fails this test even if the contributor never touches this
+ * file.
  */
 import { describe, it, expect } from 'vitest';
 import enMessages from '../../messages/en.json';
 import koMessages from '../../messages/ko.json';
 import { humanizeColorPipelineDecision } from '@/components/color-details-section';
-import type { ColorPipelineDecision } from '@/lib/process-image';
+import { COLOR_PIPELINE_DECISIONS } from '@/lib/color-pipeline-decisions';
 
-const ENUM_VALUES: ColorPipelineDecision[] = [
-    'srgb',
-    'srgb-from-unknown',
-    'p3-from-displayp3',
-    'p3-from-dcip3',
-    'p3-from-adobergb',
-    'p3-from-prophoto',
-    'p3-from-rec2020',
-];
+const ENUM_VALUES = COLOR_PIPELINE_DECISIONS;
 
 // next-intl message tables are deeply-typed unions of strings + nested
 // objects (e.g. viewer.histogramModes is itself an object). For this fixture

@@ -17,6 +17,12 @@ import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { detectColorSignals, type ColorSignals } from '@/lib/color-detection';
 import { extractIccProfileName } from '@/lib/icc-extractor';
 export { extractIccProfileName } from '@/lib/icc-extractor';
+// C5-A3 / C5-COL-MED-2: canonical color_pipeline_decision enum source-of-truth
+// lives in `lib/color-pipeline-decisions.ts` (client-safe — no Sharp / fs deps)
+// so the i18n smoke test can import the same array this resolver narrows.
+import type { ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
+export type { ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
+export { COLOR_PIPELINE_DECISIONS } from '@/lib/color-pipeline-decisions';
 
 const cpuCount = typeof os.availableParallelism === 'function'
     ? os.availableParallelism()
@@ -386,14 +392,11 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
  *
  * @returns 'p3' | 'srgb'
  */
-export type ColorPipelineDecision =
-    | 'srgb'
-    | 'srgb-from-unknown'
-    | 'p3-from-displayp3'
-    | 'p3-from-dcip3'
-    | 'p3-from-adobergb'
-    | 'p3-from-prophoto'
-    | 'p3-from-rec2020';
+// C5-A3 / C5-COL-MED-2: canonical enum + type imports live near the top of
+// this module alongside the other `@/lib/*` imports. The `ColorPipelineDecision`
+// type is referenced earlier in the file (line ~317 in the upload result type),
+// so the import has to land in the top-of-file import block rather than here
+// where the runtime resolver is declared.
 
 /**
  * Resolve the color pipeline decision label for observability.
