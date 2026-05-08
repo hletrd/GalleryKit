@@ -24,9 +24,9 @@ export interface ImageDetail {
     icc_profile_name?: string | null;
     color_pipeline_decision?: string | null;
     color_primaries?: string | null;
-    transfer_function?: string | null;
-    matrix_coefficients?: string | null;
-    is_hdr?: boolean | null;
+    transfer_function?: string | null;    // admin only (P3-3)
+    matrix_coefficients?: string | null;   // admin only (P3-3)
+    is_hdr?: boolean | null;               // admin only (P3-3)
     white_balance: string | null;
     metering_mode: string | null;
     exposure_compensation: string | null;

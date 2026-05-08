@@ -308,6 +308,12 @@ const {
     processed: _omitProcessed,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally: color pipeline is admin-only
     color_pipeline_decision: _omitColorPipelineDecision,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: HDR fields are admin-only until WI-09 ships
+    is_hdr: _omitIsHdr,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: transfer_function is admin-only
+    transfer_function: _omitTransferFunction,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: matrix_coefficients is admin-only
+    matrix_coefficients: _omitMatrixCoefficients,
     ...publicSelectFieldCore
 } = adminSelectFields;
 
@@ -335,6 +341,12 @@ const {
     processed: _omitProcessedMap,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omitted intentionally: color pipeline is admin-only
     color_pipeline_decision: _omitColorPipelineDecisionMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: HDR fields are admin-only until WI-09 ships
+    is_hdr: _omitIsHdrMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: transfer_function is admin-only
+    transfer_function: _omitTransferFunctionMap,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- P3-3: matrix_coefficients is admin-only
+    matrix_coefficients: _omitMatrixCoefficientsMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
 
@@ -360,7 +372,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'transfer_function' | 'matrix_coefficients';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -368,7 +380,7 @@ void _privacyGuard;
 // Compile-time guard for publicMapSelectFields: it must NOT contain any admin-only
 // field beyond latitude and longitude. The allowed set is exactly publicSelectFields
 // UNION {latitude, longitude}. If any OTHER sensitive key leaks in, this guard fires.
-type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision';
+type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'transfer_function' | 'matrix_coefficients';
 type _MapSensitiveKeysInPublicMap = Extract<keyof typeof publicMapSelectFields, _MapSensitiveKeys>;
 const _mapPrivacyGuard: _MapSensitiveKeysInPublicMap extends never ? true : [_MapSensitiveKeysInPublicMap, 'ERROR: privacy-sensitive field found in publicMapSelectFields — must only add latitude/longitude vs publicSelectFields'] = true;
 void _mapPrivacyGuard;

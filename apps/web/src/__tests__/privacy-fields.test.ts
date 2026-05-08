@@ -11,6 +11,9 @@ const SENSITIVE_KEYS = [
     'original_format',
     'original_file_size',
     'color_pipeline_decision',
+    'is_hdr',
+    'transfer_function',
+    'matrix_coefficients',
 ] as const;
 
 describe('Privacy field separation', () => {
