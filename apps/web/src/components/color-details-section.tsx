@@ -52,9 +52,10 @@ interface ColorDetailsSectionProps {
 }
 
 export default function ColorDetailsSection({ image, isAdmin = false, t }: ColorDetailsSectionProps) {
+    const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
-        (isAdmin && image.is_hdr) ||
+        (isAdmin && isHdr) ||
         (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
     );
     const [showColorDetails, setShowColorDetails] = useState(isNonTrivialColor);
@@ -146,7 +147,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t }: Color
                             </p>
                         </div>
                     )}
-                    {image.is_hdr && (
+                    {isHdr && (
                         <div className="col-span-2">
                             <span
                                 className="hdr-badge px-3 py-1.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white shadow-sm rounded"
