@@ -144,7 +144,15 @@ async function main() {
         WHERE ${whereClause}
         ORDER BY id ASC
     `);
-    const rows = rawRows as unknown as ImageRow[];
+    // drizzle's mysql2 `db.execute(sql)` returns the underlying mysql2 tuple
+    // `[rows, fields]`, not just the row array. Newer drizzle releases or
+    // different driver shims may return rows directly. Unwrap defensively
+    // so the script works either way — without this guard, iterating
+    // produces `[rows, fields]` as two "rows" and every field accessor
+    // returns undefined → resolveOriginalUploadPath crashes.
+    const rows = (Array.isArray(rawRows) && Array.isArray(rawRows[0])
+        ? rawRows[0]
+        : rawRows) as unknown as ImageRow[];
 
     console.log(`[backfill-color-pipeline] ${rows.length} candidate image(s) found. (force=${forceReencode})`);
 
