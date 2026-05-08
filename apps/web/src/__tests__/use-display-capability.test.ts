@@ -109,7 +109,7 @@ afterEach(() => {
 describe('useDisplayCapability detection', () => {
     it('returns p3 when screen.colorGamut === "p3" (Chromium 121+ path)', async () => {
         installMockWindow({ screenColorGamut: 'p3' });
-        const mod = await import('@/lib/use-display-capability');
+        const _mod = await import('@/lib/use-display-capability');
         // Reach into the unexported detect via a fresh import: the hook runs
         // detect() synchronously the first time. We re-implement the same
         // public-API pathway by calling detect through useSyncExternalStore
