@@ -72,6 +72,9 @@ export interface GalleryConfig {
 
     // P3-2: allow HDR (PQ/HLG) source ingest
     allowHdrIngest: boolean;
+
+    // P3-26: force color gamut/HDR chips visible even on sRGB displays
+    forceShowColorChips: boolean;
 }
 
 /**
@@ -127,6 +130,11 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('allow_hdr_ingest', raw)) return DEFAULTS.allow_hdr_ingest === 'true';
                 return raw === 'true';
             })(),
+            forceShowColorChips: (() => {
+                const raw = getSetting(map, 'force_show_color_chips');
+                if (!isValidSettingValue('force_show_color_chips', raw)) return DEFAULTS.force_show_color_chips === 'true';
+                return raw === 'true';
+            })(),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -148,6 +156,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             },
             forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
             allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
+            forceShowColorChips: DEFAULTS.force_show_color_chips === 'true',
         };
     }
 }

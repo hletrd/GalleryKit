@@ -36,6 +36,9 @@ export const GALLERY_SETTING_KEYS = [
 
     // P3-2: allow HDR (PQ/HLG) source ingest (default false)
     'allow_hdr_ingest',
+
+    // P3-26: force color gamut/HDR chips visible on sRGB displays (default false)
+    'force_show_color_chips',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -85,6 +88,9 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
     // P3-2: default off — reject PQ/HLG source uploads
     allow_hdr_ingest: 'false',
+
+    // P3-26: default off — chips hidden on sRGB displays unless display supports
+    force_show_color_chips: 'false',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -115,6 +121,9 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
 
     // P3-2: boolean toggle
     allow_hdr_ingest: (v) => v === 'true' || v === 'false',
+
+    // P3-26: boolean toggle
+    force_show_color_chips: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */
