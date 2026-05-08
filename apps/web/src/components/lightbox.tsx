@@ -89,6 +89,12 @@ function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
     const primaries = humanizeColorPrimaries(image.color_primaries);
     const transfer = humanizeTransferFunction(image.transfer_function);
     const pipeline = humanizeColorPipelineDecision(image.color_pipeline_decision, t);
+    // C3-A3 / C3-UX-MED-2: surface the HDR flag in the lightbox color pip.
+    // image.is_hdr is admin-only via privacy field separation, so public
+    // viewers will not see this row even when bypassed at the component
+    // level. Admin photographers demoing in lightbox mode see the
+    // prominent HDR pill matching the sidebar Color Details badge.
+    const isHdr = image.is_hdr === true;
 
     return (
         <div className="pointer-events-auto absolute bottom-4 left-4 z-10">
@@ -106,6 +112,15 @@ function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
                     <span>{t('viewer.colorUnknown')}</span>
                 )}
                 {transfer && <span className="opacity-80">· {transfer}</span>}
+                {isHdr && (
+                    <span
+                        className="hdr-badge ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm"
+                        aria-label={t('viewer.hdrBadgeAriaLabel')}
+                        role="img"
+                    >
+                        {t('viewer.hdrBadge')}
+                    </span>
+                )}
             </button>
             {open && (
                 <div className="mt-1.5 rounded-lg bg-black/80 p-3 text-xs text-white backdrop-blur-sm min-w-[180px] space-y-1.5">
@@ -125,6 +140,18 @@ function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
                         <div className="flex justify-between gap-3">
                             <span className="opacity-70">{t('viewer.colorPipelineDecision')}</span>
                             <span className="font-medium">{pipeline || t('viewer.colorUnknown')}</span>
+                        </div>
+                    )}
+                    {isHdr && (
+                        <div className="flex justify-between gap-3 items-center">
+                            <span className="opacity-70">{t('viewer.hdrBadge')}</span>
+                            <span
+                                className="hdr-badge px-2 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm"
+                                aria-label={t('viewer.hdrBadgeAriaLabel')}
+                                role="img"
+                            >
+                                HDR
+                            </span>
                         </div>
                     )}
                 </div>
