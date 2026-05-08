@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'r
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
-import { isWideGamutPrimary } from '@/lib/color-detection';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 

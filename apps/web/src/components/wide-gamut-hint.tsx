@@ -1,7 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import { isWideGamutPrimary } from '@/lib/color-detection';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 
 interface WideGamutHintProps {
     colorPrimaries?: string | null;

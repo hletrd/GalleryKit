@@ -32,7 +32,7 @@ import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, humanizeTagLabel } from '@/lib/photo-title';
 import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
-import { isWideGamutPrimary } from '@/lib/color-detection';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {

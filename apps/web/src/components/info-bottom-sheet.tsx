@@ -19,7 +19,7 @@ import {
 import { Histogram } from '@/components/histogram';
 import ColorDetailsSection from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
-import { isWideGamutPrimary } from '@/lib/color-detection';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface InfoBottomSheetProps {
