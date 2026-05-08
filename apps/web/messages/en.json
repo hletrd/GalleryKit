@@ -315,6 +315,13 @@
     "colorPipelineDecision": "Color pipeline",
     "hdrBadge": "HDR",
     "hdrBadgeAriaLabel": "HDR (High Dynamic Range)",
+    "colorPipelineSrgb": "sRGB",
+    "colorPipelineP3FromDisplayP3": "P3 (from Display P3)",
+    "colorPipelineP3FromDcip3": "Display P3 (from DCI-P3, D65 adapted)",
+    "colorPipelineP3FromAdobergb": "P3 (from Adobe RGB; saturated greens may clip)",
+    "colorPipelineP3FromProphoto": "P3 (from ProPhoto; saturated cyans / greens may clip)",
+    "colorPipelineP3FromRec2020": "P3 (from Rec. 2020; saturated cyans may clip)",
+    "colorPipelineSrgbFromUnknown": "sRGB (unknown source)",
     "colorUnknown": "Unknown",
     "calibrationTooltip": "Display calibration affects color accuracy. Uncalibrated displays may render saturation and white balance differently than the photographer intended.",
     "noMetadata": "No camera metadata available for this photo."

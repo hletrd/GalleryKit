@@ -315,6 +315,13 @@
     "colorPipelineDecision": "색상 파이프라인",
     "hdrBadge": "HDR",
     "hdrBadgeAriaLabel": "HDR (하이 다이내믹 레인지)",
+    "colorPipelineSrgb": "sRGB",
+    "colorPipelineP3FromDisplayP3": "P3 (Display P3 기반)",
+    "colorPipelineP3FromDcip3": "Display P3 (DCI-P3 기반, D65 적응)",
+    "colorPipelineP3FromAdobergb": "P3 (Adobe RGB 기반; 채도 높은 녹색 클리핑 가능)",
+    "colorPipelineP3FromProphoto": "P3 (ProPhoto 기반; 채도 높은 청록/녹색 클리핑 가능)",
+    "colorPipelineP3FromRec2020": "P3 (Rec. 2020 기반; 채도 높은 청록 클리핑 가능)",
+    "colorPipelineSrgbFromUnknown": "sRGB (알 수 없는 원본)",
     "colorUnknown": "알 수 없음",
     "calibrationTooltip": "디스플레이 캘리브레이션은 색상 정확도에 영향을 줍니다. 캘리브레이션되지 않은 디스플레이는 사진작가가 의도한 것과 다르게 채도와 화이트 밸런스를 표현할 수 있습니다.",
     "noMetadata": "이 사진에 카메라 메타데이터가 없습니다."
