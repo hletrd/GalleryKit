@@ -57,6 +57,14 @@ function probeCanvasP3(): boolean {
     return _cachedSupportsCanvasP3;
 }
 
+// `useSyncExternalStore` checks `Object.is(prev, next)` between getSnapshot()
+// calls. If `detect()` returns a fresh `{ colorGamut, isHdr }` object every
+// call, React detects a "change" on every render → re-render → new snapshot
+// → infinite loop (React error #185). Cache the last snapshot by VALUE so
+// repeated calls return the same reference until the underlying media-query
+// or feature-probe state actually flips.
+let _cachedSnapshot: DisplayCapability | null = null;
+
 function detect(): DisplayCapability {
     if (typeof window === 'undefined') return SERVER_DEFAULT;
 
@@ -83,7 +91,15 @@ function detect(): DisplayCapability {
         ? window.matchMedia('(dynamic-range: high)').matches
         : false;
 
-    return { colorGamut: gamut, isHdr };
+    if (
+        _cachedSnapshot &&
+        _cachedSnapshot.colorGamut === gamut &&
+        _cachedSnapshot.isHdr === isHdr
+    ) {
+        return _cachedSnapshot;
+    }
+    _cachedSnapshot = { colorGamut: gamut, isHdr };
+    return _cachedSnapshot;
 }
 
 function subscribe(callback: () => void): () => void {
@@ -117,9 +133,12 @@ export function useDisplayCapability(): DisplayCapability {
 }
 
 // Test-only export so a unit test can reset the cached canvas-P3 probe
-// between cases when the test mocks document / canvas behavior.
+// between cases when the test mocks document / canvas behavior. Also resets
+// the snapshot memoization so toggling test state produces fresh detect()
+// results.
 export function _resetCanvasP3CacheForTesting(): void {
     _cachedSupportsCanvasP3 = null;
+    _cachedSnapshot = null;
 }
 
 // Test-only export of the synchronous detect() function. Calling the hook

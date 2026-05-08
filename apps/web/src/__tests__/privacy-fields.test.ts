@@ -14,6 +14,11 @@ const SENSITIVE_KEYS = [
     'is_hdr',
     'transfer_function',
     'matrix_coefficients',
+    // P4-A1 / R4-H1: Apple HDR gain map detection. Admin-only because the
+    // gain map is not yet delivered (WI-09 dependency); surfacing
+    // has_gain_map=true publicly would imply HDR delivery the SDR pipeline
+    // can't fulfill.
+    'has_gain_map',
 ] as const;
 
 describe('Privacy field separation', () => {
