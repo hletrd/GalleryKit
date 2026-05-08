@@ -210,6 +210,43 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             aria-label={t('settings.forceShowColorChips')}
                         />
                     </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="wide-gamut-jpeg-chroma">{t('settings.wideGamutJpegChroma')}</Label>
+                            <Select
+                                value={settings.wide_gamut_jpeg_chroma || ''}
+                                onValueChange={(value) => handleChange('wide_gamut_jpeg_chroma', value)}
+                            >
+                                <SelectTrigger id="wide-gamut-jpeg-chroma">
+                                    <SelectValue placeholder={getPlaceholder('wide_gamut_jpeg_chroma')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="4:4:4">{t('settings.chroma444')}</SelectItem>
+                                    <SelectItem value="4:2:2">{t('settings.chroma422')}</SelectItem>
+                                    <SelectItem value="4:2:0">{t('settings.chroma420')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">{t('settings.wideGamutJpegChromaHint')}</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="avif-effort">{t('settings.avifEffort')}</Label>
+                            <Select
+                                value={settings.avif_effort || ''}
+                                onValueChange={(value) => handleChange('avif_effort', value)}
+                            >
+                                <SelectTrigger id="avif-effort">
+                                    <SelectValue placeholder={getPlaceholder('avif_effort')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {[4, 5, 6, 7, 8, 9].map((effort) => (
+                                        <SelectItem key={effort} value={String(effort)}>{effort}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">{t('settings.avifEffortHint')}</p>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
 

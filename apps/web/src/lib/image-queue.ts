@@ -296,6 +296,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             let imageSizes: number[] | undefined = job.imageSizes;
             let autoAltTextEnabled = false;
             let forceSrgbDerivatives = false;
+            let wideGamutJpegChroma: string | undefined;
+            let avifEffort: number | undefined;
             if (!quality && !imageSizes) {
                 try {
                     const config = await getGalleryConfig();
@@ -307,6 +309,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     imageSizes = config.imageSizes.length > 0 ? config.imageSizes : undefined;
                     autoAltTextEnabled = config.autoAltTextEnabled;
                     forceSrgbDerivatives = config.forceSrgbDerivatives;
+                    wideGamutJpegChroma = config.wideGamutJpegChroma;
+                    avifEffort = config.avifEffort;
                 } catch {
                     // DB unavailable during processing — use Sharp defaults (90/85/90)
                 }
@@ -322,6 +326,8 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 job.iccProfileName,
                 forceSrgbDerivatives,
                 job.colorSignals,
+                wideGamutJpegChroma,
+                avifEffort,
             );
 
             // Verify all 3 output formats exist and are non-zero before marking processed

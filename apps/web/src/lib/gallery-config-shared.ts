@@ -39,6 +39,12 @@ export const GALLERY_SETTING_KEYS = [
 
     // P3-26: force color gamut/HDR chips visible on sRGB displays (default false)
     'force_show_color_chips',
+
+    // P3-20: JPEG chroma subsampling for wide-gamut sources (4:4:4 / 4:2:2 / 4:2:0)
+    'wide_gamut_jpeg_chroma',
+
+    // P3-21: AVIF encoding effort (4-9, default 6)
+    'avif_effort',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -91,6 +97,12 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
     // P3-26: default off — chips hidden on sRGB displays unless display supports
     force_show_color_chips: 'false',
+
+    // P3-20: default 4:4:4 — best quality for wide-gamut sources
+    wide_gamut_jpeg_chroma: '4:4:4',
+
+    // P3-21: default 6 — balanced file size vs CPU
+    avif_effort: '6',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -124,6 +136,12 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
 
     // P3-26: boolean toggle
     force_show_color_chips: (v) => v === 'true' || v === 'false',
+
+    // P3-20: must be a valid chroma subsampling string
+    wide_gamut_jpeg_chroma: (v) => v === '4:4:4' || v === '4:2:2' || v === '4:2:0',
+
+    // P3-21: must be an integer between 4 and 9
+    avif_effort: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 4 && n <= 9; },
 };
 
 /** Validate a setting value. Returns true if valid. */

@@ -671,7 +671,14 @@
     "allowHdrIngest": "Allow HDR Ingest",
     "allowHdrIngestHint": "When ON, PQ and HLG source images can be uploaded. When OFF (default), HDR uploads are rejected to prevent accidental ingestion of unsupported wide-gamut + high-dynamic-range files.",
     "forceShowColorChips": "Force Show Color Chips",
-    "forceShowColorChipsHint": "When ON, the P3 gamut badge and HDR badge are always visible in the photo viewer, even on sRGB displays. Useful for photographers who want to verify color metadata regardless of the visitor's display."
+    "forceShowColorChipsHint": "When ON, the P3 gamut badge and HDR badge are always visible in the photo viewer, even on sRGB displays. Useful for photographers who want to verify color metadata regardless of the visitor's display.",
+    "wideGamutJpegChroma": "Wide-Gamut JPEG Chroma",
+    "wideGamutJpegChromaHint": "Chroma subsampling for wide-gamut JPEG derivatives. 4:4:4 preserves full color detail but produces larger files. 4:2:0 is smaller but may show color bleeding in fine gradients.",
+    "avifEffort": "AVIF Encoding Effort",
+    "avifEffortHint": "Higher values produce smaller files at the cost of slower encoding. 6 is the default balance. 9 is the slowest/smallest.",
+    "chroma444": "4:4:4 (best quality)",
+    "chroma422": "4:2:2 (balanced)",
+    "chroma420": "4:2:0 (smallest file)"
   },
   "footer": {
     "admin": "Admin"

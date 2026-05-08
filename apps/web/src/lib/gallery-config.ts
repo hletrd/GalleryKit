@@ -75,6 +75,12 @@ export interface GalleryConfig {
 
     // P3-26: force color gamut/HDR chips visible even on sRGB displays
     forceShowColorChips: boolean;
+
+    // P3-20: JPEG chroma subsampling for wide-gamut sources
+    wideGamutJpegChroma: string;
+
+    // P3-21: AVIF encoding effort (4-9)
+    avifEffort: number;
 }
 
 /**
@@ -135,6 +141,12 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
                 if (!isValidSettingValue('force_show_color_chips', raw)) return DEFAULTS.force_show_color_chips === 'true';
                 return raw === 'true';
             })(),
+            wideGamutJpegChroma: (() => {
+                const raw = getSetting(map, 'wide_gamut_jpeg_chroma');
+                if (!isValidSettingValue('wide_gamut_jpeg_chroma', raw)) return DEFAULTS.wide_gamut_jpeg_chroma;
+                return raw;
+            })(),
+            avifEffort: validatedNumber(map, 'avif_effort'),
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -157,6 +169,8 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             forceSrgbDerivatives: DEFAULTS.force_srgb_derivatives === 'true',
             allowHdrIngest: DEFAULTS.allow_hdr_ingest === 'true',
             forceShowColorChips: DEFAULTS.force_show_color_chips === 'true',
+            wideGamutJpegChroma: DEFAULTS.wide_gamut_jpeg_chroma,
+            avifEffort: Number(DEFAULTS.avif_effort),
         };
     }
 }

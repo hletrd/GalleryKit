@@ -105,8 +105,10 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  *       10-bit AVIF for wide-gamut, 4:4:4 JPEG chroma for wide-gamut,
  *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
  *       by format fan-out.
+ *   6 — tunable encoder parameters: wide_gamut_jpeg_chroma and avif_effort
+ *       are now admin-configurable instead of hardcoded.
  */
-export const IMAGE_PIPELINE_VERSION = 5;
+export const IMAGE_PIPELINE_VERSION = 6;
 
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
@@ -662,6 +664,8 @@ export async function processImageFormats(
     iccProfileName?: string | null, // Source ICC profile name for AVIF P3 tagging
     forceSrgbDerivatives?: boolean, // US-CM02: when true, force sRGB on WebP/JPEG even for P3 sources
     signals?: { colorPrimaries?: string | null } | null, // P3-11: NCLX fallback for ICC-less sources
+    wideGamutJpegChroma?: string, // P3-20: chroma subsampling for wide-gamut JPEG
+    avifEffort?: number, // P3-21: AVIF encoding effort (4-9)
 ) {
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
@@ -712,6 +716,8 @@ export async function processImageFormats(
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
+    const effectiveChroma = wideGamutJpegChroma ?? '4:4:4';
+    const effectiveEffort = avifEffort ?? 6;
 
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
@@ -793,7 +799,7 @@ export async function processImageFormats(
                             .withIccProfile(avifIcc)
                             .avif({
                                 quality: qualityAvif,
-                                effort: 6,
+                                effort: effectiveEffort,
                                 ...(wantHighBitdepth ? { bitdepth: 10 } : {}),
                             })
                             .toFile(outputPath);
@@ -806,7 +812,7 @@ export async function processImageFormats(
                                 .withIccProfile(avifIcc)
                                 .avif({
                                     quality: qualityAvif,
-                                    effort: 6,
+                                    effort: effectiveEffort,
                                 })
                                 .toFile(outputPath);
                         } else {
@@ -825,7 +831,7 @@ export async function processImageFormats(
                         .withIccProfile(targetIcc)
                         .jpeg({
                             quality: qualityJpeg,
-                            ...(isWideGamutSource ? { chromaSubsampling: '4:4:4' as const } : {}),
+                            ...(isWideGamutSource ? { chromaSubsampling: effectiveChroma as '4:4:4' | '4:2:2' | '4:2:0' } : {}),
                         })
                         .toFile(outputPath);
                 }
