@@ -581,7 +581,8 @@
     "switchLocale": "Switch language to {language}",
     "toggleSlideshow": "Toggle slideshow",
     "playSlideshow": "Play slideshow",
-    "pauseSlideshow": "Pause slideshow"
+    "pauseSlideshow": "Pause slideshow",
+    "toggleColorPip": "Toggle color info"
   },
   "common": {
     "untitled": "Untitled",

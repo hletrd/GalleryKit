@@ -184,6 +184,12 @@
     border: 1px solid CanvasText;
     forced-color-adjust: none;
   }
+  .lightbox-color-pip {
+    background: Canvas !important;
+    color: CanvasText !important;
+    border: 1px solid CanvasText;
+    forced-color-adjust: none;
+  }
 }
 
 /* Orientation-aware layout: landscape mobile */

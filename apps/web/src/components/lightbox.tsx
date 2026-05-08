@@ -9,6 +9,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { toast } from 'sonner';
 import { imageUrl } from '@/lib/image-url';
 import { isEditableTarget } from '@/components/photo-viewer';
+import { humanizeColorPrimaries, humanizeTransferFunction, humanizeColorPipelineDecision } from '@/components/color-details-section';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize, SLIDESHOW_INTERVAL_DEFAULT } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText } from '@/lib/photo-title';
 
@@ -74,9 +75,68 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
         : 'scale(1.08) translate(2%, 2%)';
 }
 
+interface LightboxColorPipProps {
+    image: ImageDetail;
+    t: (key: string, values?: Record<string, string | number>) => string;
+    open: boolean;
+    onToggle: () => void;
+}
+
+function LightboxColorPip({ image, t, open, onToggle }: LightboxColorPipProps) {
+    const hasData = Boolean(image.color_primaries || image.transfer_function || image.color_pipeline_decision);
+    if (!hasData) return null;
+
+    const primaries = humanizeColorPrimaries(image.color_primaries);
+    const transfer = humanizeTransferFunction(image.transfer_function);
+    const pipeline = humanizeColorPipelineDecision(image.color_pipeline_decision, t);
+
+    return (
+        <div className="pointer-events-auto absolute bottom-4 left-4 z-10">
+            <button
+                type="button"
+                onClick={onToggle}
+                className="lightbox-color-pip flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs text-white hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400 transition-colors"
+                aria-expanded={open}
+                aria-label={t('aria.toggleColorPip')}
+                title={`${t('aria.toggleColorPip')} (C)`}
+            >
+                {primaries ? (
+                    <span className="font-medium">{primaries}</span>
+                ) : (
+                    <span>{t('viewer.colorUnknown')}</span>
+                )}
+                {transfer && <span className="opacity-80">· {transfer}</span>}
+            </button>
+            {open && (
+                <div className="mt-1.5 rounded-lg bg-black/80 p-3 text-xs text-white backdrop-blur-sm min-w-[180px] space-y-1.5">
+                    {image.color_primaries && (
+                        <div className="flex justify-between gap-3">
+                            <span className="opacity-70">{t('viewer.colorPrimaries')}</span>
+                            <span className="font-medium">{primaries || t('viewer.colorUnknown')}</span>
+                        </div>
+                    )}
+                    {image.transfer_function && (
+                        <div className="flex justify-between gap-3">
+                            <span className="opacity-70">{t('viewer.transferFunction')}</span>
+                            <span className="font-medium">{transfer || t('viewer.colorUnknown')}</span>
+                        </div>
+                    )}
+                    {image.color_pipeline_decision && (
+                        <div className="flex justify-between gap-3">
+                            <span className="opacity-70">{t('viewer.colorPipelineDecision')}</span>
+                            <span className="font-medium">{pipeline || t('viewer.colorUnknown')}</span>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
+    const [colorPipOpen, setColorPipOpen] = useState(false);
     const controlsVisibleRef = useRef(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [shouldAutoHideControls, setShouldAutoHideControls] = useState(getLightboxAutoHidePreference);
@@ -291,10 +351,13 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
             showControls(true);
             setIsSlideshowActive(false);
             // Only stop propagation for keys we handle
-            if (['f', 'F', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) {
+            if (['f', 'F', 'c', 'C', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(e.key)) {
                 e.stopPropagation();
             }
-            if (e.key === 'f' || e.key === 'F') {
+            if (e.key === 'c' || e.key === 'C') {
+                if (isEditableTarget(e)) return;
+                setColorPipOpen(prev => !prev);
+            } else if (e.key === 'f' || e.key === 'F') {
                 if (isEditableTarget(e)) return;
                 toggleFullscreen();
             } else if (e.key === 'ArrowLeft' && prevId !== null) {
@@ -561,6 +624,14 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         </span>
                     </button>
                 )}
+
+                {/* Color pip — bottom left */}
+                <LightboxColorPip
+                    image={image}
+                    t={t}
+                    open={colorPipOpen}
+                    onToggle={() => setColorPipOpen(prev => !prev)}
+                />
 
                 {/* Position counter — bottom center */}
                 {currentIndex != null && totalCount != null && totalCount > 1 && (
