@@ -1,9 +1,10 @@
 /**
  * C5-A2 / C5-COL-LOW-1 / C5-COL-MED-1: lock the lightbox color pip HDR
- * gating + single-render contract in `lightbox.tsx`. Source-inspection
- * fixture (project convention — same pattern as
- * `color-details-section-delivered.test.ts`) over the `LightboxColorPip`
- * function inside `lightbox.tsx`.
+ * gating + single-render contract in the standalone
+ * `lightbox-color-pip.tsx` (P4-C4 extracted from `lightbox.tsx`).
+ * Source-inspection fixture (project convention — same pattern as
+ * `color-details-section-delivered.test.ts`) over the
+ * `LightboxColorPip` function.
  *
  * Locks two cross-cycle invariants:
  * 1. HDR badge is gated on `transfer_function === 'pq' || 'hlg'` rather
@@ -25,7 +26,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const SRC_PATH = resolve(__dirname, '../components/lightbox.tsx');
+const SRC_PATH = resolve(__dirname, '../components/lightbox-color-pip.tsx');
 const SOURCE = readFileSync(SRC_PATH, 'utf8');
 
 /**
