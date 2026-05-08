@@ -33,6 +33,7 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, humanizeTagLabel } from '@/lib/photo-title';
 import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -844,7 +845,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                             <DropdownMenuTrigger asChild>
                                                 <Button className="w-full gap-2 min-h-11">
                                                     <Download className="h-4 w-4" />
-                                                    {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                    {isP3Pipeline(image.color_pipeline_decision)
                                                         ? t('viewer.downloadP3Jpeg')
                                                         : t('viewer.downloadJpeg')}
                                                     <ChevronDown className="h-4 w-4 ml-auto" />

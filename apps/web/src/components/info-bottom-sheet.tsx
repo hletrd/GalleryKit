@@ -20,6 +20,7 @@ import { Histogram } from '@/components/histogram';
 import ColorDetailsSection from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 
 interface InfoBottomSheetProps {
@@ -330,7 +331,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                                 <DropdownMenuTrigger asChild>
                                                     <Button className="w-full gap-2 min-h-11">
                                                         <Download className="h-4 w-4" />
-                                                        {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                        {isP3Pipeline(image.color_pipeline_decision)
                                                             ? t('viewer.downloadP3Jpeg')
                                                             : t('viewer.downloadJpeg')}
                                                         <ChevronDown className="h-4 w-4 ml-auto" />
@@ -547,7 +548,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                                 <DropdownMenuTrigger asChild>
                                                     <Button className="w-full gap-2 min-h-11">
                                                         <Download className="h-4 w-4" />
-                                                        {image.color_pipeline_decision?.startsWith('p3-from-')
+                                                        {isP3Pipeline(image.color_pipeline_decision)
                                                             ? t('viewer.downloadP3Jpeg')
                                                             : t('viewer.downloadJpeg')}
                                                         <ChevronDown className="h-4 w-4 ml-auto" />
