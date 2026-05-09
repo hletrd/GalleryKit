@@ -89,8 +89,17 @@ git values must be treated as compromised and must not be reused.
 |------|---------|
 | `apps/web/src/app/actions/` | Server actions for uploads, image CRUD, topics, settings, and admin mutations |
 | `apps/web/src/db/schema.ts` | Drizzle ORM schema with composite indexes |
-| `apps/web/src/lib/process-image.ts` | Sharp pipeline (parallel AVIF/WebP/JPEG, ICC parsing, bounds checks) |
-| `apps/web/src/lib/data.ts` | Data access layer with React cache() deduplication |
+| `apps/web/src/lib/process-image.ts` | Sharp pipeline (parallel AVIF/WebP/JPEG, ICC parsing, bounds checks). `IMAGE_PIPELINE_VERSION = 6` |
+| `apps/web/src/lib/color-detection.ts` | NCLX `colr` ISOBMFF walker + ICC heuristic + gain-map + ICC chromaticity unifier |
+| `apps/web/src/lib/color-primaries.ts` | Client-safe `WIDE_GAMUT_PRIMARIES` set + `isWideGamutPrimary` helper |
+| `apps/web/src/lib/color-pipeline-decisions.ts` | Canonical `COLOR_PIPELINE_DECISIONS` enum + `isP3Pipeline` predicate (client-safe) |
+| `apps/web/src/lib/icc-extractor.ts` | ICC `desc` (v2) / `mluc` (v4 UTF-16BE, locale-matched) descriptor parser |
+| `apps/web/src/lib/icc-chromaticity.ts` | Custom-monitor ICC gamut detection from `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` (P4-A2) |
+| `apps/web/src/lib/gain-map-detection.ts` | Apple HDR gain map detection in HEIF `iinf`/`infe`/`iref` (P4-A1) |
+| `apps/web/src/lib/use-display-capability.ts` | Layered display gamut + HDR detection: `screen.colorGamut` → MQ → canvas-P3 (P4-B1). **Snapshot-memoized** — `getSnapshot` MUST return a stable reference or `useSyncExternalStore` infinite-loops (React #185) |
+| `apps/web/src/lib/settings-hash.ts` | 8-char SHA-256 prefix over color-impacting admin settings, embedded in ETag (P4-E2) |
+| `apps/web/src/lib/hdr-filenames.ts` | `_hdr.avif` filename derivation helper (reserved for WI-09) |
+| `apps/web/src/lib/data.ts` | Data access layer with React cache() deduplication. `_PrivacySensitiveKeys` compile-time guard enforces admin-only fields |
 | `apps/web/src/proxy.ts` | i18n routing + middleware-level admin auth guard |
 | `apps/web/src/lib/auth-rate-limit.ts` | Account-scoped and password-change rate limiting (in-memory Maps with DB backup for login) |
 | `apps/web/src/app/[locale]/admin/db-actions.ts` | DB backup/restore with security hardening |
@@ -101,11 +110,31 @@ git values must be treated as compromised and must not be reused.
 
 ## Database Schema (Key Tables)
 
-- `images` - Photo metadata, EXIF data, filenames
+- `images` - Photo metadata, EXIF data, filenames, color/HDR audit columns
 - `topics` - Photo albums/categories
 - `tags` / `imageTags` - Tagging system
 - `adminUsers` / `sessions` - Multi-user authentication
 - `sharedGroups` / `sharedGroupImages` - Public sharing
+- `image_views` / `topic_views` / `shared_group_views` - Analytics events (US-P44)
+- `image_embeddings` - CLIP embeddings (US-P51, stub)
+- `entitlements` - Stripe paid-download entitlements (US-P54)
+- `admin_tokens` - Lightroom Classic publish-plugin PATs (US-P53)
+- `smart_collections` - Admin-defined dynamic galleries (US-P42)
+
+### `images` color / HDR columns (admin-only via `_PrivacySensitiveKeys` guard)
+
+| Column | Source | Notes |
+|--------|--------|-------|
+| `color_space` | EXIF `ColorSpace` tag value (`'sRGB'` / `'Uncalibrated'`) | NOT the ICC name |
+| `icc_profile_name` | ICC `desc` (v2) / `mluc` (v4 UTF-16BE) descriptor | locale-matched on `mluc` (P4-E1) |
+| `bit_depth` | Sharp `metadata.depth` mapped to bits | source bit depth, not delivered |
+| `color_pipeline_decision` | Resolver enum (`p3-from-displayp3`, `p3-from-adobergb`, etc.) | admin-only |
+| `color_primaries` | NCLX > ICC chromaticity > ICC name | public |
+| `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma18 / linear) | admin-only |
+| `matrix_coefficients` | NCLX | admin-only |
+| `is_hdr` | Derived from `transfer_function in ('pq', 'hlg')` | admin-only — UI badge gates on this AND `@media (dynamic-range: high)` |
+| `has_gain_map` | Apple HDR gain map detection in HEIF `iinf`/`iref` (P4-A1) | admin-only |
+| `pipeline_version` | Encoder version used to produce derivatives (current: 6) | admin-only |
 
 ## Image Upload Flow
 
@@ -184,6 +213,102 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
 9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at producer (`lib/process-image.ts` blur builder), write time (`uploadImages` in `apps/web/src/app/actions/images.ts`), and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4 KB. The producer-side wrap (cycle 4 RPF loop AGG4-L01) closes the symmetric defense — a future MIME drift in the producer is caught at the source rather than masked by the consumer-side validation. Locked by fixture tests `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`
 
+## Color & HDR Pipeline (photographer-intent surface)
+
+The product premise: photos arrive AFTER the photographer's editing. The encoder + viewer must deliver the photographer's intent — gamut, tonality, dynamic range — accurately to every viewer's display, on every supported browser. **No edit / culling / scoring features ship in product.**
+
+### Source detection (precedence)
+
+`detectColorSignals(filepath, sharpInstance, metadata)` in `lib/color-detection.ts` resolves color primaries in priority order:
+
+1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709→sRGB`, `13=sRGB IEC61966-2-1`, `14/15=BT.2020→gamma22`, `16=PQ`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `9=BT.2020-NCL`.
+2. **ICC chromaticity** (`lib/icc-chromaticity.ts`, P4-A2) — parses `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` from the ICC tag table, converts XYZ→xy chromaticity, matches against the sRGB / Display P3 / Adobe RGB / ProPhoto / Rec.2020 presets within ΔE ≤ 0.005 (high-confidence) or ≤ 0.015 (medium). Catches custom monitor profiles (Eizo CG2700X, BenQ SW-series, X-Rite calibrations) whose name doesn't match the allowlist.
+3. **ICC name allowlist** — `resolveColorPipelineDecision` / `resolveAvifIccProfile` string-match against the description for "Display P3", "DCI-P3", "Adobe RGB", "ProPhoto", "Rec.2020" / "BT.2020", "sRGB". Both resolvers accept an optional `signals` parameter so NCLX-only sources (no ICC) still resolve correctly.
+
+### Encoder decision matrix (`process-image.ts`)
+
+| Source ICC | Decision | AVIF output | WebP / JPEG output |
+|---|---|---|---|
+| sRGB | `srgb` | sRGB 8-bit | sRGB 8-bit |
+| Display P3 / P3-D65 | `p3-from-displayp3` | **P3 10-bit** | P3 8-bit (4:4:4 JPEG) |
+| DCI-P3 | `p3-from-dcip3` | P3 8-bit (Bradford D65) | P3 8-bit (4:4:4) |
+| Adobe RGB | `p3-from-adobergb` | P3 10-bit (rgb16 pipeline) | P3 8-bit (4:4:4) |
+| ProPhoto | `p3-from-prophoto` | P3 10-bit (rgb16, may clip cyan) | P3 8-bit (4:4:4) |
+| Rec.2020 / BT.2020 | `p3-from-rec2020` | P3 10-bit (rgb16) | P3 8-bit (4:4:4) |
+| `force_srgb_derivatives=true` | (decision unchanged) | (still gamut-preserved) | sRGB 8-bit |
+| Unknown / no ICC | `srgb-from-unknown` | sRGB 8-bit | sRGB 8-bit |
+
+- Wide-gamut path: `pipelineColorspace('rgb16')` resize for non-DCI-P3 sources (DCI-P3 skips rgb16 to keep its source ICC for the Bradford transform). Per-format fresh `sharp(inputPath, …)` to eliminate shared-state cross-format contamination (WI-14).
+- 50 MP wide-gamut sources are downscaled to ≤ `WIDE_GAMUT_MAX_SOURCE_PIXELS` (admin-tunable, default 50 M) before fan-out — prevents OOM on the rgb16 pipeline.
+- 10-bit AVIF gated on a Promise-singleton libheif probe; falls back to 8-bit per-image on encode-time rejection.
+
+### HDR ingest
+
+- PQ / HLG sources are **rejected at upload** by default. The `allow_hdr_ingest` admin setting (default `false`) gates ingestion; when enabled, the ingest is accepted with a warning that the SDR-only delivery pipeline will encode the source as SDR.
+- Honesty rule: until WI-09 (HDR AVIF encoder shell-out via `avifenc`) ships, `is_hdr` / `transfer_function` / `matrix_coefficients` are **admin-only fields** so the public never sees an HDR badge whose bytes don't fulfill it.
+- Apple HDR gain maps (iPhone 14+ HEIC) are detected via the `urim` / `tmap` boxes and surfaced to admin in the Color Details audit row. The gain map itself isn't transcoded yet — the SDR base is delivered with an admin-visible "delivered as SDR base only" label.
+
+### ETag / cache invalidation
+
+`serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash.slice(0,8)}"`. The settings hash (P4-E2) covers `wide_gamut_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives` so flipping any color-impacting admin setting invalidates cached variants automatically. Pipeline version bumps invalidate all variants for all images.
+
+### Audit surface (UI)
+
+- **`<ColorDetailsSection>`** — accordion in photo viewer + mobile bottom sheet. Default-open for non-trivial color (`isNonTrivialColor` = wide-gamut OR HDR OR non-`srgb` decision). Renders ICC name, primaries, transfer function, decision (admin), source bit depth, delivered bit depth, delivered formats chips, HDR badge, gain map row (admin), copy-to-clipboard button.
+- **`<LightboxColorPip>`** (`components/lightbox-color-pip.tsx`) — slide-up panel in lightbox showing the same color metadata + a compact lazy-mounted `<Histogram>`. Closed-state pip uses `min-h-11` for a 44 px touch target.
+- **`<WideGamutHint>`** — shown to sRGB-display visitors viewing a wide-gamut photo. Uses `useDisplayCapability` (NOT raw matchMedia) so Firefox 124+ doesn't false-positive the hint.
+- **`<Histogram>`** — 256-px-canvas worker-driven RGB / luminance histogram with grid + clip blink (≥ 0.5% bins above white / below black). Priority chain: AVIF (if wide-gamut + P3 display + canvas-P3 supported) → sized JPEG → fallback base JPEG. URLs that fail an `<img>` load are short-circuited so legacy photos missing a `_640.jpg` derivative cleanly fall through to the base filename (always exists per encoder atomic-rename contract).
+- **`force_show_color_chips`** admin opt-in unhides the `gamut-p3-badge` / `hdr-badge` on non-matching displays via `:root[data-force-show-color-chips="true"]` — useful for photographer demos on sRGB laptops.
+
+### Admin tunables (color/HDR)
+
+| Setting | Default | Effect |
+|---|---|---|
+| `force_srgb_derivatives` | `false` | When ON, WebP/JPEG are sRGB regardless of source. AVIF still gamut-preserved |
+| `allow_hdr_ingest` | `false` | When OFF, PQ/HLG sources rejected at upload with a localized error |
+| `force_show_color_chips` | `false` | Admin demo override — show P3/HDR badges regardless of display capability |
+| `wide_gamut_jpeg_chroma` | `'4:4:4'` | Chroma subsampling for wide-gamut JPEG (`'4:4:4' | '4:2:2' | '4:2:0'`) |
+| `sdr_jpeg_chroma` | `'4:2:0'` | Chroma subsampling for sRGB JPEG (same enum) |
+| `avif_effort` | `6` | AVIF encoder effort (4-9). Higher = smaller files, slower encode |
+| `wide_gamut_max_source_pixels` | `50_000_000` | Pixel-count cap above which wide-gamut sources downscale before rgb16 fan-out |
+
+All admin tunables flow through `gallery-config-shared.ts` (validation) → `gallery-config.ts` (resolution) → `image-queue.ts` (passes to `processImageFormats`). Flipping any of these requires a backfill pass to re-encode existing photos at the new settings.
+
+### Backfill
+
+`apps/web/scripts/backfill-color-pipeline.ts` re-runs `processImageFormats` on photos whose `pipeline_version != IMAGE_PIPELINE_VERSION`. Idempotent: skips rows already at current version unless `--force-reencode` is passed. Acquires the `gallerykit_color_pipeline_backfill` MySQL advisory lock on a dedicated connection so two concurrent runs serialize.
+
+**Operational pattern (production)** — the production runtime container has prod-deps only and lacks `tsx` + the TypeScript source files. Running the backfill safely:
+
+```bash
+docker run --rm \
+  --name gk-backfill \
+  --network host \
+  -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
+  -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v /home/ubuntu/gallery/apps/web/data:/app/data \
+  -v /home/ubuntu/gallery/apps/web/public:/app/apps/web/public \
+  -v /home/ubuntu/gallery/apps/web/tsconfig.json:/app/apps/web/tsconfig.json:ro \
+  --env-file /home/ubuntu/gallery/apps/web/.env.local \
+  -e BACKFILL_CONCURRENCY=2 -e UPLOAD_ORIGINAL_ROOT=/app/data/uploads/original \
+  --user root -w /app/apps/web web-web:latest \
+  sh -c "npx --yes tsx@4.21.0 scripts/backfill-color-pipeline.ts"
+```
+
+**Critical:** never `npm install` inside the running `gallerykit-web` container. The runtime's `/app/node_modules` is the prod-deps tree from the Dockerfile build; an in-container `npm install --no-save` clobbered `argon2` / `mysql2` / `sharp` once and triggered a restart loop until the next deploy rebuilt the image. The `--rm` sidecar pattern above leaves the prod container untouched.
+
+### Browser × OS × display matrix (delivery honesty)
+
+| Browser | OS | Display | P3 AVIF | `(color-gamut: p3)` MQ | `(dynamic-range: high)` MQ | `screen.colorGamut` API |
+|---|---|---|---|---|---|---|
+| Safari 17+ | macOS / iOS | P3 (+HDR on Pro) | ✓ | ✓ | ✓ | Safari 18+ TP |
+| Chrome 122+ | macOS / Win / Android 14+ | P3 | ✓ | ✓ | ✗ (Chromium gap) | ✓ |
+| Edge 122+ | Windows 11 | P3 + Auto HDR | ✓ | ✓ | ✓ (Auto HDR ON) | ✓ |
+| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | **✗** Moz bug 1591455 | ✗ | ✗ |
+| Chrome | Android 13- | sRGB-only mid-range | sRGB-clipped delivery | ✗ | ✗ | varies |
+
+`useDisplayCapability` layers the three signals so Firefox + P3 display still resolves to P3 via the canvas-P3 probe fallback.
+
 ## Race Condition Protections
 
 - **Delete-while-processing**: Queue checks row exists before + conditional UPDATE after processing; orphaned files cleaned up
@@ -197,7 +322,8 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **Concurrent DB restore prevention**: MySQL advisory lock `gallerykit_db_restore` acquired on a dedicated pool connection for the entire restore window. Concurrent restore requests fail fast with `restoreInProgress` instead of racing the 250 MB upload path. The lock is released automatically on connection close, so a crashed restore never wedges the next attempt
 - **Upload-processing contract changes**: MySQL advisory lock `gallerykit_upload_processing_contract` serializes uploads with `image_sizes` / `strip_gps_on_upload` changes so the first committed image cannot race a setting that is intended to lock once photos exist
 - **Per-image-processing claim**: MySQL advisory lock `gallerykit:image-processing:{jobId}` acquired before processing so two queue workers (e.g. across a restart boundary or a multi-process deployment) cannot both convert the same upload. Paired with a `WHERE processed = false` conditional UPDATE so the losing worker detects the already-processed state and cleans up its leftover variant files
-- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, upload-contract changes, topic renames, admin-user deletes, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
+- **Concurrent backfill prevention**: MySQL advisory lock `gallerykit_color_pipeline_backfill` acquired on a dedicated connection for the whole color-pipeline backfill window. Two concurrent backfill invocations serialize cleanly rather than racing the same image rows.
+- **Advisory-lock scope note** (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names (`gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`) are scoped to the MySQL SERVER, not to an individual database. Two GalleryKit instances pointed at the same MySQL server share the same lock namespace and will serialize each other's restores, upload-contract changes, topic renames, admin-user deletes, backfill runs, and image-processing claims across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock names with a per-instance identifier if multi-tenant co-location is required
 
 ## Performance Optimizations
 
@@ -208,6 +334,84 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 - **ImageZoom**: Ref-based DOM manipulation (no React re-renders on mousemove)
 - **Histogram**: Canvas capped at 256x256 for fast computation
 - **`tag_names` aggregation**: the masonry-list queries (`getImagesLite`, `getImagesLitePage`, `getAdminImagesLite`, plus the full `getImages`) all use a shared `tagNamesAgg` constant in `apps/web/src/lib/data.ts` that compiles to `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` over a `LEFT JOIN imageTags … LEFT JOIN tags … GROUP BY images.id`. A scalar correlated subquery shape using raw SQL aliases (`it`, `t`) previously returned NULL in production, breaking the gallery aria-labels (cycle 1 RPF v3 NF-3, commit aca754c). The fixture-style test at `apps/web/src/__tests__/data-tag-names-sql.test.ts` locks this contract: do not migrate the queries away from `tagNamesAgg` without updating the test.
+
+## Migration & Schema-Drift Runbook
+
+The Drizzle MySQL migrator (`node_modules/drizzle-orm/mysql-core/dialect.cjs:62`) decides whether to apply each journal entry by:
+
+```js
+if (lastDbMigration.created_at < migration.folderMillis) apply
+```
+
+It only checks `MAX(created_at)` — not per-entry hashes — across `__drizzle_migrations`. **The journal in this repo has non-monotonic `when` timestamps** (some 2026 dates, some 2025), so a single max-row baseline poisons the cursor and the migrator silently skips every entry whose `when` is below the cursor. This burned production once: the schema sat at the post-`0011` state for months while every deploy logged "[Migration] Complete." with no error, and the new color/HDR + gain-map columns never got applied.
+
+**Permanent fix in `apps/web/scripts/migrate.js`:**
+
+- `getAllJournalMigrations(folder)` reads the full journal and returns one record per entry (tag + `folderMillis = entry.when` + `hash = SHA256(SQL file content)`).
+- `prepareLegacyDatabaseIfNeeded` no longer compares `MAX(created_at)` to `Math.max(...whens)`. Instead it checks `every(journal entry's hash present in __drizzle_migrations)`. If any are missing AND the DB carries gallery tables, it runs `reconcileLegacySchema(connection, dbName)` (idempotent CREATE/ALTER guards for every table + column the schema knows about) and then `baselineAllJournalMigrations(connection, journalMigrations)` (one row per entry, idempotent on hash).
+- `runMigrations(connection, folder, expectedMigrations)` calls drizzle's `migrate()` then post-conditions: every journal hash MUST be in `__drizzle_migrations`, otherwise `throw new Error(\`Drizzle silently skipped N migration(s): tag1, tag2, …\`)` and the deploy fails loud. This catches future drift the moment it happens.
+
+**Adding a new migration:**
+
+1. Drop a new SQL file in `apps/web/drizzle/NNNN_<name>.sql`.
+2. Add an entry to `apps/web/drizzle/meta/_journal.json` with `idx = NNNN`, `tag = "NNNN_<name>"`, and a `when` value **strictly greater** than `Math.max(...current journal whens)`. Use `Date.now()` at commit time. Failing to monotonically advance `when` causes drizzle to silently skip your migration; the post-condition assertion will then fail the next deploy.
+3. Update `reconcileLegacySchema` in `migrate.js` to mirror the new schema state (idempotent CREATE/ALTER) so a fresh DB without `__drizzle_migrations` rows can baseline cleanly.
+4. Update `apps/web/src/db/schema.ts`.
+5. If the new column is admin-only, add it to the `_omit*` block in `apps/web/src/lib/data.ts` AND to the `_PrivacySensitiveKeys` type guard AND to the `SENSITIVE_KEYS` fixture in `apps/web/src/__tests__/privacy-fields.test.ts`.
+
+**Forensics on a stuck deploy:**
+
+```bash
+docker exec gallerykit-web sh -c "node -e \"
+const m=require('mysql2/promise');
+const o=require('./apps/web/scripts/mysql-connection-options').getMysqlConnectionOptions();
+m.createConnection(o).then(async c => {
+  const [r] = await c.query('SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY id DESC LIMIT 25');
+  console.log(JSON.stringify(r, null, 2));
+  await c.end();
+});\""
+```
+
+Compare against `apps/web/drizzle/meta/_journal.json` entries × `SHA256` of each migration file content. Missing hashes = un-applied migrations. The new post-condition assertion in `migrate.js` raises this automatically; this command is for digging deeper after the assertion fires.
+
+## Operational Playbook
+
+### Per-iteration deploy directive
+
+`npm run deploy` from the repo root reads gitignored `.env.deploy`, ssh-deploys to `gallery.atik.kr`, and runs `apps/web/deploy.sh` on the host (which `git pull`s the worktree and rebuilds the Docker image via compose). The deploy is **per-iteration** by project policy — every commit pushed to `master` is followed by a deploy. There is no staging environment.
+
+### Disk hygiene
+
+The deploy host has 124 G total. Repeated deploys accumulate Docker images + builder cache that can fill the disk; once disk hits 100 % the next `git pull` on the deploy host fails with `unable to write loose object file: No space left on device`.
+
+When that happens, free disk before retrying:
+
+```bash
+ssh ubuntu@atik.kr
+docker container prune -f
+docker image prune -af          # only removes images not referenced by a running container
+docker builder prune -af        # frees BuildKit cache (often 10-20 G)
+docker volume prune -af         # removes ONLY unused volumes — running container's are safe
+df -h /
+```
+
+The running `gallerykit-web` container's image survives `docker image prune -af` because `-a` only removes unused images.
+
+### Don't `npm install` inside the running production container
+
+The runtime container's `/app/node_modules` is a curated prod-deps tree from the Dockerfile's `prod-deps` stage. An in-container `npm install --no-save <anything>` will resolve and reinstall the dep tree against `package.json`, which can drop production deps that aren't reachable from `package.json`'s `dependencies` field directly (e.g. argon2, mysql2 transitives), break startup, and put `gallerykit-web` into a restart loop. The site goes 502 until the next deploy rebuilds the image cleanly.
+
+For one-off scripts that need source files / dev-only deps (tsx, vitest, etc.), use a **sidecar `--rm` container** off the just-built `web-web:latest` image with read-only source mounts (see "Backfill" section under "Color & HDR Pipeline" for the canonical pattern). This leaves the production container untouched.
+
+### Production photographer-perspective audit history
+
+The `.context/reviews/` directory contains the running history of "as photographers" comprehensive reviews:
+
+- `photographer-r3/` (2026-05-08) — first comprehensive R3 pass, 4 CRIT + 7 HIGH findings.
+- `cycle1-rpf-photographer/` … `cycle8-rpf-photographer/` — the 8 cycles of /review-plan-fix that closed nearly all of R3 (commits `94c43393` through `689822d4`).
+- `photographer-r4/` (2026-05-08) — R4 fresh pass after cycle 9 convergence; 0 CRIT + 2 HIGH (Apple gain map detection, ICC chromaticity-based gamut detection) + 5 MED + 4 LOW.
+
+The current state of the photographer surface is documented in `photographer-r4/_aggregate.md` and the implementation plan that landed in commits `94c43393` through `2b6cfdb5`.
 
 ## Permanently Deferred
 - **2FA/WebAuthn**: Not planned. Multiple root admins with Argon2id + rate limiting is sufficient for a personal gallery. Adding TOTP/WebAuthn would add complexity without proportional benefit.

@@ -29,13 +29,14 @@
 ## Features
 
 - **Masonry Grid Layout** -- responsive, column-balanced photo grid with infinite scroll
-- **Multi-Format Optimization** -- automatic AVIF, WebP, and JPEG conversion via Sharp pipeline
+- **Multi-Format Optimization** -- automatic AVIF (10-bit for wide-gamut), WebP, and JPEG conversion via Sharp pipeline
+- **Photographer-grade color management** -- ICC profile honored, NCLX `colr` ISOBMFF detection, ICC chromaticity-based gamut detection (Eizo / BenQ / X-Rite custom monitor profiles), Display P3 / DCI-P3 / Adobe RGB / ProPhoto / Rec.2020 sources mapped to Display P3 with 4:4:4 chroma JPEG, DCI-P3 white-point Bradford-adapted to D65. Apple HDR gain map detection (admin audit only). PQ / HLG ingest gated behind admin opt-in. See `CLAUDE.md` "Color & HDR Pipeline" for the full decision matrix
 - **Topics & Albums** -- organize photos into categories with slug aliases
-- **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS
+- **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin)
 - **Tagging & Search** -- full metadata search across titles, descriptions, cameras, and tags
 - **Sharing** -- per-photo and group share links with Base56 short keys
-- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multiple root-admin accounts (Argon2; no role separation yet)
-- **Internationalization** -- English and Korean (next-intl)
+- **Admin Dashboard** -- drag-and-drop uploads, batch editing, multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
+- **Internationalization** -- English and Korean (next-intl), incl. localized color metadata
 - **Docker Support** -- standalone output with documented Linux host-network + reverse-proxy deployment
 
 ## Configuration
