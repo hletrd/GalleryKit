@@ -23,15 +23,17 @@ describe('humanizeColorPrimaries — Latinate-by-convention', () => {
         expect(humanizeColorPrimaries(input)).toBe(expected);
     });
 
+    // R5-L1: humanizer returns null for unknown so callers can distinguish
+    // "no value" from "zero-length string" via `??` / `||` fallbacks.
     it.each([
-        ['unknown', ''],
-        ['', ''],
-        [null, ''],
-        [undefined, ''],
-        ['srgb', ''],         // not a primaries enum; only transfer functions use 'srgb'
-        ['p3', ''],            // not the canonical key
-        ['rec2020', ''],        // canonical is 'bt2020', not 'rec2020'
-    ])('returns empty string for unknown / non-canonical %j', (input, expected) => {
+        ['unknown', null],
+        ['', null],
+        [null, null],
+        [undefined, null],
+        ['srgb', null],         // not a primaries enum; only transfer functions use 'srgb'
+        ['p3', null],            // not the canonical key
+        ['rec2020', null],        // canonical is 'bt2020', not 'rec2020'
+    ])('returns null for unknown / non-canonical %j', (input, expected) => {
         expect(humanizeColorPrimaries(input as string | null | undefined)).toBe(expected);
     });
 });

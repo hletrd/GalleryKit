@@ -163,6 +163,10 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // histogram: collapse and cycle-mode buttons both carry min-h-11
     // / min-w-11. Listed as 0 for visibility.
     'components/histogram.tsx': 0,
+    // lightbox-color-pip.tsx: pip button carries min-h-11 (44 px) touch target.
+    // Listed for visibility; the scanner catches HTML <button> via the generic
+    // FORBIDDEN regex, and the min-h-11 override clears the floor.
+    'components/lightbox-color-pip.tsx': 0,
     //
     // === Admin route group (cycle 1 RPF loop AGG1-M01) ===
     //

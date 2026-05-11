@@ -36,7 +36,7 @@ type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdminProp = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -161,7 +161,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
     const isWideGamutSource = isWideGamutPrimary(image.color_primaries);
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
-        (isAdminProp && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')) ||
+        (isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')) ||
         (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
     );
 
@@ -286,7 +286,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                         )}
 
                         {/* Color details accordion — mirrors desktop sidebar */}
-                        <ColorDetailsSection image={image} isAdmin={isAdminProp} t={t} />
+                        <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} />
                         <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
 
                         {/* P3-28: for non-trivial (wide-gamut/HDR) sources, show
@@ -489,7 +489,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin: isAdm
                                 pages because `selectFields` in data.ts intentionally excludes
                                 latitude/longitude for privacy. It would only render if an admin-only
                                 data accessor explicitly includes these fields. See SEC-38-01. */}
-                            {(isAdminProp && image.latitude != null && image.longitude != null) && (
+                            {(isAdmin && image.latitude != null && image.longitude != null) && (
                                 <div className="col-span-2">
                                     <p className="text-muted-foreground text-xs">{t('viewer.location')}</p>
                                     <a

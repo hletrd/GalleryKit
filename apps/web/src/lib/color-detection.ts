@@ -278,6 +278,12 @@ export async function detectColorSignals(
     // For detectColorSignals we only need the name string, not the full ICC.
     let iccName: string | null = null;
     if (metadata.icc && Buffer.isBuffer(metadata.icc)) {
+        // R5-M2: upload-time detection runs server-side with no request locale,
+        // so `extractIccProfileName` is called without a locale argument and
+        // always returns the first matching description (typically English).
+        // Locale-matched `mluc` selection is available at render time in the
+        // UI, but the stored ICC name is fixed at upload. This is acceptable
+        // because Latinate technical names are universal among photographers.
         iccName = extractIccProfileName(metadata.icc);
     } else if (typeof metadata.icc === 'string') {
         iccName = metadata.icc;
