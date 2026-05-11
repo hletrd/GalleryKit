@@ -79,6 +79,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [colorPipOpen, setColorPipOpen] = useState(false);
+    const colorPipCycleModeRef = useRef<(() => void) | null>(null);
     const controlsVisibleRef = useRef(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [shouldAutoHideControls, setShouldAutoHideControls] = useState(getLightboxAutoHidePreference);
@@ -299,6 +300,9 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
             if (e.key === 'c' || e.key === 'C') {
                 if (isEditableTarget(e)) return;
                 setColorPipOpen(prev => !prev);
+            } else if (e.key === 'h' || e.key === 'H') {
+                if (isEditableTarget(e)) return;
+                colorPipCycleModeRef.current?.();
             } else if (e.key === 'f' || e.key === 'F') {
                 if (isEditableTarget(e)) return;
                 toggleFullscreen();
@@ -574,6 +578,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     open={colorPipOpen}
                     onToggle={() => setColorPipOpen(prev => !prev)}
                     imageSizes={imageSizes}
+                    cycleModeRef={colorPipCycleModeRef}
                 />
 
                 {/* Position counter — bottom center */}

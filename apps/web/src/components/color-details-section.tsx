@@ -16,7 +16,7 @@ import { ImageDetail } from '@/lib/image-types';
  * read the same Latinate technical names that match camera vendor docs and
  * browser CSS spec.
  */
-export function humanizeColorPrimaries(value: string | null | undefined): string {
+export function humanizeColorPrimaries(value: string | null | undefined): string | null {
     switch (value) {
         case 'bt709': return 'BT.709';
         case 'p3-d65': return 'Display P3';
@@ -24,7 +24,7 @@ export function humanizeColorPrimaries(value: string | null | undefined): string
         case 'bt2020': return 'Rec. 2020';
         case 'adobergb': return 'Adobe RGB';
         case 'prophoto': return 'ProPhoto RGB';
-        default: return '';
+        default: return null;
     }
 }
 
@@ -158,6 +158,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
             isHdr: image.is_hdr ?? null,
             hasGainMap: image.has_gain_map ?? null,
             sourceBitDepth: image.bit_depth ?? null,
+            pipelineVersion: image.pipeline_version ?? null,
         };
         try {
             const text = JSON.stringify(data, null, 2);

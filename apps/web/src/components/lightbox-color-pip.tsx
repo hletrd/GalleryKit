@@ -17,6 +17,7 @@ interface LightboxColorPipProps {
     open: boolean;
     onToggle: () => void;
     imageSizes?: number[];
+    cycleModeRef?: React.RefObject<(() => void) | null>;
 }
 
 /**
@@ -30,7 +31,7 @@ interface LightboxColorPipProps {
  * P4-C5 / R4-L2 / UX-L2: chip uses `min-h-11` so the touch-target floor
  * (≥ 44 px per WCAG 2.5.5 / Apple HIG) is met without padding inflation.
  */
-export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES }: LightboxColorPipProps) {
+export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef }: LightboxColorPipProps) {
     const hasData = Boolean(image.color_primaries || image.transfer_function || image.color_pipeline_decision);
     if (!hasData) return null;
 
@@ -121,7 +122,8 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                                 imageUrl={histogramJpegUrl}
                                 avifUrl={histogramAvifUrl}
                                 colorPrimaries={image.color_primaries}
-                                className="w-[200px]"
+                                className="w-full max-w-[200px]"
+                                cycleModeRef={cycleModeRef}
                             />
                         </div>
                     )}
