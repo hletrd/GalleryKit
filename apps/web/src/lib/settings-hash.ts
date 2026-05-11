@@ -28,8 +28,10 @@ import { inArray } from 'drizzle-orm';
 
 const COLOR_IMPACTING_KEYS = [
     'wide_gamut_jpeg_chroma',
+    'sdr_jpeg_chroma',
     'avif_effort',
     'force_srgb_derivatives',
+    'wide_gamut_max_source_pixels',
 ] as const;
 
 const HASH_LENGTH = 8;

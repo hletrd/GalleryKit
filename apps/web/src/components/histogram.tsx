@@ -290,23 +290,40 @@ function drawHistogram(
     ctx.restore();
 
     // P3-9: red clip blink strips when shadow/highlight bins exceed 0.5%
-    const clipBins = mode === 'luminance' ? data.l : mode === 'r' ? data.r : mode === 'g' ? data.g : mode === 'b' ? data.b : data.l;
-    const total = clipBins.reduce((sum, v) => sum + v, 0);
+    // R5-H3: RGB mode checks the worst-case channel (max of r/g/b at 0
+    // and 255) so per-channel clipping is visible, not just luminance.
     const CLIP_THRESHOLD = 0.005;
-    if (total > 0) {
-        const belowBlack = clipBins[0] / total;
-        const aboveWhite = clipBins[255] / total;
-        if (belowBlack > CLIP_THRESHOLD || aboveWhite > CLIP_THRESHOLD) {
-            ctx.save();
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.35)'; // red-500 at 35% opacity
-            if (belowBlack > CLIP_THRESHOLD) {
-                ctx.fillRect(0, 0, 3, H);
-            }
-            if (aboveWhite > CLIP_THRESHOLD) {
-                ctx.fillRect(W - 3, 0, 3, H);
-            }
-            ctx.restore();
+    let clipBins: number[];
+    let belowBlack = 0;
+    let aboveWhite = 0;
+    let total = 0;
+    if (mode === 'rgb') {
+        const totals = [data.r, data.g, data.b].map((ch) => ch.reduce((s, v) => s + v, 0));
+        total = totals[0];
+        belowBlack = Math.max(data.r[0], data.g[0], data.b[0]);
+        aboveWhite = Math.max(data.r[255], data.g[255], data.b[255]);
+        if (total > 0) {
+            belowBlack /= total;
+            aboveWhite /= total;
         }
+    } else {
+        clipBins = mode === 'luminance' ? data.l : mode === 'r' ? data.r : mode === 'g' ? data.g : mode === 'b' ? data.b : data.l;
+        total = clipBins.reduce((sum, v) => sum + v, 0);
+        if (total > 0) {
+            belowBlack = clipBins[0] / total;
+            aboveWhite = clipBins[255] / total;
+        }
+    }
+    if (total > 0 && (belowBlack > CLIP_THRESHOLD || aboveWhite > CLIP_THRESHOLD)) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.35)'; // red-500 at 35% opacity
+        if (belowBlack > CLIP_THRESHOLD) {
+            ctx.fillRect(0, 0, 3, H);
+        }
+        if (aboveWhite > CLIP_THRESHOLD) {
+            ctx.fillRect(W - 3, 0, 3, H);
+        }
+        ctx.restore();
     }
 }
 
@@ -503,12 +520,24 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                         />
                     </div>
                     {/* P3-9: clip percentage labels */}
+                    {/* R5-H3: RGB mode shows per-channel worst-case clipping. */}
                     {histogramData && (() => {
-                        const clipBins = mode === 'luminance' ? histogramData.l : mode === 'r' ? histogramData.r : mode === 'g' ? histogramData.g : mode === 'b' ? histogramData.b : histogramData.l;
-                        const total = clipBins.reduce((sum, v) => sum + v, 0);
+                        let total = 0;
+                        let belowBlack = 0;
+                        let aboveWhite = 0;
+                        if (mode === 'rgb') {
+                            total = histogramData.r.reduce((sum, v) => sum + v, 0);
+                            belowBlack = Math.max(histogramData.r[0], histogramData.g[0], histogramData.b[0]);
+                            aboveWhite = Math.max(histogramData.r[255], histogramData.g[255], histogramData.b[255]);
+                        } else {
+                            const clipBins = mode === 'luminance' ? histogramData.l : mode === 'r' ? histogramData.r : mode === 'g' ? histogramData.g : mode === 'b' ? histogramData.b : histogramData.l;
+                            total = clipBins.reduce((sum, v) => sum + v, 0);
+                            belowBlack = clipBins[0];
+                            aboveWhite = clipBins[255];
+                        }
                         if (total === 0) return null;
-                        const belowBlack = (clipBins[0] / total) * 100;
-                        const aboveWhite = (clipBins[255] / total) * 100;
+                        belowBlack = (belowBlack / total) * 100;
+                        aboveWhite = (aboveWhite / total) * 100;
                         const threshold = 0.5;
                         const showBelow = belowBlack > threshold;
                         const showAbove = aboveWhite > threshold;
