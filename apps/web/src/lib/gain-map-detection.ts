@@ -243,9 +243,16 @@ export function hasGainMap(buffer: Buffer): boolean {
 
     // Heuristic 1 — direct detection by item_type / URI on the infe.
     const gainMapItemIds = new Set<number>();
+    // R5-M3: standalone `tmap` without an `auxl` reference or Apple URI is
+    // ambiguous — ISO 21496-1 defines `tmap` as a generic tone-map item type
+    // that future encoders may use for non-HDR purposes. Only flag `tmap`
+    // immediately when it carries the Apple HDR gain-map URN; defer all
+    // other `tmap` items to heuristic 2 (iref `auxl` check).
     for (const entry of infeEntries) {
         if (entry.itemType === 'tmap') {
-            gainMapItemIds.add(entry.itemId);
+            if (entry.itemUri && entry.itemUri.includes('apple') && entry.itemUri.includes('hdr')) {
+                gainMapItemIds.add(entry.itemId);
+            }
             continue;
         }
         if (entry.itemType === 'urim' && entry.itemUri && entry.itemUri.startsWith(APPLE_GAIN_MAP_URI)) {

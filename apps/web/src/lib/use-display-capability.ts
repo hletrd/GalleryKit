@@ -10,8 +10,8 @@
  *
  * The hook returns `{ colorGamut, isHdr }`. `colorGamut` collapses the
  * three buckets ('srgb' | 'p3' | 'rec2020') consumers care about — the
- * `WideGamutHint` shows for srgb only, and the `Histogram` requests a
- * Display-P3 canvas for any non-sRGB display.
+ * `WideGamutHint` shows for srgb only (it does not use `isHdr`), and
+ * the `Histogram` requests a Display-P3 canvas for any non-sRGB display.
  *
  * The hook subscribes to MQ changes so that switching displays / dragging
  * to an external monitor / toggling system color profile propagates without
@@ -117,6 +117,15 @@ function subscribe(callback: () => void): () => void {
             // Some browsers throw on unsupported MQ — ignore those.
         }
     }
+    // R5-M4: `screen.colorGamut` has no change-event API. Re-detect on
+    // window focus / visibilitychange as a best-effort fallback so dragging
+    // the browser from a P3 monitor to an sRGB laptop (or vice versa) does
+    // not leave stale state indefinitely.
+    const handleVisibility = () => { if (!document.hidden) callback(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', callback);
+    handlers.push(() => document.removeEventListener('visibilitychange', handleVisibility));
+    handlers.push(() => window.removeEventListener('focus', callback));
     return () => { for (const h of handlers) h(); };
 }
 

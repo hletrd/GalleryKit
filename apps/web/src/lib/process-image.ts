@@ -714,7 +714,7 @@ export async function processImageFormats(
     if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
         const scale = Math.sqrt(WIDE_GAMUT_MAX_SOURCE_PIXELS / basePixels);
         const targetWidth = Math.max(1, Math.round(baseWidth * scale));
-        const tmpPath = inputPath + '.wi15.tmp';
+        const tmpPath = path.join(os.tmpdir(), `${path.basename(inputPath)}.${randomUUID().slice(0, 8)}.wi15.tmp`);
         await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
             .resize({ width: targetWidth, withoutEnlargement: true })
             .toFile(tmpPath);

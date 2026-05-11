@@ -129,13 +129,28 @@ describe('hasGainMap', () => {
         expect(hasGainMap(meta)).toBe(true);
     });
 
-    it('detects iOS-17+ ISO 21496-1 gain map: tmap infe', () => {
+    // R5-M3: standalone `tmap` without an `auxl` reference or Apple URI is
+    // ambiguous, so the test now includes the `auxl` iref that real iOS 17+
+    // containers carry.
+    it('detects iOS-17+ ISO 21496-1 gain map: tmap infe + auxl iref', () => {
+        const iinf = makeIinf([
+            makeInfe(1, 'hvc1'),
+            makeInfe(2, 'tmap', undefined, 'tonemap'),
+        ]);
+        const iref = makeIref([
+            makeIrefEntry('auxl', 1, [2]),
+        ]);
+        const meta = makeMeta([iinf, iref]);
+        expect(hasGainMap(meta)).toBe(true);
+    });
+
+    it('does NOT detect standalone tmap without auxl ref (R5-M3)', () => {
         const iinf = makeIinf([
             makeInfe(1, 'hvc1'),
             makeInfe(2, 'tmap', undefined, 'tonemap'),
         ]);
         const meta = makeMeta([iinf]);
-        expect(hasGainMap(meta)).toBe(true);
+        expect(hasGainMap(meta)).toBe(false);
     });
 
     it('detects gain map via auxl iref when urim has no inline URI', () => {
