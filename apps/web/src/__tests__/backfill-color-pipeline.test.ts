@@ -50,7 +50,6 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
             filename_webp: 'does-not-exist.webp',
             filename_jpeg: 'does-not-exist.jpg',
             icc_profile_name: 'sRGB',
-            color_pipeline_decision: null,
             color_primaries: 'bt709',
             width: 8,
         };
@@ -79,7 +78,6 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
             filename_webp: `${id}.webp`,
             filename_jpeg: `${id}.jpg`,
             icc_profile_name: 'sRGB',
-            color_pipeline_decision: null,
             color_primaries: 'bt709',
             width: 8,
         };
@@ -119,7 +117,6 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
             filename_webp: `${id}.webp`,
             filename_jpeg: `${id}.jpg`,
             icc_profile_name: 'Display P3',
-            color_pipeline_decision: null,
             color_primaries: 'p3-d65',
             width: 8,
         };

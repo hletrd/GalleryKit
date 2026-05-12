@@ -57,12 +57,11 @@ export interface ImageRow {
     filename_webp: string;
     filename_jpeg: string;
     icc_profile_name: string | null;
-    color_pipeline_decision: string | null;
     color_primaries: string | null;
     width: number;
 }
 
-export interface ReprocessSignals {
+interface ReprocessSignals {
     icc_profile_name: string | null;
     color_primaries: string | null;
     transfer_function: string | null;
@@ -71,7 +70,7 @@ export interface ReprocessSignals {
     has_gain_map: boolean;
 }
 
-export interface ReprocessResult {
+interface ReprocessResult {
     outcome: 'processed' | 'skipped' | 'error';
     signals?: ReprocessSignals;
 }
@@ -185,7 +184,7 @@ async function main() {
 
     const rawRows = await db.execute(sql`
         SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
-               icc_profile_name, color_pipeline_decision, color_primaries, width
+               icc_profile_name, color_primaries, width
         FROM images
         WHERE ${whereClause}
         ORDER BY id ASC

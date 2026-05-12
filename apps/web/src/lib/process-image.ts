@@ -466,11 +466,7 @@ export function resolveColorPipelineDecision(
     // R7-H1: opaque ICC names (e.g. "Eizo Custom Profile") that fail
     // string matching may still have chromaticity-derived primaries. Fall
     // back to the NCLX/ICC-chromaticity signal before giving up.
-    const fallback = resolveDecisionFromPrimaries(signals?.colorPrimaries);
-    if (fallback !== 'srgb-from-unknown') {
-        return fallback;
-    }
-    return 'srgb-from-unknown';
+    return resolveDecisionFromPrimaries(signals?.colorPrimaries);
 }
 
 export type AvifIccDecision = 'p3' | 'p3-from-wide' | 'srgb';
@@ -542,12 +538,7 @@ export function resolveAvifIccProfile(
 
     // R7-H1: opaque ICC names that fail string matching may still have
     // chromaticity-derived primaries. Fall back before defaulting to sRGB.
-    const fallback = resolveAvifFromPrimaries(signals?.colorPrimaries);
-    if (fallback !== 'srgb') {
-        return fallback;
-    }
-
-    return 'srgb';
+    return resolveAvifFromPrimaries(signals?.colorPrimaries);
 }
 
 
