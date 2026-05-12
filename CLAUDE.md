@@ -132,7 +132,7 @@ git values must be treated as compromised and must not be reused.
 | `color_primaries` | NCLX > ICC chromaticity > ICC name | public |
 | `transfer_function` | NCLX (PQ / HLG / sRGB / gamma22 / gamma18 / linear) | admin-only |
 | `matrix_coefficients` | NCLX | admin-only |
-| `is_hdr` | Derived from `transfer_function in ('pq', 'hlg')` | admin-only — UI badge gates on this AND `@media (dynamic-range: high)` |
+| `is_hdr` | Derived from `transfer_function in ('pq', 'hlg')` | admin-only — UI badge gates on `transfer_function` (both fields are admin-only anyway) |
 | `has_gain_map` | Apple HDR gain map detection in HEIF `iinf`/`iref` (P4-A1) | admin-only |
 | `pipeline_version` | Encoder version used to produce derivatives (current: 6) | admin-only |
 
@@ -231,7 +231,7 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 |---|---|---|---|
 | sRGB | `srgb` | sRGB 8-bit | sRGB 8-bit |
 | Display P3 / P3-D65 | `p3-from-displayp3` | **P3 10-bit** | P3 8-bit (4:4:4 JPEG) |
-| DCI-P3 | `p3-from-dcip3` | P3 8-bit (Bradford D65) | P3 8-bit (4:4:4) |
+| DCI-P3 | `p3-from-dcip3` | **P3 10-bit** (Bradford D65) | P3 8-bit (4:4:4) |
 | Adobe RGB | `p3-from-adobergb` | P3 10-bit (rgb16 pipeline) | P3 8-bit (4:4:4) |
 | ProPhoto | `p3-from-prophoto` | P3 10-bit (rgb16, may clip cyan) | P3 8-bit (4:4:4) |
 | Rec.2020 / BT.2020 | `p3-from-rec2020` | P3 10-bit (rgb16) | P3 8-bit (4:4:4) |
