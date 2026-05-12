@@ -63,6 +63,18 @@ describe('color settings hash (P4-E2)', () => {
         expect(a).not.toBe(b);
     });
 
+    it('differs when sdr_jpeg_chroma flips', () => {
+        const a = _buildHashForTesting({ sdr_jpeg_chroma: '4:2:0' });
+        const b = _buildHashForTesting({ sdr_jpeg_chroma: '4:4:4' });
+        expect(a).not.toBe(b);
+    });
+
+    it('differs when wide_gamut_max_source_pixels changes', () => {
+        const a = _buildHashForTesting({ wide_gamut_max_source_pixels: '50000000' });
+        const b = _buildHashForTesting({ wide_gamut_max_source_pixels: '25000000' });
+        expect(a).not.toBe(b);
+    });
+
     it('ignores keys outside the canonical set', () => {
         const a = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4' });
         const b = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4', irrelevant_key: 'x' });
