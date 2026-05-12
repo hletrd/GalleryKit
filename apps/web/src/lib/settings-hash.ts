@@ -32,6 +32,10 @@ const COLOR_IMPACTING_KEYS = [
     'avif_effort',
     'force_srgb_derivatives',
     'wide_gamut_max_source_pixels',
+    // R7-H2: quality changes produce different encoded bytes — must invalidate ETag
+    'image_quality_webp',
+    'image_quality_avif',
+    'image_quality_jpeg',
 ] as const;
 
 const HASH_LENGTH = 8;

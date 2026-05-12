@@ -75,6 +75,24 @@ describe('color settings hash (P4-E2)', () => {
         expect(a).not.toBe(b);
     });
 
+    it('differs when image_quality_webp changes', () => {
+        const a = _buildHashForTesting({ image_quality_webp: '85' });
+        const b = _buildHashForTesting({ image_quality_webp: '90' });
+        expect(a).not.toBe(b);
+    });
+
+    it('differs when image_quality_avif changes', () => {
+        const a = _buildHashForTesting({ image_quality_avif: '80' });
+        const b = _buildHashForTesting({ image_quality_avif: '85' });
+        expect(a).not.toBe(b);
+    });
+
+    it('differs when image_quality_jpeg changes', () => {
+        const a = _buildHashForTesting({ image_quality_jpeg: '90' });
+        const b = _buildHashForTesting({ image_quality_jpeg: '95' });
+        expect(a).not.toBe(b);
+    });
+
     it('ignores keys outside the canonical set', () => {
         const a = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4' });
         const b = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4', irrelevant_key: 'x' });
