@@ -5,6 +5,11 @@
  * It has NO database imports and is safe for use in client components.
  */
 
+// ── Pipeline Version ──────────────────────────────────────────────────────────
+
+/** Pipeline version bump invalidates all cached image variants on deploy. */
+export const IMAGE_PIPELINE_VERSION = 6;
+
 // ── Setting Keys ──────────────────────────────────────────────────────────────
 
 export const GALLERY_SETTING_KEYS = [

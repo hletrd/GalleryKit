@@ -122,7 +122,9 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  *   6 — tunable encoder parameters (P3-20 / P3-21): wide_gamut_jpeg_chroma
  *       and avif_effort are now admin-configurable instead of hardcoded.
  */
-export const IMAGE_PIPELINE_VERSION = 6;
+// IMAGE_PIPELINE_VERSION is defined in gallery-config-shared.ts (client-safe)
+// and re-exported here for backward compatibility.
+export { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 
 const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'

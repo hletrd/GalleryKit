@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { useDisplayCapability } from '@/lib/use-display-capability';
+import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 
@@ -171,6 +172,7 @@ export function requestHistogramFromWorker(
 function computeHistogramAsync(
     imageEl: HTMLImageElement,
     worker: Worker,
+    colorPrimaries: string | null | undefined,
     signal?: AbortSignal,
 ): Promise<HistogramData> {
     const canvas = document.createElement('canvas');
@@ -180,13 +182,16 @@ function computeHistogramAsync(
     const h = Math.round(imageEl.naturalHeight * scale);
     canvas.width = w;
     canvas.height = h;
-    // CM-MED-6: request a Display-P3 2D context on P3-capable displays so a
-    // P3-tagged AVIF/JPEG composites without sRGB clipping. On non-P3
-    // displays we fall through to the default sRGB context.
+    // R6-M2: only request a Display-P3 2D context when the image itself is
+    // wide-gamut AND the display supports P3. For sRGB images, the default
+    // sRGB context preserves true source data and keeps BT.709 luminance
+    // coefficients correct in the worker.
+    const isWideGamut = isWideGamutPrimary(colorPrimaries);
     const supportsP3 = getSupportsCanvasP3();
-    const ctxOptions: CanvasRenderingContext2DSettings | undefined = supportsP3
-        ? { colorSpace: 'display-p3' as PredefinedColorSpace }
-        : undefined;
+    const ctxOptions: CanvasRenderingContext2DSettings | undefined =
+        isWideGamut && supportsP3
+            ? { colorSpace: 'display-p3' as PredefinedColorSpace }
+            : undefined;
     const ctx = canvas.getContext('2d', ctxOptions);
     if (!ctx) {
         return Promise.resolve({
@@ -401,7 +406,10 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
     // resolved AND came back as `false`. While avifSupported === null
     // (probe pending), suppress the hint to avoid the first-render flicker
     // where the hint briefly appeared before the probe settled.
-    const isClipped = isWideGamut && avifSupported === false;
+    // R6-L1: the clipping warning is about display gamut, not AVIF support.
+    // An sRGB-display visitor viewing a wide-gamut photo sees clipped colors
+    // regardless of whether their browser can decode AVIF.
+    const isClipped = isWideGamut && colorGamut === 'srgb';
 
     const histogramData = histogramState.imageUrl === effectiveUrl ? histogramState.data : null;
     const loading = Boolean(effectiveUrl) && histogramState.imageUrl !== effectiveUrl;
@@ -415,7 +423,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
     const gamutLabel = getGamutLabel(colorPrimaries, t);
 
     useEffect(() => {
-        workerRef.current = new Worker('/histogram-worker.js?v=1');
+        workerRef.current = new Worker(`/histogram-worker.js?v=${IMAGE_PIPELINE_VERSION}`);
         return () => {
             workerRef.current?.terminate();
             workerRef.current = null;
@@ -436,7 +444,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                 setHistogramState({ imageUrl: effectiveUrl, data: null });
                 return;
             }
-            computeHistogramAsync(img, worker, abortController.signal)
+            computeHistogramAsync(img, worker, colorPrimaries, abortController.signal)
                 .then((data) => {
                     if (!aborted) {
                         setHistogramState({ imageUrl: effectiveUrl, data });
@@ -465,7 +473,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
             img.onerror = null;
             img.src = '';
         };
-    }, [effectiveUrl, markFailed]);
+    }, [effectiveUrl, markFailed, colorPrimaries]);
 
     useEffect(() => {
         if (!histogramData || !canvasRef.current || collapsed) return;
