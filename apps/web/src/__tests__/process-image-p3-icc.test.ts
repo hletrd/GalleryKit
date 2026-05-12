@@ -98,6 +98,37 @@ describe('resolveAvifIccProfile — ICC decision matrix', () => {
     it('returns srgb for unknown profile name', () => {
         expect(resolveAvifIccProfile('Generic RGB')).toBe('srgb');
     });
+
+    // R7-H1: chromaticity-derived fallback when ICC name is opaque
+    it('falls back to signals.colorPrimaries for opaque ICC names', () => {
+        expect(resolveAvifIccProfile('Eizo Custom Profile', { colorPrimaries: 'p3-d65' })).toBe('p3');
+        expect(resolveAvifIccProfile('X-Rite Calibrated', { colorPrimaries: 'bt2020' })).toBe('p3-from-wide');
+        expect(resolveAvifIccProfile('BenQ SW Profile', { colorPrimaries: 'adobergb' })).toBe('p3-from-wide');
+        expect(resolveAvifIccProfile('Unknown Monitor', { colorPrimaries: 'bt709' })).toBe('srgb');
+    });
+
+    // R7-H1: opaque names with no signals still resolve to srgb
+    it('returns srgb for opaque names without chromaticity signal', () => {
+        expect(resolveAvifIccProfile('Eizo Custom Profile')).toBe('srgb');
+        expect(resolveAvifIccProfile('Generic RGB', { colorPrimaries: null })).toBe('srgb');
+    });
+
+    // R7-M1: normalized ICC name matching (strip non-alphanumeric, lowercase)
+    it('resolves DisplayP3 (no space) to p3', () => {
+        expect(resolveAvifIccProfile('DisplayP3')).toBe('p3');
+    });
+
+    it('resolves P3D65 (no hyphen) to p3', () => {
+        expect(resolveAvifIccProfile('P3D65')).toBe('p3');
+    });
+
+    it('resolves DCI_P3 (underscore) to p3', () => {
+        expect(resolveAvifIccProfile('DCI_P3')).toBe('p3');
+    });
+
+    it('resolves Adobe_RGB (underscore) to p3-from-wide', () => {
+        expect(resolveAvifIccProfile('Adobe_RGB')).toBe('p3-from-wide');
+    });
 });
 
 // ---------------------------------------------------------------------------

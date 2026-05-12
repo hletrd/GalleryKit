@@ -40,6 +40,37 @@ describe('resolveColorPipelineDecision', () => {
         expect(resolveColorPipelineDecision(input)).toBe(expected);
     });
 
+    // R7-H1: chromaticity-derived fallback when ICC name is opaque
+    it('falls back to signals.colorPrimaries for opaque ICC names', () => {
+        expect(resolveColorPipelineDecision('Eizo Custom Profile', { colorPrimaries: 'p3-d65' })).toBe('p3-from-displayp3');
+        expect(resolveColorPipelineDecision('X-Rite Calibrated', { colorPrimaries: 'bt2020' })).toBe('p3-from-rec2020');
+        expect(resolveColorPipelineDecision('BenQ SW Profile', { colorPrimaries: 'adobergb' })).toBe('p3-from-adobergb');
+        expect(resolveColorPipelineDecision('Unknown Monitor', { colorPrimaries: 'bt709' })).toBe('srgb');
+    });
+
+    // R7-H1: opaque names with no signals still resolve to srgb-from-unknown
+    it('returns srgb-from-unknown for opaque names without chromaticity signal', () => {
+        expect(resolveColorPipelineDecision('Eizo Custom Profile')).toBe('srgb-from-unknown');
+        expect(resolveColorPipelineDecision('Generic RGB', { colorPrimaries: null })).toBe('srgb-from-unknown');
+    });
+
+    // R7-M1: normalized ICC name matching (strip non-alphanumeric, lowercase)
+    it('resolves DisplayP3 (no space) to p3-from-displayp3', () => {
+        expect(resolveColorPipelineDecision('DisplayP3')).toBe('p3-from-displayp3');
+    });
+
+    it('resolves P3D65 (no hyphen) to p3-from-displayp3', () => {
+        expect(resolveColorPipelineDecision('P3D65')).toBe('p3-from-displayp3');
+    });
+
+    it('resolves DCI_P3 (underscore) to p3-from-dcip3', () => {
+        expect(resolveColorPipelineDecision('DCI_P3')).toBe('p3-from-dcip3');
+    });
+
+    it('resolves Adobe_RGB (underscore) to p3-from-adobergb', () => {
+        expect(resolveColorPipelineDecision('Adobe_RGB')).toBe('p3-from-adobergb');
+    });
+
     it('returns a value in the ColorPipelineDecision union', () => {
         const result = resolveColorPipelineDecision('Display P3');
         const allowed: ColorPipelineDecision[] = [

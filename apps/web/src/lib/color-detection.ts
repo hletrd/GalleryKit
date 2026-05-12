@@ -22,7 +22,7 @@ export interface ColorSignals {
     /** Color primaries inferred from ICC name or nclx box. */
     colorPrimaries: 'bt709' | 'p3-d65' | 'dci-p3' | 'adobergb' | 'prophoto' | 'bt2020' | 'unknown';
     /** Transfer function inferred from ICC description + bit depth. */
-    transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'pq' | 'hlg' | 'linear' | 'unknown';
+    transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma26' | 'pq' | 'hlg' | 'linear' | 'unknown';
     /** Matrix coefficients inferred from ICC / container metadata. */
     matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'identity' | 'unknown';
     /** Whether the image is HDR (PQ or HLG transfer). */
@@ -47,7 +47,7 @@ export interface ColorSignals {
 // directly to avoid pulling fs/promises into the client bundle.
 export { WIDE_GAMUT_PRIMARIES, isWideGamutPrimary } from '@/lib/color-primaries';
 
-function normalizeName(name: string | null | undefined): string {
+export function normalizeName(name: string | null | undefined): string {
     return (name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
@@ -176,10 +176,12 @@ const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     1: 'srgb',
     2: 'gamma22',
     6: 'gamma22',
+    8: 'linear',   // ITU-T H.273 linear transfer characteristic
     13: 'srgb',    // sRGB IEC 61966-2-1 (was wrongly mapped to 'pq')
     14: 'gamma22', // BT.2020 10-bit (was wrongly mapped to 'hlg')
     15: 'gamma22', // BT.2020 12-bit
     16: 'pq',      // PQ / SMPTE ST 2084 (was missing)
+    17: 'gamma26', // SMPTE ST 428-1 (DCI-P3 gamma 2.6)
     18: 'hlg',     // ARIB STD-B67 (was wrongly mapped to 'gamma18')
 };
 
@@ -274,7 +276,7 @@ export async function detectColorSignals(
     metadata: Metadata,
 ): Promise<ColorSignals> {
     // Sharp's metadata().icc is a Buffer when present; try to extract a name
-    // by reusing the same bounds-checked parser used in process-image.ts.
+    // by reusing the same bounds-checked parser from icc-extractor.ts.
     // For detectColorSignals we only need the name string, not the full ICC.
     let iccName: string | null = null;
     if (metadata.icc && Buffer.isBuffer(metadata.icc)) {

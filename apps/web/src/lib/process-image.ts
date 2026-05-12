@@ -14,7 +14,7 @@ import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
-import { detectColorSignals, type ColorSignals } from '@/lib/color-detection';
+import { detectColorSignals, type ColorSignals, normalizeName } from '@/lib/color-detection';
 import { extractIccProfileName } from '@/lib/icc-extractor';
 export { extractIccProfileName } from '@/lib/icc-extractor';
 // C5-A3 / C5-COL-MED-2: canonical color_pipeline_decision enum source-of-truth
@@ -419,43 +419,57 @@ function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_B
  * null / unknown                  │ srgb-from-unknown │ safe default
  * ───────────────────────────────────────────────────────────────────────────
  */
+// R7-H1: shared primaries → pipeline decision mapping. Used both when ICC
+// name is absent (null/undefined) and when ICC name is opaque/unrecognized.
+function resolveDecisionFromPrimaries(
+    primaries: string | null | undefined,
+): ColorPipelineDecision {
+    if (primaries === 'p3-d65') return 'p3-from-displayp3';
+    if (primaries === 'dci-p3') return 'p3-from-dcip3';
+    if (primaries === 'adobergb') return 'p3-from-adobergb';
+    if (primaries === 'prophoto') return 'p3-from-prophoto';
+    if (primaries === 'bt2020') return 'p3-from-rec2020';
+    if (primaries === 'bt709') return 'srgb';
+    return 'srgb-from-unknown';
+}
+
 export function resolveColorPipelineDecision(
     iccProfileName: string | null | undefined,
     signals?: { colorPrimaries?: string | null } | null,
 ): ColorPipelineDecision {
     if (!iccProfileName) {
         // P3-11: fall back to NCLX-derived primaries when ICC name is absent
-        const primaries = signals?.colorPrimaries;
-        if (primaries === 'p3-d65') return 'p3-from-displayp3';
-        if (primaries === 'dci-p3') return 'p3-from-dcip3';
-        if (primaries === 'adobergb') return 'p3-from-adobergb';
-        if (primaries === 'prophoto') return 'p3-from-prophoto';
-        if (primaries === 'bt2020') return 'p3-from-rec2020';
-        if (primaries === 'bt709') return 'srgb';
-        return 'srgb-from-unknown';
+        return resolveDecisionFromPrimaries(signals?.colorPrimaries);
     }
 
-    const name = iccProfileName.toLowerCase();
+    const norm = normalizeName(iccProfileName);
 
-    if (name.includes('display p3') || name === 'p3-d65' || name.startsWith('p3-d65')) {
+    if (norm.includes('displayp3') || norm.includes('p3d65')) {
         return 'p3-from-displayp3';
     }
-    if (name === 'dci-p3' || name.startsWith('dci-p3')) {
+    if (norm.includes('dcip3')) {
         return 'p3-from-dcip3';
     }
-    if (name.includes('adobe rgb') || name.includes('adobergb')) {
+    if (norm.includes('adobe') || norm.includes('adobergb')) {
         return 'p3-from-adobergb';
     }
-    if (name.includes('prophoto')) {
+    if (norm.includes('prophoto')) {
         return 'p3-from-prophoto';
     }
-    if (name.includes('rec.2020') || name.includes('bt.2020') || name.includes('rec2020') || name.includes('bt2020')) {
+    if (norm.includes('bt2020') || norm.includes('rec2020') || norm.includes('iturbt2020')) {
         return 'p3-from-rec2020';
     }
-    if (name.includes('srgb')) {
+    if (norm.includes('srgb') || norm.includes('iec61966')) {
         return 'srgb';
     }
 
+    // R7-H1: opaque ICC names (e.g. "Eizo Custom Profile") that fail
+    // string matching may still have chromaticity-derived primaries. Fall
+    // back to the NCLX/ICC-chromaticity signal before giving up.
+    const fallback = resolveDecisionFromPrimaries(signals?.colorPrimaries);
+    if (fallback !== 'srgb-from-unknown') {
+        return fallback;
+    }
     return 'srgb-from-unknown';
 }
 
@@ -487,41 +501,50 @@ export type AvifIccDecision = 'p3' | 'p3-from-wide' | 'srgb';
  * null / unknown                  │ srgb            │ safe default
  * ───────────────────────────────────────────────────────────────────────────
  */
+// R7-H1: shared primaries → AVIF ICC decision mapping. Used both when ICC
+// name is absent and when ICC name is opaque/unrecognized.
+function resolveAvifFromPrimaries(
+    primaries: string | null | undefined,
+): AvifIccDecision {
+    if (primaries === 'p3-d65' || primaries === 'dci-p3') return 'p3';
+    if (primaries === 'adobergb' || primaries === 'prophoto' || primaries === 'bt2020') return 'p3-from-wide';
+    if (primaries === 'bt709') return 'srgb';
+    return 'srgb';
+}
+
 export function resolveAvifIccProfile(
     iccProfileName: string | null | undefined,
     signals?: { colorPrimaries?: string | null } | null,
 ): AvifIccDecision {
     if (!iccProfileName) {
         // P3-11: fall back to NCLX-derived primaries when ICC name is absent
-        const primaries = signals?.colorPrimaries;
-        if (primaries === 'p3-d65' || primaries === 'dci-p3') return 'p3';
-        if (primaries === 'adobergb' || primaries === 'prophoto' || primaries === 'bt2020') return 'p3-from-wide';
-        if (primaries === 'bt709') return 'srgb';
-        return 'srgb';
+        return resolveAvifFromPrimaries(signals?.colorPrimaries);
     }
 
-    const name = iccProfileName.toLowerCase();
+    const norm = normalizeName(iccProfileName);
 
     // True P3 families — exact gamut match, no conversion needed.
-    if (
-        name.includes('display p3') ||
-        name.includes('p3-d65') ||
-        name === 'dci-p3' ||
-        name.startsWith('dci-p3')
-    ) {
+    if (norm.includes('displayp3') || norm.includes('p3d65') || norm.includes('dcip3')) {
         return 'p3';
     }
 
     // Wider-than-P3 gamuts — convert to P3 via rgb16 pipeline for best
     // color preservation. Smaller loss than clipping to sRGB.
-    if (name.includes('adobe rgb') || name.includes('adobergb')) {
+    if (norm.includes('adobe') || norm.includes('adobergb')) {
         return 'p3-from-wide';
     }
-    if (name.includes('prophoto')) {
+    if (norm.includes('prophoto')) {
         return 'p3-from-wide';
     }
-    if (name.includes('rec.2020') || name.includes('bt.2020') || name.includes('rec2020') || name.includes('bt2020')) {
+    if (norm.includes('bt2020') || norm.includes('rec2020') || norm.includes('iturbt2020')) {
         return 'p3-from-wide';
+    }
+
+    // R7-H1: opaque ICC names that fail string matching may still have
+    // chromaticity-derived primaries. Fall back before defaulting to sRGB.
+    const fallback = resolveAvifFromPrimaries(signals?.colorPrimaries);
+    if (fallback !== 'srgb') {
+        return fallback;
     }
 
     return 'srgb';
@@ -700,8 +723,9 @@ export async function processImageFormats(
     // P3-tagged derivatives so P3-capable browsers render the full gamut.
     const targetIcc: 'p3' | 'srgb' = (isWideGamutSource && !forceSrgbDerivatives) ? 'p3' : 'srgb';
 
-    // WI-12: detect DCI-P3 sources for white-point adaptation.
-    const isDciP3 = iccProfileName?.toLowerCase() === 'dci-p3' || iccProfileName?.toLowerCase().startsWith('dci-p3');
+    // WI-12 / R7-M5: detect DCI-P3 sources for white-point adaptation.
+    // NCLX-only sources declare DCI-P3 via colorPrimaries when ICC name is absent.
+    const isDciP3 = normalizeName(iccProfileName).includes('dcip3') || signals?.colorPrimaries === 'dci-p3';
 
     // WI-15 / C2-A6: cap source pixel count for wide-gamut to prevent OOM in rgb16
     // pipeline. Sources exceeding the cap are downscaled proportionally to an
@@ -710,6 +734,13 @@ export async function processImageFormats(
     const WIDE_GAMUT_MAX_SOURCE_PIXELS = wideGamutMaxSourcePixels ?? 50_000_000;
     let processingInputPath = inputPath;
     let processingBaseWidth = baseWidth;
+    // R7-L7: metadata is read here rather than passed from the upload flow
+    // because processImageFormats is also invoked by the backfill script,
+    // which has no cached metadata.  Changing the signature to accept an
+    // optional cached Metadata object would require updating both callers
+    // and plumbing height through saveOriginalAndGetMetadata; the overhead
+    // (~10-30 ms for large files) is acceptable for the personal-gallery
+    // scale and not worth the cross-caller refactor risk.
     const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true }).metadata();
     const baseHeight = (inputMeta.height && inputMeta.height > 0) ? inputMeta.height : 0;
     const basePixels = baseWidth * baseHeight;
@@ -1128,8 +1159,11 @@ export async function stripGpsFromOriginal(filePath: string): Promise<void> {
         const orientation = typeof meta.orientation === 'number' && meta.orientation >= 1 && meta.orientation <= 8
             ? meta.orientation : 1;
 
+        // R7-L2: preserve ICC profile during GPS strip so future backfill /
+        // re-detection can still read the source color space.
+        // Sharp accepts Buffer at runtime; the type definition is conservative.
         await sharp(filePath)
-            .withMetadata({ orientation })
+            .withMetadata({ orientation, icc: meta.icc as string | undefined })
             .toFile(tmpPath);
 
         await fs.rename(tmpPath, filePath);

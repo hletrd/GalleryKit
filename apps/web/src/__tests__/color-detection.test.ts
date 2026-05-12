@@ -179,6 +179,20 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    // R7-M2: NCLX transfer values 8 (linear) and 17 (SMPTE 428-1 gamma 2.6)
+    it('maps nclx transfer=8 to linear', async () => {
+        const signals = await detectFromNclx(1, 8, 1);
+        expect(signals.transferFunction).toBe('linear');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=17 to gamma26', async () => {
+        const signals = await detectFromNclx(11, 17, 1);
+        expect(signals.transferFunction).toBe('gamma26');
+        expect(signals.isHdr).toBe(false);
+        expect(signals.colorPrimaries).toBe('dci-p3');
+    });
+
     // P4-A2 / R4-H2: ICC chromaticity-based detection promotes a custom
     // (opaquely-named) ICC to the correct gamut when wtpt/rXYZ/gXYZ/bXYZ tags
     // land on a canonical preset within tolerance. Without this fallback the
