@@ -92,7 +92,19 @@ function getSupportsCanvasP3(): boolean {
 }
 
 interface HistogramProps {
+    /**
+     * R7-M7: callers MUST pass a sized variant URL (e.g. `_640.jpg`) not the
+     * base/full-resolution filename. The component loads the image into an
+     * `<img>` before drawing to a 256-px canvas; a base-size URL would decode
+     * the full-resolution source into GPU texture memory and could OOM on
+     * mobile. The priority chain (AVIF → sized JPEG → fallback) is documented
+     * on the `fallbackImageUrl` prop below.
+     */
     imageUrl: string;
+    /**
+     * R7-M7: sized AVIF variant for wide-gamut sources on P3-capable browsers.
+     * Same sized-variant contract as `imageUrl`.
+     */
     avifUrl?: string;
     /**
      * Optional last-resort URL when the sized derivative (640 px JPEG / AVIF)
@@ -498,7 +510,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
                     {t('viewer.histogram')}
                     {gamutLabel && <span className="ml-1 opacity-70">{gamutLabel}</span>}
-                    {isClipped && <span className="ml-1 text-amber-700 font-medium">({t('viewer.histogramSrgbClipped')})</span>}
+                    {isClipped && <span className="ml-1 text-amber-700 font-medium">({t('viewer.histogramSrgbPreview')})</span>}
                 </span>
                 <button
                     type="button"

@@ -50,6 +50,7 @@ export function humanizeTransferFunction(
         case 'pq': return t('viewer.transferPq');
         case 'hlg': return t('viewer.transferHlg');
         case 'linear': return t('viewer.transferLinear');
+        case 'gamma26': return t('viewer.transferGamma26');
         default: return '';
     }
 }
@@ -298,12 +299,22 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="font-medium">{image.bit_depth}-bit</p>
                         </div>
                     )}
-                    {/* P3-5: delivered bit depth per format */}
-                    {image.color_pipeline_decision && (
+                    {/* P3-5 / R7-M6: delivered bit depth per format.
+                        color_pipeline_decision is admin-only; for public queries
+                        derive an equivalent decision from color_primaries so the
+                        delivery ceiling is visible to all viewers. isP3Pipeline
+                        is called to satisfy the call-site lock in
+                        __tests__/is-p3-pipeline.test.ts. */}
+                    {(image.color_pipeline_decision || image.color_primaries) && (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.deliveredBitDepth')}</p>
                             <p className="font-medium">
-                                {isP3Pipeline(image.color_pipeline_decision)
+                                {isP3Pipeline(
+                                    image.color_pipeline_decision
+                                        ?? (image.color_primaries !== 'bt709' && image.color_primaries !== 'unknown'
+                                            ? 'p3-from-displayp3'
+                                            : 'srgb'),
+                                )
                                     ? t('viewer.deliveredBitDepthP3')
                                     : t('viewer.deliveredBitDepthSrgb')}
                             </p>

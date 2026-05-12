@@ -32,8 +32,8 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
     });
 
     describe('Delivered bit depth row (P3-5)', () => {
-        it('gates on color_pipeline_decision presence', () => {
-            expect(SOURCE).toMatch(/image\.color_pipeline_decision\s*&&/);
+        it('gates on color_pipeline_decision or color_primaries presence', () => {
+            expect(SOURCE).toMatch(/\(image\.color_pipeline_decision\s*\|\|\s*image\.color_primaries\)\s*&&/);
         });
 
         it('renders viewer.deliveredBitDepth label', () => {
@@ -52,7 +52,7 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
             // (which matches only `p3-from-*`). C7-A1 closed the gap so all
             // four call sites of the predicate share one source of truth.
             expect(SOURCE).toMatch(
-                /isP3Pipeline\s*\(\s*image\.color_pipeline_decision\s*\)[\s\S]*?t\('viewer\.deliveredBitDepthP3'\)[\s\S]*?t\('viewer\.deliveredBitDepthSrgb'\)/,
+                /isP3Pipeline\s*\([\s\S]*?image\.color_pipeline_decision[\s\S]*?\)[\s\S]*?t\('viewer\.deliveredBitDepthP3'\)[\s\S]*?t\('viewer\.deliveredBitDepthSrgb'\)/,
             );
         });
     });

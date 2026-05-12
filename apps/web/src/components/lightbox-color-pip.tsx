@@ -71,6 +71,10 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     const histogramAvifUrl = baseAvif
         ? imageUrl(`/uploads/avif/${baseAvif}_${histogramSize}.avif`)
         : undefined;
+    // R7-M8: base JPEG fallback for legacy photos missing sized derivatives.
+    const histogramFallbackUrl = baseJpeg
+        ? imageUrl(`/uploads/jpeg/${baseJpeg}.jpg`)
+        : undefined;
 
     return (
         <div className="pointer-events-auto absolute bottom-4 left-4 z-10">
@@ -127,6 +131,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                             <Histogram
                                 imageUrl={histogramJpegUrl}
                                 avifUrl={histogramAvifUrl}
+                                fallbackImageUrl={histogramFallbackUrl}
                                 colorPrimaries={image.color_primaries}
                                 className="w-full max-w-[200px]"
                                 cycleModeRef={cycleModeRef}
