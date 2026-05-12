@@ -118,8 +118,15 @@ export type ImageProcessingJob = {
     quality?: ImageQualitySettings;
     imageSizes?: number[];
     iccProfileName?: string | null;
-    // P3-11: NCLX-derived color signals for ICC-less fallback in processImageFormats
-    colorSignals?: { colorPrimaries?: string | null } | null;
+    // R6-H1: full color signals for bootstrap NCLX preservation. ProcessImageFormats
+    // consumes colorPrimaries; the remaining fields future-proof the bootstrap.
+    colorSignals?: {
+        colorPrimaries?: string | null;
+        transferFunction?: string | null;
+        matrixCoefficients?: string | null;
+        isHdr?: boolean;
+        hasGainMap?: boolean;
+    } | null;
     // US-P52: EXIF hints for caption stub / future ONNX inference
     camera_model?: string | null;
     capture_date?: string | null;
@@ -567,6 +574,11 @@ export const bootstrapImageProcessingQueue = async () => {
             capture_date: images.capture_date,
             camera_model: images.camera_model,
             icc_profile_name: images.icc_profile_name,
+            color_primaries: images.color_primaries,
+            transfer_function: images.transfer_function,
+            matrix_coefficients: images.matrix_coefficients,
+            is_hdr: images.is_hdr,
+            has_gain_map: images.has_gain_map,
         })
             .from(images)
             .where(pendingWhere)
@@ -584,6 +596,13 @@ export const bootstrapImageProcessingQueue = async () => {
                 capture_date: image.capture_date,
                 camera_model: image.camera_model,
                 iccProfileName: image.icc_profile_name,
+                colorSignals: {
+                    colorPrimaries: image.color_primaries,
+                    transferFunction: image.transfer_function,
+                    matrixCoefficients: image.matrix_coefficients,
+                    isHdr: image.is_hdr,
+                    hasGainMap: image.has_gain_map,
+                },
             });
 
         }
