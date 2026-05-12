@@ -8,16 +8,17 @@
  * What it does
  * ────────────
  * Re-processes existing images that were encoded with a pipeline version
- * older than IMAGE_PIPELINE_VERSION (currently 5). For each candidate:
+ * older than IMAGE_PIPELINE_VERSION (currently 6). For each candidate:
  *   - fetches the stored original,
  *   - re-runs processImageFormats() with the current encoder settings
  *     (P3-from-wide mapping, toColorspace + withIccProfile, autoOrient),
- *   - updates pipeline_version = 5 on success.
+ *   - re-runs detectColorSignals() on the original to refresh DB color columns,
+ *   - updates pipeline_version + color columns atomically on success.
  *
  * Idempotency
  * ───────────
- * Images with pipeline_version >= 5 are skipped by default. Re-running after
- * a successful pass is a no-op (all rows already at version 5).
+ * Images with pipeline_version >= 6 are skipped by default. Re-running after
+ * a successful pass is a no-op (all rows already at version 6).
  *
  * The serve-upload route emits an ETag containing IMAGE_PIPELINE_VERSION
  * (CM-HIGH-5), so once an image is reprocessed any cached client copy
@@ -39,7 +40,9 @@ dotenv.config({ path: '.env.local' });
 import fs from 'fs/promises';
 import PQueue from 'p-queue';
 import type { RowDataPacket } from 'mysql2';
+import sharp from 'sharp';
 import { processImageFormats, IMAGE_PIPELINE_VERSION } from '../src/lib/process-image';
+import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
 
@@ -59,16 +62,30 @@ export interface ImageRow {
     width: number;
 }
 
+export interface ReprocessSignals {
+    icc_profile_name: string | null;
+    color_primaries: string | null;
+    transfer_function: string | null;
+    matrix_coefficients: string | null;
+    is_hdr: boolean;
+    has_gain_map: boolean;
+}
+
+export interface ReprocessResult {
+    outcome: 'processed' | 'skipped' | 'error';
+    signals?: ReprocessSignals;
+}
+
 // ---------------------------------------------------------------------------
 // Single-row reprocessor — exported for unit tests.
 // ---------------------------------------------------------------------------
 
-export async function reprocessRow(row: ImageRow): Promise<'processed' | 'skipped' | 'error'> {
+export async function reprocessRow(row: ImageRow): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
     try {
         await fs.access(originalPath);
     } catch {
-        return 'skipped';
+        return { outcome: 'skipped' };
     }
 
     try {
@@ -84,16 +101,45 @@ export async function reprocessRow(row: ImageRow): Promise<'processed' | 'skippe
             undefined,
             row.color_primaries ? { colorPrimaries: row.color_primaries } : null,
         );
-        return 'processed';
     } catch (err) {
         console.error(`  [error] id=${row.id}: ${err}`);
-        return 'error';
+        return { outcome: 'error' };
+    }
+
+    // R7-M4: re-run color detection after successful re-encode so DB color
+    // columns stay in sync with the current detection logic.
+    try {
+        const image = sharp(originalPath, {
+            limitInputPixels: 256 * 1024 * 1024,
+            failOn: 'error',
+            sequentialRead: true,
+        });
+        const metadata = await image.metadata();
+        const signals = await detectColorSignals(originalPath, image, metadata);
+        return {
+            outcome: 'processed',
+            signals: {
+                icc_profile_name: signals.iccProfileName,
+                color_primaries: signals.colorPrimaries,
+                transfer_function: signals.transferFunction,
+                matrix_coefficients: signals.matrixCoefficients,
+                is_hdr: signals.isHdr,
+                has_gain_map: signals.hasGainMap,
+            },
+        };
+    } catch (err) {
+        // Detection failed but encoding succeeded — still mark as processed
+        // so the stale color columns are at least no worse than before.
+        console.warn(`  [warn] id=${row.id}: detection failed after re-encode: ${err}`);
+        return { outcome: 'processed' };
     }
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
+
+const BATCH_SIZE = 100;
 
 async function main() {
     const forceReencode = process.argv.includes('--force-reencode');
@@ -169,16 +215,42 @@ async function main() {
     let errors = 0;
     const reportEvery = Math.max(1, Math.floor(rows.length / 20));
 
+    // R7-L8: batch DB updates to reduce round-trips.
+    const updateBatch: { id: number; signals: ReprocessSignals }[] = [];
+
+    async function flushBatch(): Promise<void> {
+        if (updateBatch.length === 0) return;
+        const items = updateBatch.splice(0, updateBatch.length);
+        await db.transaction(async (tx) => {
+            for (const item of items) {
+                await tx.execute(sql`
+                    UPDATE images SET
+                        pipeline_version = ${IMAGE_PIPELINE_VERSION},
+                        icc_profile_name = ${item.signals.icc_profile_name ?? null},
+                        color_primaries = ${item.signals.color_primaries ?? null},
+                        transfer_function = ${item.signals.transfer_function ?? null},
+                        matrix_coefficients = ${item.signals.matrix_coefficients ?? null},
+                        is_hdr = ${item.signals.is_hdr},
+                        has_gain_map = ${item.signals.has_gain_map}
+                    WHERE id = ${item.id}
+                `);
+            }
+        });
+        console.log(`  [batch-flush] ${items.length} row(s) updated`);
+    }
+
     for (const [index, row] of rows.entries()) {
         queue.add(async () => {
-            const outcome = await reprocessRow(row);
-            if (outcome === 'processed') {
+            const result = await reprocessRow(row);
+            if (result.outcome === 'processed') {
                 processed++;
-                // Mark this row as pipeline version current.
-                await db.execute(sql`
-                    UPDATE images SET pipeline_version = ${IMAGE_PIPELINE_VERSION} WHERE id = ${row.id}
-                `);
-            } else if (outcome === 'skipped') {
+                if (result.signals) {
+                    updateBatch.push({ id: row.id, signals: result.signals });
+                }
+                if (updateBatch.length >= BATCH_SIZE) {
+                    await flushBatch();
+                }
+            } else if (result.outcome === 'skipped') {
                 skipped++;
             } else {
                 errors++;
@@ -193,6 +265,9 @@ async function main() {
     }
 
     await queue.onIdle();
+
+    // Flush any remaining rows.
+    await flushBatch();
 
     console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors}`);
 

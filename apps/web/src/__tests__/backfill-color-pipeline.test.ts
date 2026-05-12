@@ -55,7 +55,7 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
             width: 8,
         };
         const outcome = await reprocessRow(row);
-        expect(outcome).toBe('skipped');
+        expect(outcome.outcome).toBe('skipped');
     });
 
     it('returns "processed" and rewrites derivatives for an existing original', async () => {
@@ -84,7 +84,9 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
             width: 8,
         };
         const outcome = await reprocessRow(row);
-        expect(outcome).toBe('processed');
+        expect(outcome.outcome).toBe('processed');
+        expect(outcome.signals).toBeDefined();
+        expect(outcome.signals!.color_primaries).toBe('bt709');
 
         // Confirm derivatives exist after the reprocess.
         const sizes = await Promise.all([
@@ -106,6 +108,7 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
         await sharp({
             create: { width: 8, height: 8, channels: 3, background: { r: 200, g: 64, b: 128 } },
         })
+            .withIccProfile('p3')
             .jpeg({ quality: 90 })
             .toFile(originalDestPath);
 
@@ -121,7 +124,14 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
             width: 8,
         };
         const outcome = await reprocessRow(row);
-        expect(outcome).toBe('processed');
+        expect(outcome.outcome).toBe('processed');
+        expect(outcome.signals).toBeDefined();
+        // The synthetic JPEG carries LittleCMS's built-in 'sP3C' ICC profile,
+        // whose name does not match the Display P3 allowlist, so the
+        // re-detection falls back to 'unknown'.  The encoder still used the
+        // row's icc_profile_name ('Display P3') for the pipeline decision,
+        // so the AVIF output below remains P3-tagged.
+        expect(outcome.signals!.color_primaries).toBe('unknown');
 
         // Verify the output AVIF carries an ICC profile (P3-tagged).
         const avifPath = path.join(UPLOAD_DIR_AVIF, `${id}.avif`);
