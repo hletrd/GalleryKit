@@ -164,9 +164,13 @@
   pointer-events: none;
 }
 
-/* Only show P3 badge on P3-capable displays */
+/* Only show P3 badge on P3-capable displays.
+   R8-M3: Firefox lacks `(color-gamut: p3)` MQ support; the `data-display-gamut`
+   attribute is set by `useDisplayCapability` (canvas-P3 probe fallback). */
 .gamut-p3-badge { display: none; }
 @media (color-gamut: p3) { .gamut-p3-badge { display: inline-block; } }
+[data-display-gamut="p3"] .gamut-p3-badge,
+[data-display-gamut="rec2020"] .gamut-p3-badge { display: inline-block; }
 
 /* E3: Only show HDR badge on HDR-capable displays */
 .hdr-badge { display: none; align-items: center; gap: 0.25rem; }

@@ -34,6 +34,7 @@ import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, hu
 import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
+import { useDisplayCapability } from '@/lib/use-display-capability';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -303,6 +304,14 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             document.documentElement.removeAttribute('data-force-show-color-chips');
         };
     }, [forceShowColorChips]);
+
+    // R8-M3: set data-display-gamut on <html> so CSS can show the P3 badge on
+    // Firefox (which lacks `(color-gamut: p3)` MQ support but resolves P3 via
+    // the canvas-P3 probe in useDisplayCapability).
+    const { colorGamut: displayGamut } = useDisplayCapability();
+    useEffect(() => {
+        document.documentElement.setAttribute('data-display-gamut', displayGamut);
+    }, [displayGamut]);
 
     // Sync info state across breakpoints: mobile bottom sheet ↔ desktop sidebar
     useEffect(() => {
