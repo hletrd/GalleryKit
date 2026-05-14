@@ -193,6 +193,25 @@ describe('detectColorSignals', () => {
         expect(signals.colorPrimaries).toBe('dci-p3');
     });
 
+    // R8-M1: NCLX transfer values 4, 5, 7 (gamma-2.2 family)
+    it('maps nclx transfer=4 to gamma22', async () => {
+        const signals = await detectFromNclx(1, 4, 1);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=5 to gamma22', async () => {
+        const signals = await detectFromNclx(1, 5, 1);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=7 to gamma22', async () => {
+        const signals = await detectFromNclx(1, 7, 1);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
     // P4-A2 / R4-H2: ICC chromaticity-based detection promotes a custom
     // (opaquely-named) ICC to the correct gamut when wtpt/rXYZ/gXYZ/bXYZ tags
     // land on a canonical preset within tolerance. Without this fallback the

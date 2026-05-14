@@ -175,7 +175,11 @@ const NCLX_PRIMARIES_MAP: Record<number, ColorSignals['colorPrimaries']> = {
 const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     1: 'srgb',
     2: 'gamma22',
+    // R8-M1: ITU-T H.273 gamma-2.2 family values 4, 5, 7
+    4: 'gamma22', // ITU-T H.273 Gamma 2.2 curve
+    5: 'gamma22', // BT.470 System M
     6: 'gamma22',
+    7: 'gamma22', // SMPTE 240M
     8: 'linear',   // ITU-T H.273 linear transfer characteristic
     13: 'srgb',    // sRGB IEC 61966-2-1 (was wrongly mapped to 'pq')
     14: 'gamma22', // BT.2020 10-bit (was wrongly mapped to 'hlg')
