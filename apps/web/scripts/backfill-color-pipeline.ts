@@ -41,10 +41,12 @@ import fs from 'fs/promises';
 import PQueue from 'p-queue';
 import type { RowDataPacket } from 'mysql2';
 import sharp from 'sharp';
-import { processImageFormats, IMAGE_PIPELINE_VERSION } from '../src/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION, type ImageQualitySettings } from '../src/lib/process-image';
 import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
+import { getGalleryConfig } from '../src/lib/gallery-config';
+import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
 
 // ---------------------------------------------------------------------------
 // Minimal type for DB rows we need
@@ -75,11 +77,21 @@ interface ReprocessResult {
     signals?: ReprocessSignals;
 }
 
+interface BackfillSettings {
+    quality: ImageQualitySettings;
+    sizes: number[];
+    forceSrgbDerivatives: boolean;
+    wideGamutJpegChroma: JpegChromaSubsampling;
+    avifEffort: number;
+    sdrJpegChroma: JpegChromaSubsampling;
+    wideGamutMaxSourcePixels: number;
+}
+
 // ---------------------------------------------------------------------------
 // Single-row reprocessor — exported for unit tests.
 // ---------------------------------------------------------------------------
 
-export async function reprocessRow(row: ImageRow): Promise<ReprocessResult> {
+export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
     try {
         await fs.access(originalPath);
@@ -94,11 +106,15 @@ export async function reprocessRow(row: ImageRow): Promise<ReprocessResult> {
             row.filename_avif,
             row.filename_jpeg,
             row.width,
-            undefined,
-            undefined,
+            settings?.quality,
+            settings?.sizes,
             row.icc_profile_name,
-            undefined,
+            settings?.forceSrgbDerivatives,
             row.color_primaries ? { colorPrimaries: row.color_primaries } : null,
+            settings?.wideGamutJpegChroma,
+            settings?.avifEffort,
+            settings?.sdrJpegChroma,
+            settings?.wideGamutMaxSourcePixels,
         );
     } catch (err) {
         console.error(`  [error] id=${row.id}: ${err}`);
@@ -145,6 +161,23 @@ async function main() {
 
     const { db, connection } = await import('../src/db');
     const { sql } = await import('drizzle-orm');
+
+    // R8-CRIT: resolve current admin settings so backfilled images produce
+    // identical derivatives to what a fresh upload would produce.
+    const config = await getGalleryConfig();
+    const backfillSettings: BackfillSettings = {
+        quality: {
+            webp: config.imageQualityWebp,
+            avif: config.imageQualityAvif,
+            jpeg: config.imageQualityJpeg,
+        },
+        sizes: config.imageSizes,
+        forceSrgbDerivatives: config.forceSrgbDerivatives,
+        wideGamutJpegChroma: config.wideGamutJpegChroma,
+        avifEffort: config.avifEffort,
+        sdrJpegChroma: config.sdrJpegChroma,
+        wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
+    };
 
     console.log('[backfill-color-pipeline] Acquiring advisory lock…');
 
@@ -240,7 +273,7 @@ async function main() {
 
     for (const [index, row] of rows.entries()) {
         queue.add(async () => {
-            const result = await reprocessRow(row);
+            const result = await reprocessRow(row, backfillSettings);
             if (result.outcome === 'processed') {
                 processed++;
                 if (result.signals) {

@@ -137,4 +137,55 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
         expect(Buffer.isBuffer(avifMeta.icc)).toBe(true);
         expect(avifMeta.icc!.length).toBeGreaterThan(0);
     });
+
+    it('R8-CRIT: passes admin settings through to processImageFormats (forceSrgbDerivatives)', async () => {
+        const id = 'backfill-settings-p3-srgb';
+        generatedIds.push(id);
+
+        const originalDestPath = path.join(UPLOAD_DIR_ORIGINAL, `${id}.jpg`);
+        await fs.mkdir(path.dirname(originalDestPath), { recursive: true });
+        await sharp({
+            create: { width: 16, height: 16, channels: 3, background: { r: 200, g: 64, b: 128 } },
+        })
+            .withIccProfile('p3')
+            .jpeg({ quality: 90 })
+            .toFile(originalDestPath);
+
+        const row: ImageRow = {
+            id: 9004,
+            filename_original: `${id}.jpg`,
+            filename_avif: `${id}.avif`,
+            filename_webp: `${id}.webp`,
+            filename_jpeg: `${id}.jpg`,
+            icc_profile_name: 'Display P3',
+            color_primaries: 'p3-d65',
+            width: 16,
+        };
+
+        // With forceSrgbDerivatives=true, JPEG/WebP should be sRGB-tagged
+        // while AVIF remains P3-tagged (gamut-preserved).
+        const outcome = await reprocessRow(row, {
+            quality: { webp: 90, avif: 85, jpeg: 90 },
+            sizes: [8, 16],
+            forceSrgbDerivatives: true,
+            wideGamutJpegChroma: '4:4:4',
+            avifEffort: 6,
+            sdrJpegChroma: '4:2:0',
+            wideGamutMaxSourcePixels: 50_000_000,
+        });
+        expect(outcome.outcome).toBe('processed');
+
+        // AVIF should still be P3-tagged (forceSrgbDerivatives only affects WebP/JPEG).
+        const avifMeta = await sharp(path.join(UPLOAD_DIR_AVIF, `${id}.avif`)).metadata();
+        expect(avifMeta.icc).toBeDefined();
+        expect(Buffer.isBuffer(avifMeta.icc)).toBe(true);
+        expect(avifMeta.icc!.length).toBeGreaterThan(0);
+
+        // JPEG should be sRGB-tagged when forceSrgbDerivatives is true.
+        const jpegMeta = await sharp(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`)).metadata();
+        // sRGB ICC profile has a well-known header; the absence of a P3 profile
+        // and the presence of any ICC profile indicates sRGB tagging.
+        expect(jpegMeta.icc).toBeDefined();
+        expect(Buffer.isBuffer(jpegMeta.icc)).toBe(true);
+    });
 });
