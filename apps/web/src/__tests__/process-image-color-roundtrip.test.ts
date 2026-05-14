@@ -19,7 +19,7 @@ import sharp from 'sharp';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { processImageFormats, extractIccProfileName } from '@/lib/process-image';
+import { processImageFormats, extractIccProfileName, canUseHighBitdepthAvif } from '@/lib/process-image';
 import { ensureUploadDirectories, UPLOAD_DIR_AVIF, UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 
 const TEST_PIXEL = { r: 220, g: 30, b: 30 }; // saturated red
@@ -219,11 +219,94 @@ describe('color round-trip — Display-P3 source', () => {
             true, // forceSrgbDerivatives
         );
 
-        const { UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG } = await import('@/lib/upload-paths');
+        const { UPLOAD_DIR_WEBP, UPLOAD_DIR_JPEG, UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
         const webpProfile = await readOutputIccName(path.join(UPLOAD_DIR_WEBP, `${id}.webp`));
         const jpegProfile = await readOutputIccName(path.join(UPLOAD_DIR_JPEG, `${id}.jpg`));
         expect(webpProfile?.toLowerCase()).toMatch(/srgb|iec61966/);
         expect(jpegProfile?.toLowerCase()).toMatch(/srgb|iec61966/);
+
+        // R8-TEST P1-5: AVIF remains P3-tagged even when forceSrgbDerivatives=true
+        const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
+        expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
+    });
+
+    // R8-TEST P0-2: DCI-P3 source produces P3-tagged (D65-adapted) output
+    it('DCI-P3 source: AVIF output is P3-tagged (D65-adapted)', async () => {
+        const srcPath = path.join(tmpDir, 'dci-p3-src.jpg');
+        await makeTaggedJpeg('p3', srcPath);
+
+        const id = trackId('rt-dci-p3');
+        await processImageFormats(
+            srcPath,
+            `${id}.webp`,
+            `${id}.avif`,
+            `${id}.jpg`,
+            8,
+            { webp: 80, avif: 80, jpeg: 90 },
+            [8],
+            'DCI-P3',
+            false,
+            { colorPrimaries: 'dci-p3' },
+        );
+
+        const { UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
+        const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
+        // DCI-P3 source must produce P3-tagged (D65-adapted) output, not DCI-P3
+        expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
+    });
+
+    // R8-TEST P1-1: 10-bit AVIF for wide-gamut sources when supported
+    it('wide-gamut AVIF uses high bitdepth when supported', async () => {
+        const srcPath = path.join(tmpDir, 'p3-10bit-src.jpg');
+        await makeTaggedJpeg('p3', srcPath);
+
+        const id = trackId('rt-p3-10bit');
+        await processImageFormats(
+            srcPath,
+            `${id}.webp`,
+            `${id}.avif`,
+            `${id}.jpg`,
+            8,
+            { webp: 80, avif: 80, jpeg: 90 },
+            [8],
+            'Display P3',
+        );
+
+        const { UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
+        const avifPath = path.join(UPLOAD_DIR_AVIF, `${id}.avif`);
+        const meta = await sharp(avifPath).metadata();
+
+        const probe = await canUseHighBitdepthAvif();
+        if (probe) {
+            // 10-bit AVIF: bitsPerSample === 10 (or depth === 'ushort')
+            expect(meta.bitsPerSample).toBe(10);
+        } else {
+            // 8-bit fallback in environments without libheif 10-bit support
+            expect(meta.bitsPerSample).toBe(8);
+        }
+    });
+
+    // R8-TEST P1-4: wide-gamut JPEG chroma subsampling = 4:4:4
+    it('wide-gamut source JPEG uses 4:4:4 chroma subsampling', async () => {
+        const srcPath = path.join(tmpDir, 'p3-chroma-src.jpg');
+        await makeTaggedJpeg('p3', srcPath);
+
+        const id = trackId('rt-p3-chroma');
+        await processImageFormats(
+            srcPath,
+            `${id}.webp`,
+            `${id}.avif`,
+            `${id}.jpg`,
+            8,
+            { webp: 80, avif: 80, jpeg: 90 },
+            [8],
+            'Display P3',
+        );
+
+        const { UPLOAD_DIR_JPEG } = await import('@/lib/upload-paths');
+        const jpegPath = path.join(UPLOAD_DIR_JPEG, `${id}.jpg`);
+        const meta = await sharp(jpegPath).metadata();
+        expect(meta.chromaSubsampling).toBe('4:4:4');
     });
 });
 

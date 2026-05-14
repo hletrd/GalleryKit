@@ -107,7 +107,7 @@ async function _probeHighBitdepthAvif(): Promise<boolean> {
     return false;
 }
 
-async function canUseHighBitdepthAvif(): Promise<boolean> {
+export async function canUseHighBitdepthAvif(): Promise<boolean> {
     if (_highBitdepthAvifProbePromise) return _highBitdepthAvifProbePromise;
     _highBitdepthAvifProbePromise = _probeHighBitdepthAvif();
     return _highBitdepthAvifProbePromise;

@@ -58,6 +58,7 @@ function makeInsertChain<T>(result: T) {
 vi.mock('fs/promises', () => ({
     statfs: statfsMock,
     mkdir: mkdirMock,
+    unlink: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/db', () => ({
@@ -348,5 +349,88 @@ describe('uploadImages', () => {
             warnings: ['tagPersistenceWarning'],
         });
         expect(enqueueImageProcessingMock).toHaveBeenCalledWith(expect.objectContaining({ id: 9, topic: 'travel' }));
+    });
+
+    // R8-TEST P0-1: rejects PQ HDR upload when allow_hdr_ingest is false
+    it('rejects HDR upload when allowHdrIngest is disabled', async () => {
+        saveOriginalAndGetMetadataMock.mockResolvedValueOnce({
+            filenameOriginal: 'original.jpg',
+            filenameWebp: 'photo.webp',
+            filenameAvif: 'photo.avif',
+            filenameJpeg: 'photo.jpg',
+            width: 1200,
+            height: 800,
+            originalWidth: 1200,
+            originalHeight: 800,
+            blurDataUrl: 'data:image/png;base64,abc',
+            exifData: {},
+            colorSignals: {
+                isHdr: true,
+                transferFunction: 'pq',
+                colorPrimaries: 'bt2020',
+                iccProfileName: 'PQ HDR',
+            },
+        });
+        getGalleryConfigMock.mockResolvedValueOnce({
+            stripGpsOnUpload: false,
+            imageQualityWebp: 90,
+            imageQualityAvif: 85,
+            imageQualityJpeg: 90,
+            imageSizes: [640, 1536, 2048, 4096],
+            allowHdrIngest: false,
+        });
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'hdr-photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toEqual({ error: 'hdrNotSupported' });
+        expect(insertMock).not.toHaveBeenCalled();
+        expect(enqueueImageProcessingMock).not.toHaveBeenCalled();
+    });
+
+    // R8-TEST P0-1: accepts HDR upload with warning when allow_hdr_ingest is true
+    it('accepts HDR upload with warning when allowHdrIngest is enabled', async () => {
+        insertMock.mockImplementation(() => makeInsertChain([{ insertId: 9 }]));
+        saveOriginalAndGetMetadataMock.mockResolvedValueOnce({
+            filenameOriginal: 'original.jpg',
+            filenameWebp: 'photo.webp',
+            filenameAvif: 'photo.avif',
+            filenameJpeg: 'photo.jpg',
+            width: 1200,
+            height: 800,
+            originalWidth: 1200,
+            originalHeight: 800,
+            blurDataUrl: 'data:image/png;base64,abc',
+            exifData: {},
+            colorSignals: {
+                isHdr: true,
+                transferFunction: 'pq',
+                colorPrimaries: 'bt2020',
+                iccProfileName: 'PQ HDR',
+            },
+        });
+        getGalleryConfigMock.mockResolvedValueOnce({
+            stripGpsOnUpload: false,
+            imageQualityWebp: 90,
+            imageQualityAvif: 85,
+            imageQualityJpeg: 90,
+            imageSizes: [640, 1536, 2048, 4096],
+            allowHdrIngest: true,
+        });
+
+        const formData = new FormData();
+        formData.append('files', new File(['binary'], 'hdr-photo.jpg', { type: 'image/jpeg' }));
+        formData.set('topic', 'travel');
+        formData.set('tags', '');
+
+        await expect(uploadImages(formData)).resolves.toMatchObject({
+            success: true,
+            count: 1,
+            hdrWarningCount: 1,
+        });
+        expect(insertMock).toHaveBeenCalled();
+        expect(enqueueImageProcessingMock).toHaveBeenCalled();
     });
 });

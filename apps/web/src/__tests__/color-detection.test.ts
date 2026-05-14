@@ -212,6 +212,45 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    // R8-TEST P1-2: NCLX primaries=12 (Display P3) -> p3-d65
+    it('maps nclx primaries=12 to p3-d65', async () => {
+        const signals = await detectFromNclx(12, 13, 0);
+        expect(signals.colorPrimaries).toBe('p3-d65');
+        expect(signals.transferFunction).toBe('srgb');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    // R8-TEST P1-3: NCLX transfer code completeness
+    it('maps nclx transfer=2 to gamma22', async () => {
+        const signals = await detectFromNclx(1, 2, 1);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=6 to gamma22', async () => {
+        const signals = await detectFromNclx(1, 6, 1);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=13 to srgb', async () => {
+        const signals = await detectFromNclx(1, 13, 1);
+        expect(signals.transferFunction).toBe('srgb');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=14 to gamma22', async () => {
+        const signals = await detectFromNclx(9, 14, 9);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    it('maps nclx transfer=15 to gamma22', async () => {
+        const signals = await detectFromNclx(9, 15, 9);
+        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.isHdr).toBe(false);
+    });
+
     // P4-A2 / R4-H2: ICC chromaticity-based detection promotes a custom
     // (opaquely-named) ICC to the correct gamut when wtpt/rXYZ/gXYZ/bXYZ tags
     // land on a canonical preset within tolerance. Without this fallback the
