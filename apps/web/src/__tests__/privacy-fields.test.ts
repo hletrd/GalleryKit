@@ -19,6 +19,9 @@ const SENSITIVE_KEYS = [
     // has_gain_map=true publicly would imply HDR delivery the SDR pipeline
     // can't fulfill.
     'has_gain_map',
+    // R8-H3: bit_depth is technical metadata about photographer workflow.
+    // Admin-only to respect the privacy boundary.
+    'bit_depth',
 ] as const;
 
 describe('Privacy field separation', () => {

@@ -286,6 +286,7 @@ const {
     has_gain_map: _omitHasGainMap,
     transfer_function: _omitTransferFunction,
     matrix_coefficients: _omitMatrixCoefficients,
+    bit_depth: _omitBitDepthPublic,
     ...publicSelectFieldCore
 } = adminSelectFields;
 
@@ -311,6 +312,7 @@ const {
     has_gain_map: _omitHasGainMapMap,
     transfer_function: _omitTransferFunctionMap,
     matrix_coefficients: _omitMatrixCoefficientsMap,
+    bit_depth: _omitBitDepthMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
 
@@ -336,7 +338,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'transfer_function' | 'matrix_coefficients';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;

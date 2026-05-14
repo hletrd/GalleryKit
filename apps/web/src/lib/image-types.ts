@@ -33,7 +33,7 @@ export interface ImageDetail {
     exposure_compensation: string | null;
     exposure_program: string | null;
     flash: string | null;
-    bit_depth: number | null;
+    bit_depth?: number | null;
     pipeline_version?: number | null;
     original_format?: string | null;
     original_file_size?: number | null;
