@@ -362,6 +362,12 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             >
                                 {t('viewer.hdrBadge')}
                             </span>
+                            {/* R8-M4: honesty note — until WI-09 (HDR AVIF
+                                encoder) ships, HDR sources are delivered as SDR.
+                                Matches the gain-map honesty pattern above. */}
+                            <p className="mt-1 text-xs italic text-amber-700 dark:text-amber-300">
+                                {t('viewer.hdrDeliveredAsSdr')}
+                            </p>
                         </div>
                     )}
                     {/* P4-A1 / R4-H1: admin-only Apple HDR gain map audit row.

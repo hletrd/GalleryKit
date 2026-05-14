@@ -332,6 +332,7 @@
     "colorPipelineDecision": "색상 파이프라인",
     "hdrBadge": "HDR",
     "hdrBadgeAriaLabel": "HDR (하이 다이내믹 레인지)",
+    "hdrDeliveredAsSdr": "SDR로 전달됨 — HDR AVIF 출력은 계획 중입니다.",
     "colorPipelineSrgb": "sRGB",
     "colorPipelineP3FromDisplayP3": "P3 (Display P3 기반)",
     "colorPipelineP3FromDcip3": "Display P3 (DCI-P3 원본)",

@@ -332,6 +332,7 @@
     "colorPipelineDecision": "Color pipeline",
     "hdrBadge": "HDR",
     "hdrBadgeAriaLabel": "HDR (High Dynamic Range)",
+    "hdrDeliveredAsSdr": "Delivered as SDR — HDR AVIF output is planned.",
     "colorPipelineSrgb": "sRGB",
     "colorPipelineP3FromDisplayP3": "P3 (from Display P3)",
     "colorPipelineP3FromDcip3": "Display P3 (from DCI-P3)",
