@@ -6,6 +6,7 @@ import { Readable } from 'stream';
 import { UPLOAD_ROOT } from '@/lib/upload-paths';
 import { IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import { getColorSettingsHash } from '@/lib/settings-hash';
+import { getGalleryConfig } from '@/lib/gallery-config';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
@@ -103,7 +104,11 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
         // client even when the file mtime has not changed (e.g. an admin
         // toggles `force_srgb_derivatives=true` to clean up a colorimetric
         // bug; previously the change shipped only to fresh browsers).
-        const settingsHash = await getColorSettingsHash();
+        //
+        // R8-H1: pass resolved GalleryConfig so the hash reflects validated
+        // encoder values, not raw (possibly invalid) DB strings.
+        const config = await getGalleryConfig();
+        const settingsHash = await getColorSettingsHash(config);
         const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
 
         // Create stream and convert to web ReadableStream for proper lifecycle management

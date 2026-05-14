@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto';
 import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
 import { inArray } from 'drizzle-orm';
+import type { GalleryConfig } from './gallery-config';
 
 const COLOR_IMPACTING_KEYS = [
     'wide_gamut_jpeg_chroma',
@@ -56,6 +57,23 @@ function buildHash(values: Record<string, string | undefined>): string {
 
 const FALLBACK_HASH = buildHash({});
 
+// R8-H1: build hash from resolved GalleryConfig values instead of raw DB strings.
+// This prevents ETag misalignment when invalid DB values are stored (e.g.
+// image_quality_avif=150) but the encoder falls back to defaults.
+function buildHashFromConfig(config: GalleryConfig): string {
+    const values: Record<string, string> = {
+        wide_gamut_jpeg_chroma: config.wideGamutJpegChroma,
+        sdr_jpeg_chroma: config.sdrJpegChroma,
+        avif_effort: String(config.avifEffort),
+        force_srgb_derivatives: String(config.forceSrgbDerivatives),
+        wide_gamut_max_source_pixels: String(config.wideGamutMaxSourcePixels),
+        image_quality_webp: String(config.imageQualityWebp),
+        image_quality_avif: String(config.imageQualityAvif),
+        image_quality_jpeg: String(config.imageQualityJpeg),
+    };
+    return buildHash(values);
+}
+
 async function fetchHashFromDb(): Promise<string> {
     try {
         const rows = await db
@@ -84,7 +102,13 @@ async function fetchHashFromDb(): Promise<string> {
  * brief skew until each process refreshes — acceptable because every
  * browser will revalidate within the next 5 s window.
  */
-export async function getColorSettingsHash(): Promise<string> {
+export async function getColorSettingsHash(config?: GalleryConfig): Promise<string> {
+    // R8-H1: when a resolved GalleryConfig is provided, compute the hash
+    // directly from validated values instead of reading raw DB strings.
+    if (config) {
+        return buildHashFromConfig(config);
+    }
+
     const now = Date.now();
     if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
         return cache.hash;

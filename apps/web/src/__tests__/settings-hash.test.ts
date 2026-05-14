@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { _buildHashForTesting } from '@/lib/settings-hash';
+import { _buildHashForTesting, getColorSettingsHash } from '@/lib/settings-hash';
 
 describe('color settings hash (P4-E2)', () => {
     it('returns 8 lowercase hex characters', () => {
@@ -97,5 +97,83 @@ describe('color settings hash (P4-E2)', () => {
         const a = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4' });
         const b = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4', irrelevant_key: 'x' });
         expect(a).toBe(b);
+    });
+
+    it('R8-H1: hash from GalleryConfig matches hash from raw DB strings for same values', async () => {
+        const rawHash = _buildHashForTesting({
+            wide_gamut_jpeg_chroma: '4:4:4',
+            sdr_jpeg_chroma: '4:2:0',
+            avif_effort: '6',
+            force_srgb_derivatives: 'false',
+            wide_gamut_max_source_pixels: '50000000',
+            image_quality_webp: '90',
+            image_quality_avif: '85',
+            image_quality_jpeg: '90',
+        });
+        const configHash = await getColorSettingsHash({
+            wideGamutJpegChroma: '4:4:4',
+            sdrJpegChroma: '4:2:0',
+            avifEffort: 6,
+            forceSrgbDerivatives: false,
+            wideGamutMaxSourcePixels: 50_000_000,
+            imageQualityWebp: 90,
+            imageQualityAvif: 85,
+            imageQualityJpeg: 90,
+            imageSizes: [640, 1536, 2048, 4096],
+            stripGpsOnUpload: false,
+            slideshowIntervalSeconds: 5,
+            autoAltTextEnabled: false,
+            semanticSearchMode: 'disabled',
+            licensePrices: { editorial: 0, commercial: 0, rm: 0 },
+            allowHdrIngest: false,
+            forceShowColorChips: false,
+        });
+        expect(configHash).toBe(rawHash);
+    });
+
+    it('R8-H1: invalid DB value (e.g. avif=150) produces same hash as validated default (85)', async () => {
+        // Raw DB says 150 (invalid), but GalleryConfig validator falls back to 85.
+        // Without the config path, ETag would include 150 and misalign with encoder.
+        const rawInvalidHash = _buildHashForTesting({
+            wide_gamut_jpeg_chroma: '4:4:4',
+            sdr_jpeg_chroma: '4:2:0',
+            avif_effort: '6',
+            force_srgb_derivatives: 'false',
+            wide_gamut_max_source_pixels: '50000000',
+            image_quality_webp: '90',
+            image_quality_avif: '150', // invalid raw value
+            image_quality_jpeg: '90',
+        });
+        const configHash = await getColorSettingsHash({
+            wideGamutJpegChroma: '4:4:4',
+            sdrJpegChroma: '4:2:0',
+            avifEffort: 6,
+            forceSrgbDerivatives: false,
+            wideGamutMaxSourcePixels: 50_000_000,
+            imageQualityWebp: 90,
+            imageQualityAvif: 85, // validated fallback
+            imageQualityJpeg: 90,
+            imageSizes: [640, 1536, 2048, 4096],
+            stripGpsOnUpload: false,
+            slideshowIntervalSeconds: 5,
+            autoAltTextEnabled: false,
+            semanticSearchMode: 'disabled',
+            licensePrices: { editorial: 0, commercial: 0, rm: 0 },
+            allowHdrIngest: false,
+            forceShowColorChips: false,
+        });
+        expect(configHash).not.toBe(rawInvalidHash);
+        // The config hash should match what the raw hash would be with the validated value.
+        const rawValidHash = _buildHashForTesting({
+            wide_gamut_jpeg_chroma: '4:4:4',
+            sdr_jpeg_chroma: '4:2:0',
+            avif_effort: '6',
+            force_srgb_derivatives: 'false',
+            wide_gamut_max_source_pixels: '50000000',
+            image_quality_webp: '90',
+            image_quality_avif: '85',
+            image_quality_jpeg: '90',
+        });
+        expect(configHash).toBe(rawValidHash);
     });
 });
