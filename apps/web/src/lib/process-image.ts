@@ -59,24 +59,52 @@ sharp.cache(false);
 // the result is observed exactly once and consistently.
 let _highBitdepthAvifProbePromise: Promise<boolean> | null = null;
 
+function isTransientError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const code = (err as { code?: string }).code;
+    return code === 'EIO' || code === 'ENOSPC' || code === 'EMFILE' || code === 'EAGAIN';
+}
+
+function isBitdepthRejection(err: unknown): boolean {
+    return err instanceof Error && /bitdepth/i.test(err.message);
+}
+
+// R8-R5: retry probe up to 3 times with exponential backoff.
+// Distinguish Sharp-rejected-bitdepth (permanent, no retry) from
+// transient errors (EIO, ENOSPC, etc.).
 async function _probeHighBitdepthAvif(): Promise<boolean> {
-    try {
-        // Minimal 2x2 encode — enough to exercise the codec path without
-        // wasting CPU on a real image decode + resize pipeline.
-        await sharp({
-            create: {
-                width: 2,
-                height: 2,
-                channels: 3,
-                background: { r: 128, g: 128, b: 128 },
-            },
-        })
-            .avif({ quality: 1, effort: 1, bitdepth: 10 })
-            .toBuffer();
-        return true;
-    } catch {
-        return false;
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 100;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            // Minimal 2x2 encode — enough to exercise the codec path without
+            // wasting CPU on a real image decode + resize pipeline.
+            await sharp({
+                create: {
+                    width: 2,
+                    height: 2,
+                    channels: 3,
+                    background: { r: 128, g: 128, b: 128 },
+                },
+            })
+                .avif({ quality: 1, effort: 1, bitdepth: 10 })
+                .toBuffer();
+            return true;
+        } catch (err) {
+            if (isBitdepthRejection(err)) {
+                // Sharp/libheif does not support 10-bit AVIF — permanent failure.
+                return false;
+            }
+            if (isTransientError(err) && attempt < MAX_RETRIES - 1) {
+                const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                continue;
+            }
+            // Unknown or final failure — treat as unsupported.
+            return false;
+        }
     }
+    return false;
 }
 
 async function canUseHighBitdepthAvif(): Promise<boolean> {
@@ -751,7 +779,9 @@ export async function processImageFormats(
     // streams large files instead of random-access reading them.
     // CM-HIGH-4: autoOrient:true rotates/flips per EXIF Orientation before
     // resize so derivatives are always served upright with no orientation tag.
-    const image = sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true });
+    // R8-R8: shared `image` variable removed — every format now gets a fresh
+    // sharp() instance inside generateForFormat, eliminating cross-format
+    // contamination risk.
     const qualityWebp = quality?.webp ?? 90;
     const qualityAvif = quality?.avif ?? 85;
     const qualityJpeg = quality?.jpeg ?? 90;
@@ -798,18 +828,24 @@ export async function processImageFormats(
                 // the edge halos/desaturation that gamma-space resize
                 // introduces. Only paid on the wide-gamut path because it
                 // doubles peak RAM during resize.
-                // WI-12: DCI-P3 sources skip rgb16 pipeline so the source ICC
-                // profile (with DCI white point) is preserved for the
-                // toColorspace('p3') transform, which then does the correct
-                // Bradford adaptation to D65.
-                // WI-14: rgb16 path uses a fresh sharp instance per format to
-                // eliminate shared-state risk between parallel encodes.
+                // WI-12: DCI-P3 sources skip rgb16. Rationale:
+                //   - ICC-embedded DCI-P3: preserving the source ICC lets
+                //     toColorspace('p3') perform the correct Bradford D63→D65
+                //     adaptation.
+                //   - NCLX-only DCI-P3: no ICC to preserve; rgb16 is skipped
+                //     because the primaries are identical to Display P3 (only
+                //     white point differs), so gamma-space resize artifacts are
+                //     negligible.
+                // WI-14 / R8-R8: fresh sharp instance per format for ALL paths,
+                // not just rgb16. Eliminates shared-state risk between parallel
+                // encodes on the non-rgb16 path too.
                 const needsRgb16 = isWideGamutSource && !isDciP3;
                 const base = needsRgb16
                     ? sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
                         .pipelineColorspace('rgb16')
                         .resize({ width: resizeWidth })
-                    : image.clone().resize({ width: resizeWidth });
+                    : sharp(processingInputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
+                        .resize({ width: resizeWidth });
 
                 if (format === 'webp') {
                     // US-CM02: P3-tagged when source is P3 and forceSrgbDerivatives

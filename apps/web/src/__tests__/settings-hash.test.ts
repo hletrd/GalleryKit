@@ -93,6 +93,12 @@ describe('color settings hash (P4-E2)', () => {
         expect(a).not.toBe(b);
     });
 
+    it('differs when image_sizes changes', () => {
+        const a = _buildHashForTesting({ image_sizes: '640,1536,2048,4096' });
+        const b = _buildHashForTesting({ image_sizes: '640,1024,2048' });
+        expect(a).not.toBe(b);
+    });
+
     it('ignores keys outside the canonical set', () => {
         const a = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4' });
         const b = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4', irrelevant_key: 'x' });
@@ -109,6 +115,7 @@ describe('color settings hash (P4-E2)', () => {
             image_quality_webp: '90',
             image_quality_avif: '85',
             image_quality_jpeg: '90',
+            image_sizes: '640,1536,2048,4096',
         });
         const configHash = await getColorSettingsHash({
             wideGamutJpegChroma: '4:4:4',
@@ -143,6 +150,7 @@ describe('color settings hash (P4-E2)', () => {
             image_quality_webp: '90',
             image_quality_avif: '150', // invalid raw value
             image_quality_jpeg: '90',
+            image_sizes: '640,1536,2048,4096',
         });
         const configHash = await getColorSettingsHash({
             wideGamutJpegChroma: '4:4:4',
@@ -173,6 +181,7 @@ describe('color settings hash (P4-E2)', () => {
             image_quality_webp: '90',
             image_quality_avif: '85',
             image_quality_jpeg: '90',
+            image_sizes: '640,1536,2048,4096',
         });
         expect(configHash).toBe(rawValidHash);
     });

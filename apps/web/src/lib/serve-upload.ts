@@ -127,7 +127,9 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
                 // next request via If-None-Match. Combined with the
                 // pipeline-version-bearing ETag, a pipeline change forces a
                 // fresh fetch with no operator action required.
-                'Cache-Control': 'public, max-age=86400, must-revalidate',
+                // R8-R7: reduced from 86400 to 3600 so color-pipeline fixes
+                // ship to browsers within an hour instead of up to 24 hours.
+                'Cache-Control': 'public, max-age=3600, must-revalidate',
                 'ETag': etag,
                 'X-Content-Type-Options': 'nosniff',
             },

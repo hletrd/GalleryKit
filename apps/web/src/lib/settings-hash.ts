@@ -37,6 +37,8 @@ const COLOR_IMPACTING_KEYS = [
     'image_quality_webp',
     'image_quality_avif',
     'image_quality_jpeg',
+    // R8-R6: size config changes produce different derivative files
+    'image_sizes',
 ] as const;
 
 const HASH_LENGTH = 8;
@@ -70,6 +72,7 @@ function buildHashFromConfig(config: GalleryConfig): string {
         image_quality_webp: String(config.imageQualityWebp),
         image_quality_avif: String(config.imageQualityAvif),
         image_quality_jpeg: String(config.imageQualityJpeg),
+        image_sizes: config.imageSizes.join(','),
     };
     return buildHash(values);
 }
