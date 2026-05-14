@@ -32,13 +32,15 @@ interface InfoBottomSheetProps {
     imageSizes?: number[];
     /** R8-M2: propagate force_srgb_derivatives so mobile bottom sheet shows the effective delivery gamut. */
     forceSrgbDerivatives?: boolean;
+    /** R8-LOW: mobile histogram cycle-mode ref for H keyboard shortcut. */
+    histogramCycleRef?: React.RefObject<(() => void) | null>;
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -307,6 +309,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                             fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                             colorPrimaries={image.color_primaries}
                                             className="w-full"
+                                            cycleModeRef={histogramCycleRef}
                                         />
                                     </div>
                                 )}
@@ -525,6 +528,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                             fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                             colorPrimaries={image.color_primaries}
                                             className="w-full"
+                                            cycleModeRef={histogramCycleRef}
                                         />
                                     </div>
                                 )}

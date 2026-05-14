@@ -293,6 +293,7 @@
     "histogramBelowBlack": "블랙 이하: {pct}%",
     "histogramAboveWhite": "화이트 이상: {pct}%",
     "histogramSrgbPreview": "sRGB 색역 미리보기",
+    "histogramRenderedInP3": "(히스토그램은 Display-P3 색역으로 렌더링됨)",
     "fullscreen": "전체 화면",
     "fullscreenUnavailable": "전체 화면을 사용할 수 없습니다",
     "bottomSheet": "사진 정보",
@@ -697,7 +698,7 @@
     "chroma420": "4:2:0 (가장 작은 파일)",
     "sdrJpegChroma": "SDR JPEG 색도",
     "sdrJpegChromaHint": "sRGB 등 넓지 않은 색역 JPEG 변환본의 색도 샘플링입니다. 기본값 4:2:0 (파일이 작고, 채도 높은 색에서 가장자리에 약간의 번짐이 나타날 수 있음). 4:4:4를 선택하면 채도 높은 색이 또렷해지지만 파일 크기는 커집니다.",
-    "wideGamutMaxSourcePixels": "광색역 최대 원본 픽셀 수",
+    "wideGamutMaxSourcePixels": "광색역 원본 픽셀 상한 (메모리 보호)",
     "wideGamutMaxSourcePixelsHint": "이 값보다 큰 광색역 원본은 rgb16 파이프라인을 거치기 전에 축소됩니다. 기본값 50,000,000 (50MP). 값을 키우면 메모리 사용량이 증가하므로 메모리가 충분한 호스트에서만 설정하세요."
   },
   "footer": {

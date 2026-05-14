@@ -931,6 +931,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             untitledFallbackTitle={untitledFallbackTitle}
             imageSizes={imageSizes}
             forceSrgbDerivatives={forceSrgbDerivatives}
+            histogramCycleRef={histogramCycleRef}
         />
     </>
     );
