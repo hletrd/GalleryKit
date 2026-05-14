@@ -68,6 +68,8 @@ interface PhotoViewerProps {
     licensePrices?: Record<string, number>;
     /** P3-26: force color gamut/HDR chips visible even on sRGB displays. */
     forceShowColorChips?: boolean;
+    /** R8-M2: propagate force_srgb_derivatives to ColorDetailsSection so admins see the effective delivery gamut per format. */
+    forceSrgbDerivatives?: boolean;
     /**
      * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02: Stripe Checkout
      * post-redirect status. Surfaced as a toast on first mount so the
@@ -77,7 +79,7 @@ interface PhotoViewerProps {
     checkoutStatus?: 'success' | 'cancel' | null;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, licensePrices, checkoutStatus = null, forceShowColorChips = false }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, licensePrices, checkoutStatus = null, forceShowColorChips = false, forceSrgbDerivatives = false }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -667,7 +669,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                 <CardDescription>{image.description || t('viewer.noDescription')}</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} />
+                                <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} forceSrgbDerivatives={forceSrgbDerivatives} />
                                 <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
                                 <h3 className="font-semibold mb-3 flex items-center gap-2"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
@@ -919,6 +921,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             isAdmin={isAdmin}
             untitledFallbackTitle={untitledFallbackTitle}
             imageSizes={imageSizes}
+            forceSrgbDerivatives={forceSrgbDerivatives}
         />
     </>
     );

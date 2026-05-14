@@ -67,10 +67,10 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
         });
 
         it('renders WebP / AVIF / JPEG chip strings only when the corresponding filename is set', () => {
-            // The render uses [image.filename_webp && 'WebP', image.filename_avif && 'AVIF', image.filename_jpeg && 'JPEG'].filter(Boolean)
-            expect(SOURCE).toMatch(/image\.filename_webp\s*&&\s*'WebP'/);
-            expect(SOURCE).toMatch(/image\.filename_avif\s*&&\s*'AVIF'/);
-            expect(SOURCE).toMatch(/image\.filename_jpeg\s*&&\s*'JPEG'/);
+            // The render uses conditional objects with name keys, filtered via type predicate
+            expect(SOURCE).toMatch(/name:\s*'WebP'/);
+            expect(SOURCE).toMatch(/name:\s*'AVIF'/);
+            expect(SOURCE).toMatch(/name:\s*'JPEG'/);
         });
     });
 

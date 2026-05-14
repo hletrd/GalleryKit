@@ -318,6 +318,7 @@ export default async function PhotoPage({ params, searchParams }: {
                 slideshowIntervalSeconds={config.slideshowIntervalSeconds}
                 licensePrices={config.licensePrices}
                 forceShowColorChips={config.forceShowColorChips}
+                forceSrgbDerivatives={config.forceSrgbDerivatives}
                 checkoutStatus={checkoutStatus}
             />
             {/* Prefetch adjacent photos for instant navigation */}

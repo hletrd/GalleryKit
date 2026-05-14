@@ -30,13 +30,15 @@ interface InfoBottomSheetProps {
     isAdmin?: boolean;
     untitledFallbackTitle?: string;
     imageSizes?: number[];
+    /** R8-M2: propagate force_srgb_derivatives so mobile bottom sheet shows the effective delivery gamut. */
+    forceSrgbDerivatives?: boolean;
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -286,7 +288,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                         )}
 
                         {/* Color details accordion — mirrors desktop sidebar */}
-                        <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} />
+                        <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} forceSrgbDerivatives={forceSrgbDerivatives} />
                         <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
 
                         {/* P3-28: for non-trivial (wide-gamut/HDR) sources, show

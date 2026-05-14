@@ -116,9 +116,10 @@ interface ColorDetailsSectionProps {
     isAdmin?: boolean;
     t: (key: string) => string;
     toggleRef?: React.RefObject<(() => void) | null>;
+    forceSrgbDerivatives?: boolean;
 }
 
-export default function ColorDetailsSection({ image, isAdmin = false, t, toggleRef }: ColorDetailsSectionProps) {
+export default function ColorDetailsSection({ image, isAdmin = false, t, toggleRef, forceSrgbDerivatives = false }: ColorDetailsSectionProps) {
     const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
@@ -326,14 +327,28 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="text-muted-foreground text-xs">{t('viewer.deliveredFormats')}</p>
                             <p className="font-medium flex gap-1">
                                 {[
-                                    image.filename_webp && 'WebP',
-                                    image.filename_avif && 'AVIF',
-                                    image.filename_jpeg && 'JPEG',
-                                ].filter(Boolean).map((fmt) => (
-                                    <span key={fmt} className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-muted rounded">
-                                        {fmt}
+                                    image.filename_webp ? { name: 'WebP', gamut: (isAdmin && forceSrgbDerivatives) ? 'sRGB' : undefined } : null,
+                                    image.filename_avif ? { name: 'AVIF', gamut: (isAdmin && image.color_pipeline_decision && isP3Pipeline(image.color_pipeline_decision)) ? 'P3' : undefined } : null,
+                                    image.filename_jpeg ? { name: 'JPEG', gamut: (isAdmin && forceSrgbDerivatives) ? 'sRGB' : undefined } : null,
+                                ].filter((x): x is { name: string; gamut: string | undefined } => x !== null).map((fmt) => (
+                                    <span key={fmt.name} className="inline-block px-1.5 py-0.5 text-[11px] font-medium bg-muted rounded">
+                                        {fmt.name}
+                                        {fmt.gamut && (
+                                            <span className="ml-0.5 text-muted-foreground/70">({fmt.gamut})</span>
+                                        )}
                                     </span>
                                 ))}
+                            </p>
+                        </div>
+                    )}
+                    {/* R8-M2: when forceSrgbDerivatives is active, show admin a
+                        note that WebP/JPEG are sRGB-tagged while AVIF remains
+                        gamut-preserved. Different gamuts per format for the same
+                        source can be confusing without this annotation. */}
+                    {isAdmin && forceSrgbDerivatives && image.color_pipeline_decision && isP3Pipeline(image.color_pipeline_decision) && (
+                        <div className="col-span-2">
+                            <p className="text-xs italic text-amber-700 dark:text-amber-300">
+                                {t('viewer.forceSrgbDerivativesNote')}
                             </p>
                         </div>
                     )}
