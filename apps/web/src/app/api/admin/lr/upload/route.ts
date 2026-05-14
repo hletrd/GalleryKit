@@ -21,7 +21,7 @@ import { withAdminAuth } from '@/lib/api-auth';
 import { verifyToken } from '@/lib/admin-tokens';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, extractExifForDb, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
 import { ensureUploadDirectories } from '@/lib/upload-paths';
 import { enqueueImageProcessing } from '@/lib/image-queue';
 import { isValidSlug, safeInsertId } from '@/lib/validation';
@@ -127,6 +127,15 @@ export const POST = withAdminAuth(
             ...exifDb,
             color_space: data.iccProfileName || exifDb.color_space,
             bit_depth: data.bitDepth,
+            // R8-H2: mirror browser upload path — store all color/HDR signals
+            // so the Color Details accordion shows complete metadata.
+            color_pipeline_decision: data.colorPipelineDecision,
+            color_primaries: data.colorSignals?.colorPrimaries ?? null,
+            transfer_function: data.colorSignals?.transferFunction ?? null,
+            matrix_coefficients: data.colorSignals?.matrixCoefficients ?? null,
+            is_hdr: data.colorSignals?.isHdr ?? false,
+            has_gain_map: data.colorSignals?.hasGainMap ?? false,
+            pipeline_version: IMAGE_PIPELINE_VERSION,
             original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
             original_file_size: fileEntry.size,
         };
@@ -149,6 +158,9 @@ export const POST = withAdminAuth(
             },
             imageSizes: config.imageSizes.length > 0 ? config.imageSizes : undefined,
             iccProfileName: data.iccProfileName,
+            // R8-H2: forward color signals so the queue worker can make
+            // NCLX-informed pipeline decisions identical to browser uploads.
+            colorSignals: data.colorSignals,
         });
 
         await logAuditEvent(
