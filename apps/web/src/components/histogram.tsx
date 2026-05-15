@@ -366,6 +366,17 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
     });
     const [mode, setMode] = useState<HistogramMode>('luminance');
     const [collapsed, setCollapsed] = useState(false);
+    // R9-M9: higher-resolution histogram on desktop viewports.
+    const [canvasDims, setCanvasDims] = useState({ width: 240, height: 120 });
+    useEffect(() => {
+        function updateDims() {
+            const isDesktop = window.innerWidth >= 768;
+            setCanvasDims(isDesktop ? { width: 320, height: 160 } : { width: 240, height: 120 });
+        }
+        updateDims();
+        window.addEventListener('resize', updateDims);
+        return () => window.removeEventListener('resize', updateDims);
+    }, []);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const workerRef = useRef<Worker | null>(null);
     // Tracks URLs whose <img> load failed (404 / decode error). The URL
@@ -528,7 +539,10 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
 
             {!collapsed && (
                 <div className="flex flex-col gap-1">
-                    <div className="relative w-[240px] h-[120px] bg-black/20 rounded overflow-hidden">
+                    <div
+                        className="relative bg-black/20 rounded overflow-hidden"
+                        style={{ width: canvasDims.width, height: canvasDims.height }}
+                    >
                         {loading && (
                             <div className="absolute inset-0 flex items-center justify-center">
                                 <span className="text-xs text-muted-foreground">{t('common.loading')}</span>
@@ -536,8 +550,8 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                         )}
                         <canvas
                             ref={canvasRef}
-                            width={240}
-                            height={120}
+                            width={canvasDims.width}
+                            height={canvasDims.height}
                             className="w-full h-full"
                             role="img"
                             aria-label={t('aria.histogramLabel', { mode: modeLabels[mode] })}
