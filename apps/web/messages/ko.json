@@ -334,6 +334,8 @@
     "hdrBadge": "HDR 지원",
     "hdrBadgeAriaLabel": "HDR 지원 디스플레이 (SDR 전달)",
     "hdrDeliveredAsSdr": "SDR로 전달됨 — HDR AVIF 출력은 계획 중입니다.",
+    "matrixCoefficients": "행렬 계수",
+    "exifColorSpace": "EXIF 색 공간",
     "colorPipelineSrgb": "sRGB",
     "colorPipelineP3FromDisplayP3": "P3 (Display P3 기반)",
     "colorPipelineP3FromDcip3": "Display P3 (DCI-P3 원본)",

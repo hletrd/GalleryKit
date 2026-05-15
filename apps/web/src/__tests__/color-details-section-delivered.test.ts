@@ -74,6 +74,28 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
         });
     });
 
+    describe('R9-M6-7: admin-only matrix coefficients + EXIF color space rows', () => {
+        it('renders viewer.matrixCoefficients label gated behind isAdmin', () => {
+            expect(SOURCE).toContain("t('viewer.matrixCoefficients')");
+            expect(SOURCE).toMatch(/isAdmin\s*&&\s*image\.matrix_coefficients/);
+        });
+
+        it('renders viewer.exifColorSpace label gated behind isAdmin', () => {
+            expect(SOURCE).toContain("t('viewer.exifColorSpace')");
+            expect(SOURCE).toMatch(/isAdmin\s*&&\s*image\.color_space/);
+        });
+
+        it('humanizes matrix coefficients via the exported helper', () => {
+            // The helper is exported for potential external testing and
+            // handles bt709 / bt2020-ncl / bt2020-cl / identity / unknown.
+            expect(SOURCE).toContain('export function humanizeMatrixCoefficients(');
+            expect(SOURCE).toContain("case 'bt709': return 'BT.709'");
+            expect(SOURCE).toContain("case 'bt2020-ncl': return 'BT.2020 NCL'");
+            expect(SOURCE).toContain("case 'bt2020-cl': return 'BT.2020 CL'");
+            expect(SOURCE).toContain("case 'identity': return 'Identity'");
+        });
+    });
+
     describe('R9-M3: ProPhoto / Rec.2020 clip-to-P3 disclosure', () => {
         it('renders viewer.clippedToP3 badge when pipeline decision is p3-from-prophoto', () => {
             // The badge gates on the exact decision string, not a substring match.

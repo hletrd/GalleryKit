@@ -74,6 +74,24 @@ export function humanizeTransferFunction(
  * surface and lets TypeScript catch a future caller that passes a raw
  * unrelated string.
  */
+/**
+ * R9-M6-7: humanize matrix coefficients for the admin audit panel.
+ * Covers the NCLX values stored in the images table plus forward-looking
+ * bt2020-cl (value 10) so the UI is ready when the NCLX map is extended.
+ */
+export function humanizeMatrixCoefficients(
+    value: string | null | undefined,
+    t: (key: string) => string,
+): string {
+    switch (value) {
+        case 'bt709': return 'BT.709';
+        case 'bt2020-ncl': return 'BT.2020 NCL';
+        case 'bt2020-cl': return 'BT.2020 CL';
+        case 'identity': return 'Identity';
+        default: return t('viewer.colorUnknown');
+    }
+}
+
 export function humanizeColorPipelineDecision(
     value: ColorPipelineDecision | null | undefined,
     t: (key: string) => string,
@@ -306,6 +324,23 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                                     </Tooltip>
                                 )}
                             </p>
+                        </div>
+                    )}
+                    {/* R9-M6-7: admin-only matrix coefficients row.
+                        matrix_coefficients is an admin-only field (P3-3). */}
+                    {isAdmin && image.matrix_coefficients && (
+                        <div>
+                            <p className="text-muted-foreground text-xs">{t('viewer.matrixCoefficients')}</p>
+                            <p className="font-medium">{humanizeMatrixCoefficients(image.matrix_coefficients, t)}</p>
+                        </div>
+                    )}
+                    {/* R9-M6-7: admin-only EXIF color space row.
+                        color_space is the raw EXIF ColorSpace tag value
+                        ('sRGB' / 'Uncalibrated'), distinct from the ICC name. */}
+                    {isAdmin && image.color_space && (
+                        <div>
+                            <p className="text-muted-foreground text-xs">{t('viewer.exifColorSpace')}</p>
+                            <p className="font-medium">{image.color_space}</p>
                         </div>
                     )}
                     {/* C4-A2: source bit depth co-located with the delivered row so

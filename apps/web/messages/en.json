@@ -334,6 +334,8 @@
     "hdrBadge": "HDR-capable",
     "hdrBadgeAriaLabel": "HDR-capable display (SDR delivery)",
     "hdrDeliveredAsSdr": "Delivered as SDR — HDR AVIF output is planned.",
+    "matrixCoefficients": "Matrix coefficients",
+    "exifColorSpace": "EXIF color space",
     "colorPipelineSrgb": "sRGB",
     "colorPipelineP3FromDisplayP3": "P3 (from Display P3)",
     "colorPipelineP3FromDcip3": "Display P3 (from DCI-P3)",
