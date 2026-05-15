@@ -138,6 +138,35 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
         expect(avifMeta.icc!.length).toBeGreaterThan(0);
     });
 
+    it('R9-M4: refreshes color_pipeline_decision during backfill', async () => {
+        const id = 'backfill-decision-fixture';
+        generatedIds.push(id);
+
+        const originalDestPath = path.join(UPLOAD_DIR_ORIGINAL, `${id}.jpg`);
+        await fs.mkdir(path.dirname(originalDestPath), { recursive: true });
+        await sharp({
+            create: { width: 8, height: 8, channels: 3, background: { r: 64, g: 128, b: 200 } },
+        })
+            .withIccProfile('srgb')
+            .jpeg({ quality: 90 })
+            .toFile(originalDestPath);
+
+        const row: ImageRow = {
+            id: 9004,
+            filename_original: `${id}.jpg`,
+            filename_avif: `${id}.avif`,
+            filename_webp: `${id}.webp`,
+            filename_jpeg: `${id}.jpg`,
+            icc_profile_name: 'sRGB',
+            color_primaries: 'bt709',
+            width: 8,
+        };
+        const outcome = await reprocessRow(row);
+        expect(outcome.outcome).toBe('processed');
+        expect(outcome.signals).toBeDefined();
+        expect(outcome.signals!.color_pipeline_decision).toBe('srgb');
+    });
+
     it('R8-CRIT: passes admin settings through to processImageFormats (forceSrgbDerivatives)', async () => {
         const id = 'backfill-settings-p3-srgb';
         generatedIds.push(id);

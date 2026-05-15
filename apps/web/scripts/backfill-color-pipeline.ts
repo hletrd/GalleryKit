@@ -41,7 +41,7 @@ import fs from 'fs/promises';
 import PQueue from 'p-queue';
 import type { RowDataPacket } from 'mysql2';
 import sharp from 'sharp';
-import { processImageFormats, IMAGE_PIPELINE_VERSION, type ImageQualitySettings } from '../src/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, type ImageQualitySettings } from '../src/lib/process-image';
 import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
@@ -70,6 +70,7 @@ interface ReprocessSignals {
     matrix_coefficients: string | null;
     is_hdr: boolean;
     has_gain_map: boolean;
+    color_pipeline_decision: string | null;
 }
 
 interface ReprocessResult {
@@ -131,6 +132,7 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
         });
         const metadata = await image.metadata();
         const signals = await detectColorSignals(originalPath, image, metadata);
+        const colorPipelineDecision = resolveColorPipelineDecision(signals.iccProfileName, signals);
         return {
             outcome: 'processed',
             signals: {
@@ -140,6 +142,7 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
                 matrix_coefficients: signals.matrixCoefficients,
                 is_hdr: signals.isHdr,
                 has_gain_map: signals.hasGainMap,
+                color_pipeline_decision: colorPipelineDecision,
             },
         };
     } catch (err) {
@@ -263,7 +266,8 @@ async function main() {
                         transfer_function = ${item.signals.transfer_function ?? null},
                         matrix_coefficients = ${item.signals.matrix_coefficients ?? null},
                         is_hdr = ${item.signals.is_hdr},
-                        has_gain_map = ${item.signals.has_gain_map}
+                        has_gain_map = ${item.signals.has_gain_map},
+                        color_pipeline_decision = ${item.signals.color_pipeline_decision ?? null}
                     WHERE id = ${item.id}
                 `);
             }
