@@ -350,6 +350,7 @@
     "gainMapDeliveredAsSdr": "Delivered as SDR base only — gain map not yet passed through.",
     "copyColorMetadata": "Copy color metadata",
     "colorMetadataCopied": "Color metadata copied",
+    "clippedToP3": "Clipped to P3",
     "forceSrgbDerivativesNote": "WebP/JPEG are sRGB-tagged because 'Force sRGB' is ON. AVIF remains gamut-preserved.",
     "noMetadata": "No camera metadata available for this photo."
   },

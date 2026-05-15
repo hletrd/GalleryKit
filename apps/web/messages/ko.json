@@ -350,6 +350,7 @@
     "gainMapDeliveredAsSdr": "SDR 기본 이미지로만 제공됨 — 게인 맵은 아직 전달되지 않습니다.",
     "copyColorMetadata": "색상 메타데이터 복사",
     "colorMetadataCopied": "색상 메타데이터가 복사되었습니다",
+    "clippedToP3": "P3로 클리핑",
     "forceSrgbDerivativesNote": "'sRGB 강제 적용'이 켜져 있어 WebP/JPEG은 sRGB로 태그됩니다. AVIF는 원본 색역을 유지합니다.",
     "noMetadata": "이 사진에 카메라 메타데이터가 없습니다."
   },

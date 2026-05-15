@@ -74,6 +74,24 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
         });
     });
 
+    describe('R9-M3: ProPhoto / Rec.2020 clip-to-P3 disclosure', () => {
+        it('renders viewer.clippedToP3 badge when pipeline decision is p3-from-prophoto', () => {
+            // The badge gates on the exact decision string, not a substring match.
+            expect(SOURCE).toContain("image.color_pipeline_decision === 'p3-from-prophoto'");
+            expect(SOURCE).toContain("t('viewer.clippedToP3')");
+        });
+
+        it('renders viewer.clippedToP3 badge when pipeline decision is p3-from-rec2020', () => {
+            expect(SOURCE).toContain("image.color_pipeline_decision === 'p3-from-rec2020'");
+        });
+
+        it('uses amber styling consistent with other audit disclosures', () => {
+            // Matches the amber-200 / amber-900 pattern used for the HDR
+            // delivered-as-SDR disclosure and the forceSrgbDerivatives note.
+            expect(SOURCE).toMatch(/bg-amber-200\s+text-amber-900/);
+        });
+    });
+
     describe('Source / Delivered ordering (C4-A2 acceptance)', () => {
         it('renders Source bit depth row BEFORE the Delivered bit depth row', () => {
             const sourceMatch = SOURCE.indexOf("t('viewer.sourceBitDepth')");

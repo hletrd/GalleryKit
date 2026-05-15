@@ -274,6 +274,15 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="text-muted-foreground text-xs">{t('viewer.colorPipelineDecision')}</p>
                             <p className="font-medium flex items-center gap-1">
                                 {humanizeColorPipelineDecision(image.color_pipeline_decision as ColorPipelineDecision | null | undefined, t) || t('viewer.colorUnknown')}
+                                {/* R9-M3: ProPhoto and Rec.2020 sources are delivered
+                                    as P3 (rgb16 pipeline), which clips saturated cyans
+                                    and greens. Surface an honest disclosure so admins
+                                    know the gamut is reduced, not preserved. */}
+                                {(image.color_pipeline_decision === 'p3-from-prophoto' || image.color_pipeline_decision === 'p3-from-rec2020') && (
+                                    <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-amber-200 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 rounded">
+                                        {t('viewer.clippedToP3')}
+                                    </span>
+                                )}
                                 {/* P4-C2 / R4-M3 / UX-M2: shorten the DCI-P3 label
                                     (now "Display P3 (from DCI-P3)") and surface the
                                     Bradford D50→D65 white-point-adaptation rationale
