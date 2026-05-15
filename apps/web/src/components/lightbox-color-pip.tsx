@@ -3,6 +3,8 @@
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
+import { Info } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
     humanizeColorPrimaries,
     humanizeTransferFunction,
@@ -119,7 +121,29 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                     {image.color_pipeline_decision && (
                         <div className="flex justify-between gap-3">
                             <span className="opacity-70">{t('viewer.colorPipelineDecision')}</span>
-                            <span className="font-medium">{pipeline || t('viewer.colorUnknown')}</span>
+                            <span className="font-medium flex items-center gap-1">
+                                {pipeline || t('viewer.colorUnknown')}
+                                {/* R9-M8: replicate the Bradford D50→D65 tooltip
+                                    from color-details-section in the lightbox pip
+                                    expanded panel so photographers auditing DCI-P3
+                                    sources get the same white-point-adaptation note. */}
+                                {image.color_pipeline_decision === 'p3-from-dcip3' && (
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                type="button"
+                                                className="ml-0.5 inline-flex min-h-6 min-w-6 items-center justify-center rounded-full text-white/60 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50"
+                                                aria-label={t('viewer.colorPipelineP3FromDcip3Tooltip')}
+                                            >
+                                                <Info className="h-3 w-3" />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {t('viewer.colorPipelineP3FromDcip3Tooltip')}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                )}
+                            </span>
                         </div>
                     )}
                     {/* P4-C1 / R4-M2: compact histogram in the slide-up panel.

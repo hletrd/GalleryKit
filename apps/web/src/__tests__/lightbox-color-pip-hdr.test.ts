@@ -137,6 +137,24 @@ describe('LightboxColorPip — HDR gating + single-render (C5-A2)', () => {
         });
     });
 
+    describe('R9-M8: DCI-P3 Bradford tooltip in expanded panel', () => {
+        it('renders info button + tooltip when color_pipeline_decision is p3-from-dcip3', () => {
+            expect(PIP_BODY).toContain("image.color_pipeline_decision === 'p3-from-dcip3'");
+            expect(PIP_BODY).toContain("viewer.colorPipelineP3FromDcip3Tooltip");
+            expect(PIP_BODY).toMatch(/<Info\s+className="h-3\s+w-3"\s*\/>/);
+        });
+
+        it('places the tooltip inside the colorPipelineDecision row', () => {
+            // The tooltip trigger must be nested inside the pipeline-decision
+            // value span, not as a standalone row.
+            const pipelineRowIdx = PIP_BODY.indexOf("t('viewer.colorPipelineDecision')");
+            const tooltipIdx = PIP_BODY.indexOf("image.color_pipeline_decision === 'p3-from-dcip3'");
+            expect(pipelineRowIdx).toBeGreaterThan(-1);
+            expect(tooltipIdx).toBeGreaterThan(-1);
+            expect(tooltipIdx).toBeGreaterThan(pipelineRowIdx);
+        });
+    });
+
     describe('hasData short-circuit (existing pip contract)', () => {
         it('returns null when no color signals are present', () => {
             // Lock the early return so a refactor cannot silently render
