@@ -105,6 +105,13 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     <CardDescription>{t('settings.imageProcessingDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    {hasExistingImages && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300">
+                            <strong>{t('settings.backfillRequired')}</strong>
+                            {' '}
+                            {t('settings.backfillRequiredHint')}
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="image-quality-webp">{t('settings.webpQuality')}</Label>

@@ -699,7 +699,9 @@
     "sdrJpegChroma": "SDR JPEG Chroma",
     "sdrJpegChromaHint": "Chroma subsampling for sRGB / non-wide-gamut JPEG derivatives. Default 4:2:0 (smaller files; mild red-edge smear on saturated colors). Choose 4:4:4 for crisp saturated colors at the cost of file size.",
     "wideGamutMaxSourcePixels": "Wide-Gamut Source Pixel Cap (Memory Guard)",
-    "wideGamutMaxSourcePixelsHint": "Pixel-count cap above which wide-gamut sources are downscaled before the rgb16 pipeline. Default 50,000,000 (50 MP). Higher values use more memory; only raise on hosts with several GB of RAM."
+    "wideGamutMaxSourcePixelsHint": "Pixel-count cap above which wide-gamut sources are downscaled before the rgb16 pipeline. Default 50,000,000 (50 MP). Higher values use more memory; only raise on hosts with several GB of RAM.",
+    "backfillRequired": "Backfill required",
+    "backfillRequiredHint": "This gallery already has uploaded images. Changing color/HDR encoder settings requires running the backfill script before the new encoding takes effect for existing images."
   },
   "footer": {
     "admin": "Admin"
