@@ -100,6 +100,9 @@ function subscribe(callback: () => void): () => void {
     // window focus / visibilitychange as a best-effort fallback so dragging
     // the browser from a P3 monitor to an sRGB laptop (or vice versa) does
     // not leave stale state indefinitely.
+    // R9-R3: Firefox has no color-gamut MQ support, so display-gamut changes
+    // (dragging between monitors) are only detected on focus/visibilitychange.
+    // There is no web-platform API for live display-gamut monitoring on Firefox.
     const handleVisibility = () => { if (!document.hidden) callback(); };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', callback);

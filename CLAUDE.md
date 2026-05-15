@@ -309,6 +309,11 @@ docker run --rm \
 
 `useDisplayCapability` layers `screen.colorGamut` -> `(color-gamut: p3)` MQ -> conservative `'srgb'` default for Firefox. The canvas-P3 probe is NOT used for display detection because it tests API capability, not display gamut, producing systematic false positives on sRGB displays (R9-R1). Firefox users on P3 displays can use `force_show_color_chips` for demo purposes.
 
+**Display-change limitations:**
+- `screen.colorGamut` has no change-event API. Chrome/Safari/Edge compensate via the `color-gamut` MQ change event, but the MQ may fire before `screen.colorGamut` updates, causing a brief mismatch.
+- Firefox has no `color-gamut` MQ support at all, so dragging between monitors only updates on `focus` / `visibilitychange` (R9-R3).
+- Dual-monitor macOS: when a browser window spans P3 + sRGB displays, `screen.colorGamut` reports the primary/focused display, leaving the other half incorrect (R9-M12). There is no web-platform per-display gamut API.
+
 ## Race Condition Protections
 
 - **Delete-while-processing**: Queue checks row exists before + conditional UPDATE after processing; orphaned files cleaned up
