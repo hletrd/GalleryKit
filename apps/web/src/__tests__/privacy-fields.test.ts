@@ -22,6 +22,8 @@ const SENSITIVE_KEYS = [
     // R8-H3: bit_depth is technical metadata about photographer workflow.
     // Admin-only to respect the privacy boundary.
     'bit_depth',
+    // WI-15: downscale flag is a processing detail, not public metadata.
+    'was_downscaled',
 ] as const;
 
 describe('Privacy field separation', () => {

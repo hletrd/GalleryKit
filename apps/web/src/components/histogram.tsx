@@ -344,6 +344,15 @@ function drawHistogram(
     }
 }
 
+function estimateKeyType(data: HistogramData): 'high-key' | 'low-key' | 'balanced' {
+    const total = data.l.reduce((sum, v) => sum + v, 0);
+    if (total === 0) return 'balanced';
+    const avgLuminance = data.l.reduce((sum, v, i) => sum + v * i, 0) / total;
+    if (avgLuminance > 170) return 'high-key';
+    if (avgLuminance < 85) return 'low-key';
+    return 'balanced';
+}
+
 function getGamutLabel(primaries: string | null | undefined, t: (key: string) => string): string {
     switch (primaries) {
         case 'p3-d65': return t('viewer.histogramGamutP3');
@@ -595,6 +604,13 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                             </div>
                         );
                     })()}
+                    {/* R9-LOW: key-type estimate from luminance histogram
+                        (High-key / Low-key / Balanced). */}
+                    {histogramData && (
+                        <div className="text-xs text-muted-foreground">
+                            {t(`viewer.keyType${estimateKeyType(histogramData)}`)}
+                        </div>
+                    )}
                     <button
                         type="button"
                         onClick={cycleMode}

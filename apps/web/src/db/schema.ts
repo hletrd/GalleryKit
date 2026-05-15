@@ -70,6 +70,9 @@ export const images = mysqlTable("images", {
     // told when the source carries an HDR layer the SDR-only delivery
     // pipeline is not yet passing through (WI-09).
     has_gain_map: boolean('has_gain_map').notNull().default(false),
+    // WI-15: true when the wide-gamut rgb16 pipeline downscaled the source
+    // to stay within the wide_gamut_max_source_pixels cap.
+    was_downscaled: boolean('was_downscaled').notNull().default(false),
     // US-CM11: pipeline version marker for idempotent backfill.
     pipeline_version: int('pipeline_version'),
     original_format: varchar('original_format', { length: 10 }),

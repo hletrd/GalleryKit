@@ -35,6 +35,7 @@ export interface ImageDetail {
     flash: string | null;
     bit_depth?: number | null;
     pipeline_version?: number | null;
+    was_downscaled?: boolean | null;
     original_format?: string | null;
     original_file_size?: number | null;
     blur_data_url?: string | null;

@@ -986,6 +986,8 @@ export async function processImageFormats(
             await fs.unlink(processingInputPath).catch(() => {});
         }
     }
+
+    return { wasDownscaled: processingInputPath !== inputPath };
 }
 
 function cleanString(val: unknown): string | null {

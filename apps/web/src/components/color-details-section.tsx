@@ -354,6 +354,16 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="font-medium">{image.bit_depth}-bit</p>
                         </div>
                     )}
+                    {/* WI-15: admin-only downscale audit row. Wide-gamut sources
+                        exceeding the pixel cap are downscaled before the rgb16
+                        pipeline to prevent OOM. Surfacing this tells the admin
+                        the source was larger than the configured limit. */}
+                    {isAdmin && image.was_downscaled && (
+                        <div>
+                            <p className="text-muted-foreground text-xs">{t('viewer.downscaled')}</p>
+                            <p className="font-medium">{t('viewer.downscaledYes')}</p>
+                        </div>
+                    )}
                     {/* P3-5 / R7-M6: delivered bit depth per format.
                         color_pipeline_decision is admin-only; for public queries
                         derive an equivalent decision from color_primaries so the

@@ -331,6 +331,7 @@ async function reconcileLegacySchema(connection, dbName) {
             created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             processed boolean DEFAULT false,
+            was_downscaled boolean NOT NULL DEFAULT false,
             PRIMARY KEY (id),
             UNIQUE KEY images_share_key_unique (share_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -349,6 +350,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'license_tier', "ALTER TABLE images ADD COLUMN license_tier ENUM('none','editorial','commercial','rm') NOT NULL DEFAULT 'none'");
     await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
     await ensureColumn(connection, dbName, 'images', 'icc_profile_name', 'ALTER TABLE images ADD COLUMN icc_profile_name varchar(255) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'was_downscaled', 'ALTER TABLE images ADD COLUMN was_downscaled boolean NOT NULL DEFAULT false');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');

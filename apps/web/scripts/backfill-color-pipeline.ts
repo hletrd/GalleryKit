@@ -71,6 +71,7 @@ interface ReprocessSignals {
     is_hdr: boolean;
     has_gain_map: boolean;
     color_pipeline_decision: string | null;
+    was_downscaled: boolean;
 }
 
 interface ReprocessResult {
@@ -100,8 +101,9 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
         return { outcome: 'skipped' };
     }
 
+    let wasDownscaled = false;
     try {
-        await processImageFormats(
+        const result = await processImageFormats(
             originalPath,
             row.filename_webp,
             row.filename_avif,
@@ -117,6 +119,7 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
             settings?.sdrJpegChroma,
             settings?.wideGamutMaxSourcePixels,
         );
+        wasDownscaled = result.wasDownscaled;
     } catch (err) {
         console.error(`  [error] id=${row.id}: ${err}`);
         return { outcome: 'error' };
@@ -143,6 +146,7 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
                 is_hdr: signals.isHdr,
                 has_gain_map: signals.hasGainMap,
                 color_pipeline_decision: colorPipelineDecision,
+                was_downscaled: wasDownscaled,
             },
         };
     } catch (err) {
@@ -267,7 +271,8 @@ async function main() {
                         matrix_coefficients = ${item.signals.matrix_coefficients ?? null},
                         is_hdr = ${item.signals.is_hdr},
                         has_gain_map = ${item.signals.has_gain_map},
-                        color_pipeline_decision = ${item.signals.color_pipeline_decision ?? null}
+                        color_pipeline_decision = ${item.signals.color_pipeline_decision ?? null},
+                        was_downscaled = ${item.signals.was_downscaled}
                     WHERE id = ${item.id}
                 `);
             }
