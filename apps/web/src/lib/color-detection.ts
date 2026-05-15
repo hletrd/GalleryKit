@@ -108,9 +108,8 @@ function inferTransferFunction(
     // the documented Apple Display-P3 contract, not a guess.
     if (name.includes('displayp3') || name.includes('p3d65')) return 'srgb';
 
-    // DCI-P3 (cinema) is gamma-2.6 by SMPTE EG 432-2; treat as gamma22 as
-    // the closest available enum until a dedicated 'gamma26' value lands.
-    if (name.includes('dcip3')) return 'gamma22';
+    // DCI-P3 (cinema) is gamma-2.6 by SMPTE EG 432-2.
+    if (name.includes('dcip3')) return 'gamma26';
 
     // BT.2020 / Rec.2020 SDR uses BT.1886-style transfer (gamma-2.4-ish);
     // we report 'srgb' for the SDR companion case where the ICC name says

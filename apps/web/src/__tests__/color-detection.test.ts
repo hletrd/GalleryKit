@@ -100,6 +100,15 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    it('returns gamma26 for DCI-P3 ICC name (R9-M1)', async () => {
+        const meta = makeMockMeta({ icc: 'DCI-P3' as unknown as Buffer });
+        const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
+        expect(signals.colorPrimaries).toBe('dci-p3');
+        expect(signals.transferFunction).toBe('gamma26');
+        expect(signals.matrixCoefficients).toBe('identity');
+        expect(signals.isHdr).toBe(false);
+    });
+
     it('detects HDR from PQ transfer hint in ICC string', async () => {
         const meta = makeMockMeta({ icc: 'PQ HDR' as unknown as Buffer });
         const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
