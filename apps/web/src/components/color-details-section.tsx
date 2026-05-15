@@ -29,6 +29,16 @@ export function humanizeColorPrimaries(value: string | null | undefined): string
 }
 
 /**
+ * R9-H1: Strict allowlist for P3 ICC profile names. Substring matching
+ * `includes('p3')` falsely matches "ProPhoto" (which is NOT a P3 variant).
+ */
+const P3_ICC_NAME_ALLOWLIST = ['display p3', 'p3-d65', 'dci-p3'];
+export function isP3IccName(name: string): boolean {
+    const normalized = name.toLowerCase().trim();
+    return P3_ICC_NAME_ALLOWLIST.some(allowed => normalized.includes(allowed));
+}
+
+/**
  * C3-A2 / C3-COL-MED-1 / C3-UX-MED-3: route transfer-function names through
  * the i18n callback so the lightbox color pip and Color Details accordion
  * display Korean transfer text on Korean locales (e.g. "감마 2.2" instead of
@@ -223,7 +233,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
                             <p className="font-medium">
                                 {iccName}
-                                {iccName.toLowerCase().includes('p3') && (
+                                {isP3IccName(iccName) && (
                                     <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
                                         P3
                                     </span>
@@ -237,7 +247,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                                     <p className="text-muted-foreground text-xs">{t('viewer.colorSpace')}</p>
                                     <p className="font-medium">
                                         {iccName}
-                                        {iccName.toLowerCase().includes('p3') && (
+                                        {isP3IccName(iccName) && (
                                             <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[11px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
                                                 P3
                                             </span>
