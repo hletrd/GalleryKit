@@ -436,6 +436,9 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
 
     const histogramData = histogramState.imageUrl === effectiveUrl ? histogramState.data : null;
     const loading = Boolean(effectiveUrl) && histogramState.imageUrl !== effectiveUrl;
+    // R9-LOW: surface which derivative the histogram computed from so
+    // photographers auditing know whether they're looking at AVIF or JPEG data.
+    const histogramSource = preferAvif ? 'AVIF' : effectiveUrl ? 'JPEG' : null;
     const modeLabels: Record<HistogramMode, string> = {
         luminance: t('viewer.histogramModes.luminance'),
         rgb: t('viewer.histogramModes.color'),
@@ -526,6 +529,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                         histogram canvas reflects Display-P3 space even though
                         the source primaries are Rec.2020. */}
                     {colorPrimaries === 'bt2020' && <span className="ml-1 opacity-70">{t('viewer.histogramRenderedInP3')}</span>}
+                    {histogramSource && <span className="ml-1 opacity-60">{t('viewer.histogramSource', { format: histogramSource })}</span>}
                 </span>
                 <button
                     type="button"

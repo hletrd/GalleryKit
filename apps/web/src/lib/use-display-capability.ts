@@ -125,7 +125,7 @@ export function useDisplayCapability(): DisplayCapability {
 
 // Test-only export to reset snapshot memoization so toggling test state
 // produces fresh detect() results.
-export function _resetCanvasP3CacheForTesting(): void {
+export function _resetDisplayCapabilityCacheForTesting(): void {
     _cachedSnapshot = null;
 }
 

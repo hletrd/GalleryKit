@@ -3,7 +3,8 @@
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
-import { Info } from 'lucide-react';
+import { Info, Copy } from 'lucide-react';
+import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
     humanizeColorPrimaries,
@@ -57,6 +58,33 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     // field separation in data.ts, so this row stays hidden for public
     // viewers either way.
     const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
+
+    // R9-LOW: copy a JSON snapshot of the audit-grade color metadata to the
+    // clipboard from the lightbox expanded panel, same as the sidebar
+    // ColorDetailsSection copy button.
+    async function copyColorMetadata() {
+        const data = {
+            iccProfileName: image.icc_profile_name ?? null,
+            primaries: image.color_primaries ?? null,
+            transfer: image.transfer_function ?? null,
+            matrix: image.matrix_coefficients ?? null,
+            decision: image.color_pipeline_decision ?? null,
+            isHdr: image.is_hdr ?? null,
+            hasGainMap: image.has_gain_map ?? null,
+            sourceBitDepth: image.bit_depth ?? null,
+            pipelineVersion: image.pipeline_version ?? null,
+        };
+        try {
+            const text = JSON.stringify(data, null, 2);
+            if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+                throw new Error('clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(text);
+            toast.success(t('viewer.colorMetadataCopied'));
+        } catch {
+            toast.error(t('imageManager.copyFailed'));
+        }
+    }
 
     // P4-C1 / R4-M2: lightbox histogram. Mounted only when the panel is
     // open so the worker spawn / pixel decode does not happen for the
@@ -162,6 +190,21 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                             />
                         </div>
                     )}
+                    {/* R9-LOW: copy-to-clipboard button in expanded panel so
+                        photographers auditing in the lightbox can capture the
+                        full color metadata without switching to the sidebar. */}
+                    <div className="pt-1 border-t border-white/10">
+                        <button
+                            type="button"
+                            onClick={copyColorMetadata}
+                            className="inline-flex items-center gap-1.5 text-white/60 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 rounded px-1 py-1"
+                            aria-label={t('viewer.copyColorMetadata')}
+                            title={t('viewer.copyColorMetadata')}
+                        >
+                            <Copy className="h-3 w-3" />
+                            <span className="opacity-80">{t('viewer.copyColorMetadata')}</span>
+                        </button>
+                    </div>
                     {/* C5-A1 / C5-COL-MED-1 / C5-HDR-MED-1 / C5-UX-MED-1
                         (3-way cross-angle): the HDR pill rendered in the
                         closed-pip button row above already conveys the HDR

@@ -141,8 +141,9 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
  *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
  *       by format fan-out.
  *   4 — DCI-P3 white-point Bradford adaptation (WI-12). DCI-P3 sources
- *       skip rgb16 to preserve the source ICC for the toColorspace('p3')
- *       transform, then convert to D65 with Bradford CAT.
+ *       skip rgb16 whether the source carries an ICC profile (preserved for
+ *       toColorspace('p3') Bradford D63→D65 adaptation) or is NCLX-only
+ *       (primaries identical to Display P3, white-point difference only).
  *   5 — 50 MP wide-gamut downscale gate (WI-15) + lazy 10-bit AVIF probe.
  *       Sources beyond WIDE_GAMUT_MAX_SOURCE_PIXELS pass through a one-shot
  *       resize to keep the rgb16 pipeline within memory; the 10-bit probe

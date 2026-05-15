@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { useDisplayCapability } from '@/lib/use-display-capability';
+import { humanizeColorPrimaries } from '@/components/color-details-section';
 
 interface WideGamutHintProps {
     colorPrimaries?: string | null;
-    t: (key: string) => string;
+    t: (key: string, values?: Record<string, string | number>) => string;
 }
 
 // P4-B1 / R4-M1: replaced the inline `(color-gamut: p3)` MQ subscription
@@ -39,9 +40,11 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
 
     if (!mounted || !isWideGamut || !isSrgbDisplay) return null;
 
+    const gamutName = humanizeColorPrimaries(colorPrimaries) || t('viewer.colorUnknown');
+
     return (
         <div className="mt-2 px-3 py-2 text-xs rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800/40">
-            {t('viewer.wideGamutHint')}
+            {t('viewer.wideGamutHint', { gamut: gamutName })}
         </div>
     );
 }

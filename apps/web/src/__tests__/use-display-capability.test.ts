@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // We import the module from the project — the SSR-safe code path checks
 // `typeof window === 'undefined'`, so we monkey-patch globalThis.window
 // from these tests rather than rely on jsdom presets.
-import { _resetCanvasP3CacheForTesting } from '@/lib/use-display-capability';
+import { _resetDisplayCapabilityCacheForTesting } from '@/lib/use-display-capability';
 
 // ---------------------------------------------------------------------------
 // Test harness — control the window.* surface from each test.
@@ -94,13 +94,13 @@ function uninstallMockWindow(): void {
 }
 
 beforeEach(() => {
-    _resetCanvasP3CacheForTesting();
+    _resetDisplayCapabilityCacheForTesting();
 });
 
 afterEach(() => {
     uninstallMockWindow();
     vi.restoreAllMocks();
-    _resetCanvasP3CacheForTesting();
+    _resetDisplayCapabilityCacheForTesting();
 });
 
 // ---------------------------------------------------------------------------
@@ -196,7 +196,7 @@ describe('useDisplayCapability detection', () => {
                 '(dynamic-range: high)': { matches: false },
             },
         });
-        _resetCanvasP3CacheForTesting();
+        _resetDisplayCapabilityCacheForTesting();
         const { _detectForTesting } = await import('@/lib/use-display-capability');
         const cap = _detectForTesting!();
         expect(cap.colorGamut).toBe('srgb');

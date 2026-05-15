@@ -24,7 +24,7 @@ export interface ColorSignals {
     /** Transfer function inferred from ICC description + bit depth. */
     transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma26' | 'pq' | 'hlg' | 'linear' | 'unknown';
     /** Matrix coefficients inferred from ICC / container metadata. */
-    matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'identity' | 'unknown';
+    matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'bt2020-cl' | 'identity' | 'unknown';
     /** Whether the image is HDR (PQ or HLG transfer). */
     isHdr: boolean;
     /**
@@ -162,6 +162,7 @@ interface CicpTriplet {
     colourPrimaries: number;
     transferCharacteristics: number;
     matrixCoefficients: number;
+    fullRange: boolean;
 }
 
 const NCLX_PRIMARIES_MAP: Record<number, ColorSignals['colorPrimaries']> = {
@@ -192,6 +193,7 @@ const NCLX_MATRIX_MAP: Record<number, ColorSignals['matrixCoefficients']> = {
     0: 'identity',
     1: 'bt709',
     9: 'bt2020-ncl',
+    10: 'bt2020-cl',
 };
 
 /**
@@ -239,10 +241,12 @@ export function parseCicpFromHeif(buffer: Buffer): CicpTriplet | null {
                     const colourType = buffer.toString('ascii', dataStart, dataStart + 4);
                     if (colourType === 'nclx' && dataSize >= 11) {
                         // colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 11
+                        // full_range_flag is stored as a single byte; bit 0 is the flag.
                         return {
                             colourPrimaries: buffer.readUInt16BE(dataStart + 4),
                             transferCharacteristics: buffer.readUInt16BE(dataStart + 6),
                             matrixCoefficients: buffer.readUInt16BE(dataStart + 8),
+                            fullRange: Boolean(buffer.readUInt8(dataStart + 10) & 0x80),
                         };
                     }
                 }

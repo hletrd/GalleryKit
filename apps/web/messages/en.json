@@ -277,6 +277,7 @@
     "sharing": "Sharing…",
     "noDescription": "No description.",
     "histogram": "Histogram",
+    "histogramSource": "Source: {format}",
     "histogramModes": {
       "luminance": "Luminance",
       "color": "Color",
@@ -311,7 +312,7 @@
     "topics": {
       "default": "Gallery"
     },
-    "downloadJpeg": "Download JPEG",
+    "downloadJpeg": "Download 8-bit JPEG",
     "downloadSrgbJpeg": "Download (sRGB JPEG)",
     "downloadSrgbJpegDesc": "Compatible with all devices and browsers",
     "downloadP3Jpeg": "Download (Display P3 JPEG)",
@@ -346,7 +347,7 @@
     "colorPipelineSrgbFromUnknown": "sRGB (unknown source)",
     "colorUnknown": "Unknown",
     "calibrationTooltip": "Display calibration affects color accuracy. Uncalibrated displays may render saturation and white balance differently than the photographer intended.",
-    "wideGamutHint": "Your display shows the sRGB version of this photo. The full color gamut is available on Display P3 / wide-gamut screens.",
+    "wideGamutHint": "Your display shows the sRGB version of this photo. The full color gamut is available on {gamut} screens.",
     "gainMap": "Gain map",
     "gainMapPresent": "Apple HDR gain map detected",
     "gainMapDeliveredAsSdr": "Delivered as SDR base only — gain map not yet passed through.",

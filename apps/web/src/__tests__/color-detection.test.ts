@@ -260,6 +260,11 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    it('maps nclx matrix=10 to bt2020-cl (R9-LOW)', async () => {
+        const signals = await detectFromNclx(9, 1, 10);
+        expect(signals.matrixCoefficients).toBe('bt2020-cl');
+    });
+
     // P4-A2 / R4-H2: ICC chromaticity-based detection promotes a custom
     // (opaquely-named) ICC to the correct gamut when wtpt/rXYZ/gXYZ/bXYZ tags
     // land on a canonical preset within tolerance. Without this fallback the
@@ -416,6 +421,7 @@ describe('parseCicpFromHeif', () => {
         expect(result!.colourPrimaries).toBe(12);
         expect(result!.transferCharacteristics).toBe(1);
         expect(result!.matrixCoefficients).toBe(0);
+        expect(result!.fullRange).toBe(true); // makeColrNclx sets full_range = 1
     });
 
     it('finds nclx inside meta → iprp → ipco', () => {
@@ -469,6 +475,36 @@ describe('parseCicpFromHeif', () => {
         const meta = makeMeta([deep]);
         const result = parseCicpFromHeif(meta);
         expect(result).toBeNull();
+    });
+
+    it('parses fullRange flag (true when bit 7 is set)', () => {
+        const buf = makeColrNclx(1, 1, 1); // makeColrNclx writes 0x80 (bit 7)
+        const result = parseCicpFromHeif(buf);
+        expect(result).not.toBeNull();
+        expect(result!.fullRange).toBe(true);
+    });
+
+    it('parses fullRange flag (false when bit 7 is clear)', () => {
+        // Override the full_range byte to 0x00 (bit 7 clear)
+        const data = Buffer.alloc(11);
+        data.write('nclx', 0, 4, 'ascii');
+        data.writeUInt16BE(1, 4);
+        data.writeUInt16BE(1, 6);
+        data.writeUInt16BE(1, 8);
+        data.writeUInt8(0x00, 10); // full_range = 0
+        const buf = makeBox('colr', data);
+        const result = parseCicpFromHeif(buf);
+        expect(result).not.toBeNull();
+        expect(result!.fullRange).toBe(false);
+    });
+
+    it('maps matrix value 10 to bt2020-cl (R9-LOW)', () => {
+        const ipco = makeIpco([makeColrNclx(9, 1, 10)]); // BT.2020, sRGB, BT.2020-CL
+        const iprp = makeIprp([ipco]);
+        const meta = makeMeta([iprp]);
+        const result = parseCicpFromHeif(meta);
+        expect(result).not.toBeNull();
+        expect(result!.matrixCoefficients).toBe(10);
     });
 });
 
