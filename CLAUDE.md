@@ -96,7 +96,7 @@ git values must be treated as compromised and must not be reused.
 | `apps/web/src/lib/icc-extractor.ts` | ICC `desc` (v2) / `mluc` (v4 UTF-16BE, locale-matched) descriptor parser |
 | `apps/web/src/lib/icc-chromaticity.ts` | Custom-monitor ICC gamut detection from `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` (P4-A2) |
 | `apps/web/src/lib/gain-map-detection.ts` | Apple HDR gain map detection in HEIF `iinf`/`infe`/`iref` (P4-A1) |
-| `apps/web/src/lib/use-display-capability.ts` | Layered display gamut + HDR detection: `screen.colorGamut` → MQ → canvas-P3 (P4-B1). **Snapshot-memoized** — `getSnapshot` MUST return a stable reference or `useSyncExternalStore` infinite-loops (React #185) |
+| `apps/web/src/lib/use-display-capability.ts` | Layered display gamut + HDR detection: `screen.colorGamut` → MQ → conservative `'srgb'` for Firefox (R9-R1). **Snapshot-memoized** — `getSnapshot` MUST return a stable reference or `useSyncExternalStore` infinite-loops (React #185) |
 | `apps/web/src/lib/settings-hash.ts` | 8-char SHA-256 prefix over color-impacting admin settings, embedded in ETag (P4-E2) |
 | `apps/web/src/lib/hdr-filenames.ts` | `_hdr.avif` filename derivation helper (reserved for WI-09) |
 | `apps/web/src/lib/data.ts` | Data access layer with React cache() deduplication. `_PrivacySensitiveKeys` compile-time guard enforces admin-only fields |
@@ -304,10 +304,10 @@ docker run --rm \
 | Safari 17+ | macOS / iOS | P3 (+HDR on Pro) | ✓ | ✓ | ✓ | Safari 18+ TP |
 | Chrome 122+ | macOS / Win / Android 14+ | P3 | ✓ | ✓ | ✗ (Chromium gap) | ✓ |
 | Edge 122+ | Windows 11 | P3 + Auto HDR | ✓ | ✓ | ✓ (Auto HDR ON) | ✓ |
-| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | **✗** Moz bug 1591455 | ✗ | ✗ |
+| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | **✗** (no implementation as of Firefox 137) | ✗ | ✗ |
 | Chrome | Android 13- | sRGB-only mid-range | sRGB-clipped delivery | ✗ | ✗ | varies |
 
-`useDisplayCapability` layers the three signals so Firefox + P3 display still resolves to P3 via the canvas-P3 probe fallback.
+`useDisplayCapability` layers `screen.colorGamut` -> `(color-gamut: p3)` MQ -> conservative `'srgb'` default for Firefox. The canvas-P3 probe is NOT used for display detection because it tests API capability, not display gamut, producing systematic false positives on sRGB displays (R9-R1). Firefox users on P3 displays can use `force_show_color_chips` for demo purposes.
 
 ## Race Condition Protections
 

@@ -1,5 +1,5 @@
 /**
- * useDisplayCapability tests (P4-B1 / R4-M1).
+ * useDisplayCapability tests (P4-B1 / R4-M1 / R9-R1).
  *
  * Pure-function tests for the underlying detection. These mock
  * `window`, `screen.colorGamut`, `matchMedia`, and the canvas-P3
@@ -7,7 +7,8 @@
  *
  *   - Chromium 121+ via `screen.colorGamut`.
  *   - Chrome / Safari / Edge via `(color-gamut: p3)` MQ.
- *   - Firefox 113+ via canvas-P3 fallback (no MQ support today).
+ *   - Firefox — defaults to 'srgb' because canvas-P3 probe is not
+ *     display-gated (R9-R1).
  *   - Pure sRGB displays — no signal indicates P3.
  *   - Rec.2020 advertised via `screen.colorGamut`.
  */
@@ -184,9 +185,9 @@ describe('useDisplayCapability detection', () => {
         expect(cap.colorGamut).toBe('rec2020');
     });
 
-    it('falls back to canvas-P3 probe when neither screen.colorGamut nor MQ matches', async () => {
-        // Firefox: no screen.colorGamut, MQ returns false, canvas probe
-        // says display-p3 colorSpace is supported.
+    it('defaults Firefox to srgb when neither screen.colorGamut nor MQ is available (R9-R1)', async () => {
+        // Firefox: no screen.colorGamut, no MQ support, canvas-P3 probe
+        // would return true but is not display-gated — must default to 'srgb'.
         installMockWindow({
             omitScreenColorGamut: true,
             matchMediaResults: {
@@ -195,18 +196,11 @@ describe('useDisplayCapability detection', () => {
                 '(dynamic-range: high)': { matches: false },
             },
         });
-        // Override createElement to simulate canvas-P3 support
-        (globalThis as Record<string, unknown>).document = {
-            createElement: () => ({
-                getContext: () => ({
-                    getContextAttributes: () => ({ colorSpace: 'display-p3' }),
-                }),
-            }),
-        };
         _resetCanvasP3CacheForTesting();
         const { _detectForTesting } = await import('@/lib/use-display-capability');
         const cap = _detectForTesting!();
-        expect(cap.colorGamut).toBe('p3');
+        expect(cap.colorGamut).toBe('srgb');
+        expect(cap.isHdr).toBe(false);
     });
 
     it('returns srgb when no signal indicates P3', async () => {

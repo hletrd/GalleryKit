@@ -6,7 +6,9 @@
  *   1. `screen.colorGamut` (Chromium 121+, Safari 18+ TP) — authoritative.
  *   2. `(color-gamut: rec2020)` MQ — supported on Chrome / Safari / Edge.
  *   3. `(color-gamut: p3)` MQ — same browsers.
- *   4. Canvas-P3 feature probe — Firefox 113+ (no MQ support today).
+ *   4. Firefox fallback — defaults to 'srgb' because Firefox's canvas-P3
+ *      probe tests API capability, not display gamut, producing systematic
+ *      false positives on sRGB displays (R9-R1).
  *
  * The hook returns `{ colorGamut, isHdr }`. `colorGamut` collapses the
  * three buckets ('srgb' | 'p3' | 'rec2020') consumers care about — the
@@ -36,27 +38,6 @@ export interface DisplayCapability {
 
 const SERVER_DEFAULT: DisplayCapability = { colorGamut: 'p3', isHdr: false };
 
-/**
- * Module-cached canvas-P3 probe — runs once per process, identical to the
- * pattern in `histogram.tsx`'s `getSupportsCanvasP3`.
- */
-let _cachedSupportsCanvasP3: boolean | null = null;
-function probeCanvasP3(): boolean {
-    if (_cachedSupportsCanvasP3 !== null) return _cachedSupportsCanvasP3;
-    if (typeof document === 'undefined') {
-        _cachedSupportsCanvasP3 = false;
-        return false;
-    }
-    try {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d', { colorSpace: 'display-p3' as PredefinedColorSpace });
-        _cachedSupportsCanvasP3 = ctx !== null && ctx.getContextAttributes().colorSpace === 'display-p3';
-    } catch {
-        _cachedSupportsCanvasP3 = false;
-    }
-    return _cachedSupportsCanvasP3;
-}
-
 // `useSyncExternalStore` checks `Object.is(prev, next)` between getSnapshot()
 // calls. If `detect()` returns a fresh `{ colorGamut, isHdr }` object every
 // call, React detects a "change" on every render → re-render → new snapshot
@@ -79,12 +60,10 @@ function detect(): DisplayCapability {
             gamut = 'rec2020';
         } else if (window.matchMedia('(color-gamut: p3)').matches) {
             gamut = 'p3';
-        } else if (probeCanvasP3()) {
-            // Firefox path: no MQ support today; fall back to canvas-P3.
-            gamut = 'p3';
         }
-    } else if (probeCanvasP3()) {
-        gamut = 'p3';
+        // R9-R1: Firefox has no screen.colorGamut and no color-gamut MQ support.
+        // Its canvas-P3 probe tests API capability, not display gamut, producing
+        // systematic false positives on sRGB displays. Default to 'srgb'.
     }
 
     const isHdr = typeof window.matchMedia === 'function'
@@ -141,12 +120,9 @@ export function useDisplayCapability(): DisplayCapability {
     return useSyncExternalStore(subscribe, detect, getServerSnapshot);
 }
 
-// Test-only export so a unit test can reset the cached canvas-P3 probe
-// between cases when the test mocks document / canvas behavior. Also resets
-// the snapshot memoization so toggling test state produces fresh detect()
-// results.
+// Test-only export to reset snapshot memoization so toggling test state
+// produces fresh detect() results.
 export function _resetCanvasP3CacheForTesting(): void {
-    _cachedSupportsCanvasP3 = null;
     _cachedSnapshot = null;
 }
 
