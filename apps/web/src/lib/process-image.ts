@@ -851,6 +851,18 @@ export async function processImageFormats(
     // unless the admin opts into a different value via sdr_jpeg_chroma.
     const effectiveSdrChroma: JpegChromaSubsampling = sdrJpegChroma ?? '4:2:0';
 
+    // R10-L11: per-format set of sized variant paths written so far.
+    // Used by the catch/finally cleanup below: if any format throws mid-
+    // way through the size loop, the partial files for THAT format
+    // should be removed so the next retry (or backfill run) doesn't see
+    // a half-written ladder of size-suffixed JPEGs/WebPs/AVIFs claiming
+    // to be valid.
+    const writtenSizedPaths: Record<'webp' | 'avif' | 'jpeg', Set<string>> = {
+        webp: new Set(),
+        avif: new Set(),
+        jpeg: new Set(),
+    };
+
     const generateForFormat = async (
         format: 'webp' | 'avif' | 'jpeg',
         dir: string,
@@ -992,6 +1004,7 @@ export async function processImageFormats(
 
                 lastRendered = { resizeWidth, filePath: outputPath };
             }
+            writtenSizedPaths[format].add(outputPath);
 
             // The largest configured size serves as the "base" filename to satisfy existing schema.
             // Use atomic rename via .tmp file to eliminate the window where the base
@@ -1025,6 +1038,7 @@ export async function processImageFormats(
                 } finally {
                     await fs.unlink(tmpPath).catch(() => {});
                 }
+                writtenSizedPaths[format].add(basePath);
             }
         }
     };
@@ -1046,6 +1060,23 @@ export async function processImageFormats(
         if (webpStats.size === 0) throw new Error('Generated WebP file is empty');
         if (avifStats.size === 0) throw new Error('Generated AVIF file is empty');
         if (jpegStats.size === 0) throw new Error('Generated JPEG file is empty');
+    } catch (err) {
+        // R10-L11: clean up any partial sized variants written so far across
+        // ALL three formats. Without this, a mid-size failure (e.g. AVIF
+        // encoder OOM at size index 3 of 4) leaves the smaller AVIF
+        // variants on disk; the next retry then sees `_640.avif` etc.
+        // present and a backfill operator inspecting the filesystem
+        // would think the encode partially succeeded. Failed encodes
+        // must leave the variant directory in the same state it was in
+        // before the call (modulo files that were already there from a
+        // prior successful run, which we intentionally do not touch —
+        // we only delete paths WE wrote in this invocation).
+        await Promise.all([
+            ...Array.from(writtenSizedPaths.webp).map((p) => fs.unlink(p).catch(() => {})),
+            ...Array.from(writtenSizedPaths.avif).map((p) => fs.unlink(p).catch(() => {})),
+            ...Array.from(writtenSizedPaths.jpeg).map((p) => fs.unlink(p).catch(() => {})),
+        ]);
+        throw err;
     } finally {
         // WI-15: clean up downscaled intermediate if one was created.
         if (processingInputPath !== inputPath) {
