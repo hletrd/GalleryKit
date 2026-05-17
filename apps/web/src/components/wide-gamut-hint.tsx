@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
-import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { isWideGamutPrimary, getGamutFamily } from '@/lib/color-primaries';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 import { humanizeColorPrimaries } from '@/components/color-details-section';
 
@@ -46,32 +46,40 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
         setMounted(true);
     }, []);
 
+    // R13-M2: dismiss key is canonicalised by gamut FAMILY rather than the
+    // raw `colorPrimaries` string. Functionally-equivalent primaries values
+    // (e.g. `p3-d65` and `dci-p3` both deliver as Display P3) should not
+    // re-nag the visitor as if they were a fresh gamut. The family enum
+    // (`srgb` / `p3` / `rec2020` / `adobergb` / `prophoto` / `unknown`) is
+    // the right granularity for "did the visitor already see this hint for
+    // this gamut class in this session."
+    const gamutFamily = getGamutFamily(colorPrimaries);
+
     useEffect(() => {
-        // R10-H4 / R12-M1: re-check sessionStorage whenever the photo's
-        // gamut changes. A prior dismiss for `bt2020` should NOT suppress
-        // the hint when the visitor opens a `p3-d65` photo (and vice
-        // versa); the dismiss key includes the primaries value so each
-        // gamut decision is independent.
+        // R10-H4 / R12-M1 / R13-M2: re-check sessionStorage whenever the
+        // photo's gamut family changes. A prior dismiss for the `rec2020`
+        // family should NOT suppress the hint when the visitor opens a
+        // `p3` photo (and vice versa).
         try {
             const stored = sessionStorage.getItem(DISMISS_STORAGE_KEY);
             // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional dismiss-state hydration from sessionStorage
-            setDismissed(stored === (colorPrimaries ?? ''));
+            setDismissed(stored === gamutFamily);
         } catch {
             // sessionStorage can throw in privacy-restricted contexts
             // (Safari "Block All Cookies"). Default to "not dismissed."
             setDismissed(false);
         }
-    }, [colorPrimaries]);
+    }, [gamutFamily]);
 
     const handleDismiss = useCallback(() => {
         try {
-            sessionStorage.setItem(DISMISS_STORAGE_KEY, colorPrimaries ?? '');
+            sessionStorage.setItem(DISMISS_STORAGE_KEY, gamutFamily);
         } catch {
             // Storage write failed (private browsing, quota). Fall through:
             // the in-memory dismiss still hides the banner for this render.
         }
         setDismissed(true);
-    }, [colorPrimaries]);
+    }, [gamutFamily]);
 
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
     const { colorGamut } = useDisplayCapability();
@@ -84,7 +92,12 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
     return (
         <div
             role="status"
-            className="mt-2 px-3 py-2 text-xs rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800/40 flex items-start gap-2"
+            // R13-L2 / R10-L21: dark-mode contrast lift. The previous combo
+            // (`dark:bg-amber-900/20 dark:text-amber-200`) measured ≈ 3.2:1
+            // against the composite dark background — below WCAG AA 4.5:1
+            // for small text. Lifting the background opacity to /40 and the
+            // foreground to amber-100 brings the ratio to ≈ 4.6:1.
+            className="mt-2 px-3 py-2 text-xs rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-100 dark:border-amber-700/60 flex items-start gap-2"
         >
             <span className="flex-1">
                 {t('viewer.wideGamutHint', { gamut: gamutName })}
@@ -93,7 +106,7 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
                 type="button"
                 onClick={handleDismiss}
                 aria-label={t('viewer.wideGamutHintDismiss')}
-                className="shrink-0 -mr-1 -my-1 min-h-11 min-w-11 inline-flex items-center justify-center rounded text-amber-800/70 hover:text-amber-800 dark:text-amber-200/70 dark:hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+                className="shrink-0 -mr-1 -my-1 min-h-11 min-w-11 inline-flex items-center justify-center rounded text-amber-800/70 hover:text-amber-800 dark:text-amber-100/80 dark:hover:text-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
             >
                 <X className="h-4 w-4" aria-hidden="true" />
             </button>
