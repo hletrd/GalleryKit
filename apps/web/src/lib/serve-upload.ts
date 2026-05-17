@@ -41,6 +41,7 @@ const CONTENT_TYPES: Record<string, string> = {
 export async function serveUploadFile(
     pathSegments: string[],
     ifNoneMatch?: string | null,
+    method: 'GET' | 'HEAD' = 'GET',
 ): Promise<NextResponse> {
     if (!Array.isArray(pathSegments) || pathSegments.length < 2) {
         return new NextResponse('Not found', { status: 404 });
@@ -140,6 +141,30 @@ export async function serveUploadFile(
             }
         }
 
+        // R20-L1: HEAD requests do not need the body — return early with
+        // headers only. Skips the createReadStream + Readable.toWeb work that
+        // Next.js would discard anyway, and avoids opening a file descriptor
+        // for crawler / link-checker HEAD bursts that miss the ETag
+        // short-circuit above.
+        const responseHeaders = {
+            'Content-Type': contentType,
+            'Content-Length': stats.size.toString(),
+            // public + max-age + must-revalidate: edge caches keep the file
+            // fast for one day, but every browser must revalidate on the
+            // next request via If-None-Match. Combined with the
+            // pipeline-version-bearing ETag, a pipeline change forces a
+            // fresh fetch with no operator action required.
+            // R8-R7: reduced from 86400 to 3600 so color-pipeline fixes
+            // ship to browsers within an hour instead of up to 24 hours.
+            'Cache-Control': 'public, max-age=3600, must-revalidate',
+            'ETag': etag,
+            'X-Content-Type-Options': 'nosniff',
+        } as const;
+
+        if (method === 'HEAD') {
+            return new NextResponse(null, { headers: responseHeaders });
+        }
+
         // Create stream and convert to web ReadableStream for proper lifecycle management
         // Stream from the resolved (realpath) path, not the original path, to
         // close the TOCTOU gap where a file could be replaced by a symlink
@@ -148,20 +173,7 @@ export async function serveUploadFile(
         const webStream = Readable.toWeb(fileStream) as ReadableStream;
 
         return new NextResponse(webStream, {
-            headers: {
-                'Content-Type': contentType,
-                'Content-Length': stats.size.toString(),
-                // public + max-age + must-revalidate: edge caches keep the file
-                // fast for one day, but every browser must revalidate on the
-                // next request via If-None-Match. Combined with the
-                // pipeline-version-bearing ETag, a pipeline change forces a
-                // fresh fetch with no operator action required.
-                // R8-R7: reduced from 86400 to 3600 so color-pipeline fixes
-                // ship to browsers within an hour instead of up to 24 hours.
-                'Cache-Control': 'public, max-age=3600, must-revalidate',
-                'ETag': etag,
-                'X-Content-Type-Options': 'nosniff',
-            },
+            headers: responseHeaders,
         });
 
     } catch (err: unknown) {
