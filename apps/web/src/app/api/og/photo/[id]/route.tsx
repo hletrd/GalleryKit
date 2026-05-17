@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import { getImageCached, getSeoSettings } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { pickFirstAvailablePhotoBuffer } from '@/lib/og-photo-fetch';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
 import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rate-limit';
@@ -15,10 +15,6 @@ export const runtime = 'nodejs';
 // Cache-Control spec: public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400
 const OG_SUCCESS_CACHE_CONTROL = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400';
 const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
-
-// Target the medium derivative — large enough for 1200px OG, well below 5 MB cap.
-const OG_PHOTO_TARGET_SIZE = 1536;
-const OG_PHOTO_MAX_BYTES = 1024 * 1024; // 1 MB — guard against oversized derivatives in base64
 
 /**
  * Strip Unicode bidi/invisible formatting characters from a display string
@@ -92,34 +88,35 @@ export async function GET(
         const rawTitle = getPhotoDisplayTitle(image, `Photo #${image.id}`);
         const displayTitle = sanitizeForOg(rawTitle);
 
-        // Build absolute URL for the medium JPEG derivative.
+        // R24-M1: iterate configured `imageSizes` ascending; first available
+        // sized JPEG derivative wins. This degrades cleanly through the
+        // backfill window where the originally-targeted size may not yet
+        // exist on disk for legacy photos (e.g. after an `image_sizes`
+        // admin reconfigure). Only after ALL sizes 404 / overflow do we
+        // fall back to the admin-configured site-default OG.
+        //
+        // Lineage: R21-M1 / R22-M1 / R23-M1 closed the browser-side onError
+        // fallback contract on every public `<img>`. R24-M1 closes the
+        // equivalent server-side fallback contract on the only remaining
+        // sized-derivative-only consumer (per-photo OG generator). The
+        // encoder atomic-rename contract guarantees every configured size
+        // for `processed = true` photos eventually exists; the fallback
+        // chain bridges the transient backfill / reconfigure window.
+        //
         // next/og (Satori) fetches images by HTTP — use origin from request.
-        const nearestSize = findNearestImageSize(config.imageSizes, OG_PHOTO_TARGET_SIZE);
-        const jpegFilename = image.filename_jpeg.replace(/\.jpg$/i, `_${nearestSize}.jpg`);
+        // The helper carries the existing 10 s AbortSignal.timeout and the
+        // existing Content-Length / buffer byte caps per attempt.
         const origin = new URL(req.url).origin;
-        const photoUrl = `${origin}/uploads/jpeg/${jpegFilename}`;
-
-        // Fetch the photo and convert to base64 data URL so Satori embeds it
-        // without a second HTTP round-trip during rendering.
-        // C1-BUG-06: 10-second timeout so a hung internal fetch does not hold
-        // the OG request open indefinitely.
-        // C7-PERF-01: guard against oversized responses before buffering.
-        const photoRes = await fetch(photoUrl, { signal: AbortSignal.timeout(10000) });
-        if (!photoRes.ok) {
+        const fetched = await pickFirstAvailablePhotoBuffer(
+            origin,
+            image.filename_jpeg,
+            config.imageSizes,
+        );
+        if (!fetched) {
             rollbackOgAttempt(ip);
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
-        const contentLength = photoRes.headers.get('Content-Length');
-        if (contentLength && parseInt(contentLength, 10) > OG_PHOTO_MAX_BYTES) {
-            rollbackOgAttempt(ip);
-            return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
-        }
-        const photoBuffer = Buffer.from(await photoRes.arrayBuffer());
-        if (photoBuffer.length > OG_PHOTO_MAX_BYTES) {
-            rollbackOgAttempt(ip);
-            return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
-        }
-        const photoDataUrl = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
+        const photoDataUrl = `data:image/jpeg;base64,${fetched.buffer.toString('base64')}`;
 
         // US-CM08: generate OG as PNG via Satori, then post-process through
         // Sharp to embed the correct ICC profile and re-encode as JPEG.
