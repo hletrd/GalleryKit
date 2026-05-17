@@ -165,10 +165,13 @@
 }
 
 /* Only show P3 badge on P3-capable displays.
-   R8-M3: Firefox lacks `(color-gamut: p3)` MQ support; the `data-display-gamut`
-   attribute is set by `useDisplayCapability` (canvas-P3 probe fallback). */
+   R8-M3 / R10-M10: badge visibility is driven solely by the `data-display-gamut`
+   attribute set by `useDisplayCapability` (layered detection: `screen.colorGamut`
+   API → `(color-gamut: p3)` MQ → conservative srgb for Firefox). The raw
+   `@media (color-gamut: p3)` rule was removed because it short-circuited the
+   Firefox-safe default — leaving it in place could re-introduce the false
+   positives R9-R1 closed if `data-display-gamut` ever fails to populate. */
 .gamut-p3-badge { display: none; }
-@media (color-gamut: p3) { .gamut-p3-badge { display: inline-block; } }
 [data-display-gamut="p3"] .gamut-p3-badge,
 [data-display-gamut="rec2020"] .gamut-p3-badge { display: inline-block; }
 
@@ -241,12 +244,12 @@
    absent. */
 @keyframes lightbox-ken-burns-0 {
   from { transform: var(--kb-start, scale(1) translate(0%, 0%)); }
-  to   { transform: var(--kb-end, scale(1.08) translate(-2%, -2%)); }
+  to   { transform: var(--kb-end, scale(1.03) translate(-2%, -2%)); }
 }
 
 @keyframes lightbox-ken-burns-1 {
   from { transform: var(--kb-start, scale(1) translate(0%, 0%)); }
-  to   { transform: var(--kb-end, scale(1.08) translate(2%, 2%)); }
+  to   { transform: var(--kb-end, scale(1.03) translate(2%, 2%)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
