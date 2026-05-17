@@ -128,9 +128,18 @@ describe('cycle 3 RPF / download route source-contracts', () => {
         expect(DOWNLOAD_ROUTE_SRC).toMatch(
             /replace\(\/\[\^a-zA-Z0-9\.\]\/g,\s*['"]['"]\)/,
         );
-        // The interpolated downloadName must use the sanitized variable, not
-        // the raw `ext`.
-        expect(DOWNLOAD_ROUTE_SRC).toMatch(/`photo-\$\{imageId\}\$\{safeExt\}`/);
+        // R17-L5: the interpolated downloadName must flow through
+        // `buildDownloadFilename` so paid-download recipients get the same
+        // slug-form filename as gallery downloads (R12-M2). The slug path
+        // never receives the raw `ext`, but does receive a `safeExt`-
+        // derived value with the leading dot stripped (the helper expects
+        // ext without a leading dot).
+        expect(DOWNLOAD_ROUTE_SRC).toMatch(/buildDownloadFilename\(\s*image\.title\s*,\s*imageId\s*,\s*extNoDot\s*\)/);
+        // The legacy `photo-${imageId}${safeExt}` literal must NOT be the
+        // current downloadName path — `buildDownloadFilename` produces the
+        // same shape when title is empty, but the literal interpolation
+        // would skip the slug branch entirely.
+        expect(DOWNLOAD_ROUTE_SRC).not.toMatch(/const\s+downloadName\s*=\s*`photo-\$\{imageId\}\$\{safeExt\}`/);
     });
 
     it('P262-05: lstat runs BEFORE the atomic single-use claim', () => {

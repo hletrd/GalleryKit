@@ -23,6 +23,7 @@ import { images, entitlements } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { verifyTokenAgainstHash, hashToken, isValidTokenShape } from '@/lib/download-tokens';
+import { buildDownloadFilename } from '@/lib/download-filename';
 import { UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
 import path from 'path';
 import { createReadStream } from 'fs';
@@ -135,8 +136,13 @@ export async function GET(
     // path). Order: lstat + realpath traversal check → atomic claim → stream.
     //
     // Fetch the image filename so we can resolve the file path.
+    // R17-L5: also fetch `title` so the Content-Disposition filename can
+    // carry the same slug shape the gallery download path produces via
+    // `buildDownloadFilename` (R12-M2). Paid-download customers downloading
+    // multiple favorites otherwise end up with indistinguishable
+    // `photo-{id}.jpg` files in their Downloads folder.
     const [image] = await db
-        .select({ filename_original: images.filename_original })
+        .select({ filename_original: images.filename_original, title: images.title })
         .from(images)
         .where(eq(images.id, imageId))
         .limit(1);
@@ -221,7 +227,14 @@ export async function GET(
         // (`.jpg`, `.heic`, `.cr3`, etc.) easily fits this envelope.
         const rawExt = path.extname(image.filename_original) || '.jpg';
         const safeExt = rawExt.replace(/[^a-zA-Z0-9.]/g, '').slice(0, 8) || '.jpg';
-        const downloadName = `photo-${imageId}${safeExt}`;
+        // R17-L5: use the same slug-form filename the gallery download
+        // path produces (R12-M2). When `image.title` is empty / CJK-only /
+        // slugifies to empty, `buildDownloadFilename` returns
+        // `photo-{id}.{ext}` — identical to the legacy shape, so no
+        // regression for SKUs that prefer anonymous filenames.
+        // `buildDownloadFilename` expects ext WITHOUT leading dot.
+        const extNoDot = safeExt.replace(/^\.+/, '');
+        const downloadName = buildDownloadFilename(image.title, imageId, extNoDot);
 
         // D-101-10: RFC 6266 + RFC 5987 encode the saved filename so a
         // non-ASCII extension (today rare, future-possible if user
