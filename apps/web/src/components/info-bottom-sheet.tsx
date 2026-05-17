@@ -22,6 +22,7 @@ import WideGamutHint from '@/components/wide-gamut-hint';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { buildDownloadFilename } from '@/lib/download-filename';
 
 interface InfoBottomSheetProps {
     image: ImageDetail;
@@ -162,6 +163,17 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     const downloadExt = image.filename_jpeg ? image.filename_jpeg.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
     const avifDownloadHref = image.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
+    // R16-M1 / R12-M2: mobile bottom-sheet download anchors must use the
+    // photographer-friendly slugified filename (R12-M2 wired this into the
+    // desktop photo-viewer but missed the mobile bottom sheet, leaving
+    // phone-recipient downloads named `photo-{id}.{ext}` — indistinguishable
+    // when the user grabs 8 favorites from a wedding share).
+    const downloadNameJpeg = image.filename_jpeg
+        ? buildDownloadFilename(image.title, image.id, downloadExt)
+        : null;
+    const downloadNameAvif = image.filename_avif
+        ? buildDownloadFilename(image.title, image.id, 'avif')
+        : null;
     const isWideGamutSource = isWideGamutPrimary(image.color_primaries);
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
@@ -347,7 +359,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                     <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                         <a
                                                             href={downloadHref}
-                                                            download={`photo-${image.id}.${downloadExt}`}
+                                                            download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                             className="flex flex-col"
                                                         >
                                                             <span>{t('viewer.downloadSrgbJpeg')}</span>
@@ -357,7 +369,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                     <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                         <a
                                                             href={avifDownloadHref}
-                                                            download={`photo-${image.id}.avif`}
+                                                            download={downloadNameAvif ?? `photo-${image.id}.avif`}
                                                             className="flex flex-col"
                                                         >
                                                             <span>{t('viewer.downloadP3Avif')}</span>
@@ -370,7 +382,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                             <Button asChild className="w-full gap-2 min-h-11">
                                                 <a
                                                     href={downloadHref}
-                                                    download={`photo-${image.id}.${downloadExt}`}
+                                                    download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                 >
                                                     <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
                                                 </a>
@@ -566,7 +578,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                     <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                         <a
                                                             href={downloadHref}
-                                                            download={`photo-${image.id}.${downloadExt}`}
+                                                            download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                             className="flex flex-col"
                                                         >
                                                             <span>{t('viewer.downloadSrgbJpeg')}</span>
@@ -576,7 +588,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                                     <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                         <a
                                                             href={avifDownloadHref}
-                                                            download={`photo-${image.id}.avif`}
+                                                            download={downloadNameAvif ?? `photo-${image.id}.avif`}
                                                             className="flex flex-col"
                                                         >
                                                             <span>{t('viewer.downloadP3Avif')}</span>
@@ -589,7 +601,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                             <Button asChild className="w-full gap-2 min-h-11">
                                                 <a
                                                     href={downloadHref}
-                                                    download={`photo-${image.id}.${downloadExt}`}
+                                                    download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                 >
                                                     <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
                                                 </a>
