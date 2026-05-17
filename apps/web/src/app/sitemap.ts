@@ -13,7 +13,7 @@ export const revalidate = 3600;
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
-import { localizeUrl } from '@/lib/locale-path';
+import { localizePath, localizeUrl } from '@/lib/locale-path';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
@@ -92,10 +92,28 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.5,
   }];
 
+  // R19-L3: per-topic feed entries. Each topic ships a per-locale feed at
+  // `/{locale}/{topic}/feed.xml`; without these sitemap rows
+  // sitemap-first aggregators (Inoreader, Feedly auto-discovery) cannot
+  // see them. Reuses `topic.last_image_updated_at` from getTopics()
+  // (already projected by R18-M1) so freshness signals match the topic
+  // page's `<lastmod>`.
+  const topicFeedEntries: MetadataRoute.Sitemap = topics.flatMap((topic) =>
+    LOCALES.map((locale) => ({
+      url: `${BASE_URL}${localizePath(locale, `/${topic.slug}/feed.xml`)}`,
+      lastModified: topic.last_image_updated_at
+        ? new Date(topic.last_image_updated_at)
+        : undefined,
+      changeFrequency: 'daily' as const,
+      priority: 0.4,
+    }))
+  );
+
   return [
     ...homepageEntries,
     ...topicEntries,
     ...imageEntries,
     ...feedEntry,
+    ...topicFeedEntries,
   ];
 }
