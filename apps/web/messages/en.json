@@ -335,6 +335,7 @@
     "transferPq": "PQ (ST 2084)",
     "transferHlg": "HLG",
     "transferLinear": "Linear",
+    "transferGamma24": "Gamma 2.4 (BT.1886)",
     "transferGamma26": "Gamma 2.6",
     "colorPipelineDecision": "Color pipeline",
     "hdrBadge": "HDR-capable",

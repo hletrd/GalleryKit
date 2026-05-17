@@ -335,6 +335,7 @@
     "transferPq": "PQ (ST 2084)",
     "transferHlg": "HLG",
     "transferLinear": "리니어",
+    "transferGamma24": "감마 2.4 (BT.1886)",
     "transferGamma26": "감마 2.6",
     "colorPipelineDecision": "색상 파이프라인",
     "hdrBadge": "HDR 지원",

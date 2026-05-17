@@ -22,7 +22,7 @@ export interface ColorSignals {
     /** Color primaries inferred from ICC name or nclx box. */
     colorPrimaries: 'bt709' | 'p3-d65' | 'dci-p3' | 'adobergb' | 'prophoto' | 'bt2020' | 'unknown';
     /** Transfer function inferred from ICC description + bit depth. */
-    transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma26' | 'pq' | 'hlg' | 'linear' | 'unknown';
+    transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma24' | 'gamma26' | 'pq' | 'hlg' | 'linear' | 'unknown';
     /** Matrix coefficients inferred from ICC / container metadata. */
     matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'bt2020-cl' | 'identity' | 'unknown';
     /** Whether the image is HDR (PQ or HLG transfer). */
@@ -182,8 +182,16 @@ const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     7: 'gamma22', // SMPTE 240M
     8: 'linear',   // ITU-T H.273 linear transfer characteristic
     13: 'srgb',    // sRGB IEC 61966-2-1 (was wrongly mapped to 'pq')
-    14: 'gamma22', // BT.2020 10-bit (was wrongly mapped to 'hlg')
-    15: 'gamma22', // BT.2020 12-bit
+    // R10-M9: ITU-T H.273 values 14 and 15 (BT.2020 10/12-bit SDR) use the
+    // BT.2020-NCL transfer characteristic. In production this is rendered
+    // as BT.1886 (display gamma 2.4) on broadcast / SDR-mastering monitors,
+    // not gamma 2.2. The previous mapping to 'gamma22' under-represented
+    // the actual mastering intent. Closest single-curve label we expose is
+    // 'gamma24' (BT.1886 with default L_b=0). Photographers shipping
+    // Rec.2020 SDR exports out of DaVinci Resolve / Final Cut will get the
+    // correct admin-side label.
+    14: 'gamma24', // BT.2020 10-bit (BT.1886 / gamma 2.4)
+    15: 'gamma24', // BT.2020 12-bit (BT.1886 / gamma 2.4)
     16: 'pq',      // PQ / SMPTE ST 2084 (was missing)
     17: 'gamma26', // SMPTE ST 428-1 (DCI-P3 gamma 2.6)
     18: 'hlg',     // ARIB STD-B67 (was wrongly mapped to 'gamma18')

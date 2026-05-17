@@ -39,7 +39,7 @@ function makeT(messages: FlatMessages): (key: string) => string {
     return (key: string) => messages[key] ?? key;
 }
 
-const TRANSFER_VALUES = ['srgb', 'gamma22', 'gamma18', 'pq', 'hlg', 'linear'] as const;
+const TRANSFER_VALUES = ['srgb', 'gamma22', 'gamma18', 'gamma24', 'gamma26', 'pq', 'hlg', 'linear'] as const;
 
 describe('humanizeTransferFunction — i18n contract', () => {
     describe('English locale', () => {
@@ -77,6 +77,8 @@ describe('humanizeTransferFunction — i18n contract', () => {
             // Korean photographers see "감마 2.2" rather than "Gamma 2.2".
             expect(humanizeTransferFunction('gamma22', t)).toBe('감마 2.2');
             expect(humanizeTransferFunction('gamma18', t)).toBe('감마 1.8');
+            expect(humanizeTransferFunction('gamma24', t)).toBe('감마 2.4 (BT.1886)');
+            expect(humanizeTransferFunction('gamma26', t)).toBe('감마 2.6');
             expect(humanizeTransferFunction('linear', t)).toBe('리니어');
         });
     });

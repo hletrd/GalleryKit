@@ -60,6 +60,7 @@ export function humanizeTransferFunction(
         case 'pq': return t('viewer.transferPq');
         case 'hlg': return t('viewer.transferHlg');
         case 'linear': return t('viewer.transferLinear');
+        case 'gamma24': return t('viewer.transferGamma24');
         case 'gamma26': return t('viewer.transferGamma26');
         default: return '';
     }

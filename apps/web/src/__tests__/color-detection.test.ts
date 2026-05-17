@@ -248,15 +248,20 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
-    it('maps nclx transfer=14 to gamma22', async () => {
+    // R10-M9: ITU-T H.273 values 14 (BT.2020 10-bit) and 15 (BT.2020
+    // 12-bit) carry the BT.2020-NCL transfer characteristic, which on
+    // SDR/broadcast monitors is rendered as BT.1886 (display gamma 2.4),
+    // not gamma 2.2. Mapping them to 'gamma24' surfaces the correct
+    // mastering intent in the admin audit panel.
+    it('maps nclx transfer=14 to gamma24 (BT.2020 10-bit / BT.1886)', async () => {
         const signals = await detectFromNclx(9, 14, 9);
-        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.transferFunction).toBe('gamma24');
         expect(signals.isHdr).toBe(false);
     });
 
-    it('maps nclx transfer=15 to gamma22', async () => {
+    it('maps nclx transfer=15 to gamma24 (BT.2020 12-bit / BT.1886)', async () => {
         const signals = await detectFromNclx(9, 15, 9);
-        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.transferFunction).toBe('gamma24');
         expect(signals.isHdr).toBe(false);
     });
 
