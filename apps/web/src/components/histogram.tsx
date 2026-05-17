@@ -92,6 +92,17 @@ function getSupportsCanvasP3(): boolean {
     return _cachedSupportsCanvasP3;
 }
 
+// R15-L3 / R11-L2: hoist the P3 context options literal to module scope so
+// `computeHistogramAsync` does not re-allocate the object on every call. The
+// histogram recomputes on photo-change / format-change / window-resize; the
+// allocation cost is trivial, but the bigger win is that the call site now
+// reads as a declarative branch between two named configurations rather than
+// a runtime literal construction. The corresponding sRGB branch is `undefined`
+// (default context) and stays inline since there's no allocation to hoist.
+const P3_CTX_OPTIONS: CanvasRenderingContext2DSettings = {
+    colorSpace: 'display-p3' as PredefinedColorSpace,
+};
+
 interface HistogramProps {
     /**
      * R7-M7: callers MUST pass a sized variant URL (e.g. `_640.jpg`) not the
@@ -201,10 +212,10 @@ function computeHistogramAsync(
     // coefficients correct in the worker.
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
     const supportsP3 = getSupportsCanvasP3();
+    // R15-L3 / R11-L2: reuse the module-scope P3_CTX_OPTIONS constant rather
+    // than allocating a fresh `{ colorSpace: 'display-p3' }` literal per call.
     const ctxOptions: CanvasRenderingContext2DSettings | undefined =
-        isWideGamut && supportsP3
-            ? { colorSpace: 'display-p3' as PredefinedColorSpace }
-            : undefined;
+        isWideGamut && supportsP3 ? P3_CTX_OPTIONS : undefined;
     const ctx = canvas.getContext('2d', ctxOptions);
     if (!ctx) {
         return Promise.resolve({
