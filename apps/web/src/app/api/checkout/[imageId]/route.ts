@@ -35,6 +35,12 @@ import {
 } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
+// R20-L2: pin the route to the Node runtime explicitly. The Stripe SDK
+// imports node-only modules (`crypto`, `https`); a future Next.js default
+// flip to the Edge runtime, or a bundler heuristic miss, would otherwise
+// break `getStripe()` at import time. Matches the convention used by every
+// other paid-flow route in the repo (download, og, og/photo, search/semantic).
+export const runtime = 'nodejs';
 
 const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
