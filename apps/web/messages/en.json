@@ -647,7 +647,8 @@
     "photosInTopic": "Photos in {topic} category"
   },
   "smartCollection": {
-    "ogDescription": "Photos in {name} — {site}"
+    "ogDescription": "Photos in {name} — {site}",
+    "notFoundTitle": "Collection not found"
   },
   "error": {
     "title": "Error",
