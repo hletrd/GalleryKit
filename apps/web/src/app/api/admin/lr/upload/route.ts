@@ -163,6 +163,13 @@ export const POST = withAdminAuth(
             colorSignals: data.colorSignals,
         });
 
+        // R18-M2: bump audit-log failure severity from console.debug to
+        // console.warn so log shippers (Datadog/Loki) retain the line for
+        // post-incident triage. The token-bearing publish-plugin path is
+        // the high-trust audit surface — silently dropping audit failures
+        // makes "who uploaded image #N" unanswerable for multi-photographer
+        // studios. Structured payload mirrors the cycle 5-8 webhook log
+        // shape so operators can grep by imageId during forensics.
         await logAuditEvent(
             tokenUserId,
             'lr_token_used',
@@ -170,7 +177,14 @@ export const POST = withAdminAuth(
             String(imageId),
             ip,
             { topic: topicSlug, filename: fileEntry.name },
-        ).catch(console.debug);
+        ).catch((err) => {
+            console.warn('LR upload: audit log insert failed', {
+                userId: tokenUserId,
+                imageId,
+                action: 'lr_token_used',
+                err,
+            });
+        });
 
         revalidateAllAppData();
 
