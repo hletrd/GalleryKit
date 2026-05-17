@@ -199,6 +199,10 @@ const adminSelectFields = {
     topic: images.topic,
     capture_date: images.capture_date,
     created_at: images.created_at,
+    // R17-M2: expose updated_at to the Atom feed and any future
+    // freshness-aware consumer. Already on the schema and onUpdateNow(),
+    // so it's a zero-cost addition. Public-safe (no PII).
+    updated_at: images.updated_at,
     // EXIF
     camera_model: images.camera_model,
     lens_model: images.lens_model,
@@ -642,6 +646,38 @@ export async function getImagesLite(topic?: string, tagSlugs?: string[], limit: 
     }
     const offset = Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0);
     return query.limit(effectiveLimit).offset(offset);
+}
+
+/**
+ * R17-M3: Atom feed data helper.
+ *
+ * The masonry/gallery listings sort by `capture_date DESC` so the photo
+ * grid reflects the photographer's storytelling order. RSS / Atom
+ * syndication, however, follows publication-time convention: subscribers
+ * expect the freshest UPLOADS (and freshest EDITS, per R17-M2) at the
+ * top of the feed, not the freshest captures. A 5-year-old archive shot
+ * uploaded today should appear at the top of the feed.
+ *
+ * We select the same `publicSelectFields` so no PII leaks, but order by
+ * `updated_at DESC, created_at DESC, id DESC` and we always filter to
+ * processed = true (no half-rendered photos in the feed).
+ */
+export async function getImagesForFeed(limit: number, topicSlug?: string) {
+    const safeLimit = Math.max(1, Math.min(Math.floor(limit) || 0, LISTING_QUERY_LIMIT_PLUS_ONE));
+    const where = topicSlug && isValidSlug(topicSlug)
+        ? and(eq(images.processed, true), eq(images.topic, topicSlug))
+        : eq(images.processed, true);
+    return db.select({
+        ...publicSelectFields,
+        tag_names: tagNamesAgg,
+    })
+        .from(images)
+        .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+        .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .where(where)
+        .groupBy(images.id)
+        .orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
+        .limit(safeLimit);
 }
 
 export function normalizePaginatedRows<T extends { total_count: number | null }>(
