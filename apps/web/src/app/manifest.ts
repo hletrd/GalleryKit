@@ -12,6 +12,13 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     description: seo.description,
     start_url: '/',
     display: 'standalone',
+    // R18-L4: declare display_override so Chromium 96+ installability
+    // heuristic recognizes window-controls-overlay capability. Falls back
+    // to 'standalone' on browsers without WCO support.
+    display_override: ['window-controls-overlay', 'standalone'],
+    // R18-L4: PWA categories (W3C Web App Manifest spec) help app-store-
+    // style listings (Chrome Web Store, Edge Apps) classify the install.
+    categories: ['photo', 'photography', 'lifestyle'],
     background_color: '#09090b',
     theme_color: '#09090b',
     icons: [
