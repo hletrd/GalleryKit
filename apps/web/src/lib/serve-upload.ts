@@ -31,8 +31,17 @@ const CONTENT_TYPES: Record<string, string> = {
 /**
  * Shared handler for serving uploaded image files with security checks.
  * Used by both /uploads/[...path] and /[locale]/uploads/[...path] routes.
+ *
+ * The optional `ifNoneMatch` argument lets the route handler pass the
+ * incoming `If-None-Match` header so we can answer a 304 Not Modified
+ * when the cached client copy still matches. R11-M1: the Service Worker
+ * now sends `If-None-Match` on its HEAD revalidate; honouring it here
+ * lets the negotiated-cache short-circuit avoid a full response body.
  */
-export async function serveUploadFile(pathSegments: string[]): Promise<NextResponse> {
+export async function serveUploadFile(
+    pathSegments: string[],
+    ifNoneMatch?: string | null,
+): Promise<NextResponse> {
     if (!Array.isArray(pathSegments) || pathSegments.length < 2) {
         return new NextResponse('Not found', { status: 404 });
     }
@@ -110,6 +119,26 @@ export async function serveUploadFile(pathSegments: string[]): Promise<NextRespo
         const config = await getGalleryConfig();
         const settingsHash = await getColorSettingsHash(config);
         const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
+
+        // R11-M1: HTTP-conditional GET. If the client's If-None-Match
+        // matches the freshly-computed ETag, return 304 Not Modified
+        // with no body. The Cache-Control + ETag headers are still
+        // emitted so the client can update its freshness timer.
+        // Header parsing handles both single-tag (`W/"v6-..."`) and
+        // comma-separated tag lists (`W/"a", W/"b"`).
+        if (ifNoneMatch) {
+            const tags = ifNoneMatch.split(',').map((t) => t.trim());
+            if (tags.includes('*') || tags.includes(etag)) {
+                return new NextResponse(null, {
+                    status: 304,
+                    headers: {
+                        'ETag': etag,
+                        'Cache-Control': 'public, max-age=3600, must-revalidate',
+                        'X-Content-Type-Options': 'nosniff',
+                    },
+                });
+            }
+        }
 
         // Create stream and convert to web ReadableStream for proper lifecycle management
         // Stream from the resolved (realpath) path, not the original path, to

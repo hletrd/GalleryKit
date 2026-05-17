@@ -57,6 +57,36 @@ describe('serveUploadFile', () => {
         expect(etag).toMatch(new RegExp(`^W/"v${IMAGE_PIPELINE_VERSION}-`));
     });
 
+    it('returns 304 Not Modified when If-None-Match matches current ETag (R11-M1)', async () => {
+        const jpegPath = path.join(uploadRoot, 'jpeg', 'inm.jpg');
+        await fsp.writeFile(jpegPath, 'inm-data');
+
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+        // First request to obtain the live ETag.
+        const first = await serveUploadFile(['jpeg', 'inm.jpg']);
+        const etag = first.headers.get('ETag') ?? '';
+        expect(etag).not.toBe('');
+
+        // Conditional request with the same ETag should short-circuit to 304.
+        const conditional = await serveUploadFile(['jpeg', 'inm.jpg'], etag);
+        expect(conditional.status).toBe(304);
+        // Body must be empty on 304.
+        expect(await conditional.text()).toBe('');
+        // ETag header must still be present so clients can update freshness.
+        expect(conditional.headers.get('ETag')).toBe(etag);
+        // Cache-Control still emitted (matches MDN/HTTP 304 guidance).
+        expect(conditional.headers.get('Cache-Control')).toContain('must-revalidate');
+
+        // Mismatching ETag must still serve the body.
+        const mismatched = await serveUploadFile(['jpeg', 'inm.jpg'], 'W/"stale"');
+        expect(mismatched.status).toBe(200);
+        expect(await mismatched.text()).toBe('inm-data');
+
+        // Wildcard If-None-Match also triggers 304 per RFC 7232.
+        const wildcard = await serveUploadFile(['jpeg', 'inm.jpg'], '*');
+        expect(wildcard.status).toBe(304);
+    });
+
     it('rejects extension/directory mismatches', async () => {
         const { serveUploadFile } = await import('@/lib/serve-upload');
 

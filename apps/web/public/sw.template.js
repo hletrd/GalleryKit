@@ -162,10 +162,24 @@ async function staleWhileRevalidateImage(request) {
     // load. Do a cheap HEAD revalidation against the cached ETag; if the
     // server's ETag differs, serve the network response synchronously
     // instead of returning the stale cache entry.
+    //
+    // R11-M1: send If-None-Match so the server can answer 304 when the
+    // cached entry is still authoritative. A 304 short-circuits the
+    // revalidate body fetch entirely. A 200 (with or without a
+    // differing ETag) means the cache is stale, so we wait for the
+    // background revalidate and serve the network response.
     const cachedEtag = cached.headers.get('ETag');
     if (cachedEtag) {
       try {
-        const head = await fetch(request.clone(), { method: 'HEAD' });
+        const head = await fetch(request.url, {
+          method: 'HEAD',
+          headers: { 'If-None-Match': cachedEtag },
+        });
+        if (head.status === 304) {
+          // Server confirms cache is fresh — serve cached, skip revalidate.
+          revalidate.catch(() => {});
+          return cached;
+        }
         if (head.ok) {
           const networkEtag = head.headers.get('ETag');
           if (networkEtag && networkEtag !== cachedEtag) {
