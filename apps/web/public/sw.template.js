@@ -155,6 +155,28 @@ async function staleWhileRevalidateImage(request) {
     .catch(() => null);
 
   if (cached) {
+    // R10-H3: when admin flips a color-impacting setting the server-side ETag
+    // changes immediately. Without this check the SW would serve old cached
+    // bytes for one full visit cycle and only update on the next, leaving
+    // the photographer's audience seeing visibly stale colors for one extra
+    // load. Do a cheap HEAD revalidation against the cached ETag; if the
+    // server's ETag differs, serve the network response synchronously
+    // instead of returning the stale cache entry.
+    const cachedEtag = cached.headers.get('ETag');
+    if (cachedEtag) {
+      try {
+        const head = await fetch(request.clone(), { method: 'HEAD' });
+        if (head.ok) {
+          const networkEtag = head.headers.get('ETag');
+          if (networkEtag && networkEtag !== cachedEtag) {
+            const fresh = await revalidate;
+            if (fresh) return fresh;
+          }
+        }
+      } catch {
+        // HEAD probe failed — fall through to stale-serve below
+      }
+    }
     // Serve stale immediately, revalidate in background
     revalidate.catch(() => {});
     return cached;
