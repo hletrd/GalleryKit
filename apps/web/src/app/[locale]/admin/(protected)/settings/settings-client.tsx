@@ -28,16 +28,53 @@ interface SettingsClientProps {
     hasExistingImages: boolean;
 }
 
+// R10-M14: settings keys whose change actually requires re-running the
+// color-pipeline backfill so existing photo derivatives reflect the new
+// encoder behavior. Changing e.g. the slideshow interval or the
+// quality settings doesn't change color-pipeline output, so the
+// backfill warning should NOT fire on those edits. Without this gate
+// admins learn to ignore the amber banner because it shows on every
+// edit, and then miss it when it actually matters.
+const COLOR_HDR_BACKFILL_KEYS = new Set<string>([
+    'force_srgb_derivatives',
+    'allow_hdr_ingest',
+    'wide_gamut_jpeg_chroma',
+    'sdr_jpeg_chroma',
+    'avif_effort',
+    'wide_gamut_max_source_pixels',
+    // image quality settings DO change the rendered bytes for existing
+    // photos, so include them — they're not strictly color but the
+    // photographer-visible "this edit needs a backfill to take effect on
+    // already-uploaded photos" framing applies the same way.
+    'image_quality_webp',
+    'image_quality_avif',
+    'image_quality_jpeg',
+]);
+
 export function SettingsClient({ initialSettings, hasExistingImages }: SettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
     const defaults = getSettingDefaults();
     const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
+    // R10-M14: also keep the last-committed values in component STATE
+    // (parallel to the existing `initialRef` snapshot used inside the
+    // save callback) so render can compare current vs. baseline without
+    // touching a ref during render (react-hooks/refs lint rule). Updated
+    // alongside `initialRef.current` on successful save.
+    const [baseline, setBaseline] = useState<Record<string, string>>(initialSettings);
     const initialRef = useRef<Record<string, string>>(initialSettings);
 
     const handleChange = (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
     };
+
+    // R10-M14: track whether any backfill-relevant field is dirty (current
+    // value differs from the last committed baseline snapshot). The
+    // amber warning above the image-processing fields surfaces only when
+    // at least one such field has been edited.
+    const hasDirtyBackfillField = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
+        (key) => (settings[key] ?? '') !== (baseline[key] ?? ''),
+    );
 
     const handleSave = () => {
         startTransition(async () => {
@@ -66,6 +103,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     const nextSettings = { ...settings, ...persisted };
                     setSettings(nextSettings);
                     initialRef.current = nextSettings;
+                    setBaseline(nextSettings);
                     toast.success(t('settings.saveSuccess'));
                 } else {
                     toast.error(result.error || t('settings.saveFailed'));
@@ -105,7 +143,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     <CardDescription>{t('settings.imageProcessingDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {hasExistingImages && (
+                    {hasExistingImages && hasDirtyBackfillField && (
                         <div className="rounded-md border border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300">
                             <strong>{t('settings.backfillRequired')}</strong>
                             {' '}
