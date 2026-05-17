@@ -354,6 +354,7 @@
     "colorUnknown": "Unknown",
     "calibrationTooltip": "Display calibration affects color accuracy. Uncalibrated displays may render saturation and white balance differently than the photographer intended.",
     "wideGamutHint": "Your display shows the sRGB version of this photo. The full color gamut is available on {gamut} screens.",
+    "wideGamutHintDismiss": "Dismiss color gamut notice",
     "gainMap": "Gain map",
     "gainMapPresent": "Apple HDR gain map detected",
     "gainMapDeliveredAsSdr": "Delivered as SDR base only — gain map not yet passed through.",
