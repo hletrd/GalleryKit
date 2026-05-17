@@ -90,7 +90,10 @@ export interface AtomFeedInput {
  * The media:content element uses the Yahoo Media RSS namespace.
  */
 function renderAuthorBlock(indent: string, author: AtomAuthor): string {
-    const lines = [`${indent}<author>`, `${indent}  <name>${escapeXml(author.name)}</name>`];
+    // R18-L2: explicit type="text" on <name> per RFC 4287 §3.1.1. Default
+    // is "text" so semantics unchanged; explicit attribute silences W3C
+    // feed validator advisories.
+    const lines = [`${indent}<author>`, `${indent}  <name type="text">${escapeXml(author.name)}</name>`];
     if (author.uri) {
         lines.push(`${indent}  <uri>${escapeXml(author.uri)}</uri>`);
     }
@@ -112,13 +115,21 @@ export function composeAtomFeed(input: AtomFeedInput): string {
 
     const entriesXml = entries.map((entry) => {
         const mediaType = entry.mediaContentType ?? 'image/jpeg';
+        // R18-L2: explicit type="text" on <title> and <summary> (RFC 4287
+        // §3.1.1 default; explicit silences validator advisories).
+        // R18-L1: emit <link rel="enclosure"> alongside <media:content> so
+        // RSS readers that prefetch enclosures (NetNewsWire "download
+        // enclosures", Inoreader "include media") cache photos for offline
+        // viewing. Media RSS coverage is wider but enclosure is the Atom-
+        // native path; emit both.
         const parts = [
             '  <entry>',
             `    <id>${escapeXml(entry.id)}</id>`,
-            `    <title>${escapeXml(entry.title)}</title>`,
+            `    <title type="text">${escapeXml(entry.title)}</title>`,
             `    <updated>${escapeXml(entry.updated)}</updated>`,
-            `    <summary>${escapeXml(entry.summary)}</summary>`,
+            `    <summary type="text">${escapeXml(entry.summary)}</summary>`,
             `    <link rel="alternate" type="text/html" href="${escapeXml(entry.link)}"/>`,
+            `    <link rel="enclosure" type="${escapeXml(mediaType)}" href="${escapeXml(entry.mediaContentUrl)}"/>`,
             `    <media:content url="${escapeXml(entry.mediaContentUrl)}" medium="image" type="${escapeXml(mediaType)}"/>`,
         ];
         if (entry.author) {
@@ -130,15 +141,16 @@ export function composeAtomFeed(input: AtomFeedInput): string {
 
     // R17-M1: emit feed-level <author> per RFC 4287 §4.1.1.
     // R17-M4: emit optional <rights> per RFC 4287 §4.2.10.
+    // R18-L2: explicit type="text" on <title> per RFC 4287 §3.1.1.
     const headLines: string[] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">',
         `  <id>${escapeXml(feedId)}</id>`,
-        `  <title>${escapeXml(feedTitle)}</title>`,
+        `  <title type="text">${escapeXml(feedTitle)}</title>`,
         renderAuthorBlock('  ', feedAuthor),
     ];
     if (feedRights) {
-        headLines.push(`  <rights>${escapeXml(feedRights)}</rights>`);
+        headLines.push(`  <rights type="text">${escapeXml(feedRights)}</rights>`);
     }
     headLines.push(
         `  <updated>${escapeXml(feedUpdated)}</updated>`,

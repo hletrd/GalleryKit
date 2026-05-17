@@ -83,9 +83,9 @@ describe('composeAtomFeed', () => {
         expect(xml).toContain('<id>https://example.com/feed.xml</id>');
     });
 
-    it('includes <title> matching feedTitle', () => {
+    it('includes <title type="text"> matching feedTitle (R18-L2)', () => {
         const xml = composeAtomFeed(BASE_INPUT);
-        expect(xml).toContain('<title>My Gallery</title>');
+        expect(xml).toContain('<title type="text">My Gallery</title>');
     });
 
     it('includes <updated> at feed level', () => {
@@ -116,9 +116,9 @@ describe('composeAtomFeed', () => {
         expect(xml).toContain('<id>https://example.com/en/p/1</id>');
     });
 
-    it('entry has <title>', () => {
+    it('entry has <title type="text"> (R18-L2)', () => {
         const xml = composeAtomFeed(BASE_INPUT);
-        expect(xml).toContain('<title>Sunset at the Park</title>');
+        expect(xml).toContain('<title type="text">Sunset at the Park</title>');
     });
 
     it('entry has <updated>', () => {
@@ -126,9 +126,14 @@ describe('composeAtomFeed', () => {
         expect(xml).toContain('<updated>2024-01-15T10:00:00.000Z</updated>');
     });
 
-    it('entry has <summary>', () => {
+    it('entry has <summary type="text"> (R18-L2)', () => {
         const xml = composeAtomFeed(BASE_INPUT);
-        expect(xml).toContain('<summary>A beautiful sunset photo.</summary>');
+        expect(xml).toContain('<summary type="text">A beautiful sunset photo.</summary>');
+    });
+
+    it('entry has <link rel="enclosure"> for offline-reader prefetch (R18-L1)', () => {
+        const xml = composeAtomFeed(BASE_INPUT);
+        expect(xml).toContain('<link rel="enclosure" type="image/jpeg" href="https://example.com/uploads/jpeg/photo_1536.jpg"/>');
     });
 
     it('entry has <link> to photo page', () => {
@@ -196,7 +201,8 @@ describe('composeAtomFeed', () => {
     it('emits a feed-level <author> per RFC 4287 §4.1.1 (R17-M1)', () => {
         const xml = composeAtomFeed(BASE_INPUT);
         // Feed-level author appears before any <entry> block.
-        expect(xml).toContain('<author>\n    <name>Jane Photographer</name>');
+        // R18-L2: <name> now carries type="text".
+        expect(xml).toContain('<author>\n    <name type="text">Jane Photographer</name>');
         expect(xml).toContain('<uri>https://example.com/</uri>');
         const authorIndex = xml.indexOf('<author>');
         const entryIndex = xml.indexOf('<entry>');
@@ -209,7 +215,8 @@ describe('composeAtomFeed', () => {
             ...BASE_INPUT,
             feedAuthor: { name: 'Anonymous' },
         });
-        expect(xml).toContain('<name>Anonymous</name>');
+        // R18-L2: <name> carries type="text"; substring match still succeeds.
+        expect(xml).toContain('<name type="text">Anonymous</name>');
         // The feed-level author block must not carry a <uri> when none was supplied.
         const authorIdx = xml.indexOf('<author>');
         const authorEndIdx = xml.indexOf('</author>', authorIdx);
@@ -217,17 +224,17 @@ describe('composeAtomFeed', () => {
         expect(authorBlock).not.toContain('<uri>');
     });
 
-    it('emits <rights> when feedRights is supplied (R17-M4)', () => {
+    it('emits <rights type="text"> when feedRights is supplied (R17-M4 + R18-L2)', () => {
         const xml = composeAtomFeed({
             ...BASE_INPUT,
             feedRights: '© 2026 Jane Photographer. All rights reserved.',
         });
-        expect(xml).toContain('<rights>© 2026 Jane Photographer. All rights reserved.</rights>');
+        expect(xml).toContain('<rights type="text">© 2026 Jane Photographer. All rights reserved.</rights>');
     });
 
     it('omits <rights> when feedRights is undefined (R17-M4)', () => {
         const xml = composeAtomFeed(BASE_INPUT);
-        expect(xml).not.toContain('<rights>');
+        expect(xml).not.toContain('<rights');
     });
 
     it('emits per-entry <author> when supplied (R17-L2 forward-looking)', () => {
@@ -235,7 +242,8 @@ describe('composeAtomFeed', () => {
             ...BASE_INPUT,
             entries: [{ ...BASE_ENTRY, author: { name: 'Second Photographer' } }],
         });
-        expect(xml).toContain('<name>Second Photographer</name>');
+        // R18-L2: <name> carries type="text".
+        expect(xml).toContain('<name type="text">Second Photographer</name>');
     });
 
     it('strips C0 control bytes in titles before XML escape (R17-L1 + R17-M1)', () => {
@@ -244,8 +252,9 @@ describe('composeAtomFeed', () => {
             feedTitle: 'Clean\x01Title',
             entries: [{ ...BASE_ENTRY, title: 'Photo\x07Title' }],
         });
-        expect(xml).toContain('<title>CleanTitle</title>');
-        expect(xml).toContain('<title>PhotoTitle</title>');
+        // R18-L2: <title> now carries type="text".
+        expect(xml).toContain('<title type="text">CleanTitle</title>');
+        expect(xml).toContain('<title type="text">PhotoTitle</title>');
         expect(xml).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F]/);
     });
 });
