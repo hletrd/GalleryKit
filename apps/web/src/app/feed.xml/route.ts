@@ -92,6 +92,17 @@ export async function GET() {
         entries,
     });
 
+    // R18-L3: emit Last-Modified so RSS readers honor conditional requests
+    // (If-Modified-Since) and avoid full-body refetch on every poll. The
+    // value derives from the max entry updated timestamp computed above;
+    // bad ISO strings degrade to the current date rather than throwing.
+    let lastModifiedHeader: string;
+    try {
+        lastModifiedHeader = new Date(feedUpdated).toUTCString();
+    } catch {
+        lastModifiedHeader = new Date().toUTCString();
+    }
+
     return new NextResponse(xml, {
         status: 200,
         headers: {
@@ -100,6 +111,8 @@ export async function GET() {
             // R17-L3: pre-emptive Vary so a future locale-aware feed
             // does not poison CDN caches with the wrong locale's titles.
             'Vary': 'Accept-Language',
+            // R18-L3: Last-Modified for client-side conditional GETs.
+            'Last-Modified': lastModifiedHeader,
         },
     });
 }

@@ -95,6 +95,14 @@ export async function GET(
         entries,
     });
 
+    // R18-L3: emit Last-Modified for RSS-reader conditional GETs.
+    let lastModifiedHeader: string;
+    try {
+        lastModifiedHeader = new Date(feedUpdated).toUTCString();
+    } catch {
+        lastModifiedHeader = new Date().toUTCString();
+    }
+
     return new NextResponse(xml, {
         status: 200,
         headers: {
@@ -102,6 +110,8 @@ export async function GET(
             'Cache-Control': CACHE_CONTROL,
             // R17-L3: pre-emptive Vary for future locale-aware feeds.
             'Vary': 'Accept-Language',
+            // R18-L3: Last-Modified for client-side conditional GETs.
+            'Last-Modified': lastModifiedHeader,
         },
     });
 }
