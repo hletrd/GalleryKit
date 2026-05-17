@@ -162,7 +162,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 onChange={(e) => handleChange('image_quality_webp', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_webp')}
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.qualityHint')}</p>
+                            <p className="text-xs text-muted-foreground">{t('settings.qualityHintWebp')}</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="image-quality-avif">{t('settings.avifQuality')}</Label>
@@ -175,7 +175,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 onChange={(e) => handleChange('image_quality_avif', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_avif')}
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.qualityHint')}</p>
+                            <p className="text-xs text-muted-foreground">{t('settings.qualityHintAvif')}</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="image-quality-jpeg">{t('settings.jpegQuality')}</Label>
@@ -188,7 +188,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 onChange={(e) => handleChange('image_quality_jpeg', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_jpeg')}
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.qualityHint')}</p>
+                            <p className="text-xs text-muted-foreground">{t('settings.qualityHintJpeg')}</p>
                         </div>
                     </div>
 
