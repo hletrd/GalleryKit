@@ -37,6 +37,14 @@ const NO_CACHE = {
     'X-Content-Type-Options': 'nosniff',
 };
 
+// R21-L1: pin to Node runtime explicitly. The route uses `db` (mysql2),
+// the Sharp-backed image-processing pipeline (libvips bindings), and
+// the in-process upload queue — all Node-only. A future Next.js
+// default flip to Edge would break the Lightroom publish-plugin's
+// primary integration path with zero in-product diagnostic. Matches
+// the convention established in /api/checkout/[imageId] (R20-L2).
+export const runtime = 'nodejs';
+
 export const POST = withAdminAuth(
     async function POST(request: NextRequest) {
         // Re-verify the X-GalleryKit-Token to access userId for audit

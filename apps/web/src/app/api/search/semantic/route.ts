@@ -44,6 +44,12 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { countCodePoints } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
+// R21-L1: pin to Node runtime explicitly. The route imports `db`
+// (mysql2 — Node-only), `Buffer.from`, and the in-process rate-limit
+// Map (relies on shared process state); none are Edge-compatible.
+// Matches the convention established in /api/checkout/[imageId]
+// (R20-L2) and every other paid-flow / public-API route in the repo.
+export const runtime = 'nodejs';
 
 const NO_STORE_HEADERS = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
