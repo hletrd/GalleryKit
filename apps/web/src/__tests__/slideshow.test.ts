@@ -34,7 +34,7 @@ describe('kenBurnsTransform', () => {
 
     it('variant 0 end zooms and pans negative direction', () => {
         const t = kenBurnsTransform(0, 'end');
-        expect(t).toContain('scale(1.08)');
+        expect(t).toContain('scale(1.03)');
         // pans toward top-right (negative translate)
         expect(t).toContain('translate(-2%, -2%)');
     });
@@ -47,7 +47,7 @@ describe('kenBurnsTransform', () => {
 
     it('variant 1 end zooms and pans positive direction', () => {
         const t = kenBurnsTransform(1, 'end');
-        expect(t).toContain('scale(1.08)');
+        expect(t).toContain('scale(1.03)');
         // pans toward bottom-right (positive translate)
         expect(t).toContain('translate(2%, 2%)');
     });

@@ -68,11 +68,11 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
     if (variant === 0) {
         return phase === 'start'
             ? 'scale(1) translate(0%, 0%)'
-            : 'scale(1.08) translate(-2%, -2%)';
+            : 'scale(1.03) translate(-2%, -2%)';
     }
     return phase === 'start'
         ? 'scale(1) translate(0%, 0%)'
-        : 'scale(1.08) translate(2%, 2%)';
+        : 'scale(1.03) translate(2%, 2%)';
 }
 
 export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount }: LightboxProps) {
