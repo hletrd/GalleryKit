@@ -324,6 +324,11 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                                     sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                     blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
                                                     placeholder="blur"
+                                                    // R16-L3: parity with the primary <img> path above so
+                                                    // legacy photos (no sized derivative) don't block the main
+                                                    // thread during masonry scroll. next/image forwards the
+                                                    // attribute through to the underlying <img>.
+                                                    decoding="async"
                                                 />
                                             );
                                         })()}
