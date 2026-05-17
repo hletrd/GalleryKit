@@ -24,9 +24,15 @@ const OG_PHOTO_MAX_BYTES = 1024 * 1024; // 1 MB — guard against oversized deri
  * Strip Unicode bidi/invisible formatting characters from a display string
  * before embedding it into an OG image. Defense-in-depth: these are already
  * rejected at admin write time, but a cheap strip here closes any future gap.
+ *
+ * R17-L4: also strips C0 control characters (XML-forbidden in document
+ * content; equally inappropriate inside an OG image string — Satori
+ * renders them as missing glyphs or drops them, depending on font).
+ * Mirrors the same defense in `lib/atom-feed.ts` (R17-L1).
  */
+const OG_C0_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
 function sanitizeForOg(value: string): string {
-    return value.replace(UNICODE_FORMAT_CHARS, '');
+    return value.replace(UNICODE_FORMAT_CHARS, '').replace(OG_C0_CONTROL_CHARS, '');
 }
 
 /**
