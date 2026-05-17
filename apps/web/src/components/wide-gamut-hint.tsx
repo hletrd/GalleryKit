@@ -87,7 +87,26 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
 
     if (!mounted || !isWideGamut || !isSrgbDisplay || dismissed) return null;
 
-    const gamutName = humanizeColorPrimaries(colorPrimaries) || t('viewer.colorUnknown');
+    // R10-M8 / R14-M1: the encoder's delivery ceiling for every wide-gamut
+    // source is Display P3 (see process-image.ts decision matrix — Adobe
+    // RGB / ProPhoto / Rec.2020 all encode to P3-10bit AVIF + P3-8bit
+    // WebP/JPEG). Naming the SOURCE gamut as the "available on X screens"
+    // target is misleading: a Display P3 monitor already shows every
+    // pixel the visitor will ever receive, regardless of whether the
+    // source was Rec.2020 or Adobe RGB. The honest framing is:
+    //   - delivered gamut = Display P3 (always)
+    //   - source gamut    = context-only annotation (when source was
+    //                       wider than P3, so the visitor understands
+    //                       what they're missing on a P3 display vs the
+    //                       photographer's master).
+    // For P3 sources we keep the old single-gamut copy; for wider sources
+    // we use the more informative "wideGamutHintWithSource" variant.
+    const deliveryGamutName = 'Display P3';
+    const sourceGamutName = humanizeColorPrimaries(colorPrimaries) || t('viewer.colorUnknown');
+    const sourceIsWiderThanP3 = gamutFamily === 'rec2020' || gamutFamily === 'adobergb' || gamutFamily === 'prophoto';
+    const hintText = sourceIsWiderThanP3
+        ? t('viewer.wideGamutHintWithSource', { gamut: deliveryGamutName, source: sourceGamutName })
+        : t('viewer.wideGamutHint', { gamut: deliveryGamutName });
 
     return (
         <div
@@ -100,7 +119,7 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
             className="mt-2 px-3 py-2 text-xs rounded bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-100 dark:border-amber-700/60 flex items-start gap-2"
         >
             <span className="flex-1">
-                {t('viewer.wideGamutHint', { gamut: gamutName })}
+                {hintText}
             </span>
             <button
                 type="button"
