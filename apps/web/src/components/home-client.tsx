@@ -299,9 +299,19 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                                             photographer. The full-fidelity framing is always available
                                                             in the lightbox / photo viewer where the original aspect
                                                             ratio is preserved. */}
+                                                        {/* R20-M1: use the base JPEG filename for the
+                                                            <picture> fallback rather than the sized derivative.
+                                                            The base file always exists per the encoder
+                                                            atomic-rename contract, so legacy / mid-backfill rows
+                                                            whose `_${smallSize}.jpg` derivative is missing render
+                                                            cleanly instead of producing a broken-tile glyph on
+                                                            the highest-traffic public surface. Modern browsers
+                                                            prefer the AVIF / WebP `<source>` rows via srcset,
+                                                            so this fallback adds no extra bytes. Mirrors the
+                                                            R19-M2 fix on timeline/year. */}
                                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                                         <img
-                                                            src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`)}
+                                                            src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                                             alt={altText}
                                                             width={image.width}
                                                             height={image.height}
