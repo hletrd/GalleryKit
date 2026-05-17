@@ -635,9 +635,18 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
 
     let blurDataUrl: string | null = null;
     try {
+        // R10-L9: blur placeholder is delivered as a data: URL inline in the
+        // page HTML and rendered as a background-image during AVIF/WebP/JPEG
+        // decode. Browsers can't reliably honor an embedded P3 ICC tag on a
+        // base64 data URL, so we explicitly convert pixels to sRGB before
+        // encoding to avoid the brief gamut/saturation flash when a wide-gamut
+        // source's blur is decoded as sRGB but tagged-or-not inconsistently
+        // across engines. JPEG is a 4096-char-capped fallback signal; sRGB is
+        // the only colorspace it's guaranteed to be interpreted in.
         const blurBuffer = await image.clone()
             .resize(16, undefined, { fit: 'inside' })
             .blur(2)
+            .toColorspace('srgb')
             .jpeg({ quality: 40 })
             .toBuffer();
         if (blurBuffer.length > 0) {
@@ -768,8 +777,19 @@ export async function processImageFormats(
         const scale = Math.sqrt(WIDE_GAMUT_MAX_SOURCE_PIXELS / basePixels);
         const targetWidth = Math.max(1, Math.round(baseWidth * scale));
         const tmpPath = path.join(os.tmpdir(), `${path.basename(inputPath)}.${randomUUID().slice(0, 8)}.wi15.tmp`);
+        // R10-H1: write the downscaled intermediate as a TIFF (lossless) and
+        // preserve the source ICC profile via keepIccProfile() so the downstream
+        // rgb16 pipeline interprets pixels in the correct colorspace. Without
+        // this the intermediate is written with NO ICC (Sharp's default strips
+        // metadata), the next read assumes sRGB, and the encoder then "converts"
+        // sRGB → P3 producing washed-out / hue-shifted colors. keepIccProfile is
+        // preferred over withIccProfile('p3') because it preserves the exact
+        // source profile (including DCI-P3's D63 white point) rather than
+        // collapsing every wide-gamut source to Display-P3 D65.
         await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
             .resize({ width: targetWidth, withoutEnlargement: true })
+            .keepIccProfile()
+            .tiff({ compression: 'lzw' })
             .toFile(tmpPath);
         processingInputPath = tmpPath;
         processingBaseWidth = targetWidth;
@@ -919,7 +939,14 @@ export async function processImageFormats(
                         .withIccProfile(targetIcc)
                         .jpeg({
                             quality: qualityJpeg,
-                            chromaSubsampling: isWideGamutSource ? effectiveChroma : effectiveSdrChroma,
+                            // R10-M3: chroma subsampling tracks the TARGET gamut, not the
+                            // source. When force_srgb_derivatives=true, a wide-gamut
+                            // source is converted to sRGB and should follow the SDR
+                            // chroma setting (default 4:2:0) — not the wide-gamut chroma
+                            // setting (default 4:4:4). The previous code keyed off the
+                            // source gamut, so force-sRGB wide-gamut sources got 4:4:4
+                            // regardless of the photographer's `sdr_jpeg_chroma` choice.
+                            chromaSubsampling: targetIcc === 'p3' ? effectiveChroma : effectiveSdrChroma,
                         })
                         .toFile(outputPath);
                 }
