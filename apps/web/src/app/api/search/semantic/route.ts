@@ -72,8 +72,21 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Content-Type validation
-    const contentType = request.headers.get('content-type');
-    if (!contentType?.includes('application/json')) {
+    // R20-L4: tighten from `.includes('application/json')` to a prefix
+    // check so JSON sub-types that don't belong on this endpoint (e.g.
+    // `application/json-patch+json`, `application/ld+json`) are rejected.
+    // The header is lower-cased to handle clients that send
+    // `Application/JSON`. The optional `; charset=utf-8` and similar
+    // parameters still pass because they appear after the media-type.
+    const contentType = request.headers.get('content-type')?.toLowerCase() ?? '';
+    if (!contentType.startsWith('application/json')) {
+        return NextResponse.json({ error: 'Content-Type must be application/json' }, { status: 400, headers: NO_STORE_HEADERS });
+    }
+    // Reject sub-types that incidentally share the `application/json` prefix
+    // (e.g. `application/json-patch`). A valid media-type is followed by `;`,
+    // whitespace, or end-of-string.
+    const afterJson = contentType.slice('application/json'.length);
+    if (afterJson.length > 0 && !/^[\s;]/.test(afterJson)) {
         return NextResponse.json({ error: 'Content-Type must be application/json' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
