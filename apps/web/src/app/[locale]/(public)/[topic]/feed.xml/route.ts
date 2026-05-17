@@ -1,14 +1,26 @@
 import { NextResponse } from 'next/server';
-import { getImagesLite, getSeoSettings, getTopicBySlug } from '@/lib/data';
+import { getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { localizePath } from '@/lib/locale-path';
+import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
 
 const FEED_LIMIT = 50;
 const CACHE_CONTROL = 'public, max-age=600, s-maxage=1800';
+
+function toIso(value: unknown): string | null {
+    if (!value) return null;
+    try {
+        return value instanceof Date
+            ? value.toISOString()
+            : new Date(value as string | number).toISOString();
+    } catch {
+        return null;
+    }
+}
 
 export async function GET(
     _req: Request,
@@ -26,17 +38,13 @@ export async function GET(
     }
 
     const baseUrl = seo.url;
-    const rows = await getImagesLite(topicData.slug, undefined, FEED_LIMIT, 0);
+    // R17-M3: publication-time ordering for the topic feed (same
+    // rationale as the root feed).
+    const rows = await getImagesForFeed(FEED_LIMIT, topicData.slug);
 
     const topicPath = localizePath(locale, `/${topicData.slug}`);
     const feedSelfUrl = `${baseUrl}${topicPath}/feed.xml`;
     const feedAlternateUrl = `${baseUrl}${topicPath}`;
-
-    const feedUpdated = rows[0]?.created_at
-        ? (rows[0].created_at instanceof Date
-            ? rows[0].created_at.toISOString()
-            : new Date(rows[0].created_at).toISOString())
-        : new Date().toISOString();
 
     const entries = rows.map((img) => {
         const photoPath = localizePath(locale, `/p/${img.id}`);
@@ -46,9 +54,10 @@ export async function GET(
         const jpegSized = sizedImageFilename(img.filename_jpeg, 1536);
         const mediaUrl = absoluteImageUrl(`/uploads/jpeg/${jpegSized}`, baseUrl);
 
-        const updatedAt = img.created_at instanceof Date
-            ? img.created_at.toISOString()
-            : new Date(img.created_at).toISOString();
+        // R17-M2: prefer updated_at so admin edits propagate to RSS.
+        const updatedAt = toIso(img.updated_at)
+            ?? toIso(img.created_at)
+            ?? new Date().toISOString();
 
         return {
             id: photoUrl,
@@ -60,12 +69,29 @@ export async function GET(
         };
     });
 
+    // R17-M2: derive feed-level <updated> from max entry timestamp.
+    const feedUpdated = entries.length > 0
+        ? entries.reduce((acc, e) => (e.updated > acc ? e.updated : acc), entries[0].updated)
+        : new Date().toISOString();
+
+    // R17-M4: feed-level <rights>.
+    const siteCopyright = typeof (siteConfig as unknown as { copyright?: unknown }).copyright === 'string'
+        ? ((siteConfig as unknown as { copyright: string }).copyright).trim()
+        : '';
+    const feedRights = siteCopyright || `© ${new Date().getFullYear()} ${seo.author}`;
+
     const xml = composeAtomFeed({
         feedId: feedSelfUrl,
         feedTitle: `${topicData.label} | ${seo.title}`,
         feedSelfUrl,
         feedAlternateUrl,
         feedUpdated,
+        // R17-M1: feed-level <author> required by RFC 4287 §4.1.1.
+        feedAuthor: {
+            name: seo.author,
+            uri: baseUrl || undefined,
+        },
+        feedRights,
         entries,
     });
 
@@ -74,6 +100,8 @@ export async function GET(
         headers: {
             'Content-Type': 'application/atom+xml; charset=utf-8',
             'Cache-Control': CACHE_CONTROL,
+            // R17-L3: pre-emptive Vary for future locale-aware feeds.
+            'Vary': 'Accept-Language',
         },
     });
 }
