@@ -483,18 +483,23 @@ export async function uploadImages(formData: FormData) {
             }
         }
 
-        const totalFailures = failedFiles.length + rawRejectedCount + hdrRejectedCount;
+        // Note: HDR rejections still push into `failedFiles` (legacy behavior
+        // preserved so existing tests + downstream UI keep working). RAW
+        // rejections (R12-H1) are tracked separately in rawRejectedCount /
+        // rawRejectedFiles so they can surface their own specific message.
+        const totalFailures = failedFiles.length + rawRejectedCount;
         if (totalFailures > 0 && successCount === 0) {
             settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
-            // R12-H1: RAW-only rejection takes precedence over the generic
-            // "all uploads failed" — photographers who batch-drop a folder
-            // mixing exports and RAWs need the specific remediation hint.
-            if (rawRejectedCount > 0 && failedFiles.length === 0 && hdrRejectedCount === 0) {
-                return { error: t('rawNotSupported') };
-            }
-            // P3-2: return specific error when HDR ingest is disallowed
-            if (hdrRejectedCount > 0 && failedFiles.length === 0 && rawRejectedCount === 0) {
+            // P3-2: return specific error when ALL failures are HDR-ingest
+            // rejections and there are no other failure categories.
+            if (hdrRejectedCount > 0 && failedFiles.length === hdrRejectedCount && rawRejectedCount === 0) {
                 return { error: t('hdrNotSupported') };
+            }
+            // R12-H1: RAW-only rejection — photographers who batch-drop a
+            // folder mixing exports and RAWs need the specific remediation
+            // hint instead of the generic "all uploads failed."
+            if (rawRejectedCount > 0 && failedFiles.length === 0) {
+                return { error: t('rawNotSupported') };
             }
             return { error: t('allUploadsFailed') };
         }
