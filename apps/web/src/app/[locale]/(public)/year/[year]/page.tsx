@@ -4,10 +4,12 @@ import { getTranslations, getLocale } from 'next-intl/server';
 import { getYearInReviewImages } from '@/lib/data-timeline';
 import { getSeoSettings } from '@/lib/data';
 import { localizePath, localizeUrl, buildHreflangAlternates } from '@/lib/locale-path';
-import { imageUrl } from '@/lib/image-url';
+import { imageUrl, absoluteImageUrl } from '@/lib/image-url';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getGalleryConfig } from '@/lib/gallery-config';
+import { getCspNonce } from '@/lib/csp-nonce';
+import { safeJsonLd } from '@/lib/safe-json-ld';
 import type { Metadata } from 'next';
 
 export const revalidate = 0;
@@ -51,11 +53,13 @@ export default async function YearInReviewPage({
         return notFound();
     }
 
-    const [locale, t, monthSections, config] = await Promise.all([
+    const [locale, t, monthSections, config, seo, nonce] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
         getYearInReviewImages(yearNum),
         getGalleryConfig(),
+        getSeoSettings(),
+        getCspNonce(),
     ]);
 
     const imageSizes = config.imageSizes ?? DEFAULT_IMAGE_SIZES;
@@ -64,8 +68,35 @@ export default async function YearInReviewPage({
         ? imageSizes[1]
         : findNearestImageSize(imageSizes, 1536);
 
+    // R19-L4: schema.org/ImageGallery JSON-LD. Mirrors the timeline /
+    // topic / smart-collection pattern. Emitted only when at least one
+    // month section has photos.
+    const galleryPhotos = monthSections.flatMap((s) => s.images);
+    const galleryLd = galleryPhotos.length > 0 ? {
+        '@context': 'https://schema.org',
+        '@type': 'ImageGallery',
+        name: `${t('yearInReview', { year: yearNum })} | ${seo.title}`,
+        url: localizeUrl(seo.url, locale, `/year/${yearNum}`),
+        image: galleryPhotos.slice(0, 10).map((img) => ({
+            '@type': 'ImageObject',
+            contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, seo.url),
+            thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`, seo.url),
+            name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+        })),
+    } : null;
+    const galleryLdJson = galleryLd ? safeJsonLd(galleryLd) : null;
+
     return (
         <div className="space-y-6">
+            {galleryLdJson && (
+                <script
+                    type="application/ld+json"
+                    nonce={nonce}
+                    // Pattern mirrors apps/web/src/app/[locale]/(public)/[topic]/page.tsx:204-210
+                    // for project-consistent JSON-LD injection through safeJsonLd.
+                    {...{ dangerouslySetInnerHTML: { __html: galleryLdJson } }}
+                />
+            )}
             {/* Back link + heading */}
             <div className="space-y-1">
                 <Link
@@ -134,8 +165,12 @@ export default async function YearInReviewPage({
                                                                 srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
                                                                 sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                             />
+                                                            {/* R19-M2: base JPEG filename for the <picture> fallback,
+                                                                same rationale as timeline/page.tsx — legacy /
+                                                                mid-backfill rows whose `_${smallSize}.jpg` derivative
+                                                                is missing still render cleanly. */}
                                                             <img
-                                                                src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`)}
+                                                                src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                                                 alt={altText}
                                                                 width={photo.width}
                                                                 height={photo.height}

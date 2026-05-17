@@ -3,10 +3,12 @@ import { getTranslations, getLocale } from 'next-intl/server';
 import { getTimelineYears, getTimelineImages } from '@/lib/data-timeline';
 import { getSeoSettings } from '@/lib/data';
 import { localizePath, localizeUrl, buildHreflangAlternates } from '@/lib/locale-path';
-import { imageUrl } from '@/lib/image-url';
+import { imageUrl, absoluteImageUrl } from '@/lib/image-url';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getGalleryConfig } from '@/lib/gallery-config';
+import { getCspNonce } from '@/lib/csp-nonce';
+import { safeJsonLd } from '@/lib/safe-json-ld';
 import type { Metadata } from 'next';
 
 export const revalidate = 0;
@@ -35,11 +37,13 @@ export default async function TimelinePage({
 }) {
     const { year: yearParam } = await searchParams;
 
-    const [locale, t, years, config] = await Promise.all([
+    const [locale, t, years, config, seo, nonce] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
         getTimelineYears(),
         getGalleryConfig(),
+        getSeoSettings(),
+        getCspNonce(),
     ]);
 
     // Validate year param
@@ -68,8 +72,41 @@ export default async function TimelinePage({
     }
     const sortedMonths = [...byMonth.keys()].sort((a, b) => b - a);
 
+    // R19-L4: emit schema.org/ImageGallery JSON-LD so Google's image-search
+    // surface treats the timeline as a gallery rich-result candidate. Mirrors
+    // the homepage / topic / smart-collection pattern. Only emitted when the
+    // page actually has photos to list.
+    const galleryPhotos = sortedMonths.flatMap((month) => byMonth.get(month) ?? []);
+    const galleryUrl = selectedYear !== null
+        ? localizeUrl(seo.url, locale, `/timeline?year=${selectedYear}`)
+        : localizeUrl(seo.url, locale, '/timeline');
+    const galleryLd = galleryPhotos.length > 0 ? {
+        '@context': 'https://schema.org',
+        '@type': 'ImageGallery',
+        name: selectedYear !== null
+            ? `${t('yearInReview', { year: selectedYear })} | ${seo.title}`
+            : `${t('title')} | ${seo.title}`,
+        url: galleryUrl,
+        image: galleryPhotos.slice(0, 10).map((img) => ({
+            '@type': 'ImageObject',
+            contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, seo.url),
+            thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`, seo.url),
+            name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
+        })),
+    } : null;
+    const galleryLdJson = galleryLd ? safeJsonLd(galleryLd) : null;
+
     return (
         <div className="space-y-6">
+            {galleryLdJson && (
+                <script
+                    type="application/ld+json"
+                    nonce={nonce}
+                    // Pattern mirrors apps/web/src/app/[locale]/(public)/[topic]/page.tsx:204-210
+                    // for project-consistent JSON-LD injection through safeJsonLd.
+                    {...{ dangerouslySetInnerHTML: { __html: galleryLdJson } }}
+                />
+            )}
             {/* Page heading */}
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">{t('title')}</h1>
@@ -172,8 +209,16 @@ export default async function TimelinePage({
                                                                 srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
                                                                 sizes="(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                                                             />
+                                                            {/* R19-M2: use the base JPEG filename for the
+                                                                <picture> fallback rather than the sized derivative.
+                                                                The base file always exists per the encoder
+                                                                atomic-rename contract, so legacy / mid-backfill rows
+                                                                whose `_${smallSize}.jpg` derivative is missing render
+                                                                cleanly instead of producing a broken-tile glyph.
+                                                                Modern browsers prefer the AVIF/WebP `<source>` rows
+                                                                via srcset, so this fallback adds no extra bytes. */}
                                                             <img
-                                                                src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`)}
+                                                                src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                                                 alt={altText}
                                                                 width={photo.width}
                                                                 height={photo.height}
