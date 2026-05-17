@@ -10,8 +10,9 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { searchImagesAction } from '@/app/actions';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { useTranslation } from '@/components/i18n-provider';
-import { sizedImageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embeddings';
@@ -20,6 +21,81 @@ import { formatStoredExifDate } from '@/lib/exif-datetime';
 interface SearchProps {
     previewImageSizes?: number[];
     semanticSearchMode?: string;
+}
+
+interface SearchResultItemProps {
+    image: SearchResult;
+    previewImageSizes: number[];
+    locale: string;
+    idx: number;
+    activeIndex: number;
+    onClose: () => void;
+    refCb: (el: HTMLAnchorElement | null) => void;
+    t: ReturnType<typeof useTranslations>;
+}
+
+/**
+ * R23-M1: Per-row search result component so a sized-derivative 404
+ * onError swap to the base JPEG filename can hold per-item state that
+ * survives the parent `<Search>` re-rendering on each keystroke.
+ *
+ * Legacy photos and rows caught mid-backfill after an
+ * `IMAGE_PIPELINE_VERSION` bump may only carry the base `filename_jpeg`
+ * on disk; the encoder atomic-rename contract guarantees the base file
+ * exists. Mirrors the R21-M1 (lightbox) and R22-M1 (per-photo viewer)
+ * fallback pattern.
+ */
+function SearchResultItem({
+    image,
+    previewImageSizes,
+    locale,
+    idx,
+    activeIndex,
+    onClose,
+    refCb,
+    t,
+}: SearchResultItemProps) {
+    const sizedSrc = sizedImageUrl('/uploads/jpeg', image.filename_jpeg, 128, previewImageSizes);
+    const baseSrc = imageUrl(`/uploads/jpeg/${image.filename_jpeg}`);
+    const [imgSrc, setImgSrc] = useState<string>(sizedSrc);
+    const fallbackTriedRef = useRef(false);
+    return (
+        <Link
+            ref={refCb}
+            id={`search-result-${idx}`}
+            role="option"
+            aria-selected={idx === activeIndex}
+            href={localizePath(locale, `/p/${image.id}`)}
+            onClick={onClose}
+            className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
+        >
+            <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
+                <Image
+                    src={imgSrc}
+                    alt={image.title || t('common.photo')}
+                    width={48}
+                    height={48}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    onError={() => {
+                        if (fallbackTriedRef.current) return;
+                        fallbackTriedRef.current = true;
+                        if (imgSrc !== baseSrc) {
+                            setImgSrc(baseSrc);
+                        }
+                    }}
+                />
+            </div>
+            <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm truncate">
+                    {image.title || image.description || `${t('common.photo')} ${image.id}`}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">
+                    {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model, image.lens_model, formatStoredExifDate(image.capture_date, locale)].filter(Boolean).join(' · ')}
+                </p>
+            </div>
+        </Link>
+    );
 }
 
 interface SearchResult {
@@ -291,35 +367,17 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                         {results.length > 0 ? (
                             <div className="p-2" id="search-results" role="listbox" aria-label={t('aria.searchPhotos')}>
                                 {results.map((image, idx) => (
-                                    <Link
+                                    <SearchResultItem
                                         key={image.id}
-                                        ref={(el) => { resultRefs.current[idx] = el; }}
-                                        id={`search-result-${idx}`}
-                                        role="option"
-                                        aria-selected={idx === activeIndex}
-                                        href={localizePath(locale, `/p/${image.id}`)}
-                                        onClick={handleClose}
-                                        className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${idx === activeIndex ? 'bg-muted' : 'hover:bg-muted/50'}`}
-                                    >
-                                        <div className="w-12 h-12 rounded-md overflow-hidden bg-muted shrink-0">
-                                            <Image
-                                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, 128, previewImageSizes)}
-                                                alt={image.title || t('common.photo')}
-                                                width={48}
-                                                height={48}
-                                                className="w-full h-full object-cover"
-                                                loading="lazy"
-                                            />
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <p className="font-medium text-sm truncate">
-                                                {image.title || image.description || `${t('common.photo')} ${image.id}`}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground truncate">
-                                                {[image.topic_label || (image.topic ? image.topic.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null), image.camera_model, image.lens_model, formatStoredExifDate(image.capture_date, locale)].filter(Boolean).join(' \u00b7 ')}
-                                            </p>
-                                        </div>
-                                    </Link>
+                                        image={image}
+                                        previewImageSizes={previewImageSizes}
+                                        locale={locale}
+                                        idx={idx}
+                                        activeIndex={activeIndex}
+                                        onClose={handleClose}
+                                        refCb={(el) => { resultRefs.current[idx] = el; }}
+                                        t={t}
+                                    />
                                 ))}
                             </div>
                         ) : query.trim() ? (
