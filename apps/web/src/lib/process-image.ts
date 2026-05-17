@@ -159,6 +159,38 @@ const ALLOWED_EXTENSIONS = new Set([
     '.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif', '.tiff', '.tif', '.gif', '.bmp'
 ]);
 
+// R12-H1 / R10-L4: known camera-RAW extensions. These get a SPECIFIC
+// "not supported" message in the upload flow rather than the generic
+// "extension not allowed." Photographer-friendly: a drag-drop that mixes
+// the export and the source RAW into the dropzone should clearly say
+// "export to JPEG / TIFF / AVIF first," not just "failed."
+//
+// Reference: dcraw / libraw vendor list, narrowed to formats actively
+// produced by current consumer + pro bodies (Canon CR2/CR3, Nikon NEF/NRW,
+// Sony ARW/SR2/SRF, Fuji RAF, Olympus ORF, Panasonic RW2/RWL, Adobe DNG,
+// Pentax PEF, Samsung SRW, Sigma X3F, Hasselblad 3FR, Mamiya MEF,
+// PhaseOne IIQ, Leaf MOS, Minolta MRW, Kodak KDC, Epson ERF).
+const RAW_EXTENSIONS = new Set([
+    '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf',
+    '.orf', '.rw2', '.rwl', '.dng', '.pef', '.srw', '.x3f', '.3fr',
+    '.mef', '.iiq', '.mos', '.mrw', '.kdc', '.erf',
+]);
+
+/**
+ * R12-H1 / R10-L4: sentinel thrown by getSafeExtension when the upload
+ * is a known camera RAW. uploadImages catches this separately so the
+ * admin UI can surface a specific "RAW not supported — export to
+ * JPEG/TIFF/AVIF first" message instead of a generic "failed" entry.
+ */
+export class RawFileError extends Error {
+    readonly extension: string;
+    constructor(extension: string) {
+        super(`RAW file extension not supported: ${extension}`);
+        this.name = 'RawFileError';
+        this.extension = extension;
+    }
+}
+
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
 // Singleton promise — clears on failure so transient errors don't permanently break uploads.
@@ -183,6 +215,13 @@ function getSafeExtension(filename: string): string {
     let ext = path.extname(filename).toLowerCase();
 
     ext = ext.replace(/[^a-z0-9.]/g, '');
+
+    if (RAW_EXTENSIONS.has(ext)) {
+        // R12-H1 / R10-L4: surface a structured sentinel so uploadImages
+        // can show a specific "RAW not supported" message instead of the
+        // generic "extension not allowed" path.
+        throw new RawFileError(ext);
+    }
 
     if (!ALLOWED_EXTENSIONS.has(ext)) {
         throw new Error(`File extension not allowed: ${ext}`);

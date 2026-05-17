@@ -535,6 +535,8 @@
     "backupFailed": "데이터베이스 백업에 실패했습니다",
     "backupExitedWithCode": "백업이 코드 {code}(으)로 종료되었습니다",
     "hdrNotSupported": "HDR 이미지(PQ/HLG)는 지원하지 않습니다. 이 파일을 업로드하려면 설정에서 'HDR 업로드 허용'을 켜세요.",
+    "rawNotSupported": "카메라 RAW 파일(CR2, CR3, NEF, ARW, RAF, ORF, RW2, DNG 등)은 지원하지 않습니다. JPEG, TIFF, AVIF, HEIF, PNG로 내보낸 뒤 업로드해 주세요.",
+    "rawRejectedWarning": "RAW 파일 {count}개가 거부되었습니다. JPEG, TIFF, AVIF, HEIF, PNG로 내보낸 뒤 다시 업로드해 주세요.",
     "restoreInProgress": "다른 복원 작업이 이미 진행 중입니다",
     "noFileProvided": "파일이 제공되지 않았습니다",
     "fileTooLarge": "파일이 너무 큽니다 (최대 250MB)",

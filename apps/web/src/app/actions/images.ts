@@ -4,7 +4,7 @@ import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { eq, inArray, and } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
@@ -271,6 +271,11 @@ export async function uploadImages(formData: FormData) {
         let hdrRejectedCount = 0;
         let hdrWarningCount = 0;
         let wideGamutDownscaleWarningCount = 0;
+        // R12-H1 / R10-L4: separate RAW rejection counter so the response
+        // can show a specific "RAW not supported — export to JPEG/TIFF/AVIF
+        // first" message instead of a generic "all uploads failed" path.
+        let rawRejectedCount = 0;
+        const rawRejectedFiles: string[] = [];
 
         for (const file of files) {
             // Track saved original filename for cleanup on DB insert failure
@@ -465,17 +470,39 @@ export async function uploadImages(formData: FormData) {
                 if (savedOriginalFilename) {
                     await deleteOriginalUploadFile(savedOriginalFilename);
                 }
-                failedFiles.push(file.name);
+                if (e instanceof RawFileError) {
+                    // R12-H1 / R10-L4: surface RAW rejections in a separate
+                    // bucket so the admin UI can show an actionable "export
+                    // your RAW to JPEG/TIFF/AVIF first" message rather than
+                    // letting the file silently land in the generic failed list.
+                    rawRejectedCount++;
+                    rawRejectedFiles.push(file.name);
+                } else {
+                    failedFiles.push(file.name);
+                }
             }
         }
 
-        if (failedFiles.length > 0 && successCount === 0) {
+        const totalFailures = failedFiles.length + rawRejectedCount + hdrRejectedCount;
+        if (totalFailures > 0 && successCount === 0) {
             settleUploadTrackerClaim(uploadTracker, uploadTrackerKey, files.length, totalSize, successCount, uploadedBytes);
+            // R12-H1: RAW-only rejection takes precedence over the generic
+            // "all uploads failed" — photographers who batch-drop a folder
+            // mixing exports and RAWs need the specific remediation hint.
+            if (rawRejectedCount > 0 && failedFiles.length === 0 && hdrRejectedCount === 0) {
+                return { error: t('rawNotSupported') };
+            }
             // P3-2: return specific error when HDR ingest is disallowed
-            if (hdrRejectedCount > 0) {
+            if (hdrRejectedCount > 0 && failedFiles.length === 0 && rawRejectedCount === 0) {
                 return { error: t('hdrNotSupported') };
             }
             return { error: t('allUploadsFailed') };
+        }
+
+        // R12-H1: when SOME succeeded but RAWs were rejected, emit a warning
+        // alongside the success result so the admin UI can show a banner.
+        if (rawRejectedCount > 0) {
+            warnings.push(t('rawRejectedWarning', { count: rawRejectedCount }));
         }
 
         // Reconcile the pre-claimed quota with the uploads that actually finished.
@@ -499,6 +526,11 @@ export async function uploadImages(formData: FormData) {
             warnings,
             hdrWarningCount,
             wideGamutDownscaleWarningCount,
+            // R12-H1 / R10-L4: surface RAW rejections separately so the UI
+            // can group them under a single "RAW not supported" warning
+            // rather than mixing with disk/decode failures.
+            rawRejectedCount,
+            rawRejectedFiles,
         };
     } finally {
         await uploadContractLock.release();

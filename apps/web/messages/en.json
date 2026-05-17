@@ -535,6 +535,8 @@
     "backupFailed": "Database backup failed",
     "backupExitedWithCode": "Backup exited with code {code}",
     "hdrNotSupported": "HDR images (PQ/HLG) are not supported. Enable 'Allow HDR Ingest' in Settings to upload this file.",
+    "rawNotSupported": "Camera RAW files (CR2, CR3, NEF, ARW, RAF, ORF, RW2, DNG, etc.) are not supported. Please export to JPEG, TIFF, AVIF, HEIF, or PNG before uploading.",
+    "rawRejectedWarning": "{count} camera RAW file(s) were rejected. Export your RAWs to JPEG, TIFF, AVIF, HEIF, or PNG before uploading.",
     "restoreInProgress": "Another restore is already in progress",
     "noFileProvided": "No file provided",
     "fileTooLarge": "File too large (max 250MB)",
