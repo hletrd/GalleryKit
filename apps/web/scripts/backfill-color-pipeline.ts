@@ -8,7 +8,7 @@
  * What it does
  * ────────────
  * Re-processes existing images that were encoded with a pipeline version
- * older than IMAGE_PIPELINE_VERSION (currently 6). For each candidate:
+ * older than IMAGE_PIPELINE_VERSION (currently 7). For each candidate:
  *   - fetches the stored original,
  *   - re-runs processImageFormats() with the current encoder settings
  *     (P3-from-wide mapping, toColorspace + withIccProfile, autoOrient),
@@ -17,8 +17,8 @@
  *
  * Idempotency
  * ───────────
- * Images with pipeline_version >= 6 are skipped by default. Re-running after
- * a successful pass is a no-op (all rows already at version 6).
+ * Images with pipeline_version >= 7 are skipped by default. Re-running after
+ * a successful pass is a no-op (all rows already at version 7).
  *
  * The serve-upload route emits an ETag containing IMAGE_PIPELINE_VERSION
  * (CM-HIGH-5), so once an image is reprocessed any cached client copy

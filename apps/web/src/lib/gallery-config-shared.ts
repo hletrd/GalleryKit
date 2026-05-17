@@ -7,8 +7,18 @@
 
 // ── Pipeline Version ──────────────────────────────────────────────────────────
 
-/** Pipeline version bump invalidates all cached image variants on deploy. */
-export const IMAGE_PIPELINE_VERSION = 6;
+/**
+ * Pipeline version bump invalidates all cached image variants on deploy.
+ *
+ * Increment whenever encoder output bytes change. Recent bumps:
+ * - v6: WI-15 wide-gamut downscale, P3-from-Adobe RGB / ProPhoto / Rec.2020
+ *   rgb16 pipeline, etc.
+ * - v7 (R11-L1, 2026-05-17): cycle-1 R10-H1 (WI-15 ICC preservation),
+ *   R10-M3 (target-gamut JPEG chroma), R10-L9 (sRGB blur pipeline). All
+ *   three alter byte output for wide-gamut sources, so the ETag must
+ *   change once backfill re-encodes affected images.
+ */
+export const IMAGE_PIPELINE_VERSION = 7;
 
 // ── Setting Keys ──────────────────────────────────────────────────────────────
 

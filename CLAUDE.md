@@ -89,7 +89,7 @@ git values must be treated as compromised and must not be reused.
 |------|---------|
 | `apps/web/src/app/actions/` | Server actions for uploads, image CRUD, topics, settings, and admin mutations |
 | `apps/web/src/db/schema.ts` | Drizzle ORM schema with composite indexes |
-| `apps/web/src/lib/process-image.ts` | Sharp pipeline (parallel AVIF/WebP/JPEG, ICC parsing, bounds checks). `IMAGE_PIPELINE_VERSION = 6` |
+| `apps/web/src/lib/process-image.ts` | Sharp pipeline (parallel AVIF/WebP/JPEG, ICC parsing, bounds checks). `IMAGE_PIPELINE_VERSION = 7` |
 | `apps/web/src/lib/color-detection.ts` | NCLX `colr` ISOBMFF walker + ICC heuristic + gain-map + ICC chromaticity unifier |
 | `apps/web/src/lib/color-primaries.ts` | Client-safe `WIDE_GAMUT_PRIMARIES` set + `isWideGamutPrimary` helper |
 | `apps/web/src/lib/color-pipeline-decisions.ts` | Canonical `COLOR_PIPELINE_DECISIONS` enum + `isP3Pipeline` predicate (client-safe) |
@@ -134,7 +134,7 @@ git values must be treated as compromised and must not be reused.
 | `matrix_coefficients` | NCLX | admin-only |
 | `is_hdr` | Derived from `transfer_function in ('pq', 'hlg')` | admin-only — UI badge gates on `transfer_function` (both fields are admin-only anyway) |
 | `has_gain_map` | Apple HDR gain map detection in HEIF `iinf`/`iref` (P4-A1) | admin-only |
-| `pipeline_version` | Encoder version used to produce derivatives (current: 6) | admin-only |
+| `pipeline_version` | Encoder version used to produce derivatives (current: 7) | admin-only |
 
 ## Image Upload Flow
 
