@@ -1,4 +1,4 @@
-import { getImageIdsForSitemap, getTopics } from '@/lib/data';
+import { getImageIdsForSitemap, getLatestImageUpdatedAt, getTopics } from '@/lib/data';
 import { MetadataRoute } from 'next';
 
 // AGG8F-02 / plan-234: drop `force-dynamic` so the existing `revalidate = 3600`
@@ -31,8 +31,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // is preferable to a 5xx on /sitemap.xml that would teach crawlers to back off.
   let topics: Awaited<ReturnType<typeof getTopics>> = [];
   let images: Awaited<ReturnType<typeof getImageIdsForSitemap>> = [];
+  // R18-M1: site-wide `MAX(images.updated_at)` for the homepage entries'
+  // `<lastmod>`. Googlebot uses lastmod as a published crawl-prioritization
+  // signal ("We use lastmod to detect fresh content"). Cached via the route's
+  // `revalidate = 3600` ISR window.
+  let homepageLastModified: Date | null = null;
   try {
-    topics = await getTopics();
+    [topics, homepageLastModified] = await Promise.all([
+      getTopics(),
+      getLatestImageUpdatedAt(),
+    ]);
     const reservedLocalizedUrls = LOCALES.length * (1 + topics.length);
     const imageBudget = Math.max(
       0,
@@ -43,10 +51,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn('[sitemap] falling back to homepage-only sitemap:', err);
     topics = [];
     images = [];
+    homepageLastModified = null;
   }
 
   const homepageEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
     url: localizeUrl(BASE_URL, locale, '/'),
+    lastModified: homepageLastModified ? new Date(homepageLastModified) : undefined,
     changeFrequency: 'daily',
     priority: 1,
   }));
@@ -54,6 +64,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const topicEntries: MetadataRoute.Sitemap = topics.flatMap((topic) =>
     LOCALES.map((locale) => ({
       url: localizeUrl(BASE_URL, locale, `/${topic.slug}`),
+      lastModified: topic.last_image_updated_at
+        ? new Date(topic.last_image_updated_at)
+        : undefined,
       changeFrequency: 'weekly' as const,
       priority: 0.8,
     }))
@@ -69,9 +82,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
+  // R18-L6: list the feed itself so sitemap-first aggregators (Inoreader,
+  // Feedly) can auto-discover the syndication channel even when their
+  // HTML-link discovery misses the homepage's <link rel="alternate"> hint.
+  const feedEntry: MetadataRoute.Sitemap = [{
+    url: `${BASE_URL}/feed.xml`,
+    lastModified: homepageLastModified ? new Date(homepageLastModified) : undefined,
+    changeFrequency: 'daily',
+    priority: 0.5,
+  }];
+
   return [
     ...homepageEntries,
     ...topicEntries,
     ...imageEntries,
+    ...feedEntry,
   ];
 }

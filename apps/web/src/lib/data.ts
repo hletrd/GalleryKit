@@ -377,7 +377,40 @@ const _largePayloadGuard: _LargePayloadKeysInPublic extends never ? true : [_Lar
 void _largePayloadGuard;
 
 export async function getTopics() {
-    return db.select().from(topics).orderBy(asc(topics.order));
+    // R18-M1: select `last_image_updated_at` via correlated subquery so
+    // the sitemap homepage/topic entries can emit `<lastmod>` (Googlebot's
+    // documented crawl-prioritization signal). The subquery hits the
+    // existing `idx_images_topic` (topic, processed, capture_date,
+    // created_at) — `MAX(updated_at)` requires a row probe per topic-slug
+    // partition, which is cheap at gallery scale and the `revalidate = 3600`
+    // ISR window on `/sitemap.xml` caches the result.
+    return db.select({
+        slug: topics.slug,
+        label: topics.label,
+        order: topics.order,
+        image_filename: topics.image_filename,
+        map_visible: topics.map_visible,
+        last_image_updated_at: sql<Date | null>`(
+            SELECT MAX(${images.updated_at})
+            FROM ${images}
+            WHERE ${images.topic} = ${topics.slug}
+            AND ${images.processed} = true
+        )`,
+    }).from(topics).orderBy(asc(topics.order));
+}
+
+/**
+ * R18-M1: site-wide most-recent image update timestamp for the sitemap
+ * homepage entries' `<lastmod>`. Returns `null` when the gallery has no
+ * processed photos.
+ */
+export async function getLatestImageUpdatedAt(): Promise<Date | null> {
+    const [row] = await db
+        .select({ latest: sql<Date | null>`MAX(${images.updated_at})` })
+        .from(images)
+        .where(eq(images.processed, true))
+        .limit(1);
+    return row?.latest ?? null;
 }
 
 export async function getTopicsWithAliases() {
