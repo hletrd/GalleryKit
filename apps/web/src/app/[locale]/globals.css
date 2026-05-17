@@ -203,6 +203,26 @@
   }
 }
 
+/* R10-L1 / R11-L3: opt in to the browser's higher-quality downscale
+   filter for full-size photo surfaces. `high-quality` (Safari 17.4+,
+   Chrome 108+) maps to a Lanczos-style filter; older browsers fall
+   back to `auto` (bicubic) which is still acceptable. The cost is a
+   small amount of additional CPU on first paint; the win is fewer
+   moire artifacts and sharper fine detail on shrunken thumbnails of
+   high-resolution exports. Masonry thumbs intentionally stay on the
+   default to keep scroll-time CPU low. */
+.photo-viewer-image,
+.lightbox-image {
+  /* `high-quality` is the W3C-spec value (Safari 17.4+, Chrome 108+,
+     Firefox 113+ behind a flag). Browsers that don't recognise it
+     fall through to the default `auto` (bicubic), which is the
+     correct fallback for photographic content. Do NOT add
+     `-webkit-optimize-contrast` here — that triggers nearest-neighbour
+     scaling intended for pixel art and would visibly degrade photo
+     quality. */
+  image-rendering: high-quality;
+}
+
 /* Orientation-aware layout: landscape mobile */
 @media (orientation: landscape) and (max-width: 767px) {
   .photo-viewer-image {

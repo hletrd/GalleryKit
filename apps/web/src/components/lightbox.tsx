@@ -436,7 +436,11 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     alt={getConcisePhotoAltText(image, t('common.photo'))}
                     width={image.width}
                     height={image.height}
-                    className="w-full h-full object-contain"
+                    // R10-L1 / R11-L3: lightbox-image class gets
+                    // `image-rendering: high-quality` from globals.css so
+                    // downscaled wide-gamut JPEGs render with the slower
+                    // (better) downscale filter on Safari 17.4+ / Chrome 108+.
+                    className="w-full h-full object-contain lightbox-image"
                     draggable={false}
                     aria-label={
                         currentIndex != null && totalCount != null
