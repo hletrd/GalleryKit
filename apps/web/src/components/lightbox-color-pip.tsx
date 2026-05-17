@@ -63,6 +63,9 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
     // clipboard from the lightbox expanded panel, same as the sidebar
     // ColorDetailsSection copy button.
     async function copyColorMetadata() {
+        // R10-L16: pipeline_version is internal deploy metadata; omit it from
+        // the user-facing clipboard JSON. See color-details-section.tsx for
+        // the matching change in the sidebar copy button.
         const data = {
             iccProfileName: image.icc_profile_name ?? null,
             primaries: image.color_primaries ?? null,
@@ -72,7 +75,6 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
             isHdr: image.is_hdr ?? null,
             hasGainMap: image.has_gain_map ?? null,
             sourceBitDepth: image.bit_depth ?? null,
-            pipelineVersion: image.pipeline_version ?? null,
         };
         try {
             const text = JSON.stringify(data, null, 2);

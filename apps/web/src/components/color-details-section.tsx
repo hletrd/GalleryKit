@@ -179,6 +179,12 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     // full pipeline decision + ICC + transfer + decision in a machine-
     // parseable form.
     async function copyColorMetadata() {
+        // R10-L16: pipeline_version is an internal admin-only field used to
+        // gate backfill re-encodes. Including it in the user-facing JSON
+        // leaks the running encoder revision (useful for support but also
+        // useful for fingerprinting the deployment). The audit-grade
+        // metadata users actually want — ICC, primaries, transfer, matrix,
+        // decision, HDR flag, gain map, source bit depth — is unaffected.
         const data = {
             iccProfileName: image.icc_profile_name ?? null,
             primaries: image.color_primaries ?? null,
@@ -188,7 +194,6 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
             isHdr: image.is_hdr ?? null,
             hasGainMap: image.has_gain_map ?? null,
             sourceBitDepth: image.bit_depth ?? null,
-            pipelineVersion: image.pipeline_version ?? null,
         };
         try {
             const text = JSON.stringify(data, null, 2);
