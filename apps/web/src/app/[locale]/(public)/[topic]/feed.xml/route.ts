@@ -1,9 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { localizePath } from '@/lib/locale-path';
+import { isFeedNotModified } from '@/lib/feed-conditional';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -23,7 +24,7 @@ function toIso(value: unknown): string | null {
 }
 
 export async function GET(
-    _req: Request,
+    request: NextRequest,
     { params }: { params: Promise<{ locale: string; topic: string }> },
 ) {
     const { locale, topic: topicSlug } = await params;
@@ -101,6 +102,20 @@ export async function GET(
         lastModifiedHeader = new Date(feedUpdated).toUTCString();
     } catch {
         lastModifiedHeader = new Date().toUTCString();
+    }
+
+    // R19-M1: 304 Not Modified when If-Modified-Since covers feedUpdated
+    // (second precision per RFC 7232 §3.3). Mirrors the root /feed.xml.
+    const ifModifiedSince = request.headers.get('if-modified-since');
+    if (isFeedNotModified(ifModifiedSince, feedUpdated)) {
+        return new NextResponse(null, {
+            status: 304,
+            headers: {
+                'Cache-Control': CACHE_CONTROL,
+                'Vary': 'Accept-Language',
+                'Last-Modified': lastModifiedHeader,
+            },
+        });
     }
 
     return new NextResponse(xml, {

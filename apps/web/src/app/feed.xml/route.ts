@@ -1,10 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getImagesForFeed, getSeoSettings } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_LOCALE } from '@/lib/constants';
 import { localizePath } from '@/lib/locale-path';
+import { isFeedNotModified } from '@/lib/feed-conditional';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -23,7 +24,7 @@ function toIso(value: unknown): string | null {
     }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     const seo = await getSeoSettings();
     const baseUrl = seo.url;
 
@@ -101,6 +102,24 @@ export async function GET() {
         lastModifiedHeader = new Date(feedUpdated).toUTCString();
     } catch {
         lastModifiedHeader = new Date().toUTCString();
+    }
+
+    // R19-M1: close the R18-L3 plan note's open item. RSS readers
+    // (NetNewsWire, Inoreader, Feedly, Miniflux, FreshRSS, TT-RSS) all
+    // issue If-Modified-Since on subsequent polls; without a 304 response
+    // they re-download the full feed body even when nothing changed.
+    // RFC 7232 §3.3: compare at second precision (HTTP-date is
+    // second-precision; the ISO ms must be floored to match).
+    const ifModifiedSince = request.headers.get('if-modified-since');
+    if (isFeedNotModified(ifModifiedSince, feedUpdated)) {
+        return new NextResponse(null, {
+            status: 304,
+            headers: {
+                'Cache-Control': CACHE_CONTROL,
+                'Vary': 'Accept-Language',
+                'Last-Modified': lastModifiedHeader,
+            },
+        });
     }
 
     return new NextResponse(xml, {
