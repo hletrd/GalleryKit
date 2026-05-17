@@ -335,7 +335,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         ? {}
         : { tabIndex: -1, 'aria-hidden': true as const };
 
-    const { avifSrcSet, webpSrcSet, jpegSrc } = useMemo(() => {
+    const { avifSrcSet, webpSrcSet, jpegSrc, jpegBaseSrc } = useMemo(() => {
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
 
@@ -355,9 +355,23 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         // to avoid loading full-resolution images for browsers without WebP/AVIF support.
         const jpegSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
         const jpegSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${jpegSize}.jpg`)}`) : undefined;
+        // R21-M1: base-filename JPEG URL used as the onError fallback when
+        // the sized derivative 404s (legacy photos that pre-date the
+        // sized-derivative encoder, or rows caught mid-backfill after an
+        // IMAGE_PIPELINE_VERSION bump). The encoder atomic-rename contract
+        // guarantees the base filename is always present on disk.
+        const jpegBaseSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
 
-        return { avifSrcSet, webpSrcSet, jpegSrc };
+        return { avifSrcSet, webpSrcSet, jpegSrc, jpegBaseSrc };
     }, [image.filename_avif, image.filename_webp, image.filename_jpeg, imageSizes]);
+
+    // R21-M1: one-shot guard ref so a true 404 on even the base filename
+    // does not loop the onError handler. Reset when the photo changes so
+    // the next image gets a fresh attempt.
+    const jpegFallbackTriedRef = useRef(false);
+    useEffect(() => {
+        jpegFallbackTriedRef.current = false;
+    }, [image.id]);
 
     const transitionStyle = shouldReduceMotion
         ? {}
@@ -442,6 +456,22 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     // (better) downscale filter on Safari 17.4+ / Chrome 108+.
                     className="w-full h-full object-contain lightbox-image"
                     draggable={false}
+                    // R21-M1: legacy photos or mid-backfill rows may only
+                    // have the base JPEG on disk (not the sized derivative
+                    // referenced in jpegSrc). When the sized URL 404s,
+                    // swap to the base filename once. The encoder
+                    // atomic-rename contract guarantees the base file is
+                    // always present, so a single fallback is sufficient.
+                    onError={(e) => {
+                        if (jpegFallbackTriedRef.current) return;
+                        jpegFallbackTriedRef.current = true;
+                        if (jpegBaseSrc) {
+                            const img = e.currentTarget as HTMLImageElement;
+                            if (img.src !== jpegBaseSrc) {
+                                img.src = jpegBaseSrc;
+                            }
+                        }
+                    }}
                     aria-label={
                         currentIndex != null && totalCount != null
                             ? `${currentIndex + 1} / ${totalCount}`
