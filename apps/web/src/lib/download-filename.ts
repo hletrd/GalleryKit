@@ -40,7 +40,6 @@ function slugifyTitle(title: string | null | undefined): string {
     s = s.replace(new RegExp(UNICODE_FORMAT_CHARS.source, 'g'), '');
 
     // Strip C0 / C1 control bytes.
-    // eslint-disable-next-line no-control-regex -- intentional: strip control bytes
     s = s.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
 
     // NFKD decomposition + diacritic strip so common accented Latin
