@@ -284,6 +284,21 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                                             srcSet={`${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`}
                                                             sizes={masonrySizes}
                                                         />
+                                                        {/* R10-L23 / R15-L2: object-cover is intentional. The masonry
+                                                            layout uses w-full + h-auto + the natural aspect ratio
+                                                            (height inferred from image.height + width), so for masonry
+                                                            slots that match the image AR object-cover is a no-op. When
+                                                            CSS aspect-ratio rounds the slot (~1px) or when the card
+                                                            participates in a hover scale-105 transform, object-cover
+                                                            guarantees the photo fills the rendered box without letterbox
+                                                            artifacts. The 5% scale-up on hover (group-hover:scale-105)
+                                                            crops a few pixels off the photographer's framing — this is
+                                                            an explicit trade-off for the uniform-card aesthetic; do NOT
+                                                            switch to object-contain (uneven rows) or remove the hover
+                                                            scale (no affordance) without re-reviewing with the
+                                                            photographer. The full-fidelity framing is always available
+                                                            in the lightbox / photo viewer where the original aspect
+                                                            ratio is preserved. */}
                                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                                         <img
                                                             src={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`)}
