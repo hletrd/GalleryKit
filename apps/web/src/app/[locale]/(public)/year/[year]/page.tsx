@@ -80,7 +80,10 @@ export default async function YearInReviewPage({
         image: galleryPhotos.slice(0, 10).map((img) => ({
             '@type': 'ImageObject',
             contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, seo.url),
-            thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${smallSize}.jpg`)}`, seo.url),
+            // R21-M2: base JPEG filename for JSON-LD thumbnail so
+            // Googlebot Image always gets a 200 response (sized
+            // derivative can 404 for legacy / mid-backfill rows).
+            thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, seo.url),
             name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
         })),
     } : null;

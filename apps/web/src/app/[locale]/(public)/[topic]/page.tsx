@@ -8,7 +8,6 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
@@ -193,7 +192,10 @@ export default async function TopicPage({
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
       contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
-      thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, baseUrl),
+      // R21-M2: base JPEG filename for JSON-LD thumbnail so Googlebot
+      // Image always gets a 200 response (sized derivative can 404 for
+      // legacy / mid-backfill rows).
+      thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
       name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
     })),
   } : null;

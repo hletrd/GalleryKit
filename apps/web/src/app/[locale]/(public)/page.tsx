@@ -165,7 +165,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ t
     image: images.slice(0, 10).map((img) => ({
       '@type': 'ImageObject',
       contentUrl: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
-      thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, baseUrl),
+      // R21-M2: use the base JPEG filename for the JSON-LD thumbnail so
+      // Googlebot Image always gets a 200 response. The sized derivative
+      // can be missing for legacy rows or photos caught mid-backfill;
+      // the base filename is guaranteed by the encoder atomic-rename
+      // contract.
+      thumbnail: absoluteImageUrl(`/uploads/jpeg/${img.filename_jpeg}`, baseUrl),
       name: getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`),
     })),
   } : null;

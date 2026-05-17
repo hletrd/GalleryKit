@@ -214,7 +214,14 @@ export default async function PhotoPage({ params, searchParams }: {
         '@context': 'https://schema.org',
         '@type': 'ImageObject',
         contentUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg}`, seo.url),
-        thumbnailUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(config.imageSizes, 640)}.jpg`)}`, seo.url),
+        // R21-M2: use the base JPEG filename for thumbnailUrl so Googlebot
+        // Image always gets a 200 response. The encoder atomic-rename
+        // contract guarantees the base file is on disk; the sized
+        // derivative (`_${size}.jpg`) may be missing for legacy rows or
+        // photos caught mid-backfill after an IMAGE_PIPELINE_VERSION
+        // bump, which previously dropped the photo from Google Image
+        // Search indexing during the backfill window.
+        thumbnailUrl: absoluteImageUrl(`/uploads/jpeg/${image.filename_jpeg}`, seo.url),
         encodingFormat: 'image/jpeg',
         ...(author ? {
             creditText: author,
