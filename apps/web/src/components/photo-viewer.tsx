@@ -33,6 +33,7 @@ import { localizePath, localizeUrl } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitle, getPhotoDocumentTitle, humanizeTagLabel } from '@/lib/photo-title';
 import { isSafeBlurDataUrl } from '@/lib/blur-data-url';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
+import { buildDownloadFilename } from '@/lib/download-filename';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 
@@ -196,6 +197,17 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const downloadExt = downloadFilename ? downloadFilename.split('.').pop() || 'jpg' : 'jpg';
     const downloadHref = image?.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : null;
     const avifDownloadHref = image?.filename_avif ? imageUrl(`/uploads/avif/${image.filename_avif}`) : null;
+    // R12-M2: derive the saved-file name from the photo's public `title`
+    // (already rendered in og:title / on-page heading) so end-users have a
+    // human-readable filename in their Downloads folder rather than an
+    // anonymous `photo-{id}.{ext}`. Falls back to `photo-{id}.{ext}` when
+    // the title is missing or slugifies to empty (CJK-only titles, etc.).
+    const downloadNameJpeg = image
+        ? buildDownloadFilename(image.title, image.id, downloadExt)
+        : null;
+    const downloadNameAvif = image
+        ? buildDownloadFilename(image.title, image.id, 'avif')
+        : null;
     const isWideGamutSource = isWideGamutPrimary(image?.color_primaries);
     const formattedCaptureDate = formatStoredExifDate(image?.capture_date, locale);
     const formattedCaptureTime = formatStoredExifTime(image?.capture_date, locale);
@@ -867,7 +879,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                 <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                     <a
                                                         href={downloadHref}
-                                                        download={`photo-${image.id}.${downloadExt}`}
+                                                        download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                                         className="flex flex-col"
                                                     >
                                                         <span>{t('viewer.downloadSrgbJpeg')}</span>
@@ -877,7 +889,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                                 <DropdownMenuItem asChild className="h-auto min-h-11 py-2">
                                                     <a
                                                         href={avifDownloadHref}
-                                                        download={`photo-${image.id}.avif`}
+                                                        download={downloadNameAvif ?? `photo-${image.id}.avif`}
                                                         className="flex flex-col"
                                                     >
                                                         <span>{t('viewer.downloadP3Avif')}</span>
@@ -890,7 +902,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                                         <Button asChild className="w-full gap-2 min-h-11">
                                             <a
                                                 href={downloadHref}
-                                                download={`photo-${image.id}.${downloadExt}`}
+                                                download={downloadNameJpeg ?? `photo-${image.id}.${downloadExt}`}
                                             >
                                                 <Download className="h-4 w-4" /> {t('viewer.downloadJpeg')}
                                             </a>
