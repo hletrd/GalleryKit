@@ -112,6 +112,16 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
     return (
         <div
             role="status"
+            // R16-L4: explicit `aria-live="polite"` + `aria-atomic="true"`.
+            // role="status" implies polite live-region semantics, but the hint
+            // mounts asynchronously (after the `setMounted(true)` effect) and
+            // some NVDA configurations don't auto-announce `role=status` on
+            // initial mount when the region was previously hidden. Declaring
+            // the live-region behavior explicitly gives a consistent
+            // announcement across NVDA / VoiceOver / TalkBack without
+            // changing visual behavior on browsers that already infer it.
+            aria-live="polite"
+            aria-atomic="true"
             // R13-L2 / R10-L21: dark-mode contrast lift. The previous combo
             // (`dark:bg-amber-900/20 dark:text-amber-200`) measured ≈ 3.2:1
             // against the composite dark background — below WCAG AA 4.5:1
