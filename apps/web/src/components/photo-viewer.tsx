@@ -384,7 +384,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     alt={getAltText(image)}
                     width={image.width}
                     height={image.height}
-                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
+                    className="w-full h-full object-contain max-h-[calc(100vh-8rem)] z-0 relative photo-viewer-image"
                     priority
                     unoptimized
                 />
@@ -410,7 +410,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     alt={getAltText(image)}
                     width={image.width}
                     height={image.height}
-                    className="w-full h-full object-contain max-h-[80vh] z-0 relative photo-viewer-image"
+                    className="w-full h-full object-contain max-h-[calc(100vh-8rem)] z-0 relative photo-viewer-image"
                     decoding="async"
                     loading="eager"
                     fetchPriority="high"
