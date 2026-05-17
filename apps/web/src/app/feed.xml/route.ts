@@ -6,6 +6,8 @@ import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_LOCALE } from '@/lib/constants';
 import { localizePath } from '@/lib/locale-path';
 import { isFeedNotModified } from '@/lib/feed-conditional';
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -25,7 +27,10 @@ function toIso(value: unknown): string | null {
 }
 
 export async function GET(request: NextRequest) {
-    const seo = await getSeoSettings();
+    const [seo, config] = await Promise.all([
+        getSeoSettings(),
+        getGalleryConfig(),
+    ]);
     const baseUrl = seo.url;
 
     // R17-M3: source rows from a feed-specific helper that orders by
@@ -37,12 +42,27 @@ export async function GET(request: NextRequest) {
     const feedSelfUrl = `${baseUrl}/feed.xml`;
     const feedAlternateUrl = `${baseUrl}${localizePath(DEFAULT_LOCALE, '/')}`;
 
+    // R25-M1: resolve the feed media-content size against the LIVE admin
+    // `image_sizes` config — not against the hard-coded `DEFAULT_IMAGE_SIZES`
+    // that `sizedImageFilename`'s two-arg overload silently falls back to.
+    // Before this fix, dropping `1536` from `image_sizes` left every
+    // <media:content> URL pointing at a `_1536.jpg` that does not exist
+    // on disk (RSS-reader previews 404 silently for every entry, every
+    // reader). Lineage: R21-M1 / R22-M1 / R23-M1 / R24-M1 closed the
+    // equivalent failure mode on the public `<img>` and per-photo OG
+    // routes; R25-M1 closes the syndication-feed side of the same class.
+    //
+    // We pick `findNearestImageSize(config.imageSizes, 1536)` (RSS readers
+    // want a ~1.5K-ish preview), and `findNearestImageSize` already falls
+    // back to the largest available size if nothing close exists.
+    const feedJpegSize = findNearestImageSize(config.imageSizes, 1536);
+
     const entries = rows.map((img) => {
         const photoPath = localizePath(DEFAULT_LOCALE, `/p/${img.id}`);
         const photoUrl = `${baseUrl}${photoPath}`;
         const title = getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`);
 
-        const jpegSized = sizedImageFilename(img.filename_jpeg, 1536);
+        const jpegSized = sizedImageFilename(img.filename_jpeg, feedJpegSize, config.imageSizes);
         const mediaUrl = absoluteImageUrl(`/uploads/jpeg/${jpegSized}`, baseUrl);
 
         // R17-M2: prefer updated_at over created_at so admin edits to

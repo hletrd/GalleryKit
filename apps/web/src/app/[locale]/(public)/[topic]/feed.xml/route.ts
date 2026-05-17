@@ -5,6 +5,8 @@ import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { localizePath } from '@/lib/locale-path';
 import { isFeedNotModified } from '@/lib/feed-conditional';
+import { getGalleryConfig } from '@/lib/gallery-config';
+import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import siteConfig from '@/site-config.json';
 
 export const runtime = 'nodejs';
@@ -29,9 +31,10 @@ export async function GET(
 ) {
     const { locale, topic: topicSlug } = await params;
 
-    const [seo, topicData] = await Promise.all([
+    const [seo, topicData, config] = await Promise.all([
         getSeoSettings(),
         getTopicBySlug(topicSlug),
+        getGalleryConfig(),
     ]);
 
     if (!topicData) {
@@ -47,12 +50,18 @@ export async function GET(
     const feedSelfUrl = `${baseUrl}${topicPath}/feed.xml`;
     const feedAlternateUrl = `${baseUrl}${topicPath}`;
 
+    // R25-M1: resolve the feed media-content size against the LIVE admin
+    // `image_sizes` config (see root /feed.xml/route.ts for full lineage).
+    // Without this, dropping `1536` from `image_sizes` silently 404s every
+    // per-topic feed entry's <media:content> preview.
+    const feedJpegSize = findNearestImageSize(config.imageSizes, 1536);
+
     const entries = rows.map((img) => {
         const photoPath = localizePath(locale, `/p/${img.id}`);
         const photoUrl = `${baseUrl}${photoPath}`;
         const title = getPhotoDisplayTitleFromTagNames(img, `Photo ${img.id}`);
 
-        const jpegSized = sizedImageFilename(img.filename_jpeg, 1536);
+        const jpegSized = sizedImageFilename(img.filename_jpeg, feedJpegSize, config.imageSizes);
         const mediaUrl = absoluteImageUrl(`/uploads/jpeg/${jpegSized}`, baseUrl);
 
         // R17-M2: prefer updated_at so admin edits propagate to RSS.
