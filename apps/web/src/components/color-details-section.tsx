@@ -240,7 +240,13 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                     onClick={() => setShowColorDetails(!showColorDetails)}
                     aria-expanded={showColorDetails}
                     aria-controls={colorDetailsId}
-                    className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+                    // R10-L15: expand the toggle button to fill remaining
+                    // horizontal space (`flex-1` + left-aligned label) so
+                    // the entire accordion row is a tappable target, not
+                    // just the narrow chevron+label cluster. The tooltip
+                    // and copy buttons remain sibling clickable regions on
+                    // the right edge.
+                    className="flex flex-1 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                 >
                     <ChevronDown className={`h-4 w-4 transition-transform ${showColorDetails ? 'rotate-180' : ''}`} />
                     {accordionLabel}
