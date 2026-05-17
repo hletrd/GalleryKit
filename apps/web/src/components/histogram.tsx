@@ -7,6 +7,7 @@ import { useTranslation } from '@/components/i18n-provider';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { useDisplayCapability } from '@/lib/use-display-capability';
 import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 
@@ -605,12 +606,28 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                         );
                     })()}
                     {/* R9-LOW: key-type estimate from luminance histogram
-                        (High-key / Low-key / Balanced). */}
-                    {histogramData && (
-                        <div className="text-xs text-muted-foreground">
-                            {t(`viewer.keyType${estimateKeyType(histogramData)}`)}
-                        </div>
-                    )}
+                        (High-key / Low-key / Balanced).
+                        R15-M1 / R10-M15: wrap in tooltip so viewers unfamiliar
+                        with the terminology get a one-line plain-language
+                        explanation of what the heuristic measures. */}
+                    {histogramData && (() => {
+                        const keyType = estimateKeyType(histogramData);
+                        return (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span
+                                        tabIndex={0}
+                                        className="text-xs text-muted-foreground cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2"
+                                    >
+                                        {t(`viewer.keyType${keyType}`)}
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {t(`viewer.keyType${keyType}Tooltip`)}
+                                </TooltipContent>
+                            </Tooltip>
+                        );
+                    })()}
                     <button
                         type="button"
                         onClick={cycleMode}
