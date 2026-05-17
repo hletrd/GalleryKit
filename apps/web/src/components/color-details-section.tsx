@@ -29,6 +29,19 @@ export function humanizeColorPrimaries(value: string | null | undefined): string
 }
 
 /**
+ * R15-L1 / R12-L4: never-null variant for UI surfaces that always need a
+ * string to render. Returns the localized `viewer.colorUnknown` literal on
+ * any unrecognized value. Callers that want the discriminated branch (e.g.
+ * gate the wide-gamut hint on null) keep using `humanizeColorPrimaries`.
+ */
+export function humanizeColorPrimariesOrLabel(
+    value: string | null | undefined,
+    t: (key: string) => string,
+): string {
+    return humanizeColorPrimaries(value) || t('viewer.colorUnknown');
+}
+
+/**
  * R9-H1: Strict allowlist for P3 ICC profile names. Substring matching
  * `includes('p3')` falsely matches "ProPhoto" (which is NOT a P3 variant).
  */

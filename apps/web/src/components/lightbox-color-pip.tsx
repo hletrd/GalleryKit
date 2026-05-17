@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
     humanizeColorPrimaries,
+    humanizeColorPrimariesOrLabel,
     humanizeTransferFunction,
     humanizeColorPipelineDecision,
 } from '@/components/color-details-section';
@@ -139,7 +140,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                     {image.color_primaries && (
                         <div className="flex justify-between gap-3">
                             <span className="opacity-70">{t('viewer.colorPrimaries')}</span>
-                            <span className="font-medium">{primaries || t('viewer.colorUnknown')}</span>
+                            <span className="font-medium">{humanizeColorPrimariesOrLabel(image.color_primaries, t)}</span>
                         </div>
                     )}
                     {image.transfer_function && (

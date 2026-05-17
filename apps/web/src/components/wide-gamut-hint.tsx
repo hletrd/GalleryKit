@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { isWideGamutPrimary, getGamutFamily } from '@/lib/color-primaries';
 import { useDisplayCapability } from '@/lib/use-display-capability';
-import { humanizeColorPrimaries } from '@/components/color-details-section';
+import { humanizeColorPrimariesOrLabel } from '@/components/color-details-section';
 
 interface WideGamutHintProps {
     colorPrimaries?: string | null;
@@ -102,7 +102,8 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
     // For P3 sources we keep the old single-gamut copy; for wider sources
     // we use the more informative "wideGamutHintWithSource" variant.
     const deliveryGamutName = 'Display P3';
-    const sourceGamutName = humanizeColorPrimaries(colorPrimaries) || t('viewer.colorUnknown');
+    // R15-L1 / R12-L4: use the never-null helper so the fallback can't drift.
+    const sourceGamutName = humanizeColorPrimariesOrLabel(colorPrimaries, t);
     const sourceIsWiderThanP3 = gamutFamily === 'rec2020' || gamutFamily === 'adobergb' || gamutFamily === 'prophoto';
     const hintText = sourceIsWiderThanP3
         ? t('viewer.wideGamutHintWithSource', { gamut: deliveryGamutName, source: sourceGamutName })
