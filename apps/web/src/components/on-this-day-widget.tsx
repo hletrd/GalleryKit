@@ -4,8 +4,6 @@ import { getOnThisDayImages } from '@/lib/data-timeline';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
-import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
-import { getGalleryConfig } from '@/lib/gallery-config';
 
 /**
  * Server component — rendered as part of the home page SSR pass.
@@ -17,16 +15,20 @@ export async function OnThisDayWidget() {
     const month = now.getMonth() + 1; // 1–12
     const day = now.getDate();        // 1–31
 
-    const [t, locale, photos, config] = await Promise.all([
+    const [t, locale, photos] = await Promise.all([
         getTranslations('onThisDay'),
         getLocale(),
         getOnThisDayImages(month, day),
-        getGalleryConfig(),
     ]);
 
     if (photos.length === 0) return null;
 
-    const smallSize = findNearestImageSize(config.imageSizes ?? DEFAULT_IMAGE_SIZES, 640);
+    // R20-M2: emit the base JPEG filename rather than the sized derivative.
+    // Server components cannot use `onError` fallbacks, and the encoder
+    // atomic-rename contract guarantees the base file exists even when
+    // legacy / mid-backfill rows lack the `_${smallSize}.jpg` variant. The
+    // 48x48 thumbnail still renders crisply because the browser scales the
+    // larger source down via the inline 48x48 box.
 
     return (
         <aside aria-label={t('widgetLabel')} className="border-t pt-8">
@@ -46,8 +48,6 @@ export async function OnThisDayWidget() {
                     const year = photo.capture_date
                         ? new Date(photo.capture_date).getFullYear()
                         : null;
-                    const baseJpeg = photo.filename_jpeg.replace(/\.jpg$/i, '');
-
                     return (
                         <li key={photo.id}>
                             <Link
@@ -62,7 +62,7 @@ export async function OnThisDayWidget() {
                                 >
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
-                                        src={imageUrl(`/uploads/jpeg/${baseJpeg}_${smallSize}.jpg`)}
+                                        src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                         alt={altText}
                                         width={48}
                                         height={48}
