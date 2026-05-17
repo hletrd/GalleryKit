@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties, type ReactEventHandler } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -422,6 +422,15 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [navigate, showLightbox]);
 
+    // R22-M1: one-shot guard ref so a true 404 on even the base filename
+    // does not loop the onError handler. Reset when the photo changes so
+    // the next image gets a fresh attempt. Mirrors the R21-M1 fix on the
+    // lightbox so both viewer surfaces are consistent.
+    const jpegFallbackTriedRef = useRef(false);
+    useEffect(() => {
+        jpegFallbackTriedRef.current = false;
+    }, [image?.id]);
+
     const srcSetData = useMemo(() => {
         if (!image) return null;
         const getAltText = (img: ImageDetail) => getConcisePhotoAltText(img, t('common.photo'));
@@ -430,6 +439,22 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         const jpegFallbackTargetSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
         const jpegSrc = sizedImageUrl('/uploads/jpeg', image.filename_jpeg, jpegFallbackTargetSize, imageSizes);
         const jpegSrcSet = sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, imageSizes);
+        // R22-M1: base-filename JPEG URL used as the onError fallback when
+        // the sized derivative 404s (legacy photos that pre-date the
+        // sized-derivative encoder, or rows caught mid-backfill after an
+        // IMAGE_PIPELINE_VERSION bump). The encoder atomic-rename contract
+        // guarantees the base filename is always present on disk.
+        const jpegBaseSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
+        const handleJpegError: ReactEventHandler<HTMLImageElement> = (e) => {
+            if (jpegFallbackTriedRef.current) return;
+            jpegFallbackTriedRef.current = true;
+            if (jpegBaseSrc) {
+                const img = e.currentTarget;
+                if (img.src !== jpegBaseSrc) {
+                    img.src = jpegBaseSrc;
+                }
+            }
+        };
 
         if (!baseWebp || !baseAvif) {
             return (
@@ -442,6 +467,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     className="w-full h-full object-contain max-h-[calc(100vh-8rem)] z-0 relative photo-viewer-image"
                     priority
                     unoptimized
+                    // R22-M1: next/image forwards onError to the underlying <img>,
+                    // so the same sized-derivative fallback applies on the
+                    // no-AVIF/no-WebP branch.
+                    onError={handleJpegError}
                 />
             );
         }
@@ -469,6 +498,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     decoding="async"
                     loading="eager"
                     fetchPriority="high"
+                    // R22-M1: legacy photos or mid-backfill rows may only have
+                    // the base JPEG on disk (not the sized derivative referenced
+                    // in jpegSrc / jpegSrcSet). When the sized URL 404s, swap to
+                    // the base filename once. The encoder atomic-rename contract
+                    // guarantees the base file is always present, so a single
+                    // fallback is sufficient. Mirrors R21-M1 in lightbox.tsx.
+                    onError={handleJpegError}
                 />
             </picture>
         );
