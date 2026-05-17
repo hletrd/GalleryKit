@@ -16,6 +16,7 @@ const BASE_INPUT: AtomFeedInput = {
     feedSelfUrl: 'https://example.com/feed.xml',
     feedAlternateUrl: 'https://example.com/en/',
     feedUpdated: '2024-01-15T10:00:00.000Z',
+    feedAuthor: { name: 'Jane Photographer', uri: 'https://example.com/' },
     entries: [BASE_ENTRY],
 };
 
@@ -48,6 +49,16 @@ describe('escapeXml', () => {
 
     it('passes plain strings through unchanged', () => {
         expect(escapeXml('hello world')).toBe('hello world');
+    });
+
+    it('strips C0 control characters before escaping (R17-L1)', () => {
+        // \x01 \x07 \x0B \x0C \x1F should all be removed; \t \n \r preserved.
+        const input = 'hello\x01world\x07!\x0B\x0C\x1F';
+        expect(escapeXml(input)).toBe('helloworld!');
+    });
+
+    it('preserves tab / newline / carriage return (XML 1.0 legal whitespace)', () => {
+        expect(escapeXml('a\tb\nc\rd')).toBe('a\tb\nc\rd');
     });
 });
 
@@ -180,6 +191,62 @@ describe('composeAtomFeed', () => {
             entries: [{ ...BASE_ENTRY, mediaContentType: 'image/avif' }],
         });
         expect(xml).toContain('type="image/avif"');
+    });
+
+    it('emits a feed-level <author> per RFC 4287 §4.1.1 (R17-M1)', () => {
+        const xml = composeAtomFeed(BASE_INPUT);
+        // Feed-level author appears before any <entry> block.
+        expect(xml).toContain('<author>\n    <name>Jane Photographer</name>');
+        expect(xml).toContain('<uri>https://example.com/</uri>');
+        const authorIndex = xml.indexOf('<author>');
+        const entryIndex = xml.indexOf('<entry>');
+        expect(authorIndex).toBeGreaterThan(-1);
+        expect(entryIndex).toBeGreaterThan(authorIndex);
+    });
+
+    it('feed-level <author> omits <uri> when uri not supplied (R17-M1)', () => {
+        const xml = composeAtomFeed({
+            ...BASE_INPUT,
+            feedAuthor: { name: 'Anonymous' },
+        });
+        expect(xml).toContain('<name>Anonymous</name>');
+        // The feed-level author block must not carry a <uri> when none was supplied.
+        const authorIdx = xml.indexOf('<author>');
+        const authorEndIdx = xml.indexOf('</author>', authorIdx);
+        const authorBlock = xml.slice(authorIdx, authorEndIdx);
+        expect(authorBlock).not.toContain('<uri>');
+    });
+
+    it('emits <rights> when feedRights is supplied (R17-M4)', () => {
+        const xml = composeAtomFeed({
+            ...BASE_INPUT,
+            feedRights: '© 2026 Jane Photographer. All rights reserved.',
+        });
+        expect(xml).toContain('<rights>© 2026 Jane Photographer. All rights reserved.</rights>');
+    });
+
+    it('omits <rights> when feedRights is undefined (R17-M4)', () => {
+        const xml = composeAtomFeed(BASE_INPUT);
+        expect(xml).not.toContain('<rights>');
+    });
+
+    it('emits per-entry <author> when supplied (R17-L2 forward-looking)', () => {
+        const xml = composeAtomFeed({
+            ...BASE_INPUT,
+            entries: [{ ...BASE_ENTRY, author: { name: 'Second Photographer' } }],
+        });
+        expect(xml).toContain('<name>Second Photographer</name>');
+    });
+
+    it('strips C0 control bytes in titles before XML escape (R17-L1 + R17-M1)', () => {
+        const xml = composeAtomFeed({
+            ...BASE_INPUT,
+            feedTitle: 'Clean\x01Title',
+            entries: [{ ...BASE_ENTRY, title: 'Photo\x07Title' }],
+        });
+        expect(xml).toContain('<title>CleanTitle</title>');
+        expect(xml).toContain('<title>PhotoTitle</title>');
+        expect(xml).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F]/);
     });
 });
 
