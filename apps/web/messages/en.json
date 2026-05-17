@@ -327,6 +327,8 @@
     "slideshowOn": "Slideshow started",
     "slideshowOff": "Slideshow stopped",
     "colorDetails": "Color details",
+    "colorDetailsWithGamut": "Color: {gamut}",
+    "colorDetailsWithGamutHdr": "Color: {gamut} HDR",
     "colorPrimaries": "Color primaries",
     "transferFunction": "Transfer function",
     "transferSrgb": "sRGB",

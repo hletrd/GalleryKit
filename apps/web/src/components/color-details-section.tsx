@@ -143,7 +143,10 @@ export function primariesMatchIccName(
 interface ColorDetailsSectionProps {
     image: ImageDetail;
     isAdmin?: boolean;
-    t: (key: string) => string;
+    // R13-L1 / R10-L18: `t` is widened to accept the optional `values`
+    // interpolation map used by the dynamic accordion label
+    // (`viewer.colorDetailsWithGamut{,Hdr}` keys take `{gamut}`).
+    t: (key: string, values?: Record<string, string | number>) => string;
     toggleRef?: React.RefObject<(() => void) | null>;
     forceSrgbDerivatives?: boolean;
 }
@@ -173,6 +176,26 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     const primariesMatchIcc = primariesMatchIccName(primariesHuman, iccName);
 
     const colorDetailsId = `color-details-${image.id}`;
+
+    // R13-L1 / R10-L18: dynamic accordion label. The static "Color details"
+    // wording underfires for wide-gamut / HDR photos where the accordion is
+    // the photographer's main color-craft surface. Surface the most
+    // photographer-relevant fact in the label itself so visitors don't need
+    // to expand the accordion to see the gamut.
+    //
+    // - sRGB / unknown primaries → "Color details" (unchanged).
+    // - Wide-gamut primaries → "Color: {gamut}" (e.g. "Color: Display P3").
+    // - Wide-gamut + admin + HDR → "Color: {gamut} HDR" (admin-only because
+    //   `transfer_function` / `is_hdr` are admin-only fields).
+    const isWideGamut = Boolean(image.color_primaries) && image.color_primaries !== 'bt709';
+    const gamutLabel = primariesHuman ?? image.color_primaries ?? '';
+    const accordionLabel = (() => {
+        if (!isWideGamut || !gamutLabel) return t('viewer.colorDetails');
+        if (isAdmin && isHdr) {
+            return t('viewer.colorDetailsWithGamutHdr', { gamut: gamutLabel });
+        }
+        return t('viewer.colorDetailsWithGamut', { gamut: gamutLabel });
+    })();
 
     // P4-C6 / R4-UX-L6: copy a JSON snapshot of the audit-grade color
     // metadata to the clipboard. Useful for paste-into-forum / paste-into-
@@ -220,7 +243,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                     className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                 >
                     <ChevronDown className={`h-4 w-4 transition-transform ${showColorDetails ? 'rotate-180' : ''}`} />
-                    {t('viewer.colorDetails')}
+                    {accordionLabel}
                 </button>
                 <Tooltip>
                     <TooltipTrigger asChild>

@@ -327,6 +327,8 @@
     "slideshowOn": "슬라이드쇼 시작",
     "slideshowOff": "슬라이드쇼 중지",
     "colorDetails": "색상 정보",
+    "colorDetailsWithGamut": "색상: {gamut}",
+    "colorDetailsWithGamutHdr": "색상: {gamut} HDR",
     "colorPrimaries": "색 재현 영역",
     "transferFunction": "전달 함수",
     "transferSrgb": "sRGB",
