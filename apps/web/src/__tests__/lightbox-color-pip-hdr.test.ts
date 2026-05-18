@@ -155,6 +155,43 @@ describe('LightboxColorPip — HDR gating + single-render (C5-A2)', () => {
         });
     });
 
+    describe('R10-L20: delivered bit depth + format chips in expanded panel', () => {
+        it('renders delivered bit depth row gated on color_pipeline_decision or color_primaries', () => {
+            expect(PIP_BODY).toContain("t('viewer.deliveredBitDepth')");
+            expect(PIP_BODY).toMatch(/\(image\.color_pipeline_decision\s*\|\|\s*image\.color_primaries\)/);
+        });
+
+        it('renders delivered formats row gated on at least one filename', () => {
+            expect(PIP_BODY).toContain("t('viewer.deliveredFormats')");
+            expect(PIP_BODY).toMatch(/image\.filename_webp\s*\|\|\s*image\.filename_avif\s*\|\|\s*image\.filename_jpeg/);
+        });
+
+        it('branches delivered bit depth on isP3Pipeline and avif_10bit', () => {
+            expect(PIP_BODY).toContain('isP3Pipeline(decision)');
+            expect(PIP_BODY).toContain('image.avif_10bit === true');
+            expect(PIP_BODY).toContain("t('viewer.deliveredBitDepthP3',");
+            expect(PIP_BODY).toContain("t('viewer.deliveredBitDepthP3Fallback',");
+            expect(PIP_BODY).toContain("t('viewer.deliveredBitDepthSrgb')");
+        });
+
+        it('renders format chips with conditional gamut annotations', () => {
+            expect(PIP_BODY).toMatch(/name:\s*'WebP'/);
+            expect(PIP_BODY).toMatch(/name:\s*'AVIF'/);
+            expect(PIP_BODY).toMatch(/name:\s*'JPEG'/);
+        });
+
+        it('places delivered rows before the histogram in the panel', () => {
+            const deliveredBitDepthIdx = PIP_BODY.indexOf("t('viewer.deliveredBitDepth')");
+            const deliveredFormatsIdx = PIP_BODY.indexOf("t('viewer.deliveredFormats')");
+            const histogramIdx = PIP_BODY.indexOf('<Histogram');
+            expect(deliveredBitDepthIdx).toBeGreaterThan(-1);
+            expect(deliveredFormatsIdx).toBeGreaterThan(-1);
+            expect(histogramIdx).toBeGreaterThan(-1);
+            expect(deliveredBitDepthIdx).toBeLessThan(histogramIdx);
+            expect(deliveredFormatsIdx).toBeLessThan(histogramIdx);
+        });
+    });
+
     describe('hasData short-circuit (existing pip contract)', () => {
         it('returns null when no color signals are present', () => {
             // Lock the early return so a refactor cannot silently render
