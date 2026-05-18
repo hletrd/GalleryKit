@@ -776,6 +776,10 @@ export async function processImageFormats(
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
     const sortedSizes = [...sizes].sort((a, b) => a - b);
+    // R10-M4: tracks whether the AVIF encode used 10-bit depth. Set when
+    // the wide-gamut path successfully encodes with bitdepth:10; remains
+    // false for 8-bit AVIF (sRGB sources or 10-bit probe/fallback failure).
+    let avif10bit = false;
 
     // CM-CRIT-1 / US-CM03: resolve the OUTPUT colorspace decision first so
     // WI-15 can cap source dimensions and WI-12 can detect DCI-P3 before
@@ -953,6 +957,8 @@ export async function processImageFormats(
                                 ...(wantHighBitdepth ? { bitdepth: 10 } : {}),
                             })
                             .toFile(outputPath);
+                        // R10-M4: 10-bit encode succeeded for this image.
+                        if (wantHighBitdepth) avif10bit = true;
                     } catch (err: unknown) {
                         if (wantHighBitdepth && err instanceof Error && /bitdepth/i.test(err.message)) {
                             // Probe said 10-bit is available but this specific encode
@@ -1084,7 +1090,7 @@ export async function processImageFormats(
         }
     }
 
-    return { wasDownscaled: processingInputPath !== inputPath };
+    return { wasDownscaled: processingInputPath !== inputPath, avif10bit };
 }
 
 function cleanString(val: unknown): string | null {

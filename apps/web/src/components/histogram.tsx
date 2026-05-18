@@ -359,12 +359,29 @@ function drawHistogram(
     }
 }
 
-function estimateKeyType(data: HistogramData): 'high-key' | 'low-key' | 'balanced' {
+function percentileFromHistogram(bins: number[], p: number): number {
+    const total = bins.reduce((sum, v) => sum + v, 0);
+    if (total === 0) return 128;
+    const target = (total * p) / 100;
+    let cumsum = 0;
+    for (let i = 0; i < bins.length; i++) {
+        cumsum += bins[i];
+        if (cumsum >= target) return i;
+    }
+    return bins.length - 1;
+}
+
+export function estimateKeyType(data: HistogramData): 'high-key' | 'low-key' | 'balanced' {
     const total = data.l.reduce((sum, v) => sum + v, 0);
     if (total === 0) return 'balanced';
-    const avgLuminance = data.l.reduce((sum, v, i) => sum + v * i, 0) / total;
-    if (avgLuminance > 170) return 'high-key';
-    if (avgLuminance < 85) return 'low-key';
+    // R10-M4: percentile-based classification replaces naive average.
+    // high-key: brightest 10% of pixels are very bright AND darkest 10%
+    // are also bright (no deep shadows). low-key: darkest 10% are very
+    // dark AND brightest 10% are not blown out. Everything else = balanced.
+    const p10 = percentileFromHistogram(data.l, 10);
+    const p90 = percentileFromHistogram(data.l, 90);
+    if (p90 > 220 && p10 > 100) return 'high-key';
+    if (p10 < 40 && p90 < 180) return 'low-key';
     return 'balanced';
 }
 

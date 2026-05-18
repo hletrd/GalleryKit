@@ -36,6 +36,7 @@ export interface ImageDetail {
     bit_depth?: number | null;
     pipeline_version?: number | null;
     was_downscaled?: boolean | null;
+    avif_10bit?: boolean | null;
     original_format?: string | null;
     original_file_size?: number | null;
     blur_data_url?: string | null;

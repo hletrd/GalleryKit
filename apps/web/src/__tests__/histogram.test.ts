@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { requestHistogramFromWorker } from '@/components/histogram';
+import { requestHistogramFromWorker, estimateKeyType } from '@/components/histogram';
 
 class FakeWorker {
     listeners = new Set<(event: MessageEvent) => void>();
@@ -135,5 +135,56 @@ describe('histogram-worker luminance coefficients', () => {
         expect(srgbResult.l[58]).toBe(0);
         expect(p3Result.l[58]).toBe(1);
         expect(p3Result.l[54]).toBe(0);
+    });
+});
+
+describe('estimateKeyType — percentile-based classification (R10-M4)', () => {
+    function makeHistogram(l: number[]): { r: number[]; g: number[]; b: number[]; l: number[] } {
+        const zeroes = new Array(256).fill(0);
+        return { r: [...zeroes], g: [...zeroes], b: [...zeroes], l };
+    }
+
+    it('classifies high-key when p90 > 220 and p10 > 100', () => {
+        const bins = new Array(256).fill(0);
+        bins[240] = 1000;
+        bins[180] = 500;
+        expect(estimateKeyType(makeHistogram(bins))).toBe('high-key');
+    });
+
+    it('classifies low-key when p10 < 40 and p90 < 180', () => {
+        const bins = new Array(256).fill(0);
+        bins[20] = 1000;
+        bins[100] = 500;
+        expect(estimateKeyType(makeHistogram(bins))).toBe('low-key');
+    });
+
+    it('classifies balanced for midtone spread', () => {
+        const bins = new Array(256).fill(0);
+        bins[50] = 500;
+        bins[128] = 500;
+        bins[200] = 500;
+        expect(estimateKeyType(makeHistogram(bins))).toBe('balanced');
+    });
+
+    it('classifies balanced for empty histogram', () => {
+        expect(estimateKeyType(makeHistogram(new Array(256).fill(0)))).toBe('balanced');
+    });
+
+    it('classifies balanced when only p90 is high but p10 is low', () => {
+        // Mostly dark with a few bright highlights — not high-key because
+        // the shadow tail (p10) is too dark.
+        const bins = new Array(256).fill(0);
+        bins[10] = 800;
+        bins[240] = 200;
+        expect(estimateKeyType(makeHistogram(bins))).toBe('balanced');
+    });
+
+    it('classifies balanced when only p10 is high but p90 is moderate', () => {
+        // Mostly bright but highlights don't blow out — not high-key because
+        // p90 is below the threshold.
+        const bins = new Array(256).fill(0);
+        bins[150] = 1000;
+        bins[200] = 500;
+        expect(estimateKeyType(makeHistogram(bins))).toBe('balanced');
     });
 });

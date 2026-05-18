@@ -358,6 +358,8 @@ async function reconcileLegacySchema(connection, dbName) {
     // R10-H2: processing error diagnostics for admin retry visibility.
     await ensureColumn(connection, dbName, 'images', 'processing_error', 'ALTER TABLE images ADD COLUMN processing_error varchar(512) DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'failed_at', 'ALTER TABLE images ADD COLUMN failed_at datetime DEFAULT NULL');
+    // R10-M4: delivered AVIF bit depth (10-bit vs 8-bit). Public-safe.
+    await ensureColumn(connection, dbName, 'images', 'avif_10bit', 'ALTER TABLE images ADD COLUMN avif_10bit boolean DEFAULT NULL');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');

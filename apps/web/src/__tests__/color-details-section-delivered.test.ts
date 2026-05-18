@@ -52,8 +52,16 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
             // (which matches only `p3-from-*`). C7-A1 closed the gap so all
             // four call sites of the predicate share one source of truth.
             expect(SOURCE).toMatch(
-                /isP3Pipeline\s*\([\s\S]*?image\.color_pipeline_decision[\s\S]*?\)[\s\S]*?t\('viewer\.deliveredBitDepthP3'\)[\s\S]*?t\('viewer\.deliveredBitDepthSrgb'\)/,
+                /const decision = image\.color_pipeline_decision[\s\S]*?isP3Pipeline\(decision\)[\s\S]*?t\('viewer\.deliveredBitDepthP3'[\s\S]*?\)/,
             );
+            expect(SOURCE).toContain("t('viewer.deliveredBitDepthSrgb')");
+        });
+
+        it('R10-M4: branches on avif_10bit and forceSrgbDerivatives for accurate delivered label', () => {
+            expect(SOURCE).toContain("image.avif_10bit === true");
+            expect(SOURCE).toContain("t('viewer.deliveredBitDepthP3',");
+            expect(SOURCE).toContain("t('viewer.deliveredBitDepthP3Fallback',");
+            expect(SOURCE).toMatch(/forceSrgbDerivatives\s*\?\s*'sRGB'\s*:\s*'P3'/);
         });
     });
 

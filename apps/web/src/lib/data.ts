@@ -243,6 +243,9 @@ const adminSelectFields = {
     // R10-H2: processing diagnostics — admin-only retry surface.
     processing_error: images.processing_error,
     failed_at: images.failed_at,
+    // R10-M4: delivered AVIF bit depth (10-bit vs 8-bit). Public-safe —
+    // describes the encoded output, not source PII or internal pipeline state.
+    avif_10bit: images.avif_10bit,
 } as const;
 
 // ADMIN LISTING: lightweight field set for the admin dashboard grid.

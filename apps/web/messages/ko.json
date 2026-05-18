@@ -319,7 +319,8 @@
     "downscaledYes": "예 (rgb16 파이프라인 전)",
     "deliveredBitDepth": "출력 비트 심도",
     "deliveredBitDepthSrgb": "8비트 (모든 포맷)",
-    "deliveredBitDepthP3": "10비트 AVIF, 8비트 WebP/JPEG",
+    "deliveredBitDepthP3": "10비트 AVIF (P3), 8비트 WebP/JPEG ({webpJpegGamut})",
+    "deliveredBitDepthP3Fallback": "8비트 AVIF (P3), 8비트 WebP/JPEG ({webpJpegGamut})",
     "deliveredFormats": "출력 포맷",
     "topics": {
       "default": "갤러리"

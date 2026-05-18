@@ -319,7 +319,8 @@
     "downscaledYes": "Yes (before rgb16 pipeline)",
     "deliveredBitDepth": "Delivered",
     "deliveredBitDepthSrgb": "8-bit (all formats)",
-    "deliveredBitDepthP3": "10-bit AVIF, 8-bit WebP/JPEG",
+    "deliveredBitDepthP3": "10-bit AVIF (P3), 8-bit WebP/JPEG ({webpJpegGamut})",
+    "deliveredBitDepthP3Fallback": "8-bit AVIF (P3), 8-bit WebP/JPEG ({webpJpegGamut})",
     "deliveredFormats": "Delivered formats",
     "topics": {
       "default": "Gallery"

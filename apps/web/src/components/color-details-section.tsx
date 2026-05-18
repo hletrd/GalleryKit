@@ -412,24 +412,33 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="font-medium">{t('viewer.downscaledYes')}</p>
                         </div>
                     )}
-                    {/* P3-5 / R7-M6: delivered bit depth per format.
+                    {/* P3-5 / R7-M6 / R10-M4: delivered bit depth per format.
                         color_pipeline_decision is admin-only; for public queries
                         derive an equivalent decision from color_primaries so the
                         delivery ceiling is visible to all viewers. isP3Pipeline
                         is called to satisfy the call-site lock in
-                        __tests__/is-p3-pipeline.test.ts. */}
+                        __tests__/is-p3-pipeline.test.ts.
+                        R10-M4: label now branches on avif_10bit (tracks 10-bit
+                        probe success / per-image fallback) and forceSrgbDerivatives
+                        (WebP/JPEG gamut when forced). */}
                     {(image.color_pipeline_decision || image.color_primaries) && (
                         <div>
                             <p className="text-muted-foreground text-xs">{t('viewer.deliveredBitDepth')}</p>
                             <p className="font-medium">
-                                {isP3Pipeline(
-                                    image.color_pipeline_decision
+                                {(() => {
+                                    const decision = image.color_pipeline_decision
                                         ?? (image.color_primaries !== 'bt709' && image.color_primaries !== 'unknown'
                                             ? 'p3-from-displayp3'
-                                            : 'srgb'),
-                                )
-                                    ? t('viewer.deliveredBitDepthP3')
-                                    : t('viewer.deliveredBitDepthSrgb')}
+                                            : 'srgb');
+                                    if (!isP3Pipeline(decision)) {
+                                        return t('viewer.deliveredBitDepthSrgb');
+                                    }
+                                    const webpJpegGamut = forceSrgbDerivatives ? 'sRGB' : 'P3';
+                                    if (image.avif_10bit === true) {
+                                        return t('viewer.deliveredBitDepthP3', { webpJpegGamut });
+                                    }
+                                    return t('viewer.deliveredBitDepthP3Fallback', { webpJpegGamut });
+                                })()}
                             </p>
                         </div>
                     )}
