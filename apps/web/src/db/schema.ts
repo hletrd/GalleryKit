@@ -101,6 +101,10 @@ export const images = mysqlTable("images", {
         .onUpdateNow()
         .notNull(),
     processed: boolean("processed").default(false),
+    // R10-H2: processing error diagnostics for admin retry visibility.
+    // persisted when MAX_RETRIES exceeded; cleared on successful processing.
+    processing_error: varchar('processing_error', { length: 512 }),
+    failed_at: datetime('failed_at', { mode: 'string' }),
 }, (table) => ({
     idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at),
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),

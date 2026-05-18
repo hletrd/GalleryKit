@@ -179,10 +179,12 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // mobile-priority OR a fresh violation lands without bumping
     // the corresponding count.
     //
-    // dashboard-client.tsx: four `size="sm"` quick-action buttons
-    // ("New upload", "View live", "View admin photos", "View admin
-    // categories"). All on a desktop-priority surface.
-    'app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx': 4,
+    // dashboard-client.tsx: five `size="sm"` buttons:
+    // - four quick-action buttons ("New upload", "View live", "View admin
+    //   photos", "View admin categories")
+    // - one retry button per failed image in the failed-images section
+    // All on a desktop-priority surface.
+    'app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx': 5,
     // topic-manager.tsx: back arrow (`size="icon"`) + per-row
     // edit/delete on each topic row (`size="icon"` x 2).
     'app/[locale]/admin/(protected)/categories/topic-manager.tsx': 3,

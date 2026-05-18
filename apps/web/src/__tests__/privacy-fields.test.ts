@@ -28,6 +28,9 @@ const SENSITIVE_KEYS = [
     // Atom <author> uses a JOIN-derived display name in getImagesForFeed;
     // the raw column itself never reaches public queries.
     'uploaded_by',
+    // R10-H2: processing diagnostics — admin-only retry surface.
+    'processing_error',
+    'failed_at',
 ] as const;
 
 describe('Privacy field separation', () => {

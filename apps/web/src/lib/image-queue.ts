@@ -363,8 +363,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
 
             // US-001: Conditional update — only mark processed if still unprocessed (not deleted)
+            // R10-H2: clear any prior processing_error / failed_at on success.
             const [updateResult] = await db.update(images)
-                .set({ processed: true, pipeline_version: IMAGE_PIPELINE_VERSION, was_downscaled: wasDownscaled })
+                .set({ processed: true, pipeline_version: IMAGE_PIPELINE_VERSION, was_downscaled: wasDownscaled, processing_error: null, failed_at: null })
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
 
             if (updateResult.affectedRows === 0) {
@@ -466,6 +467,19 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                     state.lastErrors.delete(oldest);
                 }
             }
+            // R10-H2: persist processing error and failure timestamp to DB
+            // so the admin dashboard can surface failed images with retry.
+            try {
+                const truncatedError = lastErrorMsg.length > 512
+                    ? lastErrorMsg.slice(0, 512)
+                    : lastErrorMsg;
+                await db.update(images)
+                    .set({ processing_error: truncatedError, failed_at: new Date().toISOString() })
+                    .where(eq(images.id, job.id));
+            } catch (dbErr) {
+                console.error(`[Queue] Failed to persist processing error for job ${job.id}:`, dbErr);
+            }
+
             // Reschedule bootstrap to discover other pending images. The
             // permanently-failed ID is excluded from the bootstrap query
             // (notInArray on permanentlyFailedIds), so this does NOT cause

@@ -240,6 +240,9 @@ const adminSelectFields = {
     // display name on the feed side (see getImagesForFeed below); the raw
     // column never leaves the admin surface.
     uploaded_by: images.uploaded_by,
+    // R10-H2: processing diagnostics — admin-only retry surface.
+    processing_error: images.processing_error,
+    failed_at: images.failed_at,
 } as const;
 
 // ADMIN LISTING: lightweight field set for the admin dashboard grid.
@@ -300,6 +303,8 @@ const {
     matrix_coefficients: _omitMatrixCoefficients,
     bit_depth: _omitBitDepthPublic,
     uploaded_by: _omitUploadedBy,
+    processing_error: _omitProcessingError,
+    failed_at: _omitFailedAt,
     ...publicSelectFieldCore
 } = adminSelectFields;
 
@@ -328,6 +333,8 @@ const {
     matrix_coefficients: _omitMatrixCoefficientsMap,
     bit_depth: _omitBitDepthMap,
     uploaded_by: _omitUploadedByMap,
+    processing_error: _omitProcessingErrorMap,
+    failed_at: _omitFailedAtMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
 
@@ -353,7 +360,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -836,6 +843,23 @@ export async function getAdminImagesLite(limit: number = 0, offset: number = 0, 
 
     const effectiveLimit = limit > 0 ? Math.min(limit, LISTING_QUERY_LIMIT) : LISTING_QUERY_LIMIT;
     return query.limit(effectiveLimit).offset(offset);
+}
+
+// R10-H2: admin-only query for permanently-failed images (processing_error set).
+export async function getFailedImages() {
+    return db.select({
+        id: images.id,
+        filename_jpeg: images.filename_jpeg,
+        user_filename: images.user_filename,
+        title: images.title,
+        topic: images.topic,
+        processing_error: images.processing_error,
+        failed_at: images.failed_at,
+        created_at: images.created_at,
+    })
+        .from(images)
+        .where(and(eq(images.processed, false), isNotNull(images.processing_error)))
+        .orderBy(desc(images.failed_at));
 }
 
 export async function getImage(id: number) {

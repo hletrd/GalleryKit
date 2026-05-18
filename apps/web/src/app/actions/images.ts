@@ -3,7 +3,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
-import { eq, inArray, and } from 'drizzle-orm';
+import { eq, inArray, and, isNotNull } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariants, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
 import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
@@ -1049,4 +1049,76 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
         console.error('bulkUpdateImages transaction failed:', e);
         return { error: t('failedToUpdateImage') };
     }
+}
+
+// R10-H2: retry a permanently-failed image from the admin dashboard.
+export async function retryFailedImage(id: number) {
+    const originError = await requireSameOriginAdmin();
+    if (originError) return originError;
+
+    if (!Number.isInteger(id) || id <= 0) {
+        return { error: 'Invalid image ID' };
+    }
+
+    // Fetch the image row (admin-only fields needed for re-enqueue)
+    const [image] = await db.select({
+        id: images.id,
+        filename_original: images.filename_original,
+        filename_webp: images.filename_webp,
+        filename_avif: images.filename_avif,
+        filename_jpeg: images.filename_jpeg,
+        width: images.width,
+        topic: images.topic,
+        icc_profile_name: images.icc_profile_name,
+        color_primaries: images.color_primaries,
+        transfer_function: images.transfer_function,
+        matrix_coefficients: images.matrix_coefficients,
+        is_hdr: images.is_hdr,
+        has_gain_map: images.has_gain_map,
+        camera_model: images.camera_model,
+        capture_date: images.capture_date,
+        processing_error: images.processing_error,
+    })
+        .from(images)
+        .where(and(eq(images.id, id), eq(images.processed, false), isNotNull(images.processing_error)))
+        .limit(1);
+
+    if (!image) {
+        return { error: 'Image not found or not in a failed state' };
+    }
+
+    // Clear the failure columns so the image is discoverable again.
+    await db.update(images)
+        .set({ processing_error: null, failed_at: null })
+        .where(eq(images.id, id));
+
+    // Remove from the in-memory permanently-failed set so the bootstrap
+    // scan will discover it on the next run.
+    const state = getProcessingQueueState();
+    state.permanentlyFailedIds.delete(id);
+    state.retryCounts.delete(id);
+    state.lastErrors.delete(id);
+
+    // Re-enqueue for processing.
+    enqueueImageProcessing({
+        id: image.id,
+        filenameOriginal: image.filename_original,
+        filenameWebp: image.filename_webp,
+        filenameAvif: image.filename_avif,
+        filenameJpeg: image.filename_jpeg,
+        width: image.width,
+        topic: image.topic,
+        iccProfileName: image.icc_profile_name,
+        colorSignals: {
+            colorPrimaries: image.color_primaries,
+            transferFunction: image.transfer_function,
+            matrixCoefficients: image.matrix_coefficients,
+            isHdr: image.is_hdr,
+            hasGainMap: image.has_gain_map,
+        },
+        camera_model: image.camera_model,
+        capture_date: image.capture_date,
+    });
+
+    return { success: true as const };
 }

@@ -64,7 +64,10 @@
   "dashboard": {
     "title": "Dashboard",
     "uploadNew": "Upload Photos",
-    "recentUploads": "Recent Uploads"
+    "recentUploads": "Recent Uploads",
+    "failedImages": "Failed Images ({count})",
+    "retry": "Retry",
+    "retrying": "Retrying…"
   },
   "categories": {
     "title": "Categories",

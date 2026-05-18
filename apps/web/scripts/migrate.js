@@ -355,6 +355,9 @@ async function reconcileLegacySchema(connection, dbName) {
     // Nullable so legacy rows keep working; ON DELETE SET NULL keeps the
     // photo when the admin is removed but drops the authorship link.
     await ensureColumn(connection, dbName, 'images', 'uploaded_by', 'ALTER TABLE images ADD COLUMN uploaded_by int DEFAULT NULL');
+    // R10-H2: processing error diagnostics for admin retry visibility.
+    await ensureColumn(connection, dbName, 'images', 'processing_error', 'ALTER TABLE images ADD COLUMN processing_error varchar(512) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'failed_at', 'ALTER TABLE images ADD COLUMN failed_at datetime DEFAULT NULL');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');
