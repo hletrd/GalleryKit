@@ -69,6 +69,14 @@ export async function GET(
             ?? toIso(img.created_at)
             ?? new Date().toISOString();
 
+        // R17-L2: per-entry <author> when the upload carries a known admin.
+        // NULL falls back to the feed-level <author> per RFC 4287 §4.1.1.
+        // Skip when it matches the feed author to avoid a redundant block.
+        const entryAuthorName = typeof img.author_name === 'string' ? img.author_name.trim() : '';
+        const perEntryAuthor = entryAuthorName && entryAuthorName !== seo.author
+            ? { name: entryAuthorName }
+            : undefined;
+
         return {
             id: photoUrl,
             title,
@@ -76,6 +84,7 @@ export async function GET(
             summary: img.description ?? img.capture_date ?? '',
             link: photoUrl,
             mediaContentUrl: mediaUrl,
+            author: perEntryAuthor,
         };
     });
 

@@ -351,6 +351,10 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
     await ensureColumn(connection, dbName, 'images', 'icc_profile_name', 'ALTER TABLE images ADD COLUMN icc_profile_name varchar(255) DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'was_downscaled', 'ALTER TABLE images ADD COLUMN was_downscaled boolean NOT NULL DEFAULT false');
+    // R17-L2: admin user that performed the upload (admin-only PII).
+    // Nullable so legacy rows keep working; ON DELETE SET NULL keeps the
+    // photo when the admin is removed but drops the authorship link.
+    await ensureColumn(connection, dbName, 'images', 'uploaded_by', 'ALTER TABLE images ADD COLUMN uploaded_by int DEFAULT NULL');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
     const captureDateInfo = await columnInfo(connection, dbName, 'images', 'capture_date');
@@ -561,6 +565,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_created_at', 'CREATE INDEX idx_images_processed_created_at ON images (processed, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_topic', 'CREATE INDEX idx_images_topic ON images (topic, processed, capture_date, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_user_filename', 'CREATE INDEX idx_images_user_filename ON images (user_filename)');
+    await ensureIndex(connection, dbName, 'images', 'idx_images_uploaded_by', 'CREATE INDEX idx_images_uploaded_by ON images (uploaded_by)');
     await ensureIndex(connection, dbName, 'audit_log', 'audit_user_idx', 'CREATE INDEX audit_user_idx ON audit_log (user_id, created_at)');
     await ensureIndex(connection, dbName, 'audit_log', 'audit_action_idx', 'CREATE INDEX audit_action_idx ON audit_log (action, created_at)');
     await ensureIndex(connection, dbName, 'audit_log', 'audit_created_at_idx', 'CREATE INDEX audit_created_at_idx ON audit_log (created_at)');
@@ -575,6 +580,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureForeignKey(connection, dbName, 'topic_aliases', 'topic_aliases_topic_slug_topics_slug_fk', 'ALTER TABLE topic_aliases ADD CONSTRAINT topic_aliases_topic_slug_topics_slug_fk FOREIGN KEY (topic_slug) REFERENCES topics(slug) ON DELETE CASCADE');
     await ensureForeignKey(connection, dbName, 'sessions', 'sessions_user_id_admin_users_id_fk', 'ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE');
     await ensureForeignKey(connection, dbName, 'audit_log', 'audit_log_user_id_admin_users_id_fk', 'ALTER TABLE audit_log ADD CONSTRAINT audit_log_user_id_admin_users_id_fk FOREIGN KEY (user_id) REFERENCES admin_users(id)');
+    await ensureForeignKey(connection, dbName, 'images', 'images_uploaded_by_admin_users_id_fk', 'ALTER TABLE images ADD CONSTRAINT images_uploaded_by_admin_users_id_fk FOREIGN KEY (uploaded_by) REFERENCES admin_users(id) ON DELETE SET NULL');
 }
 
 async function getRecordedHashes(connection) {

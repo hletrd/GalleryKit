@@ -24,6 +24,10 @@ const SENSITIVE_KEYS = [
     'bit_depth',
     // WI-15: downscale flag is a processing detail, not public metadata.
     'was_downscaled',
+    // R17-L2: raw admin user id that performed the upload is PII. Per-entry
+    // Atom <author> uses a JOIN-derived display name in getImagesForFeed;
+    // the raw column itself never reaches public queries.
+    'uploaded_by',
 ] as const;
 
 describe('Privacy field separation', () => {

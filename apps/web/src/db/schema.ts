@@ -86,6 +86,13 @@ export const images = mysqlTable("images", {
     // Admin-set alt (title/description) always takes precedence; this is never auto-applied.
     alt_text_suggested: text('alt_text_suggested'),
 
+    // R17-L2: admin user that performed the upload. NULL for legacy rows
+    // (pre-migration) and for any future programmatic ingest path that
+    // doesn't carry a session. Surfaced via JOIN in `getImagesForFeed` to
+    // drive per-entry Atom <author>; the raw column is admin-only PII.
+    // ON DELETE SET NULL keeps the photo but drops the authorship link.
+    uploaded_by: int("uploaded_by").references(() => adminUsers.id, { onDelete: 'set null' }),
+
     created_at: timestamp("created_at")
         .default(sql`CURRENT_TIMESTAMP`)
         .notNull(),
@@ -99,6 +106,7 @@ export const images = mysqlTable("images", {
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
     idxImagesTopic: index('idx_images_topic').on(table.topic, table.processed, table.capture_date, table.created_at),
     idxImagesUserFilename: index('idx_images_user_filename').on(table.user_filename),
+    idxImagesUploadedBy: index('idx_images_uploaded_by').on(table.uploaded_by),
 }));
 
 export const tags = mysqlTable("tags", {

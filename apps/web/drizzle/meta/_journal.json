@@ -134,6 +134,13 @@
       "when": 1778587200000,
       "tag": "0018_has_gain_map",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1779494400000,
+      "tag": "0019_image_uploaded_by",
+      "breakpoints": true
     }
   ]
 }

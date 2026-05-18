@@ -1,5 +1,5 @@
 import { cache } from 'react';
-import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections } from '@/db';
+import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections, adminUsers } from '@/db';
 import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, like, isNull, isNotNull } from 'drizzle-orm';
 import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
@@ -235,6 +235,11 @@ const adminSelectFields = {
     alt_text_suggested: images.alt_text_suggested,
     // US-P54: license_tier is PUBLIC (drives Buy/Download button on photo viewer).
     license_tier: images.license_tier,
+    // R17-L2: admin user that performed the upload. ADMIN-ONLY — the raw
+    // numeric id is PII. Per-entry Atom <author> uses a JOIN-derived
+    // display name on the feed side (see getImagesForFeed below); the raw
+    // column never leaves the admin surface.
+    uploaded_by: images.uploaded_by,
 } as const;
 
 // ADMIN LISTING: lightweight field set for the admin dashboard grid.
@@ -264,6 +269,7 @@ const {
     original_file_size: _omitOriginalFileSizeAdmin,
     original_width: _omitOriginalWidth,
     original_height: _omitOriginalHeight,
+    uploaded_by: _omitUploadedByAdminList,
     ...adminListSelectFieldCore
 } = adminSelectFields;
 
@@ -293,6 +299,7 @@ const {
     transfer_function: _omitTransferFunction,
     matrix_coefficients: _omitMatrixCoefficients,
     bit_depth: _omitBitDepthPublic,
+    uploaded_by: _omitUploadedBy,
     ...publicSelectFieldCore
 } = adminSelectFields;
 
@@ -320,6 +327,7 @@ const {
     transfer_function: _omitTransferFunctionMap,
     matrix_coefficients: _omitMatrixCoefficientsMap,
     bit_depth: _omitBitDepthMap,
+    uploaded_by: _omitUploadedByMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
 
@@ -345,7 +353,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -700,13 +708,20 @@ export async function getImagesForFeed(limit: number, topicSlug?: string) {
     const where = topicSlug && isValidSlug(topicSlug)
         ? and(eq(images.processed, true), eq(images.topic, topicSlug))
         : eq(images.processed, true);
+    // R17-L2: LEFT JOIN admin_users so per-entry Atom <author> can carry
+    // the uploading admin's username. NULL falls back to the feed-level
+    // <author> at the route layer (RFC 4287 §4.1.1). The raw uploaded_by
+    // id stays admin-only (publicSelectFields omits it via the privacy
+    // guard); only the derived display name reaches the public feed.
     return db.select({
         ...publicSelectFields,
         tag_names: tagNamesAgg,
+        author_name: adminUsers.username,
     })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
         .leftJoin(tags, eq(imageTags.tagId, tags.id))
+        .leftJoin(adminUsers, eq(images.uploaded_by, adminUsers.id))
         .where(where)
         .groupBy(images.id)
         .orderBy(desc(images.updated_at), desc(images.created_at), desc(images.id))
