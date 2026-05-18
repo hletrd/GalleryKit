@@ -22,6 +22,7 @@ interface HistogramWorkerPayload {
     imageData: ArrayBuffer;
     width: number;
     height: number;
+    colorSpace?: 'srgb' | 'display-p3';
 }
 
 interface HistogramWorkerResponse {
@@ -36,7 +37,7 @@ interface HistogramWorkerResponse {
 interface HistogramWorkerLike {
     addEventListener(type: 'message', listener: (event: MessageEvent<HistogramWorkerResponse>) => void): void;
     removeEventListener(type: 'message', listener: (event: MessageEvent<HistogramWorkerResponse>) => void): void;
-    postMessage(message: { requestId: number } & HistogramWorkerPayload, transfer: Transferable[]): void;
+    postMessage(message: { requestId: number } & HistogramWorkerPayload, transfer?: Transferable[]): void;
 }
 
 // Minimal 1x1 AVIF data URL for client-side decode support probing.
@@ -227,11 +228,13 @@ function computeHistogramAsync(
     }
     ctx.drawImage(imageEl, 0, 0, w, h);
     const imageData = ctx.getImageData(0, 0, w, h);
+    const canvasColorSpace = ctx.getContextAttributes().colorSpace as 'srgb' | 'display-p3';
 
     return requestHistogramFromWorker(worker, {
         imageData: imageData.data.buffer,
         width: w,
         height: h,
+        colorSpace: canvasColorSpace,
     }, signal);
 }
 
