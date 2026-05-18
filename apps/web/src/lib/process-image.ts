@@ -112,6 +112,129 @@ export async function canUseHighBitdepthAvif(): Promise<boolean> {
     _highBitdepthAvifProbePromise = _probeHighBitdepthAvif();
     return _highBitdepthAvifProbePromise;
 }
+
+// R10-M6-M7: post-encode color-metadata verification helpers.
+// Audit-only: log warnings if expected boxes/chunks are absent,
+// but never throw or block the pipeline.
+
+export interface AvifNclxVerificationResult {
+    ok: boolean;
+    message: string;
+}
+
+/**
+ * Scan the first ~4KB of an AVIF file for a `colr` box of type `nclx`
+ * with the expected CICP primaries and transfer values.
+ *
+ * ISOBMFF `colr` box layout:
+ *   [size: 4 BE][type: 'colr'][color_type: 'nclx'][primaries: 2 BE][transfer: 2 BE]
+ *
+ * If an ICC profile (`prof`) is found instead of `nclx`, it is accepted
+ * as a valid alternative color signal but noted in the message.
+ */
+export function verifyAvifNclxInBuffer(
+    buffer: Buffer,
+    expectedPrimaries: number,
+    expectedTransfer: number,
+): AvifNclxVerificationResult {
+    if (buffer.length < 16) {
+        return { ok: false, message: 'buffer too small' };
+    }
+
+    for (let i = 4; i < buffer.length - 12; i++) {
+        if (buffer.toString('ascii', i, i + 4) !== 'colr') continue;
+
+        // Validate that the preceding 4 bytes look like a reasonable box size
+        const size = buffer.readUInt32BE(i - 4);
+        if (size < 12 || size > 64) continue;
+
+        const colorType = buffer.toString('ascii', i + 4, i + 8);
+        if (colorType === 'nclx') {
+            if (i + 12 > buffer.length) {
+                return { ok: false, message: 'NCLX truncated' };
+            }
+            const primaries = buffer.readUInt16BE(i + 8);
+            const transfer = buffer.readUInt16BE(i + 10);
+            if (primaries === expectedPrimaries && transfer === expectedTransfer) {
+                return { ok: true, message: `NCLX primaries=${primaries} transfer=${transfer}` };
+            }
+            return { ok: false, message: `NCLX mismatch: primaries=${primaries} transfer=${transfer} (expected ${expectedPrimaries}, ${expectedTransfer})` };
+        }
+        if (colorType === 'prof') {
+            return { ok: true, message: 'ICC profile (prof) found instead of NCLX' };
+        }
+    }
+
+    return { ok: false, message: 'no NCLX colr box found' };
+}
+
+async function _verifyAvifNclx(
+    filePath: string,
+    expectedPrimaries: number,
+    expectedTransfer: number,
+): Promise<void> {
+    try {
+        const buffer = await fs.readFile(filePath);
+        const { ok, message } = verifyAvifNclxInBuffer(buffer.subarray(0, 4096), expectedPrimaries, expectedTransfer);
+        if (!ok) {
+            console.warn(`[verify-avif] ${message} in ${path.basename(filePath)}`);
+        }
+    } catch (e) {
+        console.warn(`[verify-avif] failed to read ${path.basename(filePath)}:`, e);
+    }
+}
+
+export interface WebpIccVerificationResult {
+    ok: boolean;
+    message: string;
+}
+
+/**
+ * Scan the first ~1KB of a WebP file for an `ICCP` chunk.
+ *
+ * WebP chunk layout:
+ *   [chunk_size: 4 LE][chunk_tag: 4 ASCII][data]
+ */
+export function verifyWebpIccInBuffer(buffer: Buffer): WebpIccVerificationResult {
+    if (buffer.length < 12) {
+        return { ok: false, message: 'buffer too small' };
+    }
+    const riff = buffer.toString('ascii', 0, 4);
+    const webpTag = buffer.toString('ascii', 8, 12);
+    if (riff !== 'RIFF' || webpTag !== 'WEBP') {
+        return { ok: false, message: 'not a valid WebP file' };
+    }
+
+    let offset = 12;
+    while (offset + 8 <= buffer.length) {
+        const chunkSize = buffer.readUInt32LE(offset);
+        const chunkTag = buffer.toString('ascii', offset + 4, offset + 8);
+        if (chunkTag === 'ICCP') {
+            return { ok: true, message: 'ICCP chunk found' };
+        }
+        // Chunk data is padded to an even number of bytes
+        const paddedSize = chunkSize + (chunkSize % 2);
+        const nextOffset = offset + 8 + paddedSize;
+        // Sanity: prevent infinite loop on malformed files
+        if (nextOffset <= offset || nextOffset > buffer.length) break;
+        offset = nextOffset;
+    }
+
+    return { ok: false, message: 'no ICCP chunk found' };
+}
+
+async function _verifyWebpIccChunk(filePath: string): Promise<void> {
+    try {
+        const buffer = await fs.readFile(filePath);
+        const { ok, message } = verifyWebpIccInBuffer(buffer.subarray(0, 1024));
+        if (!ok) {
+            console.warn(`[verify-webp] ${message} in ${path.basename(filePath)}`);
+        }
+    } catch (e) {
+        console.warn(`[verify-webp] failed to read ${path.basename(filePath)}:`, e);
+    }
+}
+
 const envMaxInputPixels = Number.parseInt(process.env.IMAGE_MAX_INPUT_PIXELS ?? '', 10);
 const maxInputPixels = Number.isFinite(envMaxInputPixels) && envMaxInputPixels > 0
     ? envMaxInputPixels
@@ -1066,6 +1189,21 @@ export async function processImageFormats(
         if (webpStats.size === 0) throw new Error('Generated WebP file is empty');
         if (avifStats.size === 0) throw new Error('Generated AVIF file is empty');
         if (jpegStats.size === 0) throw new Error('Generated JPEG file is empty');
+
+        // R10-M6-M7: post-encode color-metadata verification (audit-only).
+        // Verify AVIF carries the expected NCLX CICP values and P3-tagged
+        // WebP carries an ICCP chunk. Warnings are non-blocking — they
+        // surface encoder behavior drift for operator awareness only.
+        const avifPath = path.join(UPLOAD_DIR_AVIF, filenameAvif);
+        const webpPath = path.join(UPLOAD_DIR_WEBP, filenameWebp);
+        if (avifIcc === 'p3') {
+            await _verifyAvifNclx(avifPath, 12, 13);
+        } else {
+            await _verifyAvifNclx(avifPath, 1, 13);
+        }
+        if (targetIcc === 'p3') {
+            await _verifyWebpIccChunk(webpPath);
+        }
     } catch (err) {
         // R10-L11: clean up any partial sized variants written so far across
         // ALL three formats. Without this, a mid-size failure (e.g. AVIF
