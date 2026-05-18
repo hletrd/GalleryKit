@@ -680,7 +680,7 @@
     "qualityHintAvif": "1-100. AVIF 85 is roughly visually equivalent to JPEG 95 at a smaller file size. Higher = better quality, larger files.",
     "qualityHintJpeg": "1-100. JPEG 90 is a typical web target; 95+ for archive-grade. Higher = better quality, larger files.",
     "imageSizes": "Output Sizes",
-    "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096). Auto-sorted and deduped, max 8, locked once photos exist.",
+    "imageSizesHint": "Comma-separated pixel widths (e.g. 640,1536,2048,4096,5120,7680). Auto-sorted and deduped, max 8, locked once photos exist.",
     "privacyTitle": "Privacy",
     "privacyDesc": "Choose what metadata to keep on upload.",
     "stripGps": "Do Not Store GPS Coordinates on Upload",

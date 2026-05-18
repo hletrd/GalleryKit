@@ -24,6 +24,9 @@ interface LightboxProps {
     slideshowIntervalSeconds?: number;
     currentIndex?: number;
     totalCount?: number;
+    /** R10-L20: replicate delivered bit depth + format chips in expanded panel. */
+    isAdmin?: boolean;
+    forceSrgbDerivatives?: boolean;
 }
 
 export function shouldAutoHideLightboxControls(hasHover: boolean, hasFinePointer: boolean) {
@@ -75,7 +78,7 @@ export function kenBurnsTransform(variant: 0 | 1, phase: 'start' | 'end'): strin
         : 'scale(1.03) translate(2%, 2%)';
 }
 
-export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount }: LightboxProps) {
+export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlideshowAdvance, imageSizes = DEFAULT_IMAGE_SIZES, slideshowIntervalSeconds = SLIDESHOW_INTERVAL_DEFAULT, currentIndex, totalCount, isAdmin = false, forceSrgbDerivatives = false }: LightboxProps) {
     const { t } = useTranslation();
     const [controlsVisible, setControlsVisible] = useState(true);
     const [colorPipOpen, setColorPipOpen] = useState(false);
@@ -613,6 +616,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     onToggle={() => setColorPipOpen(prev => !prev)}
                     imageSizes={imageSizes}
                     cycleModeRef={colorPipCycleModeRef}
+                    isAdmin={isAdmin}
+                    forceSrgbDerivatives={forceSrgbDerivatives}
                 />
 
                 {/* Position counter — bottom center */}

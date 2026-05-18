@@ -87,7 +87,7 @@ export type SeoSettingKey = typeof SEO_SETTING_KEYS[number];
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_IMAGE_SIZE_VALUES = [640, 1536, 2048, 4096] as const;
+const DEFAULT_IMAGE_SIZE_VALUES = [640, 1536, 2048, 4096, 5120, 7680] as const;
 
 export const SLIDESHOW_INTERVAL_DEFAULT = 5;
 export const SLIDESHOW_INTERVAL_MIN = 2;

@@ -12,7 +12,7 @@ import {
     humanizeTransferFunction,
     humanizeColorPipelineDecision,
 } from '@/components/color-details-section';
-import { COLOR_PIPELINE_DECISIONS, type ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
+import { COLOR_PIPELINE_DECISIONS, type ColorPipelineDecision, isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { findNearestImageSize, DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface LightboxColorPipProps {
@@ -22,6 +22,9 @@ interface LightboxColorPipProps {
     onToggle: () => void;
     imageSizes?: number[];
     cycleModeRef?: React.RefObject<(() => void) | null>;
+    /** R10-L20: replicate delivered bit depth + format chips. */
+    isAdmin?: boolean;
+    forceSrgbDerivatives?: boolean;
 }
 
 /**
@@ -35,7 +38,7 @@ interface LightboxColorPipProps {
  * P4-C5 / R4-L2 / UX-L2: chip uses `min-h-11` so the touch-target floor
  * (≥ 44 px per WCAG 2.5.5 / Apple HIG) is met without padding inflation.
  */
-export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef }: LightboxColorPipProps) {
+export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef, isAdmin = false, forceSrgbDerivatives = false }: LightboxColorPipProps) {
     const hasData = Boolean(image.color_primaries || image.transfer_function || image.color_pipeline_decision);
     if (!hasData) return null;
 
@@ -177,6 +180,50 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                                         </TooltipContent>
                                     </Tooltip>
                                 )}
+                            </span>
+                        </div>
+                    )}
+                    {/* R10-L20: delivered bit depth — same logic as
+                        color-details-section.tsx delivered row. */}
+                    {(image.color_pipeline_decision || image.color_primaries) && (
+                        <div className="flex justify-between gap-3">
+                            <span className="opacity-70">{t('viewer.deliveredBitDepth')}</span>
+                            <span className="font-medium">
+                                {(() => {
+                                    const decision = image.color_pipeline_decision
+                                        ?? (image.color_primaries !== 'bt709' && image.color_primaries !== 'unknown'
+                                            ? 'p3-from-displayp3'
+                                            : 'srgb');
+                                    if (!isP3Pipeline(decision)) {
+                                        return t('viewer.deliveredBitDepthSrgb');
+                                    }
+                                    const webpJpegGamut = forceSrgbDerivatives ? 'sRGB' : 'P3';
+                                    if (image.avif_10bit === true) {
+                                        return t('viewer.deliveredBitDepthP3', { webpJpegGamut });
+                                    }
+                                    return t('viewer.deliveredBitDepthP3Fallback', { webpJpegGamut });
+                                })()}
+                            </span>
+                        </div>
+                    )}
+                    {/* R10-L20: delivered formats — same logic as
+                        color-details-section.tsx formats row. */}
+                    {(image.filename_webp || image.filename_avif || image.filename_jpeg) && (
+                        <div className="flex justify-between gap-3">
+                            <span className="opacity-70">{t('viewer.deliveredFormats')}</span>
+                            <span className="font-medium flex gap-1">
+                                {[
+                                    image.filename_webp ? { name: 'WebP', gamut: (isAdmin && forceSrgbDerivatives) ? 'sRGB' : undefined } : null,
+                                    image.filename_avif ? { name: 'AVIF', gamut: (isAdmin && image.color_pipeline_decision && isP3Pipeline(image.color_pipeline_decision)) ? 'P3' : undefined } : null,
+                                    image.filename_jpeg ? { name: 'JPEG', gamut: (isAdmin && forceSrgbDerivatives) ? 'sRGB' : undefined } : null,
+                                ].filter((x): x is { name: string; gamut: string | undefined } => x !== null).map((fmt) => (
+                                    <span key={fmt.name} className="inline-block px-1.5 py-0.5 text-[10px] font-medium bg-white/10 rounded">
+                                        {fmt.name}
+                                        {fmt.gamut && (
+                                            <span className="ml-0.5 text-white/50">({fmt.gamut})</span>
+                                        )}
+                                    </span>
+                                ))}
                             </span>
                         </div>
                     )}

@@ -1046,6 +1046,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 slideshowIntervalSeconds={slideshowIntervalSeconds}
                 currentIndex={currentIndex}
                 totalCount={images.length}
+                isAdmin={isAdmin}
+                forceSrgbDerivatives={forceSrgbDerivatives}
             />
         )}
 

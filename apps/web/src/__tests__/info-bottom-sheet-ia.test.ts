@@ -18,11 +18,17 @@ const SRC_PATH = resolve(__dirname, '../components/info-bottom-sheet.tsx');
 const SOURCE = readFileSync(SRC_PATH, 'utf8');
 
 describe('info-bottom-sheet IA order (R10-M12)', () => {
-    it('has no isNonTrivialColor conditional branches', () => {
+    it('has no isNonTrivialColor conditional branches for reordering', () => {
         // R10-M12: removed conditional reordering entirely.
-        expect(SOURCE).not.toMatch(/isNonTrivialColor/);
-        expect(SOURCE).not.toMatch(/\{isNonTrivialColor\s*&&/);
+        // R10-L19: isNonTrivialColor may still exist for the peek-state chip.
+        // Verify any isNonTrivialColor conditional is BEFORE the expanded
+        // content div (i.e. in the peek section) and does NOT wrap large blocks.
+        const expandedMarker = SOURCE.indexOf('max-h-[calc(95dvh-140px)]');
+        const isNonTrivialIdx = SOURCE.indexOf('{isNonTrivialColor');
         expect(SOURCE).not.toMatch(/\{!isNonTrivialColor\s*&&/);
+        if (isNonTrivialIdx !== -1) {
+            expect(isNonTrivialIdx).toBeLessThan(expandedMarker);
+        }
     });
 
     it('renders EXIF section BEFORE Histogram for all photos', () => {

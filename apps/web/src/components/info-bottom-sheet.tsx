@@ -17,7 +17,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Histogram } from '@/components/histogram';
-import ColorDetailsSection from '@/components/color-details-section';
+import ColorDetailsSection, { humanizeColorPrimaries } from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
@@ -175,6 +175,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         ? buildDownloadFilename(image.title, image.id, 'avif')
         : null;
     const isWideGamutSource = isWideGamutPrimary(image.color_primaries);
+    const isNonTrivialColor = Boolean(
+        (image.color_primaries && image.color_primaries !== 'bt709') ||
+        (isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')) ||
+        (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
+    );
 
     return (
         <>
@@ -262,6 +267,21 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                             <span className="flex items-center gap-1" suppressHydrationWarning>
                                 <Calendar className="w-3 h-3" />
                                 {formattedCaptureDate}
+                            </span>
+                        )}
+                        {/* R10-L19: color indicator chip in peek state for non-trivial color photos */}
+                        {isNonTrivialColor && (
+                            <span className="inline-flex items-center gap-1">
+                                {image.color_primaries && humanizeColorPrimaries(image.color_primaries) && (
+                                    <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold bg-purple-200 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200 rounded gamut-p3-badge">
+                                        {humanizeColorPrimaries(image.color_primaries)}
+                                    </span>
+                                )}
+                                {isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg') && (
+                                    <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm">
+                                        HDR
+                                    </span>
+                                )}
                             </span>
                         )}
                     </div>
