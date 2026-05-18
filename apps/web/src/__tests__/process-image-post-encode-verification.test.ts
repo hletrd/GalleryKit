@@ -87,7 +87,6 @@ describe('verifyWebpIccInBuffer', () => {
         const iccData = Buffer.from('mock-icc');
         const chunkSize = iccData.length;
         const paddedSize = chunkSize + (chunkSize % 2);
-        const riffSize = 4 + 4 + 8 + paddedSize; // WEBP + VP8 + ICCP chunk
         const totalSize = 12 + 8 + paddedSize;
         const buf = Buffer.alloc(totalSize);
         buf.write('RIFF', 0, 4, 'ascii');

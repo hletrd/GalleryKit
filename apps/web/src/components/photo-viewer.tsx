@@ -95,6 +95,10 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     });
     const [isSharingPhoto, setIsSharingPhoto] = useState(false);
     const [isCheckingOut, setIsCheckingOut] = useState(false);
+    // R10-M11: tracks whether the current photo's actual image has finished
+    // loading. The blur placeholder stays visible until onLoad fires,
+    // then fades out for a smooth crossfade.
+    const [imageLoaded, setImageLoaded] = useState(false);
 
     /**
      * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02:
@@ -151,6 +155,17 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     useEffect(() => {
         setCurrentImageId(initialImageId);
     }, [initialImageId]);
+
+    // R10-M11: reset imageLoaded when the photo changes so the blur
+    // placeholder is visible while the new image decodes. onLoad on the
+    // <img> / <Image> will set it to true, triggering the blur fade-out.
+    // A 3-second fallback ensures cached images (where onLoad may fire
+    // before the listener is attached) still dismiss the blur.
+    useEffect(() => {
+        setImageLoaded(false);
+        const fallbackTimer = setTimeout(() => setImageLoaded(true), 3000);
+        return () => clearTimeout(fallbackTimer);
+    }, [image?.id]);
 
 
     const normalizedDisplayTitle = useMemo(() => (
@@ -471,6 +486,9 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     // so the same sized-derivative fallback applies on the
                     // no-AVIF/no-WebP branch.
                     onError={handleJpegError}
+                    // R10-M11: dismiss the blur placeholder once the actual
+                    // image has decoded, triggering the crossfade.
+                    onLoad={() => setImageLoaded(true)}
                 />
             );
         }
@@ -505,10 +523,13 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     // guarantees the base file is always present, so a single
                     // fallback is sufficient. Mirrors R21-M1 in lightbox.tsx.
                     onError={handleJpegError}
+                    // R10-M11: dismiss the blur placeholder once the actual
+                    // image has decoded, triggering the crossfade.
+                    onLoad={() => setImageLoaded(true)}
                 />
             </picture>
         );
-    }, [image, photoViewerSizes, t, imageSizes]);
+    }, [image, photoViewerSizes, t, imageSizes, setImageLoaded]);
 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 
@@ -697,6 +718,21 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         onSelectId={isSharedView ? setCurrentImageId : undefined}
                     />
 
+                    {/* R10-M11: blur crossfade during photo navigation.
+                        The blur background lives OUTSIDE AnimatePresence so it
+                        persists across image changes, acting as a placeholder
+                        while the new photo decodes. It fades out when onLoad
+                        fires (or a 3s fallback), creating a smooth dissolve
+                        from blurred preview to sharp image. */}
+                    {blurStyle && (
+                        <motion.div
+                            className="absolute inset-0 z-0"
+                            style={blurStyle}
+                            initial={false}
+                            animate={{ opacity: imageLoaded ? 0 : 1 }}
+                            transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
+                        />
+                    )}
                     <AnimatePresence mode="wait" initial={false}>
                         <motion.div
                             key={image.id}
@@ -704,8 +740,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             animate={{ opacity: 1, x: 0 }}
                             exit={prefersReducedMotion ? undefined : { opacity: 0, x: -20 }}
                             transition={{ duration: prefersReducedMotion ? 0 : 0.2 }}
-                            className="w-full h-full flex items-center justify-center relative"
-                            style={blurStyle}
+                            className="relative w-full h-full flex items-center justify-center z-10"
                         >
                             <div className="w-full h-full flex items-center justify-center">
                                 <ImageZoom className="w-full h-full flex items-center justify-center">
