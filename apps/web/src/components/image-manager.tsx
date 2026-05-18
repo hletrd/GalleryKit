@@ -49,6 +49,7 @@ import { useRouter } from 'next/navigation';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { countCodePoints } from '@/lib/utils';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 
 interface ImageType {
     id: number;
@@ -62,6 +63,7 @@ interface ImageType {
     tag_names?: string | null; // GROUP_CONCAT returns null when no tags
     user_filename?: string | null;
     description?: string | null;
+    color_primaries?: string | null;
 }
 
 export function ImageManager({
@@ -402,6 +404,7 @@ export function ImageManager({
                             <TableHead>{t('imageManager.filename')}</TableHead>
                             <TableHead>{t('imageManager.topic')}</TableHead>
                             <TableHead>{t('imageManager.tags')}</TableHead>
+                            <TableHead>{t('imageManager.gamut')}</TableHead>
                             <TableHead>{t('imageManager.date')}</TableHead>
                             <TableHead className="text-right">{t('imageManager.actions')}</TableHead>
                         </TableRow>
@@ -485,6 +488,15 @@ export function ImageManager({
                                         />
                                     </div>
                                 </TableCell>
+                                <TableCell>
+                                    {isWideGamutPrimary(image.color_primaries) ? (
+                                        <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200 rounded-full">
+                                            P3
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-muted-foreground">sRGB</span>
+                                    )}
+                                </TableCell>
                                 <TableCell suppressHydrationWarning>{formatStoredExifDate(image.capture_date, locale) || (image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-')}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
@@ -518,7 +530,7 @@ export function ImageManager({
                         ))}
                         {images.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={8} className="h-24 text-center">
+                                <TableCell colSpan={9} className="h-24 text-center">
                                     {t('imageManager.noImages')}
                                 </TableCell>
                             </TableRow>

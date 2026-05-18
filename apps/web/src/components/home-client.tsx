@@ -13,6 +13,7 @@ import { localizePath } from '@/lib/locale-path';
 import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames, humanizeTagLabel } from '@/lib/photo-title';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
@@ -69,6 +70,7 @@ interface GalleryImage {
     tag_names?: string | null;
     topic?: string;
     user_filename?: string | null;
+    color_primaries?: string | null;
 }
 
 interface GalleryTag {
@@ -343,6 +345,14 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                             );
                                         })()}
                                     </picture>
+                                    {/* R10-H5: subtle gamut badge for wide-gamut photos, gated by display capability */}
+                                    {isWideGamutPrimary(image.color_primaries) && (
+                                        <div className="absolute top-2 right-2 z-10">
+                                            <span className="gamut-p3-badge inline-flex items-center justify-center min-h-11 min-w-11 px-2 py-1 text-[10px] font-bold bg-purple-200/90 text-purple-900 dark:bg-purple-900/60 dark:text-purple-200 rounded-full backdrop-blur-sm">
+                                                P3
+                                            </span>
+                                        </div>
+                                    )}
                                     <div className="absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
                                         <h3 className="text-white text-sm font-medium truncate">{displayTitle}</h3>
                                         <p className="text-white/80 text-xs truncate">
