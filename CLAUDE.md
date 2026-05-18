@@ -310,6 +310,12 @@ docker run --rm \
 
 `useDisplayCapability` layers `screen.colorGamut` -> `(color-gamut: p3)` MQ -> conservative `'srgb'` default for Firefox. The canvas-P3 probe is NOT used for display detection because it tests API capability, not display gamut, producing systematic false positives on sRGB displays (R9-R1). Firefox users on P3 displays can use `force_show_color_chips` for demo purposes.
 
+**Firefox photographer-visible impact (R10-H4):**
+- Firefox lacks both `color-gamut` MQ and `screen.colorGamut` support, so `useDisplayCapability` conservatively reports `'srgb'` for ALL Firefox browsers regardless of actual display capability.
+- **Consequence 1 — Missing badges:** On a P3 display, Firefox visitors do NOT see the P3 gamut badge or HDR badge in the photo viewer, because the badge gating relies on `useDisplayCapability`.
+- **Consequence 2 — Incorrect hint suppression:** The `WideGamutHint` ("Your display shows the sRGB version...") is hidden on Firefox even when the visitor is on a genuine sRGB display, because the component uses `useDisplayCapability` (not raw `matchMedia`) to avoid false-positives. This is the correct trade-off: better to hide the hint from everyone on Firefox than to nag P3-display Firefox users with an incorrect sRGB claim.
+- **Mitigation:** The `force_show_color_chips` admin toggle overrides display detection and renders badges unconditionally. This is the only way to surface gamut/HDR metadata to Firefox visitors. The admin settings UI documents this gap (R10-H4-FULL).
+
 **Display-change limitations:**
 - `screen.colorGamut` has no change-event API. Chrome/Safari/Edge compensate via the `color-gamut` MQ change event, but the MQ may fire before `screen.colorGamut` updates, causing a brief mismatch.
 - Firefox has no `color-gamut` MQ support at all, so dragging between monitors only updates on `focus` / `visibilitychange` (R9-R3).

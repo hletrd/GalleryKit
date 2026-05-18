@@ -715,6 +715,8 @@
     "allowHdrIngestHint": "When ON, PQ and HLG source images can be uploaded. When OFF (default), HDR uploads are rejected to prevent accidental ingestion of unsupported wide-gamut + high-dynamic-range files.",
     "forceShowColorChips": "Force Show Color Chips",
     "forceShowColorChipsHint": "When ON, the P3 gamut badge and HDR badge are always visible in the photo viewer, even on sRGB displays. Useful for photographers who want to verify color metadata regardless of the visitor's display.",
+    "firefoxDisplayGapNote": "Firefox display detection gap",
+    "firefoxDisplayGapNoteDetail": "Firefox does not support the color-gamut media query, so gamut/HDR badges and the wide-gamut educational hint are hidden on all Firefox browsers regardless of actual display capability. Enabling \"Force Show Color Chips\" above is the only way to surface badges to Firefox visitors.",
     "wideGamutJpegChroma": "Wide-Gamut JPEG Chroma",
     "wideGamutJpegChromaHint": "Chroma subsampling for wide-gamut JPEG derivatives. 4:4:4 preserves full color detail but produces larger files. 4:2:0 is smaller but may show color bleeding in fine gradients.",
     "avifEffort": "AVIF Encoding Effort",

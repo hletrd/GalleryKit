@@ -256,6 +256,13 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         />
                     </div>
 
+                    {/* R10-H4: Firefox display detection gap — informational note for admins */}
+                    <div className="rounded-md border border-blue-200 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-300">
+                        <strong>{t('settings.firefoxDisplayGapNote')}</strong>
+                        {' '}
+                        {t('settings.firefoxDisplayGapNoteDetail')}
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="wide-gamut-jpeg-chroma">{t('settings.wideGamutJpegChroma')}</Label>
