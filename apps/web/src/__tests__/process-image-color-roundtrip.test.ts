@@ -139,6 +139,20 @@ async function readSrgbPixel(filePath: string): Promise<{ r: number; g: number; 
     return { r: data[0], g: data[1], b: data[2] };
 }
 
+/**
+ * Read the raw encoded pixel values WITHOUT converting to sRGB.
+ * This is what R10-C1 needs: if the pipeline truly preserves P3 pixel
+ * values, the raw bytes should match the input. If `.toColorspace('p3')`
+ * silently falls back to sRGB, the raw bytes will be the sRGB-clipped
+ * equivalents (detectable because red/blue channels shift).
+ */
+async function readRawPixel(filePath: string): Promise<{ r: number; g: number; b: number }> {
+    const { data } = await sharp(filePath)
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+    return { r: data[0], g: data[1], b: data[2] };
+}
+
 // ---------------------------------------------------------------------------
 // Untagged sRGB source — should produce sRGB-tagged AVIF/WebP/JPEG outputs
 // ---------------------------------------------------------------------------
@@ -228,6 +242,52 @@ describe('color round-trip — Display-P3 source', () => {
         // R8-TEST P1-5: AVIF remains P3-tagged even when forceSrgbDerivatives=true
         const avifProfile = await readOutputIccName(path.join(UPLOAD_DIR_AVIF, `${id}.avif`));
         expect(avifProfile?.toLowerCase()).toMatch(/p3|display p3/);
+    });
+
+    // R10-C1: verify P3-source pixel values survive the encode/decode
+    // pipeline without being mangled or sRGB-clipped. The source is P3-
+    // tagged with pure green (0,255,0); the pipeline should preserve
+    // those raw values in the output AVIF (the attached P3 ICC profile
+    // tells a colour-managed decoder how to interpret them). Generous
+    // tolerance accounts for AVIF encode/decode quantization.
+    it('P3-source AVIF raw pixel values are preserved, not sRGB-clipped (R10-C1)', async () => {
+        const srcPath = path.join(tmpDir, 'p3-green-src.jpg');
+        await sharp({
+            create: { width: 8, height: 8, channels: 3, background: { r: 0, g: 255, b: 0 } },
+        })
+            .withIccProfile('p3')
+            .jpeg({ quality: 95 })
+            .toFile(srcPath);
+
+        const id = trackId('rt-p3-green-raw');
+        await processImageFormats(
+            srcPath,
+            `${id}.webp`,
+            `${id}.avif`,
+            `${id}.jpg`,
+            8,
+            { webp: 80, avif: 80, jpeg: 90 },
+            [8],
+            'Display P3',
+        );
+
+        const { UPLOAD_DIR_AVIF } = await import('@/lib/upload-paths');
+        const avifPath = path.join(UPLOAD_DIR_AVIF, `${id}.avif`);
+
+        const raw = await readRawPixel(avifPath);
+
+        // A broken pipeline that mangled or clipped the values would push
+        // red/blue channels away from zero. Tolerance is generous (~25 codes)
+        // for AVIF encode quantization; the assertion still catches gross drift.
+        expect(raw.r).toBeLessThanOrEqual(25);
+        expect(raw.g).toBeGreaterThanOrEqual(230);
+        expect(raw.b).toBeLessThanOrEqual(25);
+
+        // Also verify the output carries a P3 ICC profile — the profile is
+        // what makes the preserved raw values meaningful to colour-managed
+        // decoders (browsers, Lightroom, etc.).
+        const profile = await readOutputIccName(avifPath);
+        expect(profile?.toLowerCase()).toMatch(/p3|display p3/);
     });
 
     // R8-TEST P0-2: DCI-P3 source produces P3-tagged (D65-adapted) output
