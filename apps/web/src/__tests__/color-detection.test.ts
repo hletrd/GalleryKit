@@ -229,10 +229,10 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
-    // R8-TEST P1-3: NCLX transfer code completeness
-    it('maps nclx transfer=2 to gamma22', async () => {
+    // R5-H1: ITU-T H.273 Table 3 says code 2 is "Unspecified"
+    it('maps nclx transfer=2 to unknown', async () => {
         const signals = await detectFromNclx(1, 2, 1);
-        expect(signals.transferFunction).toBe('gamma22');
+        expect(signals.transferFunction).toBe('unknown');
         expect(signals.isHdr).toBe(false);
     });
 

@@ -174,8 +174,9 @@ const NCLX_PRIMARIES_MAP: Record<number, ColorSignals['colorPrimaries']> = {
 
 const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     1: 'srgb',
-    2: 'gamma22',
-    // R8-M1: ITU-T H.273 gamma-2.2 family values 4, 5, 7
+    // R5-H1: ITU-T H.273 Table 3 says code 2 is "Unspecified" — no defined
+    // transfer function. Do NOT map to gamma22. Values 4, 5, 7 are the
+    // gamma-2.2 family (BT.470M, BT.470BG, SMPTE 240M respectively).
     4: 'gamma22', // ITU-T H.273 Gamma 2.2 curve
     5: 'gamma22', // BT.470 System M
     6: 'gamma22',
