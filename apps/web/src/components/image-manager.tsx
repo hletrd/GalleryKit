@@ -64,6 +64,8 @@ interface ImageType {
     user_filename?: string | null;
     description?: string | null;
     color_primaries?: string | null;
+    transfer_function?: string | null;
+    is_hdr?: boolean | null;
 }
 
 export function ImageManager({
@@ -490,8 +492,15 @@ export function ImageManager({
                                 </TableCell>
                                 <TableCell>
                                     {isWideGamutPrimary(image.color_primaries) ? (
-                                        <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200 rounded-full">
-                                            P3
+                                        <span className="inline-flex items-center gap-1">
+                                            <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200 rounded-full">
+                                                P3
+                                            </span>
+                                            {image.is_hdr && (
+                                                <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded-full shadow-sm">
+                                                    HDR
+                                                </span>
+                                            )}
                                         </span>
                                     ) : (
                                         <span className="text-xs text-muted-foreground">sRGB</span>
