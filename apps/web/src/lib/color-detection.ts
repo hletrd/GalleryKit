@@ -182,6 +182,7 @@ const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
     6: 'gamma22',
     7: 'gamma22', // SMPTE 240M
     8: 'linear',   // ITU-T H.273 linear transfer characteristic
+    11: 'srgb',    // R5-M1: IEC 61966-2-4 (xvYCC) — same transfer as sRGB, extended gamut
     13: 'srgb',    // sRGB IEC 61966-2-1 (was wrongly mapped to 'pq')
     // R10-M9: ITU-T H.273 values 14 and 15 (BT.2020 10/12-bit SDR) use the
     // BT.2020-NCL transfer characteristic. In production this is rendered
@@ -201,6 +202,7 @@ const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
 const NCLX_MATRIX_MAP: Record<number, ColorSignals['matrixCoefficients']> = {
     0: 'identity',
     1: 'bt709',
+    8: 'bt2020-ncl', // R5-M1: ITU-T H.273 Table 4 value 8 = BT.2020 NCL (same as 9)
     9: 'bt2020-ncl',
     10: 'bt2020-cl',
 };
@@ -250,7 +252,7 @@ export function parseCicpFromHeif(buffer: Buffer): CicpTriplet | null {
                     const colourType = buffer.toString('ascii', dataStart, dataStart + 4);
                     if (colourType === 'nclx' && dataSize >= 11) {
                         // colour_type(4) + primaries(2) + transfer(2) + matrix(2) + full_range(1) = 11
-                        // full_range_flag is stored as a single byte; bit 0 is the flag.
+                        // full_range_flag is stored as a single byte; bit 7 (MSB, 0x80) is the flag.
                         return {
                             colourPrimaries: buffer.readUInt16BE(dataStart + 4),
                             transferCharacteristics: buffer.readUInt16BE(dataStart + 6),

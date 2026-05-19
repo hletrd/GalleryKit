@@ -248,6 +248,19 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    // R5-M1: xvYCC (IEC 61966-2-4) uses the same transfer as sRGB
+    it('maps nclx transfer=11 to srgb (xvYCC)', async () => {
+        const signals = await detectFromNclx(1, 11, 1);
+        expect(signals.transferFunction).toBe('srgb');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    // R5-M1: ITU-T H.273 Table 4 value 8 = BT.2020 NCL (same as 9)
+    it('maps nclx matrix=8 to bt2020-ncl', async () => {
+        const signals = await detectFromNclx(1, 1, 8);
+        expect(signals.matrixCoefficients).toBe('bt2020-ncl');
+    });
+
     // R10-M9: ITU-T H.273 values 14 (BT.2020 10-bit) and 15 (BT.2020
     // 12-bit) carry the BT.2020-NCL transfer characteristic, which on
     // SDR/broadcast monitors is rendered as BT.1886 (display gamma 2.4),
