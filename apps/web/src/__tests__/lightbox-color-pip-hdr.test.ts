@@ -113,26 +113,30 @@ describe('LightboxColorPip — HDR gating + single-render (C5-A2)', () => {
             expect(matches.length).toBe(1);
         });
 
-        it('contains exactly one `viewer.hdrBadgeAriaLabel` occurrence', () => {
-            // The aria-label was duplicated alongside the badge. Both
-            // copies should be gone except the chip-side one.
-            const matches = PIP_BODY.match(/viewer\.hdrBadgeAriaLabel/g) ?? [];
-            expect(matches.length).toBe(1);
+        it('HDR badge is aria-hidden (R5-M4: info conveyed via button aria-label)', () => {
+            // R5-M4 moved the accessible description from the badge's
+            // standalone aria-label into the parent button's aria-label.
+            // The badge itself is now aria-hidden so screen readers don't
+            // encounter it as a separate img node.
+            expect(PIP_BODY).toMatch(/hdr-badge[\s\S]{0,200}aria-hidden="true"/);
+            expect(PIP_BODY).not.toMatch(/hdr-badge[\s\S]{0,200}aria-label=/);
+        });
+
+        it('button aria-label includes HDR status for screen readers (R5-M4)', () => {
+            // The button aria-label must contain the HDR badge text so
+            // screen reader users learn the photo is HDR-capable.
+            expect(PIP_BODY).toMatch(
+                /aria-label=\{`\$\{t\('aria\.toggleColorPip'\)\}:[\s\S]{0,400}viewer\.hdrBadge/,
+            );
         });
 
         it('does NOT contain a panel-internal HDR label/value row', () => {
             // The cycle-4 pre-C5-A1 panel rendered a label/value row:
             //   <span className="opacity-70">{t('viewer.hdrBadge')}</span>
             //   <span className="hdr-badge ...">HDR</span>
-            // Search for `viewer.hdrBadge` (without the AriaLabel suffix)
-            // followed shortly by a `hdr-badge` className. If present, the
-            // panel-internal row has crept back in.
+            // Search for `viewer.hdrBadge` followed shortly by a `hdr-badge`
+            // className. If present, the panel-internal row has crept back in.
             const panelRowPattern = /t\('viewer\.hdrBadge'\)[\s\S]{0,400}hdr-badge/;
-            // The chip-side instance does NOT contain `t('viewer.hdrBadge')`
-            // followed by another `hdr-badge` className inside 400 chars,
-            // because the chip uses `aria-label={t('viewer.hdrBadgeAriaLabel')}`
-            // (different key). Therefore this regex matching means the
-            // panel row has returned.
             expect(panelRowPattern.test(PIP_BODY)).toBe(false);
         });
     });

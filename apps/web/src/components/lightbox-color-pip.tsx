@@ -119,20 +119,23 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                 onClick={onToggle}
                 className="lightbox-color-pip inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 min-h-11 text-xs text-white hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400 transition-colors"
                 aria-expanded={open}
-                aria-label={t('aria.toggleColorPip')}
+                aria-label={`${t('aria.toggleColorPip')}: ${[
+                    primaries || t('viewer.colorUnknown'),
+                    transfer,
+                    isHdr ? t('viewer.hdrBadge') : null,
+                ].filter(Boolean).join(' · ')}`}
                 title={`${t('aria.toggleColorPip')} (C)`}
             >
                 {primaries ? (
-                    <span className="font-medium">{primaries}</span>
+                    <span className="font-medium" aria-hidden="true">{primaries}</span>
                 ) : (
-                    <span>{t('viewer.colorUnknown')}</span>
+                    <span aria-hidden="true">{t('viewer.colorUnknown')}</span>
                 )}
-                {transfer && <span className="opacity-80">· {transfer}</span>}
+                {transfer && <span className="opacity-80" aria-hidden="true">· {transfer}</span>}
                 {isHdr && (
                     <span
                         className="hdr-badge ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm"
-                        aria-label={t('viewer.hdrBadgeAriaLabel')}
-                        role="img"
+                        aria-hidden="true"
                     >
                         {t('viewer.hdrBadge')}
                     </span>
