@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from "next/link";
+import { toast } from 'sonner';
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { ImageManager } from "@/components/image-manager";
 import { useTranslation } from "@/components/i18n-provider";
@@ -47,9 +48,11 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                 setFailedImages((prev) => prev.filter((img) => img.id !== id));
             } else {
                 console.error('Retry failed:', result);
+                toast.error(t('dashboard.retryFailed'));
             }
         } catch (err) {
             console.error('Retry error:', err);
+            toast.error(t('dashboard.retryFailed'));
         } finally {
             setRetryingId(null);
         }
