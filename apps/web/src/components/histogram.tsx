@@ -212,7 +212,10 @@ function computeHistogramAsync(
     // sRGB context preserves true source data and keeps BT.709 luminance
     // coefficients correct in the worker.
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
-    const supportsP3 = getSupportsCanvasP3();
+    const forceShowColorChips =
+        typeof document !== 'undefined' &&
+        document.documentElement.getAttribute('data-force-show-color-chips') === 'true';
+    const supportsP3 = forceShowColorChips || getSupportsCanvasP3();
     // R15-L3 / R11-L2: reuse the module-scope P3_CTX_OPTIONS constant rather
     // than allocating a fresh `{ colorSpace: 'display-p3' }` literal per call.
     const ctxOptions: CanvasRenderingContext2DSettings | undefined =

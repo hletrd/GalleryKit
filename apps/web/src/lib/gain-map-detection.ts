@@ -250,7 +250,7 @@ export function hasGainMap(buffer: Buffer): boolean {
     // other `tmap` items to heuristic 2 (iref `auxl` check).
     for (const entry of infeEntries) {
         if (entry.itemType === 'tmap') {
-            if (entry.itemUri && entry.itemUri.includes('apple') && entry.itemUri.includes('hdr')) {
+            if (entry.itemUri && entry.itemUri.startsWith(APPLE_GAIN_MAP_URI)) {
                 gainMapItemIds.add(entry.itemId);
             }
             continue;
