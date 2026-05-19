@@ -12,6 +12,10 @@ self.onmessage = function (e) {
 
     // R10-M2: branch luminance coefficients on canvas colorSpace.
     // Display-P3 uses P3 coefficients; sRGB (default) uses BT.709.
+    // R5-L-BUNDLE: luminance is computed on gamma-encoded (display-referred)
+    // values, not linearized scene-referred values. This matches Adobe
+    // Lightroom / Capture One / most RAW processors. True CIE luminance Y
+    // would require inverse transfer-function linearization first.
     const isP3 = colorSpace === 'display-p3';
     const lr = isP3 ? 0.22897 : 0.2126;
     const lg = isP3 ? 0.69174 : 0.7152;

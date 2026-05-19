@@ -175,10 +175,12 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         ? buildDownloadFilename(image.title, image.id, 'avif')
         : null;
     const isWideGamutSource = isWideGamutPrimary(image.color_primaries);
+    // R5-L-BUNDLE: isNonTrivialColor uses only public-safe fields.
+    // color_pipeline_decision is admin-only so it is not included here;
+    // the peek chip's inner content handles its own conditional rendering.
     const isNonTrivialColor = Boolean(
         (image.color_primaries && image.color_primaries !== 'bt709') ||
-        (isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')) ||
-        (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
+        (isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')),
     );
 
     return (
