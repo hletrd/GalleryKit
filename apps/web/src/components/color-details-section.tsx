@@ -231,6 +231,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
             isHdr: image.is_hdr ?? null,
             hasGainMap: image.has_gain_map ?? null,
             sourceBitDepth: image.bit_depth ?? null,
+            avif10bit: image.avif_10bit ?? null,
         };
         try {
             const text = JSON.stringify(data, null, 2);
@@ -240,7 +241,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
             await navigator.clipboard.writeText(text);
             toast.success(t('viewer.colorMetadataCopied'));
         } catch {
-            toast.error(t('imageManager.copyFailed'));
+            toast.error(t('viewer.copyFailed'));
         }
     }
 
