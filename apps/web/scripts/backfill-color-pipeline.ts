@@ -213,13 +213,15 @@ async function main() {
 
     console.log('[backfill-color-pipeline] Lock acquired. Fetching candidate rows…');
 
-    // Fetch processed images with pipeline_version < IMAGE_PIPELINE_VERSION (or NULL).
-    // A2: skip rows that already have a non-null color_pipeline_decision
-    // unless --force-reencode is passed — these rows were already correctly
-    // labelled by a prior run and re-encoding is unnecessary.
+    // R5-M3: Fetch processed images whose pipeline_version is behind
+    // (or NULL). Pipeline version mismatch alone is sufficient to trigger
+    // re-encode — a decided row may still have stale encode bytes after a
+    // pipeline version bump (new chroma defaults, new effort, new rgb16).
+    // --force-reencode bypasses the version check to re-encode ALL processed
+    // images regardless of current version.
     let whereClause = sql`processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < ${IMAGE_PIPELINE_VERSION})`;
-    if (!forceReencode) {
-        whereClause = sql`${whereClause} AND (color_pipeline_decision IS NULL)`;
+    if (forceReencode) {
+        whereClause = sql`processed = TRUE`;
     }
 
     const rawRows = await db.execute(sql`
