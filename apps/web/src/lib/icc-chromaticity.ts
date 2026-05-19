@@ -117,11 +117,13 @@ interface XyzTriple { x: number; y: number; z: number }
  *
  * For multi-XYZ payloads (rare in calibration profiles), only the first
  * triple is consumed — that matches every preset gamut here.
+ * R5-M2: 'XYZT' is not an ICC-defined signature; only 'XYZ ' (0x58595A20)
+ * is accepted per ICC.1:2010 section 6.3.2.2.
  */
 function readXyzTag(buf: Buffer, offset: number, size: number): XyzTriple | null {
     if (offset < 0 || size < 20 || offset + 20 > buf.length) return null;
     const sig = buf.toString('ascii', offset, offset + 4);
-    if (sig !== 'XYZ ' && sig !== 'XYZT') return null;
+    if (sig !== 'XYZ ') return null;
     const x = readS15Fixed16(buf, offset + 8);
     const y = readS15Fixed16(buf, offset + 12);
     const z = readS15Fixed16(buf, offset + 16);
