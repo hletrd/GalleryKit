@@ -20,7 +20,12 @@ export interface ImageDetail {
     f_number: number | null;
     exposure_time: string | null;
     focal_length: number | null;
-    color_space: string | null;
+    // R27-CP-HIGH-1: color_space and icc_profile_name are admin-only;
+    // public select sets omit them entirely. Marked optional so public
+    // page consumers (`/s/[key]`, `/g/[key]`, `/p/[id]` public branch)
+    // can hand the photo viewer a row without these fields without
+    // triggering a TS2741 mismatch.
+    color_space?: string | null;
     icc_profile_name?: string | null;
     color_pipeline_decision?: string | null;
     color_primaries?: string | null;

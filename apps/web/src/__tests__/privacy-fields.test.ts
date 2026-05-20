@@ -31,6 +31,13 @@ const SENSITIVE_KEYS = [
     // R10-H2: processing diagnostics — admin-only retry surface.
     'processing_error',
     'failed_at',
+    // R27-CP-HIGH-1: color_space is the EXIF ColorSpace tag value and
+    // icc_profile_name is the ICC desc/mluc descriptor (often a custom
+    // monitor calibration name); CLAUDE.md flags both as admin-only.
+    'color_space',
+    'icc_profile_name',
+    // R27-CP-MED-2: encoder pipeline version is admin-only internal state.
+    'pipeline_version',
 ] as const;
 
 describe('Privacy field separation', () => {

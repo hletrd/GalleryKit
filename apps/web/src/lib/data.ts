@@ -227,6 +227,12 @@ const adminSelectFields = {
     exposure_program: images.exposure_program,
     flash: images.flash,
     bit_depth: images.bit_depth,
+    // R27-CP-MED-2: encoder pipeline version (IMAGE_PIPELINE_VERSION at the
+    // time the derivatives were produced). ADMIN-ONLY — internal pipeline
+    // state, leaks the upgrade timeline of color-impacting settings. Must
+    // also live in publicSelectFields' destructured omissions and in the
+    // _PrivacySensitiveKeys union below.
+    pipeline_version: images.pipeline_version,
     original_format: images.original_format,
     original_file_size: images.original_file_size,
     // blur_data_url excluded — fetched only in individual image queries
@@ -271,6 +277,9 @@ const {
     exposure_program: _omitExposureProgram,
     flash: _omitFlash,
     bit_depth: _omitBitDepth,
+    // R27-CP-MED-2: pipeline_version is admin-only AND not needed by the
+    // lightweight grid (no audit panel renders it on the dashboard grid).
+    pipeline_version: _omitPipelineVersionAdminList,
     original_format: _omitOriginalFormatAdmin,
     original_file_size: _omitOriginalFileSizeAdmin,
     original_width: _omitOriginalWidth,
@@ -308,6 +317,15 @@ const {
     uploaded_by: _omitUploadedBy,
     processing_error: _omitProcessingError,
     failed_at: _omitFailedAt,
+    // R27-CP-HIGH-1: color_space is the EXIF ColorSpace tag value
+    // (sRGB / Uncalibrated), and icc_profile_name is the ICC desc / mluc
+    // descriptor (often a custom monitor calibration like
+    // "Eizo CG2700X 2026-05-01"). Both are admin-only per CLAUDE.md and
+    // were previously leaking into public listings.
+    color_space: _omitColorSpacePublic,
+    icc_profile_name: _omitIccProfileNamePublic,
+    // R27-CP-MED-2: encoder pipeline version is admin-only internal state.
+    pipeline_version: _omitPipelineVersionPublic,
     ...publicSelectFieldCore
 } = adminSelectFields;
 
@@ -338,6 +356,12 @@ const {
     uploaded_by: _omitUploadedByMap,
     processing_error: _omitProcessingErrorMap,
     failed_at: _omitFailedAtMap,
+    // R27-CP-HIGH-1 / R27-CP-MED-2: same admin-only contract on the
+    // map-visible select path. Map markers never need EXIF ColorSpace, ICC
+    // descriptor, or encoder pipeline version.
+    color_space: _omitColorSpaceMap,
+    icc_profile_name: _omitIccProfileNameMap,
+    pipeline_version: _omitPipelineVersionMap,
     ...publicMapSelectFieldCore
 } = adminSelectFields;
 
@@ -363,7 +387,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // The guard uses Extract to find any sensitive keys that exist in publicSelectFields.
 // If the result is `never` (no sensitive keys), the guard passes. Otherwise, the
 // offending key name(s) appear in the type error.
-type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at';
+type _PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at' | 'color_space' | 'icc_profile_name' | 'pipeline_version';
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
 void _privacyGuard;
@@ -371,7 +395,7 @@ void _privacyGuard;
 // Compile-time guard for publicMapSelectFields: it must NOT contain any admin-only
 // field beyond latitude and longitude. The allowed set is exactly publicSelectFields
 // UNION {latitude, longitude}. If any OTHER sensitive key leaks in, this guard fires.
-type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients';
+type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'color_space' | 'icc_profile_name' | 'pipeline_version';
 type _MapSensitiveKeysInPublicMap = Extract<keyof typeof publicMapSelectFields, _MapSensitiveKeys>;
 const _mapPrivacyGuard: _MapSensitiveKeysInPublicMap extends never ? true : [_MapSensitiveKeysInPublicMap, 'ERROR: privacy-sensitive field found in publicMapSelectFields — must only add latitude/longitude vs publicSelectFields'] = true;
 void _mapPrivacyGuard;
