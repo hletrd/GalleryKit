@@ -124,11 +124,16 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
         expect(outcome.outcome).toBe('processed');
         expect(outcome.signals).toBeDefined();
         // The synthetic JPEG carries LittleCMS's built-in 'sP3C' ICC profile,
-        // whose name does not match the Display P3 allowlist, so the
-        // re-detection falls back to 'unknown'.  The encoder still used the
-        // row's icc_profile_name ('Display P3') for the pipeline decision,
-        // so the AVIF output below remains P3-tagged.
-        expect(outcome.signals!.color_primaries).toBe('unknown');
+        // whose descriptor name does not match the Display P3 allowlist. Prior
+        // to R28-CP-MED-2 (commit 8dff48d0, cycle 2 RPF) the re-detection
+        // therefore fell back to 'unknown'. With chad-aware ICC chromaticity
+        // detection now in place, the wtpt/rXYZ/gXYZ/bXYZ tags correctly
+        // identify the gamut as `p3-d65` regardless of the descriptor name.
+        // This is the desired outcome: the chromaticity-based path is a
+        // strictly more accurate signal than the name allowlist, so the
+        // backfill now agrees with the row's icc_profile_name ('Display P3')
+        // instead of dropping to 'unknown'.
+        expect(outcome.signals!.color_primaries).toBe('p3-d65');
 
         // Verify the output AVIF carries an ICC profile (P3-tagged).
         const avifPath = path.join(UPLOAD_DIR_AVIF, `${id}.avif`);
