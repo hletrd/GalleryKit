@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { type TopPhotoRow, type TopTopicRow, type CountryRow, type ReferrerRow, type TimeWindow } from '@/lib/analytics-data';
+import { type TopPhotoRow, type TopTopicRow, type CountryRow, type ReferrerRow, type TopSharedGroupRow, type TimeWindow } from '@/lib/analytics-data';
 
 interface AnalyticsTranslations {
     title: string;
@@ -13,11 +13,14 @@ interface AnalyticsTranslations {
     topTopicsTitle: string;
     countriesTitle: string;
     referrersTitle: string;
+    // Cycle 4 RPF loop R27-UX-MED-4: shared-album engagement section title
+    topSharedAlbumsTitle: string;
     colPhoto: string;
     colTopic: string;
     colViews: string;
     colCountry: string;
     colReferrer: string;
+    colSharedAlbum: string;
     noData: string;
     untitled: string;
     // R27-UX-MED-2: surface the truth about counter precision so the
@@ -30,11 +33,12 @@ interface Props {
     topTopics: TopTopicRow[];
     countries: CountryRow[];
     referrers: ReferrerRow[];
+    topSharedGroups: TopSharedGroupRow[];
     currentWindow: TimeWindow;
     t: AnalyticsTranslations;
 }
 
-export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, currentWindow, t }: Props) {
+export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, topSharedGroups, currentWindow, t }: Props) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -177,6 +181,52 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, cu
                                     countries.map((row) => (
                                         <tr key={row.country_code} className="border-b last:border-0 hover:bg-muted/30">
                                             <td className="px-4 py-3 font-mono">{row.country_code}</td>
+                                            <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                {/* Cycle 4 RPF loop R27-UX-MED-4: top shared albums.
+                    Each row links to the `/g/${shareKey}` public route so
+                    the admin can preview the album exactly as the client
+                    sees it. The href is intentionally locale-agnostic —
+                    the public shared-group route lives under the
+                    `[locale]` segment but the share-key page itself does
+                    not depend on the admin's current locale. */}
+                <section>
+                    <h2 className="mb-3 text-lg font-semibold">{t.topSharedAlbumsTitle}</h2>
+                    <div className="rounded-md border">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b bg-muted/50">
+                                    <th className="px-4 py-3 text-left font-medium">{t.colSharedAlbum}</th>
+                                    <th className="px-4 py-3 text-right font-medium">{t.colViews}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {topSharedGroups.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={2} className="px-4 py-6 text-center text-muted-foreground">
+                                            {t.noData}
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    topSharedGroups.map((row) => (
+                                        <tr key={row.shareKey} className="border-b last:border-0 hover:bg-muted/30">
+                                            <td className="px-4 py-3">
+                                                <a
+                                                    href={`/g/${row.shareKey}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="font-mono text-primary underline-offset-4 hover:underline"
+                                                >
+                                                    {row.shareKey}
+                                                </a>
+                                            </td>
                                             <td className="px-4 py-3 text-right tabular-nums">{row.viewCount.toLocaleString()}</td>
                                         </tr>
                                     ))

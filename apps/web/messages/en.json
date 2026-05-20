@@ -869,13 +869,15 @@
     "topTopicsTitle": "Top Topics by Views",
     "countriesTitle": "Views by Country",
     "referrersTitle": "Views by Referrer",
+    "topSharedAlbumsTitle": "Top Shared Albums by Views",
     "colPhoto": "Photo",
     "colTopic": "Topic",
     "colViews": "Views",
     "colCountry": "Country",
     "colReferrer": "Referrer",
+    "colSharedAlbum": "Share key",
     "noData": "No data for this period.",
     "untitled": "Untitled",
-    "approximateDisclaimer": "View counts are approximate. The server buffers events in memory and flushes them asynchronously, so a recent restart or extended DB outage may undercount delivered views."
+    "approximateDisclaimer": "View counts are approximate. The server buffers events in memory and flushes them asynchronously, so a recent restart or extended DB outage may undercount delivered views. Shared-album counts also only increment on the initial page load — intra-share navigation is not counted."
   }
 }

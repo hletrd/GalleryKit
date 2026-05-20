@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { getTopPhotosByViews, getTopTopicsByViews, getCountryBreakdown, getReferrerBreakdown, type TimeWindow } from '@/lib/analytics-data';
+import { getTopPhotosByViews, getTopTopicsByViews, getCountryBreakdown, getReferrerBreakdown, getTopSharedGroupsByViews, type TimeWindow } from '@/lib/analytics-data';
 import { AnalyticsClient } from './analytics-client';
 
 export const dynamic = 'force-dynamic';
@@ -17,11 +17,16 @@ export default async function AnalyticsPage({
 
     const t = await getTranslations('analytics');
 
-    const [topPhotos, topTopics, countries, referrers] = await Promise.all([
+    const [topPhotos, topTopics, countries, referrers, topSharedGroups] = await Promise.all([
         getTopPhotosByViews(window, 20),
         getTopTopicsByViews(window, 20),
         getCountryBreakdown(window, 30),
         getReferrerBreakdown(window, 20),
+        // Cycle 4 RPF loop R27-UX-MED-4: surface per-share-link engagement
+        // for client-delivery analytics. Limit 25 keeps the table scannable
+        // while still covering the long tail for accounts with many
+        // outstanding client delivery links.
+        getTopSharedGroupsByViews(window, 25),
     ]);
 
     return (
@@ -30,6 +35,7 @@ export default async function AnalyticsPage({
             topTopics={topTopics}
             countries={countries}
             referrers={referrers}
+            topSharedGroups={topSharedGroups}
             currentWindow={window}
             t={{
                 title: t('title'),
@@ -41,11 +47,13 @@ export default async function AnalyticsPage({
                 topTopicsTitle: t('topTopicsTitle'),
                 countriesTitle: t('countriesTitle'),
                 referrersTitle: t('referrersTitle'),
+                topSharedAlbumsTitle: t('topSharedAlbumsTitle'),
                 colPhoto: t('colPhoto'),
                 colTopic: t('colTopic'),
                 colViews: t('colViews'),
                 colCountry: t('colCountry'),
                 colReferrer: t('colReferrer'),
+                colSharedAlbum: t('colSharedAlbum'),
                 noData: t('noData'),
                 untitled: t('untitled'),
                 approximateDisclaimer: t('approximateDisclaimer'),

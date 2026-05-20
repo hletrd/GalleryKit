@@ -5,7 +5,7 @@
  * are used for all time-window scans.
  */
 
-import { db, imageViews, topicViews, images, topics } from '@/db';
+import { db, imageViews, topicViews, sharedGroupViews, images, topics, sharedGroups } from '@/db';
 import { eq, and, gte, count, desc, sql } from 'drizzle-orm';
 
 export type TimeWindow = '30d' | '90d' | 'all';
@@ -116,6 +116,54 @@ export async function getCountryBreakdown(window: TimeWindow, limit = 30): Promi
 export interface ReferrerRow {
     referrer_host: string;
     viewCount: number;
+}
+
+// Cycle 4 RPF loop R27-UX-MED-4: top shared albums section. Surfaces
+// per-share-key engagement so the photographer can see which client
+// delivery (shared group) is getting the most views in the selected
+// window. Admin-only query — `shared_group_views` is internal-only
+// (groupId is the integer PK, not the public `key`). We resolve the
+// integer back to the share `key` via the `sharedGroups` join so the
+// admin UI can deep-link to `/g/${key}` for an as-the-client preview.
+//
+// CAVEAT: `shared_group_views` rows are only inserted on the INITIAL
+// shared-group page load (no `?p=` query param), per the CLAUDE.md
+// shared-group analytics note. Intra-share photo navigation within the
+// same session does NOT increment this counter. The analytics page's
+// `approximateDisclaimer` callout (R27-UX-MED-2) already discloses the
+// buffered-flush undercount; the per-photo-nav undercount is a
+// secondary effect of the same approximation.
+export interface TopSharedGroupRow {
+    /** Public share key (the URL segment, e.g. `/g/abc123`). */
+    shareKey: string;
+    viewCount: number;
+}
+
+export async function getTopSharedGroupsByViews(
+    window: TimeWindow,
+    limit = 20,
+): Promise<TopSharedGroupRow[]> {
+    const since = windowStart(window);
+    const whereClause = since
+        ? and(eq(sharedGroupViews.bot, false), gte(sharedGroupViews.viewed_at, since))
+        : eq(sharedGroupViews.bot, false);
+
+    const rows = await db
+        .select({
+            shareKey: sharedGroups.key,
+            viewCount: count(sharedGroupViews.id).as('viewCount'),
+        })
+        .from(sharedGroupViews)
+        .innerJoin(sharedGroups, eq(sharedGroupViews.groupId, sharedGroups.id))
+        .where(whereClause)
+        .groupBy(sharedGroups.key)
+        .orderBy(desc(sql`viewCount`))
+        .limit(limit);
+
+    return rows.map((r) => ({
+        shareKey: r.shareKey,
+        viewCount: Number(r.viewCount),
+    }));
 }
 
 export async function getReferrerBreakdown(window: TimeWindow, limit = 20): Promise<ReferrerRow[]> {
