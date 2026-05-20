@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
-import { Info, Copy } from 'lucide-react';
+import { Info, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import {
@@ -40,6 +41,10 @@ interface LightboxColorPipProps {
  */
 export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAULT_IMAGE_SIZES, cycleModeRef, isAdmin = false, forceSrgbDerivatives = false }: LightboxColorPipProps) {
     const hasData = Boolean(image.color_primaries || image.transfer_function || image.color_pipeline_decision);
+    // R28-UX-LOW-2: transient checkmark feedback on copy. Mirrors the sidebar
+    // ColorDetailsSection so both copy buttons feel identical to the
+    // photographer regardless of which surface they used.
+    const [copied, setCopied] = useState(false);
     if (!hasData) return null;
 
     const primaries = humanizeColorPrimaries(image.color_primaries);
@@ -88,6 +93,10 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
             }
             await navigator.clipboard.writeText(text);
             toast.success(t('viewer.colorMetadataCopied'));
+            // R28-UX-LOW-2: 1.2 s checkmark flip mirrors color-details-section
+            // so both copy entry points behave identically.
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
         } catch {
             toast.error(t('viewer.copyFailed'));
         }
@@ -259,7 +268,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                             aria-label={t('viewer.copyColorMetadata')}
                             title={t('viewer.copyColorMetadata')}
                         >
-                            <Copy className="h-3 w-3" />
+                            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                             <span className="opacity-80">{t('viewer.copyColorMetadata')}</span>
                         </button>
                     </div>

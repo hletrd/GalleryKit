@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useImperativeHandle, useEffect } from 'react';
-import { Info, ChevronDown, Copy } from 'lucide-react';
+import { Info, ChevronDown, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { isP3Pipeline, type ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
@@ -172,6 +172,11 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
         (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
     );
     const [showColorDetails, setShowColorDetails] = useState(isNonTrivialColor);
+    // R28-UX-LOW-2: transient visual feedback for the copy-color-metadata
+    // button. The existing toast confirms success but doesn't give a
+    // pointer-locked visual cue at the button itself; the checkmark below
+    // flips for ~1.2 s on a successful clipboard write.
+    const [copied, setCopied] = useState(false);
 
     // R27-UX-MED-1: reset accordion open-state when the photo changes. Without
     // this, a user who opens a sRGB photo's accordion (deliberately) and then
@@ -253,6 +258,11 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
             }
             await navigator.clipboard.writeText(text);
             toast.success(t('viewer.colorMetadataCopied'));
+            // R28-UX-LOW-2: flip the icon to a checkmark for 1.2 s so the
+            // pointer-locked photographer sees the success even if the toast
+            // is dismissed early or rendered outside their gaze.
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
         } catch {
             toast.error(t('viewer.copyFailed'));
         }
@@ -302,7 +312,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                     title={t('viewer.copyColorMetadata')}
                     className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
-                    <Copy className="h-4 w-4" />
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </button>
             </div>
             {showColorDetails && (
