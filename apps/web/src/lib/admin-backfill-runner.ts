@@ -264,50 +264,61 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
 }
 
 async function runBackfill(lockConn: PoolConnection, candidates: CandidateRow[]): Promise<void> {
+    // R29-CRIT-1: every state mutation, config read, and queue construction
+    // lives INSIDE the try block so the finally clause is the single
+    // release point for the in-process `running` flag, the MySQL advisory
+    // lock, and the lock connection itself. The previous shape mutated
+    // `state.running = true` and `await getGalleryConfig()` BEFORE the try
+    // block, which meant a thrown `getGalleryConfig()` (DB blip, malformed
+    // `admin_settings` row, transient pool exhaustion) left `state.running`
+    // stuck at `true` and leaked the lock + connection until process
+    // restart. Subsequent triggers all returned `already_running` with no
+    // visible explanation. Keeping all mutations inside try/finally
+    // guarantees release regardless of WHERE the throw lands.
     const state = getState();
-    state.running = true;
-    state.lastQueuedCount = candidates.length;
-    state.lastError = null;
-    const config = await getGalleryConfig();
-    const settings: RunnerSettings = {
-        quality: {
-            webp: config.imageQualityWebp,
-            avif: config.imageQualityAvif,
-            jpeg: config.imageQualityJpeg,
-        },
-        sizes: config.imageSizes,
-        forceSrgbDerivatives: config.forceSrgbDerivatives,
-        wideGamutJpegChroma: config.wideGamutJpegChroma,
-        avifEffort: config.avifEffort,
-        sdrJpegChroma: config.sdrJpegChroma,
-        wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
-    };
-
-    const concurrency = Math.max(1, Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1);
-    const queue = new PQueue({ concurrency });
-
-    let processed = 0;
-    let errors = 0;
-    for (const row of candidates) {
-        queue.add(async () => {
-            if (isRestoreMaintenanceActive()) {
-                // Abort gracefully — restore is taking over the DB.
-                return;
-            }
-            try {
-                await reprocessOne(row, settings);
-                processed++;
-            } catch (err) {
-                errors++;
-                console.error(`[admin-backfill] id=${row.id} fatal:`, err);
-            }
-            if (processed % 25 === 0) {
-                console.log(`[admin-backfill] progress: ${processed}/${candidates.length} (errors=${errors})`);
-            }
-        });
-    }
-
     try {
+        state.running = true;
+        state.lastQueuedCount = candidates.length;
+        state.lastError = null;
+        const config = await getGalleryConfig();
+        const settings: RunnerSettings = {
+            quality: {
+                webp: config.imageQualityWebp,
+                avif: config.imageQualityAvif,
+                jpeg: config.imageQualityJpeg,
+            },
+            sizes: config.imageSizes,
+            forceSrgbDerivatives: config.forceSrgbDerivatives,
+            wideGamutJpegChroma: config.wideGamutJpegChroma,
+            avifEffort: config.avifEffort,
+            sdrJpegChroma: config.sdrJpegChroma,
+            wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
+        };
+
+        const concurrency = Math.max(1, Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1);
+        const queue = new PQueue({ concurrency });
+
+        let processed = 0;
+        let errors = 0;
+        for (const row of candidates) {
+            queue.add(async () => {
+                if (isRestoreMaintenanceActive()) {
+                    // Abort gracefully — restore is taking over the DB.
+                    return;
+                }
+                try {
+                    await reprocessOne(row, settings);
+                    processed++;
+                } catch (err) {
+                    errors++;
+                    console.error(`[admin-backfill] id=${row.id} fatal:`, err);
+                }
+                if (processed % 25 === 0) {
+                    console.log(`[admin-backfill] progress: ${processed}/${candidates.length} (errors=${errors})`);
+                }
+            });
+        }
+
         await queue.onIdle();
         console.log(`[admin-backfill] Run complete: processed=${processed} errors=${errors}`);
         state.completedRuns++;
@@ -317,7 +328,7 @@ async function runBackfill(lockConn: PoolConnection, candidates: CandidateRow[])
         console.error('[admin-backfill] Run aborted:', err);
     } finally {
         state.running = false;
-        await releaseBackfillLock(lockConn);
+        await releaseBackfillLock(lockConn).catch(() => undefined);
     }
 }
 
@@ -353,10 +364,17 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
         // both the lock and the connection on completion / failure.
         const lockConnHandoff = lockConn;
         lockConn = null;
-        // Fire-and-forget. The unhandled-rejection guard in runBackfill's
-        // finally block guarantees the lock is released regardless of how
-        // the run terminates.
-        void runBackfill(lockConnHandoff, candidates);
+        // Fire-and-forget. R29-CRIT-1: the runner now wraps EVERYTHING
+        // (state mutation, config read, queue construction, queue drain)
+        // inside a single try/finally so the lock + state are always
+        // released. The `.catch()` here is belt-and-braces — if the
+        // runner ever throws synchronously BEFORE entering its try block
+        // (e.g. a `getState()` re-entrancy bug), we swallow the rejection
+        // here rather than escalate to an unhandledRejection that newer
+        // Node versions will use to terminate the process.
+        runBackfill(lockConnHandoff, candidates).catch((err) => {
+            console.error('[admin-backfill] runner rejected synchronously:', err);
+        });
         return { status: 'queued', affectedRows: candidates.length };
     } catch (err) {
         if (lockConn) {
