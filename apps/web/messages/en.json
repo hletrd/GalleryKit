@@ -723,7 +723,7 @@
     "wideGamutJpegChroma": "Wide-Gamut JPEG Chroma",
     "wideGamutJpegChromaHint": "Chroma subsampling for wide-gamut JPEG derivatives. 4:4:4 preserves full color detail but produces larger files. 4:2:0 is smaller but may show color bleeding in fine gradients.",
     "avifEffort": "AVIF Encoding Effort",
-    "avifEffortHint": "Higher values produce smaller files at the cost of slower encoding. 6 is the default balance. 9 is the slowest/smallest.",
+    "avifEffortHint": "0-9 range matches Sharp's actual capability. Lower = faster, larger files. Higher = slower, smaller files. Sharp's native default is 4; we default to 6 (~10% smaller files at ~30% extra CPU vs. 4). 9 is the slowest/smallest.",
     "chroma444": "4:4:4 (best quality)",
     "chroma422": "4:2:2 (balanced)",
     "chroma420": "4:2:0 (smallest file)",

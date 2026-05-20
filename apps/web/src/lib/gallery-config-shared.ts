@@ -58,7 +58,7 @@ export const GALLERY_SETTING_KEYS = [
     // P3-20: JPEG chroma subsampling for wide-gamut sources (4:4:4 / 4:2:2 / 4:2:0)
     'wide_gamut_jpeg_chroma',
 
-    // P3-21: AVIF encoding effort (4-9, default 6)
+    // P3-21 / R28-CP-LOW-1: AVIF encoding effort (0-9, default 6 — Sharp's native default is 4)
     'avif_effort',
 
     // C2-A5 / C2-COL-MED-2: JPEG chroma subsampling for sRGB / non-wide-gamut
@@ -184,8 +184,11 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     // P3-20: must be a valid chroma subsampling string
     wide_gamut_jpeg_chroma: (v) => v === '4:4:4' || v === '4:2:2' || v === '4:2:0',
 
-    // P3-21: must be an integer between 4 and 9
-    avif_effort: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 4 && n <= 9; },
+    // P3-21 / R28-CP-LOW-1: must be an integer between 0 and 9. Sharp's
+    // native default is 4 (fastest reasonable). The product DEFAULT here
+    // stays at 6 (~10% smaller files at ~30% extra CPU vs. 4); admins who
+    // need faster ingest on high-volume galleries can drop to 3 or below.
+    avif_effort: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 9; },
 
     // C2-A5: must be a valid chroma subsampling string
     sdr_jpeg_chroma: (v) => v === '4:4:4' || v === '4:2:2' || v === '4:2:0',

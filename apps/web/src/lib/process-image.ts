@@ -907,7 +907,7 @@ export async function processImageFormats(
     forceSrgbDerivatives?: boolean, // US-CM02: when true, force sRGB on WebP/JPEG even for P3 sources
     signals?: { colorPrimaries?: string | null } | null, // P3-11: NCLX fallback for ICC-less sources
     wideGamutJpegChroma?: JpegChromaSubsampling, // P3-20 / C3-A6: chroma subsampling for wide-gamut JPEG
-    avifEffort?: number, // P3-21: AVIF encoding effort (4-9)
+    avifEffort?: number, // P3-21 / R28-CP-LOW-1: AVIF encoding effort (0-9, default 6)
     sdrJpegChroma?: JpegChromaSubsampling, // C2-A5 / C3-A6: chroma subsampling for SDR / non-wide-gamut JPEG
     wideGamutMaxSourcePixels?: number, // C2-A6: max source pixel count before WI-15 downscale
 ) {

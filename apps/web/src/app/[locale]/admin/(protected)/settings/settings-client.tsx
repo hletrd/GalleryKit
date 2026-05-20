@@ -291,7 +291,12 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                     <SelectValue placeholder={getPlaceholder('avif_effort')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {[4, 5, 6, 7, 8, 9].map((effort) => (
+                                    {/* R28-CP-LOW-1: full 0-9 range matches Sharp's actual
+                                        capability. Sharp's native default is 4; we ship 6 as
+                                        the product default for ~10% smaller files at the cost
+                                        of ~30% extra CPU. Admins on high-volume ingest can
+                                        drop to 0-3 for faster encoding. */}
+                                    {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((effort) => (
                                         <SelectItem key={effort} value={String(effort)}>{effort}</SelectItem>
                                     ))}
                                 </SelectContent>

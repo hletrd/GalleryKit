@@ -270,7 +270,7 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 | `force_show_color_chips` | `false` | Admin demo override — show P3/HDR badges regardless of display capability |
 | `wide_gamut_jpeg_chroma` | `'4:4:4'` | Chroma subsampling for wide-gamut JPEG (`'4:4:4' | '4:2:2' | '4:2:0'`) |
 | `sdr_jpeg_chroma` | `'4:2:0'` | Chroma subsampling for sRGB JPEG (same enum) |
-| `avif_effort` | `6` | AVIF encoder effort (4-9). Higher = smaller files, slower encode |
+| `avif_effort` | `6` | AVIF encoder effort (0-9). Higher = smaller files, slower encode. Sharp's native default is 4; we ship 6 for ~10% smaller files at ~30% extra CPU (R28-CP-LOW-1) |
 | `wide_gamut_max_source_pixels` | `50_000_000` | Pixel-count cap above which wide-gamut sources downscale before rgb16 fan-out |
 
 All admin tunables flow through `gallery-config-shared.ts` (validation) → `gallery-config.ts` (resolution) → `image-queue.ts` (passes to `processImageFormats`). Flipping any of these requires a backfill pass to re-encode existing photos at the new settings.
