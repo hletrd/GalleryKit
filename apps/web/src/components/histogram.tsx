@@ -374,6 +374,45 @@ function percentileFromHistogram(bins: number[], p: number): number {
     return bins.length - 1;
 }
 
+/**
+ * R27-HD-MED-1: derive the histogram source label from the URL the worker
+ * actually loaded, not the priority intent. When the AVIF candidate 404s
+ * and the resolver falls back to a sized/base JPEG, the label must read
+ * "JPEG" so a photographer auditing the histogram doesn't misread the
+ * source-of-truth.
+ *
+ * Returns 'AVIF' when effectiveUrl matches the AVIF candidate, 'JPEG' for
+ * any other non-null URL (sized JPEG or base fallback), or null when there
+ * is no URL to load from.
+ */
+export function resolveHistogramSourceLabel(
+    effectiveUrl: string | null,
+    avifUrl: string | undefined,
+): 'AVIF' | 'JPEG' | null {
+    if (!effectiveUrl) return null;
+    if (avifUrl && effectiveUrl === avifUrl) return 'AVIF';
+    return 'JPEG';
+}
+
+/**
+ * R27-HD-MED-1: derive the "(sRGB clipped)" hint. Fires when the photo is
+ * wide-gamut AND either (a) the visitor's display is sRGB, OR (b) the AVIF
+ * source was preferred but the candidate fell through to the sized/base
+ * JPEG — those JPEGs are sRGB-clipped on a P3 display.
+ */
+export function resolveIsClipped(opts: {
+    isWideGamut: boolean;
+    colorGamut: 'srgb' | 'p3' | 'rec2020' | 'unknown' | string;
+    preferAvif: boolean;
+    effectiveUrl: string | null;
+    avifUrl: string | undefined;
+}): boolean {
+    if (!opts.isWideGamut) return false;
+    if (opts.colorGamut === 'srgb') return true;
+    if (opts.preferAvif && opts.effectiveUrl !== opts.avifUrl) return true;
+    return false;
+}
+
 export function estimateKeyType(data: HistogramData): 'high-key' | 'low-key' | 'balanced' {
     const total = data.l.reduce((sum, v) => sum + v, 0);
     if (total === 0) return 'balanced';
@@ -476,13 +515,19 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
     // R6-L1: the clipping warning is about display gamut, not AVIF support.
     // An sRGB-display visitor viewing a wide-gamut photo sees clipped colors
     // regardless of whether their browser can decode AVIF.
-    const isClipped = isWideGamut && colorGamut === 'srgb';
+    // R27-HD-MED-1: also fire the clipped hint when the AVIF source has
+    // fallen back to the sized/base JPEG on a P3 display — the bytes the
+    // histogram canvas reads are sRGB at that point, regardless of intent.
+    const isClipped = resolveIsClipped({ isWideGamut, colorGamut, preferAvif, effectiveUrl, avifUrl });
 
     const histogramData = histogramState.imageUrl === effectiveUrl ? histogramState.data : null;
     const loading = Boolean(effectiveUrl) && histogramState.imageUrl !== effectiveUrl;
     // R9-LOW: surface which derivative the histogram computed from so
     // photographers auditing know whether they're looking at AVIF or JPEG data.
-    const histogramSource = preferAvif ? 'AVIF' : effectiveUrl ? 'JPEG' : null;
+    // R27-HD-MED-1: label follows the URL the worker actually fetched, not
+    // the priority intent — if the AVIF candidate 404s and we fall back to
+    // a sized JPEG, the label must say JPEG so the audit is truthful.
+    const histogramSource = resolveHistogramSourceLabel(effectiveUrl, avifUrl);
     const modeLabels: Record<HistogramMode, string> = {
         luminance: t('viewer.histogramModes.luminance'),
         rgb: t('viewer.histogramModes.color'),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { requestHistogramFromWorker, estimateKeyType } from '@/components/histogram';
+import { requestHistogramFromWorker, estimateKeyType, resolveHistogramSourceLabel, resolveIsClipped } from '@/components/histogram';
 
 class FakeWorker {
     listeners = new Set<(event: MessageEvent) => void>();
@@ -186,5 +186,69 @@ describe('estimateKeyType — percentile-based classification (R10-M4)', () => {
         bins[150] = 1000;
         bins[200] = 500;
         expect(estimateKeyType(makeHistogram(bins))).toBe('balanced');
+    });
+});
+
+// R27-HD-MED-1: histogram source label + clipped hint must reflect the URL
+// the worker actually loaded, not the priority intent. When the AVIF
+// candidate 404s and the resolver falls back to a sized/base JPEG, the
+// label must read "JPEG" and the (sRGB clipped) hint must fire on a P3
+// display so a photographer auditing the histogram sees the honest source.
+describe('resolveHistogramSourceLabel (R27-HD-MED-1)', () => {
+    it('returns AVIF when effectiveUrl matches avifUrl', () => {
+        expect(resolveHistogramSourceLabel('/p.avif', '/p.avif')).toBe('AVIF');
+    });
+
+    it('returns JPEG when effectiveUrl falls back from AVIF to sized JPEG', () => {
+        // Photographer dropped the AVIF derivative; resolver picked the sized JPEG.
+        expect(resolveHistogramSourceLabel('/p_1536.jpg', '/p.avif')).toBe('JPEG');
+    });
+
+    it('returns JPEG when effectiveUrl falls back to base JPEG', () => {
+        expect(resolveHistogramSourceLabel('/p.jpg', '/p.avif')).toBe('JPEG');
+    });
+
+    it('returns JPEG when no AVIF candidate was offered (legacy photo)', () => {
+        expect(resolveHistogramSourceLabel('/p.jpg', undefined)).toBe('JPEG');
+    });
+
+    it('returns null when effectiveUrl is null', () => {
+        expect(resolveHistogramSourceLabel(null, '/p.avif')).toBeNull();
+    });
+});
+
+describe('resolveIsClipped (R27-HD-MED-1)', () => {
+    it('returns false for an sRGB photo regardless of display', () => {
+        expect(resolveIsClipped({
+            isWideGamut: false, colorGamut: 'srgb', preferAvif: false,
+            effectiveUrl: '/p.jpg', avifUrl: undefined,
+        })).toBe(false);
+        expect(resolveIsClipped({
+            isWideGamut: false, colorGamut: 'p3', preferAvif: false,
+            effectiveUrl: '/p.jpg', avifUrl: undefined,
+        })).toBe(false);
+    });
+
+    it('returns true for a wide-gamut photo on an sRGB display', () => {
+        expect(resolveIsClipped({
+            isWideGamut: true, colorGamut: 'srgb', preferAvif: false,
+            effectiveUrl: '/p.jpg', avifUrl: '/p.avif',
+        })).toBe(true);
+    });
+
+    it('returns false for a wide-gamut photo on a P3 display when AVIF is fetched', () => {
+        expect(resolveIsClipped({
+            isWideGamut: true, colorGamut: 'p3', preferAvif: true,
+            effectiveUrl: '/p.avif', avifUrl: '/p.avif',
+        })).toBe(false);
+    });
+
+    it('returns true for a wide-gamut photo on a P3 display when AVIF fell back to JPEG', () => {
+        // AVIF 404'd; resolver fell through to the sized JPEG → bytes the
+        // canvas reads are sRGB-clipped on the P3 display.
+        expect(resolveIsClipped({
+            isWideGamut: true, colorGamut: 'p3', preferAvif: true,
+            effectiveUrl: '/p_1536.jpg', avifUrl: '/p.avif',
+        })).toBe(true);
     });
 });
