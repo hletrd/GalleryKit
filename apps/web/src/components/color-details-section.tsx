@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useImperativeHandle } from 'react';
+import { useState, useImperativeHandle, useEffect } from 'react';
 import { Info, ChevronDown, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -172,6 +172,19 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
         (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
     );
     const [showColorDetails, setShowColorDetails] = useState(isNonTrivialColor);
+
+    // R27-UX-MED-1: reset accordion open-state when the photo changes. Without
+    // this, a user who opens a sRGB photo's accordion (deliberately) and then
+    // navigates prev/next to a P3 photo keeps the manual choice; conversely
+    // a P3 photo that auto-opened stays open when navigating to a sRGB photo
+    // where the default would be closed. Re-anchor to `isNonTrivialColor` on
+    // every `image.id` change so the default-open heuristic applies per photo.
+    // The effect runs only on `image.id` change, not on every re-render, so
+    // manual toggles between navigations still work as expected.
+    useEffect(() => {
+        setShowColorDetails(isNonTrivialColor);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [image.id]);
 
     // C1-CRIT-1 (cycle 1 RPF): use useImperativeHandle to expose the toggle to
     // the parent's keyboard handler. Direct ref.current = ... mutation during
