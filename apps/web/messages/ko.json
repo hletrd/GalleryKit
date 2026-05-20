@@ -143,6 +143,7 @@
     "failed": "업로드에 실패했습니다.",
     "noTopicsTitle": "업로드 전에 카테고리를 만들어 주세요",
     "noTopicsDescription": "사진을 업로드하려면 카테고리가 필요합니다.",
+    "createFirstCategory": "카테고리 만들러 가기",
     "limitExceeded": "업로드 제한을 초과했습니다. 업로드 창마다 최대 {maxFiles}개, 파일당 {maxFileSize}, 총 {maxSize}까지만 추가할 수 있습니다.",
     "limitHint": "업로드 창마다 최대 {maxFiles}개, 파일당 {maxFileSize}, 총 {maxSize}까지 가능합니다.",
     "tagsForFile": "{file}의 태그",

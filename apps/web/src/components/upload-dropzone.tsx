@@ -7,7 +7,9 @@ import { useRouter } from 'next/navigation';
 import { uploadImages } from '@/app/actions';
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from '@/components/ui/card';
+import Link from 'next/link';
 import { UploadCloud, X } from 'lucide-react';
+import { localizePath } from '@/lib/locale-path';
 
 import { toast } from 'sonner';
 import { Progress } from "@/components/ui/progress";
@@ -60,7 +62,7 @@ export function UploadDropzone({
     const filesRef = useRef<PendingUploadItem[]>([]);
     const [perFileTags, setPerFileTags] = useState<Record<string, string[]>>({});
     const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
-    const { t } = useTranslation();
+    const { t, locale } = useTranslation();
     const hasTopics = topics.length > 0;
 
     // Refs for accessing latest state during async upload loop
@@ -335,6 +337,13 @@ export function UploadDropzone({
                     <div className="rounded-lg border border-dashed bg-muted/30 p-6 text-center" role="status">
                         <p className="font-medium">{t('upload.noTopicsTitle')}</p>
                         <p className="mt-1 text-sm text-muted-foreground">{t('upload.noTopicsDescription')}</p>
+                        {/* R28-UX-LOW-1: direct first-run admins to the category
+                            creation surface instead of leaving them to navigate
+                            the nav rail. min-h-11 satisfies the 44 px touch
+                            target floor per CLAUDE.md touch-target policy. */}
+                        <Button asChild variant="outline" size="sm" className="mt-4 min-h-11">
+                            <Link href={localizePath(locale, '/admin/categories')}>{t('upload.createFirstCategory')}</Link>
+                        </Button>
                     </div>
                 ) : (
                 <div className="flex flex-col gap-4">

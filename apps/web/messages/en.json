@@ -143,6 +143,7 @@
     "failed": "Upload failed.",
     "noTopicsTitle": "Create a category before uploading",
     "noTopicsDescription": "Photos need a category before they can be uploaded.",
+    "createFirstCategory": "Create a category",
     "limitExceeded": "Upload limit exceeded. Add at most {maxFiles} files, {maxFileSize} per file, and {maxSize} per upload window.",
     "limitHint": "Up to {maxFiles} files, {maxFileSize} per file, and {maxSize} per upload window.",
     "tagsForFile": "Tags for {file}",
