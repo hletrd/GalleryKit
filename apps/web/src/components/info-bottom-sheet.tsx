@@ -322,6 +322,26 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                         <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} forceSrgbDerivatives={forceSrgbDerivatives} />
                         <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
 
+                        {/* R27-UX-MED-3: histogram now precedes the EXIF grid in
+                            the mobile bottom sheet so it's visible without
+                            scrolling past camera/lens/aperture/shutter rows. The
+                            histogram is the photographer's primary color-craft
+                            surface on a phone; EXIF is reference reading. */}
+                        {image.filename_jpeg && (
+                            <div className="mt-4 mb-4 border-t pt-4">
+                                <Histogram
+                                    imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
+                                    avifUrl={image.filename_avif
+                                        ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
+                                        : undefined}
+                                    fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                    colorPrimaries={image.color_primaries}
+                                    className="w-full"
+                                    cycleModeRef={histogramCycleRef}
+                                />
+                            </div>
+                        )}
+
                         {/* EXIF section header */}
                         <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
                             <Info className="h-4 w-4" />
@@ -454,21 +474,9 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                             <p className="text-sm text-muted-foreground italic mt-2">{t('viewer.noMetadata')}</p>
                         )}
 
-                        {/* Histogram */}
-                                {image.filename_jpeg && (
-                                    <div className="mt-4 border-t pt-4">
-                                        <Histogram
-                                            imageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg.replace(/\.jpg$/i, `_${findNearestImageSize(imageSizes, 640)}.jpg`)}`)}
-                                            avifUrl={image.filename_avif
-                                                ? imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${findNearestImageSize(imageSizes, 640)}.avif`)}`)
-                                                : undefined}
-                                            fallbackImageUrl={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
-                                            colorPrimaries={image.color_primaries}
-                                            className="w-full"
-                                            cycleModeRef={histogramCycleRef}
-                                        />
-                                    </div>
-                                )}
+                                {/* R27-UX-MED-3: histogram block moved above the
+                                    EXIF section header (see above) so it's
+                                    visible without scrolling on a 375 px viewport. */}
 
                                 {/* Capture date/time */}
                                 <div className="mt-4 text-sm">
