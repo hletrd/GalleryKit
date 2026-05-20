@@ -733,7 +733,16 @@
     "wideGamutMaxSourcePixels": "Wide-Gamut Source Pixel Cap (Memory Guard)",
     "wideGamutMaxSourcePixelsHint": "Pixel-count cap above which wide-gamut sources are downscaled before the rgb16 pipeline. Default 50,000,000 (50 MP). Higher values use more memory; only raise on hosts with several GB of RAM.",
     "backfillRequired": "Backfill required",
-    "backfillRequiredHint": "This gallery already has uploaded images. Changing color/HDR encoder settings requires running the backfill script before the new encoding takes effect for existing images."
+    "backfillRequiredHint": "This gallery already has uploaded images. Changing color/HDR encoder settings requires running the backfill script before the new encoding takes effect for existing images.",
+    "backfillTriggerTitle": "Re-encode existing photos",
+    "backfillTriggerHint": "Runs the color-pipeline backfill on this live host. Re-encodes every photo whose pipeline version is below the current encoder. Safe to run after a pipeline version bump or after changing color/HDR settings above. A second click while a run is in flight is a no-op.",
+    "backfillTriggerCta": "Re-encode now",
+    "backfillRunning": "Re-encoding…",
+    "backfillQueued": "Re-encoding queued — {count} photo(s) will be processed in the background.",
+    "backfillNothingToDo": "All photos are already at the current pipeline version. Nothing to re-encode.",
+    "backfillAlreadyRunning": "A re-encode run is already in progress.",
+    "backfillUnavailable": "Re-encode is unavailable while a database restore is active.",
+    "backfillFailed": "Failed to queue re-encode. Check server logs."
   },
   "footer": {
     "admin": "Admin"

@@ -18,10 +18,11 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, ShoppingCart } from 'lucide-react';
+import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, ShoppingCart, RefreshCcw } from 'lucide-react';
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
+import { triggerBackfill } from '@/app/actions/admin-backfill';
 
 interface SettingsClientProps {
     initialSettings: Record<string, string>;
@@ -54,6 +55,11 @@ const COLOR_HDR_BACKFILL_KEYS = new Set<string>([
 export function SettingsClient({ initialSettings, hasExistingImages }: SettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
+    // R27-UX-HIGH-1: backfill trigger state. `isBackfilling` covers both the
+    // request-in-flight window AND the small window between the server
+    // confirming "queued" and the UI surfacing the toast — buttons stay
+    // disabled across both so a double-click cannot fire two triggers.
+    const [isBackfilling, startBackfillTransition] = useTransition();
     const defaults = getSettingDefaults();
     const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
     // R10-M14: also keep the last-committed values in component STATE
@@ -75,6 +81,38 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     const hasDirtyBackfillField = Array.from(COLOR_HDR_BACKFILL_KEYS).some(
         (key) => (settings[key] ?? '') !== (baseline[key] ?? ''),
     );
+
+    // R27-UX-HIGH-1: Path A — fire the in-app backfill server action when
+    // the photographer clicks "Re-encode existing photos". The action
+    // acquires the `gallerykit_color_pipeline_backfill` advisory lock
+    // non-blocking and queues a background runner; the response is
+    // synchronous and reports either `queued`, `already_running`, or
+    // `unavailable`. No retry on the UI — the photographer reads the toast
+    // and decides what to do next.
+    const handleBackfill = () => {
+        startBackfillTransition(async () => {
+            try {
+                const result = await triggerBackfill();
+                if (result.ok && result.status === 'queued') {
+                    if ((result.affectedRows ?? 0) === 0) {
+                        toast.info(t('settings.backfillNothingToDo'));
+                    } else {
+                        toast.success(
+                            t('settings.backfillQueued', { count: String(result.affectedRows ?? 0) }),
+                        );
+                    }
+                } else if (result.status === 'already_running') {
+                    toast.info(t('settings.backfillAlreadyRunning'));
+                } else if (result.status === 'unavailable') {
+                    toast.error(result.error || t('settings.backfillUnavailable'));
+                } else {
+                    toast.error(result.error || t('settings.backfillFailed'));
+                }
+            } catch {
+                toast.error(t('settings.backfillFailed'));
+            }
+        });
+    };
 
     const handleSave = () => {
         startTransition(async () => {
@@ -148,6 +186,41 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             <strong>{t('settings.backfillRequired')}</strong>
                             {' '}
                             {t('settings.backfillRequiredHint')}
+                        </div>
+                    )}
+                    {/* R27-UX-HIGH-1: in-app backfill trigger. Visible
+                        whenever the gallery has photos so the photographer
+                        can re-encode after a manual `IMAGE_PIPELINE_VERSION`
+                        bump or after admin-tunable color settings change.
+                        The button is independent of `hasDirtyBackfillField`
+                        so an admin can also re-run the backfill without
+                        first dirtying the form (the canonical scenario:
+                        deployed a pipeline version bump, want to apply it
+                        on the live host without ssh + sidecar). */}
+                    {hasExistingImages && (
+                        <div className="rounded-md border border-blue-200 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20 p-3 text-sm">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="space-y-1 text-blue-900 dark:text-blue-200">
+                                    <strong>{t('settings.backfillTriggerTitle')}</strong>
+                                    <p className="text-xs text-blue-800/80 dark:text-blue-200/80">
+                                        {t('settings.backfillTriggerHint')}
+                                    </p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleBackfill}
+                                    disabled={isBackfilling}
+                                    className="gap-2 self-start h-11"
+                                >
+                                    {isBackfilling
+                                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                                        : <RefreshCcw className="h-4 w-4" />}
+                                    {isBackfilling
+                                        ? t('settings.backfillRunning')
+                                        : t('settings.backfillTriggerCta')}
+                                </Button>
+                            </div>
                         </div>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
