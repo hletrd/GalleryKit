@@ -314,7 +314,14 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
             } else if (e.key === 'ArrowRight' && nextId !== null) {
                 onNavigate(1);
             } else if (e.key === 'Escape') {
-                if (!document.fullscreenElement) {
+                // R28-UX-HIGH-1: Escape should close the topmost modal first
+                // (the slide-up color pip), matching macOS / iOS / Radix
+                // modal-over-modal conventions. Only fall through to closing
+                // the lightbox itself when no nested overlay is open and the
+                // viewer isn't in browser fullscreen.
+                if (colorPipOpen) {
+                    setColorPipOpen(false);
+                } else if (!document.fullscreenElement) {
                     onClose();
                 }
             }
@@ -323,7 +330,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
         };
-    }, [prevId, nextId, onNavigate, onClose, toggleFullscreen, showControls]);
+    }, [prevId, nextId, onNavigate, onClose, toggleFullscreen, showControls, colorPipOpen]);
 
     const handleBackdropClick = useCallback(() => {
         setIsSlideshowActive(false);
