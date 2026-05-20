@@ -20,6 +20,9 @@ interface AnalyticsTranslations {
     colReferrer: string;
     noData: string;
     untitled: string;
+    // R27-UX-MED-2: surface the truth about counter precision so the
+    // photographer doesn't trust this as billing/audit-grade state.
+    approximateDisclaimer: string;
 }
 
 interface Props {
@@ -69,6 +72,14 @@ export function AnalyticsClient({ topPhotos, topTopics, countries, referrers, cu
                     ))}
                 </div>
             </div>
+            {/* R27-UX-MED-2: approximate-count disclosure rendered above the
+                first data block so the photographer reads the caveat before
+                interpreting any of the tables. Shared-group view counters
+                buffer events in memory and flush asynchronously per the
+                CLAUDE.md runtime-topology note. */}
+            <p className="text-xs text-muted-foreground" role="note">
+                {t.approximateDisclaimer}
+            </p>
 
             <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
                 {/* Top Photos */}

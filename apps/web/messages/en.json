@@ -874,6 +874,7 @@
     "colCountry": "Country",
     "colReferrer": "Referrer",
     "noData": "No data for this period.",
-    "untitled": "Untitled"
+    "untitled": "Untitled",
+    "approximateDisclaimer": "View counts are approximate. The server buffers events in memory and flushes them asynchronously, so a recent restart or extended DB outage may undercount delivered views."
   }
 }

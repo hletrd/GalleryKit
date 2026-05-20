@@ -48,6 +48,7 @@ export default async function AnalyticsPage({
                 colReferrer: t('colReferrer'),
                 noData: t('noData'),
                 untitled: t('untitled'),
+                approximateDisclaimer: t('approximateDisclaimer'),
             }}
         />
     );

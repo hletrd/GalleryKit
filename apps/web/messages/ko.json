@@ -848,7 +848,8 @@
     "colCountry": "국가",
     "colReferrer": "유입 경로",
     "noData": "해당 기간의 데이터가 없습니다.",
-    "untitled": "제목 없음"
+    "untitled": "제목 없음",
+    "approximateDisclaimer": "조회수는 근사치입니다. 서버는 이벤트를 메모리에 임시 저장한 뒤 비동기로 기록하므로, 최근 재시작이 있었거나 DB 장애가 길어졌다면 실제보다 낮게 집계될 수 있습니다."
   },
   "lrToken": {
     "title": "라이트룸 토큰",
