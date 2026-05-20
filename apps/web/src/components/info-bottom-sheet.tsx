@@ -35,13 +35,15 @@ interface InfoBottomSheetProps {
     forceSrgbDerivatives?: boolean;
     /** R8-LOW: mobile histogram cycle-mode ref for H keyboard shortcut. */
     histogramCycleRef?: React.RefObject<(() => void) | null>;
+    /** R28-HD-LOW-1: persist WideGamutHint dismissal across sessions for share-route recipients. */
+    isSharedView?: boolean;
 }
 
 type SheetState = 'collapsed' | 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef, isSharedView = false }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [liveTranslateY, setLiveTranslateY] = useState<number | null>(null);
@@ -320,7 +322,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
 
                         {/* Color details accordion — mirrors desktop sidebar */}
                         <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} forceSrgbDerivatives={forceSrgbDerivatives} />
-                        <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
+                        <WideGamutHint colorPrimaries={image.color_primaries} t={t} persistDismissal={isSharedView} />
 
                         {/* R27-UX-MED-3: histogram now precedes the EXIF grid in
                             the mobile bottom sheet so it's visible without

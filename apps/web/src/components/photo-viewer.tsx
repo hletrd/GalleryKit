@@ -805,7 +805,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             </CardHeader>
                             <CardContent>
                                 <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} forceSrgbDerivatives={forceSrgbDerivatives} />
-                                <WideGamutHint colorPrimaries={image.color_primaries} t={t} />
+                                <WideGamutHint colorPrimaries={image.color_primaries} t={t} persistDismissal={isSharedView} />
                                 <h3 className="font-semibold mb-3 flex items-center gap-2"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
                                     {hasExifData(image.camera_model) && (
@@ -1060,6 +1060,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             imageSizes={imageSizes}
             forceSrgbDerivatives={forceSrgbDerivatives}
             histogramCycleRef={histogramCycleRef}
+            isSharedView={isSharedView}
         />
     </>
     );

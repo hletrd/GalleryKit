@@ -9,9 +9,61 @@ import { humanizeColorPrimariesOrLabel } from '@/components/color-details-sectio
 interface WideGamutHintProps {
     colorPrimaries?: string | null;
     t: (key: string, values?: Record<string, string | number>) => string;
+    /**
+     * R28-HD-LOW-1: when true, dismiss state persists across browser
+     * sessions via localStorage (30-day TTL) instead of sessionStorage.
+     * Share-route recipients (/s/[key], /g/[key]) typically view the link
+     * once, dismiss the hint, and don't return for weeks — sessionStorage
+     * forgets between sessions and re-nags. The main /p/[id] route still
+     * uses sessionStorage so a returning visitor who may have switched
+     * displays week-over-week sees the hint fresh.
+     */
+    persistDismissal?: boolean;
 }
 
 const DISMISS_STORAGE_KEY = 'wgh-dismissed';
+// R28-HD-LOW-1: localStorage key for share-route persistence. JSON-encoded
+// record { gamut: string, expiresAt: number } so the dismiss expires
+// automatically after the TTL window even if the visitor never returns.
+const DISMISS_LOCAL_KEY = 'wgh-dismissed-v1';
+const DISMISS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface PersistedDismiss {
+    gamut: string;
+    expiresAt: number;
+}
+
+function readLocalDismiss(): PersistedDismiss | null {
+    try {
+        const raw = localStorage.getItem(DISMISS_LOCAL_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as PersistedDismiss;
+        if (
+            typeof parsed?.gamut !== 'string' ||
+            typeof parsed?.expiresAt !== 'number' ||
+            !Number.isFinite(parsed.expiresAt)
+        ) {
+            return null;
+        }
+        if (parsed.expiresAt < Date.now()) {
+            try { localStorage.removeItem(DISMISS_LOCAL_KEY); } catch { /* noop */ }
+            return null;
+        }
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function writeLocalDismiss(gamut: string): void {
+    try {
+        const record: PersistedDismiss = { gamut, expiresAt: Date.now() + DISMISS_TTL_MS };
+        localStorage.setItem(DISMISS_LOCAL_KEY, JSON.stringify(record));
+    } catch {
+        // localStorage write can throw under privacy-restricted modes or
+        // quota; the in-memory dismiss still hides the banner this render.
+    }
+}
 
 // P4-B1 / R4-M1: replaced the inline `(color-gamut: p3)` MQ subscription
 // with the unified `useDisplayCapability` hook. The hook covers the same
@@ -33,7 +85,7 @@ const DISMISS_STORAGE_KEY = 'wgh-dismissed';
 // per-session scope (not localStorage) means visitors revisiting next
 // week — possibly on a different display — see the hint again rather
 // than having it permanently suppressed across all sessions.
-export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps) {
+export default function WideGamutHint({ colorPrimaries, t, persistDismissal = false }: WideGamutHintProps) {
     const [mounted, setMounted] = useState(false);
     const [dismissed, setDismissed] = useState(false);
     useEffect(() => {
@@ -56,10 +108,19 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
     const gamutFamily = getGamutFamily(colorPrimaries);
 
     useEffect(() => {
-        // R10-H4 / R12-M1 / R13-M2: re-check sessionStorage whenever the
-        // photo's gamut family changes. A prior dismiss for the `rec2020`
-        // family should NOT suppress the hint when the visitor opens a
-        // `p3` photo (and vice versa).
+        // R10-H4 / R12-M1 / R13-M2 / R28-HD-LOW-1: re-check the appropriate
+        // storage whenever the photo's gamut family changes. A prior dismiss
+        // for the `rec2020` family should NOT suppress the hint when the
+        // visitor opens a `p3` photo (and vice versa). For share-route
+        // recipients (persistDismissal=true) we use localStorage with a
+        // 30-day TTL; for the main /p/[id] route we keep the per-session
+        // sessionStorage behavior.
+        if (persistDismissal) {
+            const persisted = readLocalDismiss();
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional dismiss-state hydration from localStorage
+            setDismissed(persisted?.gamut === gamutFamily);
+            return;
+        }
         try {
             const stored = sessionStorage.getItem(DISMISS_STORAGE_KEY);
             // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional dismiss-state hydration from sessionStorage
@@ -69,17 +130,21 @@ export default function WideGamutHint({ colorPrimaries, t }: WideGamutHintProps)
             // (Safari "Block All Cookies"). Default to "not dismissed."
             setDismissed(false);
         }
-    }, [gamutFamily]);
+    }, [gamutFamily, persistDismissal]);
 
     const handleDismiss = useCallback(() => {
-        try {
-            sessionStorage.setItem(DISMISS_STORAGE_KEY, gamutFamily);
-        } catch {
-            // Storage write failed (private browsing, quota). Fall through:
-            // the in-memory dismiss still hides the banner for this render.
+        if (persistDismissal) {
+            writeLocalDismiss(gamutFamily);
+        } else {
+            try {
+                sessionStorage.setItem(DISMISS_STORAGE_KEY, gamutFamily);
+            } catch {
+                // Storage write failed (private browsing, quota). Fall through:
+                // the in-memory dismiss still hides the banner for this render.
+            }
         }
         setDismissed(true);
-    }, [gamutFamily]);
+    }, [gamutFamily, persistDismissal]);
 
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
     const { colorGamut } = useDisplayCapability();
