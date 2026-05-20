@@ -96,6 +96,15 @@ const P3_D65_PRESET: PresetXyz = {
     b: { x: 0.150, y: 0.060 },
 };
 
+// R27-CP-MED-1: DCI-P3 (D63 white point, theatrical), per SMPTE RP 431-2.
+// Identical primaries to Display P3, white point at (0.3140, 0.3510).
+const DCI_P3_PRESET: PresetXyz = {
+    wp: { x: 0.3140, y: 0.3510 },
+    r: { x: 0.680, y: 0.320 },
+    g: { x: 0.265, y: 0.690 },
+    b: { x: 0.150, y: 0.060 },
+};
+
 const ADOBERGB_PRESET: PresetXyz = {
     wp: { x: 0.3127, y: 0.3290 },
     r: { x: 0.640, y: 0.330 },
@@ -162,6 +171,28 @@ describe('detectGamutFromIccChromaticity', () => {
         expect(result).not.toBeNull();
         expect(result!.primary).toBe('p3-d65');
         expect(result!.confidence).toBe('high');
+    });
+
+    // R27-CP-MED-1: cinema workflows (DaVinci Resolve DCI-P3 working space)
+    // export TIFF/JPEG with custom-named ICC at D63. Chromaticity matcher
+    // must distinguish DCI-P3 from Display P3 by white point alone.
+    it('detects DCI-P3 (D63) at high confidence and does not confuse with P3-D65', () => {
+        const icc = makeIccProfile(DCI_P3_PRESET);
+        const result = detectGamutFromIccChromaticity(icc);
+        expect(result).not.toBeNull();
+        expect(result!.primary).toBe('dci-p3');
+        expect(result!.confidence).toBe('high');
+        // D63 white point — not D65.
+        expect(result!.whitePoint.x).toBeCloseTo(0.3140, 3);
+        expect(result!.whitePoint.y).toBeCloseTo(0.3510, 3);
+    });
+
+    it('Display P3 (D65) does NOT match DCI-P3 preset (white-point discrimination)', () => {
+        const icc = makeIccProfile(P3_D65_PRESET);
+        const result = detectGamutFromIccChromaticity(icc);
+        expect(result).not.toBeNull();
+        expect(result!.primary).toBe('p3-d65');
+        expect(result!.primary).not.toBe('dci-p3');
     });
 
     it('detects Adobe RGB primaries at high confidence', () => {

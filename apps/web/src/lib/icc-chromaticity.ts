@@ -29,7 +29,7 @@ const HIGH_CONFIDENCE_TOLERANCE = 0.005;
 // drift, slight rounding).
 const MEDIUM_CONFIDENCE_TOLERANCE = 0.015;
 
-export type GamutPrimary = 'srgb' | 'p3-d65' | 'adobergb' | 'prophoto' | 'bt2020' | 'unknown';
+export type GamutPrimary = 'srgb' | 'p3-d65' | 'dci-p3' | 'adobergb' | 'prophoto' | 'bt2020' | 'unknown';
 
 export interface ChromaticityResult {
     primary: GamutPrimary;
@@ -70,6 +70,17 @@ const PRESETS: Record<Exclude<GamutPrimary, 'unknown'>, PresetGamut> = {
         g: { x: 0.265, y: 0.690 },
         b: { x: 0.150, y: 0.060 },
         wp: { x: 0.3127, y: 0.3290 },
+    },
+    // R27-CP-MED-1: DCI-P3 (theatrical) preset. Same primaries as Display P3,
+    // different white point: D63 ≈ (0.3140, 0.3510) per SMPTE RP 431-2. The
+    // Δxy between D63 and D65 (~0.022) exceeds MEDIUM_CONFIDENCE_TOLERANCE
+    // (0.015), so the matcher cannot confuse the two. Calibrated cinema
+    // workflows (DaVinci Resolve DCI-P3 working space, custom ICC) land here.
+    'dci-p3': {
+        r: { x: 0.680, y: 0.320 },
+        g: { x: 0.265, y: 0.690 },
+        b: { x: 0.150, y: 0.060 },
+        wp: { x: 0.3140, y: 0.3510 },
     },
     'adobergb': {
         r: { x: 0.640, y: 0.330 },

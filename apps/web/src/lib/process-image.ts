@@ -144,12 +144,18 @@ export function verifyAvifNclxInBuffer(
     for (let i = 4; i < buffer.length - 12; i++) {
         if (buffer.toString('ascii', i, i + 4) !== 'colr') continue;
 
-        // Validate that the preceding 4 bytes look like a reasonable box size
+        // Validate that the preceding 4 bytes look like a reasonable box size.
+        // NCLX boxes are tiny (always 19 bytes total), but `prof` (ICC) boxes
+        // are kilobytes — gate the upper-bound only on `nclx`. R27-CP-LOW-1.
         const size = buffer.readUInt32BE(i - 4);
-        if (size < 12 || size > 64) continue;
+        if (size < 12) continue;
 
         const colorType = buffer.toString('ascii', i + 4, i + 8);
         if (colorType === 'nclx') {
+            // NCLX payload is fixed at 7 bytes (primaries+transfer+matrix+range),
+            // so the whole box never exceeds 20 bytes. A larger "nclx" claim is
+            // a false positive from an ASCII collision; skip.
+            if (size > 64) continue;
             if (i + 12 > buffer.length) {
                 return { ok: false, message: 'NCLX truncated' };
             }
@@ -161,6 +167,8 @@ export function verifyAvifNclxInBuffer(
             return { ok: false, message: `NCLX mismatch: primaries=${primaries} transfer=${transfer} (expected ${expectedPrimaries}, ${expectedTransfer})` };
         }
         if (colorType === 'prof') {
+            // ICC `colr(prof)` boxes legitimately carry kilobytes of ICC data;
+            // don't apply the NCLX size cap.
             return { ok: true, message: 'ICC profile (prof) found instead of NCLX' };
         }
     }

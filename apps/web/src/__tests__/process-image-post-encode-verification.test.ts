@@ -59,6 +59,25 @@ describe('verifyAvifNclxInBuffer', () => {
         expect(result.message).toContain('prof');
     });
 
+    // R27-CP-LOW-1: real-world `colr(prof)` boxes contain a full ICC payload
+    // (kilobytes). The scanner must not gate on the NCLX 64-byte cap when the
+    // color_type is `prof`, otherwise legitimate ICC-embedded AVIFs are
+    // misreported as "no NCLX colr box found" in the audit log.
+    it('accepts large ICC profile (prof) box exceeding NCLX size cap', () => {
+        // Build a colr(prof) box whose payload is 4 KB of mock ICC data.
+        const iccData = Buffer.alloc(4096, 0x42);
+        const payloadSize = 4 + iccData.length;
+        const boxSize = 8 + payloadSize;
+        const buf = Buffer.alloc(boxSize);
+        buf.writeUInt32BE(boxSize, 0);
+        buf.write('colr', 4, 4, 'ascii');
+        buf.write('prof', 8, 4, 'ascii');
+        iccData.copy(buf, 12);
+        const result = verifyAvifNclxInBuffer(buf, 12, 13);
+        expect(result.ok).toBe(true);
+        expect(result.message).toContain('prof');
+    });
+
     it('fails when no colr box is present', () => {
         const buf = Buffer.from('not an avif file');
         const result = verifyAvifNclxInBuffer(buf, 12, 13);
