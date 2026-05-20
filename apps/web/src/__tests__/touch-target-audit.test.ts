@@ -39,6 +39,13 @@ import * as path from 'path';
 const srcRoot = path.resolve(__dirname, '..');
 const componentsDir = path.resolve(srcRoot, 'components');
 const adminDir = path.resolve(srcRoot, 'app', '[locale]', 'admin');
+// Cycle 4 RPF loop R27-UX-LOW-1: widen the audit to cover the public
+// route group so undersized interactive elements added at page level
+// (i.e. inlined into `app/[locale]/(public)/**/page.tsx` instead of
+// extracted into a `components/` file) cannot ship silently. Public
+// pages are mobile-priority by definition — they're the surfaces a
+// client or prospective client touches first.
+const publicDir = path.resolve(srcRoot, 'app', '[locale]', '(public)');
 const appLevelErrorFiles = [
     path.resolve(srcRoot, 'app', 'global-error.tsx'),
     path.resolve(srcRoot, 'app', '[locale]', 'error.tsx'),
@@ -49,10 +56,17 @@ const appLevelErrorFiles = [
  * Adding a new root here is the single point of change for widening
  * the audit. Each entry must be a directory; files within are filtered
  * by the `.tsx` / `.jsx` extension predicate.
+ *
+ * Cycle 4 RPF loop R27-UX-LOW-1: `publicDir` added so the public
+ * route group is now scanned recursively. Public pages mostly delegate
+ * to components/, so the audit is expected to surface zero violations
+ * — but a future inline `<Button size="sm">` in any `page.tsx` of the
+ * public route group will now fail the gate.
  */
 const SCAN_ROOTS: ReadonlyArray<string> = [
     componentsDir,
     adminDir,
+    publicDir,
 ];
 
 interface FoundIssue {
