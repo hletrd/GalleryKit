@@ -212,6 +212,16 @@ function computeHistogramAsync(
     // sRGB context preserves true source data and keeps BT.709 luminance
     // coefficients correct in the worker.
     const isWideGamut = isWideGamutPrimary(colorPrimaries);
+    // R29-MED-1: this DOM read is non-reactive on purpose. The
+    // `force_show_color_chips` admin toggle is a demo-mode escape hatch,
+    // not a runtime-tunable knob, so we sample it at canvas-build time
+    // rather than wiring a MutationObserver onto `<html>` for the
+    // attribute. Concretely: if the admin flips the setting while a photo
+    // viewer is open, this histogram will keep using the OLD `supportsP3`
+    // decision (sRGB vs P3 canvas context) until the component remounts —
+    // which happens on the next photo navigation. Documented so a future
+    // reader doesn't "fix" this by adding subscription machinery for a
+    // toggle that's flipped once-per-session at most.
     const forceShowColorChips =
         typeof document !== 'undefined' &&
         document.documentElement.getAttribute('data-force-show-color-chips') === 'true';
