@@ -1,9 +1,14 @@
 /**
- * Mobile bottom-sheet IA order lock (R10-M12).
+ * Mobile bottom-sheet IA order lock (R10-M12, updated by R27-UX-MED-3).
  *
  * R10-M12 removed the conditional reordering based on `isNonTrivialColor`.
- * The mobile sheet now uses a single consistent ordering for ALL photos:
- * Title/tags → Color details → Wide-gamut hint → EXIF → Histogram →
+ * R27-UX-MED-3 promotes the histogram above the EXIF grid so it's visible
+ * without scrolling past camera/lens/aperture/shutter rows on a 375 px
+ * viewport. The histogram is the photographer's on-the-go color-craft
+ * surface; EXIF is reference reading.
+ *
+ * Current ordering for ALL photos:
+ * Title/tags → Color details → Wide-gamut hint → Histogram → EXIF →
  * Capture date → Download.
  *
  * Source-inspection style — same pattern as
@@ -31,12 +36,14 @@ describe('info-bottom-sheet IA order (R10-M12)', () => {
         }
     });
 
-    it('renders EXIF section BEFORE Histogram for all photos', () => {
+    it('renders Histogram BEFORE EXIF section for all photos (R27-UX-MED-3)', () => {
+        // R27-UX-MED-3: histogram precedes EXIF so it's visible without
+        // scrolling past camera/lens/aperture/shutter on a 375 px viewport.
         const exifHeader = SOURCE.indexOf("t('viewer.exifData')");
         const histogram = SOURCE.indexOf('<Histogram');
         expect(exifHeader).toBeGreaterThan(-1);
         expect(histogram).toBeGreaterThan(-1);
-        expect(exifHeader).toBeLessThan(histogram);
+        expect(histogram).toBeLessThan(exifHeader);
     });
 
     it('renders exactly one Histogram component', () => {
@@ -44,7 +51,7 @@ describe('info-bottom-sheet IA order (R10-M12)', () => {
         expect(histogramOccurrences.length).toBe(1);
     });
 
-    it('renders the consistent content order: ColorDetails → WideGamutHint → EXIF → Histogram → Capture → Download', () => {
+    it('renders the consistent content order: ColorDetails → WideGamutHint → Histogram → EXIF → Capture → Download (R27-UX-MED-3)', () => {
         const colorDetails = SOURCE.indexOf('<ColorDetailsSection');
         const wideGamutHint = SOURCE.indexOf('<WideGamutHint');
         const exifHeader = SOURCE.indexOf("t('viewer.exifData')");
@@ -60,9 +67,10 @@ describe('info-bottom-sheet IA order (R10-M12)', () => {
         expect(download).toBeGreaterThan(-1);
 
         expect(colorDetails).toBeLessThan(wideGamutHint);
-        expect(wideGamutHint).toBeLessThan(exifHeader);
-        expect(exifHeader).toBeLessThan(histogram);
-        expect(histogram).toBeLessThan(captureDate);
+        expect(wideGamutHint).toBeLessThan(histogram);
+        // R27-UX-MED-3: histogram now precedes EXIF.
+        expect(histogram).toBeLessThan(exifHeader);
+        expect(exifHeader).toBeLessThan(captureDate);
         expect(captureDate).toBeLessThan(download);
     });
 });
