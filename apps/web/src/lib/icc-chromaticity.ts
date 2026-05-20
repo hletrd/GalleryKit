@@ -109,6 +109,63 @@ function readS15Fixed16(buf: Buffer, offset: number): number {
     return raw / 65536;
 }
 
+// ---------------------------------------------------------------------------
+// R28-CP-MED-2: chad (chromatic adaptation) matrix support.
+//
+// ICC v4 profiles store their `rXYZ`/`gXYZ`/`bXYZ`/`wtpt` values in the
+// PCS illuminant (D50), not the native white point. A `chad` tag (3×3
+// s15Fixed16 matrix) carries the Bradford / VonKries adaptation from
+// native → D50. To recover native primaries for chromaticity matching
+// against the canonical PRESETS (which are native-illuminant), we apply
+// `chad^-1` to the stored XYZ tuples.
+//
+// Profiles without a `chad` tag (legacy ICC v2 monitor profiles) are
+// assumed to be native-illuminant; we walk the no-chad path verbatim.
+// ---------------------------------------------------------------------------
+
+type Mat3 = [[number, number, number], [number, number, number], [number, number, number]];
+
+/** Read the `chad` tag as a 3x3 matrix. ICC `sf32` payload is 8-byte header
+ *  ('sf32' + reserved) followed by 9 s15Fixed16 values in row-major order. */
+function readChadMatrix(buf: Buffer, offset: number, size: number): Mat3 | null {
+    if (offset < 0 || size < 44 || offset + 44 > buf.length) return null;
+    const sig = buf.toString('ascii', offset, offset + 4);
+    if (sig !== 'sf32') return null;
+    const v: number[] = [];
+    for (let i = 0; i < 9; i++) {
+        const val = readS15Fixed16(buf, offset + 8 + i * 4);
+        if (!Number.isFinite(val)) return null;
+        v.push(val);
+    }
+    return [
+        [v[0], v[1], v[2]],
+        [v[3], v[4], v[5]],
+        [v[6], v[7], v[8]],
+    ];
+}
+
+function invert3x3(m: Mat3): Mat3 | null {
+    const a = m[0][0], b = m[0][1], c = m[0][2];
+    const d = m[1][0], e = m[1][1], f = m[1][2];
+    const g = m[2][0], h = m[2][1], i = m[2][2];
+    const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+    const inv = 1 / det;
+    return [
+        [(e * i - f * h) * inv, (c * h - b * i) * inv, (b * f - c * e) * inv],
+        [(f * g - d * i) * inv, (a * i - c * g) * inv, (c * d - a * f) * inv],
+        [(d * h - e * g) * inv, (b * g - a * h) * inv, (a * e - b * d) * inv],
+    ];
+}
+
+function matVec3(m: Mat3, v: XyzTriple): XyzTriple {
+    return {
+        x: m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
+        y: m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+        z: m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z,
+    };
+}
+
 /** Convert tristimulus XYZ to xy chromaticity. Returns null when X+Y+Z is zero. */
 function xyzToXy(x: number, y: number, z: number): { x: number; y: number } | null {
     const sum = x + y + z;
@@ -180,17 +237,22 @@ export function detectGamutFromIccChromaticity(icc: Buffer | null | undefined): 
     let rXyzOffset = -1, rXyzSize = 0;
     let gXyzOffset = -1, gXyzSize = 0;
     let bXyzOffset = -1, bXyzSize = 0;
+    // R28-CP-MED-2: also collect the chad tag for D50 PCS adaptation reversal.
+    let chadOffset = -1, chadSize = 0;
 
     for (let i = 132; i + 12 <= tagTableEnd; i += 12) {
         const sig = icc.toString('ascii', i, i + 4);
         const offset = icc.readUInt32BE(i + 4);
         const size = icc.readUInt32BE(i + 8);
-        if (offset + size > icc.length || size < 20 || size > MAX_TAG_TABLE_BYTES) continue;
+        if (offset + size > icc.length || size > MAX_TAG_TABLE_BYTES) continue;
+        // R28-CP-MED-2: chad payload is at least 44 bytes ('sf32'+pad+9 s15Fixed16);
+        // XYZType tags are at least 20 bytes. Filter independently.
         switch (sig) {
-            case 'wtpt': wtptOffset = offset; wtptSize = size; break;
-            case 'rXYZ': rXyzOffset = offset; rXyzSize = size; break;
-            case 'gXYZ': gXyzOffset = offset; gXyzSize = size; break;
-            case 'bXYZ': bXyzOffset = offset; bXyzSize = size; break;
+            case 'wtpt': if (size >= 20) { wtptOffset = offset; wtptSize = size; } break;
+            case 'rXYZ': if (size >= 20) { rXyzOffset = offset; rXyzSize = size; } break;
+            case 'gXYZ': if (size >= 20) { gXyzOffset = offset; gXyzSize = size; } break;
+            case 'bXYZ': if (size >= 20) { bXyzOffset = offset; bXyzSize = size; } break;
+            case 'chad': if (size >= 44) { chadOffset = offset; chadSize = size; } break;
         }
     }
 
@@ -200,11 +262,31 @@ export function detectGamutFromIccChromaticity(icc: Buffer | null | undefined): 
         return null;
     }
 
-    const wtpt = readXyzTag(icc, wtptOffset, wtptSize);
-    const rXyz = readXyzTag(icc, rXyzOffset, rXyzSize);
-    const gXyz = readXyzTag(icc, gXyzOffset, gXyzSize);
-    const bXyz = readXyzTag(icc, bXyzOffset, bXyzSize);
-    if (!wtpt || !rXyz || !gXyz || !bXyz) return null;
+    const wtptRaw = readXyzTag(icc, wtptOffset, wtptSize);
+    const rXyzRaw = readXyzTag(icc, rXyzOffset, rXyzSize);
+    const gXyzRaw = readXyzTag(icc, gXyzOffset, gXyzSize);
+    const bXyzRaw = readXyzTag(icc, bXyzOffset, bXyzSize);
+    if (!wtptRaw || !rXyzRaw || !gXyzRaw || !bXyzRaw) return null;
+
+    // R28-CP-MED-2: ICC v4 stores primaries D50-adapted; the `chad` tag
+    // carries the adaptation matrix native → D50. Apply chad^-1 to recover
+    // the native primaries so the PRESETS comparison (which is
+    // native-illuminant) matches AdobeRGB / ProPhoto / Rec.2020 even when
+    // the profile is v4 / has a chad tag (which is the common case for
+    // modern calibrated monitor profiles).
+    let wtpt = wtptRaw, rXyz = rXyzRaw, gXyz = gXyzRaw, bXyz = bXyzRaw;
+    if (chadOffset >= 0) {
+        const chad = readChadMatrix(icc, chadOffset, chadSize);
+        if (chad) {
+            const chadInv = invert3x3(chad);
+            if (chadInv) {
+                wtpt = matVec3(chadInv, wtptRaw);
+                rXyz = matVec3(chadInv, rXyzRaw);
+                gXyz = matVec3(chadInv, gXyzRaw);
+                bXyz = matVec3(chadInv, bXyzRaw);
+            }
+        }
+    }
 
     const wpXy = xyzToXy(wtpt.x, wtpt.y, wtpt.z);
     const rXy = xyzToXy(rXyz.x, rXyz.y, rXyz.z);

@@ -136,6 +136,7 @@ export function verifyAvifNclxInBuffer(
     buffer: Buffer,
     expectedPrimaries: number,
     expectedTransfer: number,
+    expectedMatrix?: number,
 ): AvifNclxVerificationResult {
     if (buffer.length < 16) {
         return { ok: false, message: 'buffer too small' };
@@ -161,10 +162,16 @@ export function verifyAvifNclxInBuffer(
             }
             const primaries = buffer.readUInt16BE(i + 8);
             const transfer = buffer.readUInt16BE(i + 10);
-            if (primaries === expectedPrimaries && transfer === expectedTransfer) {
-                return { ok: true, message: `NCLX primaries=${primaries} transfer=${transfer}` };
+            // R28-CP-MED-1: also read matrix when caller has an expectation.
+            // The NCLX payload reserves bytes 12–13 for matrix_coefficients.
+            const matrix = i + 14 <= buffer.length ? buffer.readUInt16BE(i + 12) : -1;
+            if (primaries !== expectedPrimaries || transfer !== expectedTransfer) {
+                return { ok: false, message: `NCLX mismatch: primaries=${primaries} transfer=${transfer} (expected ${expectedPrimaries}, ${expectedTransfer})` };
             }
-            return { ok: false, message: `NCLX mismatch: primaries=${primaries} transfer=${transfer} (expected ${expectedPrimaries}, ${expectedTransfer})` };
+            if (expectedMatrix !== undefined && matrix !== -1 && matrix !== expectedMatrix) {
+                return { ok: false, message: `NCLX matrix mismatch: matrix=${matrix} (expected ${expectedMatrix}; primaries=${primaries} transfer=${transfer} OK)` };
+            }
+            return { ok: true, message: `NCLX primaries=${primaries} transfer=${transfer} matrix=${matrix >= 0 ? matrix : '?'}` };
         }
         if (colorType === 'prof') {
             // ICC `colr(prof)` boxes legitimately carry kilobytes of ICC data;

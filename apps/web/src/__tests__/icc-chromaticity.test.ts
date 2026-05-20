@@ -245,6 +245,105 @@ describe('detectGamutFromIccChromaticity', () => {
         expect(result!.confidence).toBe('low');
     });
 
+    // R28-CP-MED-2: ICC v4 profiles store rXYZ/gXYZ/bXYZ adapted to D50; the
+    // chad tag carries native→D50 adaptation. The matcher must invert chad
+    // before comparing against the native-illuminant PRESETS, otherwise
+    // AdobeRGB-calibrated profiles with chad tags match nothing.
+    describe('chad-aware adaptation (R28-CP-MED-2)', () => {
+        // Bradford D65→D50 chromatic adaptation matrix (standard form).
+        const BRADFORD_D65_TO_D50: number[][] = [
+            [1.0479298, 0.0228869, -0.0501127],
+            [0.0295361, 0.9904757, -0.0170526],
+            [-0.0092345, 0.0150506, 0.7521316],
+        ];
+
+        function applyChad(xyz: { x: number; y: number; z: number }, m: number[][]): { x: number; y: number; z: number } {
+            return {
+                x: m[0][0] * xyz.x + m[0][1] * xyz.y + m[0][2] * xyz.z,
+                y: m[1][0] * xyz.x + m[1][1] * xyz.y + m[1][2] * xyz.z,
+                z: m[2][0] * xyz.x + m[2][1] * xyz.y + m[2][2] * xyz.z,
+            };
+        }
+
+        function makeIccProfileWithChad(preset: PresetXyz, chadMatrix: number[][]): Buffer {
+            // Layout (5 tags):
+            //   [0]   128-byte header (only 'acsp' magic at 36 written)
+            //   [128] tag count (4 bytes) = 5
+            //   [132] tag table: 5 × 12-byte entries = 60 bytes -> ends at 192
+            //   [192] wtpt payload (20 bytes)
+            //   [212] rXYZ payload (20 bytes)
+            //   [232] gXYZ payload (20 bytes)
+            //   [252] bXYZ payload (20 bytes)
+            //   [272] chad payload (44 bytes: 'sf32'+pad+9 s15Fixed16)
+            //   [316] end
+            const buf = Buffer.alloc(316);
+            buf.write('acsp', 36, 4, 'ascii');
+            buf.writeUInt32BE(5, 128);
+
+            // D50-adapt the native primaries before writing (mirrors a real
+            // ICC v4 profile authored at D65).
+            const wpAdapted = applyChad(xyToXyz(preset.wp), chadMatrix);
+            const rAdapted = applyChad(xyToXyz(preset.r), chadMatrix);
+            const gAdapted = applyChad(xyToXyz(preset.g), chadMatrix);
+            const bAdapted = applyChad(xyToXyz(preset.b), chadMatrix);
+
+            const chadBuf = Buffer.alloc(44);
+            chadBuf.write('sf32', 0, 4, 'ascii');
+            chadBuf.writeUInt32BE(0, 4);
+            // s15Fixed16 row-major encoding
+            for (let row = 0; row < 3; row++) {
+                for (let col = 0; col < 3; col++) {
+                    writeS15Fixed16(chadBuf, 8 + (row * 3 + col) * 4, chadMatrix[row][col]);
+                }
+            }
+
+            const tags = [
+                { sig: 'wtpt', offset: 192, payload: makeXyzPayload(wpAdapted) },
+                { sig: 'rXYZ', offset: 212, payload: makeXyzPayload(rAdapted) },
+                { sig: 'gXYZ', offset: 232, payload: makeXyzPayload(gAdapted) },
+                { sig: 'bXYZ', offset: 252, payload: makeXyzPayload(bAdapted) },
+                { sig: 'chad', offset: 272, payload: chadBuf },
+            ];
+
+            for (let i = 0; i < tags.length; i++) {
+                const t = tags[i];
+                const tagOffset = 132 + i * 12;
+                buf.write(t.sig, tagOffset, 4, 'ascii');
+                buf.writeUInt32BE(t.offset, tagOffset + 4);
+                buf.writeUInt32BE(t.payload.length, tagOffset + 8);
+                t.payload.copy(buf, t.offset);
+            }
+            return buf;
+        }
+
+        it('detects Adobe RGB at high confidence through chad inversion', () => {
+            const icc = makeIccProfileWithChad(ADOBERGB_PRESET, BRADFORD_D65_TO_D50);
+            const result = detectGamutFromIccChromaticity(icc);
+            expect(result).not.toBeNull();
+            expect(result!.primary).toBe('adobergb');
+            expect(['high', 'medium']).toContain(result!.confidence);
+            // After chad^-1 the recovered white point should land at D65.
+            expect(result!.whitePoint.x).toBeCloseTo(0.3127, 2);
+            expect(result!.whitePoint.y).toBeCloseTo(0.3290, 2);
+        });
+
+        it('detects Display P3 at high confidence through chad inversion', () => {
+            const icc = makeIccProfileWithChad(P3_D65_PRESET, BRADFORD_D65_TO_D50);
+            const result = detectGamutFromIccChromaticity(icc);
+            expect(result).not.toBeNull();
+            expect(result!.primary).toBe('p3-d65');
+            expect(['high', 'medium']).toContain(result!.confidence);
+        });
+
+        it('falls through cleanly when chad is absent (legacy ICC v2)', () => {
+            // Re-uses the original (no-chad) Adobe RGB fixture; should still match.
+            const icc = makeIccProfile(ADOBERGB_PRESET);
+            const result = detectGamutFromIccChromaticity(icc);
+            expect(result).not.toBeNull();
+            expect(result!.primary).toBe('adobergb');
+        });
+    });
+
     it('does not throw on truncated buffer (corrupt tag table)', () => {
         const icc = makeIccProfile(SRGB_PRESET);
         // Slice off the last 60 bytes (loses bXYZ + part of gXYZ payload).

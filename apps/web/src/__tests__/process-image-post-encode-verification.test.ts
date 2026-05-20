@@ -34,7 +34,36 @@ describe('verifyAvifNclxInBuffer', () => {
         const box = buildNclxColrBox(12, 13);
         const result = verifyAvifNclxInBuffer(box, 12, 13);
         expect(result.ok).toBe(true);
+        // R28-CP-MED-1: message now includes matrix (fixture writes matrix=1).
         expect(result.message).toContain('NCLX primaries=12 transfer=13');
+        expect(result.message).toContain('matrix=1');
+    });
+
+    // R28-CP-MED-1: matrix coefficient verification — fail FAST when matrix
+    // drifts even though primaries and transfer are right. This catches
+    // encoder regressions (libheif/libavif default matrix change) that today
+    // pass through silently because the audit only inspects primaries/transfer.
+    it('fails when expected matrix mismatches the NCLX matrix field', () => {
+        // Fixture writes matrix=1 (BT.709); caller expects matrix=6 (BT.601).
+        const box = buildNclxColrBox(12, 13);
+        const result = verifyAvifNclxInBuffer(box, 12, 13, 6);
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain('matrix mismatch');
+        expect(result.message).toContain('matrix=1');
+        expect(result.message).toContain('expected 6');
+    });
+
+    it('passes when expected matrix matches the NCLX matrix field', () => {
+        const box = buildNclxColrBox(12, 13);
+        const result = verifyAvifNclxInBuffer(box, 12, 13, 1);
+        expect(result.ok).toBe(true);
+        expect(result.message).toContain('matrix=1');
+    });
+
+    it('passes when no expected matrix is provided (backward-compatible)', () => {
+        const box = buildNclxColrBox(12, 13);
+        const result = verifyAvifNclxInBuffer(box, 12, 13);
+        expect(result.ok).toBe(true);
     });
 
     it('fails when NCLX primaries mismatch', () => {
