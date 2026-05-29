@@ -143,6 +143,58 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
         expect(avifMeta.icc!.length).toBeGreaterThan(0);
     });
 
+    it('AGG-02: reprocess signals include avif_10bit so the script persists the canonical column set', async () => {
+        const id = 'backfill-avif10bit-fixture';
+        generatedIds.push(id);
+
+        const originalDestPath = path.join(UPLOAD_DIR_ORIGINAL, `${id}.jpg`);
+        await fs.mkdir(path.dirname(originalDestPath), { recursive: true });
+        await sharp({
+            create: { width: 8, height: 8, channels: 3, background: { r: 64, g: 128, b: 200 } },
+        })
+            .withIccProfile('srgb')
+            .jpeg({ quality: 90 })
+            .toFile(originalDestPath);
+
+        const row: ImageRow = {
+            id: 9005,
+            filename_original: `${id}.jpg`,
+            filename_avif: `${id}.avif`,
+            filename_webp: `${id}.webp`,
+            filename_jpeg: `${id}.jpg`,
+            icc_profile_name: 'sRGB',
+            color_primaries: 'bt709',
+            width: 8,
+        };
+        const outcome = await reprocessRow(row);
+        expect(outcome.outcome).toBe('processed');
+        expect(outcome.signals).toBeDefined();
+
+        // AGG-02 contract: the sidecar script must persist the SAME column set
+        // the normal upload path (image-queue.ts) and in-app runner write.
+        // avif_10bit is PUBLIC (delivered-bit-depth chip); omitting it left
+        // the value stale after a sidecar backfill. Lock every column here so
+        // a future drift fails this gate.
+        const signals = outcome.signals!;
+        const persistedColumns = Object.keys(signals).sort();
+        expect(persistedColumns).toEqual(
+            [
+                'avif_10bit',
+                'color_pipeline_decision',
+                'color_primaries',
+                'has_gain_map',
+                'icc_profile_name',
+                'is_hdr',
+                'matrix_coefficients',
+                'transfer_function',
+                'was_downscaled',
+            ].sort(),
+        );
+        // avif_10bit is a boolean (sRGB 8-bit source → false), never undefined.
+        expect(typeof signals.avif_10bit).toBe('boolean');
+        expect(signals.avif_10bit).toBe(false);
+    });
+
     it('R9-M4: refreshes color_pipeline_decision during backfill', async () => {
         const id = 'backfill-decision-fixture';
         generatedIds.push(id);

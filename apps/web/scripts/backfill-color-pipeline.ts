@@ -72,6 +72,12 @@ interface ReprocessSignals {
     has_gain_map: boolean;
     color_pipeline_decision: string | null;
     was_downscaled: boolean;
+    // Run-2 Cycle 1 AGG-02: the re-encode can flip the delivered AVIF bit
+    // depth (10-bit vs 8-bit) when libheif/effort/settings change. avif_10bit
+    // is a PUBLIC field (delivered-bit-depth chip), and both the normal
+    // upload path (image-queue.ts) and the in-app runner persist it. This
+    // script must too, or a sidecar backfill leaves the public value stale.
+    avif_10bit: boolean;
 }
 
 interface ReprocessResult {
@@ -102,6 +108,7 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
     }
 
     let wasDownscaled = false;
+    let avif10bit = false;
     try {
         const result = await processImageFormats(
             originalPath,
@@ -120,6 +127,9 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
             settings?.wideGamutMaxSourcePixels,
         );
         wasDownscaled = result.wasDownscaled;
+        // AGG-02: capture the delivered AVIF bit depth so the UPDATE below
+        // refreshes the public avif_10bit column to match the new bytes.
+        avif10bit = result.avif10bit;
     } catch (err) {
         console.error(`  [error] id=${row.id}: ${err}`);
         return { outcome: 'error' };
@@ -147,6 +157,7 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
                 has_gain_map: signals.hasGainMap,
                 color_pipeline_decision: colorPipelineDecision,
                 was_downscaled: wasDownscaled,
+                avif_10bit: avif10bit,
             },
         };
     } catch (err) {
@@ -274,7 +285,8 @@ async function main() {
                         is_hdr = ${item.signals.is_hdr},
                         has_gain_map = ${item.signals.has_gain_map},
                         color_pipeline_decision = ${item.signals.color_pipeline_decision ?? null},
-                        was_downscaled = ${item.signals.was_downscaled}
+                        was_downscaled = ${item.signals.was_downscaled},
+                        avif_10bit = ${item.signals.avif_10bit}
                     WHERE id = ${item.id}
                 `);
             }
