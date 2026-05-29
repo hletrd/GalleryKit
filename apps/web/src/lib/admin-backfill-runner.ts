@@ -38,7 +38,6 @@
  */
 
 import fs from 'fs/promises';
-import path from 'path';
 import PQueue from 'p-queue';
 import sharp from 'sharp';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -400,9 +399,3 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
 export async function getAdminBackfillCandidateCount(): Promise<number> {
     return fetchCandidateCount();
 }
-
-// Silence unused import: `path` is no longer needed here but keeps the
-// file's I/O cluster co-located with fs / sharp imports for symmetry with
-// the companion script. If a future change re-adds path joining (e.g.
-// per-variant cleanup), the import is still here.
-void path;
