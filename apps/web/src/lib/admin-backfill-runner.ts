@@ -251,11 +251,22 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
             WHERE id = ${row.id}
         `);
     } else {
-        // Detection failed but encode succeeded — at least advance the
-        // pipeline_version so the next pass doesn't re-pick the row.
+        // R-run2c1 AGG-01: detection failed but encode succeeded. Do NOT
+        // advance pipeline_version — the re-encode is idempotent, so leaving
+        // the row behind the current version lets a later backfill retry
+        // detection and recover the (now stale) color columns. Previously
+        // this branch bumped pipeline_version, which permanently stranded the
+        // row's color metadata: candidate selection is `pipeline_version <
+        // CURRENT`, so a bumped row is NEVER re-picked, contradicting the
+        // "pick up where it left off" resume contract documented in this
+        // file's header. The operator script (backfill-color-pipeline.ts)
+        // already has the correct semantics (no version bump on detection
+        // failure); this aligns the in-app runner with it. We still persist
+        // the freshly-encoded derivatives' was_downscaled / avif_10bit so
+        // those public-facing fields reflect the new bytes even while the
+        // color columns await a successful detection retry.
         await db.execute(sql`
             UPDATE images SET
-                pipeline_version = ${IMAGE_PIPELINE_VERSION},
                 was_downscaled = ${wasDownscaled},
                 avif_10bit = ${avif10bit}
             WHERE id = ${row.id}
