@@ -80,9 +80,27 @@ interface ReprocessSignals {
     avif_10bit: boolean;
 }
 
+/**
+ * Run-2 Cycle 2 AGG2-01: derivative-only columns persisted when the re-encode
+ * succeeds but color detection THROWS. We refresh the public `avif_10bit`
+ * (delivered-bit-depth chip) and admin-only `was_downscaled` to match the fresh
+ * bytes, but deliberately leave `pipeline_version` and the color columns
+ * untouched so a later run re-detects (preserving the cycle-1 AGG-01 resume
+ * invariant). This mirrors `admin-backfill-runner.ts:268-273` so both backfill
+ * paths persist the SAME columns on the detection-failure branch — previously
+ * the runner wrote these two columns here while the script wrote nothing,
+ * leaving the public `avif_10bit` value stale after a sidecar backfill.
+ */
+interface ReprocessDerivativeOnly {
+    was_downscaled: boolean;
+    avif_10bit: boolean;
+}
+
 interface ReprocessResult {
     outcome: 'processed' | 'skipped' | 'error';
     signals?: ReprocessSignals;
+    /** Set ONLY on the detection-failure branch (encode ok, detection threw). */
+    derivativeOnly?: ReprocessDerivativeOnly;
 }
 
 interface BackfillSettings {
@@ -161,10 +179,16 @@ export async function reprocessRow(row: ImageRow, settings?: BackfillSettings): 
             },
         };
     } catch (err) {
-        // Detection failed but encoding succeeded — still mark as processed
-        // so the stale color columns are at least no worse than before.
+        // Detection failed but encoding succeeded. AGG2-01: persist the
+        // freshly-encoded derivative columns (was_downscaled, avif_10bit)
+        // WITHOUT advancing pipeline_version, so the public avif_10bit chip
+        // reflects the new bytes and the row stays a backfill candidate for a
+        // later detection retry. Mirrors admin-backfill-runner.ts:268-273.
         console.warn(`  [warn] id=${row.id}: detection failed after re-encode: ${err}`);
-        return { outcome: 'processed' };
+        return {
+            outcome: 'processed',
+            derivativeOnly: { was_downscaled: wasDownscaled, avif_10bit: avif10bit },
+        };
     }
 }
 
@@ -269,10 +293,19 @@ async function main() {
 
     // R7-L8: batch DB updates to reduce round-trips.
     const updateBatch: { id: number; signals: ReprocessSignals }[] = [];
+    // AGG2-01: detection-failure rows persist only the derivative columns
+    // (no pipeline_version bump, no color columns) so they remain backfill
+    // candidates for a later detection retry.
+    const derivativeBatch: { id: number; derivative: ReprocessDerivativeOnly }[] = [];
+
+    function pendingUpdates(): number {
+        return updateBatch.length + derivativeBatch.length;
+    }
 
     async function flushBatch(): Promise<void> {
-        if (updateBatch.length === 0) return;
+        if (pendingUpdates() === 0) return;
         const items = updateBatch.splice(0, updateBatch.length);
+        const derivativeItems = derivativeBatch.splice(0, derivativeBatch.length);
         await db.transaction(async (tx) => {
             for (const item of items) {
                 await tx.execute(sql`
@@ -290,8 +323,16 @@ async function main() {
                     WHERE id = ${item.id}
                 `);
             }
+            for (const item of derivativeItems) {
+                await tx.execute(sql`
+                    UPDATE images SET
+                        was_downscaled = ${item.derivative.was_downscaled},
+                        avif_10bit = ${item.derivative.avif_10bit}
+                    WHERE id = ${item.id}
+                `);
+            }
         });
-        console.log(`  [batch-flush] ${items.length} row(s) updated`);
+        console.log(`  [batch-flush] ${items.length} row(s) updated, ${derivativeItems.length} derivative-only`);
     }
 
     for (const [index, row] of rows.entries()) {
@@ -301,8 +342,12 @@ async function main() {
                 processed++;
                 if (result.signals) {
                     updateBatch.push({ id: row.id, signals: result.signals });
+                } else if (result.derivativeOnly) {
+                    // AGG2-01: detection failed but encode succeeded — persist
+                    // the derivative columns without bumping pipeline_version.
+                    derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly });
                 }
-                if (updateBatch.length >= BATCH_SIZE) {
+                if (pendingUpdates() >= BATCH_SIZE) {
                     await flushBatch();
                 }
             } else if (result.outcome === 'skipped') {
