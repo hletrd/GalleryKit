@@ -279,6 +279,8 @@ All admin tunables flow through `gallery-config-shared.ts` (validation) → `gal
 
 `apps/web/scripts/backfill-color-pipeline.ts` re-runs `processImageFormats` on photos whose `pipeline_version != IMAGE_PIPELINE_VERSION`. Idempotent: skips rows already at current version unless `--force-reencode` is passed. Acquires the `gallerykit_color_pipeline_backfill` MySQL advisory lock on a dedicated connection so two concurrent runs serialize.
 
+**Two equivalent entry points** — the sidecar `--rm` script above and the in-app admin Settings "Re-encode existing photos" button (`apps/web/src/app/actions/admin-backfill.ts` → `apps/web/src/lib/admin-backfill-runner.ts`, R27-UX-HIGH-1) both re-encode behind the same `gallerykit_color_pipeline_backfill` advisory lock and persist the SAME DB column set as a fresh upload (`pipeline_version`, `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit`). They serialize against each other, so you can use whichever is convenient. On a successful re-encode whose color detection THEN fails transiently, both paths leave `pipeline_version` behind the current version (the re-encode is idempotent) so a later run retries detection — they never strand stale color metadata at the current version (Run-2 Cycle 1 AGG-01 / AGG-02). The contract is locked by `__tests__/backfill-color-pipeline.test.ts` (column set) and `__tests__/admin-backfill-runner-detection-failure.test.ts` (no version bump on detection failure).
+
 **Operational pattern (production)** — the production runtime container has prod-deps only and lacks `tsx` + the TypeScript source files. Running the backfill safely:
 
 ```bash

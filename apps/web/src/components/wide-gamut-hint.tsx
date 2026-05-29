@@ -123,7 +123,6 @@ export default function WideGamutHint({ colorPrimaries, t, persistDismissal = fa
         }
         try {
             const stored = sessionStorage.getItem(DISMISS_STORAGE_KEY);
-            // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional dismiss-state hydration from sessionStorage
             setDismissed(stored === gamutFamily);
         } catch {
             // sessionStorage can throw in privacy-restricted contexts
