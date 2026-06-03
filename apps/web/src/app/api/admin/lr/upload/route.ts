@@ -22,7 +22,7 @@ import { verifyToken } from '@/lib/admin-tokens';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
-import { ensureUploadDirectories } from '@/lib/upload-paths';
+import { ensureUploadDirectories, deleteOriginalUploadFile } from '@/lib/upload-paths';
 import { enqueueImageProcessing } from '@/lib/image-queue';
 import { isValidSlug, safeInsertId } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
@@ -109,6 +109,23 @@ export const POST = withAdminAuth(
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : 'Upload failed';
             return NextResponse.json({ error: msg }, { status: 422, headers: NO_CACHE });
+        }
+
+        // Run-3 RPF cycle 1 / F2: honor the `allow_hdr_ingest` admin setting on
+        // the Lightroom PAT path, mirroring the browser upload action
+        // (app/actions/images.ts). `allow_hdr_ingest` (default false) is
+        // documented as "PQ/HLG sources rejected at upload by default"; before
+        // this gate the Lightroom publish-plugin path — the primary non-browser
+        // ingest — silently accepted HDR sources the admin had asked to reject.
+        // Not a public-honesty issue (is_hdr / transfer_function are admin-only
+        // and process-image encodes SDR derivatives regardless), but a genuine
+        // admin-intent / contract drift the R8 plan predicted.
+        if (data.colorSignals?.isHdr && !config.allowHdrIngest) {
+            await deleteOriginalUploadFile(data.filenameOriginal);
+            return NextResponse.json(
+                { error: 'HDR ingest is disabled' },
+                { status: 422, headers: NO_CACHE },
+            );
         }
 
         const exifDb = extractExifForDb(data.exifData);
