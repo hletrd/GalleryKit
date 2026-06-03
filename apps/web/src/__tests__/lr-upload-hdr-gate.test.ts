@@ -103,3 +103,55 @@ describe('lr upload GPS-original strip source-contract', () => {
         expect(stripIndex).toBeGreaterThan(guardIndex);
     });
 });
+
+/**
+ * Run-3 RPF cycle 3: lock the remaining PAT-vs-browser upload divergences fixed
+ * this cycle so a future refactor cannot silently re-introduce them.
+ * - SEC-C3-01: store the ICC descriptor in `icc_profile_name` (not `color_space`,
+ *   which is the EXIF ColorSpace tag value per CLAUDE.md).
+ * - SEC-C3-02: attribute the upload to the verified PAT user via `uploaded_by`.
+ * - CR-C3-01: acquire the upload-processing-contract advisory lock.
+ * - CR-C3-02: surface RAW rejections with a specific message.
+ */
+describe('lr upload metadata/parity source-contract (cycle 3)', () => {
+    it('writes the ICC descriptor to icc_profile_name (SEC-C3-01)', () => {
+        expect(LR_SRC).toMatch(/icc_profile_name:\s*data\.iccProfileName/);
+    });
+
+    it('does NOT pollute color_space with the ICC name (SEC-C3-01)', () => {
+        // The prior shape `color_space: data.iccProfileName || exifDb.color_space`
+        // both lost the ICC name and overwrote color_space (the EXIF ColorSpace
+        // tag value, NOT the ICC name per CLAUDE.md). color_space must flow only
+        // from the `...exifDb` spread.
+        expect(LR_SRC).not.toMatch(/color_space:\s*data\.iccProfileName/);
+    });
+
+    it('attributes the upload via uploaded_by from the token user (SEC-C3-02)', () => {
+        expect(LR_SRC).toMatch(/uploaded_by:\s*tokenUserId/);
+    });
+
+    it('acquires the upload-processing-contract lock (CR-C3-01)', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*acquireUploadProcessingContractLock[^}]*\}\s*from\s*['"]@\/lib\/upload-processing-contract-lock['"]/,
+        );
+        expect(LR_SRC).toMatch(/acquireUploadProcessingContractLock\(/);
+        // Lock must be acquired before the DB insert so the upload window is
+        // serialized against image_sizes / strip_gps settings changes.
+        const lockIndex = LR_SRC.search(/acquireUploadProcessingContractLock\(/);
+        const insertIndex = LR_SRC.indexOf('db.insert(images)');
+        expect(lockIndex).toBeGreaterThan(-1);
+        expect(insertIndex).toBeGreaterThan(-1);
+        expect(lockIndex).toBeLessThan(insertIndex);
+    });
+
+    it('releases the contract lock in a finally block (CR-C3-01)', () => {
+        expect(LR_SRC).toMatch(/finally\s*\{[\s\S]*?uploadContractLock\.release\(\)/);
+    });
+
+    it('surfaces RAW rejections with a specific message (CR-C3-02)', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*RawFileError[^}]*\}\s*from\s*['"]@\/lib\/process-image['"]/,
+        );
+        expect(LR_SRC).toMatch(/err\s+instanceof\s+RawFileError/);
+    });
+});

@@ -22,9 +22,10 @@ import { withAdminAuth } from '@/lib/api-auth';
 import { verifyToken } from '@/lib/admin-tokens';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
+import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
 import { ensureUploadDirectories, deleteOriginalUploadFile, UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
 import { enqueueImageProcessing } from '@/lib/image-queue';
+import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { isValidSlug, safeInsertId } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
@@ -100,17 +101,47 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
         }
 
-        await ensureUploadDirectories();
-
-        const config = await getGalleryConfig();
-
-        let data: Awaited<ReturnType<typeof saveOriginalAndGetMetadata>>;
-        try {
-            data = await saveOriginalAndGetMetadata(fileEntry);
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Upload failed';
-            return NextResponse.json({ error: msg }, { status: 422, headers: NO_CACHE });
+        // Run-3 RPF cycle 3 / F3 (CR-C3-01): acquire the upload-processing
+        // contract lock for the whole save→insert→enqueue window, mirroring the
+        // browser upload action (app/actions/images.ts:183). The MySQL advisory
+        // lock `gallerykit_upload_processing_contract` serializes uploads with
+        // `image_sizes` / `strip_gps_on_upload` settings changes so the first
+        // committed image cannot race a setting intended to lock once photos
+        // exist (CLAUDE.md "Race Condition Protections"). Without this, an LR
+        // publish could interleave with a concurrent settings change and defeat
+        // the lock-once guarantee on the primary non-browser ingest path.
+        const uploadContractLock = await acquireUploadProcessingContractLock();
+        if (!uploadContractLock) {
+            return NextResponse.json(
+                { error: 'Upload settings are being changed; retry shortly' },
+                { status: 409, headers: NO_CACHE },
+            );
         }
+
+        try {
+            await ensureUploadDirectories();
+
+            const config = await getGalleryConfig();
+
+            let data: Awaited<ReturnType<typeof saveOriginalAndGetMetadata>>;
+            try {
+                data = await saveOriginalAndGetMetadata(fileEntry);
+            } catch (err: unknown) {
+                // Run-3 RPF cycle 3 / F4 (CR-C3-02): surface RAW rejections with
+                // the same actionable message as the browser path
+                // (app/actions/images.ts → rawNotSupported) instead of an opaque
+                // "Upload failed". The shared getSafeExtension throws RawFileError
+                // for known camera-RAW extensions; the rejection itself already
+                // happens, only the message diverged.
+                if (err instanceof RawFileError) {
+                    return NextResponse.json(
+                        { error: 'RAW files are not supported. Export to JPEG, TIFF, or AVIF first.' },
+                        { status: 422, headers: NO_CACHE },
+                    );
+                }
+                const msg = err instanceof Error ? err.message : 'Upload failed';
+                return NextResponse.json({ error: msg }, { status: 422, headers: NO_CACHE });
+            }
 
         // Run-3 RPF cycle 1 / F2: honor the `allow_hdr_ingest` admin setting on
         // the Lightroom PAT path, mirroring the browser upload action
@@ -164,7 +195,15 @@ export const POST = withAdminAuth(
             blur_data_url: assertBlurDataUrl(data.blurDataUrl),
             processed: false,
             ...exifDb,
-            color_space: data.iccProfileName || exifDb.color_space,
+            // Run-3 RPF cycle 3 / F1 (SEC-C3-01): mirror the browser upload path
+            // exactly. `color_space` is the EXIF ColorSpace tag value (NOT the
+            // ICC name — CLAUDE.md `images` color columns table) and arrives via
+            // `...exifDb`, so it must NOT be overwritten with the ICC descriptor.
+            // The ICC descriptor belongs in its own `icc_profile_name` column,
+            // which the Color Details audit row reads. The prior shape both lost
+            // the ICC name (column never written → NULL) and polluted
+            // `color_space` with wrong-semantics data.
+            icc_profile_name: data.iccProfileName,
             bit_depth: data.bitDepth,
             // R8-H2: mirror browser upload path — store all color/HDR signals
             // so the Color Details accordion shows complete metadata.
@@ -175,6 +214,16 @@ export const POST = withAdminAuth(
             is_hdr: data.colorSignals?.isHdr ?? false,
             has_gain_map: data.colorSignals?.hasGainMap ?? false,
             pipeline_version: IMAGE_PIPELINE_VERSION,
+            // Run-3 RPF cycle 3 / F2 (SEC-C3-02): attribute the upload to the
+            // verified PAT user, mirroring the browser path
+            // (app/actions/images.ts:375 `uploaded_by: currentUser.id`). Without
+            // this, every LR-published image has `uploaded_by = NULL` and the
+            // public Atom per-entry <author> (R17-L2) falls back to the
+            // feed-level author — attribution is dead on the primary non-browser
+            // ingest path even though the PAT identifies the photographer.
+            // Cookie-fallback requests (tokenUserId === null) degrade gracefully
+            // to NULL, same as a legacy upload.
+            uploaded_by: tokenUserId,
             original_format: (data.filenameOriginal.split('.').pop()?.toUpperCase() || '').slice(0, 10) || null,
             original_file_size: fileEntry.size,
         };
@@ -231,6 +280,11 @@ export const POST = withAdminAuth(
             { success: true, id: imageId },
             { status: 201, headers: NO_CACHE },
         );
+        } finally {
+            // Run-3 RPF cycle 3 / F3: always release the contract lock, mirroring
+            // the browser path's try/finally (app/actions/images.ts:545-547).
+            await uploadContractLock.release();
+        }
     },
     { allowTokenScope: 'lr:upload' },
 );
