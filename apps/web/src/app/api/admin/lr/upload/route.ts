@@ -17,6 +17,7 @@
  */
 
 import path from 'path';
+import { statfs } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { withAdminAuth } from '@/lib/api-auth';
 import { verifyToken } from '@/lib/admin-tokens';
@@ -33,6 +34,10 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { sanitizeAdminString } from '@/lib/sanitize';
 import { revalidateAllAppData } from '@/lib/revalidation';
+import { isRestoreMaintenanceActive, cleanupOriginalIfRestoreMaintenanceBegan } from '@/lib/restore-maintenance';
+import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired } from '@/lib/upload-tracker-state';
+import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
+import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 
 const NO_CACHE = {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -101,6 +106,21 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Topic not found' }, { status: 404, headers: NO_CACHE });
         }
 
+        // Run-3 RPF cycle 4 / F1 (DEF-C4-01): mirror the browser upload path's
+        // restore-maintenance entry guard (app/actions/images.ts:122-125). While
+        // a DB restore is in progress the writer is frozen; accepting an upload
+        // here would write an on-disk original and (post-lock) an `images` row
+        // that the restore then wipes, orphaning the file. The single-writer
+        // topology (CLAUDE.md "Runtime topology") makes this a process-local
+        // flag, shared by both ingest entrypoints. 503 = service temporarily
+        // unavailable; the Lightroom plugin retries.
+        if (isRestoreMaintenanceActive()) {
+            return NextResponse.json(
+                { error: 'Restore in progress; retry shortly' },
+                { status: 503, headers: NO_CACHE },
+            );
+        }
+
         // Run-3 RPF cycle 3 / F3 (CR-C3-01): acquire the upload-processing
         // contract lock for the whole save→insert→enqueue window, mirroring the
         // browser upload action (app/actions/images.ts:183). The MySQL advisory
@@ -123,6 +143,78 @@ export const POST = withAdminAuth(
 
             const config = await getGalleryConfig();
 
+            // Run-3 RPF cycle 4 / F2 (DEF-C4-02): mirror the browser upload
+            // path's 1 GB disk-space pre-check (app/actions/images.ts:216-226).
+            // ensureUploadDirectories() above guarantees the tree exists so a
+            // fresh volume does not map ENOENT to a misleading message. Surfaces
+            // a clean 507 instead of an opaque 422 from saveOriginalAndGetMetadata
+            // on ENOSPC. The upload tree was created above.
+            try {
+                const stats = await statfs(UPLOAD_DIR_ORIGINAL);
+                const freeBytes = stats.bfree * stats.bsize;
+                if (freeBytes < 1024 * 1024 * 1024) {
+                    return NextResponse.json(
+                        { error: 'Insufficient disk space' },
+                        { status: 507, headers: NO_CACHE },
+                    );
+                }
+            } catch (err) {
+                console.error('LR upload: failed to inspect upload disk space', err);
+                return NextResponse.json(
+                    { error: 'Insufficient disk space' },
+                    { status: 507, headers: NO_CACHE },
+                );
+            }
+
+            // Run-3 RPF cycle 4 / F3 (DEF-C4-03): mirror the browser upload
+            // path's cumulative upload-tracker window (app/actions/images.ts:
+            // 183-237, 259-265, settle at 497/519). The per-file 200 MB cap and
+            // Sharp limitInputPixels already bound abuse, but this closes the
+            // last divergence so both ingress paths share identical cumulative
+            // limits. PAT requests are single-file, so claimedCount = 1 and
+            // claimedBytes = fileEntry.size. Key on the verified token user (or
+            // IP for the cookie fallback) so a single photographer's PAT cannot
+            // exceed the window. On any pre-save reject the claim is settled back
+            // to zero; on success it is settled to the actual upload.
+            const trackerKey = `lr:${tokenUserId ?? ip}`;
+            const uploadTracker = getUploadTracker();
+            pruneUploadTracker();
+            let tracker = uploadTracker.get(trackerKey);
+            if (!tracker) {
+                tracker = { count: 0, bytes: 0, windowStart: Date.now() };
+                uploadTracker.set(trackerKey, tracker);
+            }
+            resetUploadTrackerWindowIfExpired(tracker, Date.now());
+            if (tracker.count + 1 > UPLOAD_MAX_FILES_PER_WINDOW) {
+                return NextResponse.json(
+                    { error: 'Upload limit reached; retry later' },
+                    { status: 429, headers: NO_CACHE },
+                );
+            }
+            const fileSize = fileEntry.size;
+            if (fileSize > MAX_TOTAL_UPLOAD_BYTES || tracker.bytes + fileSize > MAX_TOTAL_UPLOAD_BYTES) {
+                return NextResponse.json(
+                    { error: 'Cumulative upload size exceeded; retry later' },
+                    { status: 429, headers: NO_CACHE },
+                );
+            }
+            // Pre-claim the quota before the save so concurrent PAT requests
+            // from the same token cannot all read the same tracker state and
+            // bypass the window (TOCTOU parity with images.ts:259-265). Settled
+            // back down on every pre-success return below.
+            tracker.count += 1;
+            tracker.bytes += fileSize;
+            uploadTracker.set(trackerKey, tracker);
+            const settleTrackerToActual = (success: boolean) =>
+                settleUploadTrackerClaim(
+                    uploadTracker,
+                    trackerKey,
+                    1,
+                    fileSize,
+                    success ? 1 : 0,
+                    success ? fileSize : 0,
+                );
+
             let data: Awaited<ReturnType<typeof saveOriginalAndGetMetadata>>;
             try {
                 data = await saveOriginalAndGetMetadata(fileEntry);
@@ -133,6 +225,9 @@ export const POST = withAdminAuth(
                 // "Upload failed". The shared getSafeExtension throws RawFileError
                 // for known camera-RAW extensions; the rejection itself already
                 // happens, only the message diverged.
+                // F3: the save never produced an original, so release the
+                // pre-claimed tracker quota before returning.
+                settleTrackerToActual(false);
                 if (err instanceof RawFileError) {
                     return NextResponse.json(
                         { error: 'RAW files are not supported. Export to JPEG, TIFF, or AVIF first.' },
@@ -154,6 +249,8 @@ export const POST = withAdminAuth(
         // admin-intent / contract drift the R8 plan predicted.
         if (data.colorSignals?.isHdr && !config.allowHdrIngest) {
             await deleteOriginalUploadFile(data.filenameOriginal);
+            // F3: rejected before insert — release the pre-claimed quota.
+            settleTrackerToActual(false);
             return NextResponse.json(
                 { error: 'HDR ingest is disabled' },
                 { status: 422, headers: NO_CACHE },
@@ -177,6 +274,22 @@ export const POST = withAdminAuth(
             // throws, so a strip failure logs and keeps the image (parity with
             // the browser path) rather than aborting the upload.
             await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
+        }
+
+        // Run-3 RPF cycle 4 / F1 (DEF-C4-01): late restore-maintenance re-check,
+        // mirroring the browser path's post-save guard (app/actions/images.ts:
+        // 326-330). A DB restore may have begun AFTER the entry guard but during
+        // the (slow) save+EXIF+GPS-strip window. If so, delete the orphaned
+        // on-disk original and abort before the insert so the restore is not
+        // raced with a half-written row. Returns true when maintenance began and
+        // the original was cleaned up.
+        if (await cleanupOriginalIfRestoreMaintenanceBegan(data.filenameOriginal, deleteOriginalUploadFile)) {
+            // F3: released the quota since no image landed.
+            settleTrackerToActual(false);
+            return NextResponse.json(
+                { error: 'Restore in progress; retry shortly' },
+                { status: 503, headers: NO_CACHE },
+            );
         }
 
         const insertValues = {
@@ -230,6 +343,12 @@ export const POST = withAdminAuth(
 
         const insertResult = await db.insert(images).values(insertValues);
         const imageId = safeInsertId(insertResult[0].insertId);
+
+        // F3: the upload completed — reconcile the pre-claim to the actual
+        // (1 file, fileSize bytes). Identity settle here, but kept explicit so
+        // the claim/settle pairing is symmetric with the browser path and the
+        // reject branches above.
+        settleTrackerToActual(true);
 
         enqueueImageProcessing({
             id: imageId,

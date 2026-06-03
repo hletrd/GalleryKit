@@ -155,3 +155,80 @@ describe('lr upload metadata/parity source-contract (cycle 3)', () => {
         expect(LR_SRC).toMatch(/err\s+instanceof\s+RawFileError/);
     });
 });
+
+/**
+ * Run-3 RPF cycle 4: lock the final three PAT-vs-browser upload divergences
+ * (carried LOW since cycle 2) so a future refactor cannot silently re-introduce
+ * them. After this the PAT path mirrors EVERY browser-upload constraint.
+ * - DEF-C4-01: honor the restore-maintenance window (entry guard + late
+ *   post-save re-check), mirroring app/actions/images.ts:122-125 and 326-330.
+ * - DEF-C4-02: mirror the 1 GB disk-space pre-check (images.ts:216-226).
+ * - DEF-C4-03: mirror the cumulative upload-tracker window (images.ts:183-237).
+ */
+describe('lr upload parity source-contract (cycle 4)', () => {
+    // DEF-C4-01 — restore-maintenance window
+    it('imports the restore-maintenance helpers (DEF-C4-01)', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*isRestoreMaintenanceActive[^}]*cleanupOriginalIfRestoreMaintenanceBegan[^}]*\}\s*from\s*['"]@\/lib\/restore-maintenance['"]/,
+        );
+    });
+
+    it('guards entry on isRestoreMaintenanceActive before the DB insert (DEF-C4-01)', () => {
+        const guardIndex = LR_SRC.search(/if\s*\(\s*isRestoreMaintenanceActive\(\)\s*\)/);
+        const insertIndex = LR_SRC.indexOf('db.insert(images)');
+        expect(guardIndex).toBeGreaterThan(-1);
+        expect(insertIndex).toBeGreaterThan(-1);
+        expect(guardIndex).toBeLessThan(insertIndex);
+    });
+
+    it('re-checks restore-maintenance after save and cleans up the orphan (DEF-C4-01)', () => {
+        // The late re-check must run after the GPS-strip / save window and
+        // before the insert so a restore that begins mid-request does not race
+        // a half-written row.
+        const recheckIndex = LR_SRC.search(/cleanupOriginalIfRestoreMaintenanceBegan\(/);
+        const insertIndex = LR_SRC.indexOf('db.insert(images)');
+        expect(recheckIndex).toBeGreaterThan(-1);
+        expect(recheckIndex).toBeLessThan(insertIndex);
+    });
+
+    // DEF-C4-02 — 1 GB disk-space pre-check
+    it('imports statfs and runs the 1 GB disk pre-check before the save (DEF-C4-02)', () => {
+        expect(LR_SRC).toMatch(/import\s*\{\s*statfs\s*\}\s*from\s*['"]fs\/promises['"]/);
+        const statfsIndex = LR_SRC.search(/statfs\(UPLOAD_DIR_ORIGINAL\)/);
+        const saveIndex = LR_SRC.indexOf('saveOriginalAndGetMetadata(fileEntry)');
+        expect(statfsIndex).toBeGreaterThan(-1);
+        expect(saveIndex).toBeGreaterThan(-1);
+        // The disk pre-check must precede the save so a near-full disk yields a
+        // clean 507 instead of an opaque save-path error.
+        expect(statfsIndex).toBeLessThan(saveIndex);
+        expect(LR_SRC).toMatch(/1024\s*\*\s*1024\s*\*\s*1024/);
+        expect(LR_SRC).toMatch(/status:\s*507/);
+    });
+
+    // DEF-C4-03 — cumulative upload-tracker window
+    it('imports the upload-tracker helpers and limits (DEF-C4-03)', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*getUploadTracker[^}]*\}\s*from\s*['"]@\/lib\/upload-tracker-state['"]/,
+        );
+        expect(LR_SRC).toMatch(
+            /import\s*\{\s*settleUploadTrackerClaim\s*\}\s*from\s*['"]@\/lib\/upload-tracker['"]/,
+        );
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*MAX_TOTAL_UPLOAD_BYTES[^}]*UPLOAD_MAX_FILES_PER_WINDOW[^}]*\}\s*from\s*['"]@\/lib\/upload-limits['"]/,
+        );
+    });
+
+    it('enforces the cumulative count and byte windows (DEF-C4-03)', () => {
+        expect(LR_SRC).toMatch(/tracker\.count\s*\+\s*1\s*>\s*UPLOAD_MAX_FILES_PER_WINDOW/);
+        expect(LR_SRC).toMatch(/tracker\.bytes\s*\+\s*fileSize\s*>\s*MAX_TOTAL_UPLOAD_BYTES/);
+    });
+
+    it('settles the tracker claim back down on a pre-success reject (DEF-C4-03)', () => {
+        // settleUploadTrackerClaim must be reachable with successCount 0 so a
+        // rejected/failed upload releases the pre-claimed quota rather than
+        // permanently consuming the window.
+        expect(LR_SRC).toMatch(/settleUploadTrackerClaim\(/);
+        expect(LR_SRC).toMatch(/settleTrackerToActual\(false\)/);
+        expect(LR_SRC).toMatch(/settleTrackerToActual\(true\)/);
+    });
+});
