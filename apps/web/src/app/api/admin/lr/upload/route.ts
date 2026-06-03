@@ -16,13 +16,14 @@
  * EXIF extraction, and revalidation are identical to the browser upload path.
  */
 
+import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { withAdminAuth } from '@/lib/api-auth';
 import { verifyToken } from '@/lib/admin-tokens';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
-import { ensureUploadDirectories, deleteOriginalUploadFile } from '@/lib/upload-paths';
+import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
+import { ensureUploadDirectories, deleteOriginalUploadFile, UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
 import { enqueueImageProcessing } from '@/lib/image-queue';
 import { isValidSlug, safeInsertId } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
@@ -132,6 +133,19 @@ export const POST = withAdminAuth(
         if (config.stripGpsOnUpload) {
             exifDb.latitude = null;
             exifDb.longitude = null;
+            // Run-3 RPF cycle 2 / F1: also strip GPS EXIF from the on-disk
+            // original, mirroring the browser upload path (app/actions/images.ts
+            // PP-BUG-3). Nulling the DB columns alone leaves GPS in the file that
+            // the paid-download endpoint (/api/download/[imageId]) streams
+            // verbatim, leaking the photographer's protected location to
+            // purchasers — and leaving GPS at rest on disk against the admin's
+            // explicit strip_gps_on_upload intent. The Lightroom publish-plugin
+            // is the primary non-browser ingest and its exports commonly retain
+            // GPS, so this divergence is the high-likelihood leak path.
+            // Best-effort: stripGpsFromOriginal catches its own errors and never
+            // throws, so a strip failure logs and keeps the image (parity with
+            // the browser path) rather than aborting the upload.
+            await stripGpsFromOriginal(path.join(UPLOAD_DIR_ORIGINAL, data.filenameOriginal));
         }
 
         const insertValues = {

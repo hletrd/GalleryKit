@@ -65,3 +65,41 @@ describe('lr upload HDR-ingest source-contract', () => {
         expect(LR_SRC).toMatch(/allowTokenScope:\s*['"]lr:upload['"]/);
     });
 });
+
+/**
+ * Run-3 RPF cycle 2 / F1: the LR PAT path must also strip GPS EXIF from the
+ * on-disk original when `strip_gps_on_upload` is enabled, mirroring the browser
+ * upload action (app/actions/images.ts PP-BUG-3). Nulling only the DB columns
+ * left GPS in the file streamed verbatim by /api/download/[imageId], leaking
+ * the photographer's protected location to paid-download purchasers. This
+ * source-contract locks the strip so a future refactor cannot silently re-drop
+ * the second ingest-path divergence.
+ */
+describe('lr upload GPS-original strip source-contract', () => {
+    it('imports stripGpsFromOriginal from process-image', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*stripGpsFromOriginal[^}]*\}\s*from\s*['"]@\/lib\/process-image['"]/,
+        );
+    });
+
+    it('imports UPLOAD_DIR_ORIGINAL from upload-paths', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*UPLOAD_DIR_ORIGINAL[^}]*\}\s*from\s*['"]@\/lib\/upload-paths['"]/,
+        );
+    });
+
+    it('calls stripGpsFromOriginal on the saved original', () => {
+        expect(LR_SRC).toMatch(/stripGpsFromOriginal\(/);
+    });
+
+    it('guards the GPS-original strip behind config.stripGpsOnUpload', () => {
+        const guardIndex = LR_SRC.indexOf('config.stripGpsOnUpload');
+        const stripIndex = LR_SRC.search(/stripGpsFromOriginal\(/);
+        expect(guardIndex).toBeGreaterThan(-1);
+        expect(stripIndex).toBeGreaterThan(-1);
+        // The strip call must appear inside / after the stripGpsOnUpload guard
+        // so GPS is only re-encoded when the admin enabled the setting (parity
+        // with the browser path), never unconditionally.
+        expect(stripIndex).toBeGreaterThan(guardIndex);
+    });
+});
