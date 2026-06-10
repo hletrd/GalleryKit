@@ -30,6 +30,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 - `npm run lint --workspace=apps/web` — ESLint
 - `npm run lint:api-auth --workspace=apps/web` — every admin-API export must wrap `withAdminAuth(...)`
 - `npm run lint:action-origin --workspace=apps/web` — every mutating server action must return-early on `requireSameOriginAdmin()` (or carry an explicit `@action-origin-exempt` comment)
+- `npm run lint:public-route-rate-limit --workspace=apps/web` — every PUBLIC API route exporting a mutating handler (POST/PUT/PATCH/DELETE) must call a rate-limit pre-increment helper (or carry an explicit `@public-no-rate-limit-required: <reason>` comment); GET handlers are not scanned
 - `npm run build --workspace=apps/web` — Next.js + tsc
 - `npm test --workspace=apps/web` — Vitest 1300+ unit tests including the touch-target audit (≥ 44 px) and the `_PrivacySensitiveKeys` symmetric privacy guard
 

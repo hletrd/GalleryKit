@@ -455,7 +455,7 @@ The repository has a formal test surface:
 
 ## Lint Gates (security-critical)
 
-Three lint scripts enforce architectural invariants; all are blocking in CI.
+Four lint scripts enforce architectural invariants; all are blocking in CI.
 
 - `npm run lint:api-auth --workspace=apps/web`
   - Scans every `apps/web/src/app/api/admin/**/route.{ts,tsx,js,mjs,cjs}` file.
@@ -466,6 +466,11 @@ Three lint scripts enforce architectural invariants; all are blocking in CI.
   - Requires each exported async mutating function (both `export async function` form and `export const foo = async (...) => {}` / `async function() {}` variable-export forms) to store the `requireSameOriginAdmin()` result and return early when that result is present. A bare call or ignored result is rejected. Aliased exports are rejected so the scanner can inspect the committed implementation body.
   - Read-only exports must carry an explicit leading comment containing `@action-origin-exempt: <reason>`; getter-style names are not automatically exempt because names are not proof of read-only behavior.
   - Fixture-based coverage lives at `apps/web/src/__tests__/check-action-origin.test.ts`.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`
+  - Scans every PUBLIC API route file (`apps/web/src/app/api/**` excluding `api/admin/**`) that exports a mutating HTTP handler (POST/PUT/PATCH/DELETE).
+  - Requires each such file to either call a documented rate-limit pre-increment helper from `@/lib/rate-limit` / `@/lib/auth-rate-limit` (helper names starting with `preIncrement` or `checkAndIncrement`), or carry an explicit `@public-no-rate-limit-required: <reason>` comment.
+  - GET handlers are NOT scanned — expensive public GET routes (ImageResponse, file generation) must be audited separately or opt out with the same exempt tag.
+  - Fixture-based coverage lives at `apps/web/src/__tests__/check-public-route-rate-limit.test.ts`.
 - `npm run lint --workspace=apps/web` — standard ESLint.
 
 **Adding a new mutating server action:** drop a new file in `apps/web/src/app/actions/` and the action-origin scanner will discover it automatically; every mutating export must return early on the `requireSameOriginAdmin()` result (or carry an explicit exempt comment). `auth.ts` and `public.ts` are intentionally excluded by name because they own their own same-origin/unauthenticated-surface handling.
