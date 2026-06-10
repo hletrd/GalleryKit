@@ -68,10 +68,21 @@ export function UploadDropzone({
     // Refs for accessing latest state during async upload loop
     const selectedTagsRef = useRef(selectedTags);
     const perFileTagsRef = useRef(perFileTags);
+    // R4C7 COR-R4C7-04: the topic <select> stays interactive during a
+    // batch upload (like the global tag input), but the upload loop used
+    // to read `topic` from the click-time closure — a mid-batch topic
+    // correction was silently ignored while tag edits applied. Read the
+    // topic through a ref so the whole surface shares one latest-wins
+    // contract: edits made mid-batch apply to files not yet uploaded.
+    const topicRef = useRef(topic);
 
     useEffect(() => {
         selectedTagsRef.current = selectedTags;
     }, [selectedTags]);
+
+    useEffect(() => {
+        topicRef.current = topic;
+    }, [topic]);
 
     useEffect(() => {
         perFileTagsRef.current = perFileTags;
@@ -208,7 +219,10 @@ export function UploadDropzone({
 
                 const formData = new FormData();
                 formData.append('files', file);
-                formData.append('topic', topic);
+                // R4C7 COR-R4C7-04: latest topic via ref (matches the tag
+                // refs below) so a mid-batch topic change takes effect for
+                // the files that have not been uploaded yet.
+                formData.append('topic', topicRef.current);
 
                 // Merge global selectedTags and per-file tags using LATEST values from Ref
                 const currentPerFileTags = perFileTagsRef.current;
