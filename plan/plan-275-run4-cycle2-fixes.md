@@ -103,4 +103,14 @@
       (commit 7a8cfdf5)
 - [x] Task 7 — isValidSlug pre-check on recordTopicView (commit 20f4c8cc)
 - [x] Task 8 — code-point-safe Stripe title truncation (commit 927d15db)
-- [ ] Task 9 — all gates green + per-cycle deploy
+- [x] Task 9 — ALL GATES GREEN on final tree: eslint 0 errors / 0 warnings
+      (the no-img-element warning is gone via Task 3), typecheck (app +
+      scripts), vitest 1576/1576 (161 files — includes the new
+      mysql-datetime + scanner + label + webhook contracts; one stale
+      assertion in failed-image-retry.test.ts pinned the BROKEN ISO-Z form
+      and was re-pointed at the fixed write site, commit 7aac57b0),
+      lint:api-auth, lint:action-origin, lint:public-route-rate-limit,
+      production build (exit 0), playwright e2e 20 passed / 2 skipped
+      (admin-spec + CI-only origin-guard skips by design). Deploy follows.
+
+**Status update:** all 9 tasks complete — gates green; deploying per-cycle.
