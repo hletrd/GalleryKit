@@ -118,13 +118,25 @@ suite
 **Done:** commit `5908f3f9`.
 
 ## Task 10 — Gates + deploy (per-cycle)
-- [ ] Run ALL gates on the final tree: eslint, typecheck, vitest,
-      lint:api-auth, lint:action-origin, lint:public-route-rate-limit,
-      production build, playwright e2e. Fix anything red at root cause (no
-      suppressions).
-- [ ] Refresh SW_VERSION if any commit landed (repo convention: build(sw)
-      refresh after substantive commits).
-- [ ] `npm run deploy` once after gates are green (DEPLOY_MODE per-cycle).
+- [x] ALL gates green on the final tree: eslint 0/0 · typecheck (app +
+      scripts) PASS · vitest 1616/1616 (165 files) · lint:api-auth PASS ·
+      lint:action-origin PASS · lint:public-route-rate-limit PASS ·
+      production build exit 0 (Compiled successfully) · playwright e2e
+      20 passed / 2 skipped (admin-spec + CI-only origin-guard skips by
+      design). Two gate failures surfaced and fixed at root: the cycle6
+      P390-03 and cycle8 P394-01 source contracts pinned the exact pre-fix
+      source shapes that R4C4-02/R4C4-06 deliberately changed — both
+      updated to the new shapes with intent preserved (commit `0fd0c53d`).
+- [x] SW_VERSION refreshed (`e8d8d6ec` + trailing stamp).
+- [x] Ralph reviewer pass: APPROVED (full session-diff re-read against
+      acceptance criteria; nested reviewer agents unavailable in the
+      subagent context — documented constraint). Deslop pass run via
+      ai-slop-cleaner --review: APPROVED, zero follow-ups (no dead code /
+      unused exports / wrappers introduced; close() one-liners deliberately
+      not abstracted). Post-deslop regression = the full green gate run
+      above (deslop made no edits).
+- [x] `npm run deploy` (per-cycle) — see final status.
 
-**Status:** plan written from the run4-cycle4 reviews; implementation not
-yet started. Progress will be updated per task with real commit hashes.
+**Status update (end of cycle):** all 10 tasks complete — 9 findings fixed
+with 30 new/updated test cases across 10 suites; gates green; deployed
+per-cycle.
