@@ -1270,11 +1270,23 @@ export const getSmartCollectionBySlugCached = cache(getSmartCollectionBySlug);
 /**
  * Execute a compiled smart-collection SQL condition against the images table,
  * returning paginated public-facing results with tag names.
+ *
+ * R4C5 COR-R4C5-01: accepts the same `number | ImageListCursorInput`
+ * pagination contract as `getImagesLite`. The load-more client always
+ * sends a keyset cursor after the first page; before this change the
+ * smart-collection path coerced that cursor object through
+ * `Number(...) → NaN → 0` and re-served page 1 forever. The cursor
+ * predicate is provably order-compatible: this query uses the exact
+ * `capture_date DESC, created_at DESC, id DESC` triple that
+ * `buildCursorCondition` was written against. The cursor path keeps the
+ * `COUNT(*) OVER()` column the offset path needs (callers discard
+ * `totalCount` on cursor pages) — forking the select shape for that
+ * micro-win was explicitly rejected (perf/architect, run4-cycle5).
  */
 export async function getImagesForSmartCollection(
     compiledCondition: SQL,
     pageSize: number = 30,
-    offset: number = 0,
+    offsetOrCursor: number | ImageListCursorInput = 0,
 ) {
     const normalizedPageSize = Math.min(Math.max(pageSize, 1), LISTING_QUERY_LIMIT_PLUS_ONE);
 
@@ -1289,8 +1301,13 @@ export async function getImagesForSmartCollection(
         .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
 
-    const query = baseQuery.where(and(compiledCondition, eq(images.processed, true)));
-    const rows = await query.limit(normalizedPageSize + 1).offset(offset);
+    const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
+    const cursorCondition = normalizedCursor ? buildCursorCondition(normalizedCursor) : undefined;
+    const query = baseQuery.where(and(compiledCondition, eq(images.processed, true), cursorCondition));
+    const limited = query.limit(normalizedPageSize + 1);
+    const rows = normalizedCursor
+        ? await limited
+        : await limited.offset(Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0));
     const { rows: pageRows, totalCount, hasMore } = normalizePaginatedRows(rows, normalizedPageSize);
 
     return {

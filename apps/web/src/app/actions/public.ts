@@ -161,9 +161,21 @@ export async function loadMoreSmartCollectionImages(
     if (!isValidSlug(slug)) return { status: 'invalid', images: [], hasMore: false };
 
     const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
-    // Smart collections use offset-based pagination only (cursor support not yet implemented)
-    const safeOffset = Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0);
-    if (safeOffset > 10000) {
+    // R4C5 COR-R4C5-01: mirror loadMoreImages' cursor handling. The load-more
+    // client sends a keyset cursor after the first page; the previous
+    // offset-only coercion turned that object into `Number(obj) → NaN → 0`,
+    // so every load-more re-served page 1 (duplicate grid + endless sentinel
+    // loop). Unparseable object cursors fail closed as 'invalid' instead of
+    // silently becoming offset 0.
+    const normalizedCursor = normalizeImageListCursor(offsetOrCursor);
+    if (!normalizedCursor && typeof offsetOrCursor === 'object' && offsetOrCursor !== null) {
+        return { status: 'invalid', images: [], hasMore: false };
+    }
+    const usesCursor = normalizedCursor !== null;
+    const safeOffset = normalizedCursor ?? Math.max(Math.floor(Number(offsetOrCursor)) || 0, 0);
+    // Cap legacy offset pagination to prevent deep pagination DoS. Cursor-based
+    // calls are preferred because they stay stable when new photos arrive.
+    if (!usesCursor && typeof safeOffset === 'number' && safeOffset > 10000) {
         return { status: 'invalid', images: [], hasMore: false };
     }
 
@@ -201,11 +213,17 @@ export async function loadMoreSmartCollectionImages(
 
         const ast = parseSmartCollectionQuery(collection.query_json);
         const compiledCondition = compileSmartCollection(ast);
-        const { images: rows, hasMore } = await getImagesForSmartCollection(compiledCondition, safeLimit + 1, safeOffset);
+        // R4C5 COR-R4C5-01: pass `safeLimit` — the helper applies its own
+        // single +1 lookahead internally. The previous `safeLimit + 1`
+        // double-applied it, making `hasMore` false while exactly
+        // `safeLimit + 1` rows remained and the `.slice(0, safeLimit)`
+        // dropped the final row — collections sized ≡ 1 (mod page size)
+        // permanently lost their last photo.
+        const { images: rows, hasMore } = await getImagesForSmartCollection(compiledCondition, safeLimit, safeOffset);
 
         return {
             status: 'ok',
-            images: rows.slice(0, safeLimit),
+            images: rows,
             hasMore,
         };
     } catch (err) {
