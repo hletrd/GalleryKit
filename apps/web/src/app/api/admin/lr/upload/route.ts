@@ -28,6 +28,8 @@ import { ensureUploadDirectories, deleteOriginalUploadFile, UPLOAD_DIR_ORIGINAL 
 import { enqueueImageProcessing } from '@/lib/image-queue';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { isValidSlug, safeInsertId } from '@/lib/validation';
+import { countCodePoints } from '@/lib/utils';
+import { getSafeUserFilename } from '@/lib/upload-filenames';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -77,6 +79,18 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Missing file field' }, { status: 400, headers: NO_CACHE });
         }
 
+        // R4C1 COR-R4C1-03: mirror the browser path's user-filename guard
+        // (app/actions/images.ts → getSafeUserFilename, C2L2-03/C2L2-05).
+        // The prior 255-UTF-16-unit truncation of fileEntry.name stored raw
+        // client input: no basename(), no control/format-char rejection,
+        // empty names allowed, surrogate pairs bisected (mysql2's UTF-8
+        // encoder then writes U+FFFD mojibake), and no 255-UTF-8-byte
+        // budget for the varchar(255) column.
+        const safeUserFilename = getSafeUserFilename(fileEntry.name);
+        if (!safeUserFilename) {
+            return NextResponse.json({ error: 'Invalid filename' }, { status: 400, headers: NO_CACHE });
+        }
+
         const topicSlug = formData.get('topic')?.toString().trim() ?? '';
         if (!topicSlug || !isValidSlug(topicSlug)) {
             return NextResponse.json({ error: 'Invalid or missing topic slug' }, { status: 400, headers: NO_CACHE });
@@ -95,6 +109,18 @@ export const POST = withAdminAuth(
             : { value: null, rejected: false };
         if (descRejected) {
             return NextResponse.json({ error: 'Invalid description' }, { status: 400, headers: NO_CACHE });
+        }
+
+        // R4C1 COR-R4C1-04: mirror the canonical admin metadata constraints
+        // (updateImageMetadata, C7-AGG7R-02) — validate by Unicode code
+        // points and reject loudly instead of silently truncating with a
+        // UTF-16 `.slice()` that can bisect a surrogate pair (trailing
+        // U+FFFD mojibake on the photographer's caption).
+        if (title && countCodePoints(title) > 255) {
+            return NextResponse.json({ error: 'Title too long (max 255 characters)' }, { status: 400, headers: NO_CACHE });
+        }
+        if (description && countCodePoints(description) > 5000) {
+            return NextResponse.json({ error: 'Description too long (max 5000 characters)' }, { status: 400, headers: NO_CACHE });
         }
 
         // Verify topic exists
@@ -302,9 +328,12 @@ export const POST = withAdminAuth(
             original_width: data.originalWidth,
             original_height: data.originalHeight,
             topic: topicSlug,
-            title: (title ?? '').slice(0, 255) || null,
-            description: (description ?? '').slice(0, 4096),
-            user_filename: fileEntry.name.slice(0, 255),
+            // R4C1 COR-R4C1-04: lengths validated by code points above; store
+            // the sanitized values unsliced (parity with updateImageMetadata).
+            title: title || null,
+            description: description ?? '',
+            // R4C1 COR-R4C1-03: sanitized basename, parity with browser path.
+            user_filename: safeUserFilename,
             blur_data_url: assertBlurDataUrl(data.blurDataUrl),
             processed: false,
             ...exifDb,
@@ -341,8 +370,26 @@ export const POST = withAdminAuth(
             original_file_size: fileEntry.size,
         };
 
-        const insertResult = await db.insert(images).values(insertValues);
-        const imageId = safeInsertId(insertResult[0].insertId);
+        // R4C1 COR-R4C1-02: contain insert failures, mirroring the browser
+        // path's per-file catch (app/actions/images.ts). The topic-existence
+        // check above is a TOCTOU — a concurrent topic deletion surfaces here
+        // as an FK violation; DB hiccups and a thrown safeInsertId land here
+        // too. Without this catch the route 500s opaquely, the on-disk
+        // original is orphaned, and the pre-claimed tracker quota leaks for
+        // the rest of the 1-hour window.
+        let imageId: number;
+        try {
+            const insertResult = await db.insert(images).values(insertValues);
+            imageId = safeInsertId(insertResult[0].insertId);
+        } catch (err) {
+            console.error('LR upload: image insert failed', err);
+            await deleteOriginalUploadFile(data.filenameOriginal);
+            settleTrackerToActual(false);
+            return NextResponse.json(
+                { error: 'Upload failed' },
+                { status: 500, headers: NO_CACHE },
+            );
+        }
 
         // F3: the upload completed — reconcile the pre-claim to the actual
         // (1 file, fileSize bytes). Identity settle here, but kept explicit so
@@ -364,6 +411,12 @@ export const POST = withAdminAuth(
                 jpeg: config.imageQualityJpeg,
             },
             imageSizes: config.imageSizes.length > 0 ? config.imageSizes : undefined,
+            // R4C1 COR-R4C1-05: forward EXIF caption inputs, mirroring the
+            // browser path. Without these the auto alt-text stub
+            // (caption-generator.ts) emits the generic "[AUTO] Photo" for
+            // every LR publish instead of the camera-specific caption.
+            camera_model: exifDb.camera_model,
+            capture_date: exifDb.capture_date,
             iccProfileName: data.iccProfileName,
             // R8-H2: forward color signals so the queue worker can make
             // NCLX-informed pipeline decisions identical to browser uploads.
@@ -383,7 +436,8 @@ export const POST = withAdminAuth(
             'image',
             String(imageId),
             ip,
-            { topic: topicSlug, filename: fileEntry.name },
+            // R4C1 COR-R4C1-03: audit the sanitized name, not raw client input.
+            { topic: topicSlug, filename: safeUserFilename },
         ).catch((err) => {
             console.warn('LR upload: audit log insert failed', {
                 userId: tokenUserId,

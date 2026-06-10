@@ -14,7 +14,8 @@ import { countCodePoints } from '@/lib/utils';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
 import { revalidateAllAppData, revalidateLocalizedPaths } from '@/lib/revalidation';
-import { stripControlChars, sanitizeAdminString, requireCleanInput } from '@/lib/sanitize';
+import { sanitizeAdminString, requireCleanInput } from '@/lib/sanitize';
+import { getSafeUserFilename } from '@/lib/upload-filenames';
 import { ensureTagRecord, findTagRecordByNameOrSlug, getTagSlug } from '@/lib/tag-records';
 import { MAX_TOTAL_UPLOAD_BYTES, UPLOAD_MAX_FILES_PER_WINDOW } from '@/lib/upload-limits';
 import { getGalleryConfig, type GalleryConfig } from '@/lib/gallery-config';
@@ -36,24 +37,10 @@ type ImageCleanupFailure = {
     reason: string;
 };
 
-// C2L2-03: schema column is `varchar(255)` which is a UTF-8 byte budget on
-// MySQL. Bound the byte length so high-codepoint filenames (CJK, emoji) are
-// rejected at the action boundary instead of failing at INSERT time after
-// disk and EXIF work has been done.
-const USER_FILENAME_MAX_BYTES = 255;
+// R4C1 COR-R4C1-03: getSafeUserFilename (C2L2-03 / C2L2-05) moved to
+// @/lib/upload-filenames so the Lightroom PAT route shares the exact same
+// sanitizer instead of re-implementing (and drifting from) it.
 const CLEANUP_RETRY_DELAY_MS = 50;
-
-function getSafeUserFilename(filename: string): string | null {
-    // C2L2-05: a single trailing `.trim()` is sufficient. `stripControlChars`
-    // already removes ASCII control bytes, and the post-strip trim handles
-    // any whitespace that the strip exposed.
-    const sanitized = stripControlChars(path.basename(filename))?.trim() ?? '';
-    if (!sanitized) return null;
-    if (Buffer.byteLength(sanitized, 'utf8') > USER_FILENAME_MAX_BYTES) {
-        return null;
-    }
-    return sanitized;
-}
 
 function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));

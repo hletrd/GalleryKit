@@ -232,3 +232,71 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         expect(LR_SRC).toMatch(/settleTrackerToActual\(true\)/);
     });
 });
+
+/**
+ * Run-4 cycle 1: lock the four remaining PAT-vs-browser parity gaps closed
+ * this cycle (see .context/reviews/run4-cycle1/_aggregate.md).
+ * - COR-R4C1-02: contain insert failures (delete original + settle quota + 500).
+ * - COR-R4C1-03: sanitize user_filename via the shared getSafeUserFilename.
+ * - COR-R4C1-04: validate title/description by code points (no UTF-16 slice).
+ * - COR-R4C1-05: forward camera_model / capture_date to the processing queue.
+ */
+describe('lr upload parity source-contract (run-4 cycle 1)', () => {
+    // COR-R4C1-02 — insert-failure containment
+    it('wraps the images insert in a try/catch (COR-R4C1-02)', () => {
+        const block = LR_SRC.match(
+            /try\s*\{[^{}]*db\.insert\(images\)[\s\S]*?\}\s*catch[\s\S]*?\n\s{8}\}/,
+        );
+        expect(block).not.toBeNull();
+        const blockStr = block?.[0] ?? '';
+        // On insert failure: delete the on-disk original, release the
+        // pre-claimed tracker quota, and answer structured 500 JSON.
+        expect(blockStr).toMatch(/deleteOriginalUploadFile\(data\.filenameOriginal\)/);
+        expect(blockStr).toMatch(/settleTrackerToActual\(false\)/);
+        expect(blockStr).toMatch(/status:\s*500/);
+    });
+
+    // COR-R4C1-03 — shared user-filename sanitizer
+    it('derives user_filename through the shared getSafeUserFilename (COR-R4C1-03)', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*getSafeUserFilename[^}]*\}\s*from\s*['"]@\/lib\/upload-filenames['"]/,
+        );
+        expect(LR_SRC).toMatch(/user_filename:\s*safeUserFilename/);
+        // The raw client-controlled name must no longer be persisted.
+        expect(LR_SRC).not.toMatch(/user_filename:\s*fileEntry\.name/);
+    });
+
+    it('rejects an unusable filename with 400 before any disk work (COR-R4C1-03)', () => {
+        const guardIndex = LR_SRC.search(/if\s*\(\s*!safeUserFilename\s*\)/);
+        const saveIndex = LR_SRC.indexOf('saveOriginalAndGetMetadata(fileEntry)');
+        expect(guardIndex).toBeGreaterThan(-1);
+        expect(saveIndex).toBeGreaterThan(-1);
+        expect(guardIndex).toBeLessThan(saveIndex);
+    });
+
+    it('audits the sanitized filename, not raw client input (COR-R4C1-03)', () => {
+        expect(LR_SRC).toMatch(/filename:\s*safeUserFilename/);
+        expect(LR_SRC).not.toMatch(/filename:\s*fileEntry\.name/);
+    });
+
+    // COR-R4C1-04 — code-point validation, no UTF-16 slicing
+    it('validates title/description by code points and drops the UTF-16 slices (COR-R4C1-04)', () => {
+        expect(LR_SRC).toMatch(
+            /import\s*\{[^}]*countCodePoints[^}]*\}\s*from\s*['"]@\/lib\/utils['"]/,
+        );
+        expect(LR_SRC).toMatch(/countCodePoints\(title\)\s*>\s*255/);
+        expect(LR_SRC).toMatch(/countCodePoints\(description\)\s*>\s*5000/);
+        // The surrogate-splitting truncations must be gone.
+        expect(LR_SRC).not.toMatch(/\.slice\(0,\s*255\)/);
+        expect(LR_SRC).not.toMatch(/\.slice\(0,\s*4096\)/);
+    });
+
+    // COR-R4C1-05 — caption inputs forwarded to the queue
+    it('forwards camera_model and capture_date in the enqueue payload (COR-R4C1-05)', () => {
+        const enqueueBlock = LR_SRC.match(/enqueueImageProcessing\(\{[\s\S]*?\}\);/);
+        expect(enqueueBlock).not.toBeNull();
+        const blockStr = enqueueBlock?.[0] ?? '';
+        expect(blockStr).toMatch(/camera_model:\s*exifDb\.camera_model/);
+        expect(blockStr).toMatch(/capture_date:\s*exifDb\.capture_date/);
+    });
+});
