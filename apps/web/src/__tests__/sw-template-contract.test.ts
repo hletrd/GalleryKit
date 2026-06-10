@@ -70,6 +70,46 @@ describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-1
     });
 });
 
+describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
+    const imageFn = () => TEMPLATE.slice(
+        TEMPLATE.indexOf('async function staleWhileRevalidateImage'),
+        TEMPLATE.indexOf('async function networkFirstHtml'),
+    );
+
+    it('the revalidating GET is NOT created eagerly at function entry', () => {
+        // The defeated R11-M1 shape: `const revalidate = fetch(...)` started
+        // the body fetch before the cache lookup, so a 304 probe could never
+        // skip it. The GET must live behind a closure.
+        expect(imageFn()).not.toMatch(/const revalidate\s*=\s*fetch\(/);
+        expect(imageFn()).toMatch(/const startRevalidate\s*=\s*\(\)\s*=>/);
+    });
+
+    it('the 304 branch serves cached with a metadata touch and no body fetch', () => {
+        const fn = imageFn();
+        const head304 = fn.indexOf("head.status === 304");
+        expect(head304).toBeGreaterThan(-1);
+        const branchEnd = fn.indexOf('return cached;', head304);
+        expect(branchEnd).toBeGreaterThan(head304);
+        const branch = fn.slice(head304, branchEnd);
+        expect(branch).toMatch(/touchMeta\(/);
+        expect(branch).not.toMatch(/startRevalidate\(/);
+    });
+
+    it('touchMeta never grows a tracked size (no eviction trigger)', () => {
+        const fnIdx = TEMPLATE.indexOf('async function touchMeta');
+        expect(fnIdx).toBeGreaterThan(-1);
+        const fn = TEMPLATE.slice(fnIdx, TEMPLATE.indexOf('async function', fnIdx + 1));
+        expect(fn).toMatch(/existing && existing\.size \? existing\.size : knownSize/);
+        expect(fn).not.toMatch(/recordAndEvict/);
+    });
+
+    it('cache-miss and ETag-mismatch paths still await the network response', () => {
+        const fn = imageFn();
+        expect(fn).toMatch(/const fresh = await startRevalidate\(\);/);
+        expect(fn).toMatch(/const response = await startRevalidate\(\);/);
+    });
+});
+
 describe('proxy.ts admin-render marker (COR-R4C6-05)', () => {
     it('sets x-gk-admin-render when the admin_session cookie is present', () => {
         const setIdx = PROXY.indexOf("headers.set('x-gk-admin-render', '1')");
