@@ -30,7 +30,13 @@ describe('R10-H2: failed image persistence and retry', () => {
 
         it('persists failed_at timestamp to DB when MAX_RETRIES exceeded', () => {
             // The failure path must record when the permanent failure occurred.
-            expect(queueSource).toMatch(/failed_at:\s*new\s+Date\(\)\s*\.toISOString\(\)/);
+            // R4C2 COR-R4C2-01: the value MUST be a MySQL DATETIME literal via
+            // toMySqlDateTime — the previous `new Date().toISOString()` form
+            // (which this assertion used to pin) carries a trailing `Z` that
+            // MySQL strict mode rejects with ER 1292, so the persistence this
+            // suite exists to lock never actually happened in production.
+            expect(queueSource).toMatch(/failed_at:\s*toMySqlDateTime\s*\(\s*new\s+Date\s*\(\s*\)\s*\)/);
+            expect(queueSource).not.toMatch(/failed_at:\s*new\s+Date\(\)\s*\.toISOString\(\)/);
         });
 
         it('truncates processing_error to 512 chars before DB write', () => {
