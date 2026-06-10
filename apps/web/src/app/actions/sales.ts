@@ -218,6 +218,35 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
         // be correlated to a specific entitlement row. Without it, a
         // multi-failure timeline is unparseable.
         console.error('Stripe refund failed', { entitlementId, err });
+        const errorCode = mapStripeRefundError(err);
+        // R4C4 COR-R4C4-02: `charge_already_refunded` means Stripe — the
+        // source of truth — has ALREADY refunded this charge (a prior
+        // attempt whose DB update never landed, an expired idempotency-key
+        // replay window, or a refund issued directly in the Stripe
+        // dashboard). Returning the error here left `refunded=false` and a
+        // LIVE downloadTokenHash forever: the customer could still download
+        // a refunded purchase, and every admin retry looped on an
+        // "already refunded" toast with no way to converge. Converge local
+        // state to Stripe's instead and report success.
+        if (errorCode === 'already-refunded') {
+            try {
+                await db
+                    .update(entitlements)
+                    .set({ refunded: true, downloadTokenHash: null })
+                    .where(eq(entitlements.id, entitlementId));
+                console.info('Stripe refund: converged local state for already-refunded charge', {
+                    entitlementId,
+                });
+                return { success: true };
+            } catch (convergeErr) {
+                // Convergence failed — fall through to the original error
+                // so the admin can retry (severity preserved).
+                console.error('Stripe refund: failed to converge already-refunded state', {
+                    entitlementId,
+                    err: convergeErr,
+                });
+            }
+        }
         // Cycle 6 RPF / P390-03 / C6-RPF-03: do NOT cross the action boundary
         // with `err.message`. The Stripe SDK includes request IDs (req_xxx)
         // and other internal diagnostics in `err.message` that the doc block
@@ -228,7 +257,7 @@ export async function refundEntitlement(entitlementId: number): Promise<{ error?
         // fallback for the rare case where a UI surface reads it directly.
         return {
             error: 'Refund failed',
-            errorCode: mapStripeRefundError(err),
+            errorCode,
         };
     }
 }
