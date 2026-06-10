@@ -52,10 +52,12 @@ export default async function TimelinePage({
             ? Number(yearParam)
             : years[0] ?? null;
 
-    const photos =
+    // R4C6 COR-R4C6-02: getTimelineImages now reports truncation so the
+    // page can surface it instead of silently dropping early months.
+    const { images: photos, truncated } =
         selectedYear !== null
             ? await getTimelineImages(selectedYear)
-            : [];
+            : { images: [], truncated: false };
 
     const imageSizes = config.imageSizes ?? DEFAULT_IMAGE_SIZES;
     const smallSize = findNearestImageSize(imageSizes, 640);
@@ -154,6 +156,14 @@ export default async function TimelinePage({
                                 {t('yearInReview', { year: selectedYear })}
                             </Link>
                         </div>
+                    )}
+
+                    {/* R4C6 COR-R4C6-02: visible truncation notice — the page
+                        must never silently misrepresent the year's shape. */}
+                    {truncated && selectedYear !== null && (
+                        <p role="note" className="text-sm text-muted-foreground border rounded-lg px-4 py-3 bg-muted/40">
+                            {t('truncationNotice', { count: photos.length, year: selectedYear })}
+                        </p>
                     )}
 
                     {/* Photos grouped by month */}

@@ -783,6 +783,7 @@
     "yearInReviewDescription": "{year}년의 모든 사진",
     "backToTimeline": "타임라인으로 돌아가기",
     "noPhotosForYear": "{year}년 사진을 찾을 수 없습니다.",
+    "truncationNotice": "{year}년의 최근 사진 {count}장만 표시하고 있습니다. 이 해의 더 오래된 사진은 표시되지 않습니다.",
     "months": {
       "1": "1월",
       "2": "2월",

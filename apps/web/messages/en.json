@@ -809,6 +809,7 @@
     "yearInReviewDescription": "All photos from {year}",
     "backToTimeline": "Back to Timeline",
     "noPhotosForYear": "No photos found for {year}.",
+    "truncationNotice": "Showing the {count} most recent photos of {year}. Older photos from this year are not displayed.",
     "months": {
       "1": "January",
       "2": "February",

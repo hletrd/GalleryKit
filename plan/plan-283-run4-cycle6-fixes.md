@@ -42,17 +42,19 @@ new `apps/web/src/__tests__/ime-composition-guard.test.ts`
 `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx`,
 `apps/web/messages/en.json`, `apps/web/messages/ko.json`,
 new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
-- [ ] `TIMELINE_PAGE_LIMIT` 100 → 500; `getTimelineImages` fetches
+- [x] `TIMELINE_PAGE_LIMIT` 100 → 500; `getTimelineImages` fetches
       `limit + 1` and returns `{ images, truncated }` (lookahead row
       dropped); `getYearInReviewImages` propagates `truncated`.
       Correct the non-sargable `YEAR()` index-coverage comment
       (document-specialist).
-- [ ] Both pages render a localized, visible truncation notice when
+- [x] Both pages render a localized, visible truncation notice when
       `truncated` ("Showing the {count} most recent photos of {year}.")
       — EN+KO added together. JSON-LD unchanged (already slice(0,10)).
-- [ ] Tests: helper returns truncated=false at exactly limit rows,
+- [x] Tests: helper returns truncated=false at exactly limit rows,
       true at limit+1 (mock db); source-contract pins both pages render
       the notice key.
+
+**Done:** limit 500 + lookahead + visible notices on both pages; 9 new tests green.
 
 
 ## Task 3 — UX-R4C6-03 + A11Y-R4C6-04 + COR-R4C6-12: lightbox interaction cluster

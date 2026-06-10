@@ -53,7 +53,7 @@ export default async function YearInReviewPage({
         return notFound();
     }
 
-    const [locale, t, monthSections, config, seo, nonce] = await Promise.all([
+    const [locale, t, yearInReview, config, seo, nonce] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
         getYearInReviewImages(yearNum),
@@ -61,6 +61,8 @@ export default async function YearInReviewPage({
         getSeoSettings(),
         getCspNonce(),
     ]);
+    // R4C6 COR-R4C6-02: truncation is surfaced, never silent.
+    const { sections: monthSections, truncated } = yearInReview;
 
     const imageSizes = config.imageSizes ?? DEFAULT_IMAGE_SIZES;
     const smallSize = findNearestImageSize(imageSizes, 640);
@@ -116,6 +118,14 @@ export default async function YearInReviewPage({
                 </h1>
                 <p className="text-muted-foreground">{t('yearInReviewDescription', { year: yearNum })}</p>
             </div>
+
+            {/* R4C6 COR-R4C6-02: visible truncation notice — the year-in-review
+                must never silently misrepresent the archive's shape. */}
+            {truncated && (
+                <p role="note" className="text-sm text-muted-foreground border rounded-lg px-4 py-3 bg-muted/40">
+                    {t('truncationNotice', { count: galleryPhotos.length, year: yearNum })}
+                </p>
+            )}
 
             {monthSections.length === 0 ? (
                 <p className="text-muted-foreground">{t('noPhotosForYear', { year: yearNum })}</p>

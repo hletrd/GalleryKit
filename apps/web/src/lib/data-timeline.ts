@@ -123,16 +123,41 @@ export async function getTimelineYears(): Promise<number[]> {
 // Timeline — photos for a specific year (optional month filter)
 // ---------------------------------------------------------------------------
 
-const TIMELINE_PAGE_LIMIT = 100;
+/**
+ * R4C6 COR-R4C6-02: raised from 100 — a 100-photo cap silently dropped
+ * everything beyond the most recent 100 of a year (DESC order ⇒ EARLY
+ * months vanished from the month sections entirely). 500 covers a
+ * personal-gallery year comfortably; the limit+1 lookahead below makes
+ * any remaining truncation VISIBLE instead of silent.
+ */
+export const TIMELINE_PAGE_LIMIT = 500;
+
+export type TimelinePage = {
+    images: TimelineImage[];
+    /**
+     * True when the year holds MORE processed photos than
+     * TIMELINE_PAGE_LIMIT — the pages render a localized
+     * "showing the N most recent photos" notice so the surface can
+     * never silently misrepresent the archive's shape.
+     */
+    truncated: boolean;
+};
 
 /**
  * Return processed photos captured in `year`, optionally filtered by
- * `month` (1–12). Results are ordered by capture_date DESC.
+ * `month` (1–12). Results are ordered by capture_date DESC and capped
+ * at TIMELINE_PAGE_LIMIT, with a limit+1 lookahead driving the
+ * `truncated` flag.
  *
- * The query is covered by idx_images_processed_capture_date:
- *   (processed=true, capture_date LIKE '<year>-%', ...)
+ * Index note (R4C6 doc correction): `YEAR(capture_date) = ?` is NOT
+ * sargable — only the `processed = true` prefix of
+ * idx_images_processed_capture_date narrows the scan; the YEAR()/MONTH()
+ * filters evaluate per-row within that prefix. Acceptable at
+ * personal-gallery scale; revisit with a range predicate
+ * (`capture_date >= 'Y-01-01' AND < 'Y+1-01-01'`) if the images table
+ * ever grows past that envelope.
  */
-export async function getTimelineImages(year: number, month?: number) {
+export async function getTimelineImages(year: number, month?: number): Promise<TimelinePage> {
     const conditions = [
         eq(images.processed, true),
         isNotNull(images.capture_date),
@@ -153,9 +178,13 @@ export async function getTimelineImages(year: number, month?: number) {
         .where(and(...conditions))
         .groupBy(images.id)
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
-        .limit(TIMELINE_PAGE_LIMIT);
+        .limit(TIMELINE_PAGE_LIMIT + 1);
 
-    return rows;
+    const truncated = rows.length > TIMELINE_PAGE_LIMIT;
+    return {
+        images: truncated ? rows.slice(0, TIMELINE_PAGE_LIMIT) : rows,
+        truncated,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,16 +193,22 @@ export async function getTimelineImages(year: number, month?: number) {
 
 export type MonthSection = {
     month: number; // 1–12
-    images: Awaited<ReturnType<typeof getTimelineImages>>;
+    images: TimelineImage[];
+};
+
+export type YearInReview = {
+    sections: MonthSection[];
+    /** R4C6 COR-R4C6-02: propagated from getTimelineImages — see TimelinePage. */
+    truncated: boolean;
 };
 
 /**
  * Return photos for `year` grouped by calendar month (1–12), in
  * descending month order. Months with zero processed photos are omitted.
  */
-export async function getYearInReviewImages(year: number): Promise<MonthSection[]> {
-    const all = await getTimelineImages(year);
-    if (all.length === 0) return [];
+export async function getYearInReviewImages(year: number): Promise<YearInReview> {
+    const { images: all, truncated } = await getTimelineImages(year);
+    if (all.length === 0) return { sections: [], truncated };
 
     const byMonth = new Map<number, typeof all>();
     for (const img of all) {
@@ -188,14 +223,20 @@ export async function getYearInReviewImages(year: number): Promise<MonthSection[
 
     // Sort months descending (December → January)
     const sortedMonths = [...byMonth.keys()].sort((a, b) => b - a);
-    return sortedMonths.map((month) => ({
-        month,
-        images: byMonth.get(month) ?? [],
-    }));
+    return {
+        sections: sortedMonths.map((month) => ({
+            month,
+            images: byMonth.get(month) ?? [],
+        })),
+        truncated,
+    };
 }
 
 // ---------------------------------------------------------------------------
 // Re-export type helpers
 // ---------------------------------------------------------------------------
 
-export type TimelineImage = Awaited<ReturnType<typeof getTimelineImages>>[number];
+// Derived from the on-this-day query, which selects the identical
+// timelineSelectFields + tag_names shape (type aliases hoist, so the
+// TimelinePage reference above is fine).
+export type TimelineImage = Awaited<ReturnType<typeof getOnThisDayImages>>[number];
