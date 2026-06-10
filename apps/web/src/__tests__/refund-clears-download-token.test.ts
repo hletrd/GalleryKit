@@ -59,6 +59,21 @@ describe('refund-clears-download-token (source-contract)', () => {
         }
     });
 
+    it('usedRow heuristic requires cleared hash AND set downloadedAt (R4C3 COR-R4C3-03)', () => {
+        // refundEntitlement clears the hash WITHOUT setting downloadedAt, so
+        // the "Token already used" disambiguation query must require BOTH
+        // `isNull(downloadTokenHash)` and `isNotNull(downloadedAt)` — or a
+        // refunded-never-downloaded row mislabels any mistyped token for the
+        // image as 410 "already used" instead of the accurate 404.
+        const usedRowBlock = DOWNLOAD_ROUTE_SRC.match(
+            /const\s*\[usedRow\][\s\S]*?\.limit\(1\)/,
+        );
+        expect(usedRowBlock).not.toBeNull();
+        const blockStr = usedRowBlock?.[0] ?? '';
+        expect(blockStr).toMatch(/isNull\(entitlements\.downloadTokenHash\)/);
+        expect(blockStr).toMatch(/isNotNull\(entitlements\.downloadedAt\)/);
+    });
+
     it('download route checks refunded flag before serving the file', () => {
         // The route must short-circuit on entitlement.refunded === true
         // before invoking the file stream. Use a regex that matches the

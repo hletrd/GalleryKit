@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { images, entitlements } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { verifyTokenAgainstHash, hashToken, isValidTokenShape } from '@/lib/download-tokens';
 import { buildDownloadFilename } from '@/lib/download-filename';
@@ -89,12 +89,20 @@ export async function GET(
         // back to the original token (the hash is gone), but we can give
         // the visitor an accurate error message instead of a misleading
         // 404. We do NOT serve the file here; this branch is purely UX.
+        // R4C3 COR-R4C3-03: the heuristic requires BOTH cleared-hash AND a
+        // set downloadedAt (matching the comment above). refundEntitlement
+        // clears the hash WITHOUT touching downloadedAt, so without the
+        // isNotNull condition a refunded-never-downloaded row mislabeled any
+        // mistyped token for this image as 410 "Token already used" —
+        // actively misleading on multi-buyer/refunded images. Unknown tokens
+        // now fall through to the accurate 404.
         const [usedRow] = await db
             .select({ id: entitlements.id })
             .from(entitlements)
             .where(and(
                 eq(entitlements.imageId, imageId),
                 isNull(entitlements.downloadTokenHash),
+                isNotNull(entitlements.downloadedAt),
             ))
             .limit(1);
         if (usedRow) {
