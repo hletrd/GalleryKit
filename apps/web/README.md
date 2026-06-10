@@ -64,13 +64,15 @@ Register `https://<your-host>/api/stripe/webhook` in the Stripe dashboard under 
 
 When a customer completes checkout, the webhook generates a single-use download token, stores only its SHA-256 hash in the `entitlements` table, and surfaces a "Purchase complete!" toast on the photo page. The plaintext token is the URL parameter the customer needs in `/api/download/<imageId>?token=<token>`, but it is not yet emailed automatically.
 
+**The emailed link is scanner-safe (R4C7).** Mail-security gateways (Microsoft SafeLinks/Defender, Mimecast, Proofpoint, webmail previewers) fetch links found in inbound email, and Next.js serves HEAD probes through the GET handler. The download URL therefore opens a localized confirmation page on GET — **no state changes** — and the single use is consumed only when the customer presses the "Download photo" button on that page (a POST back to the same URL). Automated scanners do not submit POST forms, so a prefetch or HEAD probe can no longer burn the token before the customer clicks.
+
 To close the loop until phase 2 ships, set `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true` in the environment. Each successful `checkout.session.completed` will then write a separate stdout line of the form:
 
 ```
 [manual-distribution] download_token: imageId=42 tier=editorial session=cs_xxx email=customer@example.com token=dl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-Operators can `docker logs <web-container> | grep manual-distribution` to retrieve the token and email it to the customer. Tokens are valid for 24 hours after entitlement creation and are single-use (the route's atomic UPDATE invalidates the hash on first download).
+Operators can `docker logs <web-container> | grep manual-distribution` to retrieve the token and email it to the customer. Tokens are valid for 24 hours after entitlement creation and are single-use (the route's atomic UPDATE invalidates the hash when the customer confirms the download on the interstitial page).
 
 The flag defaults to off so production deployments do not leak tokens into log shippers without explicit opt-in. The hashed token in the `entitlements` row is the durable record; the plaintext only ever lives in stdout under this flag.
 

@@ -61,6 +61,13 @@
     "noUsers": "No users yet.",
     "usernameFormat": "Letters, numbers, underscores, and hyphens only"
   },
+  "downloadPage": {
+    "title": "Download your photo",
+    "description": "This is a single-use download link for {title}. Your download starts when you press the button below.",
+    "descriptionNoTitle": "This is a single-use download link. Your download starts when you press the button below.",
+    "button": "Download photo",
+    "expiryNote": "The link is valid for 24 hours after purchase and can be used once."
+  },
   "dashboard": {
     "title": "Dashboard",
     "uploadNew": "Upload Photos",

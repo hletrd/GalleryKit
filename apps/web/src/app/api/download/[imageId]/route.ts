@@ -1,10 +1,42 @@
 /**
- * US-P54: GET /api/download/[imageId]?token=<dl_...>
+ * @public-no-rate-limit-required: the route (POST included) is gated by
+ *   a 256-bit single-use bearer token; the dl_<43 base64url> shape
+ *   regex short-circuits forgeries with one regex eval before any
+ *   hashing or DB work (same posture as the Stripe-signature exemption
+ *   on /api/stripe/webhook). A per-IP budget here would penalize a
+ *   legitimate customer retry right after a scanner-induced failure
+ *   while adding no guessing protection at this keyspace.
+ *   (NOTE for editors: the rate-limit lint strips quoted/backticked
+ *   spans before looking for this tag — keep this paragraph FIRST in
+ *   the file and free of apostrophes, quotes, and backticks.)
  *
- * Public endpoint bound by single-use token.
- * This route is OUTSIDE /api/admin/ — authentication is by download token.
+ * US-P54: paid-download delivery route.
  *
- * Single-use enforcement:
+ *   GET  /api/download/[imageId]?token=<dl_...> → no-claim confirmation
+ *        page (interstitial). Validates the token and renders a
+ *        localized HTML page whose <form method="post"> submits back to
+ *        the SAME URL (query preserved). NO state changes, NO fs access.
+ *   POST /api/download/[imageId]?token=<dl_...> → the actual claim +
+ *        byte streaming (single-use enforcement below).
+ *   HEAD → auto-implemented by Next.js from GET (the GET handler runs
+ *        and the body is discarded). Safe BECAUSE the GET path is
+ *        claim-free.
+ *
+ * R4C7 COR-R4C7-01/02: the single-use claim used to live on GET — a
+ * safe method per RFC 9110 §9.2.1. Mail-security gateways (SafeLinks /
+ * Defender, Mimecast, Proofpoint, webmail previewers) fetch links in
+ * inbound email, and Next.js auto-implements HEAD for GET-only routes
+ * by invoking the GET handler itself — so whichever automated request
+ * arrived first burned the customer's token with zero bytes delivered
+ * (410 on the real click). Scanners do not submit POST forms; the
+ * interstitial restores the protocol contract. See
+ * `lib/download-interstitial.ts` and README "Manual download
+ * distribution".
+ *
+ * Public endpoint bound by single-use token; OUTSIDE /api/admin/, so
+ * authentication is the download token, not the admin cookie.
+ *
+ * Single-use enforcement (POST):
  *   1. Validate token format and find matching entitlement by tokenHash.
  *   2. Check expiresAt > NOW() and refunded = false.
  *   3. Verify the original file exists, is a regular non-symlink file, and
@@ -20,12 +52,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getTranslations } from 'next-intl/server';
 import { db } from '@/db';
 import { images, entitlements } from '@/db/schema';
 import { eq, and, isNull, isNotNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { verifyTokenAgainstHash, hashToken, isValidTokenShape } from '@/lib/download-tokens';
 import { buildDownloadFilename } from '@/lib/download-filename';
+import { buildDownloadInterstitialHtml } from '@/lib/download-interstitial';
+import { deriveLocaleFromReferer } from '@/lib/license-tiers';
 import { UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
 import path from 'path';
 import { lstat, realpath, open, type FileHandle } from 'fs/promises';
@@ -36,22 +71,41 @@ export const runtime = 'nodejs';
 
 const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
 
-export async function GET(
-    request: NextRequest,
-    { params }: { params: Promise<{ imageId: string }> }
-): Promise<Response> {
-    const { imageId: imageIdStr } = await params;
+type ValidEntitlement = {
+    id: number;
+    imageId: number;
+    downloadTokenHash: string | null;
+    downloadedAt: Date | null;
+    expiresAt: Date;
+    refunded: boolean;
+};
+
+type ValidationResult =
+    | { ok: false; response: NextResponse }
+    | { ok: true; imageId: number; entitlement: ValidEntitlement };
+
+/**
+ * Shared GET/POST validation: token shape → hash → entitlement lookup
+ * (with the D-101-06 used-row disambiguation) → constant-time verify →
+ * expiry → refunded → single-use checks. Performs NO writes — both the
+ * interstitial GET and the claiming POST front-load exactly this chain
+ * so the response taxonomy (400/403/404/410) is identical on both
+ * methods.
+ */
+async function validateDownloadRequest(
+    imageIdStr: string,
+    token: string | null,
+): Promise<ValidationResult> {
     const imageId = parseInt(imageIdStr, 10);
     if (!Number.isFinite(imageId) || imageId <= 0) {
-        return new NextResponse('Invalid image ID', { status: 400, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Invalid image ID', { status: 400, headers: NO_STORE }) };
     }
 
-    const token = request.nextUrl.searchParams.get('token');
     // D-101-05: full shape validation (`dl_` + 43 base64url chars) before
-    // we hash and probe the DB. A malformed token is now rejected with a
+    // we hash and probe the DB. A malformed token is rejected with a
     // single regex eval — no SHA-256, no index probe.
     if (!token || !isValidTokenShape(token)) {
-        return new NextResponse('Missing or invalid token', { status: 400, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Missing or invalid token', { status: 400, headers: NO_STORE }) };
     }
 
     const tokenHash = hashToken(token);
@@ -107,30 +161,119 @@ export async function GET(
             ))
             .limit(1);
         if (usedRow) {
-            return new NextResponse('Token already used', { status: 410, headers: NO_STORE });
+            return { ok: false, response: new NextResponse('Token already used', { status: 410, headers: NO_STORE }) };
         }
-        return new NextResponse('Token not found', { status: 404, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Token not found', { status: 404, headers: NO_STORE }) };
     }
 
     // Check constant-time token match
     if (!entitlement.downloadTokenHash || !verifyTokenAgainstHash(token, entitlement.downloadTokenHash)) {
-        return new NextResponse('Invalid token', { status: 403, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Invalid token', { status: 403, headers: NO_STORE }) };
     }
 
     // Check expiry
     if (new Date() > new Date(entitlement.expiresAt)) {
-        return new NextResponse('Token expired', { status: 410, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Token expired', { status: 410, headers: NO_STORE }) };
     }
 
     // Check refunded
     if (entitlement.refunded) {
-        return new NextResponse('Purchase has been refunded', { status: 410, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Purchase has been refunded', { status: 410, headers: NO_STORE }) };
     }
 
     // Check single-use: already downloaded
     if (entitlement.downloadedAt !== null) {
-        return new NextResponse('Token already used', { status: 410, headers: NO_STORE });
+        return { ok: false, response: new NextResponse('Token already used', { status: 410, headers: NO_STORE }) };
     }
+
+    return { ok: true, imageId, entitlement };
+}
+
+/**
+ * GET — no-claim interstitial. Renders the localized confirmation page;
+ * the claim happens only on the explicit POST submit. This handler must
+ * stay free of writes and fs access: Next.js serves auto-HEAD through
+ * it, and mail scanners fetch it freely (R4C7 COR-R4C7-01/02).
+ */
+export async function GET(
+    request: NextRequest,
+    { params }: { params: Promise<{ imageId: string }> }
+): Promise<Response> {
+    const { imageId: imageIdStr } = await params;
+    const token = request.nextUrl.searchParams.get('token');
+
+    const validation = await validateDownloadRequest(imageIdStr, token);
+    if (!validation.ok) {
+        return validation.response;
+    }
+
+    const [image] = await db
+        .select({ title: images.title })
+        .from(images)
+        .where(eq(images.id, validation.imageId))
+        .limit(1);
+
+    if (!image) {
+        return new NextResponse('Image not found', { status: 404, headers: NO_STORE });
+    }
+
+    // C1RPF-PHOTO-LOW-03-style locale derivation: there is no Referer on
+    // a link clicked from an email client, so accept-language carries the
+    // customer's preference; falls back to the default locale.
+    const locale = deriveLocaleFromReferer(
+        request.headers.get('referer'),
+        request.headers.get('accept-language'),
+    );
+    const t = await getTranslations({ locale, namespace: 'downloadPage' });
+
+    const photoTitle = image.title?.trim() ?? '';
+    const html = buildDownloadInterstitialHtml({
+        locale,
+        strings: {
+            title: t('title'),
+            description: photoTitle
+                ? t('description', { title: photoTitle })
+                : t('descriptionNoTitle'),
+            button: t('button'),
+            expiryNote: t('expiryNote'),
+        },
+    });
+
+    return new NextResponse(html, {
+        status: 200,
+        headers: {
+            ...NO_STORE,
+            'Content-Type': 'text/html; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'no-referrer',
+            'X-Robots-Tag': 'noindex, nofollow',
+            // API routes bypass the proxy-middleware CSP (proxy.ts matcher
+            // excludes /api), so this HTML ships its own restrictive policy:
+            // no scripts, no external fetches, inline styles only, and the
+            // form may only submit back to this origin.
+            'Content-Security-Policy':
+                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        },
+    });
+}
+
+/**
+ * POST — the single-use claim + byte streaming (previously the GET
+ * body; semantics unchanged, see the single-use enforcement order in
+ * the file docblock).
+ */
+export async function POST(
+    request: NextRequest,
+    { params }: { params: Promise<{ imageId: string }> }
+): Promise<Response> {
+    const { imageId: imageIdStr } = await params;
+    const token = request.nextUrl.searchParams.get('token');
+
+    const validation = await validateDownloadRequest(imageIdStr, token);
+    if (!validation.ok) {
+        return validation.response;
+    }
+    const { imageId, entitlement } = validation;
 
     // Cycle 3 RPF / P262-03 / C3-RPF-03: use UPLOAD_DIR_ORIGINAL from
     // lib/upload-paths.ts so the route honors UPLOAD_ORIGINAL_ROOT env var
