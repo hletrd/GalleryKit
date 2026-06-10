@@ -16,9 +16,13 @@
  * the new pipeline only to fresh browsers; the existing cached
  * responses keep the old bytes for `Cache-Control max-age=86400`.
  *
- * SSR / cold-start safety: the function always synchronously returns
- * 8 hex characters. The DB read is debounced behind a 5-second cache
- * so a misbehaving DB does not stall image responses.
+ * SSR / cold-start safety: the function always resolves to 8 hex
+ * characters. The NO-ARG form debounces its DB read behind a 5-second
+ * cache; the config-arg form (R8-H1) computes purely from the caller's
+ * resolved GalleryConfig and performs no DB read here — but the CALLER
+ * pays whatever it cost to resolve that config, so hot paths must
+ * debounce the config resolution themselves (R4C3 PERF-R4C3-05:
+ * `serve-upload.ts` does, via its module-scoped 5 s TTL cache).
  */
 
 import { createHash } from 'node:crypto';
@@ -100,10 +104,15 @@ async function fetchHashFromDb(): Promise<string> {
  * throws and the worst case is the FALLBACK_HASH (which still changes
  * if any setting changes from empty to non-empty).
  *
- * The cache holds for 5 seconds so a flood of image requests does not
- * issue one DB SELECT per file. A multi-process deployment will see
- * brief skew until each process refreshes — acceptable because every
- * browser will revalidate within the next 5 s window.
+ * NO-ARG form: the internal cache holds for 5 seconds so a flood of
+ * callers does not issue one DB SELECT each. A multi-process deployment
+ * will see brief skew until each process refreshes — acceptable because
+ * every browser will revalidate within the next 5 s window.
+ *
+ * CONFIG-ARG form (R8-H1): bypasses the internal cache entirely — it is
+ * a pure computation over the caller-resolved GalleryConfig. Callers on
+ * request-flood paths must debounce their own config resolution (see
+ * serve-upload.ts `getServingColorSettingsHash`, R4C3 PERF-R4C3-05).
  */
 export async function getColorSettingsHash(config?: GalleryConfig): Promise<string> {
     // R8-H1: when a resolved GalleryConfig is provided, compute the hash

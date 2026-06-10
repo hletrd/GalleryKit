@@ -16,6 +16,60 @@ const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 const MAX_SEGMENT_LENGTH = 255;
 
+/**
+ * R4C3 PERF-R4C3-05: debounce the settings-hash computation on the
+ * image-serving hot path.
+ *
+ * React cache() scopes `getGalleryConfig()` to a SINGLE request, and
+ * `getColorSettingsHash(config)` (the R8-H1 validated-values form)
+ * bypasses settings-hash's internal 5 s cache — so before this guard,
+ * EVERY derivative GET/HEAD/304 issued its own `admin_settings` SELECT
+ * just to build the ETag (30-50 extra DB round-trips per masonry paint).
+ *
+ * This module-scoped TTL + inflight dedupe restores the documented
+ * contract ("a flood of image requests does not issue one DB SELECT per
+ * file") while preserving R8-H1 semantics: the hash is still computed
+ * from the RESOLVED GalleryConfig. An admin flip of any color-impacting
+ * setting reaches the ETag within <= 5 s — the same skew window
+ * settings-hash already documents as acceptable. On fetch failure we
+ * serve the last known hash (or settings-hash's no-arg FALLBACK_HASH
+ * path) so a misbehaving DB cannot stall image responses.
+ */
+const SERVING_SETTINGS_HASH_TTL_MS = 5_000;
+let servingHashCache: { hash: string; fetchedAt: number } | null = null;
+let servingHashInflight: Promise<string> | null = null;
+
+async function getServingColorSettingsHash(): Promise<string> {
+    const now = Date.now();
+    if (servingHashCache && now - servingHashCache.fetchedAt < SERVING_SETTINGS_HASH_TTL_MS) {
+        return servingHashCache.hash;
+    }
+    if (servingHashInflight) {
+        return servingHashInflight;
+    }
+    servingHashInflight = (async () => {
+        try {
+            const config = await getGalleryConfig();
+            const hash = await getColorSettingsHash(config);
+            servingHashCache = { hash, fetchedAt: Date.now() };
+            return hash;
+        } catch {
+            if (servingHashCache) return servingHashCache.hash;
+            // No-arg form carries its own 5 s cache + FALLBACK_HASH semantics.
+            return getColorSettingsHash();
+        } finally {
+            servingHashInflight = null;
+        }
+    })();
+    return servingHashInflight;
+}
+
+/** Test-only helper: reset the serving-path hash cache. */
+export function _resetServingSettingsHashCacheForTesting(): void {
+    servingHashCache = null;
+    servingHashInflight = null;
+}
+
 /** Map from top-level directory to allowed file extensions. Prevents serving
  *  mismatched files (e.g., a .webp from /uploads/jpeg/). */
 const DIR_EXTENSION_MAP: Record<string, Set<string>> = {
@@ -120,10 +174,12 @@ export async function serveUploadFile(
         // toggles `force_srgb_derivatives=true` to clean up a colorimetric
         // bug; previously the change shipped only to fresh browsers).
         //
-        // R8-H1: pass resolved GalleryConfig so the hash reflects validated
-        // encoder values, not raw (possibly invalid) DB strings.
-        const config = await getGalleryConfig();
-        const settingsHash = await getColorSettingsHash(config);
+        // R8-H1: the hash reflects validated encoder values (resolved
+        // GalleryConfig), not raw DB strings.
+        // R4C3 PERF-R4C3-05: resolved + hashed behind the module-scoped
+        // 5 s TTL above — NOT per-request — so derivative floods do not
+        // issue one `admin_settings` SELECT per file.
+        const settingsHash = await getServingColorSettingsHash();
         const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
 
         // R11-M1: HTTP-conditional GET. If the client's If-None-Match
