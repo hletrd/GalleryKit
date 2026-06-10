@@ -137,8 +137,12 @@ export async function POST(
         // Cycle 2 RPF / P260-09 / C2-RPF-14: append an ellipsis when truncation
         // actually fires so the customer's Stripe receipt shows the elision
         // explicitly rather than a silent cut.
+        // R4C2 COR-R4C2-08: truncate by CODE POINTS (Array.from iterates by
+        // code point) — a UTF-16 .slice(0, 199) could bisect a surrogate
+        // pair and put U+FFFD on the customer's Stripe receipt.
+        const titleCodePoints = image.title ? Array.from(image.title) : [];
         const titleForStripe = image.title
-            ? (image.title.length > 200 ? image.title.slice(0, 199) + '…' : image.title)
+            ? (titleCodePoints.length > 200 ? titleCodePoints.slice(0, 199).join('') + '…' : image.title)
             : null;
         // Cycle 6 RPF / P390-01 / C6-RPF-01: pass an Idempotency-Key on the
         // Stripe Checkout session POST. Stripe deduplicates server-side when
