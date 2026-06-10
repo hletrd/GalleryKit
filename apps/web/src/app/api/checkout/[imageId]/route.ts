@@ -93,27 +93,42 @@ export async function POST(
         return NextResponse.json({ error: 'Invalid image ID' }, { status: 400, headers: NO_STORE });
     }
 
-    // Fetch image and check tier
-    const [image] = await db
-        .select({ id: images.id, title: images.title, license_tier: images.license_tier, processed: images.processed })
-        .from(images)
-        .where(eq(images.id, imageId))
-        .limit(1);
+    // Fetch image and check tier.
+    // R4C6 COR-R4C6-08: the DB reads sit inside a try so a transient
+    // database error follows the route's own Pattern-2 contract — roll
+    // back the pre-incremented per-IP budget and answer a JSON 500 with
+    // NO_STORE — instead of escaping as a framework 500 that permanently
+    // consumed the visitor's rate budget.
+    let image: { id: number; title: string | null; license_tier: string; processed: boolean | null } | undefined;
+    let priceCents: number;
+    try {
+        [image] = await db
+            .select({ id: images.id, title: images.title, license_tier: images.license_tier, processed: images.processed })
+            .from(images)
+            .where(eq(images.id, imageId))
+            .limit(1);
 
-    if (!image) {
+        if (!image) {
+            rollbackCheckoutAttempt(ip);
+            return NextResponse.json({ error: 'Image not found' }, { status: 404, headers: NO_STORE });
+        }
+        if (!image.license_tier || !isPaidLicenseTier(image.license_tier)) {
+            rollbackCheckoutAttempt(ip);
+            return NextResponse.json({ error: 'This image is not available for purchase' }, { status: 400, headers: NO_STORE });
+        }
+        if (!image.processed) {
+            rollbackCheckoutAttempt(ip);
+            return NextResponse.json({ error: 'Image is still processing' }, { status: 400, headers: NO_STORE });
+        }
+
+        priceCents = await getTierPriceCents(image.license_tier);
+    } catch (err) {
+        // C7-RPF-01 structured log shape so operators can grep by imageId.
+        console.error('Checkout image/price lookup failed', { imageId, ip, err });
         rollbackCheckoutAttempt(ip);
-        return NextResponse.json({ error: 'Image not found' }, { status: 404, headers: NO_STORE });
-    }
-    if (!image.license_tier || !isPaidLicenseTier(image.license_tier)) {
-        rollbackCheckoutAttempt(ip);
-        return NextResponse.json({ error: 'This image is not available for purchase' }, { status: 400, headers: NO_STORE });
-    }
-    if (!image.processed) {
-        rollbackCheckoutAttempt(ip);
-        return NextResponse.json({ error: 'Image is still processing' }, { status: 400, headers: NO_STORE });
+        return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500, headers: NO_STORE });
     }
 
-    const priceCents = await getTierPriceCents(image.license_tier);
     if (priceCents <= 0) {
         rollbackCheckoutAttempt(ip);
         return NextResponse.json({ error: 'This image is not priced for sale' }, { status: 400, headers: NO_STORE });

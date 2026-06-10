@@ -160,11 +160,13 @@ new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
 ## Task 8 — COR-R4C6-08: checkout route Pattern-2 rollback on DB failure
 **Files:** `apps/web/src/app/api/checkout/[imageId]/route.ts`,
 existing checkout test suite (extend)
-- [ ] Wrap the image fetch + `getTierPriceCents` in try/catch →
+- [x] Wrap the image fetch + `getTierPriceCents` in try/catch →
       `rollbackCheckoutAttempt(ip)` + JSON `{ error }` 500 with NO_STORE
       (structured console.error with imageId/ip per the C7-RPF-01 log
       shape).
-- [ ] Test: db.select throws → rollback called, 500 JSON + no-store.
+- [x] Test: db.select throws → rollback called, 500 JSON + no-store.
+
+**Done:** DB window contained with rollback + structured log + JSON 500/no-store; 2 behavioral tests green.
 
 
 ## Task 9 — STD-R4C6-09: RFC 4287-conformant `<author><name>`
