@@ -16,6 +16,13 @@ import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
 import { MAX_UPLOAD_FILE_BYTES } from '@/lib/upload-limits';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { detectColorSignals, type ColorSignals, normalizeName } from '@/lib/color-detection';
+import {
+    stripGpsFromJpegBuffer,
+    stripGpsFromTiffBuffer,
+    stripGpsFromIsobmffBuffer,
+    stripGpsFromWebpBuffer,
+    type GpsStripResult,
+} from '@/lib/gps-exif-strip';
 import { extractIccProfileName } from '@/lib/icc-extractor';
 export { extractIccProfileName } from '@/lib/icc-extractor';
 // C5-A3 / C5-COL-MED-2: canonical color_pipeline_decision enum source-of-truth
@@ -1423,40 +1430,110 @@ export function extractExifForDb(exifData: ExifDataRaw) {
 }
 
 /**
- * PP-BUG-3: Best-effort strip GPS EXIF from the on-disk original file.
+ * PP-BUG-3 / R4C8 COR-R4C8-01: strip GPS metadata from the on-disk
+ * original file.
  *
- * The admin `strip_gps_on_upload` toggle previously only nulled the DB
- * latitude/longitude columns, leaving the original at
- * `data/uploads/original/` with intact GPS EXIF. The paid-download
- * endpoint streams that file byte-for-byte, leaking wildlife/conflict
- * photographers' protected locations.
+ * The admin `strip_gps_on_upload` toggle nulls the DB
+ * latitude/longitude columns, but the original at
+ * `data/uploads/original/` is what the paid-download endpoint streams
+ * byte-for-byte — so the file itself must lose its GPS data too.
  *
- * This function attempts to re-write the original in-place, using Sharp's
- * `.withMetadata({ orientation })` which keeps only the orientation tag
- * (and ICC if present) while stripping GPS, camera serial, etc. The
- * file is written to a temp path then atomically renamed over the
- * original so concurrent readers never see a partial write.
+ * HISTORY (R4C8 COR-R4C8-01): the previous implementation used Sharp's
+ * `.withMetadata({ orientation, icc })`, believing it "keeps only the
+ * orientation tag while stripping GPS". In Sharp 0.33+ `withMetadata`
+ * is the KEEP-metadata API — it retains ALL input EXIF (the options
+ * merely override orientation/ICC on top), so the GPS IFD survived the
+ * "strip" byte-for-byte. It also re-encoded the original at default
+ * quality (JPEG q80 / HEIF q50), silently degrading the paid
+ * deliverable.
  *
- * Best-effort only: if Sharp throws (corrupt file, unsupported format,
- * disk full), the function catches the error and returns without modifying
- * the original. The DB columns are already nulled, so the public gallery
- * does not leak GPS; only the download-original path remains at risk.
+ * Current strategy (two tiers, privacy always wins):
+ *  1. LOSSLESS byte-level scrub (`lib/gps-exif-strip.ts`) for JPEG,
+ *     TIFF, HEIF/AVIF/HEIC, and WebP — the pixel stream is never
+ *     decoded; only the GPS IFD / GPS-bearing XMP regions are
+ *     neutralized. When the file carries no GPS at all, it is left
+ *     byte-identical (no rewrite).
+ *  2. Privacy-preserving RE-ENCODE for formats without a lossless
+ *     scrubber (PNG/GIF/BMP) or when the scrubber reports a structural
+ *     anomaly: decode with `autoOrient` (orientation baked into
+ *     pixels, so no orientation tag is needed), `keepIccProfile()`,
+ *     and NO metadata retention — Sharp strips EXIF/XMP by default —
+ *     with explicit high-quality per-format encoder options. The
+ *     quality trade-off is logged via console.warn.
+ *
+ * Writes go to a temp path (mode 0600, matching the upload writer)
+ * then atomically rename over the original so concurrent readers never
+ * see a partial write.
+ *
+ * Best-effort only: on any error the function logs and returns without
+ * modifying the original. The DB columns are already nulled, so the
+ * public gallery does not leak GPS; only the download-original path
+ * remains at risk in that case.
  */
 export async function stripGpsFromOriginal(filePath: string): Promise<void> {
     const tmpPath = filePath + '.gps-strip.' + randomUUID() + '.tmp';
     try {
-        // Read orientation from the original so we can preserve it.
-        const meta = await sharp(filePath).metadata();
-        const orientation = typeof meta.orientation === 'number' && meta.orientation >= 1 && meta.orientation <= 8
-            ? meta.orientation : 1;
+        const ext = path.extname(filePath).toLowerCase();
+        const input = await fs.readFile(filePath);
 
-        // R7-L2: preserve ICC profile during GPS strip so future backfill /
-        // re-detection can still read the source color space.
-        // Sharp accepts Buffer at runtime; the type definition is conservative.
-        await sharp(filePath)
-            .withMetadata({ orientation, icc: meta.icc as string | undefined })
-            .toFile(tmpPath);
+        // Tier 1 — lossless container-aware scrub.
+        let scrubbed: GpsStripResult | null = null;
+        if ((ext === '.jpg' || ext === '.jpeg') && input.length > 2 && input[0] === 0xff && input[1] === 0xd8) {
+            scrubbed = stripGpsFromJpegBuffer(input);
+        } else if (ext === '.tif' || ext === '.tiff') {
+            scrubbed = stripGpsFromTiffBuffer(input);
+        } else if (ext === '.heic' || ext === '.heif' || ext === '.avif') {
+            scrubbed = stripGpsFromIsobmffBuffer(input);
+        } else if (ext === '.webp') {
+            scrubbed = stripGpsFromWebpBuffer(input);
+        } else if (ext === '.gif' || ext === '.bmp') {
+            // No standardized EXIF/GPS carriage in these containers; a
+            // re-encode would only degrade them (and flatten animated
+            // GIFs) for zero privacy gain.
+            return;
+        }
 
+        if (scrubbed) {
+            if (!scrubbed.stripped) return; // no GPS present — leave byte-identical
+            await fs.writeFile(tmpPath, scrubbed.buffer, { mode: 0o600 });
+            await fs.rename(tmpPath, filePath);
+            return;
+        }
+
+        // Tier 2 — the scrubber reported a structural anomaly (or the
+        // format has no lossless scrubber, e.g. PNG). Re-encode without
+        // metadata so the GPS data is guaranteed gone. PNG re-encode is
+        // pixel-lossless; lossy formats use explicit high-quality
+        // settings and the generation loss is logged.
+        const pipeline = sharp(filePath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true })
+            .keepIccProfile();
+        if (ext === '.png') {
+            await pipeline.png().toFile(tmpPath);
+        } else if (ext === '.jpg' || ext === '.jpeg') {
+            console.warn('stripGpsFromOriginal: lossless JPEG scrub failed; re-encoding at q95', { filePath });
+            await pipeline.jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toFile(tmpPath);
+        } else if (ext === '.webp') {
+            console.warn('stripGpsFromOriginal: lossless WebP scrub failed; re-encoding at q95', { filePath });
+            const isLosslessWebp = input.includes(Buffer.from('VP8L', 'ascii'));
+            await pipeline.webp(isLosslessWebp ? { lossless: true } : { quality: 95 }).toFile(tmpPath);
+        } else if (ext === '.tif' || ext === '.tiff') {
+            console.warn('stripGpsFromOriginal: lossless TIFF scrub failed; re-encoding (lzw)', { filePath });
+            await pipeline.tiff({ compression: 'lzw' }).toFile(tmpPath);
+        } else if (ext === '.avif') {
+            console.warn('stripGpsFromOriginal: lossless AVIF scrub failed; re-encoding at q90', { filePath });
+            await pipeline.avif({ quality: 90 }).toFile(tmpPath);
+        } else if (ext === '.heic' || ext === '.heif') {
+            // Prebuilt Sharp cannot encode HEVC-compressed HEIF (patent
+            // licensing), so a malformed HEIC that defeats the lossless
+            // scrub cannot be rewritten here. Surface it loudly: the
+            // original keeps its GPS data until the admin re-exports.
+            console.error('stripGpsFromOriginal: cannot strip GPS from structurally anomalous HEIC (no HEVC encoder); original retains GPS', { filePath });
+            return;
+        } else {
+            console.error('stripGpsFromOriginal: no GPS-strip strategy for extension; original retains GPS', { filePath, ext });
+            return;
+        }
+        await fs.chmod(tmpPath, 0o600).catch(() => {});
         await fs.rename(tmpPath, filePath);
     } catch (e) {
         // Best-effort cleanup of temp file
