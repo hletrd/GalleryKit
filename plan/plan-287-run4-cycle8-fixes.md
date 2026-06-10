@@ -140,4 +140,35 @@ extend `apps/web/src/__tests__/process-image-icc-options-lockin.test.ts`
 - [ ] Deploy per cycle policy (`npm run deploy`) after all green.
 
 ## Progress log
-- (updated as tasks land)
+- Task 1 ✅ `6117168a` — lib/gps-exif-strip.ts (JPEG APP1 / TIFF /
+  ISOBMFF iinf+iloc / WebP RIFF scrubbers + GPS-XMP neutralization) +
+  stripGpsFromOriginal rewrite (lossless tier → metadata-free
+  re-encode tier, mode 0600 + atomic rename, HEIC anomaly surfaced
+  loudly). 14 behavioral tests incl. pixel byte-identity and
+  forensic-residue assertions. GPS now PROVABLY gone (exif-reader)
+  where it previously survived byte-for-byte.
+- Task 2 ✅ `848bc593` — valid sharp-generated 1×1 probe in client-safe
+  lib/avif-support.ts (verified LOADS in Chromium); histogram re-export
+  for back-compat; literal-decoding unit test (metadata + full raw
+  decode + size cap).
+- Task 3 ✅ `e94346a0` — server neighbor-preload hints removed from
+  p/[id]/page.tsx (with the two neighbor getImageCached fetches);
+  viewer effect now emits ONE probe-gated responsive preload per
+  neighbor; R13-H1 comment corrected; source-contract suite (3).
+- Task 4 ✅ `7afd8522` — sizedSourcesFailed state-driven fallback in
+  lightbox + photo-viewer (recovery verified live in Chromium:
+  currentSrc lands on the base JPEG, decoded); histogram draw effect
+  gains canvasDims dep; contract pins (7).
+- Task 5 ✅ `01a58f00` — explicit `bitdepth: 8` retry (+ lockin pin),
+  autoOrient on the WI-15 inputMeta read, dead queryVersionRef +
+  unused suppressions removed from home-client.
+- Task 6 ✅ `00fcd542` — CLAUDE.md: 6 default sizes; Privacy section
+  documents the GPS-strip contract + the withMetadata trap.
+- Task 7 ✅ — plan-285 archived to done/ (`43423262`); ALL gates green
+  repo-wide: eslint **0 errors / 0 warnings** · typecheck PASS ·
+  vitest **1729/1729** (181 files; +28 tests / +4 files this cycle) ·
+  lint:api-auth PASS · lint:action-origin PASS ·
+  lint:public-route-rate-limit PASS · production build PASS
+  (`BUILD-EXIT:0`, SW_VERSION refreshed in `089add4d`) · Playwright
+  e2e **20 passed / 2 skipped** (the standing conditional skips), exit 0.
+- Deploy: recorded below after `npm run deploy`.
