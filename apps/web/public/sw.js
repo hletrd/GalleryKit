@@ -18,12 +18,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * 089add4d-p7 is replaced at build time by scripts/build-sw.ts.
+ * d676e1aa-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '089add4d-p7';
+const SW_VERSION = 'd676e1aa-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -137,6 +137,24 @@ async function evictHtmlCacheIfNeeded() {
 
 // ─── Fetch strategies ────────────────────────────────────────────────────────
 
+/**
+ * R4C9 PERF-R4C9-02: bump only the recency timestamp of a cached image's
+ * LRU entry — no body fetch, no cache.put. Used on the 304 path where the
+ * server confirmed the cached bytes are authoritative. Keeps a known size
+ * if one is already tracked (Content-Length may be absent on some cached
+ * responses); never triggers eviction because no size grows.
+ */
+async function touchMeta(url, knownSize) {
+  const entries = await getMeta();
+  const existing = entries.get(url);
+  entries.set(url, {
+    url,
+    size: existing && existing.size ? existing.size : knownSize,
+    timestamp: Date.now(),
+  });
+  await setMeta(entries);
+}
+
 async function staleWhileRevalidateImage(request) {
   const imageCache = await caches.open(IMAGE_CACHE);
   // C18-MED-01: use request.url (string) as the cache key so it matches
@@ -146,18 +164,31 @@ async function staleWhileRevalidateImage(request) {
   const cacheKey = request.url;
   const cached = await imageCache.match(cacheKey);
 
-  const revalidate = fetch(request.clone())
-    .then(async (networkResponse) => {
-      if (isSensitiveResponse(networkResponse)) return networkResponse;
-      if (!networkResponse.ok) return networkResponse;
-      const clone = networkResponse.clone();
-      const blob = await clone.blob();
-      const size = blob.size;
-      await imageCache.put(cacheKey, networkResponse.clone());
-      await recordAndEvict(request.url, size);
-      return networkResponse;
-    })
-    .catch(() => null);
+  // R4C9 PERF-R4C9-02: the revalidating GET is LAZY — a single-flight
+  // closure dispatched only when actually needed. The previous shape
+  // created the fetch Promise eagerly at function entry, so the documented
+  // R11-M1 "304 short-circuits the revalidate body fetch" never happened:
+  // every cached view still issued the full GET, re-put identical bytes,
+  // and rewrote the whole LRU meta document (N concurrent read-modify-write
+  // cycles per gallery paint).
+  let revalidatePromise = null;
+  const startRevalidate = () => {
+    if (!revalidatePromise) {
+      revalidatePromise = fetch(request.clone())
+        .then(async (networkResponse) => {
+          if (isSensitiveResponse(networkResponse)) return networkResponse;
+          if (!networkResponse.ok) return networkResponse;
+          const clone = networkResponse.clone();
+          const blob = await clone.blob();
+          const size = blob.size;
+          await imageCache.put(cacheKey, networkResponse.clone());
+          await recordAndEvict(request.url, size);
+          return networkResponse;
+        })
+        .catch(() => null);
+    }
+    return revalidatePromise;
+  };
 
   if (cached) {
     // R10-H3: when admin flips a color-impacting setting the server-side ETag
@@ -168,11 +199,11 @@ async function staleWhileRevalidateImage(request) {
     // server's ETag differs, serve the network response synchronously
     // instead of returning the stale cache entry.
     //
-    // R11-M1: send If-None-Match so the server can answer 304 when the
-    // cached entry is still authoritative. A 304 short-circuits the
-    // revalidate body fetch entirely. A 200 (with or without a
-    // differing ETag) means the cache is stale, so we wait for the
-    // background revalidate and serve the network response.
+    // R11-M1 / R4C9: send If-None-Match so the server can answer 304 when
+    // the cached entry is still authoritative. A 304 now genuinely skips
+    // the body fetch (no GET is in flight yet); only the LRU recency
+    // timestamp is touched. A 200 with a differing ETag means the cache is
+    // stale, so we dispatch the revalidate and serve the network response.
     const cachedEtag = cached.headers.get('ETag');
     if (cachedEtag) {
       try {
@@ -181,14 +212,15 @@ async function staleWhileRevalidateImage(request) {
           headers: { 'If-None-Match': cachedEtag },
         });
         if (head.status === 304) {
-          // Server confirms cache is fresh — serve cached, skip revalidate.
-          revalidate.catch(() => {});
+          // Server confirms cache is fresh — serve cached, no body fetch.
+          const cachedSize = Number(cached.headers.get('Content-Length')) || 0;
+          touchMeta(request.url, cachedSize).catch(() => {});
           return cached;
         }
         if (head.ok) {
           const networkEtag = head.headers.get('ETag');
           if (networkEtag && networkEtag !== cachedEtag) {
-            const fresh = await revalidate;
+            const fresh = await startRevalidate();
             if (fresh) return fresh;
           }
         }
@@ -196,13 +228,16 @@ async function staleWhileRevalidateImage(request) {
         // HEAD probe failed — fall through to stale-serve below
       }
     }
-    // Serve stale immediately, revalidate in background
-    revalidate.catch(() => {});
+    // Serve stale immediately, revalidate in background (true SWR path:
+    // no ETag to probe, probe network-failed, or probe answered 200 with
+    // the same ETag — the latter still refreshes the entry in background
+    // exactly as before).
+    startRevalidate();
     return cached;
   }
 
   // No cache — wait for network
-  const response = await revalidate;
+  const response = await startRevalidate();
   return response ?? new Response('Network error', { status: 503 });
 }
 
