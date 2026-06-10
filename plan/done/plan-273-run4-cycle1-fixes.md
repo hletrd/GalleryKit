@@ -1,6 +1,6 @@
 # Plan 273 — Run-4 Cycle 1 implementation fixes
 
-**Status:** in-progress (PROMPT 3)
+**Status:** COMPLETE (all 13 tasks implemented, gates green, deployed — see Progress)
 **Source review:** `.context/reviews/run4-cycle1/_aggregate.md` (+ 4 per-angle files)
 **Deferred ledger:** `plan/plan-274-run4-cycle1-deferred.md`
 
