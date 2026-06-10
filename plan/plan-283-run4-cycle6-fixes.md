@@ -195,9 +195,10 @@ existing checkout test suite (extend)
 **Done:** positivity guard on both inputs; 5 unit cases green.
 
 ## Gate work (PROMPT 3)
-- [ ] All 8 gates green after the tasks: eslint, typecheck, vitest,
-      lint:api-auth, lint:action-origin, lint:public-route-rate-limit,
-      production build, playwright e2e.
-- [ ] SW_VERSION refresh commit after the final code commit (template
-      changed this cycle).
+- [x] All 8 gates green after the tasks: eslint 0/0, typecheck PASS,
+      vitest 1675/1675 (174 files, +47 this cycle), lint:api-auth PASS,
+      lint:action-origin PASS, lint:public-route-rate-limit PASS,
+      production build OK, playwright e2e 20/20.
+- [x] SW_VERSION refresh commit after the final code commit (template
+      changed this cycle) — commit 47517ce0 (d3e0a3f5-p7).
 - [ ] Deploy per-cycle via `npm run deploy` once green.
