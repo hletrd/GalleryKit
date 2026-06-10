@@ -4,7 +4,12 @@ import { createReadStream } from 'fs';
 import { lstat, realpath } from 'fs/promises';
 import { Readable } from 'stream';
 import { UPLOAD_ROOT } from '@/lib/upload-paths';
-import { IMAGE_PIPELINE_VERSION } from '@/lib/process-image';
+// R4C1 PERF-R4C1-07: import the version constant from its definition site
+// (client-safe gallery-config-shared), NOT from process-image — the latter
+// loads sharp/libvips + the whole color-detection graph at module init,
+// which the image-SERVING path never needs. process-image.ts merely
+// re-exports this same constant.
+import { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 import { getColorSettingsHash } from '@/lib/settings-hash';
 import { getGalleryConfig } from '@/lib/gallery-config';
 const ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif']);

@@ -2,10 +2,25 @@ import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('serveUploadFile', () => {
     let uploadRoot = '';
+
+    // R4C1 TEST-R4C1-07: warm the module transform cache once, with a
+    // generous setup-scoped timeout. The first cold import of the
+    // serve-upload graph (next/server, @/db → drizzle + mysql2) can take
+    // tens of seconds on a shared-volume checkout under full-suite CPU
+    // contention, which used to blow the first TEST's 15 s budget.
+    // vi.resetModules() in beforeEach clears only the module registry,
+    // not the transform cache, so per-test re-imports stay fast. The
+    // UPLOAD_ROOT env var is irrelevant here — upload-paths just computes
+    // path constants at import time and each test re-imports after
+    // setting its own root.
+    beforeAll(async () => {
+        await import('@/lib/serve-upload');
+        vi.resetModules();
+    }, 120_000);
 
     beforeEach(async () => {
         uploadRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'gallery-upload-root-'));
@@ -40,7 +55,9 @@ describe('serveUploadFile', () => {
         await fsp.writeFile(jpegPath, 'cache-test-data');
 
         const { serveUploadFile } = await import('@/lib/serve-upload');
-        const { IMAGE_PIPELINE_VERSION } = await import('@/lib/process-image');
+        // R4C1 TEST-R4C1-07: import the constant from its light definition
+        // module so this suite never cold-loads the sharp encoder graph.
+        const { IMAGE_PIPELINE_VERSION } = await import('@/lib/gallery-config-shared');
         const response = await serveUploadFile(['jpeg', 'cache.jpg']);
 
         expect(response.status).toBe(200);
