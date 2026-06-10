@@ -40,40 +40,16 @@ interface HistogramWorkerLike {
     postMessage(message: { requestId: number } & HistogramWorkerPayload, transfer?: Transferable[]): void;
 }
 
-// Minimal 1x1 AVIF data URL for client-side decode support probing.
-const AVIF_PROBE_DATA_URL = 'data:image/avif;base64,AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAADybWV0YQAAAAAAAAAoaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAGxpYmF2aWYAAAAADnBpdG0AAAAAACAAAAAocGJhbHlydXJseXNvcF9jMwAAAAAAAQAAAAAQcGFzcwAAAAABAAAAAQAAAAAccG9zcwAAAAABAAAAAQAAAAAcc3ZjYwAAAAABAAAAAQAAAAAcc2JwcwAAAAABAAAAAQAAAAAccmVsbAAAAA8AAAA6AAAAOHN0ckAAAABzcHRsAAAAAFB0ciBzdGlsbCBwaWN0dXJlAAAAAAABAAAAAAAIc2N2eAAAAA8AAAA6AAAAOHN0Ym0AAAAAUGZiIHN0aWxsIHBpY3R1cmUAAAAAAAEAAAAAAAg=';
-
 // C3-A4 / C3-COL-LOW-2 / C3-DEBUG-LOW-1: shared module-scope Promise so the
-// first-render flicker is removed. The cached probe pattern (the previous
-// _cachedAvifSupported flag) returned `false` synchronously while the
-// `<img>.onload` resolved on the next event-loop tick. The first wide-gamut
-// histogram render in a session would therefore choose the JPEG / WebP
-// source and show the "(sRGB clipped)" hint, then flip on the next render
-// when a different effect triggered a re-render. Convert to a Promise
-// singleton (matching the rgb16 probe pattern in process-image.ts) so the
-// component awaits the resolution and renders with the correct probe
-// result on first paint.
-let _avifSupportPromise: Promise<boolean> | null = null;
-
-function probeAvifSupport(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-        if (typeof window === 'undefined' || typeof Image === 'undefined') {
-            resolve(false);
-            return;
-        }
-        const img = new Image();
-        img.onload = () => resolve(true);
-        img.onerror = () => resolve(false);
-        img.src = AVIF_PROBE_DATA_URL;
-    });
-}
-
-export function getAvifSupportPromise(): Promise<boolean> {
-    if (!_avifSupportPromise) {
-        _avifSupportPromise = probeAvifSupport();
-    }
-    return _avifSupportPromise;
-}
+// first-render flicker is removed (the component awaits the resolution and
+// renders with the correct probe result on first paint).
+// R4C8 COR-R4C8-02: the probe (and its data-URL constant) now live in
+// lib/avif-support.ts — the previous in-file constant was structurally
+// invalid ISOBMFF and failed to decode in every browser, permanently
+// disabling the AVIF histogram path. Re-exported for back-compat with
+// existing imports.
+export { getAvifSupportPromise } from '@/lib/avif-support';
+import { getAvifSupportPromise } from '@/lib/avif-support';
 
 // C1: cache Canvas-P3 probe at module scope (singleton, runs once per process).
 // Note: the prior synchronous getAvifSupported() helper has been replaced by
