@@ -56,12 +56,22 @@ export async function logAuditEvent(
  */
 export async function purgeOldAuditLog(maxAgeMs?: number): Promise<void> {
     // Precedence: 1) explicit parameter, 2) AUDIT_LOG_RETENTION_DAYS env var, 3) default 90 days
+    //
+    // R4C6 COR-R4C6-10: a NEGATIVE retention (operator typo like
+    // AUDIT_LOG_RETENTION_DAYS=-1, or a negative maxAgeMs param) put the
+    // cutoff in the FUTURE — `created_at < cutoff` then matched every row
+    // and purged the ENTIRE audit log. The previous `|| 90` rescued only
+    // 0/NaN. Both inputs now require a finite POSITIVE value; anything
+    // else falls back to the 90-day default.
+    const DEFAULT_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
     let effectiveMaxAgeMs: number;
     if (maxAgeMs !== undefined) {
-        effectiveMaxAgeMs = maxAgeMs;
+        effectiveMaxAgeMs = Number.isFinite(maxAgeMs) && maxAgeMs > 0 ? maxAgeMs : DEFAULT_MAX_AGE_MS;
     } else {
-        const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10) || 90;
-        effectiveMaxAgeMs = retentionDays * 24 * 60 * 60 * 1000;
+        const retentionDays = Number.parseInt(process.env.AUDIT_LOG_RETENTION_DAYS ?? '', 10);
+        effectiveMaxAgeMs = Number.isFinite(retentionDays) && retentionDays > 0
+            ? retentionDays * 24 * 60 * 60 * 1000
+            : DEFAULT_MAX_AGE_MS;
     }
     const cutoff = new Date(Date.now() - effectiveMaxAgeMs);
     await db.delete(auditLog).where(lt(auditLog.created_at, cutoff));

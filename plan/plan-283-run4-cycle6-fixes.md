@@ -185,13 +185,14 @@ existing checkout test suite (extend)
 ## Task 10 — COR-R4C6-10: audit-log retention env validation
 **Files:** `apps/web/src/lib/audit.ts`,
 `apps/web/src/__tests__/audit-retention.test.ts` (new)
-- [ ] `purgeOldAuditLog`: accept the env value only when
+- [x] `purgeOldAuditLog`: accept the env value only when
       `Number.isFinite(d) && d > 0`; otherwise fall back to 90. Also
       guard the explicit `maxAgeMs` param the same way (negative
       param → treated as default) for symmetry.
-- [ ] Tests: negative env → 90d cutoff (past, not future); zero/garbage
+- [x] Tests: negative env → 90d cutoff (past, not future); zero/garbage
       → 90d; valid value honored; negative explicit param → default.
 
+**Done:** positivity guard on both inputs; 5 unit cases green.
 
 ## Gate work (PROMPT 3)
 - [ ] All 8 gates green after the tasks: eslint, typecheck, vitest,
