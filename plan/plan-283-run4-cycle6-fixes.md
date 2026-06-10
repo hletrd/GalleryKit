@@ -149,10 +149,12 @@ new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
 ## Task 7 — COR-R4C6-07: semantic search stale-response guard
 **Files:** `apps/web/src/components/search.tsx`,
 `apps/web/src/__tests__/search-stale-response.test.ts` (new)
-- [ ] Re-check `requestId === requestIdRef.current` after
+- [x] Re-check `requestId === requestIdRef.current` after
       `await resp.json()` before `setResults` (mirror the keyword branch).
-- [ ] Test: interleaved semantic responses — stale A resolving after
+- [x] Test: interleaved semantic responses — stale A resolving after
       fresh B must not clobber B's results (mock fetch with deferreds).
+
+**Done:** guard added after resp.json(); locked by an ordering source contract (repo locks client components via source contracts — no jsdom render harness in the suite).
 
 
 ## Task 8 — COR-R4C6-08: checkout route Pattern-2 rollback on DB failure
