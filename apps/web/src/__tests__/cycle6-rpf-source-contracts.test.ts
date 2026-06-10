@@ -82,8 +82,12 @@ describe('cycle 6 RPF / sales action source-contracts', () => {
     it('P390-03: refund catch path returns stable "Refund failed" (NOT err.message)', () => {
         // Search for the catch block's return statement structure. The
         // stable string form must be present.
+        // R4C4 COR-R4C4-02: the catch now extracts `const errorCode =
+        // mapStripeRefundError(err)` first (so the already-refunded branch
+        // can converge DB state) and returns the same stable string with
+        // the extracted code — the no-err.message contract is unchanged.
         expect(SALES_ACTIONS_SRC).toMatch(
-            /catch\s*\(\s*err\s*\)\s*\{[\s\S]*?return\s*\{\s*error:\s*['"]Refund failed['"],\s*errorCode:\s*mapStripeRefundError\(err\)[\s\S]*?\}/,
+            /catch\s*\(\s*err\s*\)\s*\{[\s\S]*?const errorCode = mapStripeRefundError\(err\);[\s\S]*?return\s*\{\s*error:\s*['"]Refund failed['"],\s*errorCode,[\s\S]*?\}/,
         );
         // The legacy form `err instanceof Error ? err.message : 'Refund
         // failed'` must be absent from the catch block. Search for the

@@ -24,12 +24,15 @@ const DOWNLOAD_SRC = fs.readFileSync(
 describe('cycle 8 RPF / download route source-contracts', () => {
     it('P394-01: lstat/realpath catch log uses structured-object form with entitlementId', () => {
         // Structured form with entitlementId correlation key.
+        // R4C4 COR-R4C4-06: the same catch now also covers the pre-claim
+        // open(), so the label gained "/open" — the structured-object
+        // contract is unchanged.
         expect(DOWNLOAD_SRC).toMatch(
-            /console\.error\(\s*['"]Download lstat\/realpath error['"],\s*\{[\s\S]*?entitlementId:\s*entitlement\.id[\s\S]*?\}/,
+            /console\.error\(\s*['"]Download lstat\/realpath\/open error['"],\s*\{[\s\S]*?entitlementId:\s*entitlement\.id[\s\S]*?\}/,
         );
         // Legacy positional form (with trailing colon in label) absent.
         expect(DOWNLOAD_SRC).not.toMatch(
-            /console\.error\(\s*['"]Download lstat\/realpath error:['"],\s*err\s*\)/,
+            /console\.error\(\s*['"]Download lstat\/realpath(?:\/open)? error:['"],\s*err\s*\)/,
         );
     });
 
