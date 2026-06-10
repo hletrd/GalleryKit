@@ -350,6 +350,24 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'license_tier', "ALTER TABLE images ADD COLUMN license_tier ENUM('none','editorial','commercial','rm') NOT NULL DEFAULT 'none'");
     await ensureColumn(connection, dbName, 'images', 'alt_text_suggested', 'ALTER TABLE images ADD COLUMN alt_text_suggested text');
     await ensureColumn(connection, dbName, 'images', 'icc_profile_name', 'ALTER TABLE images ADD COLUMN icc_profile_name varchar(255) DEFAULT NULL');
+    // R4C1 COR-R4C1-13: the color/HDR era columns (migrations 0015-0018)
+    // were never mirrored here, violating the runbook's "update
+    // reconcileLegacySchema for every new migration" contract. Production
+    // survived because its schema was repaired manually during the original
+    // drift incident, but every database that bootstraps through this
+    // reconcile path (fresh installs via COR-R4C1-12, legacy re-baselines)
+    // came out missing all seven columns and the very first INSERT into
+    // `images` failed with ER_BAD_FIELD_ERROR. DDL mirrors the migration
+    // files (0015_color_pipeline_decision, 0016_cicp_columns,
+    // 0017_pipeline_version, 0018_has_gain_map) minus the cosmetic AFTER
+    // clauses, matching the established style of this function.
+    await ensureColumn(connection, dbName, 'images', 'color_pipeline_decision', 'ALTER TABLE images ADD COLUMN color_pipeline_decision varchar(64) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'color_primaries', 'ALTER TABLE images ADD COLUMN color_primaries varchar(32) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'transfer_function', 'ALTER TABLE images ADD COLUMN transfer_function varchar(16) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'matrix_coefficients', 'ALTER TABLE images ADD COLUMN matrix_coefficients varchar(16) DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'is_hdr', 'ALTER TABLE images ADD COLUMN is_hdr boolean NOT NULL DEFAULT FALSE');
+    await ensureColumn(connection, dbName, 'images', 'has_gain_map', 'ALTER TABLE images ADD COLUMN has_gain_map boolean NOT NULL DEFAULT FALSE');
+    await ensureColumn(connection, dbName, 'images', 'pipeline_version', 'ALTER TABLE images ADD COLUMN pipeline_version int DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'was_downscaled', 'ALTER TABLE images ADD COLUMN was_downscaled boolean NOT NULL DEFAULT false');
     // R17-L2: admin user that performed the upload (admin-only PII).
     // Nullable so legacy rows keep working; ON DELETE SET NULL keeps the
@@ -636,6 +654,22 @@ async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     await ensureMigrationTable(connection);
     const hasGalleryTables = await hasAnyGalleryTables(connection, dbName);
     if (!hasGalleryTables) {
+        // R4C1 COR-R4C1-12: a COMPLETELY FRESH database used to fall through
+        // to drizzle.migrate(), whose MAX(created_at) cursor + this repo's
+        // non-monotonic journal `when` values silently skip entries 7-17 on
+        // the very first run; the bootstrap then dies on a later entry's SQL
+        // (and the runMigrations post-condition would fail the run anyway).
+        // A SECOND `init` accidentally healed because the partial first run
+        // left gallery tables behind, flipping execution onto the legacy
+        // reconcile path below. That made every fresh install / e2e cold
+        // database fail its first `npm run init`. Bootstrap fresh databases
+        // through the SAME deterministic reconcile + per-entry baseline path
+        // instead: reconcileLegacySchema is the maintained idempotent
+        // full-schema bootstrap (CLAUDE.md migration step 3 requires every
+        // new migration to mirror its state), and after baselining every
+        // journal hash drizzle.migrate() is a verified no-op.
+        await reconcileLegacySchema(connection, dbName);
+        await baselineAllJournalMigrations(connection, migrations);
         return;
     }
 
