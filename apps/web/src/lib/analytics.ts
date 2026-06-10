@@ -100,14 +100,19 @@ const TWO_PART_TLDS = new Set([
  *   "github.com"     → "github.com"
  */
 export function extractTldPlusOne(host: string): string {
-    const labels = host.split('.');
-    if (labels.length <= 2) return host; // already TLD+1 or bare TLD
+    // R4C4 LOW-R4C4-09: a fully-qualified hostname with a trailing dot
+    // ("github.com.") split into a trailing empty label and the function
+    // returned the bare TLD ("com.") — recording a meaningless referrer.
+    // The trailing dot is semantically identical (DNS root); strip one.
+    const normalizedHost = host.endsWith('.') ? host.slice(0, -1) : host;
+    const labels = normalizedHost.split('.');
+    if (labels.length <= 2) return normalizedHost; // already TLD+1 or bare TLD
 
     // Check if last two labels form a known two-part TLD
     const lastTwo = `${labels[labels.length - 2]}.${labels[labels.length - 1]}`;
     if (TWO_PART_TLDS.has(lastTwo)) {
         // Need three labels: name.second.tld
-        if (labels.length <= 3) return host;
+        if (labels.length <= 3) return normalizedHost;
         return `${labels[labels.length - 3]}.${lastTwo}`;
     }
 

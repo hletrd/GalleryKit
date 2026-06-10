@@ -61,6 +61,16 @@ describe('extractTldPlusOne', () => {
     it('handles single label', () => {
         expect(extractTldPlusOne('localhost')).toBe('localhost');
     });
+
+    // R4C4 LOW-R4C4-09: trailing-dot FQDN referrers previously split into a
+    // trailing empty label and recorded the bare TLD ("com.") instead of
+    // the site. The trailing root-dot is stripped before the TLD+1 split.
+    it('normalizes a trailing root dot (FQDN form)', () => {
+        expect(extractTldPlusOne('github.com.')).toBe('github.com');
+        expect(extractTldPlusOne('www.github.com.')).toBe('github.com');
+        expect(extractTldPlusOne('sub.bbc.co.uk.')).toBe('bbc.co.uk');
+        expect(extractTldPlusOne('bbc.co.uk.')).toBe('bbc.co.uk');
+    });
 });
 
 // ---------------------------------------------------------------------------
