@@ -109,7 +109,11 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
 
         return { status: 'ok', processed, skipped };
     } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        return { status: 'error', message };
+        // R4C5 I18N-R4C5-03: raw err.message can carry driver/SQL internals
+        // and is English-only on a localized admin surface. Localized
+        // generic error across the boundary, detail to the server log
+        // (C6-RPF-03 / R4C4-05 lineage).
+        console.error('CLIP embedding backfill failed', err);
+        return { status: 'error', message: t('embeddingBackfillFailed') };
     }
 }

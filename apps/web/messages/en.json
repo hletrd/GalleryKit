@@ -451,6 +451,8 @@
   "serverActions": {
     "unauthorized": "Not authorized",
     "backfillRateLimited": "Backfill is rate-limited. Please wait before retrying.",
+    "embeddingBackfillFailed": "Embedding backfill failed. Check the server logs.",
+    "invalidCollectionQuery": "Invalid smart collection query. Check the server logs for details.",
     "invalidCurrentSlug": "Invalid slug",
     "labelSlugRequired": "Name and slug are required.",
     "invalidSlugFormat": "Invalid slug format.",

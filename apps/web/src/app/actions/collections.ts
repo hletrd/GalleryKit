@@ -30,7 +30,11 @@ export async function createSmartCollection(formData: FormData) {
     try {
         parseSmartCollectionQuery(queryJsonRaw);
     } catch (e) {
-        return { error: (e instanceof Error ? e.message : t('invalidInput')) };
+        // R4C5 I18N-R4C5-03: do NOT cross the action boundary with the raw
+        // English parser message (same posture as C6-RPF-03 / R4C4-05) —
+        // localized generic error to the client, detail to the server log.
+        console.warn('Smart collection query rejected (create)', e);
+        return { error: t('invalidCollectionQuery') };
     }
 
     const isPublic = formData.get('is_public') === 'true';
@@ -75,7 +79,10 @@ export async function updateSmartCollection(id: number, formData: FormData) {
     try {
         parseSmartCollectionQuery(queryJsonRaw);
     } catch (e) {
-        return { error: (e instanceof Error ? e.message : t('invalidInput')) };
+        // R4C5 I18N-R4C5-03: localized generic error across the boundary,
+        // parser detail to the server log (C6-RPF-03 / R4C4-05 lineage).
+        console.warn('Smart collection query rejected (update)', e);
+        return { error: t('invalidCollectionQuery') };
     }
 
     const isPublic = formData.get('is_public') === 'true';

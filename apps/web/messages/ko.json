@@ -451,6 +451,8 @@
   "serverActions": {
     "unauthorized": "권한이 없습니다",
     "backfillRateLimited": "백필 작업이 속도 제한되었습니다. 잠시 후 다시 시도해 주세요.",
+    "embeddingBackfillFailed": "임베딩 백필에 실패했습니다. 서버 로그를 확인해 주세요.",
+    "invalidCollectionQuery": "스마트 컬렉션 쿼리가 올바르지 않습니다. 자세한 내용은 서버 로그를 확인해 주세요.",
     "invalidCurrentSlug": "잘못된 슬러그입니다",
     "labelSlugRequired": "이름과 슬러그를 입력해야 합니다.",
     "invalidSlugFormat": "슬러그 형식이 올바르지 않습니다.",
