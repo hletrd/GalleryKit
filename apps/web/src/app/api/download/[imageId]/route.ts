@@ -169,6 +169,12 @@ export async function GET(
 
     let fileHandle: FileHandle;
     let fileSize: number;
+    // R4C5 COR-R4C5-04: nullable alias assigned the moment open() succeeds.
+    // `fileHandle.stat()` below sits between open() and the catch — a stat
+    // throw (EIO on a failing disk, EBADF after an external close) would
+    // otherwise return 404/500 with the just-opened handle leaked,
+    // violating the R4C4-06 "cannot leak on any post-open path" contract.
+    let openedHandle: FileHandle | null = null;
     try {
         const stats = await lstat(filePath);
         if (stats.isSymbolicLink() || !stats.isFile()) {
@@ -198,8 +204,12 @@ export async function GET(
         // from this validated handle. Content-Length comes from the
         // opened inode so a concurrent replace cannot desync it.
         fileHandle = await open(resolvedFilePath, 'r');
+        openedHandle = fileHandle;
         fileSize = (await fileHandle.stat()).size;
     } catch (err: unknown) {
+        // R4C5 COR-R4C5-04: close the handle if open() succeeded but a
+        // later statement in this try threw (fileHandle.stat()).
+        await openedHandle?.close().catch(() => undefined);
         if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
             // Cycle 3 RPF / P262-05: token NOT consumed yet — customer can
             // retry once the file is restored, or the photographer can issue

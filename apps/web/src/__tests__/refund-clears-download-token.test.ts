@@ -141,6 +141,25 @@ describe('download route open-before-claim contract (R4C4 COR-R4C4-06)', () => {
         expect(DOWNLOAD_ROUTE_SRC).toMatch(/fileSize\s*=\s*\(await fileHandle\.stat\(\)\)\.size/);
         expect(DOWNLOAD_ROUTE_SRC).toMatch(/'Content-Length':\s*fileSize\.toString\(\)/);
     });
+
+    it('closes the handle when a post-open statement in the same try throws (R4C5 COR-R4C5-04)', () => {
+        // fileHandle.stat() sits between open() and the catch — the catch
+        // must close the opened handle (via the nullable alias) BEFORE the
+        // ENOENT/500 returns, or an EIO/EBADF stat throw leaks the fd.
+        const aliasAssign = DOWNLOAD_ROUTE_SRC.search(/openedHandle\s*=\s*fileHandle;/);
+        const statCall = DOWNLOAD_ROUTE_SRC.search(/fileSize\s*=\s*\(await fileHandle\.stat\(\)\)\.size/);
+        expect(aliasAssign).toBeGreaterThan(-1);
+        expect(statCall).toBeGreaterThan(aliasAssign);
+        // The shared open-window catch closes the alias before any return.
+        expect(DOWNLOAD_ROUTE_SRC).toMatch(
+            /catch \(err: unknown\) \{\s*(?:\/\/[^\n]*\n\s*)*await openedHandle\?\.close\(\)\.catch\(\(\) => undefined\);/,
+        );
+        // And the close precedes the ENOENT-to-404 mapping in that catch.
+        const closeIndex = DOWNLOAD_ROUTE_SRC.indexOf('await openedHandle?.close()');
+        const enoentIndex = DOWNLOAD_ROUTE_SRC.indexOf("code === 'ENOENT'", closeIndex);
+        expect(closeIndex).toBeGreaterThan(-1);
+        expect(enoentIndex).toBeGreaterThan(closeIndex);
+    });
 });
 
 describe('refund-clears-download-token (behavioral via hash verify)', () => {
