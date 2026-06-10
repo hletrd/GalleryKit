@@ -452,6 +452,7 @@ The repository has a formal test surface:
 - `npm test --workspace=apps/web` — Vitest unit tests in `apps/web/src/__tests__/`
 - `npm run test:e2e --workspace=apps/web` — Playwright end-to-end tests in `apps/web/e2e/`
 - `npm run lint --workspace=apps/web` — ESLint
+- `npm run typecheck --workspace=apps/web` — blocking type gate: `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts` (JS script checker). Production builds embed the app config, but test-file type errors only surface through this command — run it before committing test changes.
 
 ## Lint Gates (security-critical)
 
