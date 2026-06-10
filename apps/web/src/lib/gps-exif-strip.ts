@@ -16,7 +16,10 @@
  * to a (lossy but privacy-preserving) re-encode.
  *
  * Supported containers:
- *  - JPEG  (APP1 Exif segment; GPS-bearing XMP APP1 segments dropped)
+ *  - JPEG  (APP1 Exif segment; GPS-bearing XMP APP1 segments dropped —
+ *           BOTH the standard packet and ExtendedXMP overflow segments
+ *           are token-tested, including a reconstruction pass that
+ *           catches tokens split across ExtendedXMP chunk boundaries)
  *  - TIFF  (whole-file IFD walk; GPS-bearing XMP tag value zeroed)
  *  - ISOBMFF / HEIF / AVIF / HEIC (Exif item located via iinf+iloc;
  *    GPS-bearing XMP mime items zeroed)
@@ -198,6 +201,17 @@ export function stripGpsFromJpegBuffer(input: Buffer): GpsStripResult | null {
     let stripped = false;
     let dropXmp = false;
 
+    // SEC-R4C9-01: ExtendedXMP chunk bookkeeping. Per XMP Specification
+    // Part 3 §1.1.3.1 each ExtendedXMP APP1 payload is:
+    //   signature(35) + GUID(32) + full_length u32(4) + offset u32(4) + data.
+    // The GPS properties of a > 64 KB packet commonly live ONLY in these
+    // overflow chunks (the standard packet then carries just the
+    // xmpNote:HasExtendedXMP pointer), so the extension payloads must be
+    // token-tested too — per chunk AND as the offset-ordered reconstruction
+    // (a token can straddle a chunk boundary).
+    type ExtXmpChunk = { offset: number; data: Buffer };
+    const extXmpChunks: ExtXmpChunk[] = [];
+
     type Segment = { start: number; end: number; marker: number; dataStart: number; dataEnd: number };
     const segments: Segment[] = [];
 
@@ -240,7 +254,32 @@ export function stripGpsFromJpegBuffer(input: Buffer): GpsStripResult | null {
             && data.subarray(0, XMP_APP1_SIGNATURE.length).equals(XMP_APP1_SIGNATURE)) {
             const xmp = data.toString('latin1');
             if (XMP_GPS_TOKEN.test(xmp)) dropXmp = true;
+        } else if (data.length >= XMP_EXT_APP1_SIGNATURE.length
+            && data.subarray(0, XMP_EXT_APP1_SIGNATURE.length).equals(XMP_EXT_APP1_SIGNATURE)) {
+            // SEC-R4C9-01: token-test ExtendedXMP overflow chunks too. The
+            // whole payload (GUID header included — hex ASCII, cannot
+            // false-negative the token) is tested per chunk; data runs are
+            // additionally collected for the joined reconstruction below.
+            const xmp = data.toString('latin1');
+            if (XMP_GPS_TOKEN.test(xmp)) dropXmp = true;
+            const headerEnd = XMP_EXT_APP1_SIGNATURE.length + 40;
+            if (data.length > headerEnd) {
+                extXmpChunks.push({
+                    offset: data.readUInt32BE(XMP_EXT_APP1_SIGNATURE.length + 36),
+                    data: data.subarray(headerEnd),
+                });
+            }
         }
+    }
+
+    // SEC-R4C9-01: reconstruct the extended packet in declared-offset order
+    // and token-test the joined string so a GPS marker split across two
+    // ExtendedXMP chunks cannot slip through. Only needed when the
+    // per-chunk pass above found nothing and there are multiple chunks.
+    if (!dropXmp && extXmpChunks.length > 1) {
+        extXmpChunks.sort((a, b) => a.offset - b.offset);
+        const joined = Buffer.concat(extXmpChunks.map((c) => c.data)).toString('latin1');
+        if (XMP_GPS_TOKEN.test(joined)) dropXmp = true;
     }
 
     if (!stripped && !dropXmp) {

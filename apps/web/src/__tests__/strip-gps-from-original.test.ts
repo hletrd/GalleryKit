@@ -212,6 +212,89 @@ describe('gps-exif-strip pure scrubbers', () => {
         expect(pixelsAfter.equals(pixelsBefore)).toBe(true);
     });
 
+    // SEC-R4C9-01 helpers: hand-assemble XMP APP1 segments per the XMP
+    // Specification Part 3 §1.1.3.1 layouts.
+    const app1 = (payload: Buffer): Buffer => {
+        const segment = Buffer.alloc(4 + payload.length);
+        segment[0] = 0xff;
+        segment[1] = 0xe1;
+        segment.writeUInt16BE(2 + payload.length, 2);
+        payload.copy(segment, 4);
+        return segment;
+    };
+    const stdXmpSegment = (xml: string): Buffer =>
+        app1(Buffer.from(`http://ns.adobe.com/xap/1.0/\0${xml}`, 'latin1'));
+    const extXmpSegment = (fullLength: number, offset: number, data: string): Buffer => {
+        const u32 = (n: number) => {
+            const b = Buffer.alloc(4);
+            b.writeUInt32BE(n, 0);
+            return b;
+        };
+        return app1(Buffer.concat([
+            Buffer.from('http://ns.adobe.com/xmp/extension/\0', 'latin1'),
+            Buffer.from('A'.repeat(32), 'latin1'), // 32-byte GUID
+            u32(fullLength),
+            u32(offset),
+            Buffer.from(data, 'latin1'),
+        ]));
+    };
+
+    it('SEC-R4C9-01: drops ExtendedXMP segments whose overflow chunk carries the GPS markers', async () => {
+        const file = await makeFixture('ext-xmp.jpg', 'jpeg', false);
+        const original = await fs.readFile(file);
+        // Standard packet carries ONLY the HasExtendedXMP pointer — the GPS
+        // properties overflowed into the extension (the empirically proven
+        // leak shape from the cycle-9 review).
+        const std = stdXmpSegment('<x:xmpmeta xmlns:xmpNote="http://ns.adobe.com/xmp/note/"><rdf:Description xmpNote:HasExtendedXMP="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"/></x:xmpmeta>');
+        const extData = '<rdf:Description exif:GPSLatitude="37,33.98N" exif:GPSLongitude="126,58.94E"/>';
+        const ext = extXmpSegment(extData.length, 0, extData);
+        const withXmp = Buffer.concat([original.subarray(0, 2), std, ext, original.subarray(2)]);
+
+        const result = stripGpsFromJpegBuffer(withXmp);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+        expect(result!.buffer.includes(Buffer.from('GPSLatitude', 'latin1'))).toBe(false);
+        // BOTH XMP signatures must be gone (std + extension dropped together).
+        expect(result!.buffer.includes(Buffer.from('http://ns.adobe.com/xap/1.0/', 'latin1'))).toBe(false);
+        expect(result!.buffer.includes(Buffer.from('http://ns.adobe.com/xmp/extension/', 'latin1'))).toBe(false);
+        // Output decodes to the same pixels.
+        const pixelsBefore = await sharp(original).raw().toBuffer();
+        const pixelsAfter = await sharp(result!.buffer).raw().toBuffer();
+        expect(pixelsAfter.equals(pixelsBefore)).toBe(true);
+    });
+
+    it('SEC-R4C9-01: catches a GPS token split across two ExtendedXMP chunk boundaries', async () => {
+        const file = await makeFixture('ext-xmp-split.jpg', 'jpeg', false);
+        const original = await fs.readFile(file);
+        const part1 = '<rdf:Description exif:GPSLat';
+        const part2 = 'itude="37,33.98N"/>';
+        const fullLength = part1.length + part2.length;
+        // Splice in REVERSE declared-offset order so the reconstruction's
+        // offset sort is exercised (file order alone would not match).
+        const extB = extXmpSegment(fullLength, part1.length, part2);
+        const extA = extXmpSegment(fullLength, 0, part1);
+        const withXmp = Buffer.concat([original.subarray(0, 2), extB, extA, original.subarray(2)]);
+
+        const result = stripGpsFromJpegBuffer(withXmp);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+        expect(result!.buffer.includes(Buffer.from('http://ns.adobe.com/xmp/extension/', 'latin1'))).toBe(false);
+    });
+
+    it('SEC-R4C9-01: leaves a GPS-free ExtendedXMP JPEG byte-identical (stripped=false, same reference)', async () => {
+        const file = await makeFixture('ext-xmp-clean.jpg', 'jpeg', false);
+        const original = await fs.readFile(file);
+        const std = stdXmpSegment('<x:xmpmeta xmlns:xmpNote="http://ns.adobe.com/xmp/note/"><rdf:Description xmpNote:HasExtendedXMP="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"/></x:xmpmeta>');
+        const extData = '<rdf:Description xmp:Rating="5" dc:title="harbor at dusk"/>';
+        const ext = extXmpSegment(extData.length, 0, extData);
+        const withXmp = Buffer.concat([original.subarray(0, 2), std, ext, original.subarray(2)]);
+
+        const result = stripGpsFromJpegBuffer(withXmp);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(false);
+        expect(result!.buffer).toBe(withXmp);
+    });
+
     it('stripGpsFromTiffBuffer zeroes the GPS IFD of a real EXIF TIFF block', async () => {
         // The APP1 payload of a GPS-tagged JPEG (after "Exif\0\0") IS a
         // TIFF block — extract it and run the whole-file TIFF scrubber on
