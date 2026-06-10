@@ -9,18 +9,19 @@ suppressions. HARD-SCOPE: no edit/culling/scoring features.
 ## Task 1 — PERF-R4C4-01 + TEST-R4C4-10: stale-while-revalidate for the serving-path settings-hash debounce
 **Files:** `apps/web/src/lib/serve-upload.ts:42-71`,
 `apps/web/src/__tests__/serve-upload-settings-debounce.test.ts`
-- [ ] When `servingHashCache` exists (fresh OR stale), return its hash
+- [x] When `servingHashCache` exists (fresh OR stale), return its hash
       immediately; if stale, kick the refresh inflight WITHOUT awaiting it
       (swallow rejections — failure semantics unchanged: keep last hash).
-- [ ] Only await the inflight when NO hash has ever been resolved (cold
+- [x] Only await the inflight when NO hash has ever been resolved (cold
       start) — preserves the burst=1-SELECT contract.
-- [ ] Update the module docstring: the "misbehaving DB cannot stall image
+- [x] Update the module docstring: the "misbehaving DB cannot stall image
       responses" claim becomes true; document the skew bound (≤ 5 s + one
       refresh latency).
-- [ ] Tests: keep burst=1 + ETag-hash cases; rework the TTL case to assert
-      the refetch is triggered (call count) while the stale-window response
-      resolves immediately; add a resolve-order case with a hung config
-      promise proving the response does not await the refresh.
+- [x] Tests: kept burst=1 + ETag-hash cases; TTL case now documents that
+      the stale request TRIGGERS the refresh; added hung-refresh
+      non-blocking + post-release hash-swap case and refresh-dedupe-under-
+      hang case.
+**Done:** commit `20a20714` — suite 5/5 green.
 
 ## Task 2 — COR-R4C4-02 + TEST-R4C4-11: converge DB state on `charge_already_refunded`
 **Files:** `apps/web/src/app/actions/sales.ts:215-233`, test file that owns
