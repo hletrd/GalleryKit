@@ -963,7 +963,12 @@ export async function processImageFormats(
     // and plumbing height through saveOriginalAndGetMetadata; the overhead
     // (~10-30 ms for large files) is acceptable for the personal-gallery
     // scale and not worth the cross-caller refactor risk.
-    const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true }).metadata();
+    // R4C8 COR-R4C8-07: read metadata with autoOrient so the height matches
+    // the post-orientation `baseWidth` parameter (which comes from the
+    // upload flow's autoOrient metadata). Without it, a rotated portrait
+    // source mixed oriented-width × unoriented-height and the 50 MP gate
+    // mis-evaluated (e.g. 8000×6000 orientation-6 computed 36 MP, not 48).
+    const inputMeta = await sharp(inputPath, { limitInputPixels: maxInputPixels, failOn: 'error', sequentialRead: true, autoOrient: true }).metadata();
     const baseHeight = (inputMeta.height && inputMeta.height > 0) ? inputMeta.height : 0;
     const basePixels = baseWidth * baseHeight;
     if (isWideGamutSource && basePixels > WIDE_GAMUT_MAX_SOURCE_PIXELS) {
@@ -1113,12 +1118,20 @@ export async function processImageFormats(
                         if (wantHighBitdepth && err instanceof Error && /bitdepth/i.test(err.message)) {
                             // Probe said 10-bit is available but this specific encode
                             // still failed — downgrade to 8-bit for this image only.
+                            // R4C8 COR-R4C8-06: `bitdepth: 8` MUST be explicit.
+                            // Sharp option setters only assign keys present in
+                            // the passed object — they never RESET prior state —
+                            // and clone() copies the options snapshot, so without
+                            // this the retry re-encoded with heifBitdepth 10 and
+                            // failed again, making the documented per-image 8-bit
+                            // fallback unsatisfiable.
                             await base.clone()
                                 .toColorspace(avifIcc)
                                 .withIccProfile(avifIcc)
                                 .avif({
                                     quality: qualityAvif,
                                     effort: effectiveEffort,
+                                    bitdepth: 8,
                                 })
                                 .toFile(outputPath);
                         } else {

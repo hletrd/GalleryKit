@@ -58,4 +58,14 @@ describe('process-image ICC option lock-in (CM-CRIT-1, CM-HIGH-1, CM-HIGH-2)', (
         // failOn 'error' keeps benign warnings tolerable while rejecting truncated input.
         expect(source).toMatch(/failOn\s*:\s*['"]error['"]/);
     });
+
+    it('the 8-bit AVIF retry passes an explicit bitdepth: 8 (R4C8 COR-R4C8-06 lock-in)', () => {
+        const source = readSource();
+        // Sharp option setters only assign keys present in the passed
+        // object — they never RESET prior state — and clone() copies the
+        // options snapshot. Without an explicit `bitdepth: 8` the retry
+        // inherits heifBitdepth 10 from the failed attempt and the
+        // documented per-image 8-bit fallback can never succeed.
+        expect(source).toMatch(/bitdepth\s*:\s*8\s*,?/);
+    });
 });

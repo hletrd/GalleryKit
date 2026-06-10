@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
+import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
@@ -112,7 +112,6 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
     const { t, locale } = useTranslation();
     const pathname = usePathname();
     const [allImages, setAllImages] = useState(images);
-    const queryVersionRef = useRef(0);
     const handleLoadMore = useCallback((newImages: GalleryImage[]) => {
         setAllImages(prev => [...prev, ...newImages]);
     }, []);
@@ -157,11 +156,15 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
         };
     }, [scrollKey]);
 
-    // Reset allImages when the images prop changes (e.g. topic/filter change)
-    // Increment version so stale in-flight load-more responses are discarded
+    // Reset allImages when the images prop changes (e.g. topic/filter change).
+    // R4C8 QUAL-R4C8-08: stale in-flight load-more responses are discarded by
+    // LoadMore's OWN queryVersionRef (bumped on queryKey/initial-prop change,
+    // checked before and after the await) — the dead version ref that used to
+    // live here never participated in that protocol.
     useEffect(() => {
-        queryVersionRef.current++;
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop-driven state sync: resetting gallery state when the images prop changes (topic/filter change) is a valid React pattern (https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes)
+        // Intentional prop-driven state sync: resetting gallery state when
+        // the images prop changes (topic/filter change) is a valid React
+        // pattern (react.dev/learn/you-might-not-need-an-effect).
         setAllImages(images);
     }, [images]);
 
