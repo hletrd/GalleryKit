@@ -7,10 +7,9 @@ import { UploadDropzone } from "@/components/upload-dropzone";
 import { ImageManager } from "@/components/image-manager";
 import { useTranslation } from "@/components/i18n-provider";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImageOff, RotateCcw } from "lucide-react";
 import { localizePath } from "@/lib/locale-path";
 import { retryFailedImage } from "@/app/actions/images";
-import { sizedImageUrl } from "@/lib/image-url";
 
 interface FailedImage {
     id: number;
@@ -76,12 +75,20 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                                 key={img.id}
                                 className="flex items-center gap-3 rounded-md bg-background p-2"
                             >
-                                <img
-                                    src={sizedImageUrl('/uploads/jpeg', img.filename_jpeg, 64, imageSizes)}
-                                    alt={img.title ?? img.user_filename ?? ''}
-                                    className="h-11 w-11 rounded object-cover shrink-0"
-                                    loading="lazy"
-                                />
+                                {/* R4C2 UX-R4C2-03: an image lands in this panel
+                                    BECAUSE processing failed — in the dominant
+                                    failure class the _64.jpg derivative was never
+                                    written, so a thumbnail request paints a broken
+                                    glyph (and was the repo's only no-img-element
+                                    warning). Render a deterministic icon tile; the
+                                    photo is identified by the title/user_filename
+                                    text alongside. */}
+                                <div
+                                    aria-hidden="true"
+                                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-muted"
+                                >
+                                    <ImageOff className="h-5 w-5 text-muted-foreground" />
+                                </div>
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-sm font-medium">
                                         {img.title ?? img.user_filename ?? `ID ${img.id}`}
