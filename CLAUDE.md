@@ -180,6 +180,7 @@ git values must be treated as compromised and must not be reused.
 
 ### Privacy
 - GPS coordinates (`latitude`, `longitude`) excluded from public API responses
+- `strip_gps_on_upload` additionally scrubs the on-disk ORIGINAL (the file the paid-download route streams): lossless byte-level GPS-IFD / GPS-bearing-XMP neutralization for JPEG / TIFF / HEIF-AVIF-HEIC / WebP via `apps/web/src/lib/gps-exif-strip.ts`; PNG and structurally anomalous files take a metadata-free re-encode (autoOrient + keepIccProfile, explicit high-quality settings). Never use Sharp `withMetadata()` for stripping — in Sharp 0.33+ it KEEPS input EXIF (R4C8 COR-R4C8-01)
 - `filename_original` and `user_filename` excluded from public queries
 - `adminSelectFields` includes all fields (including PII) for authenticated admin routes
 - `publicSelectFields` derived from `adminSelectFields` by omitting PII fields — separate object reference prevents accidental leakage
@@ -208,7 +209,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 2. Original saved to the private upload store under `data/uploads/original/`
 3. Enqueued to `PQueue` (default concurrency: 1; override with `QUEUE_CONCURRENCY`) for background processing
 4. Queue job **claims** image (conditional `WHERE processed = false`) before processing
-5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at configurable sizes each (default: 640, 1536, 2048, 4096; admin-configurable up to 8 sizes)
+5. Sharp processes to **AVIF/WebP/JPEG in parallel** (`Promise.all`) at configurable sizes each (default: 640, 1536, 2048, 4096, 5120, 7680; admin-configurable up to 8 sizes)
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
 7. Conditional UPDATE marks as processed; if image was deleted mid-processing, orphaned files are cleaned up
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
