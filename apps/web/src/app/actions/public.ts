@@ -352,6 +352,11 @@ export async function recordPhotoView(imageId: number): Promise<void> {
 // @action-origin-exempt: public analytics endpoint — no admin auth needed
 export async function recordTopicView(topicSlug: string): Promise<void> {
     if (typeof topicSlug !== 'string' || topicSlug.length === 0 || topicSlug.length > 255) return;
+    // R4C2 COR-R4C2-07: slug-format pre-check, parity with loadMoreImages.
+    // The FK on topic_views.topic → topics.slug already rejects junk rows,
+    // but failing fast here saves a doomed INSERT round-trip per junk call
+    // and keeps the validation posture identical across the public actions.
+    if (!isValidSlug(topicSlug)) return;
     const requestHeaders = await headers();
     const params = await buildViewParams(requestHeaders);
     if (isViewRecordRateLimited(params.ip, Date.now())) return;
