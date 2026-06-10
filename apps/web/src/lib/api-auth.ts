@@ -67,6 +67,15 @@ export function withAdminAuth<T extends unknown[]>(
                 if (verified && tokenHasScope(verified.scopes, options.allowTokenScope)) {
                     const augmentedArgs = [...args, { token: verified }] as unknown as T;
                     const response = await handler(...augmentedArgs);
+                    // R4C3 SEC-R4C3-04: mirror the cookie path's C7-SEC-02
+                    // defense-in-depth defaults. Token-authenticated responses
+                    // are admin-grade too; the first lr:read route that
+                    // forgets its own Cache-Control must not be cacheable by
+                    // intermediaries. `has()` preserves handler-set headers.
+                    if (!response.headers.has('Cache-Control')) {
+                        response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+                        response.headers.set('Pragma', 'no-cache');
+                    }
                     if (!response.headers.has('X-Content-Type-Options')) {
                         response.headers.set('X-Content-Type-Options', 'nosniff');
                     }
