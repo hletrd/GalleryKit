@@ -20,12 +20,12 @@ const state: {
     row: { id: number; sessionId: string; refunded: boolean } | undefined;
     updateCalls: UpdateCall[];
     updateShouldThrow: boolean;
-    refundsCreate: ReturnType<typeof vi.fn>;
+    refundsCreate: (...args: unknown[]) => Promise<unknown>;
 } = {
     row: { id: 42, sessionId: 'cs_test_123', refunded: false },
     updateCalls: [],
     updateShouldThrow: false,
-    refundsCreate: vi.fn(),
+    refundsCreate: async () => ({ id: 're_test_1' }),
 };
 
 vi.mock('@/lib/action-guards', () => ({
@@ -83,7 +83,7 @@ describe('refundEntitlement charge_already_refunded convergence (R4C4 COR-R4C4-0
         state.row = { id: 42, sessionId: 'cs_test_123', refunded: false };
         state.updateCalls = [];
         state.updateShouldThrow = false;
-        state.refundsCreate = vi.fn(async () => ({ id: 're_test_1' }));
+        state.refundsCreate = async () => ({ id: 're_test_1' });
     });
 
     it('happy path: refund succeeds and the UPDATE clears the hash', async () => {
@@ -94,7 +94,7 @@ describe('refundEntitlement charge_already_refunded convergence (R4C4 COR-R4C4-0
     });
 
     it('charge_already_refunded: converges local state and reports success', async () => {
-        state.refundsCreate = vi.fn(async () => { throw stripeError('charge_already_refunded'); });
+        state.refundsCreate = async () => { throw stripeError('charge_already_refunded'); };
         const result = await refundEntitlement(42);
         expect(result).toEqual({ success: true });
         // The convergence UPDATE must be the SAME shape as the happy path:
@@ -104,14 +104,14 @@ describe('refundEntitlement charge_already_refunded convergence (R4C4 COR-R4C4-0
     });
 
     it('charge_already_refunded + convergence UPDATE failure: original error preserved', async () => {
-        state.refundsCreate = vi.fn(async () => { throw stripeError('charge_already_refunded'); });
+        state.refundsCreate = async () => { throw stripeError('charge_already_refunded'); };
         state.updateShouldThrow = true;
         const result = await refundEntitlement(42);
         expect(result).toEqual({ error: 'Refund failed', errorCode: 'already-refunded' });
     });
 
     it('other Stripe errors do NOT trigger the convergence UPDATE', async () => {
-        state.refundsCreate = vi.fn(async () => { throw stripeError('resource_missing'); });
+        state.refundsCreate = async () => { throw stripeError('resource_missing'); };
         const result = await refundEntitlement(42);
         expect(result).toEqual({ error: 'Refund failed', errorCode: 'charge-unknown' });
         expect(state.updateCalls).toHaveLength(0);
