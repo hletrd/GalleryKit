@@ -12,6 +12,7 @@ import {
 } from '@/lib/admin-tokens';
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
+import { sanitizeAdminString } from '@/lib/sanitize';
 import { headers } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 
@@ -33,24 +34,51 @@ export async function createLrToken(opts: {
     const scopes = normalizeScopes(opts.scopes);
     if (scopes.length === 0) return { error: 'At least one scope is required' };
 
-    const expiresAt = opts.expiresAt ? new Date(opts.expiresAt) : null;
+    // R4C1 SEC-R4C1-01: the token label is an admin-controlled persistent
+    // string rendered back in the tokens list (and its revoke aria-label) and
+    // stored in audit metadata. Per the repo-wide admin-string policy
+    // (C7R-RPL-11 → C3L-SEC-01 → … → C6L-SEC-01), reject C0/C1 controls and
+    // Unicode bidi / zero-width formatting characters instead of persisting
+    // a spoofable label on a credential-management surface.
+    const { value: label, rejected: labelRejected } = sanitizeAdminString(opts.label);
+    if (labelRejected || !label) {
+        return { error: 'Invalid token label' };
+    }
+
+    // R4C1 SEC-R4C1-01: validate the expiry. `new Date('garbage')` yields an
+    // Invalid Date whose getTime() is NaN; verifyToken's `expires_at.getTime()
+    // <= Date.now()` comparison is then always false — a malformed expiry
+    // would mint a never-expiring token. Past dates are equally a mistake.
+    let expiresAt: Date | null = null;
+    if (opts.expiresAt) {
+        const parsed = new Date(opts.expiresAt);
+        if (!Number.isFinite(parsed.getTime())) {
+            return { error: 'Invalid expiry date' };
+        }
+        if (parsed.getTime() <= Date.now()) {
+            return { error: 'Expiry date must be in the future' };
+        }
+        expiresAt = parsed;
+    }
 
     try {
         const result = await createToken({
             userId: user.id,
-            label: opts.label,
+            label,
             scopes: scopes as AdminTokenScope[],
             expiresAt,
         });
         const ip = getClientIp(await headers());
         await logAuditEvent(user.id, 'lr_token_created', 'admin_token', String(result.id), ip, {
-            label: opts.label,
+            label,
             scopes,
         }).catch(console.debug);
         return result;
     } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to create token';
-        return { error: msg };
+        // R4C1 SEC-R4C1-01: never relay raw driver/DB error text to the
+        // client; log server-side and return a generic message.
+        console.error('createLrToken failed:', err);
+        return { error: 'Failed to create token' };
     }
 }
 
