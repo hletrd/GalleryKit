@@ -42,6 +42,13 @@ export function TokensClient() {
     useEffect(() => { fetchTokens(); }, []);
 
     const handleCreate = () => {
+        // R4C4 UX-R4C4-04: the Create button disables on isPending, but the
+        // label input's Enter handler calls this directly — without this
+        // guard, key-repeat (or a double Enter) while the server action is
+        // in flight mints MULTIPLE live tokens and only the last plaintext
+        // is ever shown. Mirrors the sibling pattern in image-manager.tsx /
+        // topic-manager.tsx.
+        if (isPending) return;
         if (!newLabel.trim()) {
             toast.error(t('lrToken.labelRequired'));
             return;
@@ -152,7 +159,7 @@ export function TokensClient() {
                             onChange={(e) => setNewLabel(e.target.value)}
                             placeholder={t('lrToken.labelPlaceholder')}
                             maxLength={128}
-                            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } }}
                         />
                     </div>
                     <DialogFooter>

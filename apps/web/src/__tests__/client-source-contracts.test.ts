@@ -32,4 +32,19 @@ describe('client component source contracts', () => {
     expect(code).toContain("getTranslations('nav')");
     expect(code).toContain("`${t('password')} | ${t('admin')}`");
   });
+
+  // R4C4 UX-R4C4-04 / TEST-R4C4-13: the token-create Enter path must respect
+  // the pending state. The Create button disables on isPending, but Enter in
+  // the label input calls handleCreate directly — without the guard,
+  // key-repeat while the server action is in flight mints multiple live
+  // tokens whose plaintext is never shown (only the last one is displayed).
+  // Mirrors the sibling pattern in image-manager.tsx / topic-manager.tsx.
+  it('guards token creation against Enter-key double-submit while pending', () => {
+    const code = source('app/[locale]/admin/(protected)/tokens/tokens-client.tsx');
+    // handleCreate must early-return on isPending BEFORE any work.
+    const handler = /const handleCreate = \(\) => \{[\s\S]*?if \(isPending\) return;[\s\S]*?startTransition/.exec(code);
+    expect(handler).not.toBeNull();
+    // The Enter handler must preventDefault and route through handleCreate.
+    expect(code).toMatch(/e\.key === 'Enter'\)\s*\{\s*e\.preventDefault\(\);\s*handleCreate\(\);/);
+  });
 });
