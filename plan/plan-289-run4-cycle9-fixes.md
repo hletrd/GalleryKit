@@ -101,4 +101,24 @@ following the repo's SW_VERSION refresh-commit convention)
       `npm run deploy` once; record result.
 
 ## Progress
-- (updated during PROMPT 3)
+- Task 1 ✅ `edac55f4` — ExtendedXMP GPS scrub (per-chunk + offset-ordered
+  reconstruction); 3 behavioral tests, detection pair PROVEN failing on
+  the pre-fix code via stash A/B run (17/17 after).
+- Task 2 ✅ `d676e1aa` + `69a9d460` — lazy single-flight revalidate
+  closure; 304 path serves cached + touchMeta only (size-preserving,
+  never evicting); 4 source-contract pins; SW_VERSION refreshed
+  (d676e1aa-p7).
+- Task 3 ✅ `a46b8ca3` — OnThisDay thumbs through next/image via the
+  existing OptimisticImage island (~48-96 px variants instead of the
+  full base JPEG). Deviation from the plan's sized-derivative+fallback
+  sketch: the optimizer path matches the masonry grid's established
+  OptimisticImage pattern and removes the 404 class entirely (base
+  source guaranteed by R20-M2; optimizer resizes server-side).
+- Task 4 ✅ `3adbd2d4` — **upgraded**: the predicted drift was REAL —
+  `color_space` + `bit_depth` (admin-only) were live in the public
+  timeline select. Removed (no consumer rendered them); compile-time
+  Extract guard added against the newly exported
+  `PrivacySensitiveKeys`; privacy fixture pins (omit + subset-of-public
+  + safe-keys) added.
+- Task 5 ✅ — plan-287 archived to done/ (`384f20f3`); gates: see final
+  record below.
