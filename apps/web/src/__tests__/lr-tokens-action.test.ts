@@ -91,6 +91,24 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
+    // R4C2 COR-R4C2-04: code-point length validation — no silent UTF-16
+    // truncation (which could bisect a surrogate pair into U+FFFD) on the
+    // credential-management surface.
+    it('rejects labels longer than 128 code points', async () => {
+        const result = await createLrToken({ label: '📷'.repeat(129), scopes: ['lr:upload'] });
+        expect(result).toEqual({ error: 'Invalid token label' });
+        expect(createTokenMock).not.toHaveBeenCalled();
+    });
+
+    it('accepts a 128-code-point label and passes it through unsliced', async () => {
+        const label = '📷'.repeat(128); // 256 UTF-16 units, 128 code points
+        const result = await createLrToken({ label, scopes: ['lr:upload'] });
+        expect(result).toEqual({ plaintext: 'gk_test', id: 7 });
+        expect(createTokenMock).toHaveBeenCalledWith(
+            expect.objectContaining({ label }),
+        );
+    });
+
     it('rejects an unparseable expiry date instead of minting a never-expiring token', async () => {
         const result = await createLrToken({
             label: 'expiring',

@@ -13,6 +13,7 @@ import {
 import { logAuditEvent } from '@/lib/audit';
 import { getClientIp } from '@/lib/rate-limit';
 import { sanitizeAdminString } from '@/lib/sanitize';
+import { countCodePoints } from '@/lib/utils';
 import { headers } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 
@@ -46,6 +47,17 @@ export async function createLrToken(opts: {
     // a spoofable label on a credential-management surface.
     const { value: label, rejected: labelRejected } = sanitizeAdminString(opts.label);
     if (labelRejected || !label) {
+        return { error: 'Invalid token label' };
+    }
+
+    // R4C2 COR-R4C2-04: validate by Unicode code points and reject loudly,
+    // mirroring the canonical admin-string constraints (C7-AGG7R-02,
+    // R4C1 COR-R4C1-04). The prior behavior let createToken's UTF-16
+    // `.slice(0, 128)` silently truncate — and potentially bisect a
+    // surrogate pair into U+FFFD mojibake — on the credential-management
+    // surface where label accuracy decides WHICH token an admin revokes.
+    // The UI's maxLength={128} already aligns with this bound.
+    if (countCodePoints(label) > 128) {
         return { error: 'Invalid token label' };
     }
 

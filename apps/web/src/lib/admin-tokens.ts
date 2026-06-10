@@ -201,7 +201,12 @@ export async function createToken(opts: {
     scopes: AdminTokenScope[];
     expiresAt?: Date | null;
 }): Promise<{ plaintext: string; id: number }> {
-    const cleanLabel = opts.label.trim().slice(0, 128);
+    // R4C2 COR-R4C2-04: residual defense-in-depth truncation is now
+    // code-point-safe (Array.from iterates by code point) so a 128-cap can
+    // never bisect a surrogate pair into U+FFFD mojibake. The action layer
+    // (createLrToken) REJECTS over-long labels before reaching here; this
+    // truncation only guards direct lib callers.
+    const cleanLabel = Array.from(opts.label.trim()).slice(0, 128).join('');
     if (!cleanLabel) throw new Error('Token label is required');
     const cleanScopes = normalizeScopes(opts.scopes);
     if (cleanScopes.length === 0) throw new Error('At least one scope is required');
