@@ -18,7 +18,11 @@ import { getTranslations } from 'next-intl/server';
 
 export type LrTokenListItem = Omit<AdminTokenRecord, 'tokenHash'>;
 
-/** @action-origin-exempt: token-create is a mutating action protected by requireSameOriginAdmin below */
+// R4C2 SEC-R4C2-02: deliberately NO exemption comment here — this is a
+// MUTATING action (mints a credential, writes admin_tokens + audit log).
+// The lint:action-origin scanner verifies the requireSameOriginAdmin()
+// early-return below directly; exemption markers are reserved for
+// read-only exports and now FAIL the gate when placed on a mutating body.
 export async function createLrToken(opts: {
     label: string;
     scopes: string[];

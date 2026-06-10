@@ -189,7 +189,13 @@ const MUTATING_FUNCTION_NAMES = new Set([
     'revalidateAllAppData',
 ]);
 
-function statementContainsPreGuardMutation(statement: ts.Statement): boolean {
+/**
+ * R4C2 SEC-R4C2-02: generic walker — true when any node in the subtree is a
+ * DIRECT mutating call (`.insert(...)` / `.update(...)` / `logAuditEvent(...)`
+ * / `revalidate*(...)` etc.). Used both for the pre-guard-mutation ordering
+ * check and to reject `@action-origin-exempt` comments on mutating bodies.
+ */
+function nodeContainsMutatingCall(root: ts.Node): boolean {
     let found = false;
     const visit = (node: ts.Node) => {
         if (found) return;
@@ -206,8 +212,12 @@ function statementContainsPreGuardMutation(statement: ts.Statement): boolean {
         }
         ts.forEachChild(node, visit);
     };
-    visit(statement);
+    visit(root);
     return found;
+}
+
+function statementContainsPreGuardMutation(statement: ts.Statement): boolean {
+    return nodeContainsMutatingCall(statement);
 }
 
 function functionCallsRequireSameOriginAdmin(body: ts.Node): boolean {
@@ -270,6 +280,18 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
 
     const evaluateBody = (owner: ts.Node, body: ts.Node | undefined, name: string) => {
         if (hasExemptComment(owner, content)) {
+            // R4C2 SEC-R4C2-02: exemption is reserved for READ-ONLY exports
+            // (scanner header + CLAUDE.md "Lint Gates"). Honoring the comment
+            // unconditionally let a mutating action opt out of verification
+            // entirely — the guard could later be refactored away with the
+            // gate still green. An exempt comment on a body containing a
+            // direct mutating call is therefore a hard failure, not a skip.
+            if (body && nodeContainsMutatingCall(body)) {
+                report.failed.push(
+                    `EXEMPT COMMENT ON MUTATING ACTION: ${relative}:${lineOf(owner)} ${name} carries '@action-origin-exempt' but its body performs mutations; exemption is reserved for read-only exports — remove the comment and return early on requireSameOriginAdmin() instead`,
+                );
+                return;
+            }
             report.skipped.push(`SKIP (exempt comment): ${relative}::${name}`);
             return;
         }
@@ -330,7 +352,12 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 const name = declaration.name.text;
                 // `init.body` is a concise-body expression OR a block; both are
                 // ts.Node and walkable by functionCallsRequireSameOriginAdmin.
-                evaluateBody(declaration, init.body, name);
+                // R4C2 SEC-R4C2-02: pass the STATEMENT as the comment owner —
+                // a leading `@action-origin-exempt` JSDoc attaches to the
+                // `export const …` statement's trivia, not to the inner
+                // VariableDeclaration node, so exemption detection (and the
+                // new exempt-on-mutating-body rejection) must look there.
+                evaluateBody(statement, init.body, name);
                 continue;
             }
             // Function expression: `async function (...) {...}`
@@ -339,7 +366,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                 const isAsync = !!funcModifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
                 if (!isAsync) continue;
                 const name = declaration.name.text;
-                evaluateBody(declaration, init.body, name);
+                evaluateBody(statement, init.body, name);
                 continue;
             }
         }

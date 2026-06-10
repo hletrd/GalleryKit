@@ -137,6 +137,67 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed).toEqual([]);
         expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::mutateFoo');
     });
+
+    // R4C2 SEC-R4C2-02: exemption comments must not silence verification of
+    // mutating actions — that let `createLrToken` opt out of the gate while
+    // minting credentials, so a future guard removal would have shipped with
+    // lint:action-origin green.
+    it('fails when an exempt comment sits on a body with a direct DB mutation', () => {
+        const src = `
+            /** @action-origin-exempt: bogus — this body mutates */
+            export async function createThing(opts) {
+                await db.insert(things).values(opts);
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+        expect(report.failed[0]).toContain('createThing');
+    });
+
+    it('fails when an exempt comment sits on a body calling logAuditEvent (arrow form)', () => {
+        const src = `
+            /** @action-origin-exempt: bogus — audit write is a mutation */
+            export const auditThing = async (id) => {
+                await logAuditEvent(1, 'x', 'y', String(id));
+                return { success: true };
+            };
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.skipped).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+        expect(report.failed[0]).toContain('auditThing');
+    });
+
+    it('still skips exempt read-only bodies that only db.select', () => {
+        const src = `
+            /** @action-origin-exempt: read-only admin getter */
+            export async function listThings() {
+                return db.select().from(things).orderBy(things.name);
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.skipped).toContain('SKIP (exempt comment): actions/fixture.ts::listThings');
+    });
+
+    it('passes a guard-carrying mutating action WITHOUT an exempt comment (createLrToken shape)', () => {
+        const src = `
+            export async function createToken(opts) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.insert(tokens).values(opts);
+                await logAuditEvent(1, 'created', 'token', '1');
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'actions/fixture.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK: actions/fixture.ts::createToken');
+    });
 });
 
 describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)', () => {
