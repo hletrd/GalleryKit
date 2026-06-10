@@ -48,7 +48,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
         const withAdminAuth = await importWrapper();
         const wrapped = withAdminAuth(
-            async () => NextResponse.json({ ok: true }),
+            async (_req: NextRequest) => NextResponse.json({ ok: true }),
             { allowTokenScope: 'lr:upload' },
         );
 
@@ -63,7 +63,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
         const withAdminAuth = await importWrapper();
         const wrapped = withAdminAuth(
-            async () => NextResponse.json({ ok: true }, {
+            async (_req: NextRequest) => NextResponse.json({ ok: true }, {
                 headers: { 'Cache-Control': 'private, max-age=1' },
             }),
             { allowTokenScope: 'lr:upload' },
@@ -78,7 +78,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
 
     it('cookie branch: applies the same defaults (C7-SEC-02 parity)', async () => {
         const withAdminAuth = await importWrapper();
-        const wrapped = withAdminAuth(async () => NextResponse.json({ ok: true }));
+        const wrapped = withAdminAuth(async (_req: NextRequest) => NextResponse.json({ ok: true }));
 
         const response = await wrapped(fakeRequest({ origin: 'https://gallery.test', host: 'gallery.test' }));
         expect(response.status).toBe(200);
@@ -91,7 +91,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         verifyTokenMock.mockResolvedValue(null);
         const withAdminAuth = await importWrapper();
         const wrapped = withAdminAuth(
-            async () => NextResponse.json({ ok: true }),
+            async (_req: NextRequest) => NextResponse.json({ ok: true }),
             { allowTokenScope: 'lr:upload' },
         );
 
