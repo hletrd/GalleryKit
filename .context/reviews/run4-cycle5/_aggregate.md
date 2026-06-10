@@ -62,9 +62,11 @@ hygiene on the `'use server'` boundary.
 | LOW-R4C5-05 | LOW/High(behavior)·Low(impact) | `lib/analytics.ts:107` strips exactly one trailing dot; `github.com..` (WHATWG-URL-preserved, attacker-suppliable Referer) still records bare `"com."` — strip ALL trailing dots | code |
 | TEST-R4C5-06 | MED-gap/High | Zero unit/e2e coverage of `loadMoreSmartCollectionImages` / `getImagesForSmartCollection` (enabled COR-R4C5-01) — behavioral + boundary + source-contract cases added with the fix | test-engineer |
 | TEST-R4C5-07 | LOW-gap/High | Download-route FileHandle leak contract missing the stat-throw case — add with COR-R4C5-04 | test-engineer |
-| DOC-R4C5-08 | LOW/High | Webhook comment (and cycle-4 aggregate record) claims "no CLIENT_FOUND_ROWS flag"; live probe proves mysql2 defaults INCLUDE FOUND_ROWS (no-op UPDATE → affectedRows=1). Webhook gate conclusion unaffected (INSERT IGNORE dup → 0 either way) — correct the comment's rationale so future `affectedRows` audits start from matched-rows semantics | document-specialist, verifier |
+| DOC-R4C5-08 | LOW/High | Webhook comment (and cycle-4 aggregate record) claims "no CLIENT_FOUND_ROWS flag"; live probe proves mysql2 defaults INCLUDE FOUND_ROWS (no-op UPDATE → affectedRows=1). **UPGRADED during implementation — see COR-R4C5-09 addendum below**: the webhook's insert is ON DUPLICATE KEY UPDATE (not INSERT IGNORE), and under FOUND_ROWS the no-op dup reports affectedRows=1 too — the conclusion was NOT safe | document-specialist, verifier |
+| COR-R4C5-09 | MED/High | **(Addendum — found while implementing Task 6's comment fix and live-probing the exact ODKU statement shape.)** `api/stripe/webhook/route.ts:357` `insertedFresh = affectedRows === 1` is INEFFECTIVE under mysql2 default FOUND_ROWS: the dup-key no-op loser (`set: { sessionId }` to its current value) ALSO reports affectedRows=1 (live-verified: fresh = (1, insertId>0); loser = (1, insertId=0); changed dup = (2, existing id)). The R4C3-02 race window therefore still logged `Entitlement created` + the LOG_PLAINTEXT_DOWNLOAD_TOKENS dead-token line. Fix: gate on `affectedRows === 1 && insertId > 0` (insertId live-verified as the disambiguator); contract test updated to pin the conjunction | verifier (live probe), debugger |
 
-All 8 findings are scheduled in this cycle's fix plan (plan-281); the two
+All 9 findings (8 from the review pass + the COR-R4C5-09 implementation-time
+addendum) are scheduled in this cycle's fix plan (plan-281); the two
 test gaps fold into their parent fixes. No new deferrals; the three
 standing deferrals (DEF-R4C1-01, DEF-R4C2-01, DEF-R4C3-01) were re-audited
 and their exit criteria remain un-triggered (evidence in

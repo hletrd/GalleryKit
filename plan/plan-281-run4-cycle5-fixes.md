@@ -69,14 +69,26 @@ new `apps/web/src/__tests__/smart-collection-pagination.test.ts`
       paths already use the normalized value.
 - [ ] Tests: `github.com..` and `github.com...` → `github.com`.
 
-## Task 6 — DOC-R4C5-08: correct the FOUND_ROWS rationale in the webhook comment
-**Files:** `apps/web/src/app/api/stripe/webhook/route.ts` (comment near the
-`affectedRows === 1` gate)
-- [ ] Replace the "without CLIENT_FOUND_ROWS" claim with the live-verified
-      fact: mysql2 defaults INCLUDE FOUND_ROWS (UPDATE affectedRows =
-      matched rows); the INSERT IGNORE gate is correct under either flag
-      because a suppressed duplicate reports 0. Cite the run4-cycle5 live
-      probe.
+## Task 6 — DOC-R4C5-08 → **UPGRADED to COR-R4C5-09**: webhook insertedFresh gate ineffective under FOUND_ROWS
+**Files:** `apps/web/src/app/api/stripe/webhook/route.ts:346-358`,
+`apps/web/src/__tests__/stripe-webhook-source.test.ts:101-120`
+- [x] While implementing the planned comment correction, the exact ODKU
+      statement shape was live-probed: under mysql2 default FOUND_ROWS the
+      no-op dup-key update reports `affectedRows = 1` — IDENTICAL to a
+      fresh insert — so the R4C3-02 gate `affectedRows === 1` never
+      filtered the race loser; the dead-token log lines it was built to
+      suppress were still emitted. (Plain-UPDATE probe: no-op → (1,0
+      changed); ODKU probe: fresh = (1, insertId>0); no-op dup = (1, 0);
+      changed dup = (2, existing id).)
+- [x] Gate fixed to the conjunction
+      `insertHeader.affectedRows === 1 && insertHeader.insertId > 0`
+      (entitlements.id is AUTO_INCREMENT, so a fresh insert always carries
+      insertId > 0); comment rewritten with the live-verified semantics.
+- [x] `stripe-webhook-source.test.ts` contract updated to pin the
+      conjunction shape.
+- [x] Aggregate amended with the COR-R4C5-09 addendum row (severity
+      upgraded MED/High; the original DOC-R4C5-08 rationale-correction is
+      subsumed).
 
 ## Gate work (after all tasks)
 - [ ] eslint · typecheck · vitest · lint:api-auth · lint:action-origin ·

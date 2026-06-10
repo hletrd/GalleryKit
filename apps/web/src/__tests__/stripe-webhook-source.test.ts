@@ -98,14 +98,18 @@ describe('stripe webhook source-contract', () => {
         expect(gateStr).not.toMatch(/email=\$\{customerEmail\}/);
     });
 
-    it('gates success logging on a TRUE insert via affectedRows === 1 (R4C3 COR-R4C3-02)', () => {
+    it('gates success logging on a TRUE insert via affectedRows === 1 AND insertId > 0 (R4C3 COR-R4C3-02 / R4C5 COR-R4C5-09)', () => {
         // The dup-key loser of a SELECT/INSERT race records nothing — its
-        // token hash is never stored. MySQL reports affectedRows 1 only for
-        // a fresh insert (0 for the no-op dup-key update, 2 for a changing
-        // one), so the success log lines must be gated on that outcome or
-        // the loser logs a [manual-distribution] line carrying a dead token
-        // (the C3-RPF-07 failure mode, re-minted in the race window).
-        expect(WEBHOOK_SRC).toMatch(/insertedFresh\s*=\s*insertHeader\.affectedRows\s*===\s*1/);
+        // token hash is never stored. Under mysql2's DEFAULT flags
+        // (CLIENT_FOUND_ROWS is ON) a no-op dup-key update reports
+        // affectedRows = 1 — IDENTICAL to a fresh insert (live-verified
+        // against MySQL 8, run4-cycle5), so the R4C3 affectedRows-only
+        // gate let the loser log a [manual-distribution] line carrying a
+        // dead token (the C3-RPF-07 failure mode, re-minted). insertId
+        // disambiguates: fresh = (1, new AUTO_INCREMENT id > 0); no-op
+        // dup loser = (1, 0); changed-value dup = (2, existing id). The
+        // gate MUST be the conjunction.
+        expect(WEBHOOK_SRC).toMatch(/insertedFresh\s*=\s*insertHeader\.affectedRows\s*===\s*1\s*&&\s*insertHeader\.insertId\s*>\s*0/);
         // The non-fresh path must bail out BEFORE 'Entitlement created'.
         const bailIndex = WEBHOOK_SRC.indexOf('if (!insertedFresh)');
         const createdLogIndex = WEBHOOK_SRC.indexOf("console.info('Entitlement created'");

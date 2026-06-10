@@ -343,18 +343,23 @@ export async function POST(request: NextRequest): Promise<Response> {
                 downloadTokenHash,
                 expiresAt,
             }).onDuplicateKeyUpdate({ set: { sessionId } }); // no-op update keeps idempotency
-            // R4C3 COR-R4C3-02: distinguish the TRUE insert from the dup-key
-            // loser. MySQL reports affectedRows = 1 for a fresh insert, 2 for
-            // a dup-key update that changed values, and 0 for a dup-key
-            // update to identical values (the no-op `set: { sessionId }` form,
-            // without CLIENT_FOUND_ROWS) — never 1 for the loser. Before this
-            // gate, two concurrent retries racing between the SELECT and the
-            // INSERT would BOTH log `Entitlement created` and the
-            // LOG_PLAINTEXT_DOWNLOAD_TOKENS manual-distribution line — the
-            // loser's line carrying a plaintext token whose hash was never
-            // stored, re-creating the exact C3-RPF-07 dead-token operator
-            // workflow in the race window the comment above anticipates.
-            insertedFresh = insertHeader.affectedRows === 1;
+            // R4C3 COR-R4C3-02 / R4C5 COR-R4C5-09: distinguish the TRUE
+            // insert from the dup-key loser. The R4C3 form gated on
+            // `affectedRows === 1` alone, reasoning the no-op dup-key update
+            // reports 0 "without CLIENT_FOUND_ROWS" — but mysql2's DEFAULT
+            // connection flags INCLUDE FOUND_ROWS, under which a dup-key
+            // update that sets a row to its current values reports
+            // affectedRows = 1, identical to a fresh insert (verified live
+            // against MySQL 8 with this app's connection options,
+            // run4-cycle5). The loser therefore still logged `Entitlement
+            // created` + the LOG_PLAINTEXT_DOWNLOAD_TOKENS line with a
+            // plaintext token whose hash was never stored — the exact
+            // C3-RPF-07 dead-token hazard. insertId disambiguates: a fresh
+            // insert carries the new AUTO_INCREMENT id (> 0) while the
+            // no-op dup-key loser reports insertId = 0 (live-verified
+            // alongside the flags). Fresh = (affectedRows 1, insertId > 0);
+            // loser = (1, 0); changed-value dup = (2, existing id).
+            insertedFresh = insertHeader.affectedRows === 1 && insertHeader.insertId > 0;
         } catch (err) {
             // Cycle 7 RPF / P392-03 / C7-RPF-03: structured-object log shape
             // with sessionId/imageId/tier so operator can correlate the
