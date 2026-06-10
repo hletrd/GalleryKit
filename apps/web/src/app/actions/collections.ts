@@ -116,9 +116,10 @@ export async function deleteSmartCollection(id: number) {
     }
 }
 
-/**
- * @action-origin-exempt: read-only — no mutation, no auth required for public listings
- */
-export async function getSmartCollections() {
-    return db.select().from(smartCollections).orderBy(smartCollections.name);
-}
+// R4C5 SEC-R4C5-02: the former `getSmartCollections` export was removed.
+// On a 'use server' boundary every export registers an invokable endpoint;
+// that getter was unauthenticated, un-rate-limited, and returned ALL rows
+// (including `is_public = false` collections with their query_json ASTs)
+// while having zero callers. If a listing getter is ever needed: the admin
+// variant must gate on isAdmin(), and a public variant must filter
+// `is_public = true` AND omit `query_json`.

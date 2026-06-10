@@ -240,3 +240,21 @@ describe('loadMoreSmartCollectionImages source contract (no double lookahead)', 
         expect(publicSource).not.toContain('getImagesForSmartCollection(compiledCondition, safeLimit + 1');
     });
 });
+
+describe('collections actions surface (R4C5 SEC-R4C5-02)', () => {
+    const collectionsSource = fs.readFileSync(
+        path.join(__dirname, '..', 'app', 'actions', 'collections.ts'),
+        'utf8',
+    );
+
+    it('does not resurrect the dead unauthenticated getSmartCollections endpoint', () => {
+        // Every export of a 'use server' file registers an invokable server
+        // action. The removed getter returned ALL rows — including
+        // is_public = false collections with their query_json ASTs — with
+        // no isAdmin() gate and no rate limit. A future listing getter must
+        // be auth-gated (admin) or is_public-filtered + query_json-omitting
+        // (public); update this lock alongside that design.
+        expect(collectionsSource).not.toMatch(/export\s+(async\s+)?function\s+getSmartCollections\b/);
+        expect(collectionsSource).not.toMatch(/export\s+const\s+getSmartCollections\b/);
+    });
+});
