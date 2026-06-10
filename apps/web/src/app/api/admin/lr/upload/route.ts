@@ -231,7 +231,15 @@ export const POST = withAdminAuth(
             tracker.count += 1;
             tracker.bytes += fileSize;
             uploadTracker.set(trackerKey, tracker);
-            const settleTrackerToActual = (success: boolean) =>
+            // R4C4 COR-R4C4-03: idempotent settle — the widened containment
+            // catch below may run after a reject branch already settled (e.g.
+            // a throw following the HDR-reject's own settle). A double settle
+            // of the same claim would steal quota from OTHER concurrent
+            // claims under this key, so the closure settles at most once.
+            let trackerSettled = false;
+            const settleTrackerToActual = (success: boolean) => {
+                if (trackerSettled) return;
+                trackerSettled = true;
                 settleUploadTrackerClaim(
                     uploadTracker,
                     trackerKey,
@@ -240,6 +248,7 @@ export const POST = withAdminAuth(
                     success ? 1 : 0,
                     success ? fileSize : 0,
                 );
+            };
 
             let data: Awaited<ReturnType<typeof saveOriginalAndGetMetadata>>;
             try {
@@ -264,6 +273,21 @@ export const POST = withAdminAuth(
                 return NextResponse.json({ error: msg }, { status: 422, headers: NO_CACHE });
             }
 
+        // R4C4 COR-R4C4-03: contain the WHOLE post-save window, mirroring the
+        // browser path's per-file catch (app/actions/images.ts:270-475). The
+        // previous narrow insert-only try left `extractExifForDb`,
+        // `cleanupOriginalIfRestoreMaintenanceBegan`, and `assertBlurDataUrl`
+        // (which throws BY CONTRACT on producer drift, AGG2-L03) bare — a
+        // throw there leaked the pre-claimed tracker quota for the rest of
+        // the 1-hour window, orphaned the on-disk original, and surfaced a
+        // non-JSON Next.js 500 the Lightroom plugin cannot parse. The early
+        // returns inside this block settle their own claims (the settle
+        // closure is idempotent) and are unaffected. Post-insert work
+        // (enqueue/audit/revalidate) stays OUTSIDE: once the row exists,
+        // deleting the original would be wrong.
+        let imageId: number;
+        let exifDb: ReturnType<typeof extractExifForDb>;
+        try {
         // Run-3 RPF cycle 1 / F2: honor the `allow_hdr_ingest` admin setting on
         // the Lightroom PAT path, mirroring the browser upload action
         // (app/actions/images.ts). `allow_hdr_ingest` (default false) is
@@ -283,7 +307,7 @@ export const POST = withAdminAuth(
             );
         }
 
-        const exifDb = extractExifForDb(data.exifData);
+        exifDb = extractExifForDb(data.exifData);
         if (config.stripGpsOnUpload) {
             exifDb.latitude = null;
             exifDb.longitude = null;
@@ -370,19 +394,17 @@ export const POST = withAdminAuth(
             original_file_size: fileEntry.size,
         };
 
-        // R4C1 COR-R4C1-02: contain insert failures, mirroring the browser
-        // path's per-file catch (app/actions/images.ts). The topic-existence
-        // check above is a TOCTOU — a concurrent topic deletion surfaces here
-        // as an FK violation; DB hiccups and a thrown safeInsertId land here
-        // too. Without this catch the route 500s opaquely, the on-disk
-        // original is orphaned, and the pre-claimed tracker quota leaks for
-        // the rest of the 1-hour window.
-        let imageId: number;
-        try {
-            const insertResult = await db.insert(images).values(insertValues);
-            imageId = safeInsertId(insertResult[0].insertId);
+        // R4C1 COR-R4C1-02 / R4C4 COR-R4C4-03: the catch below contains the
+        // whole post-save window opened above — EXIF extraction, the late
+        // restore-maintenance probe, the blur-data-url write barrier, and
+        // the insert itself (where a concurrent topic deletion surfaces as
+        // an FK violation and a thrown safeInsertId lands too). Cleanup is
+        // safe to repeat: deleteOriginalUploadFile never throws (both
+        // unlinks self-catch) and the settle closure is idempotent.
+        const insertResult = await db.insert(images).values(insertValues);
+        imageId = safeInsertId(insertResult[0].insertId);
         } catch (err) {
-            console.error('LR upload: image insert failed', err);
+            console.error('LR upload: post-save processing failed', err);
             await deleteOriginalUploadFile(data.filenameOriginal);
             settleTrackerToActual(false);
             return NextResponse.json(

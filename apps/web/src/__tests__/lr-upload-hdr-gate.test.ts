@@ -242,15 +242,22 @@ describe('lr upload parity source-contract (cycle 4)', () => {
  * - COR-R4C1-05: forward camera_model / capture_date to the processing queue.
  */
 describe('lr upload parity source-contract (run-4 cycle 1)', () => {
-    // COR-R4C1-02 — insert-failure containment
+    // COR-R4C1-02 — insert-failure containment.
+    // R4C4 COR-R4C4-03 widened the try to cover the whole post-save window
+    // (EXIF / restore probe / blur barrier / insert), so the insert is no
+    // longer the FIRST statement inside the try; the contract is now: the
+    // insert sits inside a try whose catch deletes the original, settles the
+    // quota, and answers structured 500 JSON.
     it('wraps the images insert in a try/catch (COR-R4C1-02)', () => {
-        const block = LR_SRC.match(
-            /try\s*\{[^{}]*db\.insert\(images\)[\s\S]*?\}\s*catch[\s\S]*?\n\s{8}\}/,
-        );
-        expect(block).not.toBeNull();
-        const blockStr = block?.[0] ?? '';
-        // On insert failure: delete the on-disk original, release the
-        // pre-claimed tracker quota, and answer structured 500 JSON.
+        const insertIndex = LR_SRC.indexOf('db.insert(images)');
+        expect(insertIndex).toBeGreaterThan(-1);
+        const tryIndex = LR_SRC.lastIndexOf('try {', insertIndex);
+        expect(tryIndex).toBeGreaterThan(-1);
+        const catchMatch = LR_SRC.slice(insertIndex).match(/\}\s*catch\s*\(err\)\s*\{[\s\S]*?\n\s{8}\}/);
+        expect(catchMatch).not.toBeNull();
+        const blockStr = catchMatch?.[0] ?? '';
+        // On failure anywhere in the window: delete the on-disk original,
+        // release the pre-claimed tracker quota, and answer structured 500.
         expect(blockStr).toMatch(/deleteOriginalUploadFile\(data\.filenameOriginal\)/);
         expect(blockStr).toMatch(/settleTrackerToActual\(false\)/);
         expect(blockStr).toMatch(/status:\s*500/);
@@ -298,5 +305,60 @@ describe('lr upload parity source-contract (run-4 cycle 1)', () => {
         const blockStr = enqueueBlock?.[0] ?? '';
         expect(blockStr).toMatch(/camera_model:\s*exifDb\.camera_model/);
         expect(blockStr).toMatch(/capture_date:\s*exifDb\.capture_date/);
+    });
+});
+
+/**
+ * R4C4 COR-R4C4-03 / TEST-R4C4-12: the whole post-save window (EXIF
+ * extraction, late restore-maintenance probe, blur-data-url write barrier,
+ * DB insert) must sit inside ONE containment try whose catch deletes the
+ * orphaned original, settles the pre-claimed tracker quota, and returns a
+ * parseable JSON 500 — parity with the browser path's per-file catch
+ * (app/actions/images.ts). Source-contract style per this file's documented
+ * convention (the route is too heavy to exercise end-to-end in unit scope).
+ */
+describe('lr upload post-save containment source-contract (R4C4 COR-R4C4-03)', () => {
+    // The containment catch is identified by its log line.
+    const CATCH_LOG = 'LR upload: post-save processing failed';
+
+    it('opens the containment try BEFORE extractExifForDb and the blur write barrier', () => {
+        const catchIndex = LR_SRC.indexOf(CATCH_LOG);
+        expect(catchIndex).toBeGreaterThan(-1);
+        // Find the try block that the catch closes: walk back from the catch
+        // to the nearest preceding `try {` and assert the risky calls sit
+        // between them.
+        const tryIndex = LR_SRC.lastIndexOf('try {', catchIndex);
+        expect(tryIndex).toBeGreaterThan(-1);
+        const windowSrc = LR_SRC.slice(tryIndex, catchIndex);
+        expect(windowSrc).toContain('extractExifForDb(data.exifData)');
+        expect(windowSrc).toContain('assertBlurDataUrl(data.blurDataUrl)');
+        expect(windowSrc).toContain('cleanupOriginalIfRestoreMaintenanceBegan');
+        expect(windowSrc).toContain('db.insert(images)');
+    });
+
+    it('catch deletes the original, settles the claim, and returns JSON 500', () => {
+        const catchIndex = LR_SRC.indexOf(CATCH_LOG);
+        expect(catchIndex).toBeGreaterThan(-1);
+        // The catch body runs from the log line to the closing of the 500
+        // response return.
+        const catchBody = LR_SRC.slice(catchIndex, catchIndex + 600);
+        expect(catchBody).toMatch(/deleteOriginalUploadFile\(data\.filenameOriginal\)/);
+        expect(catchBody).toMatch(/settleTrackerToActual\(false\)/);
+        expect(catchBody).toMatch(/\{\s*error:\s*'Upload failed'\s*\}/);
+        expect(catchBody).toMatch(/status:\s*500/);
+    });
+
+    it('post-insert work (enqueue/audit/revalidate) stays OUTSIDE the containment try', () => {
+        const catchIndex = LR_SRC.indexOf(CATCH_LOG);
+        const enqueueIndex = LR_SRC.indexOf('enqueueImageProcessing({');
+        const revalidateIndex = LR_SRC.indexOf('revalidateAllAppData()');
+        expect(enqueueIndex).toBeGreaterThan(catchIndex);
+        expect(revalidateIndex).toBeGreaterThan(catchIndex);
+    });
+
+    it('the settle closure is idempotent (double-settle cannot steal quota)', () => {
+        // The guard flag must be checked before settleUploadTrackerClaim runs.
+        expect(LR_SRC).toMatch(/let\s+trackerSettled\s*=\s*false/);
+        expect(LR_SRC).toMatch(/if\s*\(trackerSettled\)\s*return;/);
     });
 });
