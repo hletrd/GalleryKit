@@ -132,3 +132,65 @@ describe('parseSmartCollectionQuery', () => {
         expect(() => parseSmartCollectionQuery('[]')).toThrow();
     });
 });
+
+// R4C4 HARD-R4C4-07 / TEST-R4C4-14: runtime scalar enforcement for predicate
+// values. The declared types say string | number; non-scalars previously
+// flowed into Drizzle parameter binding where mysql2's escaping expands
+// plain objects into `key` = 'val' SQL fragments — breaking the module's
+// "parameter binding for all values" invariant on the public /c/[slug]
+// compiler. Malformed stored queries must fail loudly at parse time.
+describe('parseSmartCollectionQuery — scalar value enforcement (R4C4 HARD-R4C4-07)', () => {
+    const pred = (extra: Record<string, unknown>) =>
+        JSON.stringify({ type: 'predicate', column: 'camera_model', operator: 'eq', ...extra });
+
+    it('rejects object values', () => {
+        expect(() => parseSmartCollectionQuery(pred({ value: { a: 1 } }))).toThrow(/string or finite number/);
+    });
+
+    it('rejects array values', () => {
+        expect(() => parseSmartCollectionQuery(pred({ value: ['x'] }))).toThrow(/string or finite number/);
+    });
+
+    it('rejects null values', () => {
+        expect(() => parseSmartCollectionQuery(pred({ value: null }))).toThrow(/string or finite number/);
+    });
+
+    it('rejects boolean values', () => {
+        expect(() => parseSmartCollectionQuery(pred({ value: true }))).toThrow(/string or finite number/);
+    });
+
+    it('rejects non-scalar lo/hi on between', () => {
+        const between = JSON.stringify({
+            type: 'predicate', column: 'iso', operator: 'between', lo: { gt: 1 }, hi: 800,
+        });
+        expect(() => parseSmartCollectionQuery(between)).toThrow(/strings or finite numbers/);
+    });
+
+    it('rejects non-scalar elements inside in values', () => {
+        const inPred = JSON.stringify({
+            type: 'predicate', column: 'iso', operator: 'in', values: [100, { v: 200 }],
+        });
+        expect(() => parseSmartCollectionQuery(inPred)).toThrow(/strings or finite numbers/);
+    });
+
+    it('rejects a non-scalar value on the tag predicate', () => {
+        const tagPred = JSON.stringify({
+            type: 'predicate', column: 'tag', operator: 'eq', value: ['landscape'],
+        });
+        expect(() => parseSmartCollectionQuery(tagPred)).toThrow(/string or finite number/);
+    });
+
+    it('accepts string and finite-number scalars', () => {
+        expect(() => parseSmartCollectionQuery(pred({ value: 'X-T5' }))).not.toThrow();
+        const iso = JSON.stringify({ type: 'predicate', column: 'iso', operator: 'gte', value: 800 });
+        expect(() => parseSmartCollectionQuery(iso)).not.toThrow();
+        const between = JSON.stringify({
+            type: 'predicate', column: 'iso', operator: 'between', lo: 100, hi: 800,
+        });
+        expect(() => parseSmartCollectionQuery(between)).not.toThrow();
+        const inPred = JSON.stringify({
+            type: 'predicate', column: 'camera_model', operator: 'in', values: ['A7IV', 'X-T5'],
+        });
+        expect(() => parseSmartCollectionQuery(inPred)).not.toThrow();
+    });
+});

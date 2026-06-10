@@ -298,6 +298,20 @@ export function parseSmartCollectionQuery(json: string): SmartCollectionQuery {
     return validateNode(raw, 0);
 }
 
+/**
+ * R4C4 HARD-R4C4-07: runtime enforcement of the declared scalar value types.
+ * The Predicate types say `string | number`; without this check, a stored
+ * query carrying `value: {…}` / `[..]` / `null` / `NaN` flowed into Drizzle
+ * parameter binding, where mysql2's value escaping expands plain objects
+ * into `` `key` = 'val' `` SQL fragments — violating the module's
+ * "parameter binding for all values" invariant. Admin-only input, but the
+ * compiled query executes on the PUBLIC /c/[slug] page, so malformed values
+ * must fail loudly at validation (write time) instead.
+ */
+function isScalarValue(v: unknown): v is string | number {
+    return typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v));
+}
+
 function validateNode(node: unknown, depth: number): SmartCollectionQuery {
     if (depth > MAX_DEPTH) {
         throw new SmartCollectionDepthError(depth);
@@ -327,6 +341,10 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
             if (n.lo === undefined || n.hi === undefined) {
                 throw new SmartCollectionQueryError('between predicate requires lo and hi');
             }
+            // R4C4 HARD-R4C4-07: scalar enforcement.
+            if (!isScalarValue(n.lo) || !isScalarValue(n.hi)) {
+                throw new SmartCollectionQueryError('between predicate lo/hi must be strings or finite numbers');
+            }
         } else if (n.operator === 'in') {
             if (!Array.isArray(n.values) || n.values.length === 0) {
                 throw new SmartCollectionQueryError('in predicate requires a non-empty values array');
@@ -334,9 +352,18 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
             if (n.values.length > MAX_IN_VALUES) {
                 throw new SmartCollectionQueryError(`in predicate may have at most ${MAX_IN_VALUES} values`);
             }
+            // R4C4 HARD-R4C4-07: every element must be scalar.
+            if (!n.values.every(isScalarValue)) {
+                throw new SmartCollectionQueryError('in predicate values must be strings or finite numbers');
+            }
         } else {
             if (n.value === undefined) {
                 throw new SmartCollectionQueryError(`${n.operator} predicate requires a value`);
+            }
+            // R4C4 HARD-R4C4-07: scalar enforcement (covers eq/gt/gte/lt/lte/
+            // contains and the tag-subquery predicate).
+            if (!isScalarValue(n.value)) {
+                throw new SmartCollectionQueryError(`${n.operator} predicate value must be a string or finite number`);
             }
         }
         return n as unknown as Predicate;
