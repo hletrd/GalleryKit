@@ -13,6 +13,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG 
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 import { isValidExifDateTimeParts } from '@/lib/exif-datetime';
+import { MAX_UPLOAD_FILE_BYTES } from '@/lib/upload-limits';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { detectColorSignals, type ColorSignals, normalizeName } from '@/lib/color-detection';
 import { extractIccProfileName } from '@/lib/icc-extractor';
@@ -329,7 +330,11 @@ export class RawFileError extends Error {
     }
 }
 
-const MAX_FILE_SIZE = 200 * 1024 * 1024;
+// R4C2 ARCH-R4C2-06: single source of truth — the same constant the
+// dashboard UI advertises and the server-action body cap derives from
+// (lib/upload-limits.ts). A local literal here could silently drift from
+// the advertised limit.
+const MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES;
 
 // Singleton promise — clears on failure so transient errors don't permanently break uploads.
 let dirsPromise: Promise<void> | null = null;

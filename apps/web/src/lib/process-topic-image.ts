@@ -7,6 +7,7 @@ import { pipeline } from 'stream/promises';
 import { randomUUID } from 'crypto';
 import { isValidFilename } from '@/lib/validation';
 import { MAX_INPUT_PIXELS_TOPIC } from '@/lib/process-image';
+import { MAX_UPLOAD_FILE_BYTES } from '@/lib/upload-limits';
 const RESOURCES_ROOT = (() => {
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/resources');
     const simplePath = path.join(process.cwd(), 'public/resources');
@@ -20,7 +21,8 @@ const RESOURCES_DIR = RESOURCES_ROOT;
 
 const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
 
-const MAX_FILE_SIZE = 200 * 1024 * 1024;
+// R4C2 ARCH-R4C2-06: single source of truth with the advertised per-file cap.
+const MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES;
 
 // Singleton promise to avoid concurrent mkdir races
 let dirPromise: Promise<void> | null = null;
