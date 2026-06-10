@@ -227,3 +227,44 @@ describe('sw-cache: totalCacheSize', () => {
     expect(await totalCacheSize(meta)).toBe(0);
   });
 });
+
+// R4C6 TEST-R4C6-11: quota-eviction accounting parity with the shipped
+// template — entries the browser already evicted (delete() → false) must
+// not count toward `evicted` bytes, but their metadata is still dropped.
+describe('sw-cache: recordAndEvict quota-evicted entries (R4C6 TEST-R4C6-11)', () => {
+  class PhantomCacheStore extends MockCacheStore {
+    constructor(private readonly phantoms: Set<string>) {
+      super();
+    }
+
+    override async delete(url: string): Promise<boolean> {
+      await super.delete(url);
+      return !this.phantoms.has(url);
+    }
+  }
+
+  it('does not count bytes for entries the browser already evicted', async () => {
+    const phantomUrl = 'http://localhost/uploads/avif/phantom.avif';
+    const realUrl = 'http://localhost/uploads/avif/real.avif';
+    const cache = new PhantomCacheStore(new Set([phantomUrl]));
+    const meta = new MockMetaStore();
+    await meta.setAll(
+      new Map([
+        [phantomUrl, { url: phantomUrl, size: 600, timestamp: 1 }],
+        [realUrl, { url: realUrl, size: 600, timestamp: 2 }],
+      ]),
+    );
+
+    // Cap 1000; adding 300 pushes the tracked total to 1500 → evict from
+    // the oldest. The phantom (already quota-evicted by the browser)
+    // contributes 0 evicted bytes; the real entry contributes 600.
+    const evicted = await recordAndEvict('http://localhost/uploads/avif/new.avif', 300, cache, meta, 1000);
+
+    expect(evicted).toBe(600);
+    // Both stale metadata entries are dropped regardless.
+    const snapshot = meta.snapshot();
+    expect(snapshot.has(phantomUrl)).toBe(false);
+    expect(snapshot.has(realUrl)).toBe(false);
+    expect(snapshot.has('http://localhost/uploads/avif/new.avif')).toBe(true);
+  });
+});

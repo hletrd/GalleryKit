@@ -60,6 +60,16 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
     });
 });
 
+describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-11)', () => {
+    it('recordAndEvict only adjusts totals for entries actually deleted', () => {
+        const fnIdx = TEMPLATE.indexOf('async function recordAndEvict');
+        const fnEnd = TEMPLATE.indexOf('async function', fnIdx + 1);
+        const fn = TEMPLATE.slice(fnIdx, fnEnd);
+        expect(fn).toMatch(/const deleted = await imageCache\.delete\(entry\.url\);/);
+        expect(fn).toMatch(/if \(deleted\) \{/);
+    });
+});
+
 describe('proxy.ts admin-render marker (COR-R4C6-05)', () => {
     it('sets x-gk-admin-render when the admin_session cookie is present', () => {
         const setIdx = PROXY.indexOf("headers.set('x-gk-admin-render', '1')");

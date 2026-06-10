@@ -133,15 +133,17 @@ new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
 **Files:** `apps/web/src/lib/sw-cache.ts`,
 `apps/web/src/__tests__/sw-cache.test.ts`,
 `apps/web/src/__tests__/sw-template-contract.test.ts` (shared with Task 4)
-- [ ] Backport the template's quota-eviction accounting to
+- [x] Backport the template's quota-eviction accounting to
       `recordAndEvict` (`const deleted = await cache.delete(...)`; only
       subtract/count when deleted) — `evicted` return stops overcounting
       browser-quota-evicted entries; document the lib as the tested
       reference for the template (shipped copy).
-- [ ] Update the lib unit suite for the new accounting (missing-entry
+- [x] Update the lib unit suite for the new accounting (missing-entry
       case asserts 0 bytes counted).
-- [ ] Template contract: `if (deleted)` accounting present in
+- [x] Template contract: `if (deleted)` accounting present in
       sw.template.js recordAndEvict.
+
+**Done:** lib accounting aligned with the shipped template + phantom-eviction unit case + template contract pin; 26 tests green across both suites.
 
 
 ## Task 7 — COR-R4C6-07: semantic search stale-response guard

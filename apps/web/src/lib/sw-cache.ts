@@ -5,6 +5,12 @@
  * global `caches` API directly. Instead callers pass a CacheStore interface
  * so that Vitest can inject a lightweight in-memory mock without a SW context.
  *
+ * R4C6 TEST-R4C6-11: this module is the unit-tested REFERENCE for the
+ * SHIPPED copy in `public/sw.template.js` — keep the two in lockstep
+ * (the template cannot import modules without an SW bundler step).
+ * `__tests__/sw-template-contract.test.ts` pins the template against
+ * semantic drift.
+ *
  * US-P24 PWA story — LRU 50 MB cap, admin-route bypass.
  */
 
@@ -116,9 +122,16 @@ export async function recordAndEvict(
       if (total <= maxBytes) break;
       // Never evict the entry we just added if we can avoid it — but if we
       // absolutely must (e.g. single entry > cap) we do so anyway.
-      await cache.delete(entry.url);
-      evicted += entry.size;
-      total -= entry.size;
+      const deleted = await cache.delete(entry.url);
+      // R4C6 TEST-R4C6-11: only adjust the running total / evicted count
+      // when the entry was actually present in the cache. Browser quota
+      // evictions may have removed it independently of our metadata Map —
+      // the shipped template gained this guard and the reference module
+      // had drifted behind it (and overcounted `evicted`).
+      if (deleted) {
+        evicted += entry.size;
+        total -= entry.size;
+      }
       entries.delete(entry.url);
     }
   }
