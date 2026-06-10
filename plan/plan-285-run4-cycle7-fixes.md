@@ -110,4 +110,20 @@ new `apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts`
 - [ ] Deploy per cycle policy (`npm run deploy`) after all green.
 
 ## Progress log
-- (updated during PROMPT 3)
+- Task 2 ✅ `82991b62` — validateNode per-column narrowing (tag →
+  eq/contains) + rejection cases + 66-shape validate/compile agreement
+  property. 38/38 suite-local, full suite green.
+- Task 3 ✅ `3b02af3b` — topicRef latest-wins wiring + source-contract
+  suite (3 cases).
+- Task 1 ✅ `ddadc171` — GET interstitial (no claim, localized EN/KO,
+  own CSP/noindex/no-referrer) + POST claim+stream (taxonomy and
+  open-before-claim preserved verbatim) + auto-HEAD now safe;
+  downloadPage messages in en/ko together; README workflow rewritten;
+  method-contract suite (6) + interstitial unit suite (8). Rate-limit
+  lint exemption documented (tag placed FIRST in the docblock — the
+  scanner strips quoted spans before tag detection, so the paragraph
+  must stay apostrophe-free; noted inline for future editors).
+  Full vitest 1701/1701 · tsc clean · eslint clean ·
+  lint:public-route-rate-limit OK.
+- Task 4: plan-283 archived to done/ (this commit); full gate run +
+  build + e2e + per-cycle deploy recorded below.
