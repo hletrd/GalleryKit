@@ -7,14 +7,16 @@
  * Single-use enforcement:
  *   1. Validate token format and find matching entitlement by tokenHash.
  *   2. Check expiresAt > NOW() and refunded = false.
- *   3. Verify the original file exists and is a regular non-symlink file.
- *      (Cycle 3 RPF / P262-05 / C3-RPF-05: this happens BEFORE the atomic
- *      single-use claim so a missing-file failure does not consume the
- *      customer's token.)
+ *   3. Verify the original file exists, is a regular non-symlink file, and
+ *      OPEN it (R4C4 COR-R4C4-06). Both the existence checks AND the open
+ *      happen BEFORE the atomic single-use claim (Cycle 3 RPF / P262-05 /
+ *      C3-RPF-05) so a missing-file failure — including one in the
+ *      historical lstat→open race window — never consumes the customer's
+ *      token.
  *   4. Atomic UPDATE sets downloadedAt = NOW() WHERE downloadedAt IS NULL.
- *   5. If UPDATE affected 0 rows → already used → 410 Gone.
- *   6. Stream original file from UPLOAD_DIR_ORIGINAL (configured via
- *      UPLOAD_ORIGINAL_ROOT env var; see lib/upload-paths.ts).
+ *   5. If UPDATE affected 0 rows → already used → close handle → 410 Gone.
+ *   6. Stream the bytes from the validated open handle (UPLOAD_DIR_ORIGINAL,
+ *      configured via UPLOAD_ORIGINAL_ROOT env var; see lib/upload-paths.ts).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,8 +28,7 @@ import { verifyTokenAgainstHash, hashToken, isValidTokenShape } from '@/lib/down
 import { buildDownloadFilename } from '@/lib/download-filename';
 import { UPLOAD_DIR_ORIGINAL } from '@/lib/upload-paths';
 import path from 'path';
-import { createReadStream } from 'fs';
-import { lstat, realpath } from 'fs/promises';
+import { lstat, realpath, open, type FileHandle } from 'fs/promises';
 import { Readable } from 'stream';
 
 export const dynamic = 'force-dynamic';
@@ -166,10 +167,10 @@ export async function GET(
         return new NextResponse('Access denied', { status: 403, headers: NO_STORE });
     }
 
-    let stats: Awaited<ReturnType<typeof lstat>>;
-    let resolvedFilePath: string;
+    let fileHandle: FileHandle;
+    let fileSize: number;
     try {
-        stats = await lstat(filePath);
+        const stats = await lstat(filePath);
         if (stats.isSymbolicLink() || !stats.isFile()) {
             return new NextResponse('Access denied', { status: 403, headers: NO_STORE });
         }
@@ -177,14 +178,27 @@ export async function GET(
         // Cycle 4 RPF / P264-06 / C4-RPF-06: parallelize the two realpath
         // calls — they're independent fs round-trips and the prior serial
         // form added an avoidable round-trip per download.
-        const [resolvedUploadsDir, resolved] = await Promise.all([
+        const [resolvedUploadsDir, resolvedFilePath] = await Promise.all([
             realpath(uploadsDir).catch(() => uploadsDir),
             realpath(filePath),
         ]);
-        resolvedFilePath = resolved;
         if (!resolvedFilePath.startsWith(`${resolvedUploadsDir}${path.sep}`)) {
             return new NextResponse('Access denied', { status: 403, headers: NO_STORE });
         }
+
+        // R4C4 COR-R4C4-06: open the file BEFORE the atomic single-use
+        // claim. `createReadStream(path)` opens asynchronously and its
+        // open-failure surfaces as a stream 'error' event AFTER the
+        // response has been returned — so the previous post-claim
+        // ENOENT-to-404 catch could never fire and a file vanishing
+        // between lstat and open burned the customer's token on a 200
+        // with an aborted body (exactly what C3-RPF-05 reordered this
+        // route to avoid). An awaited open() makes the failure visible
+        // HERE, while the token is still intact; the claim below streams
+        // from this validated handle. Content-Length comes from the
+        // opened inode so a concurrent replace cannot desync it.
+        fileHandle = await open(resolvedFilePath, 'r');
+        fileSize = (await fileHandle.stat()).size;
     } catch (err: unknown) {
         if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
             // Cycle 3 RPF / P262-05: token NOT consumed yet — customer can
@@ -194,23 +208,33 @@ export async function GET(
         }
         // Cycle 8 RPF / P394-01 / C8-RPF-01: structured-object log shape
         // with `entitlementId` correlation key. Mirrors the same-file
-        // stream-error log on line 206 below and the cycle 5/6/7 contract
+        // stream-error log below and the cycle 5/6/7 contract
         // on the upstream Stripe surface (webhook + checkout + refund +
         // listEntitlements). Closes the audit chain so an operator
         // triaging a paid-asset download incident can correlate this
         // catch with the upstream entitlement row by entitlementId.
-        console.error('Download lstat/realpath error', { entitlementId: entitlement.id, err });
+        console.error('Download lstat/realpath/open error', { entitlementId: entitlement.id, err });
         return new NextResponse('Internal Server Error', { status: 500, headers: NO_STORE });
     }
 
     // Atomic single-use claim: UPDATE WHERE downloadedAt IS NULL
-    const result = await db
-        .update(entitlements)
-        .set({ downloadedAt: sql`NOW()`, downloadTokenHash: null })
-        .where(and(
-            eq(entitlements.id, entitlement.id),
-            isNull(entitlements.downloadedAt),
-        ));
+    // R4C4 COR-R4C4-06: the open file handle must not leak on any
+    // post-open path — close it on claim failure, already-used, and
+    // stream-setup failure; the success path closes it via autoClose.
+    let result: unknown;
+    try {
+        result = await db
+            .update(entitlements)
+            .set({ downloadedAt: sql`NOW()`, downloadTokenHash: null })
+            .where(and(
+                eq(entitlements.id, entitlement.id),
+                isNull(entitlements.downloadedAt),
+            ));
+    } catch (err: unknown) {
+        await fileHandle.close().catch(() => undefined);
+        console.error('Download claim UPDATE failed', { entitlementId: entitlement.id, err });
+        return new NextResponse('Internal Server Error', { status: 500, headers: NO_STORE });
+    }
 
     // Check if the update affected a row.
     // Drizzle MySQL returns [ResultSetHeader, ...] — affectedRows is on the first element.
@@ -219,11 +243,14 @@ export async function GET(
     const header = (result as unknown as Array<{ affectedRows?: number }>)[0];
     const affected = header?.affectedRows ?? 1;
     if (affected === 0) {
+        await fileHandle.close().catch(() => undefined);
         return new NextResponse('Token already used', { status: 410, headers: NO_STORE });
     }
 
     try {
-        const stream = createReadStream(resolvedFilePath);
+        // autoClose (default) closes the FileHandle when the stream ends or
+        // is destroyed (client abort) — no leak on the success path.
+        const stream = fileHandle.createReadStream();
         const webStream = Readable.toWeb(stream) as ReadableStream;
         // Cycle 3 RPF / P262-04 / C3-RPF-04: sanitize the extension before
         // interpolating into Content-Disposition. `image.filename_original` is
@@ -261,23 +288,23 @@ export async function GET(
             headers: {
                 'Content-Type': 'application/octet-stream',
                 'Content-Disposition': contentDisposition,
-                'Content-Length': stats.size.toString(),
+                'Content-Length': fileSize.toString(),
                 'X-Content-Type-Options': 'nosniff',
                 'Cache-Control': 'no-store, no-cache, must-revalidate',
             },
         });
     } catch (err: unknown) {
-        // The file was readable at lstat time; this catch handles a rare race
-        // where the file disappears between lstat and stream open. Token has
-        // already been claimed (atomic UPDATE above). Logged with err.code so
-        // operators can triage by error type.
+        // R4C4 COR-R4C4-06: the file is already OPEN (handle validated
+        // before the claim), so the historical between-lstat-and-open
+        // ENOENT race can no longer reach this catch — it now only covers
+        // synchronous setup failures (createReadStream on a closed handle,
+        // Readable.toWeb). Token has already been claimed by the atomic
+        // UPDATE above; close the handle so it cannot leak.
+        await fileHandle.close().catch(() => undefined);
         const errCode = (err instanceof Error && 'code' in err)
             ? (err as NodeJS.ErrnoException).code
             : undefined;
         console.error('Download stream error:', { entitlementId: entitlement.id, code: errCode });
-        if (errCode === 'ENOENT') {
-            return new NextResponse('File not found', { status: 404, headers: NO_STORE });
-        }
         return new NextResponse('Internal Server Error', { status: 500, headers: NO_STORE });
     }
 }

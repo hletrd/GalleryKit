@@ -76,18 +76,70 @@ describe('refund-clears-download-token (source-contract)', () => {
 
     it('download route checks refunded flag before serving the file', () => {
         // The route must short-circuit on entitlement.refunded === true
-        // before invoking the file stream. Use a regex that matches the
-        // call site (createReadStream(...)), not the top-of-file import.
+        // before invoking the file stream. R4C4 COR-R4C4-06: the stream now
+        // comes from the validated FileHandle (`fileHandle.createReadStream()`).
         const refundCheckIndex = DOWNLOAD_ROUTE_SRC.indexOf('entitlement.refunded');
         expect(refundCheckIndex).toBeGreaterThan(-1);
-        // Match the call site, not the import line. The call site has a
-        // `createReadStream(` followed by an identifier; the import does not.
-        const streamCallMatch = DOWNLOAD_ROUTE_SRC.match(/createReadStream\(\s*\w/);
+        const streamCallMatch = DOWNLOAD_ROUTE_SRC.match(/fileHandle\.createReadStream\(\)/);
         expect(streamCallMatch).not.toBeNull();
         const streamIndex = streamCallMatch?.index ?? -1;
         expect(streamIndex).toBeGreaterThan(-1);
         // Refund check happens before the stream is created
         expect(refundCheckIndex).toBeLessThan(streamIndex);
+    });
+});
+
+/**
+ * R4C4 COR-R4C4-06 / TEST-R4C4-15: open-before-claim ordering. The file
+ * handle must be opened (awaited — failures observable while the token is
+ * still intact) BEFORE the atomic single-use claim, and must be closed on
+ * every post-open non-success path so it cannot leak.
+ */
+describe('download route open-before-claim contract (R4C4 COR-R4C4-06)', () => {
+    it('opens the file handle BEFORE the single-use claim UPDATE', () => {
+        const openIndex = DOWNLOAD_ROUTE_SRC.search(/fileHandle\s*=\s*await\s+open\(/);
+        const claimIndex = DOWNLOAD_ROUTE_SRC.indexOf('downloadedAt: sql`NOW()`');
+        expect(openIndex).toBeGreaterThan(-1);
+        expect(claimIndex).toBeGreaterThan(-1);
+        expect(openIndex).toBeLessThan(claimIndex);
+    });
+
+    it('open failures share the ENOENT-to-404 catch that leaves the token intact', () => {
+        // The open() sits inside the same try whose catch maps ENOENT to
+        // 'File not found' BEFORE any claim — so a vanished file never
+        // consumes the token.
+        const tryIndex = DOWNLOAD_ROUTE_SRC.search(/fileHandle\s*=\s*await\s+open\(/);
+        const catchBlock = DOWNLOAD_ROUTE_SRC.slice(tryIndex);
+        expect(catchBlock).toMatch(/code === 'ENOENT'[\s\S]*?File not found[\s\S]*?status:\s*404/);
+        // And that 404 return precedes the claim UPDATE in source order.
+        const enoentIndex = tryIndex + catchBlock.search(/code === 'ENOENT'/);
+        const claimIndex = DOWNLOAD_ROUTE_SRC.indexOf('downloadedAt: sql`NOW()`');
+        expect(enoentIndex).toBeLessThan(claimIndex);
+    });
+
+    it('closes the handle on the already-used 410 and claim-failure paths', () => {
+        // Both the affected===0 branch and the claim-UPDATE catch must close
+        // the open handle before returning.
+        const claimCatch = DOWNLOAD_ROUTE_SRC.match(/Download claim UPDATE failed[\s\S]{0,200}/);
+        expect(DOWNLOAD_ROUTE_SRC).toMatch(/await fileHandle\.close\(\)\.catch\(\(\) => undefined\);\s*return new NextResponse\('Token already used'/);
+        expect(claimCatch).not.toBeNull();
+        const claimCatchBlock = DOWNLOAD_ROUTE_SRC.slice(
+            DOWNLOAD_ROUTE_SRC.indexOf('} catch (err: unknown) {', DOWNLOAD_ROUTE_SRC.search(/fileHandle\s*=\s*await\s+open\(/)),
+        );
+        expect(claimCatchBlock).toContain('fileHandle.close()');
+    });
+
+    it('streams from the validated handle, not a raw path re-open', () => {
+        expect(DOWNLOAD_ROUTE_SRC).toMatch(/fileHandle\.createReadStream\(\)/);
+        // The raw-path form must be gone (it opened asynchronously AFTER the
+        // claim, burning the token on a vanished file).
+        expect(DOWNLOAD_ROUTE_SRC).not.toMatch(/createReadStream\(resolvedFilePath\)/);
+        expect(DOWNLOAD_ROUTE_SRC).not.toMatch(/import\s*\{[^}]*createReadStream[^}]*\}\s*from\s*'fs'/);
+    });
+
+    it('Content-Length comes from the opened inode (handle.stat), not the pre-open lstat', () => {
+        expect(DOWNLOAD_ROUTE_SRC).toMatch(/fileSize\s*=\s*\(await fileHandle\.stat\(\)\)\.size/);
+        expect(DOWNLOAD_ROUTE_SRC).toMatch(/'Content-Length':\s*fileSize\.toString\(\)/);
     });
 });
 
