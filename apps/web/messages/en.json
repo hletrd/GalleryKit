@@ -583,7 +583,13 @@
     "imageSizesLocked": "Output sizes are locked once photos exist. Regenerate the library to change them.",
     "failedToUpdateGallerySettings": "Failed to update gallery settings",
     "uploadSettingsLocked": "Upload-processing settings are locked while uploads are active or after photos exist. Regenerate the library to change them.",
-    "tagPersistenceWarning": "Uploaded {file}, but one or more requested tags could not be saved."
+    "tagPersistenceWarning": "Uploaded {file}, but one or more requested tags could not be saved.",
+    "lrTokenScopeRequired": "At least one scope is required",
+    "lrTokenInvalidLabel": "Invalid token label",
+    "lrTokenInvalidExpiry": "Invalid expiry date",
+    "lrTokenExpiryInPast": "Expiry date must be in the future",
+    "lrTokenCreateFailed": "Failed to create token",
+    "lrTokenNotFound": "Token not found or already revoked"
   },
   "theme": {
     "system": "System",

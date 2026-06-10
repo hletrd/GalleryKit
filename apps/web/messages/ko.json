@@ -583,7 +583,13 @@
     "imageSizesLocked": "사진이 있으면 출력 크기는 잠깁니다. 변경하려면 라이브러리를 다시 생성해 주세요.",
     "failedToUpdateGallerySettings": "갤러리 설정 저장에 실패했습니다",
     "uploadSettingsLocked": "업로드가 진행 중이거나 사진이 있으면 업로드 처리 설정이 잠깁니다. 변경하려면 라이브러리를 다시 생성해 주세요.",
-    "tagPersistenceWarning": "{file} 업로드는 완료됐지만 요청한 태그 중 일부를 저장하지 못했습니다."
+    "tagPersistenceWarning": "{file} 업로드는 완료됐지만 요청한 태그 중 일부를 저장하지 못했습니다.",
+    "lrTokenScopeRequired": "최소 한 개의 권한 범위가 필요합니다",
+    "lrTokenInvalidLabel": "잘못된 토큰 이름입니다",
+    "lrTokenInvalidExpiry": "잘못된 만료 날짜입니다",
+    "lrTokenExpiryInPast": "만료 날짜는 미래여야 합니다",
+    "lrTokenCreateFailed": "토큰을 생성하지 못했습니다",
+    "lrTokenNotFound": "토큰이 없거나 이미 폐기되었습니다"
   },
   "theme": {
     "system": "시스템",

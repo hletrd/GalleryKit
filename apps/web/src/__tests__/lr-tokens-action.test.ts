@@ -53,6 +53,9 @@ vi.mock('next-intl/server', () => ({
 
 import { createLrToken } from '@/app/actions/lr-tokens';
 
+// R4C4 I18N-R4C4-05: the action's error strings are localized via
+// getTranslations('serverActions'); this suite's next-intl mock returns the
+// KEY, so assertions are key-equality (the EN/KO texts live in messages/).
 describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
     beforeEach(() => {
         createTokenMock.mockClear();
@@ -69,25 +72,25 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
 
     it('rejects labels containing bidi override characters', async () => {
         const result = await createLrToken({ label: 'demo\u202Etoken', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'Invalid token label' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
     it('rejects labels containing zero-width characters', async () => {
         const result = await createLrToken({ label: 'demo\u200Btoken', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'Invalid token label' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
     it('rejects labels containing C0 control characters', async () => {
         const result = await createLrToken({ label: 'demo\u0007token', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'Invalid token label' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
     it('rejects empty / whitespace-only labels', async () => {
         const result = await createLrToken({ label: '   ', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'Invalid token label' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
@@ -96,7 +99,7 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
     // credential-management surface.
     it('rejects labels longer than 128 code points', async () => {
         const result = await createLrToken({ label: '📷'.repeat(129), scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'Invalid token label' });
+        expect(result).toEqual({ error: 'lrTokenInvalidLabel' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
@@ -115,7 +118,7 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
             scopes: ['lr:upload'],
             expiresAt: 'not-a-date',
         });
-        expect(result).toEqual({ error: 'Invalid expiry date' });
+        expect(result).toEqual({ error: 'lrTokenInvalidExpiry' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
@@ -125,7 +128,7 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
             scopes: ['lr:upload'],
             expiresAt: '2001-01-01T00:00:00.000Z',
         });
-        expect(result).toEqual({ error: 'Expiry date must be in the future' });
+        expect(result).toEqual({ error: 'lrTokenExpiryInPast' });
         expect(createTokenMock).not.toHaveBeenCalled();
     });
 
@@ -148,7 +151,7 @@ describe('createLrToken input hygiene (SEC-R4C1-01)', () => {
             new Error("ER_ACCESS_DENIED: Access denied for user 'gallery'@'10.0.0.1'"),
         );
         const result = await createLrToken({ label: 'ok label', scopes: ['lr:upload'] });
-        expect(result).toEqual({ error: 'Failed to create token' });
+        expect(result).toEqual({ error: 'lrTokenCreateFailed' });
         consoleSpy.mockRestore();
     });
 });

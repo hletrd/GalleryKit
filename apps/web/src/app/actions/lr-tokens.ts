@@ -37,7 +37,7 @@ export async function createLrToken(opts: {
     if (!user) return { error: t('unauthorized') };
 
     const scopes = normalizeScopes(opts.scopes);
-    if (scopes.length === 0) return { error: 'At least one scope is required' };
+    if (scopes.length === 0) return { error: t('lrTokenScopeRequired') };
 
     // R4C1 SEC-R4C1-01: the token label is an admin-controlled persistent
     // string rendered back in the tokens list (and its revoke aria-label) and
@@ -47,7 +47,7 @@ export async function createLrToken(opts: {
     // a spoofable label on a credential-management surface.
     const { value: label, rejected: labelRejected } = sanitizeAdminString(opts.label);
     if (labelRejected || !label) {
-        return { error: 'Invalid token label' };
+        return { error: t('lrTokenInvalidLabel') };
     }
 
     // R4C2 COR-R4C2-04: validate by Unicode code points and reject loudly,
@@ -58,7 +58,7 @@ export async function createLrToken(opts: {
     // surface where label accuracy decides WHICH token an admin revokes.
     // The UI's maxLength={128} already aligns with this bound.
     if (countCodePoints(label) > 128) {
-        return { error: 'Invalid token label' };
+        return { error: t('lrTokenInvalidLabel') };
     }
 
     // R4C1 SEC-R4C1-01: validate the expiry. `new Date('garbage')` yields an
@@ -69,10 +69,10 @@ export async function createLrToken(opts: {
     if (opts.expiresAt) {
         const parsed = new Date(opts.expiresAt);
         if (!Number.isFinite(parsed.getTime())) {
-            return { error: 'Invalid expiry date' };
+            return { error: t('lrTokenInvalidExpiry') };
         }
         if (parsed.getTime() <= Date.now()) {
-            return { error: 'Expiry date must be in the future' };
+            return { error: t('lrTokenExpiryInPast') };
         }
         expiresAt = parsed;
     }
@@ -94,7 +94,7 @@ export async function createLrToken(opts: {
         // R4C1 SEC-R4C1-01: never relay raw driver/DB error text to the
         // client; log server-side and return a generic message.
         console.error('createLrToken failed:', err);
-        return { error: 'Failed to create token' };
+        return { error: t('lrTokenCreateFailed') };
     }
 }
 
@@ -107,7 +107,7 @@ export async function revokeLrToken(tokenId: number): Promise<{ success: boolean
     if (!user) return { error: t('unauthorized') };
 
     const deleted = await revokeToken({ userId: user.id, tokenId });
-    if (!deleted) return { error: 'Token not found or already revoked' };
+    if (!deleted) return { error: t('lrTokenNotFound') };
 
     const ip = getClientIp(await headers());
     await logAuditEvent(user.id, 'lr_token_revoked', 'admin_token', String(tokenId), ip).catch(console.debug);
