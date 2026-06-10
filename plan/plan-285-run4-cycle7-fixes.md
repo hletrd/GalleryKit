@@ -125,5 +125,19 @@ new `apps/web/src/__tests__/upload-dropzone-topic-wiring.test.ts`
   must stay apostrophe-free; noted inline for future editors).
   Full vitest 1701/1701 · tsc clean · eslint clean ·
   lint:public-route-rate-limit OK.
-- Task 4: plan-283 archived to done/ (this commit); full gate run +
-  build + e2e + per-cycle deploy recorded below.
+- Task 4 ✅ — plan-283 archived to done/ (`86694b27`); ALL gates green
+  repo-wide: eslint 0/0 · typecheck PASS · vitest **1701/1701** (177
+  files) · lint:api-auth PASS · lint:action-origin PASS ·
+  lint:public-route-rate-limit PASS (download route carries the
+  documented exemption) · production build PASS (`BUILD-EXIT:0`,
+  SW_VERSION refreshed in `1997ee20`) · Playwright e2e **20/20**.
+- LIVE behavioral smoke (standalone server :3101 + throwaway local
+  entitlement, cleaned up after): GET → 200 interstitial
+  (`<form method="post">`, `lang` follows Accept-Language en/ko, token
+  NOT in body) · HEAD → 200 **without burning the token** · repeat GET →
+  200 (still unclaimed) · POST → 200 `application/octet-stream`
+  8818 bytes with slugged Content-Disposition · subsequent GET/POST →
+  410 · post-claim D-101-06 disambiguation intact (unknown token for a
+  claimed image → 410, documented behavior). The getTranslations
+  `{locale}` overload verified working in the route handler at runtime.
+- Deploy: recorded below after `npm run deploy`.
