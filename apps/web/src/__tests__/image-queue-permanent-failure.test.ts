@@ -71,6 +71,17 @@ describe('image queue permanent failure — A2-HIGH-01 invariants', () => {
         expect(fnBody!).toMatch(/state\.permanentlyFailedIds\.clear\s*\(\)/);
     });
 
+    it('persists failed_at as a MySQL DATETIME literal, never toISOString (R4C2 COR-R4C2-01)', () => {
+        // failed_at is datetime(mode:'string'); MySQL strict mode rejects the
+        // ISO `Z` form with ER 1292, which silently killed the R10-H2
+        // failed-images surface for ~18 review cycles (the persist UPDATE
+        // threw on every permanent failure and its catch swallowed it).
+        // The write site MUST go through toMySqlDateTime.
+        expect(queueSource).toMatch(/failed_at:\s*toMySqlDateTime\s*\(\s*new\s+Date\s*\(\s*\)\s*\)/);
+        expect(queueSource).not.toMatch(/failed_at:\s*new\s+Date\(\)\.toISOString\(\)/);
+        expect(queueSource).toMatch(/import\s*\{\s*toMySqlDateTime\s*\}\s*from\s*'@\/lib\/mysql-datetime'/);
+    });
+
     it('permanentlyFailedIds is cleared in deleteImage and deleteImages actions', () => {
         // When an image is deleted, its ID must be removed from the set
         // so the ID can be reused without being silently excluded.

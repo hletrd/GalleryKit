@@ -20,6 +20,7 @@ import { getImageProcessingLockName } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
 import { embeddingToBuffer, CLIP_MODEL_VERSION } from '@/lib/clip-embeddings';
+import { toMySqlDateTime } from '@/lib/mysql-datetime';
 
 /**
  * Remove orphaned .tmp files from upload directories.
@@ -469,12 +470,19 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             }
             // R10-H2: persist processing error and failure timestamp to DB
             // so the admin dashboard can surface failed images with retry.
+            // R4C2 COR-R4C2-01: failed_at is a DATETIME(mode:'string') column;
+            // the prior `new Date().toISOString()` value carries a trailing
+            // `Z` that MySQL strict mode rejects with ER 1292, so this UPDATE
+            // threw on EVERY permanent failure and the catch below swallowed
+            // it — processing_error AND failed_at never persisted and the
+            // admin failed-images panel stayed empty. toMySqlDateTime renders
+            // the accepted 'YYYY-MM-DD HH:MM:SS' literal.
             try {
                 const truncatedError = lastErrorMsg.length > 512
                     ? lastErrorMsg.slice(0, 512)
                     : lastErrorMsg;
                 await db.update(images)
-                    .set({ processing_error: truncatedError, failed_at: new Date().toISOString() })
+                    .set({ processing_error: truncatedError, failed_at: toMySqlDateTime(new Date()) })
                     .where(eq(images.id, job.id));
             } catch (dbErr) {
                 console.error(`[Queue] Failed to persist processing error for job ${job.id}:`, dbErr);
