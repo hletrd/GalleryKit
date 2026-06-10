@@ -4,6 +4,7 @@ import { getOnThisDayImages } from '@/lib/data-timeline';
 import { imageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
+import { OptimisticImage } from '@/components/optimistic-image';
 
 /**
  * Server component — rendered as part of the home page SSR pass.
@@ -23,12 +24,14 @@ export async function OnThisDayWidget() {
 
     if (photos.length === 0) return null;
 
-    // R20-M2: emit the base JPEG filename rather than the sized derivative.
-    // Server components cannot use `onError` fallbacks, and the encoder
-    // atomic-rename contract guarantees the base file exists even when
-    // legacy / mid-backfill rows lack the `_${smallSize}.jpg` variant. The
-    // 48x48 thumbnail still renders crisply because the browser scales the
-    // larger source down via the inline 48x48 box.
+    // R20-M2 / R4C9 PERF-R4C9-03: the SOURCE stays the base JPEG filename
+    // (the encoder atomic-rename contract guarantees it exists even for
+    // legacy / mid-backfill rows that lack `_${size}.jpg` variants), but it
+    // is now delivered through next/image — the optimizer serves a ~48-96 px
+    // variant instead of the full multi-MB derivative the previous raw
+    // <img> shipped for a 48 px box. Same pattern as the masonry grid's
+    // OptimisticImage fallback path in home-client.tsx; the client island
+    // also provides the loading / retry / error states.
 
     return (
         <aside aria-label={t('widgetLabel')} className="border-t pt-8">
@@ -60,12 +63,12 @@ export async function OnThisDayWidget() {
                                     className="flex-shrink-0 rounded-md overflow-hidden bg-muted"
                                     style={{ width: 48, height: 48 }}
                                 >
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
+                                    <OptimisticImage
                                         src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                         alt={altText}
                                         width={48}
                                         height={48}
+                                        sizes="48px"
                                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                         loading="lazy"
                                         decoding="async"
