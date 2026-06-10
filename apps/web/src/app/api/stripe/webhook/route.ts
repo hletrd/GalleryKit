@@ -327,13 +327,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
         const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
 
+        let insertedFresh = false;
         try {
             // Idempotent insert: sessionId UNIQUE prevents double-recording on Stripe retries.
             // The SELECT above is the primary idempotency guard for the
             // manual-distribution log line; this ON DUPLICATE KEY UPDATE
             // remains as belt-and-suspenders against a race between the SELECT
             // and the INSERT (two concurrent retries hitting between them).
-            await db.insert(entitlements).values({
+            const [insertHeader] = await db.insert(entitlements).values({
                 imageId,
                 tier,
                 customerEmail: resolvedEmail,
@@ -342,6 +343,18 @@ export async function POST(request: NextRequest): Promise<Response> {
                 downloadTokenHash,
                 expiresAt,
             }).onDuplicateKeyUpdate({ set: { sessionId } }); // no-op update keeps idempotency
+            // R4C3 COR-R4C3-02: distinguish the TRUE insert from the dup-key
+            // loser. MySQL reports affectedRows = 1 for a fresh insert, 2 for
+            // a dup-key update that changed values, and 0 for a dup-key
+            // update to identical values (the no-op `set: { sessionId }` form,
+            // without CLIENT_FOUND_ROWS) — never 1 for the loser. Before this
+            // gate, two concurrent retries racing between the SELECT and the
+            // INSERT would BOTH log `Entitlement created` and the
+            // LOG_PLAINTEXT_DOWNLOAD_TOKENS manual-distribution line — the
+            // loser's line carrying a plaintext token whose hash was never
+            // stored, re-creating the exact C3-RPF-07 dead-token operator
+            // workflow in the race window the comment above anticipates.
+            insertedFresh = insertHeader.affectedRows === 1;
         } catch (err) {
             // Cycle 7 RPF / P392-03 / C7-RPF-03: structured-object log shape
             // with sessionId/imageId/tier so operator can correlate the
@@ -356,6 +369,15 @@ export async function POST(request: NextRequest): Promise<Response> {
             });
             // Return 500 so Stripe retries
             return NextResponse.json({ error: 'Database error' }, { status: 500, headers: NO_STORE });
+        }
+
+        // R4C3 COR-R4C3-02: the dup-key loser recorded nothing — its token
+        // hash was never stored, so logging its plaintext token would hand
+        // the operator a dead credential. Mirror the SELECT-path idempotent
+        // skip and return without the success log lines.
+        if (!insertedFresh) {
+            console.info('Stripe webhook: idempotent skip (raced insert)', { sessionId });
+            return NextResponse.json({ received: true }, { headers: NO_STORE });
         }
 
         // C1RPF-PHOTO-MED-01: drop tokenHash from the structured log line.

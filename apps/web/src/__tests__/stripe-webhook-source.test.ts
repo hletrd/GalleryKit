@@ -98,6 +98,27 @@ describe('stripe webhook source-contract', () => {
         expect(gateStr).not.toMatch(/email=\$\{customerEmail\}/);
     });
 
+    it('gates success logging on a TRUE insert via affectedRows === 1 (R4C3 COR-R4C3-02)', () => {
+        // The dup-key loser of a SELECT/INSERT race records nothing — its
+        // token hash is never stored. MySQL reports affectedRows 1 only for
+        // a fresh insert (0 for the no-op dup-key update, 2 for a changing
+        // one), so the success log lines must be gated on that outcome or
+        // the loser logs a [manual-distribution] line carrying a dead token
+        // (the C3-RPF-07 failure mode, re-minted in the race window).
+        expect(WEBHOOK_SRC).toMatch(/insertedFresh\s*=\s*insertHeader\.affectedRows\s*===\s*1/);
+        // The non-fresh path must bail out BEFORE 'Entitlement created'.
+        const bailIndex = WEBHOOK_SRC.indexOf('if (!insertedFresh)');
+        const createdLogIndex = WEBHOOK_SRC.indexOf("console.info('Entitlement created'");
+        expect(bailIndex).toBeGreaterThan(-1);
+        expect(createdLogIndex).toBeGreaterThan(-1);
+        expect(bailIndex).toBeLessThan(createdLogIndex);
+        // And the bail-out block returns received: true without retrying.
+        const bailBlock = WEBHOOK_SRC.match(
+            /if\s*\(\s*!insertedFresh\s*\)\s*\{[\s\S]*?received:\s*true[\s\S]*?\}/,
+        );
+        expect(bailBlock).not.toBeNull();
+    });
+
     it('default-deployment log line does NOT include the plaintext token', () => {
         // Outside the env-gated block, the structured log line must not
         // contain `${downloadToken}` interpolation.
