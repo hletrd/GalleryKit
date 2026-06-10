@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useTranslation } from '@/components/i18n-provider';
 import { imageUrl, sizedImageUrl } from '@/lib/image-url';
+import { isImeComposingNativeEvent, isImeComposingReactEvent } from '@/lib/ime';
 import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embeddings';
@@ -230,6 +231,10 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            // R4C6 COR-R4C6-01: Escape during an IME composition cancels the
+            // composition only — it must not close the search dialog and
+            // destroy the in-progress query.
+            if (isImeComposingNativeEvent(e)) return;
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
                 if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
                 e.preventDefault();
@@ -325,6 +330,12 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             value={query}
                             onChange={(e) => { setQuery(e.target.value); setActiveIndex(-1); }}
                             onKeyDown={(e) => {
+                                // R4C6 COR-R4C6-01: while an IME composition
+                                // is in progress, arrows navigate the
+                                // candidate list and Enter commits the
+                                // composition — they must not move the
+                                // result selection or click a result.
+                                if (isImeComposingReactEvent(e)) return;
                                 if (e.key === 'ArrowDown') {
                                     e.preventDefault();
                                     setActiveIndex(i => Math.min(i + 1, results.length - 1));

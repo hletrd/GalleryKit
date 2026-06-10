@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { isImeComposingReactEvent } from '@/lib/ime';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -334,6 +335,10 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         value={newAlias}
                                         onChange={(e) => setNewAlias(e.target.value)}
                                         onKeyDown={(e) => {
+                                            // R4C6 COR-R4C6-01: the IME
+                                            // composition-commit Enter must not
+                                            // submit a half-composed alias.
+                                            if (isImeComposingReactEvent(e)) return;
                                             if (e.key === 'Enter') {
                                                 e.preventDefault();
                                                 if (!isAddingAlias) handleAddAlias(editingTopic.slug);

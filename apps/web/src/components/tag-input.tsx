@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
 import { isValidTagName } from '@/lib/validation';
+import { isImeComposingReactEvent } from '@/lib/ime';
 
 export interface Tag {
     id: number;
@@ -94,6 +95,11 @@ export function TagInput({
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        // R4C6 COR-R4C6-01: an in-progress IME composition (Korean, etc.)
+        // delivers Enter/comma/arrow keydowns BEFORE the text is settled.
+        // Acting on them adds half-composed tags, pops tags on the
+        // composition's Backspace, and hijacks the candidate-list arrows.
+        if (isImeComposingReactEvent(e)) return;
         if (e.key === 'Backspace' && inputValue === '' && selectedTags.length > 0) {
             e.preventDefault();
             removeTag(selectedTags[selectedTags.length - 1]);

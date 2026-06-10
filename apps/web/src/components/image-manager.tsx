@@ -5,6 +5,7 @@ import { deleteImage, deleteImages, createGroupShareLink, batchAddTags, batchUpd
 import type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
 import { BulkEditDialog } from '@/components/bulk-edit-dialog';
 import { copyToClipboard } from '@/lib/clipboard';
+import { isImeComposingReactEvent } from '@/lib/ime';
 import { TagInput } from "@/components/tag-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -334,6 +335,10 @@ export function ImageManager({
                                             onChange={(e) => setTagInput(e.target.value)}
                                             placeholder={t('imageManager.placeholderTag')}
                                             onKeyDown={(e) => {
+                                                // R4C6 COR-R4C6-01: the IME
+                                                // composition-commit Enter must
+                                                // not submit a half-composed tag.
+                                                if (isImeComposingReactEvent(e)) return;
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
                                                     if (!isBatchAddingTag) void handleBatchAddTag();

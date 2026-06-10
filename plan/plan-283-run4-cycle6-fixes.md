@@ -16,22 +16,24 @@ content-hash-filename migration.
 `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`,
 `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`,
 new `apps/web/src/__tests__/ime-composition-guard.test.ts`
-- [ ] `lib/ime.ts`: `isImeComposingNativeEvent(e: KeyboardEvent)` =
+- [x] `lib/ime.ts`: `isImeComposingNativeEvent(e: KeyboardEvent)` =
       `e.isComposing || e.keyCode === 229` (Safari/legacy-Chromium quirk);
       `isImeComposingReactEvent(e: React.KeyboardEvent)` delegating to the
       nativeEvent. Client-safe pure module.
-- [ ] `tag-input.tsx handleKeyDown`: return early when composing (entire
+- [x] `tag-input.tsx handleKeyDown`: return early when composing (entire
       handler — Enter/comma must not add, Backspace must not pop tags,
       arrows must not hijack candidate navigation, Escape must not close).
-- [ ] `search.tsx`: input `onKeyDown` early-return when composing (arrows/
+- [x] `search.tsx`: input `onKeyDown` early-return when composing (arrows/
       Enter); window `keydown` handler early-return when composing (⌘K /
       Escape).
-- [ ] `image-manager.tsx` batch-add input, `topic-manager.tsx` inline-rename
+- [x] `image-manager.tsx` batch-add input, `topic-manager.tsx` inline-rename
       input, `tokens-client.tsx` token-name input: guard the Enter branch.
-- [ ] Tests: unit cases for both helper shapes (composing keydown with
+- [x] Tests: unit cases for both helper shapes (composing keydown with
       isComposing=true; keyCode 229; plain Enter passes); source-contract
       assertions that each of the five surfaces consults the guard before
       acting.
+
+**Done:** helper + 5 surfaces guarded; 13 new tests green (unit + source contracts).
 
 
 ## Task 2 — COR-R4C6-02: timeline/year silent 100-photo truncation

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { useTranslation } from '@/components/i18n-provider';
+import { isImeComposingReactEvent } from '@/lib/ime';
 import { createLrToken, revokeLrToken, listLrTokens, type LrTokenListItem } from '@/app/actions/lr-tokens';
 import { Loader2, Plus, Trash2, Copy, Key } from 'lucide-react';
 import {
@@ -159,7 +160,9 @@ export function TokensClient() {
                             onChange={(e) => setNewLabel(e.target.value)}
                             placeholder={t('lrToken.labelPlaceholder')}
                             maxLength={128}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } }}
+                            // R4C6 COR-R4C6-01: the IME composition-commit Enter
+                            // must not create a token with a half-composed label.
+                            onKeyDown={(e) => { if (isImeComposingReactEvent(e)) return; if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } }}
                         />
                     </div>
                     <DialogFooter>
