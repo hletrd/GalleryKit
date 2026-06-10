@@ -90,10 +90,13 @@ export interface AtomFeedInput {
  * The media:content element uses the Yahoo Media RSS namespace.
  */
 function renderAuthorBlock(indent: string, author: AtomAuthor): string {
-    // R18-L2: explicit type="text" on <name> per RFC 4287 §3.1.1. Default
-    // is "text" so semantics unchanged; explicit attribute silences W3C
-    // feed validator advisories.
-    const lines = [`${indent}<author>`, `${indent}  <name type="text">${escapeXml(author.name)}</name>`];
+    // R4C6 STD-R4C6-09: atom:name is part of a PERSON construct
+    // (RFC 4287 §3.2: `element atom:name { text }` under
+    // atomCommonAttributes), NOT a Text construct — it admits no `type`
+    // attribute, and emitting one made the feed schema-invalid (the
+    // R18-L2 advisory-silencing pass overshot from <title>/<summary>/
+    // <rights> onto <name>). Emit it bare.
+    const lines = [`${indent}<author>`, `${indent}  <name>${escapeXml(author.name)}</name>`];
     if (author.uri) {
         lines.push(`${indent}  <uri>${escapeXml(author.uri)}</uri>`);
     }

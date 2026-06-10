@@ -172,12 +172,14 @@ existing checkout test suite (extend)
 ## Task 9 — STD-R4C6-09: RFC 4287-conformant `<author><name>`
 **Files:** `apps/web/src/lib/atom-feed.ts`,
 `apps/web/src/__tests__/atom-feed.test.ts` (fixture correction)
-- [ ] `renderAuthorBlock`: emit `<name>` without the `type` attribute
+- [x] `renderAuthorBlock`: emit `<name>` without the `type` attribute
       (atomPersonConstruct admits none); keep type="text" on the actual
       Text constructs (title/summary/rights).
-- [ ] Update the fixture that pins `<name type="text">` in the same
+- [x] Update the fixture that pins `<name type="text">` in the same
       commit — fixture correction, not a weakening (it locked
       schema-invalid output).
+
+**Done:** bare <name>; 3 fixtures corrected in the same commit; 39 atom-feed tests green.
 
 
 ## Task 10 — COR-R4C6-10: audit-log retention env validation

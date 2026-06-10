@@ -201,8 +201,8 @@ describe('composeAtomFeed', () => {
     it('emits a feed-level <author> per RFC 4287 §4.1.1 (R17-M1)', () => {
         const xml = composeAtomFeed(BASE_INPUT);
         // Feed-level author appears before any <entry> block.
-        // R18-L2: <name> now carries type="text".
-        expect(xml).toContain('<author>\n    <name type="text">Jane Photographer</name>');
+        // R4C6 STD-R4C6-09: atom:name is a Person-construct child — no type attribute.
+        expect(xml).toContain('<author>\n    <name>Jane Photographer</name>');
         expect(xml).toContain('<uri>https://example.com/</uri>');
         const authorIndex = xml.indexOf('<author>');
         const entryIndex = xml.indexOf('<entry>');
@@ -215,8 +215,8 @@ describe('composeAtomFeed', () => {
             ...BASE_INPUT,
             feedAuthor: { name: 'Anonymous' },
         });
-        // R18-L2: <name> carries type="text"; substring match still succeeds.
-        expect(xml).toContain('<name type="text">Anonymous</name>');
+        // R4C6 STD-R4C6-09: bare <name>; substring match still succeeds.
+        expect(xml).toContain('<name>Anonymous</name>');
         // The feed-level author block must not carry a <uri> when none was supplied.
         const authorIdx = xml.indexOf('<author>');
         const authorEndIdx = xml.indexOf('</author>', authorIdx);
@@ -242,8 +242,8 @@ describe('composeAtomFeed', () => {
             ...BASE_INPUT,
             entries: [{ ...BASE_ENTRY, author: { name: 'Second Photographer' } }],
         });
-        // R18-L2: <name> carries type="text".
-        expect(xml).toContain('<name type="text">Second Photographer</name>');
+        // R4C6 STD-R4C6-09: bare <name> (Person construct admits no type).
+        expect(xml).toContain('<name>Second Photographer</name>');
     });
 
     it('strips C0 control bytes in titles before XML escape (R17-L1 + R17-M1)', () => {
