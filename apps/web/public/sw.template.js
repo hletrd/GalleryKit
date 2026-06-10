@@ -4,9 +4,19 @@
  * Strategies:
  *  - Image derivatives (/uploads/avif|webp|jpeg/): stale-while-revalidate,
  *    50 MB LRU cap, admin-route bypass.
- *  - HTML routes: network-first, 24 h fallback cache.
+ *  - HTML routes: network-first, 24 h OFFLINE-ONLY fallback cache.
+ *    R4C6 COR-R4C6-05: every public page ships the framework-default
+ *    `no-store` (revalidate = 0 dynamic rendering), so honoring
+ *    Cache-Control here left this cache permanently empty — the PWA
+ *    offline story never functioned. Caching 200 GET HTML is therefore
+ *    an EXPLICIT, narrow exemption: entries are served exclusively when
+ *    the network is unreachable, expire after 24 h, and pages rendered
+ *    WITH an admin session are excluded via the `x-gk-admin-render`
+ *    response header set by proxy.ts (the SW cannot read the request
+ *    Cookie header — it is a Fetch-spec forbidden header, which is why
+ *    the old cookie sniff never worked).
  *  - /admin/* and /api/admin/*: always bypass to network.
- *  - 401/403 responses: never cached.
+ *  - 401/403 and non-OK responses: never cached.
  *
  * __SW_VERSION__ is replaced at build time by scripts/build-sw.ts.
  *
@@ -48,11 +58,6 @@ function isSensitiveResponse(response) {
   if (response.status === 401 || response.status === 403) return true;
   const cc = response.headers.get('Cache-Control') ?? '';
   return cc.includes('no-store');
-}
-
-function hasAdminSession(request) {
-  const cookie = request.headers.get('Cookie') || '';
-  return cookie.includes('admin_session=');
 }
 
 // ─── Metadata store (LRU tracking) ──────────────────────────────────────────
@@ -204,8 +209,12 @@ async function staleWhileRevalidateImage(request) {
 async function networkFirstHtml(request) {
   try {
     const networkResponse = await fetch(request.clone());
-    if (isSensitiveResponse(networkResponse)) return networkResponse;
-    if (networkResponse.ok && !hasAdminSession(request)) {
+    // R4C6 COR-R4C6-05: deliberate Cache-Control exemption — see the
+    // header comment. `.ok` excludes 401/403/redirect-error responses;
+    // `x-gk-admin-render` excludes pages rendered with an admin session
+    // (server-decided; the request Cookie header is unreadable in SW).
+    // The image path keeps full isSensitiveResponse semantics.
+    if (networkResponse.ok && networkResponse.headers.get('x-gk-admin-render') !== '1') {
       const htmlCache = await caches.open(HTML_CACHE);
       // Stamp the cached response with a timestamp so the 24 h max-age
       // check on cache fallback (line ~148) is actually reachable.

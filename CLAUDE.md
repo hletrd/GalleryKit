@@ -349,6 +349,13 @@ docker run --rm \
 - **Histogram**: Canvas capped at 256x256 for fast computation
 - **`tag_names` aggregation**: the masonry-list queries (`getImagesLite`, `getImagesLitePage`, `getAdminImagesLite`, plus the full `getImages`) all use a shared `tagNamesAgg` constant in `apps/web/src/lib/data.ts` that compiles to `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` over a `LEFT JOIN imageTags … LEFT JOIN tags … GROUP BY images.id`. A scalar correlated subquery shape using raw SQL aliases (`it`, `t`) previously returned NULL in production, breaking the gallery aria-labels (cycle 1 RPF v3 NF-3, commit aca754c). The fixture-style test at `apps/web/src/__tests__/data-tag-names-sql.test.ts` locks this contract: do not migrate the queries away from `tagNamesAgg` without updating the test.
 
+## Service Worker / PWA (US-P24)
+
+- `public/sw.template.js` is the SHIPPED service worker source; `scripts/build-sw.ts` stamps `__SW_VERSION__` (git short-SHA + `-p{IMAGE_PIPELINE_VERSION}`) into `public/sw.js` via the `prebuild` hook. After editing the template, regenerate and commit `sw.js`.
+- `lib/sw-cache.ts` is the unit-tested REFERENCE implementation of the LRU logic; `__tests__/sw-template-contract.test.ts` pins the template against drift (R4C6 TEST-R4C6-11).
+- **Image derivatives**: stale-while-revalidate with an ETag HEAD probe, 50 MB LRU cap.
+- **HTML offline fallback (deliberate `no-store` exemption, R4C6 COR-R4C6-05)**: every public page ships the framework-default `no-store` (`revalidate = 0` dynamic rendering), so a Cache-Control-honoring SW could never populate an offline cache. `networkFirstHtml` therefore caches 200 GET HTML explicitly as an OFFLINE-ONLY fallback (entries served exclusively when the network is unreachable; 24 h TTL; 50-entry cap), excluding admin routes and any page rendered WITH an admin session. Admin-rendered pages are identified by the `x-gk-admin-render: 1` response header set in `proxy.ts` — the SW cannot read the request `Cookie` header (Fetch-spec forbidden header), so the server makes the personalization decision and the SW honors it.
+
 ## Migration & Schema-Drift Runbook
 
 The Drizzle MySQL migrator (`node_modules/drizzle-orm/mysql-core/dialect.cjs:62`) decides whether to apply each journal entry by:

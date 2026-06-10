@@ -115,7 +115,21 @@ export default function middleware(request: NextRequest) {
     }
   }
 
-  return applyProductionCsp(cspRequest, intlMiddleware(cspRequest));
+  const response = applyProductionCsp(cspRequest, intlMiddleware(cspRequest));
+
+  // R4C6 COR-R4C6-05: mark HTML responses rendered WITH an admin session
+  // so the service worker's offline-fallback HTML cache can exclude them.
+  // The SW cannot read the request Cookie header (forbidden header in SW
+  // fetch handlers), so the server — which can — makes the decision and
+  // surfaces it as a response header. The header only reflects the
+  // requester's own cookie back to the same client; it discloses nothing
+  // across users. Presence check only — cryptographic session validation
+  // stays in the server actions (defense in depth unchanged).
+  if (request.cookies.get('admin_session')) {
+    response.headers.set('x-gk-admin-render', '1');
+  }
+
+  return response;
 }
 
 export const config = {

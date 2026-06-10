@@ -83,25 +83,27 @@ new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
 **Files:** `apps/web/src/proxy.ts`, `apps/web/public/sw.template.js`,
 `apps/web/public/sw.js` (regenerated), CLAUDE.md (PWA note),
 `apps/web/src/__tests__/sw-template-contract.test.ts` (new, shared with Task 6)
-- [ ] `proxy.ts`: after the intl middleware produces a response, set
+- [x] `proxy.ts`: after the intl middleware produces a response, set
       `x-gk-admin-render: 1` when `request.cookies.get('admin_session')`
       is present (HTML page surface only — matcher already excludes
       /api and dotted paths). Reflects the requester's own cookie back
       to the same client; no cross-user disclosure.
-- [ ] `sw.template.js`: delete `hasAdminSession()` (forbidden-header
+- [x] `sw.template.js`: delete `hasAdminSession()` (forbidden-header
       dead code). `networkFirstHtml` caches 200 GET HTML when NOT
       (401/403 ∨ `x-gk-admin-render` present) — explicitly documented
       offline-only exemption from the framework-default `no-store`
       (entries are served exclusively when the network fails; 24 h TTL
       + MAX_HTML_ENTRIES eviction now reachable). Image path keeps
       `isSensitiveResponse` semantics unchanged.
-- [ ] Regenerate `public/sw.js` (build-sw) in the same commit; follow-up
+- [x] Regenerate `public/sw.js` (build-sw) in the same commit; follow-up
       SW_VERSION refresh commit after the last code commit per the
       established per-deploy pattern.
-- [ ] CLAUDE.md: document the offline-only HTML cache exemption + the
+- [x] CLAUDE.md: document the offline-only HTML cache exemption + the
       admin-render marker.
-- [ ] Contract tests: template contains the marker check and no
+- [x] Contract tests: template contains the marker check and no
       `request.headers.get('Cookie')`; proxy source sets the header.
+
+**Done:** marker header + offline-only exemption + dead cookie sniff removed + CLAUDE.md PWA section; 6 contract tests green.
 
 
 ## Task 5 — ARCH-R4C6-06: one cache policy for image derivatives
