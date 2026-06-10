@@ -205,9 +205,17 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
                 </div>
             )}
 
-            {/* Static navigation buttons (hover on desktop, always visible on mobile) */}
+            {/* Static navigation buttons (hover on desktop, always visible on mobile).
+                R4C1 UX-R4C1-14: z-20, NOT z-10. The photo's AnimatePresence
+                wrapper in photo-viewer.tsx gained `z-10` in R10-M11 (blur
+                crossfade) and is a LATER sibling of this component, so with
+                equal z-index the full-bleed image box painted ABOVE these
+                buttons and swallowed every mouse click on Prev/Next (keyboard
+                and swipe still worked, which is why it went unnoticed; the
+                shared-group e2e click test caught it). z-20 matches the swipe
+                indicators above and restores pointer access. */}
             {prevId && (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-10">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-20">
                     <Button
                         variant="secondary"
                         size="icon"
@@ -222,7 +230,7 @@ export function PhotoNavigation({ prevId, nextId, disabled, buildPhotoPath, onSe
             )}
 
             {nextId && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-10">
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-70 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 transition-opacity z-20">
                     <Button
                         variant="secondary"
                         size="icon"
