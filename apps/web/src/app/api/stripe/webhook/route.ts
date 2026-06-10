@@ -372,9 +372,17 @@ export async function POST(request: NextRequest): Promise<Response> {
         // consistency with cycle 1-4 lines.
         console.info('Entitlement created', { imageId, tier, sessionId });
         if (process.env.LOG_PLAINTEXT_DOWNLOAD_TOKENS === 'true') {
+            // R4C2 SEC/COR-R4C2-05: log resolvedEmail, not customerEmail.
+            // When Stripe sent no email, customerEmail is '' and the operator
+            // workflow ("grep the line, email the token") silently lost the
+            // pointer — while resolvedEmail carries the D-101-04
+            // `unknown+<sessionId>@stripe.local` sentinel that tags the row
+            // for manual reconciliation against the Stripe dashboard. The DB
+            // row was already right; the log line lied in exactly the case
+            // the sentinel exists for.
             console.info(
                 `[manual-distribution] download_token: imageId=${imageId} tier=${tier} ` +
-                `session=${sessionId} email=${customerEmail} token=${downloadToken}`,
+                `session=${sessionId} email=${resolvedEmail} token=${downloadToken}`,
             );
         }
     }

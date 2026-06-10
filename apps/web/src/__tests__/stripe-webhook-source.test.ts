@@ -83,6 +83,21 @@ describe('stripe webhook source-contract', () => {
         expect(gateStr).toMatch(/email=/);
     });
 
+    it('manual-distribution line logs resolvedEmail (sentinel-bearing), not raw customerEmail (R4C2)', () => {
+        // SEC/COR-R4C2-05: when Stripe sends no email, customerEmail is ''
+        // while resolvedEmail carries the `unknown+<sessionId>@stripe.local`
+        // reconciliation sentinel (D-101-04). The operator-facing line must
+        // interpolate resolvedEmail or the pointer is lost in exactly the
+        // case the sentinel exists for.
+        const gate = WEBHOOK_SRC.match(
+            /if\s*\(\s*process\.env\.LOG_PLAINTEXT_DOWNLOAD_TOKENS\s*===\s*['"]true['"]\s*\)\s*\{[\s\S]*?\)\s*;?\s*\n\s*\}/,
+        );
+        expect(gate).not.toBeNull();
+        const gateStr = gate?.[0] ?? '';
+        expect(gateStr).toMatch(/email=\$\{resolvedEmail\}/);
+        expect(gateStr).not.toMatch(/email=\$\{customerEmail\}/);
+    });
+
     it('default-deployment log line does NOT include the plaintext token', () => {
         // Outside the env-gated block, the structured log line must not
         // contain `${downloadToken}` interpolation.
