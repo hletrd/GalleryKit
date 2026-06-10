@@ -30,10 +30,18 @@ const MAX_SEGMENT_LENGTH = 255;
  * contract ("a flood of image requests does not issue one DB SELECT per
  * file") while preserving R8-H1 semantics: the hash is still computed
  * from the RESOLVED GalleryConfig. An admin flip of any color-impacting
- * setting reaches the ETag within <= 5 s — the same skew window
- * settings-hash already documents as acceptable. On fetch failure we
- * serve the last known hash (or settings-hash's no-arg FALLBACK_HASH
- * path) so a misbehaving DB cannot stall image responses.
+ * setting reaches the ETag within <= 5 s + one refresh latency — the
+ * same skew class settings-hash already documents as acceptable.
+ *
+ * R4C4 PERF-R4C4-01: stale-while-revalidate. Once ANY hash has been
+ * resolved, requests are NEVER blocked on a refresh — a stale hash is
+ * served immediately and the refresh proceeds in the background
+ * (single inflight at a time). On refresh failure the last known hash
+ * simply stays in service, so a hung or failing DB cannot stall image
+ * responses. The only blocking case is a true cold start (no hash has
+ * ever been resolved — there is nothing to serve yet); a cold-start
+ * failure falls through to settings-hash's no-arg FALLBACK_HASH path,
+ * which carries its own 5 s negative cache.
  */
 const SERVING_SETTINGS_HASH_TTL_MS = 5_000;
 let servingHashCache: { hash: string; fetchedAt: number } | null = null;
@@ -41,26 +49,36 @@ let servingHashInflight: Promise<string> | null = null;
 
 async function getServingColorSettingsHash(): Promise<string> {
     const now = Date.now();
-    if (servingHashCache && now - servingHashCache.fetchedAt < SERVING_SETTINGS_HASH_TTL_MS) {
-        return servingHashCache.hash;
+    const cached = servingHashCache;
+    if (cached && now - cached.fetchedAt < SERVING_SETTINGS_HASH_TTL_MS) {
+        return cached.hash;
     }
-    if (servingHashInflight) {
-        return servingHashInflight;
+    // Refresh needed — start one unless a refresh is already in flight.
+    // The async body never rejects (both failure branches return a value),
+    // so leaving it un-awaited cannot produce an unhandled rejection.
+    if (!servingHashInflight) {
+        servingHashInflight = (async () => {
+            try {
+                const config = await getGalleryConfig();
+                const hash = await getColorSettingsHash(config);
+                servingHashCache = { hash, fetchedAt: Date.now() };
+                return hash;
+            } catch {
+                if (servingHashCache) return servingHashCache.hash;
+                // No-arg form carries its own 5 s cache + FALLBACK_HASH semantics.
+                return getColorSettingsHash();
+            } finally {
+                servingHashInflight = null;
+            }
+        })();
     }
-    servingHashInflight = (async () => {
-        try {
-            const config = await getGalleryConfig();
-            const hash = await getColorSettingsHash(config);
-            servingHashCache = { hash, fetchedAt: Date.now() };
-            return hash;
-        } catch {
-            if (servingHashCache) return servingHashCache.hash;
-            // No-arg form carries its own 5 s cache + FALLBACK_HASH semantics.
-            return getColorSettingsHash();
-        } finally {
-            servingHashInflight = null;
-        }
-    })();
+    if (cached) {
+        // Stale-while-revalidate: serve the known hash NOW. The refresh
+        // above lands in the background; the next request past its
+        // completion picks up the new hash.
+        return cached.hash;
+    }
+    // True cold start: no hash has ever been resolved — must wait once.
     return servingHashInflight;
 }
 

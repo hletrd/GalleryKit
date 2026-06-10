@@ -15,6 +15,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
  * asserts (1) no re-resolution within the TTL across requests, (2)
  * re-resolution after the TTL elapses, (3) the ETag still carries the
  * config-derived hash (R8-H1 semantics preserved).
+ *
+ * R4C4 PERF-R4C4-01: the refresh is stale-while-revalidate — once any
+ * hash is known, a stale-window request serves IMMEDIATELY with the old
+ * hash while the refresh proceeds in the background; a hung DB must not
+ * stall image responses. Cases (4) and (5) lock that property.
  */
 
 const FAKE_CONFIG = {
@@ -96,7 +101,77 @@ describe('serve-upload settings-hash debounce (R4C3 PERF-R4C3-05)', () => {
         expect(getGalleryConfig).toHaveBeenCalledTimes(1);
 
         vi.setSystemTime(new Date('2026-06-11T00:00:06Z'));
+        // R4C4 PERF-R4C4-01: the stale-window request TRIGGERS the refresh
+        // (call count advances) even though it serves the stale hash.
         await serveUploadFile(['jpeg', 'a.jpg']);
+        expect(getGalleryConfig).toHaveBeenCalledTimes(2);
+    });
+
+    it('serves the stale hash immediately while the refresh is hung (R4C4 PERF-R4C4-01)', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-06-11T00:00:00Z'));
+
+        // First resolution succeeds fast; the second HANGS until released.
+        let releaseSecond: (() => void) | null = null;
+        const secondConfig = { ...FAKE_CONFIG, avifEffort: 9 };
+        const getGalleryConfig = vi.fn()
+            .mockImplementationOnce(async () => FAKE_CONFIG)
+            .mockImplementation(() => new Promise((resolve) => {
+                releaseSecond = () => resolve(secondConfig);
+            }));
+        vi.doMock('@/lib/gallery-config', () => ({ getGalleryConfig }));
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+
+        const first = await serveUploadFile(['jpeg', 'a.jpg']);
+        const staleEtag = first.headers.get('ETag');
+        expect(staleEtag).toBeTruthy();
+
+        vi.setSystemTime(new Date('2026-06-11T00:00:06Z'));
+        // The refresh promise is HUNG — a blocking implementation would
+        // never resolve this await (test would time out). SWR must serve
+        // the stale hash right away while the refresh stays in flight.
+        const second = await serveUploadFile(['jpeg', 'a.jpg']);
+        expect(second.status).toBe(200);
+        expect(second.headers.get('ETag')).toBe(staleEtag);
+        expect(getGalleryConfig).toHaveBeenCalledTimes(2);
+
+        // Release the hung refresh and let its continuations drain.
+        expect(releaseSecond).not.toBeNull();
+        releaseSecond!();
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+
+        // The next request inside the new TTL window serves the REFRESHED
+        // hash (avifEffort changed → different settings hash → new ETag).
+        const third = await serveUploadFile(['jpeg', 'a.jpg']);
+        expect(third.status).toBe(200);
+        expect(third.headers.get('ETag')).not.toBe(staleEtag);
+        // No additional config resolution was needed for the third request.
+        expect(getGalleryConfig).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not stack refreshes: a hung refresh is joined, not duplicated', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-06-11T00:00:00Z'));
+
+        const getGalleryConfig = vi.fn()
+            .mockImplementationOnce(async () => FAKE_CONFIG)
+            .mockImplementation(() => new Promise(() => { /* hang forever */ }));
+        vi.doMock('@/lib/gallery-config', () => ({ getGalleryConfig }));
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+
+        await serveUploadFile(['jpeg', 'a.jpg']);
+        vi.setSystemTime(new Date('2026-06-11T00:00:06Z'));
+
+        // Multiple stale-window requests while ONE refresh hangs: all serve
+        // immediately and only one refresh attempt is in flight.
+        const responses = await Promise.all([
+            serveUploadFile(['jpeg', 'a.jpg']),
+            serveUploadFile(['jpeg', 'a.jpg']),
+            serveUploadFile(['jpeg', 'a.jpg']),
+        ]);
+        for (const response of responses) {
+            expect(response.status).toBe(200);
+        }
         expect(getGalleryConfig).toHaveBeenCalledTimes(2);
     });
 
