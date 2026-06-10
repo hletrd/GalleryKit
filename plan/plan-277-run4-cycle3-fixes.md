@@ -89,4 +89,14 @@ per-iteration deploy via `npm run deploy` after green gates, no suppressions.
       locked by `api-auth-response-headers.test.ts` (commit c7d3db1a)
 - [x] Task 5 — usedRow heuristic requires `isNotNull(downloadedAt)`; query
       shape locked in `refund-clears-download-token.test.ts` (commit 74d70974)
-- [ ] Task 6 — gates + deploy (in progress)
+- [x] Task 6 — ALL GATES GREEN on final tree: eslint 0 errors / 0 warnings,
+      typecheck app + scripts (one gate failure surfaced and fixed at root:
+      the new api-auth test's zero-arg handlers made `withAdminAuth<T>` infer
+      `T=[]` under tsconfig.typecheck.json — handlers now declare the request
+      param, commit b7681b9a), vitest 1591/1591 (165 files — includes the 4
+      new/extended suites), lint:api-auth, lint:action-origin,
+      lint:public-route-rate-limit, production build (exit 0), playwright
+      e2e 20 passed / 2 skipped (admin-spec + CI-only origin-guard skips by
+      design). Deploy follows (per-cycle).
+
+**Status update:** all 6 tasks complete — gates green; deploying per-cycle.
