@@ -60,21 +60,23 @@ new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
 ## Task 3 — UX-R4C6-03 + A11Y-R4C6-04 + COR-R4C6-12: lightbox interaction cluster
 **Files:** `apps/web/src/components/lightbox.tsx`,
 `apps/web/src/__tests__/lightbox-controls-contract.test.ts` (new)
-- [ ] Auto-hide: both hide-timer callbacks keep controls ONLY when the
+- [x] Auto-hide: both hide-timer callbacks keep controls ONLY when the
       active element is inside the dialog AND matches `:focus-visible`
       (try/catch the matches call); when hiding with a (mouse-focused)
       control still holding focus, blur it first so `aria-hidden` never
       applies to a focused element (WCAG 4.1.2). blur() emits no focusin,
       so FocusTrap will not re-capture until the next Tab — which
       correctly re-reveals controls via `onFocusCapture`.
-- [ ] Remove the `aria-label={currentIndex+1 / totalCount}` from the
+- [x] Remove the `aria-label={currentIndex+1 / totalCount}` from the
       lightbox `<img>` — alt text must win accessible-name computation;
       the `role="status"` live-region counter already announces position.
-- [ ] Space branch: move `isEditableTarget(e)` above
+- [x] Space branch: move `isEditableTarget(e)` above
       `preventDefault()`/`stopPropagation()`.
-- [ ] Source-contract tests: no aria-label on the lightbox img; editable
+- [x] Source-contract tests: no aria-label on the lightbox img; editable
       check precedes preventDefault in the Space branch; hide path
       consults `:focus-visible`.
+
+**Done:** focus-visible keepalive + blur-before-hide; ARIA label removed from the slide img; Space guard reordered; 5 contract tests green.
 
 
 ## Task 4 — COR-R4C6-05: revive the SW HTML offline fallback honestly (+ kill the dead Cookie sniff)

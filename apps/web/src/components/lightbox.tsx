@@ -136,6 +136,43 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     // Keep ref in sync with state for use in stable callbacks
     useEffect(() => { controlsVisibleRef.current = controlsVisible; }, [controlsVisible]);
 
+    /**
+     * R4C6 UX-R4C6-03: shared hide-timer terminal. The previous check —
+     * "keep controls if dialog contains document.activeElement" — was
+     * ALWAYS true: the close button is force-focused on mount and the
+     * focus trap keeps focus inside thereafter, so auto-hide never fired
+     * for anyone and the chrome sat on the photo permanently.
+     *
+     * Keep controls only for KEYBOARD focus (`:focus-visible`); for
+     * mouse/touch-focused controls, blur BEFORE hiding so `aria-hidden`
+     * never lands on a focused element (WCAG 4.1.2). blur() emits no
+     * focusin, so the focus trap will not re-capture until the next Tab
+     * keypress — which correctly re-reveals the controls via
+     * `onFocusCapture`.
+     */
+    const hideControlsRespectingFocus = useCallback(() => {
+        const active = document.activeElement;
+        const dialog = dialogRef.current;
+        if (dialog && active instanceof HTMLElement && dialog.contains(active)) {
+            let keyboardFocused = false;
+            try {
+                keyboardFocused = active.matches(':focus-visible');
+            } catch {
+                // Selector unsupported: fail safe toward the previous
+                // keep-visible behavior for focused controls.
+                keyboardFocused = true;
+            }
+            if (keyboardFocused) {
+                controlsVisibleRef.current = true;
+                setControlsVisible(true);
+                return;
+            }
+            active.blur();
+        }
+        controlsVisibleRef.current = false;
+        setControlsVisible(false);
+    }, []);
+
     const showControls = useCallback((forceReset = false) => {
         const now = Date.now();
         // Use ref to avoid stale-closure dependency on controlsVisible.
@@ -158,16 +195,8 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         if (hideTimer.current) {
             clearTimeout(hideTimer.current);
         }
-        hideTimer.current = setTimeout(() => {
-            if (dialogRef.current?.contains(document.activeElement)) {
-                controlsVisibleRef.current = true;
-                setControlsVisible(true);
-                return;
-            }
-            controlsVisibleRef.current = false;
-            setControlsVisible(false);
-        }, 3000);
-    }, [shouldAutoHideControls]);
+        hideTimer.current = setTimeout(hideControlsRespectingFocus, 3000);
+    }, [shouldAutoHideControls, hideControlsRespectingFocus]);
 
     // Slideshow timer: start/stop based on isSlideshowActive
     useEffect(() => {
@@ -235,21 +264,13 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
             return;
         }
 
-        hideTimer.current = setTimeout(() => {
-            if (dialogRef.current?.contains(document.activeElement)) {
-                controlsVisibleRef.current = true;
-                setControlsVisible(true);
-                return;
-            }
-            controlsVisibleRef.current = false;
-            setControlsVisible(false);
-        }, 3000);
+        hideTimer.current = setTimeout(hideControlsRespectingFocus, 3000);
         return () => {
             if (hideTimer.current) {
                 clearTimeout(hideTimer.current);
             }
         };
-    }, [shouldAutoHideControls]);
+    }, [shouldAutoHideControls, hideControlsRespectingFocus]);
 
     useEffect(() => {
         const handleFullscreenChange = () => {
@@ -286,9 +307,12 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         const handleKeyDown = (e: KeyboardEvent) => {
             // Space key toggles slideshow — don't reset controls or stop slideshow
             if (e.key === ' ') {
+                // R4C6 COR-R4C6-12: consult the editable-target guard BEFORE
+                // preventDefault, or typing a literal space in an editable
+                // target would be suppressed while the lightbox is open.
+                if (isEditableTarget(e)) return;
                 e.preventDefault();
                 e.stopPropagation();
-                if (isEditableTarget(e)) return;
                 setIsSlideshowActive(prev => !prev);
                 showControls(true);
                 return;
@@ -482,11 +506,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                             }
                         }
                     }}
-                    aria-label={
-                        currentIndex != null && totalCount != null
-                            ? `${currentIndex + 1} / ${totalCount}`
-                            : undefined
-                    }
+                    // R4C6 A11Y-R4C6-04: no ARIA labeling on this element — it
+                    // would WIN the accessible-name computation over the
+                    // descriptive alt text, and the position is already
+                    // announced by the role="status" live-region counter below.
                     style={
                         isSlideshowActive && !shouldReduceMotion
                             ? {
