@@ -120,5 +120,14 @@ following the repo's SW_VERSION refresh-commit convention)
   Extract guard added against the newly exported
   `PrivacySensitiveKeys`; privacy fixture pins (omit + subset-of-public
   + safe-keys) added.
-- Task 5 ✅ — plan-287 archived to done/ (`384f20f3`); gates: see final
-  record below.
+- Task 5 ✅ — plan-287 archived to done/ (`384f20f3`); ALL gates green
+  repo-wide: eslint **0 errors / 0 warnings** · typecheck PASS ·
+  vitest **1739/1739** (181 files; +10 tests this cycle) ·
+  lint:api-auth PASS · lint:action-origin PASS ·
+  lint:public-route-rate-limit PASS · production build PASS
+  (`BUILD-EXIT:0`; SW_VERSION refreshed in `649bdc5b` and `de1531a7`) ·
+  Playwright e2e **20 passed / 2 skipped** (the standing conditional
+  skips), exit 0.
+- Deploy ✅ — `npm run deploy` exit 0 (image rebuilt, container
+  `gallerykit-web` Started). Post-deploy probes: `/api/live` 200,
+  `/en` 200.
