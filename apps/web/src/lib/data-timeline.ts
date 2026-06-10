@@ -11,14 +11,27 @@
 import { db, images, imageTags, tags } from '@/db';
 import { eq, and, desc, isNotNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
+import type { PrivacySensitiveKeys } from '@/lib/data';
 
 // ---------------------------------------------------------------------------
 // Field sets (mirrors publicSelectFields from data.ts — privacy-safe subset)
 // ---------------------------------------------------------------------------
 
 // PRIVACY: These fields match publicSelectFields. They intentionally omit
-// latitude, longitude, filename_original, user_filename, processed,
-// original_format, original_file_size. Do NOT add PII fields here.
+// every member of the PrivacySensitiveKeys contract in data.ts (PII like
+// latitude/longitude/filename_original/user_filename AND the admin-only
+// color-audit columns: color_space, icc_profile_name, bit_depth,
+// pipeline_version, transfer_function, …). Do NOT add sensitive fields
+// here — the compile-time guard + the privacy-fields fixture test below
+// will fail the build/tests if you do.
+//
+// R4C9 TEST-R4C9-04 (upgraded to a live finding during implementation):
+// color_space and bit_depth USED to be selected here —
+// they were moved to admin-only in data.ts (R27-CP-HIGH-1 / earlier
+// bit_depth lockdown) and this hand-maintained mirror silently drifted.
+// No timeline/OnThisDay/year-review consumer ever rendered them, so the
+// removal is zero-behavior-change; the guards exist so the NEXT drift is
+// impossible.
 const timelineSelectFields = {
     id: images.id,
     filename_avif: images.filename_avif,
@@ -39,14 +52,25 @@ const timelineSelectFields = {
     f_number: images.f_number,
     exposure_time: images.exposure_time,
     focal_length: images.focal_length,
-    color_space: images.color_space,
     white_balance: images.white_balance,
     metering_mode: images.metering_mode,
     exposure_compensation: images.exposure_compensation,
     exposure_program: images.exposure_program,
     flash: images.flash,
-    bit_depth: images.bit_depth,
 } as const;
+
+// Compile-time privacy guard (R4C9 TEST-R4C9-04) — same pattern as
+// data.ts: if any PrivacySensitiveKeys member is ever added to
+// timelineSelectFields, the offending key name(s) appear in a type error.
+type _TimelineSensitive = Extract<keyof typeof timelineSelectFields, PrivacySensitiveKeys>;
+const _timelinePrivacyGuard: _TimelineSensitive extends never ? true : [_TimelineSensitive, 'ERROR: privacy-sensitive field found in timelineSelectFields — see PRIVACY comment above'] = true;
+void _timelinePrivacyGuard;
+
+// Runtime fixture pin for __tests__/privacy-fields.test.ts (keeps the
+// SENSITIVE_KEYS list and the type guard from drifting apart).
+export const timelineSelectFieldKeys = Object.freeze(
+    Object.keys(timelineSelectFields).sort(),
+) as readonly (keyof typeof timelineSelectFields)[];
 
 /**
  * Shared GROUP_CONCAT expression — matches tagNamesAgg in data.ts exactly.

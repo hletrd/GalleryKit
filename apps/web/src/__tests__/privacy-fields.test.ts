@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { images } from '@/db/schema';
 import { adminSelectFieldKeys, publicSelectFieldKeys } from '@/lib/data';
+import { timelineSelectFieldKeys } from '@/lib/data-timeline';
 
 const SENSITIVE_KEYS = [
     'latitude',
@@ -86,5 +87,36 @@ describe('Privacy field separation', () => {
             .sort();
         const sensitiveSorted = [...SENSITIVE_KEYS].sort();
         expect(adminOnlyKeys).toEqual(sensitiveSorted);
+    });
+
+    /**
+     * R4C9 TEST-R4C9-04: lib/data-timeline.ts hand-mirrors the public
+     * select shape for the timeline / year-in-review / OnThisDay PUBLIC
+     * pages. The mirror had silently drifted — color_space and bit_depth
+     * (admin-only since R27-CP-HIGH-1 / R8-H3) were still being selected
+     * on public requests. These pins make any future drift a test
+     * failure; data-timeline.ts additionally carries the same
+     * compile-time Extract guard as data.ts.
+     */
+    it('timeline select fields omit every sensitive contract key (TEST-R4C9-04)', () => {
+        for (const key of SENSITIVE_KEYS) {
+            expect(timelineSelectFieldKeys).not.toContain(key);
+        }
+    });
+
+    it('timeline select fields are a subset of the public select fields', () => {
+        const publicKeySet = new Set<string>(publicSelectFieldKeys);
+        for (const key of timelineSelectFieldKeys) {
+            // tag_names is aggregated separately in both modules; every
+            // selected COLUMN must be public-approved.
+            expect(publicKeySet.has(key)).toBe(true);
+        }
+    });
+
+    it('timeline select fields still expose the intended safe keys', () => {
+        expect(timelineSelectFieldKeys).toContain('id');
+        expect(timelineSelectFieldKeys).toContain('filename_jpeg');
+        expect(timelineSelectFieldKeys).toContain('capture_date');
+        expect(timelineSelectFieldKeys).toContain('title');
     });
 });
