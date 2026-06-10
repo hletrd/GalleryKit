@@ -165,10 +165,21 @@ describe('AGG-01: runner does NOT advance pipeline_version when detection fails'
         expect(result.status).toBe('queued');
 
         // Let the fire-and-forget runner drain: config read, encode, detection
-        // throw, UPDATE, queue.onIdle, finally.
-        for (let i = 0; i < 10; i++) {
-            await new Promise((r) => setImmediate(r));
-        }
+        // throw, UPDATE, queue.onIdle, finally. R4C1 TEST-R4C1-06: a fixed
+        // 10×setImmediate drain raced the REAL `sharp(path).metadata()` libuv
+        // threadpool I/O (sharp is deliberately unmocked — see the fs/promises
+        // mock comment above) and flaked on slow machines: the assertions ran
+        // before the UPDATE landed. Poll the runner's own completion signal —
+        // `state.running` is reset in runBackfill's `finally`, which is the
+        // single authoritative release point (R29-CRIT-1).
+        await vi.waitFor(
+            () => {
+                if (readAdminBackfillState().running) {
+                    throw new Error('backfill runner still draining');
+                }
+            },
+            { timeout: 20_000, interval: 25 },
+        );
 
         // Encode was attempted (so we're genuinely on the post-encode path).
         expect(processImageFormatsMock).toHaveBeenCalled();
