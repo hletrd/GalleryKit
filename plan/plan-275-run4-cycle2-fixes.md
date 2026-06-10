@@ -92,10 +92,15 @@
 - [x] Task 2 — exempt comment removed + scanner hardened (exempt-on-mutating-body
       now FAILS; arrow-form exemption detection fixed) + 5 fixtures
       (commit 605e07db)
-- [ ] Task 3 — ImageOff icon tile (clears eslint warning)
-- [ ] Task 4 — label code-point validation + safe residual truncation
-- [ ] Task 5 — resolvedEmail in manual-distribution log + source-contract test
-- [ ] Task 6 — single 200 MiB constant
-- [ ] Task 7 — isValidSlug pre-check on recordTopicView
-- [ ] Task 8 — code-point-safe Stripe title truncation
+- [x] Task 3 — ImageOff icon tile; doomed thumbnail fetch removed; eslint
+      no-img-element warning gone at root (commit 6dea1f92)
+- [x] Task 4 — label code-point validation + safe residual truncation
+      (commit 9d582f08)
+- [x] Task 5 — resolvedEmail in manual-distribution log + source-contract test
+      (commit 6fc59264)
+- [x] Task 6 — single 200 MiB constant across upload-limits / process-image /
+      process-topic-image (3rd copy found and consolidated too)
+      (commit 7a8cfdf5)
+- [x] Task 7 — isValidSlug pre-check on recordTopicView (commit 20f4c8cc)
+- [x] Task 8 — code-point-safe Stripe title truncation (commit 927d15db)
 - [ ] Task 9 — all gates green + per-cycle deploy
