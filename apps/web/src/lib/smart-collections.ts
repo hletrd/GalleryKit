@@ -277,6 +277,22 @@ const VALID_OPERATORS = new Set([
     'eq', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'contains',
 ]);
 
+/**
+ * R4C7 COR-R4C7-03: per-column operator narrowing. `VALID_OPERATORS`
+ * above is column-global, but `compileTagPredicate` only implements
+ * `eq` / `contains` for the tag subquery and THROWS for everything
+ * else. The save actions (`createSmartCollection` /
+ * `updateSmartCollection`) validate with `parseSmartCollectionQuery`
+ * only — without this narrowing an admin could "successfully" save
+ * `{column:'tag', operator:'gt', …}` and every public visit to
+ * `/c/[slug]` would then compile-throw into `notFound()` with zero
+ * signal. Per the module's own write-time-failure doctrine
+ * (R4C4 HARD-R4C4-07), malformed queries must fail loudly at
+ * validation. `compileTagPredicate` keeps its throw as defense in
+ * depth for rows persisted before this guard.
+ */
+const TAG_OPERATORS = new Set(['eq', 'contains']);
+
 const VALID_COLUMNS = new Set<AllowedColumn>([
     'iso', 'focal_length', 'f_number', 'exposure_time',
     'camera_model', 'lens_model', 'capture_date', 'topic', 'tag',
@@ -335,6 +351,15 @@ function validateNode(node: unknown, depth: number): SmartCollectionQuery {
         }
         if (typeof n.operator !== 'string' || !VALID_OPERATORS.has(n.operator)) {
             throw new SmartCollectionQueryError(`Unknown operator "${n.operator}"`);
+        }
+        // R4C7 COR-R4C7-03: the tag predicate compiles to a subquery that
+        // only supports eq/contains — reject anything else at validation
+        // (write) time so the save action fails loudly instead of the
+        // public collection page 404ing on compile.
+        if (n.column === 'tag' && !TAG_OPERATORS.has(n.operator)) {
+            throw new SmartCollectionQueryError(
+                `Tag predicate only supports "eq" and "contains" operators, got "${n.operator}"`,
+            );
         }
         // Structural checks per operator
         if (n.operator === 'between') {

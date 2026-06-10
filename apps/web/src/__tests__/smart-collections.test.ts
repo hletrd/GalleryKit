@@ -194,3 +194,82 @@ describe('parseSmartCollectionQuery — scalar value enforcement (R4C4 HARD-R4C4
         expect(() => parseSmartCollectionQuery(inPred)).not.toThrow();
     });
 });
+
+// R4C7 COR-R4C7-03: the validator must reject tag-column operators the
+// compiler cannot execute. Before this guard, an admin could save
+// `{column:'tag', operator:'gt', …}` (parse-only validation in the save
+// actions) and the public /c/[slug] page compile-threw into notFound()
+// for every visitor.
+describe('parseSmartCollectionQuery — per-column operator enforcement (R4C7 COR-R4C7-03)', () => {
+    const tagPred = (operator: string, extra: Record<string, unknown> = { value: 'landscape' }) =>
+        JSON.stringify({ type: 'predicate', column: 'tag', operator, ...extra });
+
+    it.each(['gt', 'gte', 'lt', 'lte'])('rejects tag × %s at validation time', (op) => {
+        expect(() => parseSmartCollectionQuery(tagPred(op)))
+            .toThrow(/Tag predicate only supports "eq" and "contains"/);
+    });
+
+    it('rejects tag × between at validation time', () => {
+        expect(() => parseSmartCollectionQuery(tagPred('between', { lo: 'a', hi: 'b' })))
+            .toThrow(/Tag predicate only supports "eq" and "contains"/);
+    });
+
+    it('rejects tag × in at validation time', () => {
+        expect(() => parseSmartCollectionQuery(tagPred('in', { values: ['a', 'b'] })))
+            .toThrow(/Tag predicate only supports "eq" and "contains"/);
+    });
+
+    it('still accepts tag × eq and tag × contains', () => {
+        expect(() => parseSmartCollectionQuery(tagPred('eq'))).not.toThrow();
+        expect(() => parseSmartCollectionQuery(tagPred('contains'))).not.toThrow();
+    });
+
+    it('rejects tag misuse nested inside groups (write-time, not render-time)', () => {
+        const nested = JSON.stringify({
+            type: 'and',
+            children: [
+                { type: 'predicate', column: 'iso', operator: 'gte', value: 800 },
+                { type: 'or', children: [{ type: 'predicate', column: 'tag', operator: 'gt', value: 'x' }] },
+            ],
+        });
+        expect(() => parseSmartCollectionQuery(nested))
+            .toThrow(/Tag predicate only supports "eq" and "contains"/);
+    });
+});
+
+// R4C7 COR-R4C7-03 agreement property: every minimal AST the validator
+// ACCEPTS must compile without throwing. This pins the validate/compile
+// contract as a CLASS, so a future operator or column addition cannot
+// reintroduce the asymmetry (validator-pass → public-page compile-throw).
+describe('validate/compile agreement (R4C7 COR-R4C7-03)', () => {
+    const columns = ['iso', 'focal_length', 'f_number', 'exposure_time', 'camera_model', 'lens_model', 'capture_date', 'topic', 'tag'] as const;
+    const operators = ['eq', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'contains'] as const;
+
+    const minimalAstFor = (column: string, operator: string): string => {
+        if (operator === 'between') {
+            return JSON.stringify({ type: 'predicate', column, operator, lo: '1', hi: '2' });
+        }
+        if (operator === 'in') {
+            return JSON.stringify({ type: 'predicate', column, operator, values: ['1', '2'] });
+        }
+        return JSON.stringify({ type: 'predicate', column, operator, value: '1' });
+    };
+
+    it('compiles every validator-accepted column × operator combination', () => {
+        let accepted = 0;
+        for (const column of columns) {
+            for (const operator of operators) {
+                let ast;
+                try {
+                    ast = parseSmartCollectionQuery(minimalAstFor(column, operator));
+                } catch {
+                    continue; // validator rejected — nothing to agree on
+                }
+                accepted++;
+                expect(() => compileSmartCollection(ast)).not.toThrow();
+            }
+        }
+        // Sanity: 8 direct columns × 8 operators + tag × 2 = 66 accepted shapes.
+        expect(accepted).toBe(66);
+    });
+});
