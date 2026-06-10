@@ -36,6 +36,7 @@ import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { buildDownloadFilename } from '@/lib/download-filename';
 import { isP3Pipeline } from '@/lib/color-pipeline-decisions';
 import { useDisplayCapability } from '@/lib/use-display-capability';
+import { getAvifSupportPromise } from '@/lib/avif-support';
 
 /** Check if a keyboard event target is an editable element (input, textarea, contentEditable, or role=textbox). */
 export function isEditableTarget(e: KeyboardEvent): boolean {
@@ -299,19 +300,27 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     // Preload prev/next image files so they appear instantly on navigation.
     //
-    // R13-H1 / R13-L3 / R10-L13: emit one responsive preload PER format the
-    // photo has (AVIF / WebP / JPEG) using the modern `imagesrcset` +
-    // `imagesizes` + `type=` attribute trio. Browsers that can't decode AVIF
-    // ignore the `type="image/avif"` link (no double-fetch); browsers that
-    // CAN decode AVIF skip the WebP/JPEG tags because their `<picture>` will
-    // pick AVIF from the in-DOM `<source>` chain. Each visitor preloads
-    // exactly the bytes their navigation will render — not the base-size
-    // full-resolution JPEG that the old single-preload always warmed.
+    // R4C8 PERF-R4C8-03: emit exactly ONE responsive preload per neighbor.
+    // The previous shape (R13-H1) emitted one preload PER format on the
+    // belief that browsers which can decode AVIF "skip the WebP/JPEG tags
+    // because their <picture> will pick AVIF" — that mechanism does not
+    // exist: the `type` attribute on a preload link only gates MIME
+    // SUPPORT, and preload links carry no knowledge of the picture's
+    // source selection. Chromium fetched the AVIF AND WebP preloads for
+    // every neighbor (verified live), doubling neighbor bandwidth. The
+    // format is now chosen ONCE via the AVIF decode probe (the same
+    // Promise-singleton the histogram uses): AVIF when supported, else
+    // WebP (universally decodable by the browsers this app targets),
+    // else JPEG — matching what the in-DOM <picture> will actually
+    // select on navigation. `imagesrcset` / `imagesizes` keep the width
+    // choice responsive (they are the HTML spec attribute names, NOT
+    // camelCase DOM properties, hence setAttribute).
     useEffect(() => {
         const imgs = [image?.prevImage, image?.nextImage].filter(Boolean) as Array<NonNullable<typeof image.prevImage>>;
         if (imgs.length === 0) return;
 
         const links: HTMLLinkElement[] = [];
+        let cancelled = false;
 
         const appendResponsivePreload = (
             type: 'image/avif' | 'image/webp' | 'image/jpeg',
@@ -322,40 +331,35 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             link.rel = 'preload';
             link.as = 'image';
             link.type = type;
-            // `imagesrcset` / `imagesizes` are the HTML spec attribute names
-            // for responsive preload. They are NOT camelCase DOM properties,
-            // so we use `setAttribute` rather than direct assignment.
             link.setAttribute('imagesrcset', srcset);
             link.setAttribute('imagesizes', sizes);
             document.head.appendChild(link);
             links.push(link);
         };
 
-        for (const img of imgs) {
-            const baseAvif = img.filename_avif?.replace(/\.avif$/i, '');
-            const baseWebp = img.filename_webp?.replace(/\.webp$/i, '');
-            const baseJpeg = img.filename_jpeg?.replace(/\.jpg$/i, '');
+        getAvifSupportPromise().then((avifSupported) => {
+            if (cancelled) return;
+            for (const img of imgs) {
+                const baseAvif = img.filename_avif?.replace(/\.avif$/i, '');
+                const baseWebp = img.filename_webp?.replace(/\.webp$/i, '');
+                const baseJpeg = img.filename_jpeg?.replace(/\.jpg$/i, '');
 
-            if (baseAvif) {
-                const srcset = imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ');
-                appendResponsivePreload('image/avif', srcset, photoViewerSizes);
+                // Single-format selection — mirrors the <picture> outcome.
+                if (avifSupported && baseAvif) {
+                    const srcset = imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ');
+                    appendResponsivePreload('image/avif', srcset, photoViewerSizes);
+                } else if (baseWebp) {
+                    const srcset = imageSizes.map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ');
+                    appendResponsivePreload('image/webp', srcset, photoViewerSizes);
+                } else if (baseJpeg) {
+                    const srcset = imageSizes.map(w => `${imageUrl(`/uploads/jpeg/${baseJpeg}_${w}.jpg`)} ${w}w`).join(', ');
+                    appendResponsivePreload('image/jpeg', srcset, photoViewerSizes);
+                }
             }
-            if (baseWebp) {
-                const srcset = imageSizes.map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ');
-                appendResponsivePreload('image/webp', srcset, photoViewerSizes);
-            }
-            // JPEG path: only emit if neither AVIF nor WebP exist for this
-            // photo. The in-DOM `<picture>` will only fall through to JPEG
-            // when `<source>` entries are absent, so preloading JPEG for a
-            // photo that has AVIF/WebP would warm bytes the browser never
-            // requests on AVIF/WebP-capable Safari/Chrome/Firefox.
-            if (!baseAvif && !baseWebp && img.filename_jpeg) {
-                const srcset = imageSizes.map(w => `${imageUrl(`/uploads/jpeg/${baseJpeg}_${w}.jpg`)} ${w}w`).join(', ');
-                appendResponsivePreload('image/jpeg', srcset, photoViewerSizes);
-            }
-        }
+        });
 
         return () => {
+            cancelled = true;
             for (const link of links) {
                 if (link.parentNode) link.parentNode.removeChild(link);
             }

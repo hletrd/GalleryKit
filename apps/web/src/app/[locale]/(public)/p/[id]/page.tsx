@@ -10,7 +10,6 @@ import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { PhotoViewerLoading } from '@/components/photo-viewer-loading';
@@ -165,38 +164,15 @@ export default async function PhotoPage({ params, searchParams }: {
 
     if (!image) return notFound();
 
-    // Preload adjacent images for instant prev/next navigation. Issue both
-    // AVIF (modern browsers) and JPEG (fallback) preloads with explicit
-    // `type` so the browser only fetches the variant it actually needs.
-    const [prevImage, nextImage] = await Promise.all([
-        image.prevId ? getImageCached(image.prevId) : null,
-        image.nextId ? getImageCached(image.nextId) : null,
-    ]);
-    const preloadSize = findNearestImageSize(config.imageSizes, 1536);
-    type PreloadHint = { href: string; type?: string };
-    const preloadHints: PreloadHint[] = [];
-    for (const adj of [prevImage, nextImage]) {
-        if (!adj?.filename_jpeg) continue;
-        const baseJpeg = adj.filename_jpeg.replace(/\.jpg$/i, '');
-        preloadHints.push({
-            href: absoluteImageUrl(`/uploads/jpeg/${baseJpeg}_${preloadSize}.jpg`, seo.url),
-            type: 'image/jpeg',
-        });
-        if (adj.filename_avif) {
-            const baseAvif = adj.filename_avif.replace(/\.avif$/i, '');
-            preloadHints.push({
-                href: absoluteImageUrl(`/uploads/avif/${baseAvif}_${preloadSize}.avif`, seo.url),
-                type: 'image/avif',
-            });
-        }
-        if (adj.filename_webp) {
-            const baseWebp = adj.filename_webp.replace(/\.webp$/i, '');
-            preloadHints.push({
-                href: absoluteImageUrl(`/uploads/webp/${baseWebp}_${preloadSize}.webp`, seo.url),
-                type: 'image/webp',
-            });
-        }
-    }
+    // R4C8 PERF-R4C8-03: the server-rendered neighbor preload hints were
+    // removed. The `type` attribute on a preload link only gates MIME
+    // SUPPORT, not whether the eventual <picture> will pick that source —
+    // Chromium fetched all three per-format hints (verified live), so the
+    // old block triple-fetched ~1536 px files for both neighbors with
+    // fetchPriority=high, competing with the CURRENT photo's bandwidth.
+    // Neighbor warming is owned by the photo-viewer client effect, which
+    // emits exactly ONE responsive preload per neighbor (format chosen via
+    // the AVIF-support probe).
 
     // Fire-and-forget view recording: do not block render on analytics insert.
     // recordPhotoView is a void server action — errors are swallowed internally.
@@ -286,16 +262,6 @@ export default async function PhotoPage({ params, searchParams }: {
 
     return (
         <>
-            {preloadHints.map((hint) => (
-                <link
-                    key={hint.href}
-                    rel="preload"
-                    as="image"
-                    href={hint.href}
-                    type={hint.type}
-                    fetchPriority="high"
-                />
-            ))}
             <script
                 type="application/ld+json"
                 nonce={nonce}
