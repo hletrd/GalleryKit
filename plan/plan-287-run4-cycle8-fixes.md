@@ -171,4 +171,7 @@ extend `apps/web/src/__tests__/process-image-icc-options-lockin.test.ts`
   lint:public-route-rate-limit PASS · production build PASS
   (`BUILD-EXIT:0`, SW_VERSION refreshed in `089add4d`) · Playwright
   e2e **20 passed / 2 skipped** (the standing conditional skips), exit 0.
-- Deploy: recorded below after `npm run deploy`.
+- Deploy ✅ — `npm run deploy` exit 0 (container `gallerykit-web`
+  Started; the build-time sitemap ECONNREFUSED fallback is the known
+  builder-no-DB pattern). Post-deploy probes: `/api/live` 200,
+  `/en` 200.
