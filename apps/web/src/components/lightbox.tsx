@@ -402,9 +402,19 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
     // R21-M1: one-shot guard ref so a true 404 on even the base filename
     // does not loop the onError handler. Reset when the photo changes so
     // the next image gets a fresh attempt.
+    // R4C8 COR-R4C8-05: the fallback is STATE-driven (drop the <source>
+    // rows, then point the <img> at the base JPEG). The previous bare
+    // `img.src = base` swap was ineffective: mutating src re-runs the
+    // HTML image-selection algorithm, which again prefers the matching
+    // <source type="image/avif"> — verified live (currentSrc stayed on
+    // the 404ing sized AVIF). Removing the sources is the only way the
+    // src attribute participates in selection.
     const jpegFallbackTriedRef = useRef(false);
+    const [sizedSourcesFailed, setSizedSourcesFailed] = useState(false);
     useEffect(() => {
         jpegFallbackTriedRef.current = false;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional per-photo reset: the fallback decision belongs to ONE image; navigating to the next photo must re-arm the sized-derivative attempt (same pattern as the guard ref above)
+        setSizedSourcesFailed(false);
     }, [image.id]);
 
     const transitionStyle = shouldReduceMotion
@@ -465,14 +475,14 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         : undefined
                 }
             >
-                {avifSrcSet && (
+                {!sizedSourcesFailed && avifSrcSet && (
                     <source
                         type="image/avif"
                         srcSet={avifSrcSet}
                         sizes="100vw"
                     />
                 )}
-                {webpSrcSet && (
+                {!sizedSourcesFailed && webpSrcSet && (
                     <source
                         type="image/webp"
                         srcSet={webpSrcSet}
@@ -480,7 +490,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     />
                 )}
                 <img
-                    src={jpegSrc}
+                    src={sizedSourcesFailed ? (jpegBaseSrc ?? jpegSrc) : jpegSrc}
                     alt={getConcisePhotoAltText(image, t('common.photo'))}
                     width={image.width}
                     height={image.height}
@@ -490,20 +500,22 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                     // (better) downscale filter on Safari 17.4+ / Chrome 108+.
                     className="w-full h-full object-contain lightbox-image"
                     draggable={false}
-                    // R21-M1: legacy photos or mid-backfill rows may only
-                    // have the base JPEG on disk (not the sized derivative
-                    // referenced in jpegSrc). When the sized URL 404s,
-                    // swap to the base filename once. The encoder
-                    // atomic-rename contract guarantees the base file is
-                    // always present, so a single fallback is sufficient.
-                    onError={(e) => {
+                    // R21-M1 / R4C8 COR-R4C8-05: legacy photos or
+                    // mid-backfill rows may only have the base JPEG on
+                    // disk (not the sized derivatives referenced in the
+                    // srcsets). When the selected resource 404s, flip the
+                    // state ONCE: the re-render drops the <source> rows
+                    // and points src at the base filename — a bare
+                    // `img.src` swap cannot work while a matching
+                    // <source> remains (selection re-picks the source).
+                    // The encoder atomic-rename contract guarantees the
+                    // base file is always present, so a single fallback
+                    // is sufficient; the ref guard stops a second pass.
+                    onError={() => {
                         if (jpegFallbackTriedRef.current) return;
                         jpegFallbackTriedRef.current = true;
                         if (jpegBaseSrc) {
-                            const img = e.currentTarget as HTMLImageElement;
-                            if (img.src !== jpegBaseSrc) {
-                                img.src = jpegBaseSrc;
-                            }
+                            setSizedSourcesFailed(true);
                         }
                     }}
                     // R4C6 A11Y-R4C6-04: no ARIA labeling on this element — it

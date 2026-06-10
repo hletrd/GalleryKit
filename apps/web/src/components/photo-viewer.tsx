@@ -445,9 +445,19 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     // does not loop the onError handler. Reset when the photo changes so
     // the next image gets a fresh attempt. Mirrors the R21-M1 fix on the
     // lightbox so both viewer surfaces are consistent.
+    // R4C8 COR-R4C8-05: the <picture>-branch fallback is STATE-driven —
+    // the re-render drops the <source> rows and points the <img> at the
+    // base JPEG. A bare `img.src` swap cannot work while a matching
+    // <source> remains: mutating src re-runs the image-selection
+    // algorithm, which re-picks the (404ing) source — verified live.
     const jpegFallbackTriedRef = useRef(false);
+    const [sizedSourcesFailed, setSizedSourcesFailed] = useState(false);
     useEffect(() => {
         jpegFallbackTriedRef.current = false;
+        // Intentional per-photo reset: the fallback decision belongs to ONE
+        // image; navigating to the next photo must re-arm the
+        // sized-derivative attempt (same pattern as the guard ref above).
+        setSizedSourcesFailed(false);
     }, [image?.id]);
 
     const srcSetData = useMemo(() => {
@@ -486,12 +496,33 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     className="w-full h-full object-contain max-h-[calc(100vh-8rem)] z-0 relative photo-viewer-image"
                     priority
                     unoptimized
-                    // R22-M1: next/image forwards onError to the underlying <img>,
-                    // so the same sized-derivative fallback applies on the
-                    // no-AVIF/no-WebP branch.
+                    // R22-M1: next/image forwards onError to the underlying <img>.
+                    // The in-place src swap IS effective on this branch because
+                    // there are no <source> siblings to win re-selection.
                     onError={handleJpegError}
                     // R10-M11: dismiss the blur placeholder once the actual
                     // image has decoded, triggering the crossfade.
+                    onLoad={() => setImageLoaded(true)}
+                />
+            );
+        }
+
+        // R4C8 COR-R4C8-05: once a sized derivative has 404ed, render the
+        // plain <img> on the base JPEG with NO <source> rows — the only
+        // shape in which the src attribute participates in selection. The
+        // encoder atomic-rename contract guarantees the base file exists.
+        if (sizedSourcesFailed && jpegBaseSrc) {
+            return (
+                /* eslint-disable-next-line @next/next/no-img-element -- intentional plain img: this is the error-fallback render and must not re-introduce <source> siblings or loader indirection */
+                <img
+                    src={jpegBaseSrc}
+                    alt={getAltText(image)}
+                    width={image.width}
+                    height={image.height}
+                    className="w-full h-full object-contain max-h-[calc(100vh-8rem)] z-0 relative photo-viewer-image"
+                    decoding="async"
+                    loading="eager"
+                    fetchPriority="high"
                     onLoad={() => setImageLoaded(true)}
                 />
             );
@@ -520,20 +551,26 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     decoding="async"
                     loading="eager"
                     fetchPriority="high"
-                    // R22-M1: legacy photos or mid-backfill rows may only have
-                    // the base JPEG on disk (not the sized derivative referenced
-                    // in jpegSrc / jpegSrcSet). When the sized URL 404s, swap to
-                    // the base filename once. The encoder atomic-rename contract
-                    // guarantees the base file is always present, so a single
-                    // fallback is sufficient. Mirrors R21-M1 in lightbox.tsx.
-                    onError={handleJpegError}
+                    // R22-M1 / R4C8 COR-R4C8-05: legacy photos or mid-backfill
+                    // rows may only have the base JPEG on disk. When the
+                    // selected resource 404s, flip the state ONCE so the
+                    // re-render above drops the <source> rows and serves the
+                    // base filename — a bare src swap cannot win while a
+                    // matching <source> remains. Mirrors lightbox.tsx.
+                    onError={() => {
+                        if (jpegFallbackTriedRef.current) return;
+                        jpegFallbackTriedRef.current = true;
+                        if (jpegBaseSrc) {
+                            setSizedSourcesFailed(true);
+                        }
+                    }}
                     // R10-M11: dismiss the blur placeholder once the actual
                     // image has decoded, triggering the crossfade.
                     onLoad={() => setImageLoaded(true)}
                 />
             </picture>
         );
-    }, [image, photoViewerSizes, t, imageSizes, setImageLoaded]);
+    }, [image, photoViewerSizes, t, imageSizes, setImageLoaded, sizedSourcesFailed]);
 
     if (!image) return <div className="p-8 text-center">{t('home.noImages')}</div>;
 

@@ -576,10 +576,16 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
         };
     }, [effectiveUrl, markFailed, colorPrimaries]);
 
+    // R4C8 COR-R4C8-04: `canvasDims` MUST be a dependency. The <canvas>
+    // width/height attributes come from canvasDims state, and per the HTML
+    // spec assigning either attribute RESETS (clears) the drawing buffer —
+    // so when a resize crosses the 768 px breakpoint React re-attributes
+    // the canvas and the histogram blanked until the next mode/theme/photo
+    // change. Redrawing from the cached histogramData is cheap.
     useEffect(() => {
         if (!histogramData || !canvasRef.current || collapsed) return;
         drawHistogram(canvasRef.current, histogramData, mode, isDark);
-    }, [histogramData, mode, collapsed, isDark]);
+    }, [histogramData, mode, collapsed, isDark, canvasDims]);
 
     const cycleMode = useCallback(() => {
         setMode((prev) => {
