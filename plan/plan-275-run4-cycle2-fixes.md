@@ -86,8 +86,12 @@
 - Then `npm run deploy` (DEPLOY_MODE=per-cycle).
 
 ## Progress
-- [ ] Task 1 — toMySqlDateTime helper + failed_at fix + format contract tests
-- [ ] Task 2 — exempt comment removed + scanner hardened + fixtures
+- [x] Task 1 — toMySqlDateTime helper + failed_at fix + format contract tests
+      (commit 53e6722a; helper-produced literal verified INSERTable on live
+      MySQL 8 strict mode)
+- [x] Task 2 — exempt comment removed + scanner hardened (exempt-on-mutating-body
+      now FAILS; arrow-form exemption detection fixed) + 5 fixtures
+      (commit 605e07db)
 - [ ] Task 3 — ImageOff icon tile (clears eslint warning)
 - [ ] Task 4 — label code-point validation + safe residual truncation
 - [ ] Task 5 — resolvedEmail in manual-distribution log + source-contract test
