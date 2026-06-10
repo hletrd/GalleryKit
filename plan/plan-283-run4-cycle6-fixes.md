@@ -109,22 +109,24 @@ new `apps/web/src/__tests__/data-timeline-truncation.test.ts`
 ## Task 5 — ARCH-R4C6-06: one cache policy for image derivatives
 **Files:** `apps/web/next.config.ts`, `apps/web/nginx/default.conf`,
 `CLAUDE.md`, `apps/web/src/__tests__/next-config-uploads-headers.test.ts` (new)
-- [ ] `headers()`: add `source: '/uploads/:format(jpeg|webp|avif)/:file*'`
+- [x] `headers()`: add `source: '/uploads/:format(jpeg|webp|avif)/:file*'`
       → `Cache-Control: public, max-age=3600, must-revalidate` (matches
       serve-upload; applies to the Next static path that actually serves
       production today — fixes the per-view revalidation RTT immediately
       and deployment-independently).
-- [ ] `nginx/default.conf`: `expires 1y; … immutable` →
+- [x] `nginx/default.conf`: `expires 1y; … immutable` →
       `Cache-Control "public, max-age=3600, must-revalidate"` with a
       comment explaining the in-place re-encode hazard (drop `expires`).
-- [ ] CLAUDE.md: correct "immutable cache-control" claim + ETag section
+- [x] CLAUDE.md: correct "immutable cache-control" claim + ETag section
       (static-first precedence; serve-upload serves locale-prefixed and
       missing paths; unified policy).
-- [ ] Test: source-contract on next.config (uploads headers rule present
+- [x] Test: source-contract on next.config (uploads headers rule present
       with the exact policy string) and nginx conf (no `immutable` on the
       uploads location).
-- [ ] Host-nginx drift (production lacks the repo uploads location) →
+- [x] Host-nginx drift (production lacks the repo uploads location) →
       recorded in plan-284 as ops runbook item (non-code).
+
+**Done:** unified 3600/must-revalidate policy across next.config headers(), nginx conf, docs; 3 contract tests green; host-nginx drift recorded in plan-284.
 
 
 ## Task 6 — TEST-R4C6-11: align sw-cache lib with the shipped template + template contract suite

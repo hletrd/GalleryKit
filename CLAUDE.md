@@ -167,7 +167,7 @@ git values must be treated as compromised and must not be reused.
 - **Filename sanitization**: UUIDs via `crypto.randomUUID()` (no user-controlled filenames on disk)
 - **Decompression bomb mitigation**: Sharp `limitInputPixels` configured
 - **Directory whitelist**: Only `jpeg`, `webp`, `avif` served publicly; `original/` excluded
-- **Headers**: `X-Content-Type-Options: nosniff`, immutable cache-control
+- **Headers**: `X-Content-Type-Options: nosniff` (global `headers()` rule); derivatives use `Cache-Control: public, max-age=3600, must-revalidate` — deliberately NOT `immutable`, because backfill re-encodes rewrite bytes in place under unchanged filenames (R4C6 ARCH-R4C6-06; same policy in `next.config.ts headers()`, `serve-upload.ts`, and `nginx/default.conf`)
 
 ### Database Security
 - Most application queries use Drizzle ORM parameterization; audited raw-SQL surfaces are confined to schema/admin maintenance helpers and must not concatenate untrusted input
@@ -251,7 +251,9 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 
 ### ETag / cache invalidation
 
-`serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash.slice(0,8)}"`. The settings hash (P4-E2) covers `wide_gamut_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives` so flipping any color-impacting admin setting invalidates cached variants automatically. Pipeline version bumps invalidate all variants for all images.
+**Serving precedence (R4C6 ARCH-R4C6-06):** derivatives live in `public/uploads/`, and Next serves `public/` assets BEFORE route handlers — so for existing files the production serving path is Next's static server (`W/"{size-hex}-{mtime-hex}"` ETag), not `serve-upload.ts`. The `app/uploads/[...path]` route (and therefore the serve-upload pipeline below) executes only for locale-prefixed `/{locale}/uploads/...` URLs and for files missing from `public/`. All layers now share one cache policy: `public, max-age=3600, must-revalidate` (set for the static path via `next.config.ts headers()`).
+
+On the paths it serves, `serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash.slice(0,8)}"`. The settings hash (P4-E2) covers `wide_gamut_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives` so flipping any color-impacting admin setting invalidates cached variants on that path automatically. On the static path, invalidation rides the mtime+size ETag: a backfill re-encode rewrites the file, changing both. Pipeline version bumps invalidate all variants for all images on the serve-upload path and (via re-encode mtime changes) on the static path after backfill.
 
 ### Audit surface (UI)
 

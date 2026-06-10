@@ -48,6 +48,24 @@ const nextConfig: NextConfig = {
     const devCspValue = buildContentSecurityPolicy({ isDev: true, imageBaseUrl });
 
     return [
+      // R4C6 ARCH-R4C6-06: unified cache policy for image derivatives.
+      // Files live in public/uploads/, and public/ assets take precedence
+      // over the app/uploads/[...path] route handler — so in production
+      // Next's STATIC serving (default `public, max-age=0`) is what
+      // actually delivers existing derivatives, forcing a revalidation
+      // round-trip per image per view. This rule applies the same policy
+      // serve-upload.ts uses for the paths it does serve (locale-prefixed
+      // and missing files): one hour of freshness, then revalidate.
+      // Deliberately NOT `immutable`: backfill re-encodes rewrite bytes
+      // IN PLACE under unchanged filenames, so immutable caching would
+      // pin stale bytes until expiry (see serve-upload.ts and
+      // nginx/default.conf, which carry the same policy).
+      {
+        source: '/uploads/:format(jpeg|webp|avif)/:file*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, must-revalidate' },
+        ],
+      },
       {
         source: '/(.*)',
         headers: [
