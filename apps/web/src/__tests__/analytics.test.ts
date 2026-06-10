@@ -71,6 +71,17 @@ describe('extractTldPlusOne', () => {
         expect(extractTldPlusOne('sub.bbc.co.uk.')).toBe('bbc.co.uk');
         expect(extractTldPlusOne('bbc.co.uk.')).toBe('bbc.co.uk');
     });
+
+    // R4C5 LOW-R4C5-05: WHATWG URL preserves multi-dotted hosts verbatim
+    // ("github.com.." stays "github.com.."), and Referer is
+    // attacker-suppliable — the single-dot strip still recorded "com.".
+    // ALL trailing dots are stripped before the TLD+1 split.
+    it('normalizes multiple trailing dots', () => {
+        expect(extractTldPlusOne('github.com..')).toBe('github.com');
+        expect(extractTldPlusOne('github.com...')).toBe('github.com');
+        expect(extractTldPlusOne('www.github.com..')).toBe('github.com');
+        expect(extractTldPlusOne('bbc.co.uk..')).toBe('bbc.co.uk');
+    });
 });
 
 // ---------------------------------------------------------------------------

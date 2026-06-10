@@ -103,8 +103,12 @@ export function extractTldPlusOne(host: string): string {
     // R4C4 LOW-R4C4-09: a fully-qualified hostname with a trailing dot
     // ("github.com.") split into a trailing empty label and the function
     // returned the bare TLD ("com.") — recording a meaningless referrer.
-    // The trailing dot is semantically identical (DNS root); strip one.
-    const normalizedHost = host.endsWith('.') ? host.slice(0, -1) : host;
+    // The trailing dot is semantically identical (DNS root); strip it.
+    // R4C5 LOW-R4C5-05: strip ALL trailing dots, not just one — WHATWG URL
+    // preserves "github.com.." verbatim (verified live in Node), and the
+    // Referer header is attacker-suppliable, so the single-dot slice still
+    // recorded "com." for multi-dotted hosts.
+    const normalizedHost = host.replace(/\.+$/, '');
     const labels = normalizedHost.split('.');
     if (labels.length <= 2) return normalizedHost; // already TLD+1 or bare TLD
 
