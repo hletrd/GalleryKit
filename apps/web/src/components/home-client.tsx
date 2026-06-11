@@ -353,8 +353,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                         <div className="absolute top-2 right-2 z-10">
                                             <span
                                                 className="gamut-p3-badge inline-flex items-center justify-center min-h-11 min-w-11 px-2 py-1 text-[10px] font-bold bg-purple-200/90 text-purple-900 dark:bg-purple-900/60 dark:text-purple-200 rounded-full backdrop-blur-sm"
-                                                role="img"
-                                                aria-label={t('viewer.colorDetailsWithGamut', { gamut: 'P3' })}
+                                                aria-hidden="true"
                                             >
                                                 P3
                                             </span>
