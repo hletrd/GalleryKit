@@ -123,6 +123,49 @@ describe('stripe webhook source-contract', () => {
         expect(bailBlock).not.toBeNull();
     });
 
+    it('handles paid-session-for-deleted-image with a 200 + error log BEFORE the INSERT (COR-R4C18-02)', () => {
+        // The route SELECTs currentImage for the C4-RPF-02 tier-drift warn;
+        // when the image was deleted between checkout and webhook delivery,
+        // the entitlement INSERT is impossible (image_id NOT NULL FK) and
+        // even a successful row would be cascade-deleted. Falling through
+        // previously FK-faulted into the catch's 500, which Stripe retried
+        // for days with every retry failing identically. The branch must
+        // return received: true (permanent condition — no retry) and emit
+        // a manual-refund error log carrying the reconciliation keys.
+        const guardIndex = WEBHOOK_SRC.indexOf('if (!currentImage)');
+        const insertIndex = WEBHOOK_SRC.indexOf('db.insert(entitlements)');
+        expect(guardIndex).toBeGreaterThan(-1);
+        expect(insertIndex).toBeGreaterThan(-1);
+        expect(guardIndex).toBeLessThan(insertIndex);
+        const block = WEBHOOK_SRC.match(
+            /if\s*\(\s*!currentImage\s*\)\s*\{[\s\S]*?received:\s*true[\s\S]*?\n\s*\}/,
+        );
+        expect(block).not.toBeNull();
+        const blockStr = block?.[0] ?? '';
+        expect(blockStr).toMatch(/console\.error/);
+        expect(blockStr).toMatch(/sessionId/);
+        expect(blockStr).toMatch(/amountTotalCents/);
+    });
+
+    it('INSERT catch converts the FK race (ER_NO_REFERENCED_ROW_2) to a 200, keeping 500 for transient errors (COR-R4C18-02)', () => {
+        // Belt-and-suspenders for the SELECT→INSERT window: an image
+        // deleted between the currentImage check and the INSERT surfaces
+        // as ER_NO_REFERENCED_ROW_2 — the same permanent condition, so the
+        // catch must return received: true for it instead of the 500 that
+        // re-arms Stripe's retry loop.
+        expect(WEBHOOK_SRC).toMatch(/import.*hasMySQLErrorCode.*from.*['"]@\/lib\/validation['"]/);
+        const catchBlock = WEBHOOK_SRC.match(
+            /\}\s*catch\s*\(err\)\s*\{[\s\S]*?Database error[\s\S]*?\n\s*\}/,
+        );
+        expect(catchBlock).not.toBeNull();
+        const catchStr = catchBlock?.[0] ?? '';
+        expect(catchStr).toMatch(/hasMySQLErrorCode\(err,\s*['"]ER_NO_REFERENCED_ROW_2['"]\)/);
+        expect(catchStr).toMatch(/received:\s*true/);
+        // The transient-error contract is preserved: the catch still
+        // contains the 500-so-Stripe-retries return.
+        expect(catchStr).toMatch(/status:\s*500/);
+    });
+
     it('default-deployment log line does NOT include the plaintext token', () => {
         // Outside the env-gated block, the structured log line must not
         // contain `${downloadToken}` interpolation.

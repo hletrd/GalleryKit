@@ -31,6 +31,7 @@ import { entitlements, images } from '@/db/schema';
 import { constructStripeEvent } from '@/lib/stripe';
 import { generateDownloadToken } from '@/lib/download-tokens';
 import { isPaidLicenseTier } from '@/lib/license-tiers';
+import { hasMySQLErrorCode } from '@/lib/validation';
 import type Stripe from 'stripe';
 
 export const dynamic = 'force-dynamic';
@@ -259,7 +260,26 @@ export async function POST(request: NextRequest): Promise<Response> {
             .from(images)
             .where(eq(images.id, imageId))
             .limit(1);
-        if (currentImage && currentImage.license_tier !== tier) {
+        // COR-R4C18-02: a paid session for a DELETED image is a permanent
+        // condition — entitlements.image_id is a NOT NULL FK (onDelete
+        // cascade), so the INSERT below is impossible (ER_NO_REFERENCED_ROW_2)
+        // and even a successful row would be cascade-deleted the moment the
+        // image vanished. Previously this fell through to the catch's 500,
+        // which Stripe retried on its multi-day schedule with every retry
+        // failing identically: no entitlement, no audit trail for the PAID
+        // session, sustained error noise. Answer 200 so Stripe stops, and
+        // log at error level with the reconciliation keys so the operator
+        // sees the manual-refund obligation.
+        if (!currentImage) {
+            console.error('Stripe webhook: paid session for deleted image — manual refund required', {
+                sessionId,
+                imageId,
+                tier,
+                amountTotalCents,
+            });
+            return NextResponse.json({ received: true }, { headers: NO_STORE });
+        }
+        if (currentImage.license_tier !== tier) {
             console.warn('Stripe webhook: tier mismatch between Stripe metadata and current image tier', {
                 sessionId,
                 imageId,
@@ -361,6 +381,21 @@ export async function POST(request: NextRequest): Promise<Response> {
             // loser = (1, 0); changed-value dup = (2, existing id).
             insertedFresh = insertHeader.affectedRows === 1 && insertHeader.insertId > 0;
         } catch (err) {
+            // COR-R4C18-02 (belt-and-suspenders for the SELECT→INSERT race):
+            // the image can be deleted between the currentImage check above
+            // and this INSERT; the FK then raises ER_NO_REFERENCED_ROW_2 —
+            // the same PERMANENT deleted-image condition, so it gets the
+            // same 200 + manual-refund error log instead of the 500 that
+            // re-arms Stripe's retry loop.
+            if (hasMySQLErrorCode(err, 'ER_NO_REFERENCED_ROW_2')) {
+                console.error('Stripe webhook: paid session for deleted image — manual refund required', {
+                    sessionId,
+                    imageId,
+                    tier,
+                    amountTotalCents,
+                });
+                return NextResponse.json({ received: true }, { headers: NO_STORE });
+            }
             // Cycle 7 RPF / P392-03 / C7-RPF-03: structured-object log shape
             // with sessionId/imageId/tier so operator can correlate the
             // failure with the Stripe retry that follows (Stripe retries on
@@ -372,7 +407,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                 tier,
                 err,
             });
-            // Return 500 so Stripe retries
+            // Return 500 so Stripe retries (transient errors only — the
+            // permanent FK case returned 200 above).
             return NextResponse.json({ error: 'Database error' }, { status: 500, headers: NO_STORE });
         }
 
