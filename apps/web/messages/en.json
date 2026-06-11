@@ -160,7 +160,8 @@
     "fileError": "{file}: {error}",
     "warningSuccess": "Uploaded {count} file(s), with {warnings} warning(s).",
     "hdrWarning": "{count, plural, one {1 HDR image uploaded. Current pipeline delivers SDR only — HDR highlights have been tone-mapped to SDR range.} other {# HDR images uploaded. Current pipeline delivers SDR only — HDR highlights have been tone-mapped to SDR range.}}",
-    "wideGamutDownscaleWarning": "{count, plural, one {1 wide-gamut image exceeds 50 MP — will be downscaled during processing.} other {# wide-gamut images exceed 50 MP — will be downscaled during processing.}}"
+    "wideGamutDownscaleWarning": "{count, plural, one {1 wide-gamut image exceeds 50 MP — will be downscaled during processing.} other {# wide-gamut images exceed 50 MP — will be downscaled during processing.}}",
+    "dropzoneLabel": "Upload photos: drop files here or press Enter to browse"
   },
   "imageManager": {
     "selected": "{count} selected",

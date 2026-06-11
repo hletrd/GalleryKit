@@ -396,6 +396,9 @@ export function UploadDropzone({
                 {/* Dropzone */}
                 <div
                     {...getRootProps()}
+                    role="button"
+                    aria-label={t('upload.dropzoneLabel')}
+                    aria-disabled={uploading || !hasTopics}
                     className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer transition-colors
                         ${isDragActive ? 'border-primary bg-primary/10' : 'border-muted'}
                         ${uploading || !hasTopics ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/50 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'}
