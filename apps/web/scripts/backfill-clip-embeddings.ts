@@ -31,7 +31,7 @@ import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
 import { db, images, imageEmbeddings, adminSettings } from '../src/db';
-import { eq, and, notExists } from 'drizzle-orm';
+import { eq, and, notExists, gt, asc } from 'drizzle-orm';
 import { embedImageStub } from '../src/lib/clip-inference';
 import { embeddingToBuffer, CLIP_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '../src/lib/clip-embeddings';
 
@@ -61,9 +61,15 @@ async function main() {
     }
 
     let processed = 0;
-    const skipped = 0;
     let failed = 0;
-    let offset = 0;
+    // COR-R4C19-04: keyset pagination instead of LIMIT/OFFSET. Each upsert
+    // removes its row from the notExists() WHERE set, so advancing an OFFSET
+    // skipped ~half the backlog. A strictly-increasing id cursor survives
+    // both the shrinking filter AND rows that keep matching after a failed
+    // insert, and turns each batch into an index range seek.
+    // (OBS-R4C19-E: the dead `skipped` counter is gone — every selected row
+    // is either processed or failed.)
+    let cursor = 0;
 
     for (;;) {
         // Select processed images without an embedding row
@@ -73,6 +79,7 @@ async function main() {
             .where(
                 and(
                     eq(images.processed, true),
+                    gt(images.id, cursor),
                     notExists(
                         db.select({ imageId: imageEmbeddings.imageId })
                             .from(imageEmbeddings)
@@ -80,13 +87,14 @@ async function main() {
                     ),
                 ),
             )
-            .limit(BATCH_SIZE)
-            .offset(offset);
+            .orderBy(asc(images.id))
+            .limit(BATCH_SIZE);
 
         if (rows.length === 0) break;
+        cursor = rows[rows.length - 1].id;
 
         // Cap total scan to SEMANTIC_SCAN_LIMIT
-        if (processed + skipped + failed + rows.length > SEMANTIC_SCAN_LIMIT) {
+        if (processed + failed + rows.length > SEMANTIC_SCAN_LIMIT) {
             console.log(`[backfill-clip-embeddings] Reached SEMANTIC_SCAN_LIMIT (${SEMANTIC_SCAN_LIMIT}). Stop here and re-run to continue.`);
             break;
         }
@@ -123,11 +131,10 @@ async function main() {
         }
 
         if (rows.length < BATCH_SIZE) break;
-        offset += rows.length;
     }
 
-    console.log(`[backfill-clip-embeddings] Done. processed=${processed} skipped=${skipped} failed=${failed}`);
-    process.exit(0);
+    console.log(`[backfill-clip-embeddings] Done. processed=${processed} failed=${failed}`);
+    process.exit(failed > 0 ? 1 : 0);
 }
 
 main().catch((err) => {
