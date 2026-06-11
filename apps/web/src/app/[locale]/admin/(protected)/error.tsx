@@ -13,7 +13,11 @@ export default function AdminError({
     const { t, locale } = useTranslation();
 
     return (
-        <section className="flex min-h-[60vh] items-center justify-center px-4" aria-labelledby="admin-route-error-title">
+        // DES-R4C15-06: the outer wrapper is pure layout — labelling BOTH
+        // nested elements with the same id announced two identical regions
+        // to AT. Single labelled <section> inside a plain <div>, matching
+        // the public twin (app/[locale]/error.tsx) structure.
+        <div className="flex min-h-[60vh] items-center justify-center px-4">
             <section className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-card p-6 text-center shadow-sm" aria-labelledby="admin-route-error-title">
                 <h1 id="admin-route-error-title" className="text-7xl font-bold text-muted-foreground/30">{t('error.title')}</h1>
                 <p className="text-lg text-muted-foreground">
@@ -34,6 +38,6 @@ export default function AdminError({
                 </Link>
                 </div>
             </section>
-        </section>
+        </div>
     );
 }

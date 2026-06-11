@@ -36,17 +36,20 @@ export async function Footer() {
                 <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
                     {siteConfig.footer_text}
                 </p>
+                {/* DES-R4C15-05: min-h-11 on both links — isolated tap targets
+                    on every public page's mobile footer must present the 44 px
+                    floor. The md:h-24 desktop footer absorbs the height. */}
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
                     <Link
                         href="https://github.com/hletrd/gallerykit"
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center gap-2 hover:underline"
+                        className="flex min-h-11 items-center gap-2 hover:underline"
                     >
                         <GithubIcon className="h-4 w-4" />
                         GitHub
                     </Link>
-                    <Link href={localizePath(locale, '/admin')} rel="nofollow" className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors">
+                    <Link href={localizePath(locale, '/admin')} rel="nofollow" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors">
                         {t('admin')}
                     </Link>
                 </div>

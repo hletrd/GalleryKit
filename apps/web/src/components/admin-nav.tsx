@@ -34,7 +34,10 @@ export function AdminNav() {
                         href={href}
                         aria-current={isActive ? "page" : undefined}
                         className={cn(
-                            "inline-flex min-h-10 items-center rounded-md px-3 py-2 transition-colors hover:bg-accent hover:text-accent-foreground",
+                            // DES-R4C15-04: min-h-11 (44 px touch-target floor —
+                            // links sit outside the audit's Button pattern domain,
+                            // so the policy is honored here directly).
+                            "inline-flex min-h-11 items-center rounded-md px-3 py-2 transition-colors hover:bg-accent hover:text-accent-foreground",
                             isActive ? "bg-accent text-foreground font-bold" : "text-foreground/70"
                         )}
                     >
