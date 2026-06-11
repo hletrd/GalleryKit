@@ -37,6 +37,29 @@ function hasGoogleAnalyticsId(value: string | undefined | null): boolean {
   return /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(value?.trim() ?? '');
 }
 
+/**
+ * COR-R4C16-02: GA4 (gtag.js) source allowlist per Google's documented
+ * CSP contract (developers.google.com/tag-platform/security/guides/csp,
+ * verified 2026-06-11 — analytics tier only, NO advertising hosts).
+ * GA4 routes `/g/collect` beacons through REGIONAL endpoints
+ * (`region1.google-analytics.com` for EU data residency) and falls
+ * back to image beacons when fetch/sendBeacon is blocked; the previous
+ * literal `www.google-analytics.com` connect-src silently dropped all
+ * EU visitors' beacons (CSP-blocked → analytics undercount with no
+ * server-side signal). Wildcards on the LEFT of the hostname are valid
+ * CSP syntax.
+ */
+const GA_SCRIPT_SOURCES = ['https://*.googletagmanager.com'] as const;
+const GA_CONNECT_SOURCES = [
+  'https://*.google-analytics.com',
+  'https://*.analytics.google.com',
+  'https://*.googletagmanager.com',
+] as const;
+const GA_IMG_SOURCES = [
+  'https://*.google-analytics.com',
+  'https://*.googletagmanager.com',
+] as const;
+
 export function buildContentSecurityPolicy({
   nonce,
   isDev = process.env.NODE_ENV === 'development',
@@ -48,8 +71,12 @@ export function buildContentSecurityPolicy({
   imageBaseUrl?: URL | null;
   googleAnalyticsId?: string | null;
 } = {}) {
-  const imgSrc = getCspImageSources(imageBaseUrl).join(' ');
   const includeGoogleAnalytics = hasGoogleAnalyticsId(googleAnalyticsId);
+  const imgSources = getCspImageSources(imageBaseUrl);
+  if (includeGoogleAnalytics) {
+    imgSources.push(...GA_IMG_SOURCES);
+  }
+  const imgSrc = imgSources.join(' ');
 
   if (isDev) {
     return [
@@ -64,7 +91,7 @@ export function buildContentSecurityPolicy({
 
   const scriptSources = ["'self'"];
   if (includeGoogleAnalytics) {
-    scriptSources.push('https://www.googletagmanager.com');
+    scriptSources.push(...GA_SCRIPT_SOURCES);
   }
   if (nonce) {
     scriptSources.unshift(`'nonce-${nonce}'`);
@@ -72,7 +99,7 @@ export function buildContentSecurityPolicy({
 
   const connectSources = ["'self'"];
   if (includeGoogleAnalytics) {
-    connectSources.push('https://www.google-analytics.com');
+    connectSources.push(...GA_CONNECT_SOURCES);
   }
 
   return [
