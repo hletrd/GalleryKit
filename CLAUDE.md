@@ -493,12 +493,12 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
 The vitest fixture at that path enforces the 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/`) recursively.
 
 **Pattern coverage** — the FORBIDDEN regex set catches:
-- shadcn `<Button size="sm">` without an `h-11` / `h-12` / `min-h-11` / `size-11` / `size-12` override (default 32 px);
-- shadcn `<Button size="icon">` without an `h-11` / `size-11` override (default 36 px);
-- `<Button className="...h-8...">` / `...h-9...` literals and `cn()` composites;
-- HTML `<button className="...h-8/h-9...">` literals.
+- shadcn `<Button size="sm">` / `<Button size="icon">` without an explicit `h-11` / `h-12` / `min-h-11` / `size-11` / `size-12` override — kept as belt-and-braces: `ui/button.tsx` now floors every size variant at ≥ 44 px (`min-h-11`/`size-11`/`min-h-12`/`size-12`), so these hits are 44 px-compliant at runtime today, but the scanner cannot see variant CSS and a future variant downgrade must surface here (R4C15 / OBS-R4C14-A);
+- `<Button className="...h-8...">` / `...h-9...` literals and `cn()` composites (explicit downsize overrides — these DO render sub-44);
+- HTML `<button className="...h-8/h-9...">` literals;
+- sub-44 arbitrary values `min-h-[0-43px]` on `<Button>`, `<button>`, and interactive `<Badge asChild>` wrappers (className lands on the child via Radix Slot), string-literal and `cn()` composite forms (R4C15 DES-R4C15-03).
 
-**Multi-line tags** — the scanner normalizes multi-line `<Button>` / `<button>` JSX openings into a single logical line (Prettier-default formatting writes any 3+ prop tag across multiple lines). The normalizer balances strings/braces/comments and rewrites `=>` to `=ARROW` so the `[^>]*` lookahead in FORBIDDEN does not stop at arrow operators inside event handlers. See `normalizeMultilineButtonTags` and `scanSource` in the test file. Cycle 3 RPF loop AGG3-M01 added this normalization after the cycle-2 audit was found to silently miss every multi-line Button.
+**Multi-line tags** — the scanner normalizes multi-line `<Button>` / `<button>` / `<Badge>` JSX openings into a single logical line (Prettier-default formatting writes any 3+ prop tag across multiple lines). The normalizer balances strings/braces/comments and rewrites `=>` to `=ARROW` so the `[^>]*` lookahead in FORBIDDEN does not stop at arrow operators inside event handlers. See `normalizeMultilineButtonTags` and `scanSource` in the test file. Cycle 3 RPF loop AGG3-M01 added this normalization after the cycle-2 audit was found to silently miss every multi-line Button; R4C15 added `Badge` after the tag-filter chips shipped 32 px through the `asChild` blind spot.
 
 **Adding a documented exemption** — raise the `KNOWN_VIOLATIONS[<rel-path>]` count in the test file by the appropriate delta and add a comment block above the entry that:
 1. Explains why each violation is acceptable (typically: keyboard-primary admin surface, decorative spinner, or larger pointer-events hit-zone wrapping a smaller visible icon).

@@ -142,6 +142,16 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // Re-open: when mobile admin becomes a priority OR a new
     // violation is added — the count below MUST be raised, which is
     // a code-review checkpoint.
+    //
+    // POST-LIFT NOTE (run-4 cycle 15, closes OBS-R4C14-A): every
+    // size="sm"/size="icon" hit counted in this group now renders at
+    // ≥ 44 px because ui/button.tsx floors all size variants
+    // (min-h-11/size-11/min-h-12/size-12). The entries are retained —
+    // NOT retired — because the bare size="sm"/"icon" patterns stay as
+    // belt-and-braces against a future variant downgrade (see FORBIDDEN
+    // header note); retiring the counts would make that safety net fail
+    // the gate on day one of any such downgrade instead of surfacing it
+    // as a reviewed diff here.
     // image-manager: the inline-edit and per-row delete buttons all
     // use size="sm" or size="icon"; admin table flow is keyboard-primary.
     // Cycle 3 RPF loop AGG3-M01: count raised from 4 → 5 because the
@@ -221,12 +231,29 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
  * interactive surface. Each pattern is paired with a description.
  *
  * Pattern shapes covered:
- *   - shadcn `<Button size="sm">` (32 px)
- *   - shadcn `<Button size="icon">` without `h-1[12]` / `size-1[12]` override (36 px default)
+ *   - shadcn `<Button size="sm">` / `<Button size="icon">` without an
+ *     explicit `h-1[12]` / `min-h-1[12]` / `size-1[12]` override.
+ *     POST-LIFT NOTE (run-4 cycle 15, closes OBS-R4C14-A/DOC-R4C14-03):
+ *     `ui/button.tsx` now floors EVERY size variant at ≥ 44 px
+ *     (`default`/`sm` = min-h-11, `lg` = min-h-12, `icon`/`icon-sm` =
+ *     size-11, `icon-lg` = size-12), so a bare `size="sm"`/`size="icon"`
+ *     consumer is actually 44 px-compliant at runtime today. These two
+ *     patterns are KEPT deliberately as belt-and-braces: the scanner
+ *     cannot see variant CSS, and a future button.tsx downgrade of those
+ *     variants would otherwise re-introduce sub-44 targets invisibly.
+ *     The matching KNOWN_VIOLATIONS entries below are therefore
+ *     conservative documentation of pattern hits, not of real sub-44
+ *     rendering.
  *   - `<Button className="...h-8...">`, `...h-9...`, and 40 px
- *     `h-10`/`w-10`/`size-10` literals
+ *     `h-10`/`w-10`/`size-10` literals (explicit downsize overrides —
+ *     these DO render sub-44 because the literal beats the variant floor)
  *   - `<Button className={cn("...h-8...", ...)}>` composites
  *   - HTML `<button className="...h-8...">`, `...h-9...`, and 40 px literals
+ *   - sub-44 arbitrary values `min-h-[0-43px]` on `<Button>`, `<button>`,
+ *     and interactive `<Badge asChild>` wrappers, in both string-literal
+ *     and cn() composite forms (run-4 cycle 15 DES-R4C15-03 /
+ *     TEST-R4C15-02 — the tag-filter chips shipped 32 px through this
+ *     exact blind spot)
  */
 const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // Cycle 3 RPF loop AGG3-M01: allow `h-11`/`h-12`/`min-h-11`/`size-11`
@@ -235,14 +262,15 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // (e.g. photo-viewer.tsx mobile Info / Share at h-11) no longer trip.
     {
         pattern: /<Button\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bsize=["']sm["']/,
-        description: 'shadcn <Button size="sm"> renders h-8 (32 px) — below 44 px floor',
+        description: 'shadcn <Button size="sm"> without explicit ≥44 px override (belt-and-braces: variant currently floors at min-h-11, see header note)',
     },
-    // <Button size="icon"> defaults to size-9 (36 px). Allow if an
-    // h-1[12] / w-1[12] / size-1[12] override is present on the same
-    // tag; otherwise flag.
+    // <Button size="icon"> without an explicit h-1[12] / size-1[12]
+    // override on the same tag. Post-lift the variant itself is size-11
+    // (44 px) — kept as belt-and-braces against a future variant
+    // downgrade (see header note).
     {
         pattern: /<Button\b(?![^>]*\b(?:h-1[12]|size-1[12])\b)[^>]*\bsize=["']icon["']/,
-        description: '<Button size="icon"> defaults to h-9 (36 px) — needs h-11 / size-11 override to clear 44 px floor',
+        description: '<Button size="icon"> without explicit ≥44 px override (belt-and-braces: variant currently floors at size-11, see header note)',
     },
     {
         pattern: /<Button\b[^>]*\bclassName=["'][^"']*\bh-8\b/,
@@ -283,6 +311,39 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     {
         pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?:h-10|w-10|size-10)\b/,
         description: 'HTML <button className="...h-10/w-10/size-10..."> renders 40 px on one axis — below 44 px floor',
+    },
+    // Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02: arbitrary-value
+    // sub-44 min-heights (`min-h-[32px]`, `min-h-[40px]`, …) evaded every
+    // pattern above — the tag-filter chips shipped at 32 px through this
+    // gap. `(?:\d|[123]\d|4[0-3])` matches 0-43; `min-h-[44px]`+ stays
+    // compliant. The usual h-11/min-h-11/size-11 override lookahead
+    // applies (a co-present 44 px utility wins in CSS).
+    {
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: '<Button className="...min-h-[<44px]..."> arbitrary value below 44 px floor',
+    },
+    {
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: '<Button className={cn("...min-h-[<44px]...")}> composite arbitrary value below 44 px floor',
+    },
+    {
+        pattern: /<button\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: 'HTML <button className="...min-h-[<44px]..."> arbitrary value below 44 px floor',
+    },
+    {
+        pattern: /<button\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: 'HTML <button className={cn("...min-h-[<44px]...")}> composite arbitrary value below 44 px floor',
+    },
+    // `<Badge asChild>` merges its className onto the interactive child
+    // (Radix Slot) — gate on `asChild` so decorative (span) badges with
+    // compact sizing never trip.
+    {
+        pattern: /<Badge\b(?=[^>]*\basChild\b)(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: '<Badge asChild className="...min-h-[<44px]..."> sizes its interactive child below the 44 px floor',
+    },
+    {
+        pattern: /<Badge\b(?=[^>]*\basChild\b)(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: '<Badge asChild className={cn("...min-h-[<44px]...")}> composite sizes its interactive child below the 44 px floor',
     },
 ];
 
@@ -385,7 +446,13 @@ function findJsxTagEnd(source: string, start: number): number {
 export function normalizeMultilineButtonTags(source: string): string {
     let out = '';
     let cursor = 0;
-    const re = /<(Button|button)\b/g;
+    // Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02: `Badge` added to the
+    // normalized tag set. `<Badge asChild>` renders its className onto the
+    // interactive CHILD element via Radix Slot, so a multi-line Badge
+    // opening carrying a sub-44 sizing class is a real touch-target
+    // violation that the scanner must be able to see on one logical line
+    // (the tag-filter chips shipped exactly this shape unseen).
+    const re = /<(Button|button|Badge)\b/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(source)) !== null) {
         const tagStart = m.index;
@@ -537,6 +604,15 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'HTML <button className="h-8">', snippet: `<button className="h-8 w-8" type="button">x</button>` },
             { name: 'HTML <button className="h-9">', snippet: `<button className="h-9 w-9" type="button">x</button>` },
             { name: 'HTML <button className="h-10 w-10">', snippet: `<button className="h-10 w-10" type="button">x</button>` },
+            // Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02: sub-44
+            // arbitrary min-h values and interactive <Badge asChild>
+            // wrappers (the pre-fix tag-filter chip shapes).
+            { name: '<Button className="min-h-[36px]">', snippet: `<Button className="min-h-[36px]">x</Button>` },
+            { name: '<Button className={cn("min-h-[40px]", ...)}>', snippet: `<Button className={cn("min-h-[40px]", "px-3")}>x</Button>` },
+            { name: 'HTML <button className="min-h-[40px]">', snippet: `<button className="min-h-[40px]" type="button">x</button>` },
+            { name: 'HTML <button className={cn("min-h-[32px]", ...)}>', snippet: `<button className={cn("min-h-[32px]", "px-3")} type="button">x</button>` },
+            { name: '<Badge asChild className="min-h-[32px]">', snippet: `<Badge asChild variant="outline" className="min-h-[32px] px-3"><button type="button">x</button></Badge>` },
+            { name: '<Badge asChild className={cn("min-h-[32px]", ...)}> (pre-fix tag-filter shape)', snippet: `<Badge asChild variant={active ? "default" : "outline"} className={cn("cursor-pointer hover:bg-primary/90 min-h-[32px] px-3 py-1", active && "bg-primary")}><button type="button">x</button></Badge>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
@@ -626,10 +702,60 @@ describe('touch-target audit (44 px floor)', () => {
             { name: '<Button size="icon" className="size-12">', snippet: `<Button size="icon" className="size-12">x</Button>` },
             { name: '<Button size="default">', snippet: `<Button size="default" className="px-4">x</Button>` },
             { name: 'HTML <button className="h-11">', snippet: `<button className="h-11 w-11" type="button">x</button>` },
+            // Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02 compliant shapes:
+            // 44 px chips, ≥44 arbitrary values, 3-digit arbitrary values,
+            // co-present ≥44 override, and DECORATIVE (non-asChild) badges
+            // whose compact sizing is not a touch target.
+            { name: '<Badge asChild className={cn("min-h-11", ...)}> (fixed chip shape)', snippet: `<Badge asChild variant="outline" className={cn("cursor-pointer min-h-11 px-3 py-1", active && "bg-primary")}><button type="button">x</button></Badge>` },
+            { name: '<Badge asChild className="min-h-[44px]">', snippet: `<Badge asChild className="min-h-[44px] px-3"><button type="button">x</button></Badge>` },
+            { name: 'decorative <Badge className="min-h-[32px]"> (no asChild)', snippet: `<Badge variant="secondary" className="min-h-[32px] px-2">3 photos</Badge>` },
+            { name: 'HTML <button className="min-h-[44px]">', snippet: `<button className="min-h-[44px]" type="button">x</button>` },
+            { name: 'HTML <button className="min-h-[120px]"> (3-digit)', snippet: `<button className="min-h-[120px]" type="button">x</button>` },
+            { name: '<Button className="min-h-[40px] min-h-11"> (override wins)', snippet: `<Button className="min-h-[40px] min-h-11">x</Button>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
             expect(matched, `FORBIDDEN regex falsely flagged: ${name} → ${snippet}`).toBe(false);
         }
+    });
+
+    /**
+     * Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02: lock that the scanner
+     * sees multi-line `<Badge asChild>` wrappers (the tag-filter chips
+     * are Prettier-formatted across multiple lines). Without `Badge` in
+     * the normalizer tag set, the per-line regex never saw the opening.
+     */
+    it('scanSource catches multi-line <Badge asChild> with sub-44 min-h composite', () => {
+        const multilineSnippet = [
+            '<Badge',
+            '    key={tag.id}',
+            '    asChild',
+            '    variant={active ? "default" : "outline"}',
+            '    className={cn(',
+            '        "cursor-pointer hover:bg-primary/90 min-h-[32px] px-3 py-1",',
+            '        "flex gap-1",',
+            '        active && "bg-primary text-primary-foreground"',
+            '    )}',
+            '>',
+            '    <button type="button">x</button>',
+            '</Badge>',
+        ].join('\n');
+        const issues = scanSource('fixture/multiline-badge.tsx', multilineSnippet);
+        expect(issues.length, `Expected at least one issue, got: ${JSON.stringify(issues)}`).toBeGreaterThan(0);
+        expect(issues.some((i) => i.pattern.includes('Badge asChild'))).toBe(true);
+    });
+
+    it('scanSource accepts multi-line <Badge asChild> with min-h-11 chip sizing', () => {
+        const multilineSnippet = [
+            '<Badge',
+            '    asChild',
+            '    variant="outline"',
+            '    className={cn("cursor-pointer min-h-11 px-3 py-1", active && "bg-primary")}',
+            '>',
+            '    <button type="button">x</button>',
+            '</Badge>',
+        ].join('\n');
+        const issues = scanSource('fixture/multiline-badge-ok.tsx', multilineSnippet);
+        expect(issues, `min-h-11 Badge chip should pass: ${JSON.stringify(issues)}`).toEqual([]);
     });
 });
