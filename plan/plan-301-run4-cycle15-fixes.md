@@ -171,3 +171,16 @@ OBS-R4C14-A pickup note).
   pattern-coverage updated.
 - Task 4 DONE — `cfcaa866` fix(a11y): admin-nav min-h-11, footer link
   44px hit areas, admin error region label dedupe.
+- Gates (all 8 green): eslint ✓ (exit 0), typecheck ✓ (exit 0),
+  vitest ✓ 185 files / 1770 tests (baseline 184/1759 — +1 file,
+  +11 tests), api-auth lint ✓, action-origin lint ✓,
+  public-route-rate-limit lint ✓, production build ✓ (exit 0; sw.js
+  stamped cfcaa866-p7, committed 5a94ccdb), playwright e2e ✓
+  (20 passed / 2 skipped, 8.0m).
+- GATE_FIXES note: zero pre-existing gate errors/warnings encountered
+  this cycle (clean baseline); the 1+3+2 pre-fix-failing tests are new
+  locks landed WITH their fixes, not gate regressions.
+- DEPLOY: per-cycle-success — `npm run deploy` exit 0; host pulled
+  8c39bac3, image rebuilt, `gallerykit-web` recreated and started;
+  live probes `/en` 200, `/api/live` 200, `/sw.js` 200 with
+  `SW_VERSION = 'cfcaa866-p7'` served in production.
