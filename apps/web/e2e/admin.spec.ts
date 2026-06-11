@@ -69,6 +69,38 @@ test.describe('admin workflows (opt-in)', () => {
     expect(restoredState).toBe(initialState);
   });
 
+  test('admin can create and delete a topic (TEST-R4C19-07)', async ({ page }) => {
+    // Regression lane for COR-R4C19-01: topicRouteSegmentExists read the
+    // drizzle/mysql2 [rows, fields] tuple as a rows array, so EVERY
+    // createTopic returned slugConflictsWithRoute for six weeks while all
+    // gates stayed green — no e2e exercised topic creation. This spec walks
+    // the real UI path: create → visible in the categories table → delete.
+    await loginAsAdmin(page);
+
+    await page.locator('a[href$="/admin/categories"]').first().click();
+    await expect(page).toHaveURL(/\/admin\/categories/);
+
+    const slug = `e2e-topic-${Date.now()}`;
+    const topicRow = page.getByRole('row').filter({ hasText: slug }).first();
+
+    await page.getByRole('button', { name: 'Add' }).click();
+    const createDialog = page.getByRole('dialog');
+    await expect(createDialog).toBeVisible();
+    await createDialog.locator('#create-topic-label').fill('E2E Topic Lock');
+    await createDialog.locator('#create-topic-slug').fill(slug);
+    await createDialog.getByRole('button', { name: 'Create' }).click();
+
+    try {
+      await expect(topicRow).toBeVisible({ timeout: 15_000 });
+    } finally {
+      if (await topicRow.isVisible().catch(() => false)) {
+        await topicRow.getByRole('button', { name: 'Delete' }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+        await expect(topicRow).toBeHidden({ timeout: 15_000 });
+      }
+    }
+  });
+
   test('admin upload workflow works on the dashboard', async ({ page }) => {
     await loginAsAdmin(page);
 
