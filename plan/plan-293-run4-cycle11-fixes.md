@@ -48,7 +48,16 @@ assertions fail against pre-fix source and pass after.
 `npm test` green; the swap-and-drain pair and finally-reschedule guard are
 unchanged.
 
-**Status:** ✅ implemented + committed (see CHANGES). All gates green.
+**Status:** ✅ implemented + committed (`17b18321`). All gates green:
+- eslint — PASS
+- typecheck — PASS (app + scripts)
+- vitest — **1745 passed** (182 files); the new COR-R4C11-01 assertion proven
+  failing-before / passing-after
+- lint:api-auth / lint:action-origin / lint:public-route-rate-limit — PASS
+- production build — PASS (route table emitted; `sw.js` refreshed to
+  `17b18321-p7` in `8b146032`)
+- Playwright e2e — **20 passed / 2 skipped** (standing conditional skips:
+  admin-credentials + authenticated origin-guard CI-only), exit 0
 
 ---
 
@@ -58,6 +67,14 @@ Both c10 fixes independently re-verified SOUND at line level (GPS post-EOI
 trailer rejection correct for baseline + progressive; admin-delete audit
 detach complete because `audit_log.target_id` carries no FK). No corrective
 task required.
+
+## Deploy record
+
+- `npm run deploy` (per-cycle) — **SUCCESS**. Image `web-web` rebuilt,
+  `gallerykit-web` recreated + started, "Deployment Complete!" exit 0.
+- Live probes: `https://gallery.atik.kr/api/live` → **200**; `/` → **307**
+  locale redirect → `/en` → **200**; deployed `/sw.js` reports
+  `SW_VERSION = '17b18321-p7'`, confirming the COR-R4C11-01 fix is live.
 
 ## Deferred / non-scheduled
 
