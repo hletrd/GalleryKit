@@ -141,16 +141,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     }, [isOpen, onClose]);
 
     useEffect(() => {
-        if (isOpen && sheetState === 'expanded') {
-            requestAnimationFrame(() => closeButtonRef.current?.focus());
-        }
-    }, [isOpen, sheetState]);
-
-    useEffect(() => {
-        if (isOpen && sheetState !== 'expanded') {
+        // Only move focus on the closed→open transition, not on intermediate sheetState changes.
+        if (isOpen && !prevIsOpenRef.current) {
             requestAnimationFrame(() => dragHandleRef.current?.focus());
         }
-    }, [isOpen, sheetState]);
+    }, [isOpen]);
 
     if (!isOpen || !image) return null;
 
@@ -244,7 +239,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                     onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     aria-expanded={sheetState === 'expanded'}
-                    aria-label={t('viewer.info')}
+                    aria-label={sheetState === 'expanded' ? t('viewer.collapseSheet') : t('viewer.expandSheet')}
                 >
                     <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
                 </button>

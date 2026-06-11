@@ -321,6 +321,8 @@
     "fullscreen": "Fullscreen",
     "fullscreenUnavailable": "Fullscreen is not available",
     "bottomSheet": "Photo Info",
+    "expandSheet": "Expand photo info",
+    "collapseSheet": "Collapse photo info",
     "whiteBalance": "White Balance",
     "meteringMode": "Metering",
     "exposureComp": "Exposure Comp.",
