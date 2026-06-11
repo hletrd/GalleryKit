@@ -61,9 +61,32 @@ let isFlushing = false;
 const FLUSH_CHUNK_SIZE = 20; // Process view-count updates in chunks to limit concurrent DB promises
 
 async function flushGroupViewCounts() {
-    if (isFlushing) return; // Prevent concurrent flush
-    isFlushing = true;
+    // COR-R4C11-01: this invocation has consumed the scheduled timer, so null
+    // the handle FIRST — before the isFlushing guard. Previously the guard
+    // early-returned WITHOUT clearing viewCountFlushTimer, so a timer that
+    // fired while a prior (slow) flush was still draining left a stale,
+    // already-fired handle in the variable. That made the in-flight flush's
+    // finally-block reschedule guard (`!viewCountFlushTimer`) skip AND made
+    // every future bufferGroupViewCount() refuse to arm a timer (it only arms
+    // when `!viewCountFlushTimer`) — stranding the buffer (it grows to
+    // MAX_VIEW_COUNT_BUFFER_SIZE then silently drops increments) until the
+    // process exits. Nulling on entry keeps the variable an accurate
+    // "a drain is pending" signal.
     viewCountFlushTimer = null;
+    if (isFlushing) {
+        // A flush is already draining the previous batch. Re-arm a timer so
+        // the increments buffered since that flush's swap are drained once it
+        // finishes (respects the exponential backoff via getNextFlushInterval).
+        // Without this the post-swap increments would wait for the next
+        // bufferGroupViewCount, which itself only arms a timer when none is
+        // pending.
+        if (viewCountBuffer.size > 0 && !viewCountFlushTimer) {
+            viewCountFlushTimer = setTimeout(flushGroupViewCounts, getNextFlushInterval());
+            viewCountFlushTimer.unref?.();
+        }
+        return; // Prevent concurrent flush
+    }
+    isFlushing = true;
     // C2-F01: swap the Map reference atomically so new increments during the
     // flush go to a fresh Map. The old Map is drained chunk-by-chunk below.
     // This prevents losing buffered increments if the process crashes between

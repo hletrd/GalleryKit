@@ -122,6 +122,37 @@ describe('view-count flush — C2-F01 swap-and-drain + backoff invariants', () =
         expect(fnBody!).toMatch(/viewCountBuffer\.size\s*>\s*0\s*&&\s*!viewCountFlushTimer/);
     });
 
+    it('COR-R4C11-01: nulls viewCountFlushTimer on ENTRY (before the isFlushing guard) and re-arms on the early return', () => {
+        // COR-R4C11-01: when a timer fires while a prior (slow) flush is still
+        // draining, the invocation must (a) clear the just-fired handle so it
+        // is not left stale, and (b) re-arm a timer on the isFlushing
+        // early-return so the post-swap increments are still drained. Without
+        // (a), the in-flight flush's finally-reschedule guard and every future
+        // bufferGroupViewCount() see a non-null handle and refuse to arm a
+        // timer — stranding the buffer until process exit.
+        const fnBody = extractFnBody(dataSource, 'async function flushGroupViewCounts');
+        expect(fnBody).toBeTruthy();
+
+        // (a) The `viewCountFlushTimer = null` assignment must precede the
+        //     `if (isFlushing)` guard (entry-null), not follow it.
+        const nullIdx = fnBody!.search(/viewCountFlushTimer\s*=\s*null\s*;/);
+        const guardIdx = fnBody!.search(/if\s*\(\s*isFlushing\s*\)/);
+        const isFlushingTrueIdx = fnBody!.search(/isFlushing\s*=\s*true/);
+        expect(nullIdx).toBeGreaterThanOrEqual(0);
+        expect(guardIdx).toBeGreaterThanOrEqual(0);
+        expect(isFlushingTrueIdx).toBeGreaterThanOrEqual(0);
+        expect(nullIdx).toBeLessThan(guardIdx);
+
+        // (b) The isFlushing branch (everything between the guard and the
+        //     `isFlushing = true` line) must re-arm a timer and return. This
+        //     window is strictly the early-return branch — the finally-block
+        //     re-arm lives AFTER `isFlushing = true`, so this assertion cannot
+        //     be satisfied by the finally re-arm.
+        const earlyBranch = fnBody!.slice(guardIdx, isFlushingTrueIdx);
+        expect(earlyBranch).toMatch(/viewCountFlushTimer\s*=\s*setTimeout\(\s*flushGroupViewCounts/);
+        expect(earlyBranch).toMatch(/\breturn\b/);
+    });
+
     it('C1F-DB-01: post-rebuffer cap enforcement evicts oldest entries when buffer exceeds MAX_VIEW_COUNT_BUFFER_SIZE', () => {
         const fnBody = extractFnBody(dataSource, 'async function flushGroupViewCounts');
         expect(fnBody).toBeTruthy();
