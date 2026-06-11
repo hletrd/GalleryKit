@@ -1,7 +1,7 @@
 # Plan 303 — Run-4 Cycle 16 fixes
 
 **Source review:** `.context/reviews/run4-cycle16/_aggregate.md`
-**Status:** TODO → (progress log at bottom)
+**Status:** IMPLEMENTED — all 6 tasks landed (progress log at bottom)
 **Gates per fix:** eslint, typecheck, vitest, api-auth lint,
 action-origin lint, public-route-rate-limit lint, production build,
 playwright e2e — all green before the cycle closes; per-fix commits
@@ -197,4 +197,35 @@ dark splash; plus the standing-deferral re-audit — nothing fires).
 
 ## Progress log
 
-- (updated during PROMPT 3)
+- Task 1 DONE — `7144479c` fix(admin): settle-before-close on all six
+  confirm dialogs. image-manager's two uncontrolled dialogs converted
+  to controlled state (the settle pattern needs an explicit close);
+  admin-user-manager's dismiss-before-await moved to post-settle;
+  topic-manager's synchronous dismisses removed from onClick;
+  sales-client refund holds the dialog with "Refunding…".
+  db/page marker added. Lock proven failing 7/7 pre-fix
+  (6 to fix + db/page pre-marker), green post-fix with exactly
+  1 documented marker; tag-manager canary included.
+- Task 2 DONE — `61d85a05` fix(csp): GA4 wildcard host set per
+  Google's documented analytics-tier contract; negative
+  advertising-host assertions; GA-absent CSP locked unchanged.
+- Task 3 DONE — `61218056` fix(images): IMAGE_BASE_URL runtime
+  injection (html data-image-base + lazy resolver in image-url.ts);
+  3-branch resolver tests + layout-stamp wiring lock; constants.ts
+  scope comments (DOC-R4C16-01 lineage cited in commit body).
+- Task 4 DONE — `e0f7f684` fix(a11y): 44px upload topic select +
+  native-<select> audit patterns/normalizer/fixtures. Bonus
+  hardening surfaced during proof: the stale
+  'upload-dropzone.tsx': 1 KNOWN_VIOLATIONS budget (for a long-fixed
+  Clear-all shape) was silently absorbing the new select violation
+  under the <=-budget semantics — re-tightened to 0, then proven
+  failing (found 1 / allowed 0 at line 366) and green post-fix.
+  CLAUDE.md pattern coverage updated in the same diff.
+- Task 5 DONE — `233c38b2` fix(a11y): role="status" on the settings
+  backfill banner; role="alert" on the bulk-edit validation error.
+- Task 6 DONE — `217098aa` feat(viewer): pointer-anchored double-tap/
+  click zoom via anchorPctFromClientPoint + anchoredZoomPosition
+  extracted VERBATIM from the wheel path (wheel + pinch pure
+  refactors, behavior locked by an extraction-equivalence test);
+  keyboard toggle keeps center; 32 zoom tests green. DEF-R4C8-C
+  passivity deferral untouched.
