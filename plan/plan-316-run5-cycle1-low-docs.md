@@ -43,7 +43,7 @@ One sweep over the doc surfaces; group commits by file to keep diffs reviewable.
 | DES-R5C1-19 | `home-client.tsx:397` — `aria-hidden="true"` on the decorative empty-state SVG. |
 | DES-R5C1-20 | `upload-dropzone.tsx:486-490` — inherited global tags get `aria-label={t('upload.globalTagInherited', { tag })}` (new en/ko key) or fieldset/legend grouping. |
 | DES-R5C1-21 | `app/[locale]/error.tsx:21` — mirror `not-found.tsx:29`: `aria-hidden` decorative giant text + real AA-contrast heading. |
-| DES-R5C1-22 | `lightbox.tsx:666-674` — `aria-label={t('aria.photoPosition', {current, total})}` on the counter (coordinate with plan-501 item 15, which touches the same node; if 501 already landed it, mark done). |
+| DES-R5C1-22 | DONE — landed with plan-314 Item 15 (commit c459b1fd): `aria.photoPosition` context label on the lightbox counter, en/ko keys added. |
 | DES-R5C1-23 | `info-bottom-sheet.tsx:221-222` — add `paddingBottom: env(safe-area-inset-bottom)` to the outer container (cheap, harmless); physical iOS-15 device verification deferred to a manual pass (needs-manual-validation classification preserved). |
 
 ## Unit C — Code hygiene / micro-perf (LOW)

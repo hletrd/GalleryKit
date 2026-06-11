@@ -185,3 +185,31 @@
 | 14-17 | Items 14-17 | DES-R5C1-01/03/04/05 | a11y; independent |
 
 **Gates to run before each commit:** `npm test --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run lint --workspace=apps/web`, plus `lint:api-auth` / `lint:action-origin` / `lint:public-route-rate-limit` when touching their surfaces. Deploy per iteration per CLAUDE.md.
+
+---
+
+## Progress — 2026-06-11 (cycle 1 implementation)
+
+All 17 items implemented, verified (typecheck + focused tests per item; full suite 1881 tests green after each batch), committed GPG-signed:
+
+| Item | Finding(s) | Commit | Status |
+|---|---|---|---|
+| 1 | TRC-R5C1-18 | 2032d5b8 | DONE |
+| 2 | BUG-R5C1-02 | d71d2de5 (+ cd9a58d7 test typing fix) | DONE |
+| 3 | CRT-R5C1-01 + COR-R5C1-04 | 1fabf9ec | DONE |
+| 4 | CRT-R5C1-02 | 130760da | DONE |
+| 5 | CRT-R5C1-03 | 852a2e3f | DONE |
+| 6 | PERF-R5C1-01 | 8bc3c51b | DONE |
+| 7 | PERF-R5C1-02 | 55458f95 (migration 0021) | DONE |
+| 8 | TEST-R5C1-01 | 804697a1 | DONE |
+| 9 | TEST-R5C1-03 | 804697a1 | DONE |
+| 10 | TEST-R5C1-02 | 5898e924 | DONE |
+| 11 | TEST-R5C1-04 | b7524a6e | DONE |
+| 12 | TEST-R5C1-05 | fb221271 | DONE |
+| 13 | TEST-R5C1-06 | 81aed586 | DONE |
+| 14 | DES-R5C1-01 | fb9beccb | DONE |
+| 15 | DES-R5C1-03 (+ DES-R5C1-22 folded from plan-316) | c459b1fd | DONE |
+| 16 | DES-R5C1-04 | ab6f41eb | DONE |
+| 17 | DES-R5C1-05 | 81409dc2 | DONE |
+
+Item 1 optional scanner follow-on intentionally rolled to plan-315 (already noted there). Plans 315/316 remain scheduled for subsequent cycles.
