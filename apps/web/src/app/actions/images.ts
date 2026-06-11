@@ -1040,8 +1040,11 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
 
 // R10-H2: retry a permanently-failed image from the admin dashboard.
 export async function retryFailedImage(id: number) {
+    const t = await getTranslations('serverActions');
+    // TRC-R5C1-18: requireSameOriginAdmin first, then isAdmin (matches file-standard pattern, e.g. bulkUpdateImages :871).
     const originError = await requireSameOriginAdmin();
-    if (originError) return originError;
+    if (originError) return { error: originError };
+    if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) {
         return { error: 'Invalid image ID' };
