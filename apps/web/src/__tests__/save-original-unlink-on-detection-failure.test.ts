@@ -70,7 +70,7 @@ async function makeTinyJpegFile(): Promise<File> {
         create: { width: 4, height: 4, channels: 3, background: { r: 128, g: 64, b: 32 } },
     }).jpeg({ quality: 50 }).toBuffer();
 
-    return new File([buf], 'test.jpg', { type: 'image/jpeg' });
+    return new File([new Uint8Array(buf)], 'test.jpg', { type: 'image/jpeg' });
 }
 
 describe('saveOriginalAndGetMetadata — post-write cleanup (BUG-R5C1-02)', () => {
@@ -82,7 +82,7 @@ describe('saveOriginalAndGetMetadata — post-write cleanup (BUG-R5C1-02)', () =
         // Track files before the call
         const before = await fs.readdir(tmpDir);
 
-        await expect(saveOriginalAndGetMetadata(file, 50_000_000)).rejects.toThrow('simulated detection failure');
+        await expect(saveOriginalAndGetMetadata(file)).rejects.toThrow('simulated detection failure');
 
         // After the rejected promise, no new files should remain
         const after = await fs.readdir(tmpDir);
@@ -102,7 +102,7 @@ describe('saveOriginalAndGetMetadata — post-write cleanup (BUG-R5C1-02)', () =
 
         const file = await makeTinyJpegFile();
 
-        const result = await saveOriginalAndGetMetadata(file, 50_000_000);
+        const result = await saveOriginalAndGetMetadata(file);
         expect(result.filenameOriginal).toBeTruthy();
 
         // File should exist
