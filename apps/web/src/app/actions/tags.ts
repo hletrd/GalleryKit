@@ -398,7 +398,15 @@ export async function batchUpdateImageTags(
                 const { value: cleanName, rejected: nameRejected } = requireCleanInput(name);
                 // Reject malformed input: skip tag names that contained control
                 // characters (defense in depth — matches addTagToImage pattern).
-                if (nameRejected) continue;
+                // COR-R4C17-05: surface the skip in warnings[] exactly like a
+                // format-invalid name below — silently dropping it reported
+                // success while ignoring the request. Generic key only: never
+                // echo the rejected value (requireCleanInput returns null on
+                // rejection by contract).
+                if (nameRejected) {
+                    warnings.push(t('invalidTagName'));
+                    continue;
+                }
                 if (!cleanName) continue;
                 if (!isValidTagName(cleanName)) {
                     warnings.push(t('invalidTagName') + `: "${cleanName}"`);
@@ -424,7 +432,11 @@ export async function batchUpdateImageTags(
                 const { value: cleanName, rejected: nameRejected } = requireCleanInput(name);
                 // Reject malformed input: skip tag names that contained control
                 // characters (defense in depth — matches removeTagFromImage pattern).
-                if (nameRejected) continue;
+                // COR-R4C17-05: warn on the skip (see add loop above).
+                if (nameRejected) {
+                    warnings.push(t('invalidTagName'));
+                    continue;
+                }
                 if (!cleanName) continue;
                 const resolvedTag = await findTagRecordByNameOrSlug(tx, cleanName);
                 if (resolvedTag.kind === 'collision') {
