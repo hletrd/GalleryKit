@@ -76,7 +76,25 @@ add the assertion to the e2e admin-users spec instead.)
 
 ---
 
-## Gate checklist (PROMPT 3)
-- [ ] eslint, typecheck, vitest, api-auth, action-origin,
-      public-route-rate-limit lints, production build, e2e — all green
-- [ ] per-cycle deploy (`npm run deploy`) after gates green
+## Gate checklist (PROMPT 3) — ALL GREEN
+- [x] eslint — 0 errors / 0 warnings
+- [x] typecheck — PASS
+- [x] vitest — **1744/1744** (182 files; +5 tests this cycle: 4 GPS-trailer
+      cases in `strip-gps-from-original.test.ts` + 1 audit-detach behavioral
+      test in `admin-user-delete-audit-detach.test.ts`)
+- [x] lint:api-auth — PASS
+- [x] lint:action-origin — PASS
+- [x] lint:public-route-rate-limit — PASS
+- [x] production build — PASS (route table emitted, middleware compiled,
+      0 errors; `sw.js` refreshed to `78d2a108-p7` in `4f20df8e`)
+- [x] Playwright e2e — **20 passed / 2 skipped** (standing conditional
+      skips: authenticated origin-guard CI-only + one configured skip), exit 0
+
+## Commits this cycle
+- `208a8c7e` — SEC-R4C10-01 GPS post-EOI trailer fix + tests
+- `a5455047` — COR-R4C10-01 audit-detach fix + test
+- `78d2a108` — review artifacts + plans
+- `4f20df8e` — SW_VERSION refresh
+
+## Deploy (DEPLOY_MODE: per-cycle)
+(record appended below after `npm run deploy`)
