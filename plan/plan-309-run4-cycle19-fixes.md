@@ -114,4 +114,10 @@ the live site.
 
 ### Deploy
 
-- recorded below after `npm run deploy`.
+- `npm run deploy` ✅ (per-cycle) — host rebuilt and recreated
+  `gallerykit-web`, "Deployment Complete!".
+- Live probes: `/en` 200 · `/api/live` 200 · `/feed.xml` 200 ·
+  `/kr/<topic>/feed.xml` 404 (c18 fix verified live) · served
+  `SW_VERSION = '5ae58a7a-p7'` (committed stamp convention).
+- The COR-R4C19-01 fix is live: topic create / slug rename / alias
+  create are functional again for the first time since 2026-04-28.
