@@ -173,10 +173,14 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // delete-user button is now visible to the scanner. Re-open: same
     // as image-manager (admin keyboard-primary on desktop).
     'components/admin-user-manager.tsx': 2,
-    // upload-dropzone: "Clear all" link-style ghost button with
-    // h-auto p-0 (deliberately compact). Re-open if upload UI becomes
-    // mobile-primary.
-    'components/upload-dropzone.tsx': 1,
+    // upload-dropzone: 0 (run-4 cycle 16 DES-R4C16-04). The historical
+    // "Clear all h-auto p-0" exemption was fixed long ago (it ships
+    // min-h-11 now) but the stale budget of 1 stayed — and silently
+    // absorbed the topic <select> h-10 violation the c16 native-select
+    // patterns surfaced. Budget re-tightened to the actual count so the
+    // next dropzone violation fails loud instead of spending a ghost
+    // allowance.
+    'components/upload-dropzone.tsx': 0,
     // admin-header: single Logout link rendered as size="sm" Button.
     'components/admin-header.tsx': 1,
     // photo-navigation: <Button size="icon" className="h-12 w-12">
@@ -345,6 +349,28 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<Badge\b(?=[^>]*\basChild\b)(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
         description: '<Badge asChild className={cn("...min-h-[<44px]...")}> composite sizes its interactive child below the 44 px floor',
     },
+    // Run-4 cycle 16 DES-R4C16-04 / TEST-R4C16-04: native `<select>`
+    // elements. Hand-styled selects sit outside both the shadcn
+    // SelectTrigger primitive (which floors at min-h-11 via
+    // data-[size]:min-h-11) and every pattern above — the upload topic
+    // picker shipped 40 px through exactly this gap. Same ≥44 override
+    // lookahead as the c15 patterns (a co-present h-11/min-h-11 wins).
+    {
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+        description: 'native <select className="...h-8/h-9/h-10..."> renders below the 44 px floor',
+    },
+    {
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+        description: 'native <select className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
+    },
+    {
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: 'native <select className="...min-h-[<44px]..."> arbitrary value below the 44 px floor',
+    },
+    {
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: 'native <select className={cn("...min-h-[<44px]...")}> composite arbitrary value below the 44 px floor',
+    },
 ];
 
 function listFilesRecursive(dir: string, predicate: (f: string) => boolean): string[] {
@@ -452,7 +478,9 @@ export function normalizeMultilineButtonTags(source: string): string {
     // opening carrying a sub-44 sizing class is a real touch-target
     // violation that the scanner must be able to see on one logical line
     // (the tag-filter chips shipped exactly this shape unseen).
-    const re = /<(Button|button|Badge)\b/g;
+    // Run-4 cycle 16 DES-R4C16-04 / TEST-R4C16-04: native `select` added
+    // (lowercase only — `<SelectTrigger` does not match `<select\b`).
+    const re = /<(Button|button|Badge|select)\b/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(source)) !== null) {
         const tagStart = m.index;
@@ -613,6 +641,12 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'HTML <button className={cn("min-h-[32px]", ...)}>', snippet: `<button className={cn("min-h-[32px]", "px-3")} type="button">x</button>` },
             { name: '<Badge asChild className="min-h-[32px]">', snippet: `<Badge asChild variant="outline" className="min-h-[32px] px-3"><button type="button">x</button></Badge>` },
             { name: '<Badge asChild className={cn("min-h-[32px]", ...)}> (pre-fix tag-filter shape)', snippet: `<Badge asChild variant={active ? "default" : "outline"} className={cn("cursor-pointer hover:bg-primary/90 min-h-[32px] px-3 py-1", active && "bg-primary")}><button type="button">x</button></Badge>` },
+            // Run-4 cycle 16 DES-R4C16-04 / TEST-R4C16-04: native <select>
+            // shapes (the pre-fix upload topic picker shipped h-10 = 40 px).
+            { name: 'native <select className="h-10"> (pre-fix upload topic picker shape)', snippet: `<select id="upload-topic" className="flex h-10 w-full items-center rounded-md border" value={topic}>x</select>` },
+            { name: 'native <select className="h-9">', snippet: `<select className="h-9 w-full" value={v}>x</select>` },
+            { name: 'native <select className={cn("h-10", ...)}>', snippet: `<select className={cn("h-10", "w-full")} value={v}>x</select>` },
+            { name: 'native <select className="min-h-[40px]">', snippet: `<select className="min-h-[40px] w-full" value={v}>x</select>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
@@ -660,6 +694,28 @@ describe('touch-target audit (44 px floor)', () => {
         ].join('\n');
         const issues = scanSource('fixture/multiline-sm.tsx', multilineSnippet);
         expect(issues.length).toBeGreaterThan(0);
+    });
+
+    it('scanSource catches multi-line native <select> with sub-44px className and accepts h-11 (DES-R4C16-04)', () => {
+        const violating = [
+            '<select',
+            '    id="upload-topic"',
+            '    className="flex h-10 w-full items-center justify-between rounded-md border"',
+            '    value={topic}',
+            '    onChange={(e) => setTopic(e.target.value)}',
+            '>',
+            '    <option>x</option>',
+            '</select>',
+        ].join('\n');
+        expect(scanSource('fixture/select-violation.tsx', violating).length).toBeGreaterThan(0);
+
+        const compliant = violating.replace('h-10', 'h-11');
+        expect(scanSource('fixture/select-ok.tsx', compliant)).toEqual([]);
+
+        // shadcn SelectTrigger is NOT in the native-select pattern domain
+        // (the primitive floors at min-h-11 via data-[size]:min-h-11).
+        const selectTrigger = '<SelectTrigger id="avif-effort" className="w-[200px]"><SelectValue /></SelectTrigger>';
+        expect(scanSource('fixture/select-trigger-ok.tsx', selectTrigger)).toEqual([]);
     });
 
     it('scanSource accepts multi-line <Button size="icon"> with h-11 override', () => {

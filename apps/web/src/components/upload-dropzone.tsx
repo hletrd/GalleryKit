@@ -365,7 +365,12 @@ export function UploadDropzone({
                         <label htmlFor="upload-topic" className="text-sm font-medium mb-1 block">{t('upload.topic')}</label>
                         <select
                             id="upload-topic"
-                            className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            // DES-R4C16-04: h-11 (44 px touch-target floor per CLAUDE.md
+                            // policy) — hand-styled native selects sit outside the shadcn
+                            // SelectTrigger primitive's min-h-11 floor, and phones are a
+                            // real upload path. The audit's native-<select> patterns now
+                            // lock this shape.
+                            className="flex h-11 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             value={topic}
                             onChange={(e) => setTopic(e.target.value)}
                         >
