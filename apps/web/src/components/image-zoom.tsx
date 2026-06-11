@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
-import { DEFAULT_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
+import { DEFAULT_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, anchoredZoomPosition, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
 
 interface ImageZoomProps {
     children: React.ReactNode;
@@ -95,17 +95,14 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
                 return;
             }
 
-            // Anchor zoom to cursor position within container
+            // Anchor zoom to cursor position within container.
+            // UX-R4C16-06: math extracted to lib/image-zoom-math.ts
+            // (anchorPctFromClientPoint + anchoredZoomPosition) so wheel,
+            // pinch, double-tap, and click share one anchor-math source —
+            // behavior here is unchanged (verbatim extraction, unit-locked).
             const rect = container.getBoundingClientRect();
-            const cursorXPct = ((e.clientX - rect.left) / rect.width - 0.5) * -100;
-            const cursorYPct = ((e.clientY - rect.top) / rect.height - 0.5) * -100;
-
-            // Adjust pan so the cursor-anchor point stays fixed
-            const scaleRatio = newLevel / currentLevel;
-            const { x, y } = positionRef.current;
-            const newX = cursorXPct + (x - cursorXPct) * scaleRatio;
-            const newY = cursorYPct + (y - cursorYPct) * scaleRatio;
-            const clamped = clampPan(newX, newY);
+            const anchor = anchorPctFromClientPoint(e.clientX, e.clientY, rect);
+            const clamped = anchoredZoomPosition(currentLevel, newLevel, anchor, positionRef.current);
 
             zoomLevelRef.current = newLevel;
             positionRef.current = clamped;
@@ -158,6 +155,27 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         return () => window.removeEventListener('mouseup', up);
     }, []);
 
+    // UX-R4C16-06: zoom in anchored at the pointer/tap point — the same
+    // convention the wheel path uses (shared helpers) — instead of the
+    // previous hardcoded center zoom. "Double-tap the eye to check
+    // focus" must land on the eye, not the image center. Falls back to
+    // center when no client point is available (keyboard toggle).
+    const zoomInAt = useCallback((clientX: number | null, clientY: number | null, animate: boolean) => {
+        const targetLevel = lastPinchLevelRef.current > MIN_ZOOM ? lastPinchLevelRef.current : DEFAULT_ZOOM;
+        let next = { x: 0, y: 0 };
+        if (clientX !== null && clientY !== null && containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                const anchor = anchorPctFromClientPoint(clientX, clientY, rect);
+                next = anchoredZoomPosition(MIN_ZOOM, targetLevel, anchor, positionRef.current);
+            }
+        }
+        zoomLevelRef.current = targetLevel;
+        positionRef.current = next;
+        setIsZoomed(true);
+        applyTransform(targetLevel, next.x, next.y, animate);
+    }, [applyTransform]);
+
     // --- Click to toggle zoom (desktop) ---
     const handleClick = useCallback((e: React.MouseEvent) => {
         const target = e.target as HTMLElement;
@@ -171,12 +189,9 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         if (zoomLevelRef.current > MIN_ZOOM) {
             resetZoom(true);
         } else {
-            const targetLevel = lastPinchLevelRef.current > MIN_ZOOM ? lastPinchLevelRef.current : DEFAULT_ZOOM;
-            zoomLevelRef.current = targetLevel;
-            setIsZoomed(true);
-            applyTransform(targetLevel, 0, 0, true);
+            zoomInAt(e.clientX, e.clientY, true);
         }
-    }, [applyTransform, resetZoom]);
+    }, [resetZoom, zoomInAt]);
 
     // R2C10-MED-01: Dedicated keyboard handler — do not delegate to handleClick
     // because handleClick's target.closest('[role="button"]') guard matches the
@@ -186,12 +201,10 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         if (zoomLevelRef.current > MIN_ZOOM) {
             resetZoom(true);
         } else {
-            const targetLevel = lastPinchLevelRef.current > MIN_ZOOM ? lastPinchLevelRef.current : DEFAULT_ZOOM;
-            zoomLevelRef.current = targetLevel;
-            setIsZoomed(true);
-            applyTransform(targetLevel, 0, 0, true);
+            // Keyboard has no pointer location — center zoom is correct here.
+            zoomInAt(null, null, true);
         }
-    }, [applyTransform, resetZoom]);
+    }, [resetZoom, zoomInAt]);
 
     // --- Touch: double-tap to toggle zoom ---
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
@@ -201,11 +214,10 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             if (zoomLevelRef.current > MIN_ZOOM) {
                 resetZoom(true);
             } else {
-                const targetLevel = lastPinchLevelRef.current > MIN_ZOOM ? lastPinchLevelRef.current : DEFAULT_ZOOM;
-                zoomLevelRef.current = targetLevel;
-                positionRef.current = { x: 0, y: 0 };
-                setIsZoomed(true);
-                applyTransform(targetLevel, 0, 0, true);
+                // UX-R4C16-06: anchor at the tap point ("double-tap the
+                // eye" lands on the eye, not the image center).
+                const tap = e.changedTouches[0];
+                zoomInAt(tap.clientX, tap.clientY, true);
             }
         }
         lastTapRef.current = now;
@@ -214,7 +226,7 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
         }
         isDraggingRef.current = false;
         isPinchingRef.current = false;
-    }, [applyTransform, resetZoom]);
+    }, [resetZoom, zoomInAt]);
 
     // --- Touch: single-finger drag pan when zoomed ---
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -230,10 +242,8 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             if (containerRef.current) {
                 const rect = containerRef.current.getBoundingClientRect();
                 const mid = touchMidpoint(t0, t1);
-                pinchMidpointRef.current = {
-                    x: ((mid.x - rect.left) / rect.width - 0.5) * -100,
-                    y: ((mid.y - rect.top) / rect.height - 0.5) * -100,
-                };
+                // UX-R4C16-06: shared anchor-space conversion (verbatim).
+                pinchMidpointRef.current = anchorPctFromClientPoint(mid.x, mid.y, rect);
             }
             e.stopPropagation();
             return;
@@ -260,13 +270,14 @@ export function ImageZoom({ children, className }: ImageZoomProps) {
             const rawLevel = pinchStartZoomRef.current * (dist / pinchStartDistanceRef.current);
             const clampedLevel = clampZoom(rawLevel);
 
-            // Anchor to pinch midpoint
-            const mid = pinchMidpointRef.current;
-            const startPos = pinchStartPositionRef.current;
-            const scaleRatio = clampedLevel / pinchStartZoomRef.current;
-            const newX = mid.x + (startPos.x - mid.x) * scaleRatio;
-            const newY = mid.y + (startPos.y - mid.y) * scaleRatio;
-            const clamped = clampPan(newX, newY);
+            // Anchor to pinch midpoint (UX-R4C16-06: shared helper —
+            // verbatim equivalent of the previous inline arithmetic).
+            const clamped = anchoredZoomPosition(
+                pinchStartZoomRef.current,
+                clampedLevel,
+                pinchMidpointRef.current,
+                pinchStartPositionRef.current,
+            );
 
             zoomLevelRef.current = clampedLevel;
             positionRef.current = clamped;

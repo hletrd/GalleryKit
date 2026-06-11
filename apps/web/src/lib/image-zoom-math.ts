@@ -41,3 +41,53 @@ export function clampPan(x: number, y: number): { x: number; y: number } {
         y: Math.max(-100, Math.min(100, y)),
     };
 }
+
+export interface AnchorRect {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+
+/**
+ * UX-R4C16-06: convert a client-coordinate point (cursor / tap) into the
+ * anchor-percentage space the pan transform uses. This is the exact
+ * convention the shipped wheel-zoom path established (image-zoom.tsx
+ * cursor anchoring): offset from container center, normalized to
+ * [-0.5, 0.5], scaled by -100.
+ */
+export function anchorPctFromClientPoint(
+    clientX: number,
+    clientY: number,
+    rect: AnchorRect,
+): { x: number; y: number } {
+    return {
+        x: ((clientX - rect.left) / rect.width - 0.5) * -100,
+        y: ((clientY - rect.top) / rect.height - 0.5) * -100,
+    };
+}
+
+/**
+ * UX-R4C16-06: pan position that keeps the anchor point visually fixed
+ * across a zoom-level change — extracted VERBATIM from the wheel path's
+ * inline arithmetic (and structurally identical to the pinch path's),
+ * so wheel, pinch, double-tap, and click zoom all share ONE
+ * anchor-math source. Any future correction to the convention lands
+ * here once instead of in three inline copies (the c15 theme bug's
+ * exact failure mode).
+ *
+ * `ratio = newLevel / currentLevel`; identity when ratio === 1; result
+ * is clamped to the pan bounds.
+ */
+export function anchoredZoomPosition(
+    currentLevel: number,
+    newLevel: number,
+    anchor: { x: number; y: number },
+    position: { x: number; y: number },
+): { x: number; y: number } {
+    const scaleRatio = newLevel / currentLevel;
+    return clampPan(
+        anchor.x + (position.x - anchor.x) * scaleRatio,
+        anchor.y + (position.y - anchor.y) * scaleRatio,
+    );
+}

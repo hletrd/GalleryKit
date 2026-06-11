@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
+import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, anchoredZoomPosition, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
 
 describe('touchDistance', () => {
     it('returns 0 for coincident points', () => {
@@ -104,5 +104,60 @@ describe('clampPan', () => {
     it('clamps y to -100..100', () => {
         expect(clampPan(0, -200).y).toBe(-100);
         expect(clampPan(0, 200).y).toBe(100);
+    });
+});
+
+/**
+ * UX-R4C16-06 / TEST-R4C16-05: anchored-zoom math extracted from the
+ * wheel path's inline arithmetic so wheel / pinch / double-tap / click
+ * share one source. These tests lock the SHIPPED wheel convention
+ * verbatim (extraction must not change wheel behavior) and the
+ * double-tap-from-rest cases built on it.
+ */
+describe('anchorPctFromClientPoint', () => {
+    const rect = { left: 100, top: 50, width: 1000, height: 800 };
+    it('maps the container center to (0, 0)', () => {
+        expect(anchorPctFromClientPoint(600, 450, rect)).toEqual({ x: -0, y: -0 });
+    });
+    it('maps the top-left corner to (+50, +50) (shipped -100 scale convention)', () => {
+        expect(anchorPctFromClientPoint(100, 50, rect)).toEqual({ x: 50, y: 50 });
+    });
+    it('maps the bottom-right corner to (-50, -50)', () => {
+        expect(anchorPctFromClientPoint(1100, 850, rect)).toEqual({ x: -50, y: -50 });
+    });
+    it('maps a right-of-center cursor to a negative x anchor', () => {
+        expect(anchorPctFromClientPoint(900, 450, rect).x).toBeCloseTo(-30);
+    });
+});
+
+describe('anchoredZoomPosition', () => {
+    it('is the identity when the level does not change (ratio = 1)', () => {
+        expect(anchoredZoomPosition(2, 2, { x: -30, y: 10 }, { x: 12, y: -4 })).toEqual({ x: 12, y: -4 });
+    });
+    it('keeps a centered anchor centered from rest', () => {
+        expect(anchoredZoomPosition(MIN_ZOOM, DEFAULT_ZOOM, { x: 0, y: 0 }, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
+    });
+    it('matches the pre-extraction wheel arithmetic verbatim', () => {
+        // Reference: newX = anchorX + (posX - anchorX) * (newLevel / currentLevel)
+        const currentLevel = 1.4;
+        const newLevel = wheelStep(currentLevel, -100);
+        const anchor = { x: -30, y: 12.5 };
+        const pos = { x: 8, y: -20 };
+        const ratio = newLevel / currentLevel;
+        const expected = clampPan(
+            anchor.x + (pos.x - anchor.x) * ratio,
+            anchor.y + (pos.y - anchor.y) * ratio,
+        );
+        expect(anchoredZoomPosition(currentLevel, newLevel, anchor, pos)).toEqual(expected);
+    });
+    it('double-tap from rest pans toward the anchor by (1 - ratio)', () => {
+        // From rest (level 1, pan 0): result = anchor * (1 - ratio).
+        const out = anchoredZoomPosition(MIN_ZOOM, DEFAULT_ZOOM, { x: -30, y: 20 }, { x: 0, y: 0 });
+        expect(out.x).toBeCloseTo(-30 * (1 - DEFAULT_ZOOM));
+        expect(out.y).toBeCloseTo(20 * (1 - DEFAULT_ZOOM));
+    });
+    it('saturates at the pan clamp for extreme corner anchors', () => {
+        const out = anchoredZoomPosition(MIN_ZOOM, MAX_ZOOM, { x: 50, y: -50 }, { x: 0, y: 0 });
+        expect(out).toEqual({ x: -100, y: 100 });
     });
 });
