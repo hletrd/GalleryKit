@@ -69,7 +69,24 @@ Both proven failing against the pre-fix source.
 - Commit body records the corrected p-queue semantics (DOC-R4C12-02) so the
   inverted claim in `c6627ec8`'s message has a discoverable correction.
 
-**Status:** ⏳ pending (PROMPT 3 of this cycle).
+**Status:** ✅ implemented + committed (`ef1ea136`). All gates green:
+- eslint — PASS
+- typecheck — PASS (app + scripts; also re-run inside the build)
+- vitest — **1747 passed** (183 files; baseline 1745/182 + the 2 new
+  COR-R4C12-01 tests in the new `image-queue-quiesce.test.ts`); both new
+  tests proven failing-before (deadlock rejection + wrong call order) /
+  passing-after
+- lint:api-auth / lint:action-origin / lint:public-route-rate-limit — PASS
+- production build — PASS (route table emitted; `sw.js` refreshed to
+  `ef1ea136-p7` in `1f56666a`)
+- Playwright e2e — **20 passed / 2 skipped** (standing conditional skips:
+  admin-credentials + authenticated origin-guard CI-only), exit 0
+
+Implementation note: the shipped reorder is the MINIMAL one — only
+`queue.clear()` moved above the `await queue.onIdle()`; the state clears
+stay after the await so an in-flight job that fails during the quiesce
+window cannot leave stale retry/permanent-failure entries behind
+(preserves the C1F-DB-02 post-restore-clean-slate intent).
 
 ---
 
@@ -88,4 +105,8 @@ double-arm). The flush-machine pattern does not recur elsewhere in `src/`.
 
 ## Deploy record
 
-- ⏳ pending — recorded after the per-cycle deploy completes.
+- `npm run deploy` (per-cycle) — **SUCCESS**. Image `web-web` rebuilt,
+  `gallerykit-web` recreated + started, "Deployment Complete!" exit 0.
+- Live probes: `https://gallery.atik.kr/api/live` → **200**; `/` → **307**
+  locale redirect → `/en` → **200**; deployed `/sw.js` reports
+  `SW_VERSION = 'ef1ea136-p7'`, confirming the COR-R4C12-01 fix is live.
