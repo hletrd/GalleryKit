@@ -221,11 +221,20 @@ export function preIncrementOgAttempt(ip: string, now: number): boolean {
     return (ogRateLimit.get(ip)?.count ?? 0) > OG_MAX_REQUESTS;
 }
 
-/** Roll back a pre-incremented OG rate-limit counter. Used when the
- *  request was rejected before the expensive CPU work ran (e.g., topic
- *  not found) — the user should not be charged for resources they didn't
- *  consume. Matches the public-read-path rollback pattern (Pattern 2
- *  in the rate-limit docstring at the top of this file). */
+/** Roll back a pre-incremented OG rate-limit counter.
+ *
+ *  SEC-R4C17-01 / DOC-R4C17-02: ONLY for rejections that consumed no
+ *  post-validation work — i.e. malformed params bounced BEFORE any DB
+ *  lookup or CPU (a non-numeric photo id). Post-DB failures
+ *  (nonexistent topic/photo, missing derivatives, render errors) stay
+ *  CHARGED: refunding them turns the limiter into a free enumeration
+ *  oracle with unmetered DB/CPU consumption — the charged-404 policy
+ *  AGG8F-01 established on `/api/og`. The OG bucket therefore follows
+ *  Pattern-1 semantics for everything after syntactic validation
+ *  (the guarded resource is server CPU/DB, not user fairness). Both
+ *  routes' policies are source-locked: og-route-source-contracts.test.ts
+ *  (topic route — zero rollbacks) and og-photo-fallback.test.ts
+ *  (photo route — exactly two, both pre-DB). */
 export function rollbackOgAttempt(ip: string) {
     const currentEntry = ogRateLimit.get(ip);
     if (currentEntry && currentEntry.count > 1) {

@@ -50,9 +50,27 @@ describe('/api/og/photo/[id] R24-M1 fallback contract (route source)', () => {
         expect(source).not.toContain('findNearestImageSize');
     });
 
-    it('rate-limit budget is rolled back when the all-sizes-fail branch fires', () => {
+    it('rate-limit rollback exists ONLY on pre-DB validation rejections (SEC-R4C17-01)', () => {
+        // SEC-R4C17-01: post-DB failure paths (!image, !fetched, catch) stay
+        // CHARGED, matching the sibling /api/og route's charged-404 policy
+        // (og-route-source-contracts.test.ts). The previous contract refunded
+        // them, so the 30/min budget bound only for cacheable successes and
+        // nonexistent-id probes got unlimited free DB lookups (enumeration
+        // oracle + unmetered DB load). Rollback remains ONLY for the two
+        // syntactic id-validation rejections that consumed no work.
         const rollbackOccurrences = (source.match(/rollbackOgAttempt\(ip\)/g) || []).length;
-        expect(rollbackOccurrences).toBeGreaterThanOrEqual(4);
+        expect(rollbackOccurrences).toBe(2);
+
+        const dbCallIndex = source.indexOf('getImageCached(imageId)');
+        expect(dbCallIndex).toBeGreaterThan(-1);
+        // Both remaining rollbacks sit ABOVE the DB lookup…
+        const beforeDbCall = source.slice(0, dbCallIndex);
+        expect((beforeDbCall.match(/rollbackOgAttempt\(ip\)/g) || []).length).toBe(2);
+        // …and NOTHING after the DB lookup refunds the attempt.
+        const afterDbCall = source.slice(dbCallIndex);
+        expect(afterDbCall).not.toContain('rollbackOgAttempt');
+
+        // The all-sizes-fail fallback branch itself remains (R24-M1).
         expect(source).toContain('if (!fetched) {');
     });
 });

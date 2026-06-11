@@ -79,8 +79,13 @@ export async function GET(
         // Fall back to site default if photo not found.
         // getImageCached already filters WHERE processed = true, so a non-null
         // result is guaranteed to be processed.
+        // SEC-R4C17-01: the attempt stays CHARGED — this branch is reached
+        // only after real DB work, and refunding it made this route a free
+        // image-id-enumeration oracle with unmetered DB load. The sibling
+        // /api/og route documents and test-locks the same charged-404
+        // policy (og-route-source-contracts.test.ts); this route's contract
+        // is locked by og-photo-fallback.test.ts.
         if (!image) {
-            rollbackOgAttempt(ip);
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
 
@@ -113,7 +118,10 @@ export async function GET(
             config.imageSizes,
         );
         if (!fetched) {
-            rollbackOgAttempt(ip);
+            // SEC-R4C17-01: charged — this branch consumed DB work plus up
+            // to |imageSizes| internal fetch attempts (10 s timeout / 1 MB
+            // cap each); refunding it let one legacy photo in a backfill
+            // window become an unmetered internal-fetch amplifier.
             return buildFallbackResponse(req, OG_SUCCESS_CACHE_CONTROL, seo.og_image_url || undefined);
         }
         const photoDataUrl = `data:image/jpeg;base64,${fetched.buffer.toString('base64')}`;
@@ -218,7 +226,11 @@ export async function GET(
             },
         });
     } catch (e: unknown) {
-        rollbackOgAttempt(ip);
+        // SEC-R4C17-01: charged — failures landing here consumed DB work
+        // and potentially Satori/Sharp CPU; refunding them allowed
+        // error-triggering inputs (e.g. a corrupt derivative) to retry
+        // without ever tripping the limiter. Matches the sibling /api/og
+        // route's catch path, which has never refunded.
         if (e instanceof Error) {
             console.error(`[og/photo] ${e.message}`);
         }
