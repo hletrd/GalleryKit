@@ -674,9 +674,29 @@ export async function quiesceImageProcessingQueueForRestore(
     state: ProcessingQueueState = getProcessingQueueState(),
     queue: Pick<PQueue, 'pause' | 'clear' | 'onIdle'> = state.queue,
 ) {
+    // COR-R4C12-01: clear() MUST precede the onIdle() await. p-queue emits
+    // `idle` only when size === 0 && pending === 0, and a PAUSED queue never
+    // starts queued tasks — so `pause(); await onIdle()` deadlocked forever
+    // whenever >= 1 job was queued behind the in-flight one (batch-upload
+    // N >= 2 photos at QUEUE_CONCURRENCY=1, then restore mid-processing).
+    // The hung restoreDatabase action then never reached its finally:
+    // endRestoreMaintenance() never ran and the restore/upload advisory-lock
+    // connections were held forever, wedging uploads, processing, and all
+    // future restores until a container restart. Clearing first drops the
+    // queued jobs (intended — the post-restore bootstrap re-discovers
+    // `processed = false` rows via `bootstrapped = false` below) and lets
+    // `idle` fire as soon as the in-flight job (if any) completes. Mirrors
+    // drainProcessingQueueForShutdown's pause -> clear -> onIdle order.
+    // (History: c6627ec8 swapped the original, deadlock-free onPendingZero()
+    // for onIdle() without reordering; its message inverted p-queue's actual
+    // semantics — onPendingZero waits for RUNNING tasks, ignoring queued
+    // ones, and is emitted unconditionally when pending hits 0.)
+    // New-job interleaving between clear() and onIdle() is impossible here:
+    // beginRestoreMaintenance() runs before quiesce, so
+    // enqueueImageProcessing rejects, and the queue is paused anyway.
     queue.pause();
-    await queue.onIdle();
     queue.clear();
+    await queue.onIdle();
     state.enqueued.clear();
     state.retryCounts.clear();
     state.claimRetryCounts.clear();
