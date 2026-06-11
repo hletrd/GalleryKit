@@ -229,3 +229,18 @@ dark splash; plus the standing-deferral re-audit — nothing fires).
   refactors, behavior locked by an extraction-equivalence test);
   keyboard toggle keeps center; 32 zoom tests green. DEF-R4C8-C
   passivity deferral untouched.
+- Gates (all 8 green): eslint ✓ (exit 0), typecheck ✓ (exit 0),
+  vitest ✓ 186 files / 1788 tests (baseline 185/1770 — +1 file,
+  +18 tests), api-auth lint ✓, action-origin lint ✓,
+  public-route-rate-limit lint ✓, production build ✓ (exit 0; sw.js
+  stamped 217098aa-p7, committed 8d6349ff), playwright e2e ✓
+  (20 passed / 2 skipped, 6.9m).
+- GATE_FIXES note: zero pre-existing gate errors/warnings encountered
+  this cycle (clean baseline); the 7-pre-fix-failing settle lock, the
+  1-pre-fix-failing audit extension (after the stale-budget
+  re-tighten), and the new resolver/zoom tests are locks landed WITH
+  their fixes, not gate regressions.
+- DEPLOY: per-cycle-success — `npm run deploy` exit 0; host pulled
+  3aa3c4ff, image rebuilt, `gallerykit-web` recreated and started;
+  live probes `/en` 200, `/api/live` 200, `/sw.js` 200 with
+  `SW_VERSION = '217098aa-p7'` served in production.
