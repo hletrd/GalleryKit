@@ -665,10 +665,10 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {/* Position counter — bottom center */}
                 {currentIndex != null && totalCount != null && totalCount > 1 && (
                     <div
-                        {...controlVisibilityProps}
-                        className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1 rounded-full z-10"
+                        className={`pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1 rounded-full z-10 transition-opacity duration-300 ${controlsVisible ? 'opacity-100' : 'opacity-0'}`}
                         role="status"
                         aria-live="polite"
+                        aria-label={t('aria.photoPosition', { current: currentIndex + 1, total: totalCount })}
                     >
                         {currentIndex + 1} / {totalCount}
                     </div>
