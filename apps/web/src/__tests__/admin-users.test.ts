@@ -162,6 +162,23 @@ describe('createAdminUser', () => {
         expect(resetRateLimitMock).not.toHaveBeenCalled();
     });
 
+    // TEST-R5C1-05: assert argon2.hash is called with PASSWORD_HASH_OPTIONS on the create path
+    it('calls argon2.hash with the correct work-factor options on successful create', async () => {
+        insertMock.mockReturnValue(makeInsertChain([{ insertId: 8 }]));
+
+        const formData = new FormData();
+        formData.set('username', 'new-admin');
+        formData.set('password', 'CorrectHorseBatteryStaple!');
+        formData.set('confirmPassword', 'CorrectHorseBatteryStaple!');
+
+        await createAdminUser(formData);
+
+        expect(argon2HashMock).toHaveBeenCalledWith(
+            'CorrectHorseBatteryStaple!',
+            expect.objectContaining({ memoryCost: 65_536, timeCost: 3 })
+        );
+    });
+
     it('rolls back only the current attempt after duplicate-username failure', async () => {
         const duplicate = Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
         insertMock.mockReturnValue({ values: vi.fn().mockRejectedValue(duplicate) });
