@@ -75,7 +75,10 @@
     "failedImages": "Failed Images ({count})",
     "retry": "Retry",
     "retrying": "Retrying…",
-    "retryFailed": "Retry failed. Check the server logs or try again."
+    "retryFailed": "Retry failed. Check the server logs or try again.",
+    "retrySuccess": "Queued for re-processing.",
+    "previousPage": "Previous page",
+    "nextPage": "Next page"
   },
   "categories": {
     "title": "Categories",

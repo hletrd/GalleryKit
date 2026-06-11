@@ -45,6 +45,11 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
             const result = await retryFailedImage(id);
             if (result && typeof result === 'object' && 'success' in result && result.success) {
                 setFailedImages((prev) => prev.filter((img) => img.id !== id));
+                // DES-R4C17-04: announce success through the established
+                // sonner live-region channel — the error path already
+                // toasts, and silently removing the row left screen-reader
+                // users with no feedback on the SAME button's success path.
+                toast.success(t('dashboard.retrySuccess'));
             } else {
                 console.error('Retry failed:', result);
                 toast.error(t('dashboard.retryFailed'));
@@ -125,15 +130,20 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                     </div>
                     {totalPages > 1 && (
                         <div className="flex items-center justify-center gap-4 mt-4">
+                            {/* DES-R4C17-03: every pagination control carries a
+                                localized aria-label — the disabled placeholders
+                                render ONLY a chevron icon (no accessible name at
+                                all), and the bare page number on the enabled
+                                variants is a weak name on its own. */}
                             {page > 1 ? (
                                 <Button asChild variant="outline" size="sm">
-                                    <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page - 1}`}>
+                                    <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page - 1}`} aria-label={t('dashboard.previousPage')}>
                                         <ChevronLeft className="h-4 w-4 mr-1" />
                                         {page - 1}
                                     </Link>
                                 </Button>
                             ) : (
-                                <Button variant="outline" size="sm" disabled>
+                                <Button variant="outline" size="sm" disabled aria-label={t('dashboard.previousPage')}>
                                     <ChevronLeft className="h-4 w-4 mr-1" />
                                 </Button>
                             )}
@@ -142,13 +152,13 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
                             </span>
                             {page < totalPages ? (
                                 <Button asChild variant="outline" size="sm">
-                                    <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page + 1}`}>
+                                    <Link href={`${localizePath(locale, '/admin/dashboard')}?page=${page + 1}`} aria-label={t('dashboard.nextPage')}>
                                         {page + 1}
                                         <ChevronRight className="h-4 w-4 ml-1" />
                                     </Link>
                                 </Button>
                             ) : (
-                                <Button variant="outline" size="sm" disabled>
+                                <Button variant="outline" size="sm" disabled aria-label={t('dashboard.nextPage')}>
                                     <ChevronRight className="h-4 w-4 ml-1" />
                                 </Button>
                             )}
