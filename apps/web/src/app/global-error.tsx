@@ -1,6 +1,6 @@
 'use client';
 
-import { resolveErrorShellBrand } from '@/lib/error-shell';
+import { resolveErrorShellBrand, resolveErrorShellThemeClass } from '@/lib/error-shell';
 import siteConfig from '@/site-config.json';
 
 const COPY = {
@@ -42,9 +42,16 @@ function detectBrandTitle() {
     return resolveErrorShellBrand(document, siteConfig.nav_title, siteConfig.title);
 }
 
-function detectDarkMode() {
-    if (typeof document === 'undefined') return false;
-    return document.documentElement.classList.contains('dark');
+// COR-R4C15-01: the theme system is 4-valued (`lib/theme.ts`
+// THEME_VALUES: system/light/dark/oled) and next-themes applies the
+// theme name as the <html> class. The previous dark-only check missed
+// `oled`, so a fatal error in OLED true-black mode rendered a fresh
+// <html> with no theme class — i.e. a blinding white error page. The
+// pure helper preserves whichever theme class the crashed document
+// carried ('oled' | 'dark' | null).
+function detectThemeClass() {
+    if (typeof document === 'undefined') return null;
+    return resolveErrorShellThemeClass(document);
 }
 
 export default function GlobalError({
@@ -56,10 +63,10 @@ export default function GlobalError({
     const locale = detectLocale();
     const copy = COPY[locale];
     const brandTitle = detectBrandTitle();
-    const isDark = detectDarkMode();
+    const themeClass = detectThemeClass();
 
     return (
-        <html lang={locale} className={isDark ? 'dark' : undefined}>
+        <html lang={locale} className={themeClass ?? undefined}>
             <body className="min-h-screen bg-background text-foreground">
                 <main className="min-h-screen flex items-center justify-center px-6">
                     <div className="w-full max-w-md rounded-2xl border border-border bg-card/95 p-8 text-center shadow-lg">
