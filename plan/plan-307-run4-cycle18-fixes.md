@@ -1,7 +1,7 @@
 # Plan 307 — Run-4 Cycle 18 fixes
 
 **Source review:** `.context/reviews/run4-cycle18/_aggregate.md`
-**Status:** PENDING
+**Status:** COMPLETE — all 3 tasks landed; all 8 gates green; deployed
 **Gates per repo policy:** eslint, typecheck, vitest, api-auth lint,
 action-origin lint, public-route-rate-limit lint, production build,
 playwright e2e — all 8 must be green before deploy. GPG-signed
@@ -79,11 +79,40 @@ propagation risk; 3/6 cross-angle).
 
 ## Progress
 
-- [ ] Task 1 — COR-R4C18-01 + TEST-R4C18-01
-- [ ] Task 2 — COR-R4C18-02 + TEST-R4C18-02
-- [ ] Task 3 — DOC-R4C18-03 / SEC-R4C18-04
+- [x] Task 1 — COR-R4C18-01 + TEST-R4C18-01 — DONE, commit `b4a5795c`.
+  Locks proven failing pre-fix (4 failed / 14 passed), green post-fix;
+  feed+og contract sweep 77/77. Route now 404s unsupported locales
+  before any DB work with the dotted-route self-validation rule
+  documented in-file.
+- [x] Task 2 — COR-R4C18-02 + TEST-R4C18-02 — DONE, commit `ff0fb549`.
+  Locks proven failing pre-fix (2 failed / 9 passed), green post-fix;
+  payments sweep 53/53. Both layers landed (!currentImage guard +
+  ER_NO_REFERENCED_ROW_2 catch); transient-DB 500 contract preserved
+  and still asserted.
+- [x] Task 3 — DOC-R4C18-03 / SEC-R4C18-04 — DONE, commit `096bfceb`.
+  Comment-only (verified: diff contains comment lines only); header
+  now registers four patterns; Pattern 2 names the checkout/semantic
+  guarded-resource rationale; rate-limit-adjacent sweep 45/45.
 
 ## Gate run + deploy record (cycle close)
 
-To be filled during PROMPT 3 after all tasks land: 8-gate results,
-GATE_FIXES count, and the per-cycle deploy record with live probes.
+- Gates (all 8 green): eslint ✓ (exit 0), typecheck ✓ (exit 0),
+  api-auth lint ✓, action-origin lint ✓, public-route-rate-limit
+  lint ✓, vitest ✓ 186 files / 1794 tests (exit 0; +6 over the c17
+  baseline 1788 = 4 new feed locale locks + 2 new webhook
+  deleted-image locks), production build ✓ (exit 0; sw.js stamped
+  096bfceb-p7, committed 00df9a68), playwright e2e ✓ 20 passed /
+  2 skipped (6.7m, exit 0).
+- Vitest ran on a quiet machine sequentially after the lint/typecheck
+  stages; no flake observed this cycle (the c17
+  backfill-detection-failure load-timeout did not recur).
+- GATE_FIXES: zero pre-existing gate errors/warnings encountered this
+  cycle (clean baseline); the two extended source-contract locks
+  landed WITH their fixes per the prove-failing-first protocol
+  (Task 1: 4 failed pre-fix; Task 2: 2 failed pre-fix).
+- DEPLOY: per-cycle-success — `npm run deploy` exit 0 against HEAD
+  `00df9a68`; host rebuilt the image and recreated `gallerykit-web`
+  (Started). Live probes: `/en` 200, `/api/live` 200, `/sw.js` 200
+  serving `SW_VERSION = '096bfceb-p7'`. COR-R4C18-01 verified
+  end-to-end in production: `GET /en/tws/feed.xml` → 200,
+  `GET /zz/tws/feed.xml` → 404.
