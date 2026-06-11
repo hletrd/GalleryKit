@@ -140,13 +140,6 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isOpen, onClose]);
 
-    useEffect(() => {
-        // Only move focus on the closed→open transition, not on intermediate sheetState changes.
-        if (isOpen && !prevIsOpenRef.current) {
-            requestAnimationFrame(() => dragHandleRef.current?.focus());
-        }
-    }, [isOpen]);
-
     if (!isOpen || !image) return null;
 
     const displayTitle = getPhotoDisplayTitle(
@@ -198,7 +191,9 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                 active={isOpen}
                 focusTrapOptions={{
                     allowOutsideClick: true,
-                    initialFocus: () => dragHandleRef.current ?? closeButtonRef.current ?? false,
+                    // Initial focus lands on the close button once per open (FocusTrap
+                    // activation), never on intermediate sheetState changes (DES-R5C1-04).
+                    initialFocus: () => closeButtonRef.current ?? dragHandleRef.current ?? false,
                 }}
             >
             <div
