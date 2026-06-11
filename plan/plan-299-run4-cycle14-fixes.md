@@ -119,3 +119,7 @@ re-audit).
 - GATE_FIXES note: zero pre-existing gate errors/warnings encountered
   this cycle (clean baseline); the 9+1 pre-fix-failing tests are
   new locks landed WITH their fixes, not gate regressions.
+- DEPLOY: per-cycle-success — `npm run deploy` exit 0; host pulled
+  `c49e4a7c`, image rebuilt, `gallerykit-web` recreated and healthy;
+  live probes `/en` 200, `/api/live` 200, `/sw.js` 200 with
+  `SW_VERSION = '82e35324-p7'` served in production.
