@@ -1,7 +1,7 @@
 /**
  * Rate Limiting — patterns and conventions
  *
- * Three rollback patterns are used across the codebase, each with distinct
+ * Four rollback patterns are used across the codebase, each with distinct
  * security/reliability tradeoffs. When adding a new rate-limited action,
  * choose the appropriate pattern:
  *
@@ -14,12 +14,21 @@
  *    retry — the 15-minute window is generous.
  *    Use for: security-critical write paths (auth, credential changes).
  *
- * 2. **Rollback on infrastructure error** (public.ts loadMore/search):
+ * 2. **Rollback on infrastructure error** (public.ts loadMore/search;
+ *    /api/checkout/[imageId]; /api/search/semantic):
  *    The pre-incremented counter IS rolled back when the underlying
- *    operation throws. Rationale: the user should not be penalized for
- *    server errors on public read paths — a DB failure is not the user's
- *    fault and the rate-limit charge would be unfair.
- *    Use for: public read paths where the user has no malicious intent.
+ *    operation throws — or, for checkout/semantic, on any early return
+ *    that never reached the limiter's GUARDED RESOURCE. Rationale: the
+ *    user should not be penalized for server errors on public read
+ *    paths; and where the limiter exists to protect a specific expensive
+ *    resource (checkout guards the Stripe API budget; semantic guards
+ *    embedding CPU), branches that never consume that resource (image
+ *    not found / not for sale / unpriced — 1-2 PK SELECTs whose facts
+ *    are public on /p/{id} anyway) are fairly refunded. SEC-R4C18-04
+ *    adjudicated this as deliberate, NOT a Pattern-4 violation: there is
+ *    no enumeration value and no amplification analogue on these paths.
+ *    Use for: public read paths, and routes whose guarded resource is a
+ *    downstream API/CPU stage the refunded branches never reach.
  *
  * 3. **Rollback on over-limit / FK violation only** (sharing.ts):
  *    The counter is rolled back when the action did NOT execute (e.g.,
@@ -28,6 +37,21 @@
  *    are also rolled back because admin share operations are low-risk.
  *    Use for: admin write paths where legitimate user errors (duplicate
  *    key, already-exists) should not consume rate-limit budget.
+ *
+ * 4. **Charged post-validation** (/api/og and /api/og/photo/[id] —
+ *    AGG8F-01 / SEC-R4C17-01):
+ *    Rollback ONLY for syntactic pre-DB rejections (malformed params
+ *    bounced before any DB lookup or CPU). EVERYTHING after validation
+ *    stays charged — nonexistent topics/photos, missing derivatives,
+ *    render errors, and infrastructure errors alike. Rationale: the
+ *    guarded resource here is the route's OWN DB/CPU work, which those
+ *    branches have already consumed; refunding them turns the limiter
+ *    into a free enumeration oracle with unmetered DB/CPU consumption.
+ *    Both OG buckets are source-locked to this contract
+ *    (og-route-source-contracts.test.ts — zero rollbacks;
+ *    og-photo-fallback.test.ts — exactly two, both pre-DB).
+ *    Use for: unauthenticated CPU/DB-expensive GET surfaces where
+ *    failure responses are themselves attacker-probeable.
  */
 import { createHash } from 'crypto';
 import { isIP } from 'net';
