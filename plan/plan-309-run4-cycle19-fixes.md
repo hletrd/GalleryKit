@@ -1,7 +1,7 @@
 # Plan 309 — Run-4 Cycle 19 fixes
 
 **Source review:** `.context/reviews/run4-cycle19/_aggregate.md`
-**Status:** PENDING
+**Status:** IMPLEMENTED — all 6 tasks landed; gates + deploy recorded below
 
 Repo-rule constraints honored: GPG-signed commits (`-S`), conventional
 commits + gitmoji, fine-grained per-fix commits, pull --rebase before
@@ -82,4 +82,36 @@ the live site.
 
 ## Progress log
 
-(appended during PROMPT 3)
+- Task 1 ✅ `2881e32f` — topics.ts tuple unwrap + tuple-accurate mocks.
+  Failing-pre-fix proof: 4 failed / 10 passed with pre-fix source
+  (rename ×2, alias create, new createTopic-success lock); 14/14
+  post-fix. Live-DB pre-fix proof recorded in the review.
+- Task 3 ✅ `962931f1` — cicp-recheck tuple unwrap; typecheck:scripts
+  clean.
+- Task 4 ✅ `66871cb5` — keyset pagination in both backfills +
+  implemented the documented auto_alt_text_enabled/--force gate; dead
+  `skipped` counter removed; clip script now exits 1 on failures.
+- Task 5 ✅ `a61cfb45` — migrate-titles refusal guard; verified live
+  (counts titles, refuses, exits 1, zero writes).
+- Task 6 ✅ `046d7cb3` — star re-export fail-closed in the
+  public-route gate + 2 fixture locks (suite 18/18); live gate green.
+- Task 2 ✅ `5ae58a7a` — admin topic create/delete e2e in the
+  adminE2EEnabled lane, self-cleaning.
+
+### Gate run (this cycle)
+
+- eslint ✅ · lint:api-auth ✅ · lint:action-origin ✅ ·
+  lint:public-route-rate-limit ✅ (all green post-fix)
+- vitest ✅ 186 files / 1797 tests, all passed
+- typecheck + production build ✅ (exit 0; typecheck:app +
+  typecheck:scripts run inside the build chain)
+- playwright e2e ✅ 21 passed / 2 skipped (the two CI-only credential
+  canaries) — including the NEW `admin can create and delete a topic
+  (TEST-R4C19-07)` spec at 3.5 s, which is the integrated end-to-end
+  proof that COR-R4C19-01 is fixed through the real UI + server + DB
+  stack (pre-fix this spec deterministically failed: every create
+  returned slugConflictsWithRoute).
+
+### Deploy
+
+- recorded below after `npm run deploy`.
