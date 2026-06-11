@@ -182,7 +182,12 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                 </CardHeader>
                 <CardContent className="space-y-4">
                     {hasExistingImages && hasDirtyBackfillField && (
-                        <div className="rounded-md border border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300">
+                        /* DES-R4C16-05: role="status" (polite live region) — this
+                           banner appears dynamically when a color-impacting field
+                           goes dirty; without it a screen-reader admin edits
+                           avif_effort and never learns existing photos now need a
+                           re-encode. Advisory, not blocking → status, not alert. */
+                        <div role="status" className="rounded-md border border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300">
                             <strong>{t('settings.backfillRequired')}</strong>
                             {' '}
                             {t('settings.backfillRequiredHint')}

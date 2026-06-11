@@ -322,7 +322,11 @@ export function BulkEditDialog({
                     </div>
 
                     {validationError && (
-                        <p className="text-sm text-destructive">{validationError}</p>
+                        /* DES-R4C16-05: role="alert" — the rejection appears
+                           dynamically when Apply is blocked; screen-reader users
+                           previously got silence. Precedent: C4-RPF-09 (sales
+                           load-error region). */
+                        <p role="alert" className="text-sm text-destructive">{validationError}</p>
                     )}
                 </div>
 
