@@ -92,3 +92,37 @@ for (const [label, source] of SUITES) {
         });
     });
 }
+
+describe('topic /[locale]/[topic]/feed.xml — COR-R4C18-01 locale validation', () => {
+    // COR-R4C18-01: route handlers bypass BOTH the next-intl middleware
+    // (proxy.ts matcher excludes every dotted path) AND the [locale]
+    // layout's notFound() locale gate (layouts wrap pages, not route
+    // handlers). The topic feed must therefore self-validate its locale
+    // param — otherwise GET /<junk>/<topic>/feed.xml returns a 200 feed
+    // whose alternate link and every entry link point at a locale prefix
+    // that 404s for all subscribers, CDN-cached per arbitrary string.
+    it('imports isSupportedLocale from @/lib/locale-path', () => {
+        expect(topicSource).toContain('isSupportedLocale');
+        expect(topicSource).toContain("from '@/lib/locale-path'");
+    });
+
+    it('rejects unsupported locales BEFORE any DB work', () => {
+        const guardIndex = topicSource.indexOf('isSupportedLocale(locale)');
+        expect(guardIndex).toBeGreaterThan(-1);
+        // The guard must sit above every data-layer call in source order.
+        for (const dbCall of ['getSeoSettings(', 'getTopicBySlug(', 'getImagesForFeed(', 'getGalleryConfig(']) {
+            const callIndex = topicSource.indexOf(dbCall, topicSource.indexOf('export async function GET'));
+            expect(callIndex).toBeGreaterThan(guardIndex);
+        }
+    });
+
+    it('the rejection branch returns a 404', () => {
+        const guardIndex = topicSource.indexOf('isSupportedLocale(locale)');
+        const windowAfterGuard = topicSource.slice(guardIndex, guardIndex + 300);
+        expect(windowAfterGuard).toContain('status: 404');
+    });
+
+    it('lineage comment cites COR-R4C18-01', () => {
+        expect(topicSource).toContain('COR-R4C18-01');
+    });
+});

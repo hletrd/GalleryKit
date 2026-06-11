@@ -3,7 +3,7 @@ import { getImagesForFeed, getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { composeAtomFeed } from '@/lib/atom-feed';
 import { absoluteImageUrl, sizedImageFilename } from '@/lib/image-url';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
-import { localizePath } from '@/lib/locale-path';
+import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { isFeedNotModified } from '@/lib/feed-conditional';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
@@ -30,6 +30,21 @@ export async function GET(
     { params }: { params: Promise<{ locale: string; topic: string }> },
 ) {
     const { locale, topic: topicSlug } = await params;
+
+    // COR-R4C18-01: route handlers bypass BOTH locale guards the rest of
+    // the app relies on — the next-intl middleware never runs here
+    // (proxy.ts's matcher excludes every dotted path, and this path ends
+    // in `.xml`) and the `[locale]/layout.tsx` notFound() gate wraps
+    // pages, not route handlers. Without this check, ANY locale segment
+    // (`/kr/<topic>/feed.xml`, typo'd or crafted) returned a 200 feed
+    // whose alternate link and every entry link carried the bogus prefix
+    // and 404'd for all subscribers — CDN-cached per arbitrary locale
+    // string. Any new dotted route under `[locale]` must self-validate
+    // its locale param the same way. Source-locked by
+    // feed-sized-derivative.test.ts.
+    if (!isSupportedLocale(locale)) {
+        return new NextResponse(null, { status: 404 });
+    }
 
     const [seo, topicData, config] = await Promise.all([
         getSeoSettings(),
