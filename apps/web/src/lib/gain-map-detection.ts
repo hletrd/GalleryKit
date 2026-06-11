@@ -128,9 +128,15 @@ export function hasGainMap(buffer: Buffer): boolean {
         if (pos >= dataEnd) return { itemId, itemType, itemUri: null };
         pos++; // skip null terminator
         void nameStart;
-        // For 'urim' items, item_uri follows the name.
+        // For 'urim' items, item_uri follows the name. COR-R4C14-02: also
+        // read a trailing URI for 'tmap' items — heuristic 1 in hasGainMap()
+        // promises to flag a tmap that carries the Apple HDR gain-map URN
+        // (R5-M3), which was unreachable while the URI was parsed for urim
+        // only. ISO 21496-1 tmap items carry no URI in practice, so this
+        // changes nothing for real files; it makes the documented intent
+        // executable.
         let itemUri: string | null = null;
-        if (itemType === 'urim' && pos < dataEnd) {
+        if ((itemType === 'urim' || itemType === 'tmap') && pos < dataEnd) {
             itemUri = readNullTerminatedAscii(pos, dataEnd);
         }
         return { itemId, itemType, itemUri };

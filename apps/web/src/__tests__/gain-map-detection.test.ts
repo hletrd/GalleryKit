@@ -153,6 +153,19 @@ describe('hasGainMap', () => {
         expect(hasGainMap(meta)).toBe(false);
     });
 
+    // COR-R4C14-02: the R5-M3 carve-out — a tmap that DOES carry the Apple
+    // HDR gain-map URN is unambiguous and must be flagged by heuristic 1
+    // even without an auxl iref. Before the fix, parseInfe only read the
+    // trailing URI for 'urim' items, so this documented branch was dead code.
+    it('detects standalone tmap when it carries the Apple gain-map URN (R5-M3 carve-out)', () => {
+        const iinf = makeIinf([
+            makeInfe(1, 'hvc1'),
+            makeInfe(2, 'tmap', APPLE_GAIN_MAP_URI, 'tonemap'),
+        ]);
+        const meta = makeMeta([iinf]);
+        expect(hasGainMap(meta)).toBe(true);
+    });
+
     it('detects gain map via auxl iref when urim has no inline URI', () => {
         // Some encoders write the URI in a sibling URI box rather than inline
         // on infe. The auxl reference still pinpoints the auxiliary item.
