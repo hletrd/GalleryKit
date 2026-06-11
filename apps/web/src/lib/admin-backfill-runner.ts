@@ -155,13 +155,21 @@ async function fetchCandidateCount(): Promise<number> {
     return Number(rows[0].cnt);
 }
 
-async function fetchCandidates(): Promise<CandidateRow[]> {
+// PERF-R5C1-01: keyset-paginated batch fetch — mirrors backfill-color-pipeline.ts.
+// Each call returns at most BATCH_SIZE rows with id > cursor, ordered ASC.
+// Processing each batch through PQueue before fetching the next keeps memory
+// residency O(batch) rather than O(gallery).
+const BATCH_SIZE = 100;
+
+async function fetchCandidateBatch(cursor: number): Promise<CandidateRow[]> {
     const result = await db.execute(sql`
         SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
                icc_profile_name, color_primaries, width
         FROM images
         WHERE processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < ${IMAGE_PIPELINE_VERSION})
+          AND id > ${cursor}
         ORDER BY id ASC
+        LIMIT ${BATCH_SIZE}
     `);
     const rows = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result) as unknown as CandidateRow[];
     return rows;
@@ -273,22 +281,18 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
     }
 }
 
-async function runBackfill(lockConn: PoolConnection, candidates: CandidateRow[]): Promise<void> {
+async function runBackfill(lockConn: PoolConnection): Promise<void> {
     // R29-CRIT-1: every state mutation, config read, and queue construction
     // lives INSIDE the try block so the finally clause is the single
     // release point for the in-process `running` flag, the MySQL advisory
-    // lock, and the lock connection itself. The previous shape mutated
-    // `state.running = true` and `await getGalleryConfig()` BEFORE the try
-    // block, which meant a thrown `getGalleryConfig()` (DB blip, malformed
-    // `admin_settings` row, transient pool exhaustion) left `state.running`
-    // stuck at `true` and leaked the lock + connection until process
-    // restart. Subsequent triggers all returned `already_running` with no
-    // visible explanation. Keeping all mutations inside try/finally
-    // guarantees release regardless of WHERE the throw lands.
+    // lock, and the lock connection itself.
+    //
+    // PERF-R5C1-01: batched keyset-paginated fetch. Each batch of at most
+    // BATCH_SIZE rows is enqueued and drained through PQueue before the next
+    // batch is fetched, keeping memory residency O(batch) not O(gallery).
     const state = getState();
     try {
         state.running = true;
-        state.lastQueuedCount = candidates.length;
         state.lastError = null;
         const config = await getGalleryConfig();
         const settings: RunnerSettings = {
@@ -310,26 +314,45 @@ async function runBackfill(lockConn: PoolConnection, candidates: CandidateRow[])
 
         let processed = 0;
         let errors = 0;
-        for (const row of candidates) {
-            queue.add(async () => {
-                if (isRestoreMaintenanceActive()) {
-                    // Abort gracefully — restore is taking over the DB.
-                    return;
-                }
-                try {
-                    await reprocessOne(row, settings);
-                    processed++;
-                } catch (err) {
-                    errors++;
-                    console.error(`[admin-backfill] id=${row.id} fatal:`, err);
-                }
-                if (processed % 25 === 0) {
-                    console.log(`[admin-backfill] progress: ${processed}/${candidates.length} (errors=${errors})`);
-                }
-            });
+        let cursor = 0;
+
+        for (;;) {
+            if (isRestoreMaintenanceActive()) {
+                console.log('[admin-backfill] Restore maintenance detected — aborting batch loop.');
+                break;
+            }
+            const batch = await fetchCandidateBatch(cursor);
+            if (batch.length === 0) break;
+
+            for (const row of batch) {
+                queue.add(async () => {
+                    if (isRestoreMaintenanceActive()) {
+                        return;
+                    }
+                    try {
+                        await reprocessOne(row, settings);
+                        processed++;
+                    } catch (err) {
+                        errors++;
+                        console.error(`[admin-backfill] id=${row.id} fatal:`, err);
+                    }
+                    if (processed % 25 === 0) {
+                        console.log(`[admin-backfill] progress: processed=${processed} errors=${errors}`);
+                    }
+                });
+            }
+            // Drain the batch fully before fetching the next one.
+            await queue.onIdle();
+
+            // Advance keyset cursor to the highest id in this batch.
+            cursor = batch[batch.length - 1]!.id;
+
+            if (batch.length < BATCH_SIZE) {
+                // Last batch — no more rows to fetch.
+                break;
+            }
         }
 
-        await queue.onIdle();
         console.log(`[admin-backfill] Run complete: processed=${processed} errors=${errors}`);
         state.completedRuns++;
     } catch (err) {
@@ -363,12 +386,16 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
         if (!lockConn) {
             return { status: 'already_running' };
         }
-        const candidates = await fetchCandidates();
-        if (candidates.length === 0) {
+        // PERF-R5C1-01: use the count query for the up-front disclosure only.
+        // The actual candidate fetch is now batched inside runBackfill.
+        const candidateCount = await fetchCandidateCount();
+        if (candidateCount === 0) {
             // Nothing to do — release the lock and report zero work.
             await releaseBackfillLock(lockConn);
             return { status: 'queued', affectedRows: 0 };
         }
+        // Store the up-front count for the UI status disclosure.
+        getState().lastQueuedCount = candidateCount;
         // Hand the lock connection off to the background runner. From this
         // point the runner owns the connection's lifetime and will release
         // both the lock and the connection on completion / failure.
@@ -382,10 +409,10 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
         // (e.g. a `getState()` re-entrancy bug), we swallow the rejection
         // here rather than escalate to an unhandledRejection that newer
         // Node versions will use to terminate the process.
-        runBackfill(lockConnHandoff, candidates).catch((err) => {
+        runBackfill(lockConnHandoff).catch((err) => {
             console.error('[admin-backfill] runner rejected synchronously:', err);
         });
-        return { status: 'queued', affectedRows: candidates.length };
+        return { status: 'queued', affectedRows: candidateCount };
     } catch (err) {
         if (lockConn) {
             await releaseBackfillLock(lockConn).catch(() => undefined);
