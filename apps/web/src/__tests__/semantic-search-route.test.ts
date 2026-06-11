@@ -79,7 +79,8 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         vi.clearAllMocks();
         hasTrustedSameOriginMock.mockReturnValue(true);
         isRestoreMaintenanceActiveMock.mockReturnValue(false);
-        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
+        // CRT-R5C1-01: 'stub' is the only mode that serves public requests.
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'stub' });
         getClientIpMock.mockReturnValue('203.0.113.50');
         preIncrementSemanticAttemptMock.mockReturnValue(false);
         embedTextStubMock.mockReturnValue(new Float32Array(512).fill(0.1));
@@ -164,13 +165,30 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Query must be at least 3 characters' });
     });
 
-    it('returns 503 when semantic search is not in production mode', async () => {
+    it('returns 503 when semantic search mode is disabled', async () => {
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'disabled' });
 
         const response = await POST(mockRequest({ query: 'mountain landscape' }));
 
         expect(response.status).toBe(503);
         await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
+        // COR-R5C1-04: rate limit was incremented then rolled back on disabled path
+        expect(preIncrementSemanticAttemptMock).toHaveBeenCalled();
+        expect(rollbackSemanticAttemptMock).toHaveBeenCalled();
+    });
+
+    it('CRT-R5C1-01: returns 503 for stale stored "production" value (fail-closed)', async () => {
+        // Simulate a stale DB value from before the validator was tightened.
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
+
+        const response = await POST(mockRequest({ query: 'mountain landscape' }));
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
+        // Must NOT have called the stub encoder — no ranking output produced.
+        expect(embedTextStubMock).not.toHaveBeenCalled();
+        // Rate limit rolled back.
+        expect(rollbackSemanticAttemptMock).toHaveBeenCalled();
     });
 
     it('returns 429 when rate limit is exceeded', async () => {

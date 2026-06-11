@@ -164,8 +164,11 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     // US-P52
     auto_alt_text_enabled: (v) => v === 'true' || v === 'false',
 
-    // US-P51: must be one of the three allowed modes
-    semantic_search_mode: (v) => v === 'disabled' || v === 'stub' || v === 'production',
+    // US-P51: CRT-R5C1-01 — 'production' is rejected until a real ONNX encoder
+    // module + model files are present (capability-probe re-enable criterion).
+    // Until then only 'disabled' and 'stub' are storable via admin settings.
+    // The route enforces a defense-in-depth 503 for stale DB rows.
+    semantic_search_mode: (v) => v === 'disabled' || v === 'stub',
 
     // US-P54: license tier prices must be non-negative integers (cents)
     license_price_editorial_cents: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 0; },

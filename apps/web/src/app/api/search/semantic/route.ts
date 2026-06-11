@@ -158,22 +158,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
-    // Check semantic search mode — only 'production' serves public requests
-    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
-    try {
-        const config = await getGalleryConfig();
-        semanticMode = config.semanticSearchMode;
-    } catch {
-        // fail closed
-    }
-    if (semanticMode !== 'production') {
-        return NextResponse.json(
-            { error: 'Semantic search is not fully configured' },
-            { status: 503, headers: NO_STORE_HEADERS },
-        );
-    }
-
-    // Rate-limit — consumed AFTER all cheap validation gates (Pattern 2)
+    // CRT-R5C1-01: Capability gate — only 'stub' mode is the current encoder.
+    // Treat 'production' as 503 regardless of stored config (defense in depth
+    // for stale DB values written before the validator was tightened).
+    // COR-R5C1-04: rate-limit pre-increment is placed BEFORE the config read
+    // so the counter is consumed on every request that passes cheap validation,
+    // preventing free config probing. Pattern 2: rollback on all subsequent
+    // early-return paths before expensive work begins.
     const ip = getClientIp(request.headers);
     const now = Date.now();
     const overLimit = preIncrementSemanticAttempt(ip, now);
@@ -181,6 +172,24 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json(
             { error: 'Rate limited' },
             { status: 429, headers: { ...NO_STORE_HEADERS, 'Retry-After': '60' } },
+        );
+    }
+
+    // Check semantic search mode — only 'stub' serves public requests currently.
+    // 'production' is rejected even if stored (stale DB value) because the
+    // stub encoder returns random results and must never serve real traffic.
+    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
+    try {
+        const config = await getGalleryConfig();
+        semanticMode = config.semanticSearchMode;
+    } catch {
+        // fail closed — config unavailable means disabled
+    }
+    if (semanticMode !== 'stub') {
+        rollbackSemanticAttempt(ip);
+        return NextResponse.json(
+            { error: 'Semantic search is not fully configured' },
+            { status: 503, headers: NO_STORE_HEADERS },
         );
     }
 

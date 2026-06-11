@@ -537,7 +537,8 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             <SelectContent>
                                 <SelectItem value="disabled">{t('settings.semanticSearchModeDisabled')}</SelectItem>
                                 <SelectItem value="stub">{t('settings.semanticSearchModeStub')}</SelectItem>
-                                <SelectItem value="production">{t('settings.semanticSearchModeProduction')}</SelectItem>
+                                {/* CRT-R5C1-01: 'production' hidden until real ONNX encoder ships.
+                                    i18n key kept for forward compatibility. */}
                             </SelectContent>
                         </Select>
                     </div>
