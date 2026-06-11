@@ -295,6 +295,71 @@ describe('gps-exif-strip pure scrubbers', () => {
         expect(result!.buffer).toBe(withXmp);
     });
 
+    it('SEC-R4C10-01: returns null for a JPEG with a GPS-bearing post-EOI trailer (forces re-encode)', async () => {
+        // A motion-photo / MPF JPEG = [primary still][second full JPEG].
+        // Build both with GPS EXIF; the primary scrub alone would leave the
+        // trailer's coordinates intact, so the lossless path must bail to the
+        // re-encode fallback (null) which decodes only the primary still.
+        const primaryFile = await makeFixture('trailer-primary.jpg', 'jpeg', true);
+        const trailerFile = await makeFixture('trailer-secondary.jpg', 'jpeg', true);
+        const primary = await fs.readFile(primaryFile);
+        const trailer = await fs.readFile(trailerFile);
+        // Sanity: the trailer really carries GPS before scrubbing (binary
+        // EXIF GPS IFD, read via exif-reader — NOT an ASCII string scan).
+        expect(await gpsInFile(trailerFile)).not.toBeNull();
+        const motionPhoto = Buffer.concat([primary, trailer]);
+
+        const result = stripGpsFromJpegBuffer(motionPhoto);
+        // Proven-failing-before: the old walker returned { stripped: true }
+        // with the trailer GPS surviving. The fix returns null so
+        // stripGpsFromOriginal re-encodes (trailer dropped entirely).
+        expect(result).toBeNull();
+    });
+
+    it('SEC-R4C10-01: returns null for a JPEG with a trailer even when neither image carries GPS', async () => {
+        // The lossless path cannot certify a trailer is GPS-free (the
+        // secondary's EXIF GPS is binary), so ANY non-trivial trailer routes
+        // to the safe re-encode. Privacy-correct trade for a narrow slice of
+        // uploads when strip_gps_on_upload is ON.
+        const primaryFile = await makeFixture('trailer-clean-primary.jpg', 'jpeg', false);
+        const trailerFile = await makeFixture('trailer-clean-secondary.jpg', 'jpeg', false);
+        const primary = await fs.readFile(primaryFile);
+        const trailer = await fs.readFile(trailerFile);
+        const concatenated = Buffer.concat([primary, trailer]);
+
+        expect(stripGpsFromJpegBuffer(concatenated)).toBeNull();
+    });
+
+    it('SEC-R4C10-01: a single-image JPEG with no trailer is unaffected (lossless tier-1 preserved)', async () => {
+        // Regression guard: the trailer check must not false-positive on a
+        // normal single-image GPS JPEG — it still scrubs losslessly.
+        const file = await makeFixture('single-image-gps.jpg', 'jpeg', true);
+        const input = await fs.readFile(file);
+        const result = stripGpsFromJpegBuffer(input);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+        // Decodes to the same pixels (lossless byte surgery, not a re-encode).
+        const pixelsBefore = await sharp(input).raw().toBuffer();
+        const pixelsAfter = await sharp(result!.buffer).raw().toBuffer();
+        expect(pixelsAfter.equals(pixelsBefore)).toBe(true);
+        // And the GPS is gone.
+        expect(await gpsInFile(file)).not.toBeNull(); // fixture had GPS
+        const outPath = path.join(tmpDir, 'single-image-gps.out.jpg');
+        await fs.writeFile(outPath, result!.buffer);
+        expect(await gpsInFile(outPath)).toBeNull();
+    });
+
+    it('SEC-R4C10-01: tolerates a couple of trailing padding bytes after EOI', async () => {
+        // Some encoders emit 1-2 trailing bytes after the final EOI; these
+        // must NOT trip the trailer guard (no leak risk from <=2 bytes).
+        const file = await makeFixture('padded-eoi-gps.jpg', 'jpeg', true);
+        const input = await fs.readFile(file);
+        const padded = Buffer.concat([input, Buffer.from([0x00, 0x00])]);
+        const result = stripGpsFromJpegBuffer(padded);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+    });
+
     it('stripGpsFromTiffBuffer zeroes the GPS IFD of a real EXIF TIFF block', async () => {
         // The APP1 payload of a GPS-tagged JPEG (after "Exif\0\0") IS a
         // TIFF block — extract it and run the whole-file TIFF scrubber on

@@ -19,7 +19,12 @@
  *  - JPEG  (APP1 Exif segment; GPS-bearing XMP APP1 segments dropped —
  *           BOTH the standard packet and ExtendedXMP overflow segments
  *           are token-tested, including a reconstruction pass that
- *           catches tokens split across ExtendedXMP chunk boundaries)
+ *           catches tokens split across ExtendedXMP chunk boundaries.
+ *           A JPEG carrying a post-EOI trailer — a second full FFD8…FFD9
+ *           image (MPF secondary / Samsung·Pixel Motion Photo) or an
+ *           appended container — is treated as a structural anomaly:
+ *           the lossless single-image walker returns null so the caller's
+ *           re-encode fallback strips the trailer entirely, SEC-R4C10-01)
  *  - TIFF  (whole-file IFD walk; GPS-bearing XMP tag value zeroed)
  *  - ISOBMFF / HEIF / AVIF / HEIC (Exif item located via iinf+iloc;
  *    GPS-bearing XMP mime items zeroed)
@@ -187,6 +192,15 @@ const EXIF_APP1_SIGNATURE = Buffer.from('Exif\0\0', 'latin1');
 const XMP_APP1_SIGNATURE = Buffer.from('http://ns.adobe.com/xap/1.0/\0', 'latin1');
 const XMP_EXT_APP1_SIGNATURE = Buffer.from('http://ns.adobe.com/xmp/extension/\0', 'latin1');
 
+/** JPEG End-Of-Image marker. Cannot occur inside valid entropy-coded scan
+ *  data (a literal 0xFF there is always followed by 0x00 stuffing or an
+ *  RSTn marker), so `indexOf(JPEG_EOI_MARKER, scanStart)` reliably locates
+ *  the primary image's true terminator. */
+const JPEG_EOI_MARKER = Buffer.from([0xff, 0xd9]);
+/** Tolerate a couple of trailing padding bytes some encoders emit after EOI
+ *  before treating the remainder as a post-EOI trailer (SEC-R4C10-01). */
+const JPEG_TRAILER_TOLERANCE_BYTES = 2;
+
 /**
  * Lossless GPS strip for a JPEG file. Zeroes the GPS IFD inside every
  * APP1 Exif segment and DROPS XMP APP1 segments (standard + extended)
@@ -216,6 +230,10 @@ export function stripGpsFromJpegBuffer(input: Buffer): GpsStripResult | null {
     const segments: Segment[] = [];
 
     let pos = 2;
+    // SEC-R4C10-01: position of the SOS/EOI marker that ended the header
+    // walk — the start of the region in which the primary image's terminal
+    // EOI lives. Used to detect a post-EOI trailer below.
+    let scanRegionStart = -1;
     while (pos + 4 <= buf.length) {
         if (buf[pos] !== 0xff) return null;
         // Skip fill bytes (0xFF padding before a marker)
@@ -223,7 +241,7 @@ export function stripGpsFromJpegBuffer(input: Buffer): GpsStripResult | null {
         while (markerPos + 1 < buf.length && buf[markerPos + 1] === 0xff) markerPos++;
         if (markerPos + 1 >= buf.length) return null;
         const marker = buf[markerPos + 1];
-        if (marker === 0xda || marker === 0xd9) break; // SOS / EOI — no metadata beyond
+        if (marker === 0xda || marker === 0xd9) { scanRegionStart = markerPos; break; } // SOS / EOI — no metadata beyond
         if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
             pos = markerPos + 2;
             continue;
@@ -239,6 +257,25 @@ export function stripGpsFromJpegBuffer(input: Buffer): GpsStripResult | null {
             dataEnd: markerPos + 2 + segLength,
         });
         pos = markerPos + 2 + segLength;
+    }
+
+    // SEC-R4C10-01: reject a post-EOI trailer. A JPEG may carry a second
+    // full FFD8…FFD9 image after the primary EOI (MPF secondary, Samsung /
+    // Pixel Motion Photo) or an appended container. The header walk above
+    // only inspects the PRIMARY image's segments, so a GPS-bearing trailer
+    // (binary EXIF GPS IFD or GPS XMP in the embedded secondary) would be
+    // copied verbatim into the rewritten output while we report success.
+    // The lossless path cannot certify the trailer is GPS-free, so a
+    // non-trivial trailer is a structural anomaly: return null and let the
+    // caller's tier-2 Sharp re-encode drop the trailer entirely (it decodes
+    // only the primary still). FF D9 cannot occur inside valid entropy-coded
+    // scan data, so indexOf finds the true primary EOI even for progressive
+    // (multi-SOS) JPEGs whose only EOI is the final one.
+    if (scanRegionStart !== -1) {
+        const eoiIdx = buf.indexOf(JPEG_EOI_MARKER, scanRegionStart);
+        if (eoiIdx !== -1 && buf.length - (eoiIdx + 2) > JPEG_TRAILER_TOLERANCE_BYTES) {
+            return null;
+        }
     }
 
     for (const seg of segments) {
