@@ -260,8 +260,11 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 </TableBody>
             </Table>
 
-            {/* Delete Topic Confirmation */}
-            <AlertDialog open={!!deleteSlug} onOpenChange={(open) => !open && setDeleteSlug(null)}>
+            {/* Delete Topic Confirmation.
+                COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) — the
+                previous onClick fired the delete AND dismissed synchronously,
+                so the Loader2 / "Deleting…" states were unreachable dead UI. */}
+            <AlertDialog open={!!deleteSlug} onOpenChange={(open) => { if (!open && !isDeletingTopic) setDeleteSlug(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>{t('categories.deleteConfirmTitle')}</AlertDialogTitle>
@@ -270,8 +273,17 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { if (deleteSlug) handleDelete(deleteSlug); setDeleteSlug(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={isDeletingTopic}>
+                        <AlertDialogCancel disabled={isDeletingTopic}>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                if (!deleteSlug || isDeletingTopic) return;
+                                await handleDelete(deleteSlug);
+                                setDeleteSlug(null);
+                            }}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={isDeletingTopic}
+                        >
                             {isDeletingTopic && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {isDeletingTopic ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>
@@ -354,8 +366,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Alias Confirmation */}
-            <AlertDialog open={!!deleteAliasInfo} onOpenChange={(open) => !open && setDeleteAliasInfo(null)}>
+            {/* Delete Alias Confirmation.
+                COR-R4C16-01: settle-before-close (see topic dialog above). */}
+            <AlertDialog open={!!deleteAliasInfo} onOpenChange={(open) => { if (!open && !isDeletingAlias) setDeleteAliasInfo(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>{t('categories.deleteAliasTitle')}</AlertDialogTitle>
@@ -364,8 +377,17 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { if (deleteAliasInfo) handleDeleteAlias(deleteAliasInfo.topicSlug, deleteAliasInfo.alias); setDeleteAliasInfo(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={isDeletingAlias}>
+                        <AlertDialogCancel disabled={isDeletingAlias}>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                if (!deleteAliasInfo || isDeletingAlias) return;
+                                await handleDeleteAlias(deleteAliasInfo.topicSlug, deleteAliasInfo.alias);
+                                setDeleteAliasInfo(null);
+                            }}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={isDeletingAlias}
+                        >
                             {isDeletingAlias && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {isDeletingAlias ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>

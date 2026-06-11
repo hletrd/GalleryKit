@@ -209,6 +209,11 @@ export default function DbPage() {
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel>{tShared('cancel')}</AlertDialogCancel>
+                                    {/* @alert-dialog-auto-close-ok: pure confirm gate — the
+                                        250 MB restore upload runs under startTransition with
+                                        page-level progress (isPending button label above);
+                                        holding this modal open for that multi-minute window
+                                        would be worse than closing it (COR-R4C16-01). */}
                                     <AlertDialogAction onClick={confirmRestore} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                                         {t('restoreButton')}
                                     </AlertDialogAction>

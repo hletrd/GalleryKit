@@ -283,9 +283,14 @@ export function SalesClient({ rows: initialRows, t }: Props) {
                 was inconsistent with the cycle 39 confirm-dialog pattern used
                 for other destructive admin actions.
             */}
+            {/* COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) — the
+                refund is an irreversible multi-second Stripe call; the dialog
+                stays open with the "Refunding…" label until it settles
+                (handleRefund's finally dismisses); ESC / overlay / Cancel are
+                inert mid-flight. */}
             <AlertDialog
                 open={!!confirmTarget}
-                onOpenChange={(open) => { if (!open) setConfirmTarget(null); }}
+                onOpenChange={(open) => { if (!open && refundingId === null) setConfirmTarget(null); }}
             >
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -301,9 +306,16 @@ export function SalesClient({ rows: initialRows, t }: Props) {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>{t.refundCancel}</AlertDialogCancel>
+                        <AlertDialogCancel disabled={refundingId !== null}>{t.refundCancel}</AlertDialogCancel>
                         <AlertDialogAction
-                            onClick={() => confirmTarget && handleRefund(confirmTarget.id)}
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                if (!confirmTarget || refundingId !== null) return;
+                                // handleRefund settles internally (try/catch) and its
+                                // finally clears refundingId AND confirmTarget — no
+                                // explicit dismiss needed here.
+                                await handleRefund(confirmTarget.id);
+                            }}
                             disabled={refundingId !== null}
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                         >

@@ -65,7 +65,10 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
     }
 
     async function handleDelete(id: number) {
-        setDeleteTarget(null);
+        // COR-R4C16-01: do NOT dismiss the confirm dialog here — the
+        // settle-before-close pattern (DES-R4C14-B) keeps it open with the
+        // in-flight label until this handler settles; the AlertDialogAction
+        // onClick dismisses after the await.
         setIsDeleting(true);
         try {
             const result = await deleteAdminUser(id);
@@ -173,16 +176,28 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                     </Table>
                 </div>
             </CardContent>
-            <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+            {/* COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) — the
+                dialog stays open with the in-flight label until the delete
+                settles; ESC / overlay / Cancel are inert mid-flight. */}
+            <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open && !isDeleting) setDeleteTarget(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>{t('users.deleteConfirm', { username: deleteTarget?.username ?? '' })}</AlertDialogTitle>
                         <AlertDialogDescription>{t('users.deleteConfirmDesc')}</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => deleteTarget && handleDelete(deleteTarget.id)} disabled={isDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            {t('imageManager.delete')}
+                        <AlertDialogCancel disabled={isDeleting}>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                if (!deleteTarget || isDeleting) return;
+                                await handleDelete(deleteTarget.id);
+                                setDeleteTarget(null);
+                            }}
+                            disabled={isDeleting}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            {isDeleting ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

@@ -85,6 +85,13 @@ export function ImageManager({
     const [images, setImages] = useState(initialImages);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    // COR-R4C16-01: controlled confirm-dialog state so the settle-before-
+    // close pattern (DES-R4C14-B, tag-manager) can keep the dialog open
+    // while the async delete is in flight. The Radix Action auto-closes
+    // uncontrolled dialogs on click, which made the isBulkDeleting /
+    // deletingId in-flight labels below unreachable dead UI.
+    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+    const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
     const [isBulkDeleting, setIsBulkDeleting] = useState(false);
     const [isSharing, setIsSharing] = useState(false);
 
@@ -366,7 +373,11 @@ export function ImageManager({
                             {isSharing ? t('imageManager.sharing') : <><Share2 className="h-4 w-4 mr-2" /> {t('imageManager.share')}</>}
                         </Button>
                         <div className="h-4 w-px bg-border" />
-                        <AlertDialog>
+                        {/* COR-R4C16-01: settle-before-close (DES-R4C14-B pattern) —
+                            preventDefault() suppresses the Radix auto-close so the
+                            in-flight "Deleting…" label is reachable; ESC / overlay /
+                            Cancel are inert mid-flight; close on settle. */}
+                        <AlertDialog open={showBulkDeleteConfirm} onOpenChange={(open) => { if (open) setShowBulkDeleteConfirm(true); else if (!isBulkDeleting) setShowBulkDeleteConfirm(false); }}>
                             <AlertDialogTrigger asChild>
                                 <Button variant="destructive" size="sm" className="h-11" disabled={isBulkDeleting}>
                                     {isBulkDeleting ? t('imageManager.deleting') : t('imageManager.deleteSelected')}
@@ -380,8 +391,18 @@ export function ImageManager({
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
-                                    <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleBulkDelete} disabled={isBulkDeleting}>{isBulkDeleting ? t('imageManager.deleting') : t('imageManager.delete')}</AlertDialogAction>
+                                    <AlertDialogCancel disabled={isBulkDeleting}>{t('imageManager.cancel')}</AlertDialogCancel>
+                                    <AlertDialogAction
+                                        onClick={async (e) => {
+                                            e.preventDefault();
+                                            if (isBulkDeleting) return;
+                                            await handleBulkDelete();
+                                            setShowBulkDeleteConfirm(false);
+                                        }}
+                                        disabled={isBulkDeleting}
+                                    >
+                                        {isBulkDeleting ? t('imageManager.deleting') : t('imageManager.delete')}
+                                    </AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
@@ -517,7 +538,8 @@ export function ImageManager({
                                         <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => startEdit(image)} aria-label={t('aria.editItem')}>
                                             <Pencil className="h-4 w-4" />
                                         </Button>
-                                        <AlertDialog>
+                                        {/* COR-R4C16-01: settle-before-close (see bulk dialog above). */}
+                                        <AlertDialog open={deleteConfirmId === image.id} onOpenChange={(open) => { if (open) setDeleteConfirmId(image.id); else if (deletingId !== image.id) setDeleteConfirmId(null); }}>
                                             <AlertDialogTrigger asChild>
                                             <Button variant="destructive" size="icon" className="h-11 w-11" aria-label={t('aria.deleteItem')}>
                                                 <Trash2 className="h-4 w-4" />
@@ -531,8 +553,16 @@ export function ImageManager({
                                                 </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
-                                                <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => handleDelete(image.id)} disabled={deletingId === image.id}>
+                                                <AlertDialogCancel disabled={deletingId === image.id}>{t('imageManager.cancel')}</AlertDialogCancel>
+                                                <AlertDialogAction
+                                                    onClick={async (e) => {
+                                                        e.preventDefault();
+                                                        if (deletingId !== null) return;
+                                                        await handleDelete(image.id);
+                                                        setDeleteConfirmId(null);
+                                                    }}
+                                                    disabled={deletingId === image.id}
+                                                >
                                                     {deletingId === image.id ? t('imageManager.deleting') : t('imageManager.delete')}
                                                 </AlertDialogAction>
                                             </AlertDialogFooter>
