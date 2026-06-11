@@ -125,8 +125,17 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                 </TableBody>
             </Table>
 
-            {/* Delete Tag Confirmation */}
-            <AlertDialog open={deleteId !== null} onOpenChange={(open) => !open && setDeleteId(null)}>
+            {/* Delete Tag Confirmation.
+                DES-R4C14-B: the action used to close the dialog synchronously
+                (Radix auto-close + immediate setDeleteId(null)) while the
+                async delete was still in flight, so the isDeleting spinner /
+                "Deleting…" label / disabled states below were unreachable and
+                the admin got no feedback until the toast. preventDefault()
+                suppresses the Radix auto-close; the dialog now stays open
+                with the spinner until the action settles (handleDelete
+                resolves on both success and error — it catches internally),
+                and ESC / overlay / Cancel are inert mid-flight. */}
+            <AlertDialog open={deleteId !== null} onOpenChange={(open) => { if (!open && !isDeleting) setDeleteId(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>{t('tags.deleteConfirmTitle')}</AlertDialogTitle>
@@ -135,8 +144,17 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel>{t('imageManager.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => { if (deleteId !== null) handleDelete(deleteId); setDeleteId(null); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={isDeleting}>
+                        <AlertDialogCancel disabled={isDeleting}>{t('imageManager.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                if (deleteId === null || isDeleting) return;
+                                await handleDelete(deleteId);
+                                setDeleteId(null);
+                            }}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={isDeleting}
+                        >
                             {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {isDeleting ? t('imageManager.deleting') : t('imageManager.delete')}
                         </AlertDialogAction>
