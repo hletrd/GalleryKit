@@ -11,6 +11,22 @@ describe('validateSeoOgImageUrl', () => {
         expect(validateSeoOgImageUrl('//evil.example/og.jpg', 'https://gallery.example.com')).toBe(false);
     });
 
+    // SEC-R4C20-01: backslash-bypass of the same-origin gate. `/\evil.com`
+    // slips past the `//` check (second char is `\`, not `/`) but browsers and
+    // crawlers normalize `\`→`/` per the WHATWG URL spec, so it resolves to the
+    // scheme-relative `//evil.com` (→ https://evil.com/). These all returned
+    // `true` before the fix.
+    it('rejects backslash relative OG image URLs that normalize to an off-site authority', () => {
+        expect(validateSeoOgImageUrl('/\\evil.com', 'https://gallery.example.com')).toBe(false);
+        expect(validateSeoOgImageUrl('/\\/evil.com', 'https://gallery.example.com')).toBe(false);
+        expect(validateSeoOgImageUrl('/\\\\evil.com', 'https://gallery.example.com')).toBe(false);
+        expect(validateSeoOgImageUrl('/foo\\bar', 'https://gallery.example.com')).toBe(false);
+    });
+
+    it('still accepts a legitimate forward-slash relative path after the backslash guard', () => {
+        expect(validateSeoOgImageUrl('/uploads/og.jpg', 'https://gallery.example.com')).toBe(true);
+    });
+
     it('rejects third-party OG image URLs when BASE_URL is absent and site-config fallback is used', () => {
         expect(validateSeoOgImageUrl('https://cdn.example.com/og.jpg', 'http://localhost:3000')).toBe(false);
     });

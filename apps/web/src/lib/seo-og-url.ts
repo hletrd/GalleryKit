@@ -7,6 +7,19 @@ export function validateSeoOgImageUrl(rawValue: string, configuredBaseUrl: strin
     }
 
     if (trimmedUrl.startsWith('/') && !trimmedUrl.startsWith('//')) {
+        // SEC-R4C20-01: reject backslashes in the relative branch. Browsers and
+        // link-preview crawlers normalize `\` to `/` per the WHATWG URL spec for
+        // http/https, so a value like `/\evil.com` — which slips past the `//`
+        // check because its second char is `\`, not `/` — resolves to the
+        // scheme-relative `//evil.com` (→ https://evil.com/). That bypasses the
+        // same-origin intent of this validator both in the public `<meta
+        // og:image>` tag and in the 302 `Location` of /api/og/photo/[id]
+        // (open redirect). Upstream `normalizeStringRecord` already strips C0
+        // controls (tab/CR/LF), so backslash is the only char that survives
+        // normalization AND re-normalizes to `/`; rejecting it closes the gap.
+        if (trimmedUrl.includes('\\')) {
+            return false;
+        }
         return true;
     }
 
