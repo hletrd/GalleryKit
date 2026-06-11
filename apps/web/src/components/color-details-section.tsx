@@ -5,6 +5,7 @@ import { Info, ChevronDown, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { isP3Pipeline, type ColorPipelineDecision } from '@/lib/color-pipeline-decisions';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { ImageDetail } from '@/lib/image-types';
 
 /**
@@ -166,8 +167,15 @@ interface ColorDetailsSectionProps {
 
 export default function ColorDetailsSection({ image, isAdmin = false, t, toggleRef, forceSrgbDerivatives = false }: ColorDetailsSectionProps) {
     const isHdr = image.transfer_function === 'pq' || image.transfer_function === 'hlg';
+    // COR-R4C14-01: the primaries arm routes through the canonical
+    // `isWideGamutPrimary` (lib/color-primaries.ts single source of truth)
+    // so `'unknown'` — persisted for every ICC-less upload — is NOT treated
+    // as wide gamut. Matches CLAUDE.md's contract: isNonTrivialColor =
+    // wide-gamut OR HDR OR non-srgb decision. Admin viewers of
+    // unknown-profile photos still default-open via the
+    // `srgb-from-unknown` decision arm below.
     const isNonTrivialColor = Boolean(
-        (image.color_primaries && image.color_primaries !== 'bt709') ||
+        isWideGamutPrimary(image.color_primaries) ||
         (isAdmin && isHdr) ||
         (image.color_pipeline_decision && image.color_pipeline_decision !== 'srgb'),
     );
@@ -218,7 +226,10 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
     // - Wide-gamut primaries → "Color: {gamut}" (e.g. "Color: Display P3").
     // - Wide-gamut + admin + HDR → "Color: {gamut} HDR" (admin-only because
     //   `transfer_function` / `is_hdr` are admin-only fields).
-    const isWideGamut = Boolean(image.color_primaries) && image.color_primaries !== 'bt709';
+    // COR-R4C14-01: canonical predicate — `'unknown'` primaries must fall
+    // back to the static "Color details" label, never the raw enum token
+    // ("Color: unknown" / "색상: unknown").
+    const isWideGamut = isWideGamutPrimary(image.color_primaries);
     const gamutLabel = primariesHuman ?? image.color_primaries ?? '';
     const accordionLabel = (() => {
         if (!isWideGamut || !gamutLabel) return t('viewer.colorDetails');
@@ -451,7 +462,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             <p className="font-medium">
                                 {(() => {
                                     const decision = image.color_pipeline_decision
-                                        ?? (image.color_primaries !== 'bt709' && image.color_primaries !== 'unknown'
+                                        ?? (isWideGamutPrimary(image.color_primaries)
                                             ? 'p3-from-displayp3'
                                             : 'srgb');
                                     if (!isP3Pipeline(decision)) {

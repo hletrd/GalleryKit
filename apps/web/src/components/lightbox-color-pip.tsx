@@ -14,6 +14,7 @@ import {
     humanizeColorPipelineDecision,
 } from '@/components/color-details-section';
 import { COLOR_PIPELINE_DECISIONS, type ColorPipelineDecision, isP3Pipeline } from '@/lib/color-pipeline-decisions';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { findNearestImageSize, DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 
 interface LightboxColorPipProps {
@@ -204,7 +205,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                             <span className="font-medium">
                                 {(() => {
                                     const decision = image.color_pipeline_decision
-                                        ?? (image.color_primaries !== 'bt709' && image.color_primaries !== 'unknown'
+                                        ?? (isWideGamutPrimary(image.color_primaries)
                                             ? 'p3-from-displayp3'
                                             : 'srgb');
                                     if (!isP3Pipeline(decision)) {

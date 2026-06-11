@@ -180,8 +180,11 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
     // R5-L-BUNDLE: isNonTrivialColor uses only public-safe fields.
     // color_pipeline_decision is admin-only so it is not included here;
     // the peek chip's inner content handles its own conditional rendering.
+    // COR-R4C14-01: primaries arm routes through the canonical
+    // `isWideGamutPrimary` so `'unknown'` (every ICC-less upload) does not
+    // render an empty peek chip wrapper or count as non-trivial color.
     const isNonTrivialColor = Boolean(
-        (image.color_primaries && image.color_primaries !== 'bt709') ||
+        isWideGamutPrimary(image.color_primaries) ||
         (isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg')),
     );
 
