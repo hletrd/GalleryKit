@@ -241,6 +241,19 @@ export async function deleteAdminUser(id: number) {
         }
 
         await conn.query('DELETE FROM sessions WHERE user_id = ?', [id]);
+        // COR-R4C10-01: detach the target's audit_log rows before deleting
+        // the admin. The `audit_log_user_id_admin_users_id_fk` FK is
+        // ON DELETE NO ACTION, and every successful login writes
+        // audit_log(user_id=self), so any admin who has ever logged in within
+        // the audit-retention window has rows that would make the delete fail
+        // with errno 1451 (empirically reproduced against MySQL 8). The
+        // user_id column is nullable, so NULL-ing it here detaches the actor
+        // linkage exactly as an ON DELETE SET NULL rule would — the audit
+        // event records (action / target_id / ip / created_at) survive — and
+        // needs no schema migration. Mirrors the uploaded_by SET NULL
+        // precedent. Do NOT remove this UPDATE: the delete below will throw
+        // errno 1451 for any admin with audit history without it.
+        await conn.query('UPDATE audit_log SET user_id = NULL WHERE user_id = ?', [id]);
         const [deleteResult] = await conn.query<ResultSetHeader>(
             'DELETE FROM admin_users WHERE id = ?',
             [id]
