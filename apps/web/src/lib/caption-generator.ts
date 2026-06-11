@@ -24,7 +24,8 @@ export interface CaptionInput {
 }
 
 const ALT_TEXT_MAX_CHARS = 140;
-const ALT_TEXT_STUB_PREFIX = '[AUTO] ';
+// CRT-R5C1-02: exported so photo-title.ts can strip it from visible-title fallbacks.
+export const ALT_TEXT_STUB_PREFIX = '[AUTO] ';
 
 /**
  * STUB: Produce an EXIF-derived caption placeholder.

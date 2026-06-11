@@ -1,4 +1,5 @@
 import type { TagInfo } from '@/lib/image-types';
+import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-generator';
 
 interface PhotoTitleInput {
     title: string | null;
@@ -102,7 +103,19 @@ export function getConcisePhotoAltText(
     const hasMeaningfulTitle = image.title && image.title.trim() && !isFilenameLikeTitle(image.title);
     const hasTags = image.tag_names && image.tag_names.trim();
     if (!hasMeaningfulTitle && !hasTags && image.alt_text_suggested && image.alt_text_suggested.trim()) {
-        return image.alt_text_suggested.trim();
+        // CRT-R5C1-02: strip the stub prefix so '[AUTO] Photo taken with ...' never
+        // reaches visible titles, <title>, or OG meta tags. The raw value is still
+        // returned for alt="" attributes by callers that use alt_text_suggested directly.
+        // Use a constant-derived regex (not a second hardcoded literal).
+        // Strip the prefix including any trailing whitespace after it.
+        // Also strip the trimmed prefix form (e.g. '[AUTO]' without trailing space)
+        // so bare '[AUTO]' → empty → fallback.
+        const escapedPrefix = ALT_TEXT_STUB_PREFIX.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const stripped = image.alt_text_suggested.trim().replace(new RegExp(`^${escapedPrefix}\\s*`), '');
+        if (stripped.trim()) {
+            return stripped.trim();
+        }
+        // Stripped remainder was empty — fall through to generic fallback below.
     }
     return getPhotoDisplayTitleFromTagNames(image, fallback)
         .replace(/^#+/, '')
