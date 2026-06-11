@@ -523,6 +523,12 @@ async function reconcileLegacySchema(connection, dbName) {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // PERF-R5C1-02: analytics breakdown indexes (migration 0021).
+    await ensureIndex(connection, dbName, 'image_views', 'idx_image_views_bot_viewed_country',
+        'CREATE INDEX idx_image_views_bot_viewed_country ON image_views (bot, viewed_at, country_code)');
+    await ensureIndex(connection, dbName, 'image_views', 'idx_image_views_bot_viewed_referrer',
+        'CREATE INDEX idx_image_views_bot_viewed_referrer ON image_views (bot, viewed_at, referrer_host)');
+
     await ensureTable(connection, `
         CREATE TABLE IF NOT EXISTS topic_views (
             id int NOT NULL AUTO_INCREMENT,
