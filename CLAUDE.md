@@ -98,7 +98,7 @@ git values must be treated as compromised and must not be reused.
 | `apps/web/src/lib/gain-map-detection.ts` | Apple HDR gain map detection in HEIF `iinf`/`infe`/`iref` (P4-A1) |
 | `apps/web/src/lib/use-display-capability.ts` | Layered display gamut + HDR detection: `screen.colorGamut` → MQ → conservative `'srgb'` for Firefox (R9-R1). **Snapshot-memoized** — `getSnapshot` MUST return a stable reference or `useSyncExternalStore` infinite-loops (React #185) |
 | `apps/web/src/lib/settings-hash.ts` | 8-char SHA-256 prefix over color-impacting admin settings, embedded in ETag (P4-E2) |
-| `apps/web/src/lib/hdr-filenames.ts` | `_hdr.avif` filename derivation helper (reserved for WI-09) |
+| `apps/web/src/lib/hdr-filenames.ts` | `_hdr.avif` filename derivation helper (RESERVED — NOT WIRED until WI-09 ships; honesty invariant enforced by `_PrivacySensitiveKeys` guard, not a feature flag) |
 | `apps/web/src/lib/data.ts` | Data access layer with React cache() deduplication. `_PrivacySensitiveKeys` compile-time guard enforces admin-only fields |
 | `apps/web/src/proxy.ts` | i18n routing + middleware-level admin auth guard |
 | `apps/web/src/lib/auth-rate-limit.ts` | Account-scoped and password-change rate limiting (in-memory Maps with DB backup for login) |
