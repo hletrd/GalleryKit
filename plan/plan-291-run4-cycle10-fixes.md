@@ -96,5 +96,12 @@ add the assertion to the e2e admin-users spec instead.)
 - `78d2a108` — review artifacts + plans
 - `4f20df8e` — SW_VERSION refresh
 
-## Deploy (DEPLOY_MODE: per-cycle)
-(record appended below after `npm run deploy`)
+## Deploy (DEPLOY_MODE: per-cycle) — ✅ SUCCESS
+- `git push` → `53a18715..d9e93ecc master -> master` (rebase clean).
+- `npm run deploy` exit 0 — Docker image `web-web` rebuilt
+  (sha256:0a4f0414…), container `gallerykit-web` Recreated + Started,
+  "Deployment Complete!".
+- Post-deploy live probes: `/api/live` 200, `/en` 200, `/sw.js` 200.
+- Note: the e2e webServer build re-stamped `sw.js` to `4f20df8e-p7`
+  (`d9e93ecc`); the deploy host's own build re-stamps from the deployed
+  HEAD — committed value lags one commit by design (same as prior cycles).
