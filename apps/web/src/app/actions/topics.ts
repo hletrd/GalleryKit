@@ -234,9 +234,22 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
             }
 
             if (slug !== cleanCurrentSlug) {
-                const nextImageFilename = imageFilename ?? previousImageFilename ?? null;
                 await db.transaction(async (tx) => {
-                    const [transactionTopic] = await tx.select({ slug: topics.slug })
+                    // COR-R4C13-01: the "rename" is a recreate — every topics
+                    // column NOT sourced from the form must be carried from
+                    // the authoritative row, read under the route lock INSIDE
+                    // the transaction (this also closes the pre-lock
+                    // image_filename TOCTOU, COR-R4C13-02). map_visible is
+                    // NOT NULL DEFAULT false, so omitting it silently reset
+                    // the US-P21 public-map opt-in on every slug rename. The
+                    // rename test pins the inserted VALUES — thread any
+                    // future topics column through BOTH this select and the
+                    // insert below.
+                    const [transactionTopic] = await tx.select({
+                        slug: topics.slug,
+                        image_filename: topics.image_filename,
+                        map_visible: topics.map_visible,
+                    })
                         .from(topics)
                         .where(eq(topics.slug, cleanCurrentSlug))
                         .limit(1);
@@ -245,11 +258,14 @@ export async function updateTopic(currentSlug: string, formData: FormData) {
                         throw new TopicNotFoundError();
                     }
 
+                    const nextImageFilename = imageFilename ?? transactionTopic.image_filename ?? null;
+
                     await tx.insert(topics).values({
                         label,
                         slug,
                         order,
                         image_filename: nextImageFilename,
+                        map_visible: transactionTopic.map_visible,
                     });
                     await tx.update(images).set({ topic: slug }).where(eq(images.topic, cleanCurrentSlug));
                     await tx.update(topicAliases).set({ topicSlug: slug }).where(eq(topicAliases.topicSlug, cleanCurrentSlug));

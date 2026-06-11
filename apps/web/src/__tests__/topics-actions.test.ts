@@ -89,6 +89,7 @@ vi.mock('@/db', () => ({
     topics: {
         slug: 'topics.slug',
         image_filename: 'topics.image_filename',
+        map_visible: 'topics.map_visible',
     },
     topicAliases: {
         alias: 'topic_aliases.alias',
@@ -245,6 +246,7 @@ describe('topic actions', () => {
 
     it('renames topics by inserting the replacement row before moving child references', async () => {
         const steps: string[] = [];
+        const insertedPayloads: unknown[] = [];
 
         // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
         // First call: topicRouteSegmentExists('new-topic') → no conflict (empty array)
@@ -259,10 +261,22 @@ describe('topic actions', () => {
             update: typeof updateMock;
             delete: typeof deleteMock;
         }) => Promise<void>) => {
-            const txSelect = vi.fn().mockReturnValue(makeSelectChain([{ slug: 'old-topic' }]));
+            // COR-R4C13-01: the authoritative pre-rename row is read INSIDE
+            // the transaction and must carry map_visible + image_filename
+            // into the replacement insert.
+            const txSelect = vi.fn().mockReturnValue(makeSelectChain([{
+                slug: 'old-topic',
+                image_filename: 'old-topic.webp',
+                map_visible: true,
+            }]));
             const txInsert = vi.fn(() => {
                 steps.push('insert-topic');
-                return makeWriteChain([{ insertId: 12 }]);
+                return {
+                    values: vi.fn((payload: unknown) => {
+                        insertedPayloads.push(payload);
+                        return Promise.resolve([{ insertId: 12 }]);
+                    }),
+                };
             });
             const txUpdate = vi.fn((table: { topic?: string }) => {
                 steps.push(table.topic === 'images.topic' ? 'update-images' : 'update-aliases');
@@ -288,6 +302,74 @@ describe('topic actions', () => {
 
         await expect(updateTopic('old-topic', formData)).resolves.toEqual({ success: true });
         expect(steps).toEqual(['insert-topic', 'update-images', 'update-aliases', 'delete-topic']);
+        // COR-R4C13-01: the replacement row must carry EVERY non-form topics
+        // column from the authoritative transaction-selected row. This is an
+        // exact-object assertion on purpose: when a new topics column is
+        // added to the schema, this test must be updated consciously — a
+        // silent DEFAULT reset (the map_visible bug) can never ship again.
+        expect(insertedPayloads).toEqual([{
+            label: 'New Topic',
+            slug: 'new-topic',
+            order: 5,
+            image_filename: 'old-topic.webp',
+            map_visible: true,
+        }]);
+    });
+
+    it('carries map_visible while applying a newly uploaded image during a rename', async () => {
+        const insertedPayloads: unknown[] = [];
+
+        executeMock.mockResolvedValueOnce([]);
+        selectMock
+            .mockReturnValueOnce(makeSelectChain([{ image_filename: 'old-topic.webp' }]))
+            .mockReturnValueOnce(makeSelectChain([]));
+        processTopicImageMock.mockResolvedValue('new-cover.webp');
+
+        transactionMock.mockImplementation(async (callback: (tx: {
+            select: typeof selectMock;
+            insert: typeof insertMock;
+            update: typeof updateMock;
+            delete: typeof deleteMock;
+        }) => Promise<void>) => {
+            const txSelect = vi.fn().mockReturnValue(makeSelectChain([{
+                slug: 'old-topic',
+                image_filename: 'old-topic.webp',
+                map_visible: true,
+            }]));
+            const txInsert = vi.fn(() => ({
+                values: vi.fn((payload: unknown) => {
+                    insertedPayloads.push(payload);
+                    return Promise.resolve([{ insertId: 13 }]);
+                }),
+            }));
+            const txUpdate = vi.fn(() => makeUpdateChain([{ affectedRows: 1 }]));
+            const txDelete = vi.fn(() => makeWriteChain([{ affectedRows: 1 }]));
+
+            await callback({
+                select: txSelect,
+                insert: txInsert,
+                update: txUpdate,
+                delete: txDelete,
+            });
+        });
+
+        const formData = new FormData();
+        formData.set('label', 'New Topic');
+        formData.set('slug', 'new-topic');
+        formData.set('order', '5');
+        formData.set('image', new File(['x'], 'cover.jpg', { type: 'image/jpeg' }));
+
+        await expect(updateTopic('old-topic', formData)).resolves.toEqual({ success: true });
+        // The NEW image wins over the carried one; map_visible still carries.
+        expect(insertedPayloads).toEqual([{
+            label: 'New Topic',
+            slug: 'new-topic',
+            order: 5,
+            image_filename: 'new-cover.webp',
+            map_visible: true,
+        }]);
+        // The replaced previous image is cleaned up after the rename commits.
+        expect(deleteTopicImageMock).toHaveBeenCalledWith('old-topic.webp');
     });
 
     it('allows deleting legacy dotted aliases even though new ones are rejected', async () => {
