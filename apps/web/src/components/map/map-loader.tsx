@@ -15,6 +15,8 @@ interface MapLoaderProps {
     locale: string;
     noPhotosLabel: string;
     openPhotoLabel: string;
+    /** PERF-R4C15-02: configured image_sizes for sized popup thumbnails. */
+    imageSizes: number[];
 }
 
 export function MapLoader(props: MapLoaderProps) {

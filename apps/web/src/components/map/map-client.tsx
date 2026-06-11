@@ -6,10 +6,11 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
 import 'leaflet-defaulticon-compatibility';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { useRouter } from 'next/navigation';
 import { localizePath } from '@/lib/locale-path';
+import { imageUrl, sizedImageUrl } from '@/lib/image-url';
 
 export interface MapMarker {
     id: number;
@@ -25,6 +26,51 @@ interface MapClientProps {
     locale: string;
     noPhotosLabel: string;
     openPhotoLabel: string;
+    /**
+     * PERF-R4C15-02: the admin-configured `image_sizes` list, passed from
+     * the map page's getGalleryConfig(). Deliberately required — a
+     * DEFAULT_IMAGE_SIZES shortcut here would silently 404 every popup
+     * thumb into the full-resolution fallback whenever an admin
+     * reconfigures `image_sizes`.
+     */
+    imageSizes: number[];
+}
+
+/**
+ * PERF-R4C15-02: popup thumbnail following the R23-M1 sized-derivative
+ * contract (mirrors SearchResultItem in components/search.tsx, which in
+ * turn mirrors the R21-M1 lightbox / R22-M1 viewer idiom): request the
+ * nearest configured derivative for the ~120 px rendered size instead
+ * of the full-resolution base JPEG (multi-MB for a 120×80 thumb), and
+ * swap one-shot to the base filename if the sized derivative 404s
+ * (legacy photos mid-backfill — the encoder atomic-rename contract
+ * guarantees the base file exists). Routing through
+ * imageUrl()/sizedImageUrl() also honors IMAGE_BASE_URL on CDN-fronted
+ * deployments; the previous raw `/uploads/jpeg/${…}` interpolation was
+ * the only image surface in src/ bypassing it.
+ */
+function MarkerThumb({ marker, imageSizes }: { marker: MapMarker; imageSizes: number[] }) {
+    const sizedSrc = sizedImageUrl('/uploads/jpeg', marker.filename_jpeg, 128, imageSizes);
+    const baseSrc = imageUrl(`/uploads/jpeg/${marker.filename_jpeg}`);
+    const [imgSrc, setImgSrc] = useState<string>(sizedSrc);
+    const fallbackTriedRef = useRef(false);
+    return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+            src={imgSrc}
+            alt={marker.title ?? String(marker.id)}
+            width={120}
+            height={80}
+            style={{ objectFit: 'cover', borderRadius: '4px' }}
+            onError={() => {
+                if (fallbackTriedRef.current) return;
+                fallbackTriedRef.current = true;
+                if (imgSrc !== baseSrc) {
+                    setImgSrc(baseSrc);
+                }
+            }}
+        />
+    );
 }
 
 // Fits the map view to contain all markers after mount.
@@ -48,7 +94,7 @@ function FitBounds({ markers }: { markers: MapMarker[] }) {
     return null;
 }
 
-export function MapClient({ markers, locale, openPhotoLabel }: MapClientProps) {
+export function MapClient({ markers, locale, openPhotoLabel, imageSizes }: MapClientProps) {
     const router = useRouter();
 
     function handleMarkerClick(id: number) {
@@ -85,14 +131,7 @@ export function MapClient({ markers, locale, openPhotoLabel }: MapClientProps) {
                             className="flex flex-col items-center gap-1 min-h-[44px] min-w-[44px] cursor-pointer text-left"
                             aria-label={`${openPhotoLabel}: ${marker.title ?? marker.id}`}
                         >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                                src={`/uploads/jpeg/${marker.filename_jpeg}`}
-                                alt={marker.title ?? String(marker.id)}
-                                width={120}
-                                height={80}
-                                style={{ objectFit: 'cover', borderRadius: '4px' }}
-                            />
+                            <MarkerThumb marker={marker} imageSizes={imageSizes} />
                             {marker.title && (
                                 <span className="text-xs font-medium text-center max-w-[120px] truncate">
                                     {marker.title}

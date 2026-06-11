@@ -1,4 +1,5 @@
 import { getMapImages, getSeoSettings } from '@/lib/data';
+import { getGalleryConfig } from '@/lib/gallery-config';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { Metadata } from 'next';
 import { MapLoader } from '@/components/map/map-loader';
@@ -23,10 +24,14 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function MapPage() {
-    const [t, locale, mapImages] = await Promise.all([
+    // PERF-R4C15-02: getGalleryConfig is React cache()-wrapped, so this
+    // costs nothing extra in a request where Nav already resolved it; the
+    // configured image_sizes drive sized popup thumbnails in MapClient.
+    const [t, locale, mapImages, config] = await Promise.all([
         getTranslations('map'),
         getLocale(),
         getMapImages(),
+        getGalleryConfig(),
     ]);
 
     // Only pass images that have non-null lat/lng (type-narrowed for the client).
@@ -54,6 +59,7 @@ export default async function MapPage() {
                     locale={locale}
                     noPhotosLabel={t('noPhotos')}
                     openPhotoLabel={t('openPhoto')}
+                    imageSizes={config.imageSizes}
                 />
             )}
         </div>
