@@ -859,46 +859,55 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
         // Non-critical
     }
 
-    const iccProfileName = extractIccProfileName(metadata.icc);
+    // BUG-R5C1-02: wrap everything after the successful original write in a
+    // try/catch so that any throw (ICC extraction, detectColorSignals,
+    // resolveColorPipelineDecision, or future code) unlinks the already-written
+    // original before re-throwing, preventing orphaned files on disk.
+    try {
+        const iccProfileName = extractIccProfileName(metadata.icc);
 
-    // US-CM04: detect CICP-equivalent color signals for future HDR delivery.
-    // P3-11: compute before pipeline decision so NCLX-derived primaries can
-    // be used as fallback when ICC name is absent.
-    const colorSignals = await detectColorSignals(originalPath, image, metadata);
-    const colorPipelineDecision = resolveColorPipelineDecision(iccProfileName, colorSignals);
+        // US-CM04: detect CICP-equivalent color signals for future HDR delivery.
+        // P3-11: compute before pipeline decision so NCLX-derived primaries can
+        // be used as fallback when ICC name is absent.
+        const colorSignals = await detectColorSignals(originalPath, image, metadata);
+        const colorPipelineDecision = resolveColorPipelineDecision(iccProfileName, colorSignals);
 
-    // CM-LOW-1: Sharp's metadata.depth is a string union ('uchar', 'ushort',
-    // 'float', etc.), not a numeric string. The pre-fix code did
-    // parseInt('uchar', 10) → NaN → null, so the bit_depth column was
-    // always empty. Map the documented string values to their bit count.
-    const DEPTH_TO_BITS: Record<string, number> = {
-        uchar: 8, char: 8,
-        ushort: 16, short: 16,
-        uint: 32, int: 32,
-        float: 32, complex: 64,
-        double: 64, dpcomplex: 128,
-    };
-    const bitDepth: number | null = (typeof metadata.depth === 'string' && metadata.depth in DEPTH_TO_BITS)
-        ? DEPTH_TO_BITS[metadata.depth]
-        : (typeof metadata.depth === 'number' && Number.isFinite(metadata.depth) ? metadata.depth : null);
+        // CM-LOW-1: Sharp's metadata.depth is a string union ('uchar', 'ushort',
+        // 'float', etc.), not a numeric string. The pre-fix code did
+        // parseInt('uchar', 10) → NaN → null, so the bit_depth column was
+        // always empty. Map the documented string values to their bit count.
+        const DEPTH_TO_BITS: Record<string, number> = {
+            uchar: 8, char: 8,
+            ushort: 16, short: 16,
+            uint: 32, int: 32,
+            float: 32, complex: 64,
+            double: 64, dpcomplex: 128,
+        };
+        const bitDepth: number | null = (typeof metadata.depth === 'string' && metadata.depth in DEPTH_TO_BITS)
+            ? DEPTH_TO_BITS[metadata.depth]
+            : (typeof metadata.depth === 'number' && Number.isFinite(metadata.depth) ? metadata.depth : null);
 
-    return {
-        id,
-        filenameOriginal,
-        filenameWebp,
-        filenameAvif,
-        filenameJpeg,
-        width,
-        height,
-        originalWidth: width,
-        originalHeight: height,
-        exifData,
-        blurDataUrl,
-        iccProfileName,
-        bitDepth,
-        colorPipelineDecision,
-        colorSignals,
-    };
+        return {
+            id,
+            filenameOriginal,
+            filenameWebp,
+            filenameAvif,
+            filenameJpeg,
+            width,
+            height,
+            originalWidth: width,
+            originalHeight: height,
+            exifData,
+            blurDataUrl,
+            iccProfileName,
+            bitDepth,
+            colorPipelineDecision,
+            colorSignals,
+        };
+    } catch (e) {
+        await fs.unlink(originalPath).catch(() => {});
+        throw e;
+    }
 }
 
 export interface ImageQualitySettings {
