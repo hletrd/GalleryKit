@@ -3,7 +3,17 @@ export const LOCALES = ['en', 'ko'] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = 'en';
 
-/** Base URL for image assets. Override with IMAGE_BASE_URL env var for CDN-fronted deployments. */
+/**
+ * Base URL for image assets. Override with the IMAGE_BASE_URL env var for
+ * CDN-fronted deployments.
+ *
+ * SCOPE (COR-R4C16-03): this constant carries the real value on the
+ * SERVER only — it is not NEXT_PUBLIC_, so client bundles resolve it to
+ * ''. Client code must go through `lib/image-url.ts`, which falls back
+ * to the `data-image-base` attribute stamped on `<html>` by
+ * `app/[locale]/layout.tsx`. Do not consume this constant directly from
+ * client components.
+ */
 export const IMAGE_BASE_URL = process.env.IMAGE_BASE_URL || '';
 
 import siteConfig from '@/site-config.json';

@@ -1,6 +1,62 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { imageUrl, sizedImageFilename, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
+
+/**
+ * COR-R4C16-03 / TEST-R4C16-03: the image base resolves per-runtime —
+ * server reads the IMAGE_BASE_URL env (module constant); the browser
+ * reads the `data-image-base` attribute stamped on `<html>` by the
+ * locale layout (client bundles cannot see non-NEXT_PUBLIC env vars —
+ * the compiled chunk does a runtime `process.env` lookup against the
+ * browser shim, which is always empty).
+ */
+describe('imageUrl base resolution (COR-R4C16-03)', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+    });
+
+    it('browser: uses the data-image-base attribute stamped on <html>', () => {
+        vi.stubGlobal('document', {
+            documentElement: { dataset: { imageBase: 'https://cdn.example.com' } },
+        });
+        expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('https://cdn.example.com/uploads/jpeg/a.jpg');
+    });
+
+    it('browser: normalizes trailing slashes on the stamped base', () => {
+        vi.stubGlobal('document', {
+            documentElement: { dataset: { imageBase: 'https://cdn.example.com/' } },
+        });
+        expect(imageUrl('uploads/jpeg/a.jpg')).toBe('https://cdn.example.com/uploads/jpeg/a.jpg');
+    });
+
+    it('browser: falls back to relative paths when the attribute is absent (env unset)', () => {
+        vi.stubGlobal('document', { documentElement: { dataset: {} } });
+        expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('/uploads/jpeg/a.jpg');
+    });
+
+    it('server: reads the IMAGE_BASE_URL env via the module constant', async () => {
+        vi.stubEnv('IMAGE_BASE_URL', 'https://cdn.example.com');
+        vi.resetModules();
+        const fresh = await import('@/lib/image-url');
+        expect(typeof document).toBe('undefined');
+        expect(fresh.imageUrl('/uploads/jpeg/a.jpg')).toBe('https://cdn.example.com/uploads/jpeg/a.jpg');
+        vi.resetModules();
+    });
+
+    it('wiring: the locale layout stamps data-image-base on <html> (injection lock)', () => {
+        // Source-inspection lock: a layout refactor that drops the stamp
+        // would sever the browser-side resolution while every unit test
+        // above stays green — fail loud here instead.
+        const layoutSource = fs.readFileSync(
+            path.resolve(__dirname, '..', 'app', '[locale]', 'layout.tsx'),
+            'utf8',
+        );
+        expect(layoutSource).toContain('data-image-base={IMAGE_BASE_URL || undefined}');
+    });
+});
 
 describe('sizedImageFilename', () => {
     it('uses the nearest configured derivative size for the requested target', () => {

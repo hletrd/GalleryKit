@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
-import { LOCALES } from '@/lib/constants';
+import { IMAGE_BASE_URL, LOCALES } from '@/lib/constants';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
 import { getSeoSettings } from '@/lib/data';
 import siteConfig from "@/site-config.json";
@@ -100,6 +100,14 @@ export default async function RootLayout({
       suppressHydrationWarning
       data-gallery-title={seo.title}
       data-gallery-nav-title={seo.nav_title || seo.title}
+      // COR-R4C16-03: IMAGE_BASE_URL is a server-runtime env var (not
+      // NEXT_PUBLIC_), so client bundles resolve it to '' — stamping it
+      // on <html> lets lib/image-url.ts resolve the CDN base in the
+      // browser (document.documentElement.dataset.imageBase). The SSR
+      // pass and this attribute read the same env, so hydration sees
+      // identical URLs. Omitted entirely when unset (the common
+      // single-host topology) — zero behavior change there.
+      data-image-base={IMAGE_BASE_URL || undefined}
     >
       <head>
         <link rel="preconnect" href={seo.url} crossOrigin="anonymous" />
