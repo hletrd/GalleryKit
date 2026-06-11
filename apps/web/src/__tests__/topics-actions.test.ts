@@ -182,8 +182,12 @@ describe('topic actions', () => {
     });
 
     it('rejects createTopic when the requested slug already exists as an alias route', async () => {
-        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
-        executeMock.mockResolvedValueOnce([{ found: 1 }]);
+        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query.
+        // COR-R4C19-01: the mock MUST be the runtime-accurate mysql2
+        // `[rows, fields]` tuple — drizzle's raw db.execute never returns a
+        // bare rows array. Bare-array mocks previously green-lit code that
+        // failed on every real request.
+        executeMock.mockResolvedValueOnce([[{ found: 1 }], []]);
 
         const formData = new FormData();
         formData.set('label', 'Travel');
@@ -249,8 +253,11 @@ describe('topic actions', () => {
         const insertedPayloads: unknown[] = [];
 
         // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
-        // First call: topicRouteSegmentExists('new-topic') → no conflict (empty array)
-        executeMock.mockResolvedValueOnce([]);
+        // First call: topicRouteSegmentExists('new-topic') → no conflict.
+        // COR-R4C19-01: runtime-accurate mysql2 tuple — zero rows is
+        // `[[], []]`, NOT `[]`. This assertion failed pre-fix (the tuple's
+        // length 2 was read as a conflict).
+        executeMock.mockResolvedValueOnce([[], []]);
         selectMock
             .mockReturnValueOnce(makeSelectChain([{ image_filename: 'old-topic.webp' }]))
             .mockReturnValueOnce(makeSelectChain([]));
@@ -319,7 +326,8 @@ describe('topic actions', () => {
     it('carries map_visible while applying a newly uploaded image during a rename', async () => {
         const insertedPayloads: unknown[] = [];
 
-        executeMock.mockResolvedValueOnce([]);
+        // COR-R4C19-01: runtime-accurate mysql2 tuple (zero conflict rows).
+        executeMock.mockResolvedValueOnce([[], []]);
         selectMock
             .mockReturnValueOnce(makeSelectChain([{ image_filename: 'old-topic.webp' }]))
             .mockReturnValueOnce(makeSelectChain([]));
@@ -386,13 +394,35 @@ describe('topic actions', () => {
     });
 
     it('serializes alias creation behind the shared route lock before inserting', async () => {
-        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query
-        executeMock.mockResolvedValueOnce([]);
+        // C3L-CR-02: topicRouteSegmentExists now uses db.execute with UNION query.
+        // COR-R4C19-01: runtime-accurate mysql2 tuple (zero conflict rows) —
+        // this assertion failed pre-fix (tuple length 2 read as a conflict).
+        executeMock.mockResolvedValueOnce([[], []]);
         insertMock.mockReturnValueOnce(makeWriteChain([{ insertId: 1 }]));
 
         await expect(createTopicAlias('travel', 'night')).resolves.toEqual({ success: true });
         expect(lockQueryMock).toHaveBeenCalled();
         expect(insertMock).toHaveBeenCalledTimes(1);
+        expect(releaseLockQueryMock).toHaveBeenCalled();
+    });
+
+    it('creates a topic when the route segment is free (COR-R4C19-01)', async () => {
+        // Regression lock for the six-week production breakage: drizzle's raw
+        // db.execute returns the mysql2 `[rows, fields]` tuple, and the
+        // pre-fix `.length > 0` check on the TUPLE reported every segment as
+        // conflicting, so createTopic could never succeed. Proven failing
+        // against the pre-fix source.
+        executeMock.mockResolvedValueOnce([[], []]);
+        insertMock.mockReturnValueOnce(makeWriteChain([{ insertId: 7 }]));
+
+        const formData = new FormData();
+        formData.set('label', 'Astro');
+        formData.set('slug', 'astro');
+        formData.set('order', '0');
+
+        await expect(createTopic(formData)).resolves.toEqual({ success: true });
+        expect(insertMock).toHaveBeenCalledTimes(1);
+        expect(lockQueryMock).toHaveBeenCalled();
         expect(releaseLockQueryMock).toHaveBeenCalled();
     });
 

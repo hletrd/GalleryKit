@@ -38,12 +38,23 @@ async function topicRouteSegmentExists(segment: string): Promise<boolean> {
     // C3L-CR-02: combined single query with UNION instead of two sequential
     // SELECTs. Both tables are checked in one round-trip to the database.
     const normalizedSegment = segment.trim();
-    const rows = await db.execute(sql`
+    const result = await db.execute(sql`
         SELECT 1 AS found FROM ${topics} WHERE ${topics.slug} = ${normalizedSegment}
         UNION ALL
         SELECT 1 AS found FROM ${topicAliases} WHERE ${topicAliases.alias} = ${normalizedSegment}
         LIMIT 1
     `);
+    // COR-R4C19-01: drizzle's raw `db.execute(sql)` on the mysql2 driver
+    // returns the underlying mysql2 `[rows, fields]` TUPLE, not a rows array
+    // (canonical in-repo documentation: scripts/backfill-color-pipeline.ts).
+    // Checking `.length` on the tuple is always 2 > 0, which falsely reported
+    // EVERY segment as existing — breaking topic create, slug rename, and
+    // alias create with a bogus slugConflictsWithRoute error. Unwrap to the
+    // actual rows array (same house pattern as lib/admin-tokens.ts and
+    // lib/admin-backfill-runner.ts) before testing emptiness.
+    const rows = (Array.isArray(result) && Array.isArray(result[0])
+        ? result[0]
+        : result) as unknown as Array<{ found: number }>;
     return rows.length > 0;
 }
 
