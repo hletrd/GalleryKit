@@ -70,7 +70,7 @@ issue uncovered. Baseline pre-change: vitest 183/1747 green.
 
 ## Deploy
 
-- [ ] DEPLOY_MODE=per-cycle: after gates green and pushes done, run
+- [x] DEPLOY_MODE=per-cycle: after gates green and pushes done, run
       `npm run deploy` once; record result below.
 
 ## Progress
@@ -91,4 +91,15 @@ issue uncovered. Baseline pre-change: vitest 183/1747 green.
 - [x] Committed `414a8e18` fix(topics) + SW refresh `c813f0a1`
       (`SW_VERSION = 414a8e18-p7`), both GPG-signed, conventional +
       gitmoji
-- [ ] Pushed + deploy record appended
+- [x] Pushed (`5910d6c4..4042a7a9`) + deploy record appended
+
+## Deploy record
+
+- `npm run deploy` (per-cycle) — **SUCCESS**. Image `web-web` rebuilt,
+  `gallerykit-web` recreated + started, "Deployment Complete!" exit 0.
+  (The build-stage `ECONNREFUSED 127.0.0.1:3306` line is the expected
+  static-gen DB probe inside the Docker build — no DB at build time;
+  public pages are `revalidate = 0`.)
+- Live probes: `https://gallery.atik.kr/api/live` → **200**; `/en` →
+  **200**; deployed `/sw.js` reports `SW_VERSION = '414a8e18-p7'`,
+  confirming the COR-R4C13-01 fix is live.
