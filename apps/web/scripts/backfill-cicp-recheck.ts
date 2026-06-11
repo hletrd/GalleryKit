@@ -59,7 +59,16 @@ async function main() {
         WHERE original_format IN ('heif', 'avif', 'heic')
         ORDER BY id ASC
     `);
-    const rows = rawRows as unknown as DbRow[];
+    // COR-R4C19-03: drizzle's raw `db.execute(sql)` on the mysql2 driver
+    // returns the underlying mysql2 `[rows, fields]` TUPLE (canonical
+    // documentation: scripts/backfill-color-pipeline.ts). Casting the tuple
+    // to DbRow[] iterated [rowsArray, fieldsArray] as two pseudo-rows and
+    // crashed the diagnostic via an unhandled PQueue rejection on
+    // resolveOriginalUploadPath(undefined). Unwrap to the actual rows array
+    // (house pattern: lib/admin-tokens.ts, lib/admin-backfill-runner.ts).
+    const rows = (Array.isArray(rawRows) && Array.isArray(rawRows[0])
+        ? rawRows[0]
+        : rawRows) as unknown as DbRow[];
 
     console.log(`[backfill-cicp-recheck] ${rows.length} candidate image(s) found.`);
 
