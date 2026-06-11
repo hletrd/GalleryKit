@@ -83,6 +83,17 @@ export function checkPublicRouteSource(content: string, relative: string = 'rout
         // ExportDeclaration (e.g. export { handler as POST }) is exported by definition
         const isExportDecl = ts.isExportDeclaration(statement);
         if (!isExported && !isExportDecl) continue;
+        // OBS-R4C19-C: `export * from './impl'` re-exports every named export
+        // of the target module — including mutating handlers this scanner
+        // cannot see. check-api-auth fails closed on the same shape ("does
+        // not export any HTTP handlers"); mirror that posture here instead
+        // of silently passing the file as "no mutating handlers".
+        if (ts.isExportDeclaration(statement) && !statement.exportClause && statement.moduleSpecifier) {
+            report.failed.push(
+                `STAR RE-EXPORT: ${relative} uses 'export * from …', which hides handler exports from this scanner. Re-export handlers by name so the rate-limit gate can audit them.`
+            );
+            return report;
+        }
         if (ts.isFunctionDeclaration(statement) && statement.name && MUTATING_METHODS.has(statement.name.text)) {
             mutatingHandlers.push(statement.name.text);
         }

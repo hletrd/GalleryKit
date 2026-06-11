@@ -201,4 +201,28 @@ describe('checkPublicRouteSource', () => {
         expect(result.failed[0]).toContain('PUT');
         expect(result.failed[0]).toContain('DELETE');
     });
+
+    it('fails closed on star re-exports that can hide mutating handlers (OBS-R4C19-C)', () => {
+        // `export * from` re-exports every named export of the target module
+        // — including POST handlers this scanner cannot see. Previously this
+        // shape passed as "no mutating handlers" (fail-open) while the
+        // sibling admin-auth gate failed closed on the same shape.
+        const source = `
+            export * from './handlers';
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(1);
+        expect(result.failed[0]).toContain('STAR RE-EXPORT');
+    });
+
+    it('still passes named re-exports of non-mutating handlers alongside other statements', () => {
+        // Named re-exports stay auditable: a GET-only specifier re-export is
+        // not a mutating handler and must not trip the star-re-export rule.
+        const source = `
+            export { GET } from './handlers';
+        `;
+        const result = checkPublicRouteSource(source, 'route.ts');
+        expect(result.failed).toHaveLength(0);
+        expect(result.passed.some(p => p.includes('no mutating handlers'))).toBe(true);
+    });
 });
