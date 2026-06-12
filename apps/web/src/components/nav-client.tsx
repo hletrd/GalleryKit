@@ -16,6 +16,11 @@ import { Search } from "@/components/search";
 import { localizePath, stripLocalePrefix } from "@/lib/locale-path";
 import { nextTheme, type StoredTheme } from "@/lib/theme";
 
+const LOCALE_DISPLAY_NAMES: Record<string, string> = {
+    en: 'English',
+    ko: '한국어',
+};
+
 interface NavClientProps {
     topics: { slug: string; label: string; image_filename?: string | null }[];
     navTitle: string;
@@ -161,7 +166,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     <button
                         onClick={handleLocaleSwitch}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors"
-                        aria-label={t('aria.switchLocale', { language: otherLocale === 'ko' ? '한국어' : 'English' })}
+                        aria-label={t('aria.switchLocale', { language: LOCALE_DISPLAY_NAMES[otherLocale] ?? otherLocale })}
                     >
                         {otherLocale.toUpperCase()}
                     </button>

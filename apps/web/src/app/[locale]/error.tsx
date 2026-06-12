@@ -15,7 +15,8 @@ export default function Error({
     return (
         <main className="flex min-h-[60vh] items-center justify-center px-4" role="main">
             <section className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-card p-6 text-center shadow-sm" aria-labelledby="route-error-title">
-                <h1 id="route-error-title" className="text-7xl font-bold text-muted-foreground/30">{t('error.title')}</h1>
+                <span aria-hidden="true" className="text-7xl font-bold text-muted-foreground/30 block">{t('error.title')}</span>
+                <h1 id="route-error-title" className="sr-only">{t('error.title')}</h1>
                 <p className="text-lg text-muted-foreground">
                     {t('error.description')}
                 </p>

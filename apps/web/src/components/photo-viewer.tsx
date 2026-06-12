@@ -576,7 +576,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     return (
         <>
-        <div className={cn("flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container", showLightbox && "hidden")}>
+        <div className={cn("flex flex-col h-full min-h-[calc(100vh-8rem)] photo-viewer-container", showLightbox && "hidden")} aria-describedby="photo-viewer-shortcuts">
             {/* Accessible H1 for heading-based SR navigation.
                 Keeping visually hidden because the viewer surfaces the title
                 in the toolbar/info sidebar already; the goal is to ensure
