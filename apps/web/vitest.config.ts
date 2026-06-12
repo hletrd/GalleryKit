@@ -5,6 +5,12 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
+            // ARCH-R5C2-02 follow-up: `server-only` throws at import time
+            // outside a React Server environment, so every test that
+            // transitively imports a server-only-guarded module (e.g.
+            // image-queue -> caption-generator) would fail. Alias it to an
+            // empty stub - the production build keeps the real guard.
+            'server-only': path.resolve(__dirname, './src/__tests__/stubs/server-only.ts'),
         },
     },
     test: {

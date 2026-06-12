@@ -39,23 +39,29 @@ const SALES_ACTIONS_SRC = fs.readFileSync(
 );
 
 describe('cycle 6 RPF / checkout source-contracts', () => {
-    it('P390-01: stripe.checkout.sessions.create passes idempotencyKey of checkout-${imageId}-${ip}-${minute}', () => {
+    it('P390-01 (+TRC-R5C1-16): deterministic idempotencyKey for known IPs, omitted for unknown IP', () => {
         // The call uses multi-line formatting. Match the call site, the
-        // idempotency-key derivation, and verify the key is wired into the
-        // SAME call (i.e. appears AFTER `stripe.checkout.sessions.create(`
-        // and BEFORE the next semicolon).
+        // idempotency-key derivation, and verify the options object is wired
+        // into the SAME call (i.e. appears AFTER
+        // `stripe.checkout.sessions.create(` and BEFORE the next semicolon).
         expect(CHECKOUT_SRC).toMatch(/stripe\.checkout\.sessions\.create\(/);
-        // C18-HIGH-01: the key is deterministic per user: checkout-<imageId>-<ip>-<minute>.
-        // No random nonce — deduplication is the primary purpose of idempotency keys.
+        // C18-HIGH-01: the key stays deterministic per user context:
+        // checkout-<imageId>-<ip>-<minute>. No random nonce — deduplication is
+        // the primary purpose of idempotency keys.
+        // TRC-R5C1-16 (run-5 cycle-2, fc4abdcd): when getClientIp() returns
+        // 'unknown' the key is OMITTED entirely so distinct unknown-IP buyers
+        // can never share a Stripe session. The key assignment is therefore
+        // guarded by an ip !== 'unknown' branch and passed via stripeOptions.
+        expect(CHECKOUT_SRC).toMatch(/if\s*\(ip\s*!==\s*'unknown'\)/);
         expect(CHECKOUT_SRC).toMatch(
-            /idempotencyKey\s*=\s*`checkout-\$\{image\.id\}-\$\{ip\}-\$\{Math\.floor\(Date\.now\(\)\s*\/\s*60_000\)\}`/,
+            /stripeOptions\.idempotencyKey\s*=\s*`checkout-\$\{image\.id\}-\$\{ip\}-\$\{Math\.floor\(Date\.now\(\)\s*\/\s*60_000\)\}`/,
         );
         const callIndex = CHECKOUT_SRC.indexOf('stripe.checkout.sessions.create(');
         expect(callIndex).toBeGreaterThan(-1);
         const semiIndex = CHECKOUT_SRC.indexOf(';', callIndex);
-        const keyIndex = CHECKOUT_SRC.indexOf('{ idempotencyKey }', callIndex);
-        expect(keyIndex).toBeGreaterThan(callIndex);
-        expect(keyIndex).toBeLessThan(semiIndex);
+        const optsIndex = CHECKOUT_SRC.indexOf('stripeOptions,', callIndex);
+        expect(optsIndex).toBeGreaterThan(callIndex);
+        expect(optsIndex).toBeLessThan(semiIndex);
     });
 });
 

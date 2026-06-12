@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { test, expect } from '@playwright/test';
-import { adminE2EEnabled, expectNoNextError, loginAsAdmin, waitForImageProcessed } from './helpers';
+import { adminE2EEnabled, ensureEnglishLocale, expectNoNextError, loginAsAdmin, waitForImageProcessed } from './helpers';
 
 test('admin E2E credentials are configured when CI expects admin coverage', () => {
   test.skip(process.env.CI !== 'true', 'Local runs may omit admin E2E credentials.');
