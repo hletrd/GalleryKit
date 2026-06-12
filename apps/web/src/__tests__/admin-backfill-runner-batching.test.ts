@@ -1,19 +1,36 @@
 /**
- * PERF-R5C1-01: admin-backfill-runner batched candidate fetch.
+ * PERF-R5C1-01 + AGG-R5C2-03 (BUG-R5C2-01 / CRT-R5C2-04 / TEST-R5C2-02 / -15 /
+ * BUG-R5C2-04): admin-backfill-runner batched candidate fetch.
  *
  * Verifies:
- *  (a) Single-batch case: all 50 candidates trigger exactly 1 batch query.
- *  (b) Multi-batch case: 150 candidates trigger 2 batch queries, each ≤ BATCH_SIZE.
- *  (c) Cursor advances strictly: second batch query is issued with cursor = 100
- *      (the max id of the first batch).
+ *  (a) Single-batch case: 50 candidates → exactly 1 batch SELECT.
+ *  (b) Multi-batch case: 150 candidates → exactly 2 batch SELECTs, issued with
+ *      cursor 0 then 100, returning 100 then 50 rows.
+ *  (c) Cursor advances strictly: the second batch SELECT only sees ids > 100.
  *
- * Strategy: db.execute is called in this order:
- *   1. fetchCandidateCount()  → COUNT query
- *   2..N. fetchCandidateBatch(cursor) → SELECT queries (one per batch)
- *   N+1..M. reprocessOne UPDATE queries (one per row × 2 columns)
+ * WHY THIS REWRITE (BUG-R5C2-01): the previous mock dispatched purely by call
+ * ORDER with a shared `batchIndex` counter, which could not tell a real
+ * `fetchCandidateBatch` SELECT apart from a `reprocessOne` UPDATE. The first
+ * UPDATE call after batch 1 satisfied `batchIndex*100 < total` and was handed
+ * the SECOND batch's rows — so the test "saw" a second batch that the real loop
+ * never fetched. A regression that broke loop continuation (always `break`
+ * after batch 1) still passed.
  *
- * We dispatch by call count, not by SQL content inspection (drizzle sql
- * template objects do not serialise to a searchable string in this context).
+ * The fix: dispatch by SQL CONTENT. Drizzle `sql` tagged templates expose
+ * `queryChunks`, where the literal SQL fragments are `StringChunk`s and the
+ * bare `${...}` interpolations are inlined raw primitive chunks (Number /
+ * Boolean / null) in source order. So we can:
+ *   - join the StringChunk text to classify the query (batch SELECT vs COUNT vs
+ *     UPDATE) by keyword (`LIMIT` + `id >` → batch; `COUNT` → count; `SET`/
+ *     `UPDATE` → row update); and
+ *   - read the inlined primitive chunks in order to recover the BOUND cursor.
+ *     The batch SELECT inlines `[IMAGE_PIPELINE_VERSION, cursor, BATCH_SIZE]`,
+ *     so the cursor is the 2nd primitive.
+ *
+ * Batch SELECT responses come ONLY from the SELECT dispatch path; UPDATE calls
+ * get an update-shaped result and NEVER contribute a batch. Completion is
+ * awaited deterministically via `vi.waitFor(readAdminBackfillState().running)`
+ * — no wall-clock `setTimeout` sleeps remain (BUG-R5C2-04).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -31,6 +48,8 @@ const { queryMock, releaseMock, lockConnection, executeMock } = vi.hoisted(() =>
 
 vi.mock('@/db', () => ({
     connection: {
+        // Every getConnection() — for the global backfill lock AND for each
+        // per-image processing claim — returns the same fake lock connection.
         getConnection: vi.fn(async () => lockConnection),
     },
     db: {
@@ -78,6 +97,32 @@ vi.mock('@/lib/color-detection', () => ({
     isWideGamutPrimary: vi.fn(() => false),
 }));
 
+// reprocessOne constructs a real `sharp(originalPath)` and awaits
+// `image.metadata()` BEFORE calling the mocked detectColorSignals. The
+// synthetic `/fake/...` paths don't exist on disk, so a real Sharp instance
+// would reject in metadata() and push every row down the detection-failed
+// branch. Mock sharp so the constructed instance's metadata() resolves.
+//
+// NOTE: process-image.ts calls sharp.concurrency() / sharp.cache() and reads
+// sharp.versions.heif at MODULE LOAD (it is pulled in via importOriginal() in
+// the @/lib/process-image mock above). So the mocked default must be a callable
+// carrying those statics, not a bare vi.fn(), or the process-image import
+// throws `default.concurrency is not a function`.
+vi.mock('sharp', () => {
+    const sharpFn = vi.fn(() => ({
+        metadata: vi.fn().mockResolvedValue({ width: 100, height: 100, depth: 'uchar' }),
+    })) as unknown as {
+        (...args: unknown[]): unknown;
+        concurrency: ReturnType<typeof vi.fn>;
+        cache: ReturnType<typeof vi.fn>;
+        versions: { heif?: string };
+    };
+    sharpFn.concurrency = vi.fn();
+    sharpFn.cache = vi.fn();
+    sharpFn.versions = { heif: '1.0.0' };
+    return { default: sharpFn };
+});
+
 vi.mock('@/lib/upload-paths', () => ({
     resolveOriginalUploadPath: vi.fn(async (n: string) => `/fake/${n}`),
     ensureUploadDirectories: vi.fn(),
@@ -85,10 +130,21 @@ vi.mock('@/lib/upload-paths', () => ({
 
 vi.mock('fs/promises', async (importOriginal) => {
     const actual = (await importOriginal()) as Record<string, unknown>;
-    return { ...actual, access: vi.fn().mockResolvedValue(undefined) };
+    const access = vi.fn().mockResolvedValue(undefined);
+    // The runner uses `import fs from 'fs/promises'` (DEFAULT import). Under this
+    // interop config the default binding resolves to the module's `default`
+    // object, NOT the named exports — so the mocked `access` must also live on
+    // `default` or `fs.access` silently falls through to the real fs (ENOENT on
+    // the synthetic `/fake/...` paths, which would make every row skip as
+    // 'missing-original'). Provide both the named override and a `default`.
+    return {
+        ...actual,
+        access,
+        default: { ...(actual.default as object), access },
+    };
 });
 
-import { triggerAdminBackfill } from '@/lib/admin-backfill-runner';
+import { triggerAdminBackfill, readAdminBackfillState } from '@/lib/admin-backfill-runner';
 
 const BATCH_SIZE = 100;
 
@@ -108,10 +164,22 @@ function makeRow(id: number) {
 function resetGlobalState() {
     const sym = Symbol.for('gallerykit.adminBackfillState');
     const g = globalThis as Record<symbol, unknown>;
-    g[sym] = { running: false, lastQueuedCount: 0, completedRuns: 0, lastError: null };
+    g[sym] = {
+        running: false,
+        lastQueuedCount: 0,
+        completedRuns: 0,
+        lastError: null,
+        skippedMissingOriginal: 0,
+        skippedLocked: 0,
+        encodeFailures: 0,
+        detectionFailures: 0,
+    };
 }
 
 function setupLockMocks() {
+    // Both the global backfill lock and every per-image processing claim go
+    // through lockConnection.query — grant every GET_LOCK so no row is skipped
+    // as 'locked' (we want processed=150 in the happy path).
     queryMock.mockImplementation(async (sqlText: string) => {
         if (typeof sqlText === 'string' && sqlText.includes('GET_LOCK')) return [[{ acquired: 1 }]];
         if (typeof sqlText === 'string' && sqlText.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
@@ -120,51 +188,91 @@ function setupLockMocks() {
 }
 
 /**
- * Build an executeMock that:
- *  - call 0: returns COUNT = totalRows (for fetchCandidateCount in triggerAdminBackfill)
- *  - call 1..N: returns successive BATCH_SIZE pages (for fetchCandidateBatch in runBackfill)
- *  - all other calls: returns [] (UPDATE rows from reprocessOne)
+ * Inspect a drizzle `sql` tagged-template object passed to db.execute and
+ * recover (a) the joined literal SQL text and (b) the inlined bound primitives
+ * in source order. Bare `${number}` / `${boolean}` / `${null}` interpolations
+ * are inlined as raw primitive chunks (not Param wrappers) — see the scratch
+ * verification in the executor report; this is stable across drizzle's `sql`
+ * builder for primitive interpolations.
+ */
+function inspectSql(arg: unknown): { text: string; values: unknown[] } {
+    const chunks = (arg as { queryChunks?: unknown[] })?.queryChunks;
+    if (!Array.isArray(chunks)) {
+        return { text: '', values: [] };
+    }
+    const textParts: string[] = [];
+    const values: unknown[] = [];
+    for (const c of chunks) {
+        const ctor = (c as { constructor?: { name?: string } })?.constructor?.name;
+        if (ctor === 'StringChunk') {
+            const v = (c as { value: unknown }).value;
+            textParts.push(Array.isArray(v) ? v.join('') : String(v));
+        } else if (c && typeof c === 'object' && 'value' in (c as object)) {
+            // Param-style wrapper (defensive — not the primitive-inline path).
+            values.push((c as { value: unknown }).value);
+        } else {
+            // Inlined raw primitive (Number / Boolean / null / String).
+            values.push(c);
+        }
+    }
+    return { text: textParts.join(' '), values };
+}
+
+type SqlKind = 'count' | 'batch' | 'update';
+
+function classifySql(text: string): SqlKind {
+    if (/COUNT\(/i.test(text)) return 'count';
+    if (/LIMIT/i.test(text) && /id\s*>/i.test(text)) return 'batch';
+    return 'update';
+}
+
+interface BatchObservation {
+    /** Bound cursor value (the `id > ${cursor}` parameter). */
+    cursor: number;
+    /** ids of the rows this SELECT returned. */
+    ids: number[];
+}
+
+/**
+ * Build an executeMock that dispatches by SQL CONTENT (not call order):
+ *  - COUNT query   → returns the total candidate count.
+ *  - batch SELECT  → returns the keyset page `id > cursor` (≤ BATCH_SIZE rows),
+ *                    and records the observed cursor + returned ids.
+ *  - UPDATE        → returns an update-shaped result, NEVER a batch payload.
  *
- * Returns an array that accumulates how many rows each SELECT call returned.
+ * The returned `batches` array is the GROUND TRUTH for assertions: it only
+ * grows when a real batch SELECT is dispatched, so a loop that fails to issue
+ * the second fetch cannot fabricate a second entry.
  */
 function buildExecuteMock(totalRows: number) {
     const allRows = Array.from({ length: totalRows }, (_, i) => makeRow(i + 1));
-    const batchSizes: number[] = [];
-    let executeCallCount = 0;
-    let batchIndex = 0;
+    const batches: BatchObservation[] = [];
 
-    executeMock.mockImplementation(async () => {
-        const callIndex = executeCallCount++;
+    executeMock.mockImplementation(async (arg: unknown) => {
+        const { text, values } = inspectSql(arg);
+        const kind = classifySql(text);
 
-        if (callIndex === 0) {
-            // COUNT query from fetchCandidateCount in triggerAdminBackfill
+        if (kind === 'count') {
             return [[{ cnt: totalRows }]];
         }
 
-        // Determine if this is a SELECT batch query or an UPDATE.
-        // Batch queries come in strictly after count, one per batch, before
-        // reprocessOne's UPDATE calls for that batch (because we await queue.onIdle()
-        // before fetching the next batch).
-        // However, reprocessOne issues db.execute(UPDATE) calls too — we can't
-        // distinguish by call index alone. We use a shared batchIndex counter and
-        // a sentinel: once we've returned a short batch (<BATCH_SIZE) or an empty
-        // batch, no more SELECT calls are expected.
-        const batchStart = batchIndex * BATCH_SIZE;
-        if (batchStart < allRows.length) {
-            const batch = allRows.slice(batchStart, batchStart + BATCH_SIZE);
-            batchSizes.push(batch.length);
-            batchIndex++;
-            return [batch];
+        if (kind === 'batch') {
+            // Inlined primitives for the batch SELECT are
+            // [IMAGE_PIPELINE_VERSION, cursor, BATCH_SIZE] — cursor is values[1].
+            const cursor = Number(values[1]);
+            const page = allRows.filter((r) => r.id > cursor).slice(0, BATCH_SIZE);
+            batches.push({ cursor, ids: page.map((r) => r.id) });
+            return [page];
         }
 
-        // All batches served — remaining calls are UPDATE queries
+        // UPDATE — never a batch payload.
         return [[]];
     });
 
-    return batchSizes;
+    return batches;
 }
 
-describe('PERF-R5C1-01: admin-backfill-runner batched fetch', () => {
+describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-content dispatch)', () => {
     beforeEach(() => {
         resetGlobalState();
         queryMock.mockReset();
@@ -173,71 +281,99 @@ describe('PERF-R5C1-01: admin-backfill-runner batched fetch', () => {
         setupLockMocks();
     });
 
-    it('(a) single-batch case: exactly 1 SELECT query for 50 candidates', async () => {
-        const batchSizes = buildExecuteMock(50);
+    async function waitForRunnerDone() {
+        await vi.waitFor(
+            () => {
+                expect(readAdminBackfillState().running).toBe(false);
+            },
+            { timeout: 5000 },
+        );
+    }
+
+    it('(a) single-batch: 50 candidates → exactly 1 batch SELECT at cursor 0', async () => {
+        const batches = buildExecuteMock(50);
 
         const result = await triggerAdminBackfill();
         expect(result.status).toBe('queued');
-        await new Promise((r) => setTimeout(r, 500));
+        await waitForRunnerDone();
 
-        // Exactly 1 batch query issued, returning all 50 rows
-        expect(batchSizes).toHaveLength(1);
-        expect(batchSizes[0]).toBe(50);
+        expect(batches).toHaveLength(1);
+        expect(batches[0]!.cursor).toBe(0);
+        expect(batches[0]!.ids).toHaveLength(50);
+
+        // All 50 reprocessed cleanly, nothing skipped/failed.
+        const state = readAdminBackfillState();
+        expect(state.skippedMissingOriginal).toBe(0);
+        expect(state.skippedLocked).toBe(0);
+        expect(state.encodeFailures).toBe(0);
+        expect(state.detectionFailures).toBe(0);
     });
 
-    it('(b) multi-batch: 150 candidates → 2 SELECT queries, each ≤ BATCH_SIZE', async () => {
-        const batchSizes = buildExecuteMock(150);
+    it('(b) multi-batch: 150 candidates → 2 batch SELECTs at cursor 0 then 100 (100 + 50 rows)', async () => {
+        const batches = buildExecuteMock(150);
 
         const result = await triggerAdminBackfill();
         expect(result.status).toBe('queued');
-        await new Promise((r) => setTimeout(r, 500));
+        await waitForRunnerDone();
 
-        // 2 batches: [100, 50]
-        expect(batchSizes).toHaveLength(2);
-        for (const size of batchSizes) {
-            expect(size).toBeLessThanOrEqual(BATCH_SIZE);
+        // Exactly two REAL batch fetches — a regression that never issues the
+        // second fetch leaves this at length 1 and the test FAILS.
+        expect(batches).toHaveLength(2);
+        expect(batches.map((b) => b.cursor)).toEqual([0, 100]);
+        expect(batches[0]!.ids).toHaveLength(BATCH_SIZE);
+        expect(batches[1]!.ids).toHaveLength(50);
+        for (const b of batches) {
+            expect(b.ids.length).toBeLessThanOrEqual(BATCH_SIZE);
         }
-        expect(batchSizes[0]).toBe(BATCH_SIZE);
-        expect(batchSizes[1]).toBe(50);
+
+        // Observability: all 150 processed, no skips/failures.
+        const state = readAdminBackfillState();
+        expect(state.skippedMissingOriginal).toBe(0);
+        expect(state.skippedLocked).toBe(0);
+        expect(state.encodeFailures).toBe(0);
+        expect(state.detectionFailures).toBe(0);
     });
 
-    it('(c) cursor advances strictly across 2 batches (110 candidates)', async () => {
-        // 110 candidates → 2 batches: first [1..100], second [101..110]
-        // The second batch must only contain ids > 100 (cursor = 100 after first batch).
-        const allRows = Array.from({ length: 110 }, (_, i) => makeRow(i + 1));
-        let batchIndex = 0;
-        const returnedBatches: Array<{ ids: number[] }> = [];
+    it('(c) cursor advances strictly: batch 2 only sees ids > 100 (110 candidates)', async () => {
+        const batches = buildExecuteMock(110);
 
-        executeMock.mockImplementation(async () => {
-            const callIndex = batchIndex;
+        const result = await triggerAdminBackfill();
+        expect(result.status).toBe('queued');
+        await waitForRunnerDone();
 
-            if (callIndex === 0) {
-                batchIndex++;
-                // COUNT query
-                return [[{ cnt: 110 }]];
+        expect(batches).toHaveLength(2);
+        expect(batches[1]!.cursor).toBe(100);
+
+        const maxIdBatch1 = Math.max(...batches[0]!.ids);
+        const minIdBatch2 = Math.min(...batches[1]!.ids);
+        expect(maxIdBatch1).toBe(100);
+        expect(minIdBatch2).toBeGreaterThan(maxIdBatch1);
+        expect(batches[1]!.ids).toEqual([101, 102, 103, 104, 105, 106, 107, 108, 109, 110]);
+    });
+
+    it('skips rows whose per-image processing lock is held (counted as skippedLocked, no version bump)', async () => {
+        // 3 candidates, single batch. Deny the per-image GET_LOCK for image id=2
+        // so it is skipped as 'locked'; grant everything else.
+        const batches = buildExecuteMock(3);
+        queryMock.mockImplementation(async (sqlText: string, params?: unknown[]) => {
+            if (typeof sqlText === 'string' && sqlText.includes('GET_LOCK')) {
+                const name = Array.isArray(params) ? String(params[0]) : '';
+                if (name === 'gallerykit:image-processing:2') return [[{ acquired: null }]];
+                return [[{ acquired: 1 }]];
             }
-
-            const batchStart = (callIndex - 1) * BATCH_SIZE;
-            if (batchStart < allRows.length) {
-                const batch = allRows.slice(batchStart, batchStart + BATCH_SIZE);
-                returnedBatches.push({ ids: batch.map((r) => r.id) });
-                batchIndex++;
-                return [batch];
-            }
-
+            if (typeof sqlText === 'string' && sqlText.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
             return [[]];
         });
 
         const result = await triggerAdminBackfill();
         expect(result.status).toBe('queued');
-        await new Promise((r) => setTimeout(r, 500));
+        await waitForRunnerDone();
 
-        // 2 batches served
-        expect(returnedBatches).toHaveLength(2);
-
-        // (c) strict cursor advance: every id in batch 2 > every id in batch 1
-        const maxIdBatch1 = Math.max(...returnedBatches[0]!.ids);
-        const minIdBatch2 = Math.min(...returnedBatches[1]!.ids);
-        expect(minIdBatch2).toBeGreaterThan(maxIdBatch1);
+        expect(batches).toHaveLength(1);
+        const state = readAdminBackfillState();
+        expect(state.skippedLocked).toBe(1);
+        expect(state.skippedMissingOriginal).toBe(0);
+        expect(state.encodeFailures).toBe(0);
+        expect(state.detectionFailures).toBe(0);
     });
 });
