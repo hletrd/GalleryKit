@@ -32,6 +32,15 @@
  * Uses MySQL GET_LOCK so two concurrent backfill invocations serialize
  * rather than racing the same rows. The lock is released automatically
  * when the dedicated connection closes.
+ *
+ * KNOWN GAP (TRC-R5C2-01 rider, plan-322): unlike the in-app runner
+ * (admin-backfill-runner.ts), this script does NOT claim the per-image
+ * `gallerykit:image-processing:{id}` lock per row — its DB writes are
+ * batched in flushBatch() decoupled from the per-row encode, so a per-row
+ * lock would not cover the UPDATE window without restructuring the
+ * batching. Operationally: do not trigger admin "Retry" on failed images
+ * (retryFailedImage) while a sidecar run is active; the global backfill
+ * lock already serializes this script against the in-app runner.
  */
 
 import * as dotenv from 'dotenv';

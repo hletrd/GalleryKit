@@ -61,9 +61,9 @@ function detect(): DisplayCapability {
         } else if (window.matchMedia('(color-gamut: p3)').matches) {
             gamut = 'p3';
         }
-        // R9-R1: Firefox has no screen.colorGamut and no color-gamut MQ support.
-        // Its canvas-P3 probe tests API capability, not display gamut, producing
-        // systematic false positives on sRGB displays. Default to 'srgb'.
+        // R9-R1: Firefox 110+ supports (color-gamut: p3) MQ and reaches this branch.
+        // Firefox ≤109 matches neither MQ and falls through, defaulting to 'srgb'.
+        // screen.colorGamut is unsupported in Firefox across all versions.
     }
 
     const isHdr = typeof window.matchMedia === 'function'
@@ -100,9 +100,10 @@ function subscribe(callback: () => void): () => void {
     // window focus / visibilitychange as a best-effort fallback so dragging
     // the browser from a P3 monitor to an sRGB laptop (or vice versa) does
     // not leave stale state indefinitely.
-    // R9-R3: Firefox has no color-gamut MQ support, so display-gamut changes
-    // (dragging between monitors) are only detected on focus/visibilitychange.
-    // There is no web-platform API for live display-gamut monitoring on Firefox.
+    // R9-R3: Firefox 110+ subscribes to the color-gamut MQ change event above.
+    // Firefox ≤109 has no color-gamut MQ, so display-gamut changes (dragging
+    // between monitors) are only detected on focus/visibilitychange for those
+    // versions. screen.colorGamut has no change-event API on any browser.
     const handleVisibility = () => { if (!document.hidden) callback(); };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', callback);

@@ -6,8 +6,11 @@ import * as path from 'path';
  * Cycle 1 RPF v3 TE-1 / A-2 seatbelt, hardened in cycle 2 + cycle 1
  * (current loop):
  *
- * Codify the WCAG 2.5.5 / Apple HIG / Google MDN 44 px touch-target
- * floor as a fixture-style guard so a future change cannot regress a
+ * Codify the WCAG 2.5.5 Target Size (Enhanced) — Level AAA in WCAG 2.2
+ * (44×44 px; WCAG 2.2 also adds 2.5.8 Target Size (Minimum), Level AA,
+ * 24×24 px — this repo exceeds both) / Apple HIG / Google MDN 44 px
+ * touch-target floor as a fixture-style guard so a future change cannot
+ * regress a
  * primary interactive surface to h-8 (32 px), h-9 (36 px), or shadcn
  * size="sm" (32 px) without an explicit, documented exemption.
  *

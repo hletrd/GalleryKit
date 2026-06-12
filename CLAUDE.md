@@ -117,7 +117,7 @@ git values must be treated as compromised and must not be reused.
 - `sharedGroups` / `sharedGroupImages` - Public sharing
 - `image_views` / `topic_views` / `shared_group_views` - Analytics events (US-P44)
 - `image_embeddings` - CLIP embeddings (US-P51, stub)
-- `entitlements` - Stripe paid-download entitlements (US-P54)
+- `entitlements` - Stripe paid-download entitlements (US-P54). **Warning:** `checkout.session.async_payment_succeeded` is not yet handled — delayed payment methods (bank transfer / ACH) complete checkout but never receive an entitlement row; only card / immediate-payment methods are fully supported until plan-316 CRT-R5C1-04 ships.
 - `admin_tokens` - Lightroom Classic publish-plugin PATs (US-P53)
 - `smart_collections` - Admin-defined dynamic galleries (US-P42)
 
@@ -148,7 +148,7 @@ git values must be treated as compromised and must not be reused.
 ## Security Architecture
 
 ### Authentication & Sessions
-- Passwords hashed with **Argon2** (industry-standard memory-hard KDF)
+- Passwords hashed with **Argon2** (industry-standard memory-hard KDF; Argon2id, memoryCost=65536 / 64 MiB, timeCost=3, parallelism=4 — exceeds OWASP minimums; see `apps/web/src/lib/password-hashing.ts`)
 - Session tokens: HMAC-SHA256 signed, verified with `timingSafeEqual` (constant-time)
 - Cookie attributes: `httpOnly`, `secure` (in production), `sameSite: lax`, `path: /`
 - Session secret: `SESSION_SECRET` env var is required in production; dev/test can fall back to a DB-stored generated secret in `admin_settings`
@@ -180,7 +180,7 @@ git values must be treated as compromised and must not be reused.
 
 ### Privacy
 - GPS coordinates (`latitude`, `longitude`) excluded from public API responses
-- `strip_gps_on_upload` additionally scrubs the on-disk ORIGINAL (the file the paid-download route streams): lossless byte-level GPS-IFD / GPS-bearing-XMP neutralization for JPEG / TIFF / HEIF-AVIF-HEIC / WebP via `apps/web/src/lib/gps-exif-strip.ts`; PNG and structurally anomalous files take a metadata-free re-encode (autoOrient + keepIccProfile, explicit high-quality settings). Never use Sharp `withMetadata()` for stripping — in Sharp 0.33+ it KEEPS input EXIF (R4C8 COR-R4C8-01)
+- `strip_gps_on_upload` additionally scrubs the on-disk ORIGINAL (the file the paid-download route streams): lossless byte-level GPS-IFD / GPS-bearing-XMP neutralization for JPEG / TIFF / HEIF-AVIF-HEIC / WebP via `apps/web/src/lib/gps-exif-strip.ts`; PNG and structurally anomalous files take a metadata-free re-encode (autoOrient + keepIccProfile, explicit high-quality settings). Never use Sharp `withMetadata()` for stripping — `withMetadata()` keeps most input metadata (EXIF/XMP/IPTC) including GPS coordinates; in Sharp 0.33+ this behaviour is explicit (R4C8 COR-R4C8-01)
 - `filename_original` and `user_filename` excluded from public queries
 - `adminSelectFields` includes all fields (including PII) for authenticated admin routes
 - `publicSelectFields` derived from `adminSelectFields` by omitting PII fields — separate object reference prevents accidental leakage
@@ -199,7 +199,10 @@ The `images` table has composite indexes optimized for query patterns:
 - `(processed, created_at)` — prev/next navigation
 - `(topic, processed, capture_date, created_at)` — topic-filtered listings
 - `(user_filename)` — upload deduplication
+- `(uploaded_by)` — admin upload-attribution queries
 - `image_tags(tag_id)` — tag JOIN performance
+- `image_views(bot, viewed_at, country_code)` — analytics country breakdown (migration 0021)
+- `image_views(bot, viewed_at, referrer_host)` — analytics referrer breakdown (migration 0021)
 
 Connection pool: 10 connections, queue limit 20, keepalive enabled.
 
@@ -223,7 +226,7 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 
 `detectColorSignals(filepath, sharpInstance, metadata)` in `lib/color-detection.ts` resolves color primaries in priority order:
 
-1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709→sRGB`, `13=sRGB IEC61966-2-1`, `14/15=BT.2020→gamma22`, `16=PQ`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `9=BT.2020-NCL`.
+1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709 (labelled 'srgb' — practical SDR approximation; 13=sRGB IEC61966-2-1 is the canonical code; full mapping in color-detection.ts NCLX_TRANSFER_MAP)`, `14/15=BT.2020→gamma22`, `16=PQ`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `9=BT.2020-NCL`.
 2. **ICC chromaticity** (`lib/icc-chromaticity.ts`, P4-A2) — parses `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` from the ICC tag table, converts XYZ→xy chromaticity, matches against the sRGB / Display P3 / Adobe RGB / ProPhoto / Rec.2020 presets within ΔE ≤ 0.005 (high-confidence) or ≤ 0.015 (medium). Catches custom monitor profiles (Eizo CG2700X, BenQ SW-series, X-Rite calibrations) whose name doesn't match the allowlist.
 3. **ICC name allowlist** — `resolveColorPipelineDecision` / `resolveAvifIccProfile` string-match against the description for "Display P3", "DCI-P3", "Adobe RGB", "ProPhoto", "Rec.2020" / "BT.2020", "sRGB". Both resolvers accept an optional `signals` parameter so NCLX-only sources (no ICC) still resolve correctly.
 
@@ -252,7 +255,7 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 
 ### ETag / cache invalidation
 
-**Serving precedence (R4C6 ARCH-R4C6-06):** derivatives live in `public/uploads/`, and Next serves `public/` assets BEFORE route handlers — so for existing files the production serving path is Next's static server (`W/"{size-hex}-{mtime-hex}"` ETag), not `serve-upload.ts`. The `app/uploads/[...path]` route (and therefore the serve-upload pipeline below) executes only for locale-prefixed `/{locale}/uploads/...` URLs and for files missing from `public/`. All layers now share one cache policy: `public, max-age=3600, must-revalidate` (set for the static path via `next.config.ts headers()`).
+**Serving precedence (R4C6 ARCH-R4C6-06):** derivatives live in `public/uploads/`, and Next resolves requests in order: `headers()` config → filesystem (pages + `public/`) → route handlers. For existing files the production serving path is therefore Next's static server (`W/"{size-hex}-{mtime-hex}"` ETag), not `serve-upload.ts`. The `app/uploads/[...path]` route (and therefore the serve-upload pipeline below) executes only for locale-prefixed `/{locale}/uploads/...` URLs and for files missing from `public/`. All layers now share one cache policy: `public, max-age=3600, must-revalidate` (set for the static path via `next.config.ts headers()`).
 
 On the paths it serves, `serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash.slice(0,8)}"`. The settings hash (P4-E2) covers `wide_gamut_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives` so flipping any color-impacting admin setting invalidates cached variants on that path automatically. On the static path, invalidation rides the mtime+size ETag: a backfill re-encode rewrites the file, changing both. Pipeline version bumps invalidate all variants for all images on the serve-upload path and (via re-encode mtime changes) on the static path after backfill.
 
@@ -310,20 +313,20 @@ docker run --rm \
 | Safari 17+ | macOS / iOS | P3 (+HDR on Pro) | ✓ | ✓ | ✓ | Safari 18+ TP |
 | Chrome 122+ | macOS / Win / Android 14+ | P3 | ✓ | ✓ | ✗ (Chromium gap) | ✓ |
 | Edge 122+ | Windows 11 | P3 + Auto HDR | ✓ | ✓ | ✓ (Auto HDR ON) | ✓ |
-| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | **✗** (no implementation as of Firefox 137) | ✗ | ✗ |
+| Firefox 124+ | macOS / Win | P3 | ✓ (FF 113+) | ✓ (FF 110+) | ✗ | ✗ |
 | Chrome | Android 13- | sRGB-only mid-range | sRGB-clipped delivery | ✗ | ✗ | varies |
 
-`useDisplayCapability` layers `screen.colorGamut` -> `(color-gamut: p3)` MQ -> conservative `'srgb'` default for Firefox. The canvas-P3 probe is NOT used for display detection because it tests API capability, not display gamut, producing systematic false positives on sRGB displays (R9-R1). Firefox users on P3 displays can use `force_show_color_chips` for demo purposes.
+`useDisplayCapability` layers `screen.colorGamut` -> `(color-gamut: p3)` MQ -> conservative `'srgb'` default (for browsers that support neither). The canvas-P3 probe is NOT used for display detection because it tests API capability, not display gamut, producing systematic false positives on sRGB displays (R9-R1). Source: caniuse mdn-css_at-rules_media_color-gamut (verified 2026-06-12).
 
 **Firefox photographer-visible impact (R10-H4):**
-- Firefox lacks both `color-gamut` MQ and `screen.colorGamut` support, so `useDisplayCapability` conservatively reports `'srgb'` for ALL Firefox browsers regardless of actual display capability.
-- **Consequence 1 — Missing badges:** On a P3 display, Firefox visitors do NOT see the P3 gamut badge or HDR badge in the photo viewer, because the badge gating relies on `useDisplayCapability`.
-- **Consequence 2 — Incorrect hint suppression:** The `WideGamutHint` ("Your display shows the sRGB version...") is hidden on Firefox even when the visitor is on a genuine sRGB display, because the component uses `useDisplayCapability` (not raw `matchMedia`) to avoid false-positives. This is the correct trade-off: better to hide the hint from everyone on Firefox than to nag P3-display Firefox users with an incorrect sRGB claim.
-- **Mitigation:** The `force_show_color_chips` admin toggle overrides display detection and renders badges unconditionally. This is the only way to surface gamut/HDR metadata to Firefox visitors. The admin settings UI documents this gap (R10-H4-FULL).
+- Firefox 110+ supports the `(color-gamut: p3)` MQ, so `useDisplayCapability` reaches the MQ-branch — P3 badges and `WideGamutHint` behave like Chrome's MQ path on Firefox 110+. `screen.colorGamut` remains unsupported in Firefox across all versions.
+- **Firefox ≤ 109:** no `color-gamut` MQ support, so `useDisplayCapability` falls back to the conservative `'srgb'` default. P3 badges and the `WideGamutHint` are suppressed for all Firefox ≤ 109 visitors regardless of actual display capability.
+- **Consequence — HDR detection gap (all Firefox):** the `(dynamic-range: high)` MQ is not implemented in Firefox, so `isHdr` always returns `false` on Firefox regardless of version.
+- **Mitigation:** The `force_show_color_chips` admin toggle overrides display detection and renders P3/HDR badges unconditionally — useful for demos on Firefox ≤ 109 or when testing HDR metadata display. The admin settings UI documents this gap (R10-H4-FULL).
 
 **Display-change limitations:**
 - `screen.colorGamut` has no change-event API. Chrome/Safari/Edge compensate via the `color-gamut` MQ change event, but the MQ may fire before `screen.colorGamut` updates, causing a brief mismatch.
-- Firefox has no `color-gamut` MQ support at all, so dragging between monitors only updates on `focus` / `visibilitychange` (R9-R3).
+- Firefox ≤ 109 has no `color-gamut` MQ at all, so display-gamut changes (dragging between monitors) are only detected on `focus` / `visibilitychange` (R9-R3). Firefox 110+ uses the MQ change event like Chrome.
 - Dual-monitor macOS: when a browser window spans P3 + sRGB displays, `screen.colorGamut` reports the primary/focused display, leaving the other half incorrect (R9-M12). There is no web-platform per-display gamut API.
 
 ## Race Condition Protections
@@ -357,11 +360,11 @@ docker run --rm \
 - `public/sw.template.js` is the SHIPPED service worker source; `scripts/build-sw.ts` stamps `__SW_VERSION__` (git short-SHA + `-p{IMAGE_PIPELINE_VERSION}`) into `public/sw.js` via the `prebuild` hook. After editing the template, regenerate and commit `sw.js`.
 - `lib/sw-cache.ts` is the unit-tested REFERENCE implementation of the LRU logic; `__tests__/sw-template-contract.test.ts` pins the template against drift (R4C6 TEST-R4C6-11).
 - **Image derivatives**: stale-while-revalidate with an ETag HEAD probe, 50 MB LRU cap.
-- **HTML offline fallback (deliberate `no-store` exemption, R4C6 COR-R4C6-05)**: every public page ships the framework-default `no-store` (`revalidate = 0` dynamic rendering), so a Cache-Control-honoring SW could never populate an offline cache. `networkFirstHtml` therefore caches 200 GET HTML explicitly as an OFFLINE-ONLY fallback (entries served exclusively when the network is unreachable; 24 h TTL; 50-entry cap), excluding admin routes and any page rendered WITH an admin session. Admin-rendered pages are identified by the `x-gk-admin-render: 1` response header set in `proxy.ts` — the SW cannot read the request `Cookie` header (Fetch-spec forbidden header), so the server makes the personalization decision and the SW honors it.
+- **HTML offline fallback (deliberate `no-store` exemption, R4C6 COR-R4C6-05)**: every public page sets `revalidate = 0` (dynamic rendering; Next.js emits no-cache response headers for dynamically rendered routes), so a Cache-Control-honoring SW could never populate an offline cache. `networkFirstHtml` therefore caches 200 GET HTML explicitly as an OFFLINE-ONLY fallback (entries served exclusively when the network is unreachable; 24 h TTL; 50-entry cap), excluding admin routes and any page rendered WITH an admin session. Admin-rendered pages are identified by the `x-gk-admin-render: 1` response header set in `proxy.ts` — the SW cannot read the request `Cookie` header (Fetch-spec forbidden header), so the server makes the personalization decision and the SW honors it.
 
 ## Migration & Schema-Drift Runbook
 
-The Drizzle MySQL migrator (`node_modules/drizzle-orm/mysql-core/dialect.cjs:62`) decides whether to apply each journal entry by:
+The Drizzle MySQL migrator (`node_modules/drizzle-orm/mysql-core/dialect.cjs:62` — internal reference; file/line drifts across drizzle-orm versions; informational only, migrate.js uses its own hash-based post-conditions) decides whether to apply each journal entry by:
 
 ```js
 if (lastDbMigration.created_at < migration.folderMillis) apply
@@ -488,7 +491,7 @@ Four lint scripts enforce architectural invariants; all are blocking in CI.
 
 ## Touch-Target Audit
 
-**Policy: 44x44 px minimum** — all interactive elements (buttons, links, checkboxes, etc.) must present a tappable/clickable area of at least 44x44 px, per WCAG 2.5.5 (Level AAA), Apple HIG, and Google MDN guidelines. This is enforced as a blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts`.
+**Policy: 44x44 px minimum** — all interactive elements (buttons, links, checkboxes, etc.) must present a tappable/clickable area of at least 44x44 px, per WCAG 2.5.5 Target Size (Enhanced) — Level AAA in WCAG 2.2 (44×44 px; WCAG 2.2 also adds 2.5.8 Target Size (Minimum), Level AA, 24×24 px — this repo exceeds both), Apple HIG, and Google MDN guidelines. This is enforced as a blocking unit test at `apps/web/src/__tests__/touch-target-audit.test.ts`.
 
 The vitest fixture at that path enforces the 44 px touch-target floor as a blocking unit test (not a lint script — runs under `npm test --workspace=apps/web`). The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/`) recursively.
 

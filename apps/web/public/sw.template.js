@@ -5,10 +5,10 @@
  *  - Image derivatives (/uploads/avif|webp|jpeg/): stale-while-revalidate,
  *    50 MB LRU cap, admin-route bypass.
  *  - HTML routes: network-first, 24 h OFFLINE-ONLY fallback cache.
- *    R4C6 COR-R4C6-05: every public page ships the framework-default
- *    `no-store` (revalidate = 0 dynamic rendering), so honoring
- *    Cache-Control here left this cache permanently empty — the PWA
- *    offline story never functioned. Caching 200 GET HTML is therefore
+ *    R4C6 COR-R4C6-05: every public page sets revalidate = 0 (dynamic
+ *    rendering; Next.js emits no-cache response headers for dynamically
+ *    rendered routes), so honoring Cache-Control here left this cache
+ *    permanently empty — the PWA offline story never functioned. Caching 200 GET HTML is therefore
  *    an EXPLICIT, narrow exemption: entries are served exclusively when
  *    the network is unreachable, expire after 24 h, and pages rendered
  *    WITH an admin session are excluded via the `x-gk-admin-render`
