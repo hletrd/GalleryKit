@@ -90,6 +90,25 @@ export interface CountryRow {
     viewCount: number;
 }
 
+// PERF-R5C2-01 (index-utilization note): the `(bot, viewed_at, country_code)`
+// and `(bot, viewed_at, referrer_host)` composite indexes serve the WINDOWED
+// (default, non-'all') case as a covering RANGE SCAN — the equality on `bot`
+// plus the `viewed_at >= since` range narrows directly to the time window, and
+// the trailing GROUP BY column is in the index so MySQL aggregates without
+// touching the base table.
+//
+// For the 'all' window (no `viewed_at` predicate) MySQL cannot do a loose
+// index scan to skip-aggregate, because `viewed_at` sits BETWEEN the leading
+// `bot` column and the GROUP BY column in the index order — so it falls back to
+// a covering-index temp-table aggregation: full covering-index scan over the
+// `bot = false` slice into a temp table grouped by the trailing column. This is
+// bounded by view-event retention (events are pruned, so the scan size is
+// capped), which is why the 'all' case is acceptable today.
+//
+// Re-ordering the index to put the GROUP BY column adjacent to `bot` (enabling a
+// loose scan for the 'all' case) is DELIBERATELY DEFERRED pending EXPLAIN
+// evidence that the temp-table aggregation is actually a hot path — see
+// plan-322 entry 3. Do not reorder these indexes without that evidence.
 export async function getCountryBreakdown(window: TimeWindow, limit = 30): Promise<CountryRow[]> {
     const since = windowStart(window);
     const whereClause = since
@@ -166,6 +185,10 @@ export async function getTopSharedGroupsByViews(
     }));
 }
 
+// PERF-R5C2-01: same index-utilization characteristics as getCountryBreakdown
+// above — windowed case is a covering range scan on `(bot, viewed_at, referrer_host)`;
+// the 'all' window aggregates via covering-index temp table (bounded by retention).
+// Index re-ordering deferred pending EXPLAIN evidence (plan-322 entry 3).
 export async function getReferrerBreakdown(window: TimeWindow, limit = 20): Promise<ReferrerRow[]> {
     const since = windowStart(window);
     const whereClause = since
