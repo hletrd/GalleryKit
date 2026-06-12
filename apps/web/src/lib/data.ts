@@ -422,7 +422,11 @@ void _privacyGuard;
 // Compile-time guard for publicMapSelectFields: it must NOT contain any admin-only
 // field beyond latitude and longitude. The allowed set is exactly publicSelectFields
 // UNION {latitude, longitude}. If any OTHER sensitive key leaks in, this guard fires.
-type _MapSensitiveKeys = 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'color_space' | 'icc_profile_name' | 'pipeline_version';
+// Derived from the canonical PrivacySensitiveKeys union minus the two fields
+// (latitude, longitude) that publicMapSelectFields is explicitly allowed to expose.
+// Any new entry added to PrivacySensitiveKeys automatically becomes guarded here
+// without requiring a manual update to this list.
+type _MapSensitiveKeys = Exclude<PrivacySensitiveKeys, 'latitude' | 'longitude'>;
 type _MapSensitiveKeysInPublicMap = Extract<keyof typeof publicMapSelectFields, _MapSensitiveKeys>;
 const _mapPrivacyGuard: _MapSensitiveKeysInPublicMap extends never ? true : [_MapSensitiveKeysInPublicMap, 'ERROR: privacy-sensitive field found in publicMapSelectFields — must only add latitude/longitude vs publicSelectFields'] = true;
 void _mapPrivacyGuard;

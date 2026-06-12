@@ -118,6 +118,12 @@ export const verifySessionToken = cache(async function verifySessionToken(token:
         return null;
     }
 
+    // Defense-in-depth: assert token part shapes AFTER crypto verification so
+    // these checks cannot be used as a timing oracle. A forged token fails HMAC
+    // first; only a structurally-odd but HMAC-valid token reaches here.
+    if (!/^[0-9a-f]{32}$/.test(random)) return null;
+    if (!/^[0-9a-f]{64}$/.test(signature)) return null;
+
     // Check token age (24 hours max)
     const tokenTimestamp = parseInt(timestamp, 10);
     if (!Number.isFinite(tokenTimestamp)) return null;

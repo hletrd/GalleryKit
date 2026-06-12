@@ -853,6 +853,8 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
             // comfortably inside MAX_BLUR_DATA_URL_LENGTH (4096), so
             // this is a no-op for valid producer output.
             const candidate = `data:image/jpeg;base64,${blurBuffer.toString('base64')}`;
+            // assertBlurDataUrl returns null on rejection and never throws,
+            // so the surrounding non-critical blur catch cannot mask a detection failure.
             blurDataUrl = assertBlurDataUrl(candidate);
         }
     } catch {
