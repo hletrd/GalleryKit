@@ -42,7 +42,7 @@ export default async function NotFound() {
           </h1>
           <Link
             href={localizePath(locale, '/')}
-            className="text-primary hover:underline text-sm"
+            className="inline-flex items-center min-h-11 text-primary hover:underline text-sm"
           >
             {t('backHome')}
           </Link>
