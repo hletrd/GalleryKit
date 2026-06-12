@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   recordAndEvict,
   removeEntry,
@@ -182,18 +182,25 @@ describe('sw-cache: recordAndEvict LRU eviction', () => {
     expect(cache.deleted[1]).toBe('http://localhost/uploads/avif/b.avif');
   });
 
+  // AGG-R5C2-15 (TEST-R5C2-04): use fake timers so the timestamp advance is
+  // deterministic — no wall-clock sleep that makes CI flaky under load.
   it('updates timestamp on re-insert (upsert semantics)', async () => {
-    const url = 'http://localhost/uploads/avif/same.avif';
-    await recordAndEvict(url, 100, cache, meta, 50 * 1024 * 1024);
-    const first = meta.snapshot().get(url)!.timestamp;
+    vi.useFakeTimers();
+    try {
+      const url = 'http://localhost/uploads/avif/same.avif';
+      await recordAndEvict(url, 100, cache, meta, 50 * 1024 * 1024);
+      const first = meta.snapshot().get(url)!.timestamp;
 
-    // Small delay to ensure timestamp changes
-    await new Promise((r) => setTimeout(r, 2));
-    await recordAndEvict(url, 200, cache, meta, 50 * 1024 * 1024);
-    const second = meta.snapshot().get(url)!.timestamp;
+      // Advance the system clock by 50 ms so Date.now() returns a higher value.
+      vi.setSystemTime(Date.now() + 50);
+      await recordAndEvict(url, 200, cache, meta, 50 * 1024 * 1024);
+      const second = meta.snapshot().get(url)!.timestamp;
 
-    expect(second).toBeGreaterThanOrEqual(first);
-    expect(meta.snapshot().get(url)!.size).toBe(200);
+      expect(second).toBeGreaterThan(first);
+      expect(meta.snapshot().get(url)!.size).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

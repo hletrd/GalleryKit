@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,11 @@ function makeToken(
     } = {}
 ): string {
     const ts = options.timestamp ?? Date.now();
-    const rand = options.randomHex ?? 'deadbeef'.repeat(4); // 32-char hex
+    // AGG-R5C2-14: use unique 32-char hex per call so React cache() inside
+    // session.ts cannot deduplicate identical token strings across tests.
+    // randomBytes(16).toString('hex') produces exactly 32 lowercase hex chars
+    // which satisfies the post-HMAC shape assertion /^[0-9a-f]{32}$/.
+    const rand = options.randomHex ?? randomBytes(16).toString('hex');
     const data = `${ts}:${rand}`;
     let sig = createHmac('sha256', secret).update(data).digest('hex');
     if (options.corruptSignature) sig = sig.replace(/.$/, sig.endsWith('0') ? '1' : '0');
@@ -170,6 +174,10 @@ describe('getSessionSecret', () => {
     const mockDbInsert = vi.fn();
 
     beforeEach(() => {
+        // AGG-R5C2-14 (TEST-R5C2-03/-16): resetModules in beforeEach ensures
+        // module-level singletons (cachedSessionSecret, sessionSecretPromise)
+        // are cleared before every test — not just after the previous one.
+        vi.resetModules();
         vi.doMock('@/db', () => ({
             db: {
                 query: {
