@@ -30,6 +30,7 @@ import { isWideGamutPrimary } from '@/lib/color-detection';
 import { headers } from 'next/headers';
 import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
 import type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
+import { stripStubPrefix } from '@/lib/caption-constants';
 
 type ImageCleanupFailure = {
     target: 'original' | 'webp' | 'avif' | 'jpeg';
@@ -971,7 +972,13 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                     if (!row.alt_text_suggested) continue;
                     if (applyAltSuggested === 'title' && row.title) continue;
                     if (applyAltSuggested === 'description' && row.description) continue;
-                    toUpdate.push({ id: row.id, caption: row.alt_text_suggested });
+                    // CRT-R5C2-02: strip the [AUTO] stub prefix before copying into
+                    // title/description so the prefix never persists in stored metadata.
+                    // If stripping produces an empty/whitespace-only value, skip the row
+                    // (leave title/description unchanged rather than storing empty string).
+                    const stripped = stripStubPrefix(row.alt_text_suggested).trim();
+                    if (!stripped) continue;
+                    toUpdate.push({ id: row.id, caption: stripped });
                 }
 
                 for (const { id, caption } of toUpdate) {
@@ -1087,6 +1094,7 @@ export async function retryFailedImage(id: number) {
     const state = getProcessingQueueState();
     state.permanentlyFailedIds.delete(id);
     state.retryCounts.delete(id);
+    state.claimRetryCounts.delete(id);
     state.lastErrors.delete(id);
 
     // Re-enqueue for processing.

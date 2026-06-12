@@ -8,6 +8,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// caption-generator (imported transitively via image-queue → images) pulls in
+// 'server-only'. Mock it so vitest doesn't reject the import outside Next.js.
+vi.mock('server-only', () => ({}));
+
 // ---------------------------------------------------------------------------
 // Hoisted mocks
 // ---------------------------------------------------------------------------
@@ -355,6 +359,93 @@ describe('bulkUpdateImages — transactional rollback', () => {
         await bulkUpdateImages(makeInput({ licenseTier: { mode: 'set', value: 'editorial' } }));
 
         expect(logAuditEventMock).not.toHaveBeenCalled();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// CRT-R5C2-02: applyAltSuggested strips [AUTO] prefix before storing
+// ---------------------------------------------------------------------------
+
+describe('bulkUpdateImages — applyAltSuggested prefix strip (CRT-R5C2-02)', () => {
+    it('stores the stripped caption (without [AUTO] prefix) when applyAltSuggested=title', async () => {
+        const capturedUpdates: { id: number; title?: string }[] = [];
+
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const tx = {
+                update: vi.fn((table: unknown) => ({
+                    set: vi.fn((clause: Record<string, unknown>) => ({
+                        where: vi.fn((cond: unknown) => {
+                            void table; void cond;
+                            if ('title' in clause) {
+                                capturedUpdates.push({ id: 0, title: clause.title as string });
+                            }
+                            return Promise.resolve([{ affectedRows: 1 }]);
+                        }),
+                    })),
+                })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: vi.fn(() => ({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                alt_text_suggested: '[AUTO] Photo taken with X',
+                            },
+                        ])),
+                    })),
+                })),
+            };
+            await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({ applyAltSuggested: 'title' }));
+        expect(res).toEqual({ success: true, count: 3 });
+        expect(capturedUpdates.length).toBeGreaterThan(0);
+        for (const u of capturedUpdates) {
+            expect(u.title).not.toContain('[AUTO]');
+            expect(u.title).toBe('Photo taken with X');
+        }
+    });
+
+    it('skips the row when stripping [AUTO] produces an empty value', async () => {
+        let updateCalled = false;
+
+        transactionMock.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+            const tx = {
+                update: vi.fn(() => ({
+                    set: vi.fn(() => ({
+                        where: vi.fn(() => {
+                            updateCalled = true;
+                            return Promise.resolve([{ affectedRows: 1 }]);
+                        }),
+                    })),
+                })),
+                insert: vi.fn(() => ({ ignore: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })) })),
+                delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
+                select: vi.fn(() => ({
+                    from: vi.fn(() => ({
+                        where: vi.fn(() => Promise.resolve([
+                            {
+                                id: 1,
+                                title: null,
+                                description: null,
+                                // Stripping this prefix leaves empty string → must be skipped
+                                alt_text_suggested: '[AUTO] ',
+                            },
+                        ])),
+                    })),
+                })),
+            };
+            await cb(tx);
+        });
+
+        const res = await bulkUpdateImages(makeInput({ applyAltSuggested: 'title' }));
+        expect(res).toEqual({ success: true, count: 3 });
+        // No per-row title update should have been called because the stripped value is empty
+        expect(updateCalled).toBe(false);
     });
 });
 
