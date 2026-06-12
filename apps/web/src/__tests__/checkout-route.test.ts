@@ -2,17 +2,19 @@
  * TEST-R5C1-06: Checkout route branch tests.
  * Follows the mocked Stripe + DB pattern of checkout-db-error-rollback.test.ts.
  * Covers: strict price parse, priceCents <= 0, unprocessed image, happy path
- * with idempotency key shape, rollback on each 4xx branch, unknown image 404.
+ * with idempotency key shape, rollback on each 4xx branch, unknown image 404,
+ * and unknown-IP idempotency omission (TRC-R5C1-16 / AGG-R5C2-53).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const { selectMock, preIncrementMock, rollbackMock, stripeCreateMock } = vi.hoisted(() => ({
+const { selectMock, preIncrementMock, rollbackMock, stripeCreateMock, getClientIpMock } = vi.hoisted(() => ({
     selectMock: vi.fn(),
     preIncrementMock: vi.fn(),
     rollbackMock: vi.fn(),
     stripeCreateMock: vi.fn(),
+    getClientIpMock: vi.fn(),
 }));
 
 vi.mock('@/db', () => ({
@@ -43,7 +45,7 @@ vi.mock('@/lib/stripe', () => ({
 vi.mock('@/lib/rate-limit', () => ({
     preIncrementCheckoutAttempt: (...args: unknown[]) => preIncrementMock(...args),
     rollbackCheckoutAttempt: (...args: unknown[]) => rollbackMock(...args),
-    getClientIp: () => '203.0.113.9',
+    getClientIp: (...args: unknown[]) => getClientIpMock(...args),
     CHECKOUT_WINDOW_MS: 60_000,
 }));
 
@@ -73,22 +75,31 @@ function makeRequest(imageId = '42'): NextRequest {
 }
 
 /**
- * Build a select mock chain that returns the provided image row for the first
- * call and the provided admin_settings row for the second call.
- * Pass null for imageRow to simulate "not found".
- * Pass null for settingsRow to simulate "no price setting".
+ * AGG-R5C2-53: table-keyed dispatch replaces the order-dependent call-counter
+ * approach. Each call is matched by inspecting the `from` argument's table
+ * identifier so a query-order refactor cannot silently feed wrong rows.
+ *
+ * The drizzle mock receives the schema table object as the argument to `.from()`.
+ * We distinguish image queries from adminSettings queries by checking which
+ * sentinel property values are present on the mock schema object:
+ *   - images table has `processed: 'images.processed'` (unique to images)
+ *   - adminSettings table has `value: 'admin_settings.value'` (unique to settings)
  */
 function buildSelectChain(
     imageRow: Record<string, unknown> | null,
     settingsRow: { value: string } | null = { value: '500' }
 ) {
-    let callCount = 0;
     selectMock.mockImplementation(() => ({
-        from: () => ({
+        from: (table: Record<string, unknown>) => ({
             where: () => ({
                 limit: async () => {
-                    callCount++;
-                    if (callCount === 1) return imageRow ? [imageRow] : [];
+                    // Dispatch by which schema object was passed to .from().
+                    // images has 'processed' key; adminSettings does not.
+                    const isImagesQuery = 'processed' in table;
+                    if (isImagesQuery) {
+                        return imageRow ? [imageRow] : [];
+                    }
+                    // adminSettings query
                     return settingsRow ? [settingsRow] : [];
                 },
             }),
@@ -108,6 +119,8 @@ beforeEach(() => {
     preIncrementMock.mockReset().mockReturnValue(false);
     rollbackMock.mockReset();
     stripeCreateMock.mockReset();
+    // Default: known IP
+    getClientIpMock.mockReturnValue('203.0.113.9');
 });
 
 describe('checkout route branch tests (TEST-R5C1-06)', () => {
@@ -181,7 +194,7 @@ describe('checkout route branch tests (TEST-R5C1-06)', () => {
         // Stripe was called
         expect(stripeCreateMock).toHaveBeenCalledOnce();
 
-        // Idempotency key shape: checkout-{imageId}-{ip}-{minute}
+        // Known IP → deterministic idempotency key: checkout-{imageId}-{ip}-{minute}
         const callArgs = stripeCreateMock.mock.calls[0];
         const idempotencyOptions = callArgs[1] as { idempotencyKey: string };
         expect(idempotencyOptions.idempotencyKey).toMatch(
@@ -206,6 +219,37 @@ describe('checkout route branch tests (TEST-R5C1-06)', () => {
         const minute = parseInt(parts[parts.length - 1], 10);
         // Allow ±1 minute for timing skew around the minute boundary
         expect(Math.abs(minute - expectedMinute)).toBeLessThanOrEqual(1);
+    });
+
+    // ── (4c) Unknown IP → no idempotency key (TRC-R5C1-16) ───────────────────
+    //
+    // When TRUST_PROXY is not configured, getClientIp() returns 'unknown'.
+    // Two distinct buyers of the same image in the same minute must each
+    // receive a fresh Stripe session — the route omits idempotencyKey so
+    // Stripe does not deduplicate across unrelated callers.
+
+    it('(4c) unknown IP → two POSTs each create a session with NO idempotencyKey', async () => {
+        getClientIpMock.mockReturnValue('unknown');
+        stripeCreateMock.mockResolvedValue({ url: 'https://checkout.stripe.com/pay/cs_test_unknownip' });
+
+        // First request
+        buildSelectChain(validProcessedImage, { value: '999' });
+        const res1 = await POST(makeRequest(), { params: Promise.resolve({ imageId: '42' }) });
+        expect(res1.status).toBe(200);
+
+        // Second request (same image, same minute, different buyer)
+        buildSelectChain(validProcessedImage, { value: '999' });
+        const res2 = await POST(makeRequest(), { params: Promise.resolve({ imageId: '42' }) });
+        expect(res2.status).toBe(200);
+
+        expect(stripeCreateMock).toHaveBeenCalledTimes(2);
+
+        // Neither call may carry an idempotencyKey — omitting it entirely
+        // means Stripe treats each as a distinct request (TRC-R5C1-16 fix).
+        for (const call of stripeCreateMock.mock.calls) {
+            const options = call[1] as Record<string, unknown>;
+            expect(options).not.toHaveProperty('idempotencyKey');
+        }
     });
 
     // ── (5) Rollback called on each 4xx branch ────────────────────────────────

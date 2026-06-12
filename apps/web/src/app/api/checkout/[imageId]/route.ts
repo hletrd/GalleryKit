@@ -169,13 +169,20 @@ export async function POST(
         // (`checkout-${imageId}-${ip}-${minute}`) collapses rapid duplicates
         // while keeping distinct legitimate buys at minute N+1 separate.
         // Mirrors the cycle 5 P388-01 refund idempotency-key pattern.
-        // C18-HIGH-01: the key MUST be deterministic per user context. Adding
-        // randomness (e.g. randomUUID) defeats deduplication entirely. When
-        // TRUST_PROXY is not set, IP becomes 'unknown' and all users share
-        // the same key — this is a deployment-configuration issue, not a
-        // code bug. Operators should set TRUST_PROXY=true when behind a
-        // reverse proxy so per-IP keys work correctly.
-        const idempotencyKey = `checkout-${image.id}-${ip}-${Math.floor(Date.now() / 60_000)}`;
+        // TRC-R5C1-16: when TRUST_PROXY is not configured, getClientIp()
+        // returns 'unknown' and all concurrent buyers of the same image in
+        // the same minute would share one Stripe idempotency key, causing the
+        // second buyer's session creation to silently return the FIRST
+        // buyer's session URL. Fix: omit the key entirely for unknown-IP
+        // callers so each request creates a fresh Stripe session. Stripe-side
+        // deduplication is lost only for misconfigured-proxy deployments —
+        // the correct trade-off versus silently colliding distinct buyers.
+        // Operators should set TRUST_PROXY=true behind a reverse proxy so
+        // per-IP deterministic keys work correctly.
+        const stripeOptions: { idempotencyKey?: string } = {};
+        if (ip !== 'unknown') {
+            stripeOptions.idempotencyKey = `checkout-${image.id}-${ip}-${Math.floor(Date.now() / 60_000)}`;
+        }
         const session = await stripe.checkout.sessions.create(
             {
                 mode: 'payment',
@@ -201,7 +208,7 @@ export async function POST(
                 success_url: `${origin}/${locale}/p/${image.id}?checkout=success`,
                 cancel_url: `${origin}/${locale}/p/${image.id}?checkout=cancel`,
             },
-            { idempotencyKey },
+            stripeOptions,
         );
 
         return NextResponse.json({ url: session.url }, { headers: NO_STORE });
