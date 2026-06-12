@@ -60,10 +60,11 @@ test.describe('admin workflows (opt-in)', () => {
 
     // The login form renders the server-action error in a <p role="alert">.
     // "Invalid credentials" is the serverActions.invalidCredentials key from
-    // en.json — returned for any username/password mismatch.
-    const errorAlert = page.getByRole('alert');
+    // en.json — returned for any username/password mismatch. Filter by text:
+    // Next.js's route announcer (#__next-route-announcer__) also carries
+    // role="alert", so a bare getByRole('alert') is a strict-mode violation.
+    const errorAlert = page.getByRole('alert').filter({ hasText: 'Invalid credentials' });
     await expect(errorAlert).toBeVisible({ timeout: 10_000 });
-    await expect(errorAlert).toContainText('Invalid credentials');
 
     // The URL must stay on the login page (not redirected to dashboard).
     await expect(page).toHaveURL(/\/admin$/);
