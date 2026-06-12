@@ -412,28 +412,38 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                         </p>
                     </div>
                     {semanticSearchMode !== 'disabled' && (
-                        <div className="p-3 border-t flex items-center justify-between gap-3">
-                            <Label
-                                htmlFor="semantic-search-toggle"
-                                className="text-xs text-muted-foreground cursor-pointer select-none"
-                            >
-                                {t('search.semanticToggle')}
-                            </Label>
-                            <Switch
-                                id="semantic-search-toggle"
-                                checked={useSemanticSearch}
-                                onCheckedChange={(checked) => {
-                                    setUseSemanticSearch(checked);
-                                    setResults([]);
-                                    setSearchStatus(null);
-                                    if (query.trim()) {
-                                        performSearch(query, checked);
-                                    }
-                                }}
-                                aria-label={t('search.semanticToggle')}
-                                // 44px touch-target floor: Switch has an implicit min-h,
-                                // wrapper div provides at least 44px tap area via padding.
-                            />
+                        <div className="p-3 border-t space-y-1.5">
+                            <div className="flex items-center justify-between gap-3">
+                                <Label
+                                    htmlFor="semantic-search-toggle"
+                                    className="text-xs text-muted-foreground cursor-pointer select-none"
+                                >
+                                    {t('search.semanticToggle')}
+                                </Label>
+                                <Switch
+                                    id="semantic-search-toggle"
+                                    checked={useSemanticSearch}
+                                    onCheckedChange={(checked) => {
+                                        setUseSemanticSearch(checked);
+                                        setResults([]);
+                                        setSearchStatus(null);
+                                        if (query.trim()) {
+                                            performSearch(query, checked);
+                                        }
+                                    }}
+                                    aria-describedby="semantic-search-hint"
+                                    aria-label={t('search.semanticToggle')}
+                                    // 44px touch-target floor: Switch has an implicit min-h,
+                                    // wrapper div provides at least 44px tap area via padding.
+                                />
+                            </div>
+                            {/* CRT-R5C2-01: honesty disclaimer. The semantic toggle is only
+                                shown when mode === 'stub' (the public demo posture), and the
+                                stub encoder's scores are essentially random — tell the visitor
+                                so the ranking is not mistaken for real relevance. */}
+                            <p id="semantic-search-hint" className="text-xs text-muted-foreground">
+                                {t('search.semanticExperimentalHint')}
+                            </p>
                         </div>
                     )}
                 </div>

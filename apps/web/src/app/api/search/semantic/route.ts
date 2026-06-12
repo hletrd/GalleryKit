@@ -14,9 +14,23 @@
  * semantic-enabled, body shape, query length) and rolled back on any
  * early-return path before expensive embedding work begins.
  *
- * WARNING: The stub encoder returns RANDOM results. Do NOT enable
- * semantic_search_mode in production until the stub is replaced with real ONNX
- * inference. This endpoint rejects requests when mode is not 'production'.
+ * Serving gate (CRT-R5C2-01 / BUG-R5C2-02): this endpoint SERVES requests when
+ * `semantic_search_mode === 'stub'` — the deliberate admin opt-in demo posture.
+ * Stub mode returns ranked results computed from `embedTextStub`, whose scores
+ * are NOT semantically meaningful (cosine similarity between a query and an
+ * image embedding is essentially random). The visitor-facing search toggle
+ * carries an explicit "experimental — results may not match" disclaimer
+ * (`search.semanticExperimentalHint`) so neither admin nor visitor is deceived.
+ *
+ * Every other mode returns 503:
+ *   - 'disabled' (the default) → 503.
+ *   - any stale/invalid stored value, INCLUDING the legacy 'production' string,
+ *     → 503. 'production' is no longer storable (the validator rejects it, see
+ *     gallery-config-shared.ts) and `getGalleryConfig` heals such rows to
+ *     'disabled'; the explicit `!== 'stub'` gate below is defense-in-depth for
+ *     any value that reaches this route. 'production' is reserved for a future
+ *     real CLIP encoder (WI-P51 / ONNX); when that ships the gate is re-opened
+ *     for it, NOT for the stub.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -57,9 +71,16 @@ const NO_STORE_HEADERS = {
 };
 
 /** Clamp the user-supplied topK parameter to the valid range [1, SEMANTIC_TOP_K_MAX].
- *  Falls back to SEMANTIC_TOP_K_DEFAULT for missing, non-finite, or non-numeric values. */
+ *  Falls back to SEMANTIC_TOP_K_DEFAULT for missing, non-finite, or non-numeric values.
+ *
+ *  COR-R5C2-06 / AGG-R5C2-33: reject non-number `raw` explicitly. `Number(true)`,
+ *  `Number([])`, and `Number(['5'])` all coerce to finite numbers (1, 0, 5), so a
+ *  bare `Number(raw)` would silently accept booleans / empty arrays / single-element
+ *  arrays as a topK. Anything defined that is not already a `number` falls back to
+ *  the default; `undefined` (omitted) also falls back. */
 export function clampSemanticTopK(raw: unknown): number {
-    const topKRaw = raw !== undefined ? Number(raw) : SEMANTIC_TOP_K_DEFAULT;
+    if (raw !== undefined && typeof raw !== 'number') return SEMANTIC_TOP_K_DEFAULT;
+    const topKRaw = raw !== undefined ? raw : SEMANTIC_TOP_K_DEFAULT;
     return Math.min(Math.max(Number.isFinite(topKRaw) ? Math.floor(topKRaw) : SEMANTIC_TOP_K_DEFAULT, 1), SEMANTIC_TOP_K_MAX);
 }
 
@@ -159,8 +180,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // CRT-R5C1-01: Capability gate — only 'stub' mode is the current encoder.
-    // Treat 'production' as 503 regardless of stored config (defense in depth
-    // for stale DB values written before the validator was tightened).
+    // Any non-'stub' value (incl. a legacy 'production' string that healed to
+    // 'disabled' in getGalleryConfig, or any stale DB value) yields a 503
+    // (defense in depth — see the file docstring).
     // COR-R5C1-04: rate-limit pre-increment is placed BEFORE the config read
     // so the counter is consumed on every request that passes cheap validation,
     // preventing free config probing. Pattern 2: rollback on all subsequent
@@ -176,9 +198,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // Check semantic search mode — only 'stub' serves public requests currently.
-    // 'production' is rejected even if stored (stale DB value) because the
-    // stub encoder returns random results and must never serve real traffic.
-    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
+    // The config resolver can only ever return 'disabled' | 'stub' (a legacy
+    // 'production' DB row fails validation and heals to 'disabled'), so the
+    // gate below rejects everything except 'stub'. The stub encoder returns
+    // random results and must never masquerade as real semantic ranking.
+    let semanticMode: 'disabled' | 'stub' = 'disabled';
     try {
         const config = await getGalleryConfig();
         semanticMode = config.semanticSearchMode;

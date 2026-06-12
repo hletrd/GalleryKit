@@ -402,8 +402,27 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             // US-P51: Fire-and-forget embedding hook. MUST NOT block the queue job.
             // Runs after Sharp processing + processed=true is committed. Gated by
             // semantic_search_mode admin setting so it is a no-op by default.
+            //
+            // BUG-R5C2-05 / AGG-R5C2-09 — stub-embedding contract:
+            //   In 'stub' mode this DELIBERATELY writes embeddings. They power the
+            //   admin opt-in demo semantic search (the /api/search/semantic route
+            //   serves 'stub' mode, with a visitor-facing "experimental" disclaimer).
+            //   These vectors are NOT semantically meaningful — `embedImageStub`
+            //   produces a deterministic-but-random vector keyed off the image id,
+            //   so cosine similarity between a query and an image embedding is
+            //   essentially random. This is intentional, consistent with the
+            //   plan-319 honesty posture (stub-serving stays; we make it honest).
+            //
+            //   Provenance: every row records `modelVersion: CLIP_MODEL_VERSION`
+            //   (currently 'stub-sha256-v1', see lib/clip-embeddings.ts). A future
+            //   REAL CLIP encoder MUST NOT trust or serve rows whose `modelVersion`
+            //   is a stub identifier — gate reads/writes on the model version and
+            //   re-embed (or ignore) stub rows rather than overwriting blindly.
+            //   The `model_version` column on image_embeddings already distinguishes
+            //   stub rows, so no schema migration is needed for that future encoder
+            //   to tell stub vectors apart from production ones.
             void (async () => {
-                let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
+                let semanticMode: 'disabled' | 'stub' = 'disabled';
                 try {
                     const cfg = await getGalleryConfig();
                     semanticMode = cfg.semanticSearchMode;

@@ -409,7 +409,8 @@
     "rateLimited": "Too many searches. Please wait a moment and try again.",
     "maintenance": "Search is temporarily unavailable during maintenance.",
     "invalid": "Type at least 2 characters to search.",
-    "semanticToggle": "Semantic search"
+    "semanticToggle": "Semantic search",
+    "semanticExperimentalHint": "Experimental — results may not match your query."
   },
   "notFound": {
     "description": "Page not found.",
@@ -726,8 +727,7 @@
     "semanticSearchMode": "Semantic Search Mode",
     "semanticSearchModeDisabled": "Disabled",
     "semanticSearchModeStub": "Stub (testing only)",
-    "semanticSearchModeProduction": "Production (requires ONNX)",
-    "semanticSearchProductionWarning": "Warning: Production mode requires a real ONNX CLIP model. Without it, search results will be semantically random.",
+    "semanticSearchProductionWarning": "This legacy \"production\" value is no longer valid and is being treated as Disabled. Re-select Disabled or Stub to apply a supported mode.",
     "licensePricingTitle": "License Pricing",
     "licensePricingDesc": "Set prices for paid download license tiers (in USD cents). 0 = not for sale.",
     "licensePriceEditorial": "Editorial License (cents)",

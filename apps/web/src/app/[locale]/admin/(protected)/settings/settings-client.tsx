@@ -537,11 +537,15 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             <SelectContent>
                                 <SelectItem value="disabled">{t('settings.semanticSearchModeDisabled')}</SelectItem>
                                 <SelectItem value="stub">{t('settings.semanticSearchModeStub')}</SelectItem>
-                                {/* CRT-R5C1-01: 'production' hidden until real ONNX encoder ships.
-                                    i18n key kept for forward compatibility. */}
+                                {/* CRT-R5C1-01: no 'production' item — the validator rejects
+                                    that value and the resolver heals it to 'disabled'. A real
+                                    ONNX encoder (WI-P51) will re-introduce a selectable mode. */}
                             </SelectContent>
                         </Select>
                     </div>
+                    {/* BUG-R5C2-03 / CRT-R5C2-05: a stale legacy 'production' DB row is no
+                        longer storable and is treated as Disabled by the resolver. Tell the
+                        admin truthfully instead of implying production search is running. */}
                     {settings.semantic_search_mode === 'production' && (
                         <p className="text-xs text-amber-600 font-medium">
                             {t('settings.semanticSearchProductionWarning')}
