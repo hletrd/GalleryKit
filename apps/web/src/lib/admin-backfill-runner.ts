@@ -47,7 +47,7 @@ import { sql } from 'drizzle-orm';
 import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, type ImageQualitySettings } from '@/lib/process-image';
 import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath } from '@/lib/upload-paths';
-import { LOCK_COLOR_PIPELINE_BACKFILL } from '@/lib/advisory-locks';
+import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName } from '@/lib/advisory-locks';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
@@ -89,6 +89,26 @@ interface AdminBackfillState {
     completedRuns: number;
     /** Last error message if a run failed, else null. */
     lastError: string | null;
+    // AGG-R5C2-10 (COR-R5C2-01/-02) observability counters. All additive and
+    // backward-compatible — existing consumers (admin-backfill.ts destructures
+    // only `running`) are unaffected. These reflect the LAST run's tallies and
+    // are reset to 0 at the start of every run.
+    /** Rows skipped because the original file was missing on disk. */
+    skippedMissingOriginal: number;
+    /**
+     * Rows skipped because the per-image processing advisory lock was held by
+     * the live queue worker (or a concurrent retryFailedImage). These rows are
+     * NOT version-bumped and remain backfill candidates for a later run.
+     */
+    skippedLocked: number;
+    /** Rows whose re-encode (processImageFormats) threw. No version bump. */
+    encodeFailures: number;
+    /**
+     * Rows whose re-encode succeeded but color detection threw. Derivative
+     * columns are persisted WITHOUT a pipeline_version bump so a later run
+     * retries detection (documented resume contract).
+     */
+    detectionFailures: number;
 }
 
 function getState(): AdminBackfillState {
@@ -101,15 +121,35 @@ function getState(): AdminBackfillState {
             lastQueuedCount: 0,
             completedRuns: 0,
             lastError: null,
+            skippedMissingOriginal: 0,
+            skippedLocked: 0,
+            encodeFailures: 0,
+            detectionFailures: 0,
         };
     }
-    return g[adminBackfillStateKey]!;
+    // Defensive backfill for state objects created before these fields existed
+    // (e.g. a globalThis symbol seeded by an older module version or a test).
+    const s = g[adminBackfillStateKey]!;
+    s.skippedMissingOriginal ??= 0;
+    s.skippedLocked ??= 0;
+    s.encodeFailures ??= 0;
+    s.detectionFailures ??= 0;
+    return s;
 }
 
 /** Public read-only view of runner state, exposed via getAdminBackfillStatus(). */
 export function readAdminBackfillState(): Readonly<AdminBackfillState> {
     const s = getState();
-    return { running: s.running, lastQueuedCount: s.lastQueuedCount, completedRuns: s.completedRuns, lastError: s.lastError };
+    return {
+        running: s.running,
+        lastQueuedCount: s.lastQueuedCount,
+        completedRuns: s.completedRuns,
+        lastError: s.lastError,
+        skippedMissingOriginal: s.skippedMissingOriginal,
+        skippedLocked: s.skippedLocked,
+        encodeFailures: s.encodeFailures,
+        detectionFailures: s.detectionFailures,
+    };
 }
 
 async function acquireBackfillLock(): Promise<PoolConnection | null> {
@@ -144,6 +184,41 @@ async function releaseBackfillLock(lockConn: PoolConnection | null) {
     }
 }
 
+// TRC-R5C2-01 (AGG-R5C2-08): per-image processing claim. The runner re-encodes
+// `processed = TRUE` rows, which the live PQueue worker normally never touches
+// (it only claims `processed = FALSE`). But `retryFailedImage` can re-enqueue a
+// processed row, and the queue worker claims the SAME `gallerykit:image-processing:{id}`
+// advisory lock before encoding. Acquiring that lock here (non-blocking, 0-second
+// timeout — identical semantics to image-queue.ts:193) means the backfill SKIPS a
+// row that the queue worker is actively re-encoding rather than racing it into a
+// double-encode / interleaved-write of the same derivative files.
+async function acquireImageProcessingClaim(imageId: number): Promise<PoolConnection | null> {
+    const lockConn = await connection.getConnection();
+    try {
+        const [rows] = await lockConn.query<(RowDataPacket & { acquired: number | null })[]>(
+            'SELECT GET_LOCK(?, 0) AS acquired',
+            [getImageProcessingLockName(imageId)],
+        );
+        if (rows[0]?.acquired === 1) {
+            return lockConn;
+        }
+    } catch (err) {
+        lockConn.release();
+        throw err;
+    }
+    lockConn.release();
+    return null;
+}
+
+async function releaseImageProcessingClaim(imageId: number, lockConn: PoolConnection | null) {
+    if (!lockConn) return;
+    try {
+        await lockConn.query('SELECT RELEASE_LOCK(?)', [getImageProcessingLockName(imageId)]);
+    } finally {
+        lockConn.release();
+    }
+}
+
 async function fetchCandidateCount(): Promise<number> {
     const result = await db.execute(sql`
         SELECT COUNT(*) AS cnt
@@ -162,6 +237,18 @@ async function fetchCandidateCount(): Promise<number> {
 const BATCH_SIZE = 100;
 
 async function fetchCandidateBatch(cursor: number): Promise<CandidateRow[]> {
+    // ARCH-R5C2-04: this per-batch re-query intentionally REPLACES the old
+    // start-of-run candidate snapshot. There is no frozen ID list; each batch
+    // re-evaluates `pipeline_version < CURRENT` against live data. Correctness of
+    // that non-snapshot design rests on two invariants:
+    //   (a) the `gallerykit_color_pipeline_backfill` advisory lock serializes
+    //       backfills, so no concurrent backfill is advancing pipeline_version on
+    //       rows this run still expects to see; and
+    //   (b) fresh uploads land at pipeline_version = CURRENT (set by the upload /
+    //       queue path), so a newly-uploaded image is NEVER a candidate and can
+    //       never appear mid-run to shift the keyset window.
+    // Together they guarantee the keyset walk visits every stale row exactly once
+    // and terminates, even though the candidate set is re-read every batch.
     const result = await db.execute(sql`
         SELECT id, filename_original, filename_avif, filename_webp, filename_jpeg,
                icc_profile_name, color_primaries, width
@@ -175,89 +262,111 @@ async function fetchCandidateBatch(cursor: number): Promise<CandidateRow[]> {
     return rows;
 }
 
-async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promise<void> {
+// AGG-R5C2-10 (COR-R5C2-01/-02): discriminated result so the runner loop can
+// tally WHY a row did not get a version bump, instead of swallowing every
+// early-return into an undifferentiated "processed" count. Each `ok: false`
+// reason maps 1:1 to a real early-return path below.
+type ReprocessResult =
+    | { ok: true }
+    | { ok: false; reason: 'missing-original' | 'locked' | 'encode-failed' | 'detection-failed'; error?: unknown };
+
+async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
     try {
         await fs.access(originalPath);
     } catch {
         // Original missing — skip silently. The companion script does the same.
-        return;
+        return { ok: false, reason: 'missing-original' };
     }
 
-    let wasDownscaled = false;
-    let avif10bit = false;
+    // TRC-R5C2-01: claim the per-image processing lock for the FULL re-encode +
+    // detection + UPDATE window. If the live queue worker (or a concurrent
+    // retryFailedImage) holds it, skip this row — no version bump, so it stays a
+    // candidate for the next run. Released in `finally` after the DB UPDATE.
+    const claimConn = await acquireImageProcessingClaim(row.id);
+    if (!claimConn) {
+        return { ok: false, reason: 'locked' };
+    }
+
     try {
-        const result = await processImageFormats(
-            originalPath,
-            row.filename_webp,
-            row.filename_avif,
-            row.filename_jpeg,
-            row.width,
-            settings.quality,
-            settings.sizes,
-            row.icc_profile_name,
-            settings.forceSrgbDerivatives,
-            row.color_primaries ? { colorPrimaries: row.color_primaries } : null,
-            settings.wideGamutJpegChroma,
-            settings.avifEffort,
-            settings.sdrJpegChroma,
-            settings.wideGamutMaxSourcePixels,
-        );
-        wasDownscaled = result.wasDownscaled;
-        avif10bit = result.avif10bit;
-    } catch (err) {
-        console.error(`[admin-backfill] id=${row.id} encode failed:`, err);
-        return;
-    }
+        let wasDownscaled = false;
+        let avif10bit = false;
+        try {
+            const result = await processImageFormats(
+                originalPath,
+                row.filename_webp,
+                row.filename_avif,
+                row.filename_jpeg,
+                row.width,
+                settings.quality,
+                settings.sizes,
+                row.icc_profile_name,
+                settings.forceSrgbDerivatives,
+                row.color_primaries ? { colorPrimaries: row.color_primaries } : null,
+                settings.wideGamutJpegChroma,
+                settings.avifEffort,
+                settings.sdrJpegChroma,
+                settings.wideGamutMaxSourcePixels,
+            );
+            wasDownscaled = result.wasDownscaled;
+            avif10bit = result.avif10bit;
+        } catch (err) {
+            console.error(`[admin-backfill] id=${row.id} encode failed:`, err);
+            return { ok: false, reason: 'encode-failed', error: err };
+        }
 
-    // Re-detect color signals from the original so DB columns stay in sync
-    // with the current detection logic (mirrors backfill-color-pipeline.ts).
-    let signals: {
-        icc_profile_name: string | null;
-        color_primaries: string | null;
-        transfer_function: string | null;
-        matrix_coefficients: string | null;
-        is_hdr: boolean;
-        has_gain_map: boolean;
-        color_pipeline_decision: string | null;
-    } | null = null;
-    try {
-        const image = sharp(originalPath, {
-            limitInputPixels: 256 * 1024 * 1024,
-            failOn: 'error',
-            sequentialRead: true,
-        });
-        const metadata = await image.metadata();
-        const detected = await detectColorSignals(originalPath, image, metadata);
-        signals = {
-            icc_profile_name: detected.iccProfileName,
-            color_primaries: detected.colorPrimaries,
-            transfer_function: detected.transferFunction,
-            matrix_coefficients: detected.matrixCoefficients,
-            is_hdr: detected.isHdr,
-            has_gain_map: detected.hasGainMap,
-            color_pipeline_decision: resolveColorPipelineDecision(detected.iccProfileName, detected),
-        };
-    } catch (err) {
-        console.warn(`[admin-backfill] id=${row.id} detection failed:`, err);
-    }
+        // Re-detect color signals from the original so DB columns stay in sync
+        // with the current detection logic (mirrors backfill-color-pipeline.ts).
+        let signals: {
+            icc_profile_name: string | null;
+            color_primaries: string | null;
+            transfer_function: string | null;
+            matrix_coefficients: string | null;
+            is_hdr: boolean;
+            has_gain_map: boolean;
+            color_pipeline_decision: string | null;
+        } | null = null;
+        let detectionError: unknown = null;
+        try {
+            const image = sharp(originalPath, {
+                limitInputPixels: 256 * 1024 * 1024,
+                failOn: 'error',
+                sequentialRead: true,
+            });
+            const metadata = await image.metadata();
+            const detected = await detectColorSignals(originalPath, image, metadata);
+            signals = {
+                icc_profile_name: detected.iccProfileName,
+                color_primaries: detected.colorPrimaries,
+                transfer_function: detected.transferFunction,
+                matrix_coefficients: detected.matrixCoefficients,
+                is_hdr: detected.isHdr,
+                has_gain_map: detected.hasGainMap,
+                color_pipeline_decision: resolveColorPipelineDecision(detected.iccProfileName, detected),
+            };
+        } catch (err) {
+            detectionError = err;
+            console.warn(`[admin-backfill] id=${row.id} detection failed:`, err);
+        }
 
-    if (signals) {
-        await db.execute(sql`
-            UPDATE images SET
-                pipeline_version = ${IMAGE_PIPELINE_VERSION},
-                icc_profile_name = ${signals.icc_profile_name ?? null},
-                color_primaries = ${signals.color_primaries ?? null},
-                transfer_function = ${signals.transfer_function ?? null},
-                matrix_coefficients = ${signals.matrix_coefficients ?? null},
-                is_hdr = ${signals.is_hdr},
-                has_gain_map = ${signals.has_gain_map},
-                color_pipeline_decision = ${signals.color_pipeline_decision ?? null},
-                was_downscaled = ${wasDownscaled},
-                avif_10bit = ${avif10bit}
-            WHERE id = ${row.id}
-        `);
-    } else {
+        if (signals) {
+            await db.execute(sql`
+                UPDATE images SET
+                    pipeline_version = ${IMAGE_PIPELINE_VERSION},
+                    icc_profile_name = ${signals.icc_profile_name ?? null},
+                    color_primaries = ${signals.color_primaries ?? null},
+                    transfer_function = ${signals.transfer_function ?? null},
+                    matrix_coefficients = ${signals.matrix_coefficients ?? null},
+                    is_hdr = ${signals.is_hdr},
+                    has_gain_map = ${signals.has_gain_map},
+                    color_pipeline_decision = ${signals.color_pipeline_decision ?? null},
+                    was_downscaled = ${wasDownscaled},
+                    avif_10bit = ${avif10bit}
+                WHERE id = ${row.id}
+            `);
+            return { ok: true };
+        }
+
         // R-run2c1 AGG-01: detection failed but encode succeeded. Do NOT
         // advance pipeline_version — the re-encode is idempotent, so leaving
         // the row behind the current version lets a later backfill retry
@@ -278,6 +387,11 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
                 avif_10bit = ${avif10bit}
             WHERE id = ${row.id}
         `);
+        return { ok: false, reason: 'detection-failed', error: detectionError };
+    } finally {
+        // Release the per-image claim AFTER the DB UPDATE so the lock window
+        // covers the whole re-encode→detect→persist sequence.
+        await releaseImageProcessingClaim(row.id, claimConn).catch(() => undefined);
     }
 }
 
@@ -294,6 +408,13 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
     try {
         state.running = true;
         state.lastError = null;
+        // AGG-R5C2-10: reset the per-run observability tallies at the start of
+        // every run so the surfaced counters reflect THIS run, not a sum across
+        // runs (which would be misleading for the admin status disclosure).
+        state.skippedMissingOriginal = 0;
+        state.skippedLocked = 0;
+        state.encodeFailures = 0;
+        state.detectionFailures = 0;
         const config = await getGalleryConfig();
         const settings: RunnerSettings = {
             quality: {
@@ -314,6 +435,13 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
 
         let processed = 0;
         let errors = 0;
+        // AGG-R5C2-10 observability tallies — written through to `state` so the
+        // admin status disclosure can surface them. `skipped` is the sum of the
+        // two skip reasons (missing original + locked) for the human-readable log.
+        let skippedMissingOriginal = 0;
+        let skippedLocked = 0;
+        let encodeFailures = 0;
+        let detectionFailures = 0;
         let cursor = 0;
 
         for (;;) {
@@ -330,14 +458,48 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
                         return;
                     }
                     try {
-                        await reprocessOne(row, settings);
-                        processed++;
+                        const result = await reprocessOne(row, settings);
+                        if (result.ok) {
+                            processed++;
+                        } else {
+                            switch (result.reason) {
+                                case 'missing-original':
+                                    skippedMissingOriginal++;
+                                    break;
+                                case 'locked':
+                                    skippedLocked++;
+                                    break;
+                                case 'encode-failed':
+                                    encodeFailures++;
+                                    // Surface the encode failure for the admin UI
+                                    // (COR-R5C2-02) — these rows keep their stale
+                                    // pipeline_version and need an operator's eye.
+                                    state.lastError =
+                                        result.error instanceof Error ? result.error.message : String(result.error);
+                                    break;
+                                case 'detection-failed':
+                                    detectionFailures++;
+                                    break;
+                            }
+                        }
                     } catch (err) {
                         errors++;
                         console.error(`[admin-backfill] id=${row.id} fatal:`, err);
                     }
-                    if (processed % 25 === 0) {
-                        console.log(`[admin-backfill] progress: processed=${processed} errors=${errors}`);
+                    // Mirror the per-run tallies into shared state continuously so a
+                    // mid-run status poll sees live progress, not just the final value.
+                    state.skippedMissingOriginal = skippedMissingOriginal;
+                    state.skippedLocked = skippedLocked;
+                    state.encodeFailures = encodeFailures;
+                    state.detectionFailures = detectionFailures;
+                    const handled =
+                        processed + skippedMissingOriginal + skippedLocked + encodeFailures + detectionFailures + errors;
+                    if (handled % 25 === 0) {
+                        console.log(
+                            `[admin-backfill] progress: processed=${processed} errors=${errors} ` +
+                                `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
+                                `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures}`,
+                        );
                     }
                 });
             }
@@ -353,7 +515,17 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
             }
         }
 
-        console.log(`[admin-backfill] Run complete: processed=${processed} errors=${errors}`);
+        // Final flush of the tallies into shared state (covers the case where the
+        // last handled count was not a multiple of 25).
+        state.skippedMissingOriginal = skippedMissingOriginal;
+        state.skippedLocked = skippedLocked;
+        state.encodeFailures = encodeFailures;
+        state.detectionFailures = detectionFailures;
+        console.log(
+            `[admin-backfill] Run complete: processed=${processed} errors=${errors} ` +
+                `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
+                `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures}`,
+        );
         state.completedRuns++;
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
