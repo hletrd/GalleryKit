@@ -45,6 +45,7 @@ Commit/gate discipline identical to plan 501 (GPG-signed, gitmoji, per-item comm
 - **Change:** When `getClientIp()` returns `'unknown'`, omit the `idempotencyKey` option entirely (Stripe treats absent key as always-new) — or append a `crypto.randomUUID()` component. Document the TRUST_PROXY dependency in the deployment docs (coordinate with plan 503 doc batch).
 - **Test:** Extend plan-501 Item 13's checkout tests: ip `'unknown'` → `sessions.create` called WITHOUT an idempotency key (or with a unique one per call).
 - **Acceptance:** two concurrent unknown-IP buyers can never share a checkout session.
+- **STATUS: DONE (run-5 cycle-2, commit fc4abdcd via plan-319 item 6)** — unknown-IP requests omit the idempotency key; both branches test-pinned in checkout-route.test.ts.
 
 ### Item 7 — TRC-R5C1-17: pin the `affectedRows` claim shape (S)
 - **Where:** `apps/web/src/app/api/download/[imageId]/route.ts:394-400`.

@@ -47,6 +47,9 @@
 | AGG-R5C2-53 / TEST-R5C2-13 | LOW | `checkout-route.test.ts:82-97`: replace order-dependent select-chain mock with labelled `mockImplementationOnce` pairs or table-keyed dispatch |
 | AGG-R5C2-54 / TEST-R5C2-14 | LOW | new standalone `countCodePoints` tests (emoji/CJK surrogate pairs, combining marks) |
 
-## Progress
+## Progress — 2026-06-12 (run-5 cycle-2): ALL UNITS DONE
 
-(record per-row status + commit as work proceeds)
+- Unit A (9 doc rows): f212e84c — CLAUDE.md truth pass + use-display-capability comments + sw.template.js wording + regenerated sw.js + touch-target test header.
+- Unit B: AGG-R5C2-30 → 24f607de; AGG-R5C2-32 → 24f607de; AGG-R5C2-33 → 5700f184; AGG-R5C2-37 → 3b5d9f20; AGG-R5C2-38 → a5e787ee; AGG-R5C2-39 → 24f607de.
+- Unit C: AGG-R5C2-40 → d8307299; AGG-R5C2-41/-42/-43/-44 → 0e8fd431; AGG-R5C2-45 → verified non-focusable, no change (recorded in 0e8fd431 body); AGG-R5C2-46 → verified already implemented (95dvh + 95vh fallback present), no change.
+- Unit D: AGG-R5C2-52 → 3bccd70a; AGG-R5C2-53 → fc4abdcd; AGG-R5C2-54 → 1305bc5e.

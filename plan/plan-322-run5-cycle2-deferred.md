@@ -37,6 +37,12 @@
 - **Reason for deferral:** rider on already-planned plan-315 item 16 (PERF-R5C1-07 SW background-revalidate rework) — coalescing meta writes belongs inside that same rework, not as a standalone change to soon-restructured code.
 - **Exit criterion:** implemented together with plan-315 item 16; the item's spec now includes "coalesce/batch LRU meta writes (per-paint debounce or per-URL meta entries)".
 
+### 4b. AGG-R5C2-08 rider — sidecar `backfill-color-pipeline.ts` per-image lock not mirrored
+- **Original severity/confidence:** MED / High (TRC-R5C2-01) — the in-app runner fix SHIPPED this cycle; this rider covers only the sidecar script half
+- **Where:** `apps/web/scripts/backfill-color-pipeline.ts` (header comment now documents the gap)
+- **Reason for deferral:** the sidecar batches its DB UPDATEs in `flushBatch()` decoupled from the per-row encode, so a per-row advisory lock cannot cover the encode→UPDATE window without restructuring the batching — the plan-320 item 2 "structurally risky, leave it and say so" branch. Mitigations: the global `gallerykit_color_pipeline_backfill` lock serializes the sidecar against the in-app runner; the sidecar is a manual ops tool; operator guidance (don't trigger admin Retry during a sidecar run) is documented in the script header.
+- **Exit criterion:** any restructure of the sidecar's batching, OR evidence of a real interleaved-write incident during a sidecar run → claim the per-image lock for the full encode→flush window (e.g. flush per-row while a lock is held).
+
 ### 5. AGG-R5C2-31 / SEC-R5C2-02 — OG fallback 302 relies on write-time validator
 - **Original severity/confidence:** LOW / Med · likely-covered-by-planned-work (security-reviewer's own verdict: "Recommend [treating as covered by SEC-R5C1-04] and close")
 - **Where:** `apps/web/src/app/api/og/photo/[id]/route.tsx:246-258`

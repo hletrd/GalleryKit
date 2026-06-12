@@ -45,9 +45,11 @@ Sources: BUG-R5C2-01, CRT-R5C2-04, TEST-R5C2-02, BUG-R5C2-04, TEST-R5C2-15.
 
 | # | Finding(s) | Commit | Status |
 |---|---|---|---|
-| 1 | AGG-R5C2-01 | | |
-| 2 | AGG-R5C2-02 | | |
-| 3 | AGG-R5C2-03 | | |
-| 4 | AGG-R5C2-04 | | |
-| 5 | AGG-R5C2-05 | | |
-| 6 | AGG-R5C2-06 (+plan-315 item 6) | | |
+| 1 | AGG-R5C2-01 | 5700f184 | DONE — disclaimer (en+ko) + docstring + truthful settings note + union narrowed |
+| 2 | AGG-R5C2-02 | 6d17ca58 | DONE — caption-constants.ts + server-only; photo-title decoupled from caption-generator |
+| 3 | AGG-R5C2-03 | 3b48e185 | DONE — SQL-content dispatch, bound-cursor pins (0→100), vi.waitFor |
+| 4 | AGG-R5C2-04 | f212e84c | DONE — caniuse re-verified (FF 110+); matrix + prose + code comments corrected |
+| 5 | AGG-R5C2-05 | 6d17ca58 | DONE — caption-generator.test.ts (8 tests) |
+| 6 | AGG-R5C2-06 (+plan-315 item 6) | fc4abdcd | DONE — unknown-IP omits idempotency key; both branches pinned |
+
+**All 6 items implemented 2026-06-12 (run-5 cycle-2).** Typecheck clean and targeted suites green at each commit; full gate record in plan-318.

@@ -59,16 +59,18 @@
 
 | # | Finding | Commit | Status |
 |---|---|---|---|
-| 1 | AGG-R5C2-07 | | |
-| 2 | AGG-R5C2-08 | | |
-| 3 | AGG-R5C2-09 | | |
-| 4 | AGG-R5C2-10 | | |
-| 5 | AGG-R5C2-12 | | |
-| 6 | AGG-R5C2-13 | | |
-| 7 | AGG-R5C2-14 | | |
-| 8 | AGG-R5C2-15 | | |
-| 9 | AGG-R5C2-16 | | |
-| 10 | AGG-R5C2-17 | | |
-| 11 | AGG-R5C2-18 | | |
-| 12 | AGG-R5C2-19 | | |
-| 13 | AGG-R5C2-11 (doc half) | | |
+| 1 | AGG-R5C2-07 | 3b5d9f20 (+6d17ca58 helper) | DONE |
+| 2 | AGG-R5C2-08 | a5e787ee | DONE (runner); sidecar half deferred → plan-322 entry 4b |
+| 3 | AGG-R5C2-09 | 5700f184 | DONE — contract + CLIP_MODEL_VERSION provenance documented |
+| 4 | AGG-R5C2-10 | a5e787ee | DONE — counters in logs + AdminBackfillState (additive) |
+| 5 | AGG-R5C2-12 | 6d17ca58 | DONE — filter(Boolean) + tests |
+| 6 | AGG-R5C2-13 | d8307299 | DONE — min-h-11 on both links |
+| 7 | AGG-R5C2-14 | eb4432f0 | DONE |
+| 8 | AGG-R5C2-15 | eb4432f0 | DONE — fake timers |
+| 9 | AGG-R5C2-16 | 1305bc5e | DONE — 12 tests |
+| 10 | AGG-R5C2-17 | 67bdf447 | DONE — resolver suite |
+| 11 | AGG-R5C2-18 | 3bccd70a | DONE — 404 + /s/[key] specs |
+| 12 | AGG-R5C2-19 | 1305bc5e | DONE — 35 tests |
+| 13 | AGG-R5C2-11 (doc half) | 22671f52 | DONE — index-utilization comments; index re-order stays deferred (plan-322) |
+
+**All 13 items implemented 2026-06-12 (run-5 cycle-2).**
