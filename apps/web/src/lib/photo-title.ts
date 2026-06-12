@@ -120,6 +120,3 @@ export function getConcisePhotoAltText(
         .replace(/\s+#/g, ', ');
 }
 
-// Re-export ALT_TEXT_STUB_PREFIX_RE so existing tests importing it from here
-// continue to work without modification.
-export { ALT_TEXT_STUB_PREFIX_RE };

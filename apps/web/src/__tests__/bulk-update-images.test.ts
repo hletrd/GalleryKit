@@ -8,9 +8,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// caption-generator (imported transitively via image-queue → images) pulls in
-// 'server-only'. Mock it so vitest doesn't reject the import outside Next.js.
-vi.mock('server-only', () => ({}));
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks

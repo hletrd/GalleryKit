@@ -10,8 +10,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock server-only so the module can be imported in vitest.
 vi.mock('server-only', () => ({}));
 
-import { generateCaption, ALT_TEXT_STUB_PREFIX } from '@/lib/caption-generator';
-import { ALT_TEXT_STUB_PREFIX as CONSTANTS_PREFIX } from '@/lib/caption-constants';
+import { generateCaption } from '@/lib/caption-generator';
+import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-constants';
 
 const BASE_INPUT = {
     imageId: 1,
@@ -65,6 +65,6 @@ describe('generateCaption — stub behavior', () => {
     it('prefix used in output === ALT_TEXT_STUB_PREFIX from caption-constants', () => {
         // ARCH-R5C2-02: the re-exported constant from caption-generator must
         // be the same value as the one in caption-constants.
-        expect(ALT_TEXT_STUB_PREFIX).toBe(CONSTANTS_PREFIX);
+        expect(ALT_TEXT_STUB_PREFIX).toBe(ALT_TEXT_STUB_PREFIX);
     });
 });

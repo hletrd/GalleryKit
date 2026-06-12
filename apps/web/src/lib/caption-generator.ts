@@ -19,7 +19,6 @@
 import 'server-only';
 
 export type { CaptionInput };
-export { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-constants';
 
 import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-constants';
 
