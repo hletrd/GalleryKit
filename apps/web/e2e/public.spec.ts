@@ -98,6 +98,47 @@ test('home gallery keeps a full H1 -> H2 -> H3 heading hierarchy', async ({ page
   expect(h3Count).toBeGreaterThan(0);
 });
 
+test('unknown route renders localized 404 page (AGG-R5C2-18)', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/en/this-route-does-not-exist-xyz');
+  await expectNoNextError(page);
+
+  // The not-found page renders "Page not found." as the <h1> and a recovery
+  // link with text "Back to gallery". Assert both so a stripped-error page
+  // (raw Next.js error output) does not satisfy this check.
+  await expect(page.getByRole('heading', { level: 1, name: 'Page not found.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to gallery' })).toBeVisible();
+});
+
+test('shared-link unknown key renders localized not-found page, not a 500 (AGG-R5C2-18)', async ({ page }) => {
+  // An unknown /s/[key] key calls notFound() server-side and renders the
+  // same localized not-found page — not a raw 500. This spec always runs
+  // regardless of seed data because it exercises the error path only.
+  await ensureEnglishLocale(page);
+  await page.goto('/en/s/this-key-does-not-exist-xyz');
+  await expectNoNextError(page);
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Page not found.' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to gallery' })).toBeVisible();
+});
+
+test('shared-link valid key renders photo page (AGG-R5C2-18)', async ({ page }) => {
+  // This spec requires a seeded share link in the test environment.
+  // The e2e seed data only ships a shared-group key (/g/Abc234Def5) but no
+  // single-photo share link (/s/[key]). Skip gracefully when none is
+  // available rather than hard-coding a fragile key.
+  const shareKey = process.env.E2E_SHARE_KEY?.trim();
+  test.skip(!shareKey, 'Set E2E_SHARE_KEY to a seeded /s/[key] value to run this spec.');
+
+  await ensureEnglishLocale(page);
+  await page.goto(`/en/s/${shareKey}`);
+  await expectNoNextError(page);
+
+  // A valid share key renders a photo title heading and the "View Gallery" link.
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'View Gallery' })).toBeVisible();
+});
+
 test('shared-group navigation keeps the shared route context', async ({ page }) => {
   await ensureEnglishLocale(page);
   await page.goto('/g/Abc234Def5');

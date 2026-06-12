@@ -42,6 +42,33 @@ test.describe('admin workflows (opt-in)', () => {
     await expect(page.locator('input[type="file"]')).toBeVisible();
   });
 
+  test('wrong-password login attempt shows localized error and stays on login page (AGG-R5C2-52)', async ({ page }) => {
+    // Gated inside adminE2EEnabled so this test only runs when admin E2E
+    // credentials are available — the same guard used by all other admin
+    // specs. This also keeps the test off remote hosts unless
+    // E2E_ALLOW_REMOTE_ADMIN=true, which protects the per-IP login
+    // rate limit (5 attempts / 15 min). One wrong attempt is consumed here;
+    // subsequent tests perform a correct login so the budget is not exhausted.
+    await ensureEnglishLocale(page);
+    await page.goto('/admin');
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page.getByPlaceholder('Username')).toBeVisible();
+
+    await page.getByPlaceholder('Username').fill('nonexistent-user-xyz');
+    await page.getByPlaceholder('Password').fill('totally-wrong-password-xyz');
+    await page.getByRole('button', { name: /sign in/i }).click();
+
+    // The login form renders the server-action error in a <p role="alert">.
+    // "Invalid credentials" is the serverActions.invalidCredentials key from
+    // en.json — returned for any username/password mismatch.
+    const errorAlert = page.getByRole('alert');
+    await expect(errorAlert).toBeVisible({ timeout: 10_000 });
+    await expect(errorAlert).toContainText('Invalid credentials');
+
+    // The URL must stay on the login page (not redirected to dashboard).
+    await expect(page).toHaveURL(/\/admin$/);
+  });
+
   test('admin settings GPS toggle reflects lock state in the hydrated UI (C1R-07)', async ({ page }) => {
     await loginAsAdmin(page);
 
