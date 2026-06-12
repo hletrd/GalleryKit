@@ -1,10 +1,5 @@
 import type { TagInfo } from '@/lib/image-types';
-import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-generator';
-
-// CRT-R5C1-02: module-level constant — avoid rebuilding on every call.
-const ALT_TEXT_STUB_PREFIX_RE = new RegExp(
-    `^${ALT_TEXT_STUB_PREFIX.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`
-);
+import { ALT_TEXT_STUB_PREFIX_RE, stripStubPrefix } from '@/lib/caption-constants';
 
 interface PhotoTitleInput {
     title: string | null;
@@ -46,7 +41,9 @@ export function getPhotoDisplayTitle(
 
     if (image.title && image.title.trim() && !isFilenameLikeTitle(image.title)) {
         if (options.formatTitleAsTags) {
-            return image.title.split(/\s+/).map((word) => `#${word}`).join(' ');
+            // COR-R5C2-03: filter(Boolean) removes empty tokens produced by
+            // leading/trailing/multiple spaces so no bare '#' tokens appear.
+            return image.title.split(/\s+/).filter(Boolean).map((word) => `#${word}`).join(' ');
         }
         return image.title;
     }
@@ -108,10 +105,11 @@ export function getConcisePhotoAltText(
     const hasMeaningfulTitle = image.title && image.title.trim() && !isFilenameLikeTitle(image.title);
     const hasTags = image.tag_names && image.tag_names.trim();
     if (!hasMeaningfulTitle && !hasTags && image.alt_text_suggested && image.alt_text_suggested.trim()) {
-        // CRT-R5C1-02: strip the stub prefix so '[AUTO] Photo taken with ...' never
-        // reaches visible titles, <title>, or OG meta tags. The raw value is still
-        // returned for alt="" attributes by callers that use alt_text_suggested directly.
-        const stripped = image.alt_text_suggested.trim().replace(ALT_TEXT_STUB_PREFIX_RE, '');
+        // CRT-R5C1-02 / CRT-R5C2-03: strip the stub prefix so '[AUTO] Photo taken with ...'
+        // never reaches visible titles, <title>, or OG meta tags.
+        // ALT_TEXT_STUB_PREFIX_RE is imported from caption-constants (not caption-generator)
+        // so this module remains client-safe.
+        const stripped = stripStubPrefix(image.alt_text_suggested.trim());
         if (stripped.trim()) {
             return stripped.trim();
         }
@@ -121,3 +119,7 @@ export function getConcisePhotoAltText(
         .replace(/^#+/, '')
         .replace(/\s+#/g, ', ');
 }
+
+// Re-export ALT_TEXT_STUB_PREFIX_RE so existing tests importing it from here
+// continue to work without modification.
+export { ALT_TEXT_STUB_PREFIX_RE };

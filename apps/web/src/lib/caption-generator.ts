@@ -16,16 +16,20 @@
  *   - Florence-2-base ONNX weights are downloaded to data/models/florence2/
  *   - The download script (scripts/download-florence2.ts) is run by the operator
  */
+import 'server-only';
 
-export interface CaptionInput {
+export type { CaptionInput };
+export { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-constants';
+
+import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-constants';
+
+interface CaptionInput {
     imageId: number;
     camera_model: string | null | undefined;
     capture_date: string | null | undefined;
 }
 
 const ALT_TEXT_MAX_CHARS = 140;
-// CRT-R5C1-02: exported so photo-title.ts can strip it from visible-title fallbacks.
-export const ALT_TEXT_STUB_PREFIX = '[AUTO] ';
 
 /**
  * STUB: Produce an EXIF-derived caption placeholder.

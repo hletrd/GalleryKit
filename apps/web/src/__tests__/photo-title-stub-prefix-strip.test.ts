@@ -5,11 +5,15 @@
  * OG meta, and photo viewer) must strip the ALT_TEXT_STUB_PREFIX from
  * alt_text_suggested before returning. The raw value is still available to
  * callers that consume alt_text_suggested directly for the alt="" attribute.
+ *
+ * Extended in R5C2 to cover:
+ *  - formatTitleAsTags empty-token fix (COR-R5C2-03)
+ *  - stripStubPrefix unit cases (ARCH-R5C2-02)
  */
 
 import { describe, it, expect } from 'vitest';
-import { getConcisePhotoAltText } from '@/lib/photo-title';
-import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-generator';
+import { getConcisePhotoAltText, getPhotoDisplayTitle } from '@/lib/photo-title';
+import { ALT_TEXT_STUB_PREFIX, stripStubPrefix } from '@/lib/caption-constants';
 
 const FALLBACK = 'Photo';
 
@@ -77,5 +81,84 @@ describe('getConcisePhotoAltText — [AUTO] prefix strip (CRT-R5C1-02)', () => {
         );
         // Not starting with [AUTO], so returned as-is
         expect(result).toBe('Photo [AUTO] annotation');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// COR-R5C2-03: formatTitleAsTags must not produce bare '#' tokens
+// ---------------------------------------------------------------------------
+
+describe('getPhotoDisplayTitle — formatTitleAsTags empty-token fix (COR-R5C2-03)', () => {
+    it('does not produce bare # tokens from a leading-space title', () => {
+        const result = getPhotoDisplayTitle(
+            { title: '  sunset ocean' },
+            'fallback',
+            { formatTitleAsTags: true },
+        );
+        expect(result).not.toContain('#  ');
+        expect(result).not.toMatch(/(^|\s)#(\s|$)/);
+        expect(result).toBe('#sunset #ocean');
+    });
+
+    it('does not produce bare # tokens from a trailing-space title', () => {
+        const result = getPhotoDisplayTitle(
+            { title: 'sunset ocean  ' },
+            'fallback',
+            { formatTitleAsTags: true },
+        );
+        expect(result).not.toMatch(/(^|\s)#(\s|$)/);
+        expect(result).toBe('#sunset #ocean');
+    });
+
+    it('does not produce bare # tokens from a multiple-space title', () => {
+        const result = getPhotoDisplayTitle(
+            { title: 'sunset  ocean' },
+            'fallback',
+            { formatTitleAsTags: true },
+        );
+        expect(result).not.toMatch(/(^|\s)#(\s|$)/);
+        expect(result).toBe('#sunset #ocean');
+    });
+
+    it('handles single-word title without bare # tokens', () => {
+        const result = getPhotoDisplayTitle(
+            { title: '  solo  ' },
+            'fallback',
+            { formatTitleAsTags: true },
+        );
+        expect(result).toBe('#solo');
+        expect(result).not.toMatch(/(^|\s)#(\s|$)/);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// ARCH-R5C2-02: stripStubPrefix unit cases
+// ---------------------------------------------------------------------------
+
+describe('stripStubPrefix (caption-constants)', () => {
+    it('strips the exact prefix from a standard stub value', () => {
+        expect(stripStubPrefix('[AUTO] Photo taken with Canon EOS R5')).toBe('Photo taken with Canon EOS R5');
+    });
+
+    it('strips the prefix even with extra trailing whitespace in prefix', () => {
+        expect(stripStubPrefix('[AUTO]   Photo')).toBe('Photo');
+    });
+
+    it('returns empty string when prefix is the entire content', () => {
+        expect(stripStubPrefix('[AUTO] ')).toBe('');
+        expect(stripStubPrefix('[AUTO]')).toBe('');
+    });
+
+    it('does not strip mid-string occurrences', () => {
+        expect(stripStubPrefix('Photo [AUTO] note')).toBe('Photo [AUTO] note');
+    });
+
+    it('is idempotent on a non-prefixed string', () => {
+        expect(stripStubPrefix('normal title')).toBe('normal title');
+    });
+
+    it('applies only one stripping (not recursive)', () => {
+        // Double prefix — only the first is stripped
+        expect(stripStubPrefix('[AUTO] [AUTO] nested')).toBe('[AUTO] nested');
     });
 });
