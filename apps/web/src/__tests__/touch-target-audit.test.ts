@@ -1088,4 +1088,42 @@ describe('touch-target audit (44 px floor)', () => {
             ).toBe(true);
         }
     });
+
+    // AGG-C6-03 (run-9 c3 DES-C6-1): two MORE public back-nav <Link>s shipped
+    // ~20 px tall in the same bare-link gap — the adjacent siblings the c5 pass
+    // (AGG-C5-03) missed. Same pragmatic partial close: pin the two SPECIFIC
+    // fixed back-nav links keep their min-h-11 tap area. (The anchor key here is
+    // the link's BODY text, which sits between the <Link> opening tag and its
+    // </Link>; the window from `<Link` to the anchor still includes the
+    // className, so the same scan applies.)
+    it('public back-nav <Link>s keep their min-h-11 tap area (AGG-C6-03)', () => {
+        const backNavLinkFiles = [
+            { rel: 'app/[locale]/(public)/s/[key]/page.tsx', anchor: 'viewGallery' },
+            { rel: 'app/[locale]/(public)/year/[year]/page.tsx', anchor: 'backToTimeline' },
+        ];
+        const hasMinH44 = (s: string) => /min-h-11\b/.test(s) || /min-h-\[(?:4[4-9]|[5-9]\d|\d{3,})px\]/.test(s);
+        for (const { rel, anchor } of backNavLinkFiles) {
+            const abs = path.resolve(srcRoot, rel);
+            const src = fs.readFileSync(abs, 'utf8');
+            let foundLinkWithAnchor = false;
+            let linkWithAnchorHasMinH44 = false;
+            let fromIdx = src.indexOf(anchor);
+            while (fromIdx !== -1) {
+                const linkOpen = src.lastIndexOf('<Link', fromIdx);
+                if (linkOpen !== -1 && !src.slice(linkOpen, fromIdx).includes('</Link>')) {
+                    foundLinkWithAnchor = true;
+                    if (hasMinH44(src.slice(linkOpen, fromIdx))) {
+                        linkWithAnchorHasMinH44 = true;
+                        break;
+                    }
+                }
+                fromIdx = src.indexOf(anchor, fromIdx + anchor.length);
+            }
+            expect(foundLinkWithAnchor, `${rel}: a <Link> rendering ${anchor} must exist`).toBe(true);
+            expect(
+                linkWithAnchorHasMinH44,
+                `${rel}: the public back-nav <Link> rendering ${anchor} must carry min-h-11 (or min-h-[≥44px]) for a 44 px tap target (AGG-C6-03)`,
+            ).toBe(true);
+        }
+    });
 });

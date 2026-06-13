@@ -106,7 +106,7 @@ export default async function YearInReviewPage({
             <div className="space-y-1">
                 <Link
                     href={localizePath(locale, `/timeline?year=${yearNum}`)}
-                    className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1"
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 min-h-11"
                 >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />

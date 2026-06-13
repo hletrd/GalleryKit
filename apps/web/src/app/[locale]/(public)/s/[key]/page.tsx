@@ -102,7 +102,7 @@ export default async function SharedPhotoPage({ params }: { params: Promise<{ ke
     return (
         <>
             <div className="flex items-center justify-between mb-4 px-4 pt-4">
-                <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1">
+                <Link href={localizePath(locale, '/')} className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11">
                     <ArrowLeft className="h-4 w-4" /> {t('viewGallery')}
                 </Link>
             </div>

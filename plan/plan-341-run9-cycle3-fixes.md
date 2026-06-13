@@ -58,7 +58,7 @@
   - (b) `year/[year]/page.tsx:109` → add `min-h-11` to the existing classes (it already has `inline-flex items-center`).
   - Optional (pragmatic middle path, mirrors plan-340 Deferred-1's resolution for the cycle-5 links): extend the positive-assertion `it` block in `touch-target-audit.test.ts` to also pin these two links keep `min-h-11`, so a future drop is caught. The full layout-aware bare-link heuristic stays DEFERRED in plan-342.
 - **Acceptance:** both links present a >=44 px tap target (`min-h-11`); no visual regression (flex layout + underline/hover preserved); no hardcoded English (strings still via `t()`). Because the audit cannot SEE bare links, verification is reading the rendered classes + the optional positive pin. lint + typecheck + full gate run green.
-- **Status:** PENDING
+- **Status:** DONE (commit pending push). Added `min-h-11` to both back-nav `<Link>`s (`s/[key]/page.tsx:105`, `year/[year]/page.tsx:109`) keeping the existing flex/underline. Took the pragmatic positive-pin: new `it('public back-nav <Link>s keep their min-h-11 tap area (AGG-C6-03)')` block in `touch-target-audit.test.ts`, scoped per-link by anchor key (`viewGallery`/`backToTimeline`). PROVEN non-vacuous: dropping `min-h-11` from one link flips it RED, restored GREEN (14/14). typecheck clean.
 
 ## Item 4 — AGG-C6-04: `<Link>`/`<a>` touch-target patterns missed the `max-` lookbehind (LOW · critic · adjacent gap of AGG-C5-02)
 
