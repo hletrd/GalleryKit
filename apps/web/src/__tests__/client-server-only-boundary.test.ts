@@ -22,6 +22,43 @@ const srcRoot = path.resolve(__dirname, '..');
 
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'];
 
+/**
+ * AGG-R8-01 (run-8 c2): de-flake. This scan walks the whole `src` tree and,
+ * for every `'use client'` module, walks its transitive `@/lib`/`@/db` import
+ * closure. Without caching, the SAME shared `@/lib` file is `readFileSync`'d
+ * once per client module whose closure reaches it — on a cold/contended CI
+ * runner the redundant re-reads pushed the single test past the default 15 s
+ * `testTimeout` (a flake that ALSO masked any real violation behind the same
+ * red). Memoize every file read into one Map keyed by absolute path, plus a
+ * per-file parsed-import-spec cache, so each source is read and parsed exactly
+ * once across the entire run. We also set a generous explicit per-test timeout
+ * below — NOT a suppression: the assertion still runs to completion and still
+ * fails on a real client→server-only leak; we are only correcting an under-
+ * sized timeout that previously turned a slow-but-correct run into a false red.
+ */
+const readCache = new Map<string, string | null>();
+function readSourceCached(file: string): string | null {
+    const hit = readCache.get(file);
+    if (hit !== undefined) return hit;
+    let source: string | null;
+    try {
+        source = fs.readFileSync(file, 'utf8');
+    } catch {
+        source = null;
+    }
+    readCache.set(file, source);
+    return source;
+}
+
+const importSpecCache = new Map<string, string[]>();
+function extractAliasedImportsCached(file: string, source: string): string[] {
+    const hit = importSpecCache.get(file);
+    if (hit !== undefined) return hit;
+    const specs = extractAliasedImports(source);
+    importSpecCache.set(file, specs);
+    return specs;
+}
+
 /** Resolve a `@/...` import specifier to an on-disk source file, or null. */
 function resolveAliasedModule(spec: string): string | null {
     if (!spec.startsWith('@/')) return null;
@@ -90,19 +127,15 @@ function findServerOnlyInClosure(entry: string): { offender: string; chain: stri
         const { file, chain } = stack.pop()!;
         if (visited.has(file)) continue;
         visited.add(file);
-        let source: string;
-        try {
-            source = fs.readFileSync(file, 'utf8');
-        } catch {
-            continue;
-        }
+        const source = readSourceCached(file);
+        if (source === null) continue;
         // The entry file itself is the 'use client' module — its OWN
         // server-only presence is impossible (build would already fail), but a
         // transitive dependency carrying server-only is the real bug.
         if (file !== entry && hasServerOnlyImport(source)) {
             return { offender: relFromSrc(file), chain };
         }
-        for (const spec of extractAliasedImports(source)) {
+        for (const spec of extractAliasedImportsCached(file, source)) {
             const resolved = resolveAliasedModule(spec);
             if (resolved && !visited.has(resolved)) {
                 stack.push({ file: resolved, chain: [...chain, relFromSrc(resolved)] });
@@ -120,11 +153,8 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
     it("no 'use client' module transitively imports a server-only file", () => {
         const allFiles = listFilesRecursive(srcRoot);
         const clientFiles = allFiles.filter((f) => {
-            try {
-                return isUseClient(fs.readFileSync(f, 'utf8'));
-            } catch {
-                return false;
-            }
+            const source = readSourceCached(f);
+            return source !== null && isUseClient(source);
         });
         // Sanity: the codebase has client components — if this is 0 the scanner
         // is broken (wrong root / predicate) and would pass vacuously.
@@ -144,7 +174,9 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
             violations,
             `Client components must not pull 'server-only' into their bundle:\n\n${violations.join('\n\n')}`,
         ).toEqual([]);
-    });
+    }, 60_000); // AGG-R8-01: generous explicit timeout — the memoized scan runs in
+    // single-digit seconds, but a cold/contended CI runner doing a full src-tree
+    // walk must not false-fail against the 15 s default. The assertion is unchanged.
 
     it('photo-title.ts imports caption-constants (client-safe), NOT caption-generator (server-only)', () => {
         // AGG-R5C2-02 pin: the exact regression this guard exists for.
