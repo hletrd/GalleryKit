@@ -74,6 +74,14 @@ export interface BackfillStatusResult {
     completedRuns?: number;
     /** Candidate count captured when the last run started (its processed-total upper bound). */
     lastQueuedCount?: number;
+    /**
+     * AGG-1 (run-6 c1): the LAST run's REAL successfully-re-encoded count and
+     * fatal-error count, mirrored straight from the runner state. The UI renders
+     * `processed` from THIS field — never reconstructed by subtracting failures
+     * from `lastQueuedCount`, which dropped `errors` and over-counted.
+     */
+    processed?: number;
+    errors?: number;
     encodeFailures?: number;
     detectionFailures?: number;
     skippedMissingOriginal?: number;
@@ -98,6 +106,8 @@ export async function getBackfillStatus(): Promise<BackfillStatusResult> {
             candidateCount,
             completedRuns: s.completedRuns,
             lastQueuedCount: s.lastQueuedCount,
+            processed: s.processed,
+            errors: s.errors,
             encodeFailures: s.encodeFailures,
             detectionFailures: s.detectionFailures,
             skippedMissingOriginal: s.skippedMissingOriginal,

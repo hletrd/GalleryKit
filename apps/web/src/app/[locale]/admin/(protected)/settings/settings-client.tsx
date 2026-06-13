@@ -275,17 +275,16 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                     <strong className="block">{t('settings.backfillLastRunTitle')}</strong>
                                     {backfillStatus.lastRunHadFailures ? (
                                         <p className="text-amber-700 dark:text-amber-400">
+                                            {/* AGG-1 (run-6 c1): render the REAL successfully-re-encoded
+                                                count from the runner's mirrored `processed` counter, and
+                                                surface fatal `errors` (per-row UPDATE failures). The prior
+                                                code reconstructed processed by subtracting failures/skips
+                                                from the pre-run candidate snapshot, which dropped `errors`
+                                                entirely — a fatal-only run then read "N re-encoded, 0
+                                                failures" with no error line. */}
                                             {t('settings.backfillLastRunWithFailures', {
-                                                processed: String(
-                                                    Math.max(
-                                                        0,
-                                                        (backfillStatus.lastQueuedCount ?? 0) -
-                                                            (backfillStatus.encodeFailures ?? 0) -
-                                                            (backfillStatus.detectionFailures ?? 0) -
-                                                            (backfillStatus.skippedMissingOriginal ?? 0) -
-                                                            (backfillStatus.skippedLocked ?? 0),
-                                                    ),
-                                                ),
+                                                processed: String(backfillStatus.processed ?? 0),
+                                                errors: String(backfillStatus.errors ?? 0),
                                                 encodeFailures: String(backfillStatus.encodeFailures ?? 0),
                                                 detectionFailures: String(backfillStatus.detectionFailures ?? 0),
                                             })}
@@ -293,7 +292,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                     ) : (
                                         <p>
                                             {t('settings.backfillLastRunClean', {
-                                                processed: String(backfillStatus.lastQueuedCount ?? 0),
+                                                processed: String(backfillStatus.processed ?? 0),
                                             })}
                                         </p>
                                     )}

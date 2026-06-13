@@ -125,6 +125,25 @@ interface AdminBackfillState {
     running: boolean;
     /** Total candidate count from the last started run, for status disclosure. */
     lastQueuedCount: number;
+    /**
+     * AGG-1 (run-6 c1): the LAST run's REAL successfully-re-encoded row count,
+     * mirrored from the runner's `processed` local. The admin UI must read this
+     * directly rather than reconstructing it by subtracting failures/skips from
+     * `lastQueuedCount` — that reconstruction silently dropped `errors` (fatal
+     * per-row UPDATE failures) and used the pre-run candidate snapshot, so a run
+     * where every row's version-bump UPDATE threw reported the failed rows as
+     * "re-encoded". Reset to 0 at the start of every run.
+     */
+    processed: number;
+    /**
+     * AGG-1 (run-6 c1): the LAST run's fatal per-row error count, mirrored from
+     * the runner's `errors` local (the `catch` around `reprocessOne` — deadlock /
+     * lock-timeout / connection-drop on the version-bump UPDATE). Previously this
+     * counter lived only as a function-local and was never surfaced, so a
+     * fatal-only run looked clean to every status consumer. Reset to 0 at the
+     * start of every run.
+     */
+    errors: number;
     /** Monotonic counter incremented when the runner finishes successfully. */
     completedRuns: number;
     /** Last error message if a run failed, else null. */
@@ -168,6 +187,8 @@ function getState(): AdminBackfillState {
         g[adminBackfillStateKey] = {
             running: false,
             lastQueuedCount: 0,
+            processed: 0,
+            errors: 0,
             completedRuns: 0,
             lastError: null,
             skippedMissingOriginal: 0,
@@ -180,6 +201,8 @@ function getState(): AdminBackfillState {
     // Defensive backfill for state objects created before these fields existed
     // (e.g. a globalThis symbol seeded by an older module version or a test).
     const s = g[adminBackfillStateKey]!;
+    s.processed ??= 0;
+    s.errors ??= 0;
     s.skippedMissingOriginal ??= 0;
     s.skippedLocked ??= 0;
     s.encodeFailures ??= 0;
@@ -206,6 +229,8 @@ export function _resetAdminBackfillStateForTesting(): void {
     g[adminBackfillStateKey] = {
         running: false,
         lastQueuedCount: 0,
+        processed: 0,
+        errors: 0,
         completedRuns: 0,
         lastError: null,
         skippedMissingOriginal: 0,
@@ -222,6 +247,8 @@ export function readAdminBackfillState(): Readonly<AdminBackfillState> {
     return {
         running: s.running,
         lastQueuedCount: s.lastQueuedCount,
+        processed: s.processed,
+        errors: s.errors,
         completedRuns: s.completedRuns,
         lastError: s.lastError,
         skippedMissingOriginal: s.skippedMissingOriginal,
@@ -508,6 +535,11 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         // AGG-R5C2-10: reset the per-run observability tallies at the start of
         // every run so the surfaced counters reflect THIS run, not a sum across
         // runs (which would be misleading for the admin status disclosure).
+        // AGG-1 (run-6 c1): processed + errors are reset here too so the admin
+        // sees THIS run's real successful count and fatal-error count, not a
+        // stale carry-over or a snapshot-derived reconstruction.
+        state.processed = 0;
+        state.errors = 0;
         state.skippedMissingOriginal = 0;
         state.skippedLocked = 0;
         state.encodeFailures = 0;
@@ -592,10 +624,21 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
                         }
                     } catch (err) {
                         errors++;
+                        // AGG-1 (run-6 c1): a fatal per-row error (the version-bump
+                        // UPDATE threw) must also populate lastError, not just the
+                        // encode-failed branch above. Otherwise a fatal-only run
+                        // surfaces the with-failures banner with NO error message —
+                        // the admin sees "failures" but no detail. Last-writer-wins
+                        // across workers at concurrency>1 (counts stay correct; the
+                        // scalar message reflects whichever worker threw last —
+                        // documented in AdminBackfillState).
+                        state.lastError = err instanceof Error ? err.message : String(err);
                         console.error(`[admin-backfill] id=${row.id} fatal:`, err);
                     }
                     // Mirror the per-run tallies into shared state continuously so a
                     // mid-run status poll sees live progress, not just the final value.
+                    state.processed = processed;
+                    state.errors = errors;
                     state.skippedMissingOriginal = skippedMissingOriginal;
                     state.skippedLocked = skippedLocked;
                     state.encodeFailures = encodeFailures;
@@ -625,6 +668,8 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
 
         // Final flush of the tallies into shared state (covers the case where the
         // last handled count was not a multiple of 25).
+        state.processed = processed;
+        state.errors = errors;
         state.skippedMissingOriginal = skippedMissingOriginal;
         state.skippedLocked = skippedLocked;
         state.encodeFailures = encodeFailures;
