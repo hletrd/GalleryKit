@@ -1036,4 +1036,32 @@ describe('touch-target audit (44 px floor)', () => {
         const issues = scanSource('fixture/multiline-badge-ok.tsx', multilineSnippet);
         expect(issues, `min-h-11 Badge chip should pass: ${JSON.stringify(issues)}`).toEqual([]);
     });
+
+    // AGG-C5-03 (run-9 c2 DES-C5-1): three PUBLIC inline <Link> recovery actions
+    // (the only escape from an empty/over-filtered state) shipped ~20 px tall,
+    // below the 44 px floor, in the audit's DELIBERATE bare-link gap (the
+    // <Link>/<a> patterns only flag an EXPLICIT sub-44 sizing token, so a link
+    // with no height token at all is out of scope by design). The full
+    // bare-link heuristic is deferred (plan-340 Deferred-1 — it would
+    // false-positive every link inheriting ≥44 px from a sized flex parent);
+    // this is the pragmatic partial close: pin that these three SPECIFIC fixed
+    // links keep their min-h-11 tap area, so a future drop is caught here.
+    it('public inline recovery <Link>s keep their min-h-11 tap area (AGG-C5-03)', () => {
+        const recoveryLinkFiles = [
+            { rel: 'components/topic-empty-state.tsx', anchor: "home.clearFilter" },
+            { rel: 'components/home-client.tsx', anchor: "home.clearFilter" },
+            { rel: 'app/[locale]/(public)/timeline/page.tsx', anchor: 'yearInReview' },
+        ];
+        for (const { rel, anchor } of recoveryLinkFiles) {
+            const abs = path.resolve(srcRoot, rel);
+            const src = fs.readFileSync(abs, 'utf8');
+            // The recovery <Link> is the one rendering the anchor string; assert
+            // a min-h-11 (or min-h-[≥44px]) tap-area utility is present in the file.
+            expect(src.includes(anchor), `${rel} should still render the ${anchor} recovery link`).toBe(true);
+            expect(
+                /min-h-11\b/.test(src) || /min-h-\[(?:4[4-9]|[5-9]\d|\d{3,})px\]/.test(src),
+                `${rel}: the inline recovery <Link> must carry min-h-11 (or min-h-[≥44px]) for a 44 px tap target (AGG-C5-03)`,
+            ).toBe(true);
+        }
+    });
 });

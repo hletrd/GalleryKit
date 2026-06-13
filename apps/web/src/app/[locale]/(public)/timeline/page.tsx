@@ -151,7 +151,7 @@ export default async function TimelinePage({
                         <div className="flex items-center gap-4">
                             <Link
                                 href={localizePath(locale, `/year/${selectedYear}`)}
-                                className="text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4"
+                                className="inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4"
                             >
                                 {t('yearInReview', { year: selectedYear })}
                             </Link>

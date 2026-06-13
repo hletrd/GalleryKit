@@ -15,7 +15,7 @@ export function TopicEmptyState({ hasFilters, clearHref }: TopicEmptyStateProps)
         <div className="flex flex-col items-center justify-center h-64 border border-dashed rounded-xl text-muted-foreground gap-2">
             <p>{t('home.noImages')}</p>
             {hasFilters && (
-                <Link href={clearHref} className="underline hover:text-primary">
+                <Link href={clearHref} className="inline-flex items-center min-h-11 px-2 underline hover:text-primary">
                     {t('home.clearFilter')}
                 </Link>
             )}
