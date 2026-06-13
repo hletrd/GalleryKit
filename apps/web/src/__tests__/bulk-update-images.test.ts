@@ -237,6 +237,38 @@ describe('bulkUpdateImages — input validation', () => {
         }));
         expect(res).toEqual({ error: 'topicNotFound' });
     });
+
+    // COR-R5C1-01 (plan-315 item 1, pulled forward as AGG-R5C3): malformed
+    // TriState payloads must return a clean localized error, NOT throw an
+    // unhandled TypeError (framework 500) when `.mode` is read.
+    it('rejects a missing TriState field (topic undefined) with invalidInput, not a 500', async () => {
+        const input = makeInput();
+        // Simulate a malformed Server-Action payload: topic omitted entirely.
+        delete (input as Partial<BulkUpdateImagesInput>).topic;
+        const res = await bulkUpdateImages(input as BulkUpdateImagesInput);
+        expect(res).toEqual({ error: 'invalidInput' });
+    });
+
+    it('rejects a TriState field that is not an object', async () => {
+        const input = makeInput();
+        (input as unknown as Record<string, unknown>).titlePrefix = 'oops';
+        const res = await bulkUpdateImages(input);
+        expect(res).toEqual({ error: 'invalidInput' });
+    });
+
+    it('rejects an unknown TriState mode', async () => {
+        const input = makeInput();
+        (input as unknown as Record<string, unknown>).description = { mode: 'destroy' };
+        const res = await bulkUpdateImages(input);
+        expect(res).toEqual({ error: 'invalidInput' });
+    });
+
+    it("rejects mode 'set' without a string value", async () => {
+        const input = makeInput();
+        (input as unknown as Record<string, unknown>).topic = { mode: 'set', value: 42 };
+        const res = await bulkUpdateImages(input);
+        expect(res).toEqual({ error: 'invalidInput' });
+    });
 });
 
 describe('bulkUpdateImages — tri-state diff applier', () => {

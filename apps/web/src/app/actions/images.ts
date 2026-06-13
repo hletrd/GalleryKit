@@ -29,7 +29,7 @@ import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { isWideGamutPrimary } from '@/lib/color-detection';
 import { headers } from 'next/headers';
 import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
-import type { BulkUpdateImagesInput } from '@/lib/bulk-edit-types';
+import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 import { stripStubPrefix } from '@/lib/caption-constants';
 
 type ImageCleanupFailure = {
@@ -895,6 +895,24 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     }
     if (addTagNames.length > 100 || removeTagNames.length > 100) {
         return { error: t('tooManyTags') };
+    }
+
+    // COR-R5C1-01 (plan-315 item 1, pulled forward this cycle): validate each
+    // TriState field's SHAPE before reading `.mode`. The fields below are read
+    // as `topic.mode`/`titlePrefix.mode`/… — a malformed Server-Action payload
+    // (field missing, not an object, or `mode='set'` without a string `value`)
+    // would otherwise throw an unhandled TypeError and surface as a framework
+    // 500 instead of a clean localized error. isTriState narrows mode to the
+    // valid enum and, for 'set', requires a string value.
+    const isTriState = (v: unknown): v is TriState<string> => {
+        if (typeof v !== 'object' || v === null) return false;
+        const mode = (v as { mode?: unknown }).mode;
+        if (mode === 'leave' || mode === 'clear') return true;
+        if (mode === 'set') return typeof (v as { value?: unknown }).value === 'string';
+        return false;
+    };
+    if (!isTriState(topic) || !isTriState(titlePrefix) || !isTriState(description) || !isTriState(licenseTier)) {
+        return { error: t('invalidInput') };
     }
 
     // Validate topic field — verify slug format and existence before any writes.
