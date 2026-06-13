@@ -28,10 +28,17 @@ const MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES;
 let dirPromise: Promise<void> | null = null;
 const ensureDir = () => {
     if (!dirPromise) {
-        dirPromise = fs.mkdir(RESOURCES_DIR, { recursive: true }).then(() => {}).catch((e) => {
-            dirPromise = null;
+        // AGG-R5C3-09 (BUG-R5C3-06): guarded reset. Capture this attempt's
+        // promise in a local and only null the singleton if it STILL points at
+        // THIS attempt. The previous unconditional `dirPromise = null` let a
+        // failed attempt clobber a newer in-flight one set by a concurrent
+        // caller — matching the documented `ensureDirs` singleton pattern used
+        // elsewhere.
+        const p = fs.mkdir(RESOURCES_DIR, { recursive: true }).then(() => {}).catch((e) => {
+            if (dirPromise === p) dirPromise = null;
             throw e;
         });
+        dirPromise = p;
     }
     return dirPromise;
 };
