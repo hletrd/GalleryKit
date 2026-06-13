@@ -253,6 +253,85 @@ describe('gps-exif-strip pure scrubbers', () => {
         expect(stripGpsFromWebpBuffer(Buffer.from('not a webp file at all'))).toBeNull();
     });
 
+    // AGG-C7-02 (run-9 c4 TE-C7-1): the WebP XMP-chunk JUNK-retag GPS branch
+    // (`gps-exif-strip.ts` `else if (chunkTag === 'XMP ')`) had ZERO direct
+    // coverage — every other stripGpsFromWebpBuffer test hits only the EXIF
+    // chunk or the null/GPS-free cases, and the JPEG XMP path is JPEG-only.
+    // That branch is the symmetric twin of the EXIF-path field-order bug fixed
+    // last cycle (AGG-C6-01): the SAME `buf.write('JUNK', offset, …)`
+    // offset-arithmetic class. A wrong-offset regression in the JUNK write
+    // would leave a GPS-bearing XMP chunk readable in the paid-download
+    // ORIGINAL while still reporting stripped:true — a silent privacy leak with
+    // no test to catch it. Sharp does not emit an `XMP ` RIFF chunk on encode,
+    // so we inject one (a real, spec-shaped RIFF sub-chunk: [FourCC][LE size]
+    // [payload][pad]) right after the WEBP header and fix the top-level RIFF
+    // size, mirroring the chunk layout the scrubber's `webpPixelChunk` walker
+    // (above) reads.
+    function injectWebpChunk(webp: Buffer, tag: string, payload: Buffer): Buffer {
+        const padded = payload.length + (payload.length % 2);
+        const chunk = Buffer.alloc(8 + padded);
+        chunk.write(tag, 0, 4, 'ascii');
+        chunk.writeUInt32LE(payload.length, 4);
+        payload.copy(chunk, 8);
+        // header = bytes 0..12 (RIFF + size + WEBP); inject before the pixel chunk.
+        const out = Buffer.concat([webp.subarray(0, 12), chunk, webp.subarray(12)]);
+        out.writeUInt32LE(out.length - 8, 4); // top-level RIFF size = file size - 8
+        return out;
+    }
+
+    it('stripGpsFromWebpBuffer neutralizes a GPS-bearing XMP chunk (JUNK-retag, VP8 pixels byte-identical)', async () => {
+        const file = await makeFixture('pure-xmp-gps.webp', 'webp', false);
+        const base = await fs.readFile(file);
+        const withXmp = injectWebpChunk(
+            base,
+            'XMP ',
+            Buffer.from(
+                '<x:xmpmeta><rdf:Description exif:GPSLatitude="37,33.98N" exif:GPSLongitude="126,58.68E"/></x:xmpmeta>',
+                'latin1',
+            ),
+        );
+        // Preconditions: the injected chunk really carries GPS and a VP8 pixel
+        // chunk exists to compare.
+        expect(withXmp.includes(Buffer.from('GPSLatitude', 'latin1'))).toBe(true);
+        const pixelsBefore = webpPixelChunk(withXmp);
+        expect(pixelsBefore).not.toBeNull();
+
+        const result = stripGpsFromWebpBuffer(withXmp);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+
+        // The GPS-bearing XMP chunk's FourCC was retagged to JUNK (so readers
+        // skip it) and its payload zeroed — the GPS token is gone.
+        expect(result!.buffer.includes(Buffer.from('GPSLatitude', 'latin1'))).toBe(false);
+        expect(result!.buffer.includes(Buffer.from('JUNK', 'ascii'))).toBe(true);
+
+        // Lossless contract: the compressed VP8 pixel chunk is byte-identical —
+        // the surgery only rewrote the XMP chunk's tag + payload bytes, never
+        // re-encoded the image. This is what a wrong JUNK-write offset (the
+        // AGG-C6-01 bug class) would break.
+        const pixelsAfter = webpPixelChunk(result!.buffer);
+        expect(pixelsAfter).not.toBeNull();
+        expect(pixelsAfter!.equals(pixelsBefore!)).toBe(true);
+    });
+
+    it('stripGpsFromWebpBuffer leaves a GPS-free XMP chunk intact (stripped=false)', async () => {
+        const file = await makeFixture('pure-xmp-clean.webp', 'webp', false);
+        const base = await fs.readFile(file);
+        const withXmp = injectWebpChunk(
+            base,
+            'XMP ',
+            Buffer.from('<x:xmpmeta><rdf:Description dc:title="a clean caption"/></x:xmpmeta>', 'latin1'),
+        );
+        const result = stripGpsFromWebpBuffer(withXmp);
+        expect(result).not.toBeNull();
+        // No GPS token → nothing stripped, the input reference is returned
+        // unchanged (the clean XMP chunk is NOT destroyed).
+        expect(result!.stripped).toBe(false);
+        expect(result!.buffer).toBe(withXmp);
+        expect(result!.buffer.includes(Buffer.from('XMP ', 'ascii'))).toBe(true);
+        expect(result!.buffer.includes(Buffer.from('a clean caption', 'latin1'))).toBe(true);
+    });
+
     // AGG-C6-T1: direct ISOBMFF pure-scrubber test, for symmetry with the WebP
     // and JPEG pure-scrubber tests above. The dispatcher-level AVIF test (further
     // up) is less vacuous than WebP's was (the AVIF re-encode fallback is lossy
