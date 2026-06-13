@@ -1,13 +1,11 @@
 import { AdminHeader } from '@/components/admin-header';
 import { getCurrentUser } from '@/app/actions/auth';
-import { getTranslations } from 'next-intl/server';
 
 export default async function AdminLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const t = await getTranslations('common');
     // C1R-03: only render the protected admin chrome (nav + logout) for
     // authenticated admins. The unauthenticated login page should not
     // enumerate admin sub-routes or render a logout form. `getCurrentUser`
@@ -17,11 +15,15 @@ export default async function AdminLayout({
 
     return (
         <div className="flex flex-col h-screen overflow-hidden">
-            <a href="#admin-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md">
-                {t('skipToContent')}
-            </a>
             {currentUser ? <AdminHeader /> : null}
-            <main id="admin-content" tabIndex={-1} className="flex-1 w-full py-6 px-4 overflow-auto focus:outline-none">
+            {/* AGG-R5C3-03 (WCAG 2.4.1): the single global skip link in
+                [locale]/layout.tsx targets #main-content. The admin <main>
+                MUST carry that id so the global skip link resolves on admin
+                routes too — previously it carried only #admin-content, leaving
+                the global "Skip to content" link pointing at nothing on every
+                admin page. The admin layout therefore renders NO separate skip
+                link (the global one is the single source of truth). */}
+            <main id="main-content" tabIndex={-1} className="flex-1 w-full py-6 px-4 overflow-auto focus:outline-none">
                 {children}
             </main>
         </div>
