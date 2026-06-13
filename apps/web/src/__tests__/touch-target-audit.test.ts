@@ -437,11 +437,11 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // a sizing className present, so sr-only skip links (no h-/min-h token) and
     // plain text links never trip.
     {
-        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: '<Link className="...h-8/h-9/h-10..."> renders below the 44 px floor',
     },
     {
-        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: '<Link className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
     },
     {
@@ -455,11 +455,11 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // HTML <a> anchors (lowercase). Same shapes; gated on a className sizing
     // token so semantic/sr-only anchors do not false-positive.
     {
-        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: 'HTML <a className="...h-8/h-9/h-10..."> renders below the 44 px floor',
     },
     {
-        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: 'HTML <a className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
     },
     {
@@ -991,6 +991,16 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'native <select className="max-h-8"> (ceiling)', snippet: `<select className="max-h-8 w-full" value={v}>x</select>` },
             { name: 'native <select className={cn("max-h-10", ...)}> (cn ceiling)', snippet: `<select className={cn("max-h-10", "w-full")} value={v}>x</select>` },
             { name: 'native <select className="max-h-screen"> (named ceiling)', snippet: `<select className="max-h-screen w-full" value={v}>x</select>` },
+            // AGG-C6-04 (run-9 c3 CRT-NF-1): the SAME `max-` ceiling false positive
+            // existed one tag-name over — the <Link>/<a> h-8/h-9/h-10 patterns
+            // (the c1/c2 fixes reached <Button>/<button>/<select> only). A
+            // `<Link className="max-h-10">` / `<a className="max-h-9">` must NOT
+            // flag (max-height is a ceiling). These pin the <Link>/<a> half of the
+            // recurring fix-one-sibling-miss-the-next theme (Button → select → a/Link).
+            { name: '<Link className="max-h-10"> (ceiling, not a floor)', snippet: `<Link href="/x" className="max-h-10 overflow-auto">x</Link>` },
+            { name: '<Link className={cn("max-h-9", ...)}> (cn ceiling)', snippet: `<Link href="/x" className={cn("max-h-9", "px-2")}>x</Link>` },
+            { name: 'HTML <a className="max-h-9"> (ceiling)', snippet: `<a href="/x" className="max-h-9 block">x</a>` },
+            { name: 'HTML <a className={cn("max-w-10", ...)}> (cn ceiling)', snippet: `<a href="/x" className={cn("max-w-10", "px-2")}>x</a>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));

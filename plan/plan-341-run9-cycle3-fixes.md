@@ -69,7 +69,7 @@
   1. Add `(?<!max-)` to the bare-`(?:h-8|h-9|h-10)` portion of all four patterns at `:440,444,458,462`, mirroring EXACTLY how `40a65aef`/`07a838d6` anchored the Button/button/select patterns. Re-read those patterns at HEAD to copy the precise lookbehind form. Confirm the `min-h-[<44px]` patterns (true floors) and the negative lookahead are unaffected.
   2. Add `<Link className="max-h-10">`, `<a className="max-h-9">`, and a `cn()` composite form to the does-not-flag self-check block (mirror the select negative fixtures added by `07a838d6`).
 - **Acceptance:** the four `<Link>`/`<a>` patterns no longer match `max-h-{8,9,10}`/`max-w-…` but still match real sub-44 tokens (`h-8`, `min-h-[40px]`); the new self-check fixtures pass; the full `touch-target-audit.test.ts` still passes (no current file regresses — verify with `npx vitest run touch-target-audit`). Run `npm run typecheck --workspace=apps/web` before committing.
-- **Status:** PENDING
+- **Status:** DONE (commit pending push). Added `\b(?<!max-)(?:h-8|h-9|h-10)\b` to all four `<Link>`/`<a>` patterns (`:440,444,458,462`), mirroring the select form exactly. Added 4 `max-` negative self-check fixtures (`<Link>`/`<a>` literal + `cn()`). Empirically verified in Node: `max-h-10`/`max-h-9` no-flag, `h-8`/`h-10` still flag (ALL CORRECT). typecheck clean; audit 14/14.
 
 ## Item 5 — AGG-C6-05: document the `<select>`/`<Link>`/`<a>` `max-` lookbehind in CLAUDE.md (LOW doc · document-specialist)
 
@@ -78,7 +78,7 @@
 - **Why it matters:** CLAUDE.md:512 describes the `<select>` patterns as catching `h-8/h-9/h-10` but omits that the branch carries `(?<!max-)` (added cycle-5 by `07a838d6`, same as the Button fix the doc DOES describe). A maintainer reading CLAUDE.md would wrongly believe `<select className="max-h-10">` flags. Docs are incomplete, not wrong about live behavior — no code defect.
 - **Change:** update the Touch-Target Audit prose to note that the bare-`h-8/h-9/h-10` branch carries `(?<!max-)` across ALL tag classes — `<Button>`/`<button>` (40a65aef), native `<select>` (07a838d6), AND `<Link>`/`<a>` (this cycle's Item 4) — so `max-h-*` ceilings never false-positive. One concise sentence; fold into the Item-4 commit so the doc and the code change land together.
 - **Acceptance:** CLAUDE.md accurately describes the current lookbehind coverage across all interactive tag classes. No code change. (Direct-write to CLAUDE.md is allowed per CLAUDE-omc model_routing.)
-- **Status:** PENDING
+- **Status:** DONE (commit pending push). Added a dedicated "`max-` ceiling exemption (all interactive tag classes)" bullet to CLAUDE.md's touch-target Pattern-coverage section, documenting the `(?<!max-)` lookbehind across Button/button (40a65aef), select (07a838d6), and Link/a (this cycle's Item 4), with the negative-fixture note. Folded into the Item-4 commit.
 
 ## Item 6 (OPTIONAL) — AGG-C6-T1: direct `stripGpsFromIsobmffBuffer` pure-scrubber test (LOW test depth · test-engineer)
 
