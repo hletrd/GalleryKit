@@ -763,7 +763,12 @@
     "backfillNothingToDo": "모든 사진이 이미 최신 파이프라인 버전입니다. 재인코딩할 사진이 없습니다.",
     "backfillAlreadyRunning": "이미 재인코딩이 진행 중입니다.",
     "backfillUnavailable": "데이터베이스 복원이 진행 중일 때는 재인코딩을 실행할 수 없습니다.",
-    "backfillFailed": "재인코딩을 시작하지 못했습니다. 서버 로그를 확인해 주세요."
+    "backfillFailed": "재인코딩을 시작하지 못했습니다. 서버 로그를 확인해 주세요.",
+    "backfillLastRunTitle": "최근 재인코딩 실행 결과",
+    "backfillLastRunClean": "정상 완료 — 사진 {processed}장을 재인코딩했습니다.",
+    "backfillLastRunWithFailures": "일부 실패와 함께 완료 — {processed}장 재인코딩, 인코딩 실패 {encodeFailures}건, 색상 감지 실패 {detectionFailures}건. 해당 사진은 이전 버전을 유지하며 다음 실행 때 다시 시도됩니다.",
+    "backfillLastRunSkips": "{skippedMissingOriginal}장 건너뜀(원본 없음), {skippedLocked}장 건너뜀(처리 중).",
+    "backfillLastRunError": "마지막 오류: {error}"
   },
   "footer": {
     "admin": "관리자"

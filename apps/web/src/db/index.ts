@@ -10,13 +10,21 @@ const isLocalhost = ['127.0.0.1', 'localhost', '::1'].includes(dbHost);
 const sslDisabled = process.env.DB_SSL === 'false';
 const sslConfig = (!isLocalhost && !sslDisabled) ? { ssl: { rejectUnauthorized: true } } : {};
 
+// AGG-R5C3-05: exported so background maintenance ops (the color-pipeline
+// backfill runner) can budget how many of the shared pool connections they
+// pin without starving live traffic. The runner caps its effective
+// concurrency at floor((POOL_CONNECTION_LIMIT - 2) / 2) because each backfill
+// worker can hold up to 2 connections at once (the per-image processing claim
+// + a transient db.execute), and the whole-run advisory lock pins 1 more.
+export const POOL_CONNECTION_LIMIT = 10;
+
 const poolConnection = mysql.createPool({
     host: dbHost,
     port: Number(process.env.DB_PORT) || 3306,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
-    connectionLimit: 10,
+    connectionLimit: POOL_CONNECTION_LIMIT,
     waitForConnections: true,
     queueLimit: 20,
     connectTimeout: 5000,

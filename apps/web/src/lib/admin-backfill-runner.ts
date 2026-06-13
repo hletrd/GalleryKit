@@ -24,6 +24,15 @@
  *   we ship 1 because the in-app runner shares Sharp + libheif worker
  *   capacity with the live image-processing queue. Operators on a host
  *   with spare CPU can raise this; the env var is read at runner start.
+ *   AGG-R5C3-05: the requested value is ALSO clamped to a connection-budget
+ *   cap so a background re-encode cannot pin the whole shared DB pool. Each
+ *   worker can hold up to 2 of the 10 pool connections at once (per-image
+ *   claim + transient db.execute) and the whole-run advisory lock pins 1
+ *   more, so the effective ceiling is floor((POOL_CONNECTION_LIMIT - 2) / 2)
+ *   = 4 at the shipped pool size. Requests above the cap are clamped DOWN
+ *   (see resolveBackfillConcurrency) and a warning is logged. A pool-exhausted
+ *   claim acquire is treated as a `locked` skip (row retried next run), never
+ *   a tight error spin.
  * - The runner is INVISIBLE to the existing PQueue image-processing queue
  *   (which only claims `processed = false` rows). Re-encoding processed
  *   images is structured as a parallel, dedicated path here so we don't
@@ -42,7 +51,7 @@ import PQueue from 'p-queue';
 import sharp from 'sharp';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import { connection, db } from '@/db';
+import { connection, db, POOL_CONNECTION_LIMIT } from '@/db';
 import { sql } from 'drizzle-orm';
 import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, type ImageQualitySettings } from '@/lib/process-image';
 import { detectColorSignals } from '@/lib/color-detection';
@@ -79,6 +88,37 @@ export type AdminBackfillStatus =
     | { status: 'unavailable'; reason: string }
     | { status: 'error'; reason: string };
 
+/**
+ * AGG-R5C3-05: cap the backfill's effective concurrency against the shared DB
+ * pool budget.
+ *
+ * Connection budget arithmetic (POOL_CONNECTION_LIMIT = 10):
+ *   - the whole-run advisory lock pins 1 connection for the run's lifetime;
+ *   - each in-flight backfill worker can hold up to 2 connections at once —
+ *     the per-image processing claim connection (held across encode → detect →
+ *     UPDATE) plus the transient `db.execute` UPDATE connection;
+ *   - therefore N workers need `1 + 2N` connections worst-case. Leaving at
+ *     least 1 connection free for live traffic requires `1 + 2N <= LIMIT - 1`,
+ *     i.e. N <= (LIMIT - 2) / 2.
+ *
+ * At LIMIT = 10 the cap is floor(8/2) = 4. Operators who raise
+ * ADMIN_BACKFILL_CONCURRENCY above the cap are silently clamped DOWN to it so a
+ * background maintenance op can never pin the whole pool and 500 live requests.
+ */
+export function resolveBackfillConcurrency(
+    requested: number,
+    poolLimit: number = POOL_CONNECTION_LIMIT,
+): number {
+    // Guard against a non-finite pool limit (e.g. a test mock of @/db that omits
+    // POOL_CONNECTION_LIMIT, making the imported binding undefined). Fall back to
+    // the shipped pool size so the cap arithmetic never yields NaN — a NaN
+    // concurrency would silently freeze PQueue and run zero tasks.
+    const limit = Number.isFinite(poolLimit) ? poolLimit : 10;
+    const cap = Math.max(1, Math.floor((limit - 2) / 2));
+    const req = Math.max(1, Math.floor(requested) || 1);
+    return Math.min(req, cap);
+}
+
 const adminBackfillStateKey = Symbol.for('gallerykit.adminBackfillState');
 
 interface AdminBackfillState {
@@ -89,6 +129,15 @@ interface AdminBackfillState {
     completedRuns: number;
     /** Last error message if a run failed, else null. */
     lastError: string | null;
+    /**
+     * AGG-R5C3-04: true when the LAST completed run recorded any encode or
+     * detection failure (or a fatal per-row error). `completedRuns` still
+     * increments on a with-failures run — a run that finished is "complete" —
+     * but this flag lets the admin status surface distinguish a clean run from
+     * one where every row encode-failed, instead of both reading as success.
+     * Reset to false at the start of every run.
+     */
+    lastRunHadFailures: boolean;
     // AGG-R5C2-10 (COR-R5C2-01/-02) observability counters. All additive and
     // backward-compatible — existing consumers (admin-backfill.ts destructures
     // only `running`) are unaffected. These reflect the LAST run's tallies and
@@ -125,6 +174,7 @@ function getState(): AdminBackfillState {
             skippedLocked: 0,
             encodeFailures: 0,
             detectionFailures: 0,
+            lastRunHadFailures: false,
         };
     }
     // Defensive backfill for state objects created before these fields existed
@@ -134,7 +184,36 @@ function getState(): AdminBackfillState {
     s.skippedLocked ??= 0;
     s.encodeFailures ??= 0;
     s.detectionFailures ??= 0;
+    s.lastRunHadFailures ??= false;
     return s;
+}
+
+/**
+ * AGG-R5C3-22 (TEST-R5C3-11): test-only reset of the globalThis-backed runner
+ * state. Tests previously poked the `Symbol.for('gallerykit.adminBackfillState')`
+ * global directly and had to hand-list every field — drifting out of sync the
+ * moment a new counter was added. Routing the reset through the module that owns
+ * the state keeps the field set in one place. Guarded so it is inert outside a
+ * test runner.
+ */
+export function _resetAdminBackfillStateForTesting(): void {
+    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+        throw new Error('_resetAdminBackfillStateForTesting is test-only');
+    }
+    const g = globalThis as typeof globalThis & {
+        [adminBackfillStateKey]?: AdminBackfillState;
+    };
+    g[adminBackfillStateKey] = {
+        running: false,
+        lastQueuedCount: 0,
+        completedRuns: 0,
+        lastError: null,
+        skippedMissingOriginal: 0,
+        skippedLocked: 0,
+        encodeFailures: 0,
+        detectionFailures: 0,
+        lastRunHadFailures: false,
+    };
 }
 
 /** Public read-only view of runner state, exposed via getAdminBackfillStatus(). */
@@ -149,6 +228,7 @@ export function readAdminBackfillState(): Readonly<AdminBackfillState> {
         skippedLocked: s.skippedLocked,
         encodeFailures: s.encodeFailures,
         detectionFailures: s.detectionFailures,
+        lastRunHadFailures: s.lastRunHadFailures,
     };
 }
 
@@ -279,11 +359,28 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         return { ok: false, reason: 'missing-original' };
     }
 
+    // ── LOCK-CRITICAL (AGG-R5C3-17) ──────────────────────────────────────────
     // TRC-R5C2-01: claim the per-image processing lock for the FULL re-encode +
     // detection + UPDATE window. If the live queue worker (or a concurrent
     // retryFailedImage) holds it, skip this row — no version bump, so it stays a
-    // candidate for the next run. Released in `finally` after the DB UPDATE.
-    const claimConn = await acquireImageProcessingClaim(row.id);
+    // candidate for the next run. The acquire and the protected `try` below are
+    // deliberately adjacent: nothing may run between a successful acquire and the
+    // `try` whose `finally` releases the lock, or a throw there would leak the
+    // claim connection. Released in `finally` after the DB UPDATE.
+    //
+    // AGG-R5C3-05: acquireImageProcessingClaim may throw if the shared pool is
+    // exhausted (getConnection() rejects). Treat that exactly like a held lock —
+    // a `locked` skip with NO version bump — so a saturated pool degrades into
+    // "retry this row next run" instead of escaping to the queue task's
+    // catch-and-increment, which would tight-loop errors++ with no backoff under
+    // sustained exhaustion.
+    let claimConn: PoolConnection | null;
+    try {
+        claimConn = await acquireImageProcessingClaim(row.id);
+    } catch (err) {
+        console.warn(`[admin-backfill] id=${row.id} claim acquire failed (pool exhausted?):`, err);
+        return { ok: false, reason: 'locked', error: err };
+    }
     if (!claimConn) {
         return { ok: false, reason: 'locked' };
     }
@@ -415,6 +512,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         state.skippedLocked = 0;
         state.encodeFailures = 0;
         state.detectionFailures = 0;
+        state.lastRunHadFailures = false;
         const config = await getGalleryConfig();
         const settings: RunnerSettings = {
             quality: {
@@ -430,7 +528,17 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
             wideGamutMaxSourcePixels: config.wideGamutMaxSourcePixels,
         };
 
-        const concurrency = Math.max(1, Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1);
+        // AGG-R5C3-05: clamp the requested concurrency to the pool-budget cap so
+        // this background op cannot pin the whole shared connection pool and 500
+        // live traffic. See resolveBackfillConcurrency for the arithmetic.
+        const requestedConcurrency = Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1;
+        const concurrency = resolveBackfillConcurrency(requestedConcurrency);
+        if (concurrency < Math.max(1, Math.floor(requestedConcurrency) || 1)) {
+            console.warn(
+                `[admin-backfill] ADMIN_BACKFILL_CONCURRENCY=${requestedConcurrency} exceeds the ` +
+                    `pool-budget cap; clamped to ${concurrency} (pool limit ${POOL_CONNECTION_LIMIT}).`,
+            );
+        }
         const queue = new PQueue({ concurrency });
 
         let processed = 0;
@@ -521,8 +629,14 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         state.skippedLocked = skippedLocked;
         state.encodeFailures = encodeFailures;
         state.detectionFailures = detectionFailures;
+        // AGG-R5C3-04: a run is "complete" whether or not rows failed, but the
+        // completion signal must distinguish the two. completedRuns increments
+        // either way; lastRunHadFailures records whether the run was clean.
+        const hadFailures = encodeFailures > 0 || detectionFailures > 0 || errors > 0;
+        state.lastRunHadFailures = hadFailures;
         console.log(
-            `[admin-backfill] Run complete: processed=${processed} errors=${errors} ` +
+            `[admin-backfill] Run complete ${hadFailures ? 'WITH FAILURES' : '(clean)'}: ` +
+                `processed=${processed} errors=${errors} ` +
                 `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
                 `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures}`,
         );

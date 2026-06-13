@@ -30,6 +30,9 @@ vi.mock('@/db', () => ({
     db: {
         execute: vi.fn(),
     },
+    // AGG-R5C3-05: the runner imports POOL_CONNECTION_LIMIT to budget its
+    // concurrency; the mock must export it or the module access throws.
+    POOL_CONNECTION_LIMIT: 10,
 }));
 
 vi.mock('@/lib/gallery-config', () => ({

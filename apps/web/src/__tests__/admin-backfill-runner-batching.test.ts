@@ -55,6 +55,9 @@ vi.mock('@/db', () => ({
     db: {
         execute: executeMock,
     },
+    // AGG-R5C3-05: the runner imports POOL_CONNECTION_LIMIT to budget its
+    // concurrency; the mock must export it or the module access throws.
+    POOL_CONNECTION_LIMIT: 10,
 }));
 
 vi.mock('@/lib/gallery-config', () => ({
@@ -144,7 +147,11 @@ vi.mock('fs/promises', async (importOriginal) => {
     };
 });
 
-import { triggerAdminBackfill, readAdminBackfillState } from '@/lib/admin-backfill-runner';
+import {
+    triggerAdminBackfill,
+    readAdminBackfillState,
+    _resetAdminBackfillStateForTesting,
+} from '@/lib/admin-backfill-runner';
 
 const BATCH_SIZE = 100;
 
@@ -162,18 +169,10 @@ function makeRow(id: number) {
 }
 
 function resetGlobalState() {
-    const sym = Symbol.for('gallerykit.adminBackfillState');
-    const g = globalThis as Record<symbol, unknown>;
-    g[sym] = {
-        running: false,
-        lastQueuedCount: 0,
-        completedRuns: 0,
-        lastError: null,
-        skippedMissingOriginal: 0,
-        skippedLocked: 0,
-        encodeFailures: 0,
-        detectionFailures: 0,
-    };
+    // AGG-R5C3-22 (TEST-R5C3-11): route the reset through the runner's own
+    // test-only export instead of poking Symbol.for(...) and hand-listing every
+    // field — the field set lives in one place now and cannot drift.
+    _resetAdminBackfillStateForTesting();
 }
 
 function setupLockMocks() {

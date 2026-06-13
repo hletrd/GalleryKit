@@ -61,21 +61,50 @@ export async function triggerBackfill(): Promise<TriggerBackfillResult> {
     }
 }
 
-/** @action-origin-exempt: read-only status check (no DB writes, no mutations). */
-export async function getBackfillStatus(): Promise<{
+export interface BackfillStatusResult {
     ok: boolean;
     running: boolean;
     candidateCount: number;
+    /**
+     * AGG-R5C3-04: last-run observability surfaced to the admin UI. Previously
+     * the runner computed these counters but no consumer read them, so a run
+     * where every row encode-failed looked identical to a clean run. All fields
+     * reflect the LAST completed run.
+     */
+    completedRuns?: number;
+    /** Candidate count captured when the last run started (its processed-total upper bound). */
+    lastQueuedCount?: number;
+    encodeFailures?: number;
+    detectionFailures?: number;
+    skippedMissingOriginal?: number;
+    skippedLocked?: number;
+    lastRunHadFailures?: boolean;
+    lastError?: string | null;
     error?: string;
-}> {
+}
+
+/** @action-origin-exempt: read-only status check (no DB writes, no mutations). */
+export async function getBackfillStatus(): Promise<BackfillStatusResult> {
     const t = await getTranslations('serverActions');
     if (!(await isAdmin())) {
         return { ok: false, running: false, candidateCount: 0, error: t('unauthorized') };
     }
     try {
         const candidateCount = await getAdminBackfillCandidateCount();
-        const { running } = readAdminBackfillState();
-        return { ok: true, running, candidateCount };
+        const s = readAdminBackfillState();
+        return {
+            ok: true,
+            running: s.running,
+            candidateCount,
+            completedRuns: s.completedRuns,
+            lastQueuedCount: s.lastQueuedCount,
+            encodeFailures: s.encodeFailures,
+            detectionFailures: s.detectionFailures,
+            skippedMissingOriginal: s.skippedMissingOriginal,
+            skippedLocked: s.skippedLocked,
+            lastRunHadFailures: s.lastRunHadFailures,
+            lastError: s.lastError,
+        };
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { ok: false, running: false, candidateCount: 0, error: msg };

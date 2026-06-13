@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useRef } from 'react';
+import { useState, useTransition, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,7 +22,7 @@ import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, Sho
 import { SLIDESHOW_INTERVAL_MIN, SLIDESHOW_INTERVAL_MAX } from '@/lib/gallery-config-shared';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
-import { triggerBackfill } from '@/app/actions/admin-backfill';
+import { triggerBackfill, getBackfillStatus, type BackfillStatusResult } from '@/app/actions/admin-backfill';
 
 interface SettingsClientProps {
     initialSettings: Record<string, string>;
@@ -70,6 +70,24 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     const [baseline, setBaseline] = useState<Record<string, string>>(initialSettings);
     const initialRef = useRef<Record<string, string>>(initialSettings);
 
+    // AGG-R5C3-04: surface the last backfill run's outcome to the admin. The
+    // runner already computed encode/detection-failure counters but nothing
+    // read them, so a run where every row encode-failed looked identical to a
+    // clean run. Fetch the status on mount and after each trigger settles.
+    const [backfillStatus, setBackfillStatus] = useState<BackfillStatusResult | null>(null);
+    const refreshBackfillStatus = useCallback(async () => {
+        if (!hasExistingImages) return;
+        try {
+            const s = await getBackfillStatus();
+            if (s.ok) setBackfillStatus(s);
+        } catch {
+            // Non-fatal — the summary line just stays absent.
+        }
+    }, [hasExistingImages]);
+    useEffect(() => {
+        void refreshBackfillStatus();
+    }, [refreshBackfillStatus]);
+
     const handleChange = (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
     };
@@ -101,6 +119,12 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             t('settings.backfillQueued', { count: String(result.affectedRows ?? 0) }),
                         );
                     }
+                    // AGG-R5C3-04: the run is fire-and-forget; poll the status a
+                    // few times so the last-run summary reflects the new run's
+                    // outcome without a manual page reload.
+                    void refreshBackfillStatus();
+                    setTimeout(() => void refreshBackfillStatus(), 3000);
+                    setTimeout(() => void refreshBackfillStatus(), 10000);
                 } else if (result.status === 'already_running') {
                     toast.info(t('settings.backfillAlreadyRunning'));
                 } else if (result.status === 'unavailable') {
@@ -226,6 +250,53 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                         : t('settings.backfillTriggerCta')}
                                 </Button>
                             </div>
+                            {/* AGG-R5C3-04: last-run summary. completedRuns > 0 means
+                                at least one run has finished; render its outcome so a
+                                fully-failed run is no longer indistinguishable from a
+                                clean one. */}
+                            {backfillStatus && (backfillStatus.completedRuns ?? 0) > 0 && (
+                                <div role="status" className="mt-3 border-t border-blue-200/60 dark:border-blue-900/40 pt-2 text-xs text-blue-900/90 dark:text-blue-200/90 space-y-1">
+                                    <strong className="block">{t('settings.backfillLastRunTitle')}</strong>
+                                    {backfillStatus.lastRunHadFailures ? (
+                                        <p className="text-amber-700 dark:text-amber-400">
+                                            {t('settings.backfillLastRunWithFailures', {
+                                                processed: String(
+                                                    Math.max(
+                                                        0,
+                                                        (backfillStatus.lastQueuedCount ?? 0) -
+                                                            (backfillStatus.encodeFailures ?? 0) -
+                                                            (backfillStatus.detectionFailures ?? 0) -
+                                                            (backfillStatus.skippedMissingOriginal ?? 0) -
+                                                            (backfillStatus.skippedLocked ?? 0),
+                                                    ),
+                                                ),
+                                                encodeFailures: String(backfillStatus.encodeFailures ?? 0),
+                                                detectionFailures: String(backfillStatus.detectionFailures ?? 0),
+                                            })}
+                                        </p>
+                                    ) : (
+                                        <p>
+                                            {t('settings.backfillLastRunClean', {
+                                                processed: String(backfillStatus.lastQueuedCount ?? 0),
+                                            })}
+                                        </p>
+                                    )}
+                                    {((backfillStatus.skippedMissingOriginal ?? 0) > 0 ||
+                                        (backfillStatus.skippedLocked ?? 0) > 0) && (
+                                        <p>
+                                            {t('settings.backfillLastRunSkips', {
+                                                skippedMissingOriginal: String(backfillStatus.skippedMissingOriginal ?? 0),
+                                                skippedLocked: String(backfillStatus.skippedLocked ?? 0),
+                                            })}
+                                        </p>
+                                    )}
+                                    {backfillStatus.lastRunHadFailures && backfillStatus.lastError && (
+                                        <p className="text-amber-700 dark:text-amber-400 break-words">
+                                            {t('settings.backfillLastRunError', { error: backfillStatus.lastError })}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
