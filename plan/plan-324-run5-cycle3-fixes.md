@@ -38,6 +38,6 @@
 
 | # | Finding | Commit | Status |
 |---|---|---|---|
-| 1 | AGG-R5C3-01 | — | TODO |
-| 2 | AGG-R5C3-02 | — | TODO |
-| 3 | AGG-R5C3-03 | — | TODO |
+| 1 | AGG-R5C3-01 | 3cba9be7 | DONE |
+| 2 | AGG-R5C3-02 | e99c5e90 | DONE |
+| 3 | AGG-R5C3-03 | 19847bf4 | DONE |

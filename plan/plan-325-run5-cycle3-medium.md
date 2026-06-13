@@ -101,22 +101,22 @@
 
 | # | Finding | Commit | Status |
 |---|---|---|---|
-| 1 | AGG-R5C3-04 | — | TODO |
-| 2 | AGG-R5C3-05 (+-17) | — | TODO |
-| 3 | AGG-R5C3-12 | — | TODO |
-| 4 | AGG-R5C3-09 | — | TODO |
-| 5 | AGG-R5C3-13 | — | TODO |
-| 6 | AGG-R5C3-10 | — | TODO |
-| 7 | TRC-R5C3-04 | — | TODO |
-| 8 | AGG-R5C3-06 | — | TODO |
-| 9 | AGG-R5C3-07 | — | TODO |
-| 10 | AGG-R5C3-21 | — | TODO |
-| 11 | AGG-R5C3-22 | — | TODO |
-| 12 | plan-315 #14 | — | TODO |
-| 13 | plan-315 #19 | — | TODO |
-| 14 | plan-315 #17 | — | TODO |
-| 15 | plan-315 #18 | — | TODO |
-| 16 | plan-315 #1 | — | TODO |
-| 17 | plan-315 #25/27/31/33 | — | TODO |
-| 18 | plan-315 #26 | — | TODO |
-| 19 | plan-315 #30 | — | TODO |
+| 1 | AGG-R5C3-04 | 5778792b | DONE |
+| 2 | AGG-R5C3-05 (+-17) | 5778792b | DONE |
+| 3 | AGG-R5C3-12 | a294c333 | DONE |
+| 4 | AGG-R5C3-09 | facc0362 | DONE |
+| 5 | AGG-R5C3-13 | c3be5546 | DONE |
+| 6 | AGG-R5C3-10 | a06f8863 | DONE |
+| 7 | TRC-R5C3-04 | a294c333 | DONE |
+| 8 | AGG-R5C3-06 | 2f67db6d | DONE |
+| 9 | AGG-R5C3-07 | ef343ca9 | DONE |
+| 10 | AGG-R5C3-21 | (client-server-only-boundary) | DONE |
+| 11 | AGG-R5C3-22 | 1ed3c273 (+5778792b reset) | DONE |
+| 12 | plan-315 #14 | c1a1227a | DONE |
+| 13 | plan-315 #19 | c1a1227a | DONE |
+| 14 | plan-315 #17 | c1a1227a | DONE |
+| 15 | plan-315 #18 | c1a1227a | DONE |
+| 16 | plan-315 #1 | 652add51 | DONE |
+| 17 | plan-315 #25/27/31/33 | 7656c996 + b3022f12 | DONE |
+| 18 | plan-315 #26 | b3022f12 | DONE |
+| 19 | plan-315 #30 | 2420abec | DONE |
