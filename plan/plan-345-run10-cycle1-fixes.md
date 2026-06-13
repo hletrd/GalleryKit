@@ -79,9 +79,9 @@ Update the `SCAN_ROOTS` description in CLAUDE.md:505 to add the third entry the 
 
 - [x] Read the live `SCAN_ROOTS` array at fix time — confirmed 3 entries (`componentsDir`/`adminDir`/`publicDir`); critic's "root-level locale files" claim refuted
 - [x] Update CLAUDE.md:505 to add `app/[locale]/(public)/`
-- [ ] Commit + push (GPG-signed, conventional + gitmoji)
+- [x] Commit + push (GPG-signed, conventional + gitmoji)
 
-**Implemented:** CLAUDE.md:505 sentence updated from "`components/` + the admin route group `app/[locale]/admin/`" to add "+ the public route group `app/[locale]/(public)/`". Matches the live 3-entry array. (Commit SHA recorded after push.)
+**Implemented:** commit `__ITEM2_SHA__` — CLAUDE.md:505 sentence updated from "`components/` + the admin route group `app/[locale]/admin/`" to add "+ the public route group `app/[locale]/(public)/`". Matches the live 3-entry array.
 
 ---
 
