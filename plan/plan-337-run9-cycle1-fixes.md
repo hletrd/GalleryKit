@@ -70,7 +70,7 @@
 
 - [x] Item 1 — AGG-C4-01 scale-token regex `max-` false positive + self-check — DONE (commit `40a65aef`): `(?<!max-)` on every bare h/w branch + 9 negative regression fixtures; 12/12 audit + typecheck green.
 - [x] Item 2 — AGG-C4-02 sidecar backfill `affectedRows` cleanup guard — DONE: `flushBatch` captures `affectedRows` on both UPDATE branches, threads per-format filenames into batch items, cleans up via `deleteImageVariants(dir, fn, [])` after commit, tallies `deletedMidReencode` (decremented from `processed`); CLAUDE.md backfill prose updated; typecheck:scripts green.
-- [ ] Item 3 — AGG-C4-03 sales StatusBadge light-mode contrast
+- [x] Item 3 — AGG-C4-03 sales StatusBadge light-mode contrast — DONE: `downloaded`/`pending` light value → `text-green-700`/`text-amber-700` (both 5.02:1 on white), `dark:*-400` kept. Confirmed no other `text-{green,amber,red}-600` light sites remain in the codebase. lint + typecheck green.
 - [ ] Item 4 — AGG-C4-04 upload-worker delete-race cleanup `[]` dir scan
 - [ ] Item 5 — AGG-C4-05 test backfill runner 2nd cleanup branch
 - [ ] Item 6 — AGG-C4-06/07 doc + comment honesty

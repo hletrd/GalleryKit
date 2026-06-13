@@ -88,9 +88,13 @@ function computeStatus(row: EntitlementRow): SalesStatus {
 function StatusBadge({ status, t }: { status: SalesStatus; t: SalesTranslations }) {
     const cfg: Record<SalesStatus, { label: string; cls: string; Icon: typeof Check }> = {
         refunded: { label: t.statusRefunded, cls: 'text-destructive-text', Icon: RotateCcw },
-        downloaded: { label: t.statusDownloaded, cls: 'text-green-600 dark:text-green-400', Icon: Check },
+        // AGG-C4-03 (run-9 c1 DES-A1): the light-mode -600 shades fail WCAG
+        // 1.4.3 small-text on the white sales table (green-600 #16a34a = 3.30:1,
+        // amber-600 #d97706 = 3.19:1). Use -700 in light (both 5.02:1 on white)
+        // and keep the passing -400 dark variants.
+        downloaded: { label: t.statusDownloaded, cls: 'text-green-700 dark:text-green-400', Icon: Check },
         expired: { label: t.statusExpired, cls: 'text-muted-foreground', Icon: XCircle },
-        pending: { label: t.statusPending, cls: 'text-amber-600 dark:text-amber-400', Icon: Clock },
+        pending: { label: t.statusPending, cls: 'text-amber-700 dark:text-amber-400', Icon: Clock },
     };
     const { label, cls, Icon } = cfg[status];
     return (
