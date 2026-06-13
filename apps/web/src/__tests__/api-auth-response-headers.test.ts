@@ -99,4 +99,26 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         expect(response.status).toBe(401);
         expect(response.headers.get('Cache-Control')).toContain('no-store');
     });
+
+    it('token branch: a VERIFIED token with the WRONG scope yields a no-store 401', async () => {
+        // plan-315 item 18 / TEST-R5C1-08 (pulled forward as TEST-R5C3-05): a
+        // valid token whose scope set does NOT include the route's required scope
+        // must be rejected — NOT fall through to the cookie path. A token bearing
+        // only ['lr:read'] presented to an lr:upload route is 401, never 200.
+        verifyTokenMock.mockResolvedValue({ id: 2, userId: 9, scopes: ['lr:read'] });
+        const withAdminAuth = await importWrapper();
+        let handlerCalled = false;
+        const wrapped = withAdminAuth(
+            async (_req: NextRequest) => {
+                handlerCalled = true;
+                return NextResponse.json({ ok: true });
+            },
+            { allowTokenScope: 'lr:upload' },
+        );
+
+        const response = await wrapped(fakeRequest({ 'x-gallerykit-token': 'gk_readonly' }));
+        expect(response.status).toBe(401);
+        expect(handlerCalled, 'handler must NOT run for a wrong-scope token').toBe(false);
+        expect(response.headers.get('Cache-Control')).toContain('no-store');
+    });
 });
