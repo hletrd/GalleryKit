@@ -1,5 +1,5 @@
 import type { TagInfo } from '@/lib/image-types';
-import { ALT_TEXT_STUB_PREFIX_RE, stripStubPrefix } from '@/lib/caption-constants';
+import { stripStubPrefix } from '@/lib/caption-constants';
 
 interface PhotoTitleInput {
     title: string | null;
@@ -107,8 +107,9 @@ export function getConcisePhotoAltText(
     if (!hasMeaningfulTitle && !hasTags && image.alt_text_suggested && image.alt_text_suggested.trim()) {
         // CRT-R5C1-02 / CRT-R5C2-03: strip the stub prefix so '[AUTO] Photo taken with ...'
         // never reaches visible titles, <title>, or OG meta tags.
-        // ALT_TEXT_STUB_PREFIX_RE is imported from caption-constants (not caption-generator)
-        // so this module remains client-safe.
+        // stripStubPrefix is imported from caption-constants (NOT caption-generator,
+        // which is server-only) so this module remains client-safe — pinned by
+        // client-server-only-boundary.test.ts (AGG-R5C2-02 / AGG-R5C3-21).
         const stripped = stripStubPrefix(image.alt_text_suggested.trim());
         if (stripped.trim()) {
             return stripped.trim();

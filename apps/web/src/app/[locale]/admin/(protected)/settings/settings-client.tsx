@@ -75,6 +75,10 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     // read them, so a run where every row encode-failed looked identical to a
     // clean run. Fetch the status on mount and after each trigger settles.
     const [backfillStatus, setBackfillStatus] = useState<BackfillStatusResult | null>(null);
+    // Imperative refresh used after a trigger settles (event-handler context, so
+    // a direct setState is fine here). The mount fetch lives in the effect below
+    // with its own mounted-guard so the setState is gated behind the await
+    // (react-hooks/set-state-in-effect).
     const refreshBackfillStatus = useCallback(async () => {
         if (!hasExistingImages) return;
         try {
@@ -85,8 +89,20 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
         }
     }, [hasExistingImages]);
     useEffect(() => {
-        void refreshBackfillStatus();
-    }, [refreshBackfillStatus]);
+        if (!hasExistingImages) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const s = await getBackfillStatus();
+                if (!cancelled && s.ok) setBackfillStatus(s);
+            } catch {
+                // Non-fatal — the summary line just stays absent.
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [hasExistingImages]);
 
     const handleChange = (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
