@@ -165,21 +165,22 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // header note); retiring the counts would make that safety net fail
     // the gate on day one of any such downgrade instead of surfacing it
     // as a reviewed diff here.
-    // image-manager: the inline-edit and per-row delete buttons all
-    // use size="sm" or size="icon"; admin table flow is keyboard-primary.
-    // Cycle 3 RPF loop AGG3-M01: count raised from 4 → 5 because the
-    // multi-line `<Button … size="sm" onClick={handleShare}>` Share
-    // button at line ~303 is now visible to the scanner after the
-    // multi-line normalizer landed. The five violations are:
-    //   - bulk add tag (`size="sm"`) at the toolbar
-    //   - share toolbar button (`size="sm"`)
-    //   - delete-selected toolbar (`size="sm"`)
-    //   - per-row inline edit (`size="icon"`)
-    //   - per-row inline delete (`size="icon"`)
-    // US-P41: count raised from 5 → 6 for the new "Bulk edit" size="sm"
-    // toolbar button. Same admin keyboard-primary rationale applies.
-    // Re-open: when admin becomes mobile-priority, drop these to h-11.
-    'components/image-manager.tsx': 6,
+    // image-manager: AGG-C4-09 / AGG-C5 (run-9 c2, 2026-06-13) — count
+    // TIGHTENED 6 → 1 after empirical re-measurement (zero the budget, read
+    // the audit output). Five of the six historically-budgeted buttons now
+    // carry an explicit ≥44 px override and no longer trip the scanner:
+    //   - bulk add-tag toolbar `size="sm" className="h-11"` (~:314)
+    //   - bulk-edit toolbar `size="sm" className="h-11"` (~:368)
+    //   - delete-selected toolbar `size="sm" className="h-11"` (~:382)
+    //   - per-row inline edit `size="icon" className="h-11 w-11"` (~:538)
+    //   - per-row inline delete `size="icon" className="h-11 w-11"` (~:544)
+    // The SINGLE remaining violation is the `batchAddButton` DialogTrigger
+    // `<Button variant="secondary" size="sm">` (~:328) with no height override.
+    // Keeping the stale 6 masked up to 5 NEW sub-44 targets before the gate
+    // fired (regression-detection slack); the real floor is 1.
+    // Re-open: when admin becomes mobile-priority, give :328 an h-11 and drop
+    // this entry to 0; or recount if image-manager's button set changes.
+    'components/image-manager.tsx': 1,
     // admin-user-manager: "Add admin" header button (`size="sm"`)
     // and the per-row delete-user icon (`size="icon"`). Cycle 3 RPF
     // loop AGG3-M01: count raised from 1 → 2 because the multi-line
