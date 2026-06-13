@@ -92,7 +92,25 @@ export function TagFilter({ tags }: { tags: { id: number, name: string, slug: st
                         aria-pressed={currentTags.includes(tag.slug)}
                     >
                         {displayName(tag.name)}
-                        <span className="text-xs text-muted-foreground">({tag.count})</span>
+                        {/* AGG-R8-04 (run-8 c2): the count must inherit the chip
+                            foreground when the chip is ACTIVE. On the active
+                            chip (bg-primary), an unconditional text-muted-
+                            foreground computed 2.94:1 (light) / 2.45:1 (dark) —
+                            below WCAG 1.4.3 4.5:1 small-text — on the public home
+                            page. Gate the muted class on the INACTIVE state so
+                            an active chip's count uses text-primary-foreground
+                            (the chip's designed ≥4.5:1 pairing); inactive chips
+                            keep the muted 6.03:1 look. */}
+                        <span
+                            className={cn(
+                                "text-xs",
+                                currentTags.includes(tag.slug)
+                                    ? "text-primary-foreground/90"
+                                    : "text-muted-foreground"
+                            )}
+                        >
+                            ({tag.count})
+                        </span>
                     </button>
                 </Badge>
             ))}
