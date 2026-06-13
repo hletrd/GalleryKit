@@ -193,7 +193,17 @@ function setupLockMocks() {
  * are inlined as raw primitive chunks (not Param wrappers) — see the scratch
  * verification in the executor report; this is stable across drizzle's `sql`
  * builder for primitive interpolations.
+ *
+ * AGG-R5C3-22 (TEST-R5C3-09): this inspector depends on TWO drizzle-orm
+ * INTERNALS — the `queryChunks` array on a `sql` template object and the
+ * `StringChunk` constructor name for its literal fragments. Verified against
+ * drizzle-orm ^0.45.2 (apps/web/package.json). If a future drizzle upgrade
+ * renames `StringChunk` or restructures `queryChunks`, `sawStringChunk` stays
+ * false and the assertion in the single-batch test below fails LOUD at the
+ * upgrade — instead of every batch silently classifying as 'update' (empty text)
+ * and the loop-continuation coverage rotting into a vacuous pass.
  */
+let sawStringChunk = false;
 function inspectSql(arg: unknown): { text: string; values: unknown[] } {
     const chunks = (arg as { queryChunks?: unknown[] })?.queryChunks;
     if (!Array.isArray(chunks)) {
@@ -204,6 +214,7 @@ function inspectSql(arg: unknown): { text: string; values: unknown[] } {
     for (const c of chunks) {
         const ctor = (c as { constructor?: { name?: string } })?.constructor?.name;
         if (ctor === 'StringChunk') {
+            sawStringChunk = true;
             const v = (c as { value: unknown }).value;
             textParts.push(Array.isArray(v) ? v.join('') : String(v));
         } else if (c && typeof c === 'object' && 'value' in (c as object)) {
@@ -274,6 +285,7 @@ function buildExecuteMock(totalRows: number) {
 describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-content dispatch)', () => {
     beforeEach(() => {
         resetGlobalState();
+        sawStringChunk = false;
         queryMock.mockReset();
         releaseMock.mockReset();
         executeMock.mockReset();
@@ -299,6 +311,13 @@ describe('PERF-R5C1-01 / AGG-R5C2-03: admin-backfill-runner batched fetch (SQL-c
         expect(batches).toHaveLength(1);
         expect(batches[0]!.cursor).toBe(0);
         expect(batches[0]!.ids).toHaveLength(50);
+
+        // AGG-R5C3-22 (TEST-R5C3-09): prove the drizzle `queryChunks` /
+        // `StringChunk` shape this whole SQL-content dispatch relies on was
+        // actually exercised. If a drizzle upgrade drifts the internals,
+        // sawStringChunk stays false and this fails loud rather than letting the
+        // dispatch silently misclassify every query.
+        expect(sawStringChunk, 'drizzle StringChunk shape drifted — inspectSql is no longer pinning real SQL').toBe(true);
 
         // All 50 reprocessed cleanly, nothing skipped/failed.
         const state = readAdminBackfillState();

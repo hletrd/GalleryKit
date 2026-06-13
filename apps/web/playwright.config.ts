@@ -47,6 +47,13 @@ if (!useLocalServer && process.env.E2E_ADMIN_ENABLED === 'true' && process.env.E
 
 export default defineConfig({
   testDir: './e2e',
+  // AGG-R5C3-22 (TEST-R5C3-12): admin specs must run SERIALLY against the
+  // login rate-limit budget (5 attempts / 15-min window, per-IP AND per-account).
+  // Parallel workers each logging in would collide on that shared budget and
+  // lock the account out mid-run. `fullyParallel: false` + `workers: 1` keeps
+  // the whole e2e suite single-worker, so admin login specs never race the
+  // budget. Do NOT raise `workers` without first isolating admin auth specs into
+  // their own serialized project (or seeding distinct admin accounts per worker).
   fullyParallel: false,
   workers: 1,
   timeout: 60_000,
