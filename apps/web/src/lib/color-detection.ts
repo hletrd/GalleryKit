@@ -386,6 +386,18 @@ export async function detectColorSignals(
         if (nclxMatrix !== undefined) matrixCoefficients = nclxMatrix;
     }
 
+    // AGG-R8c3-01 / CRT-1 (run-8 c3): the per-field code-2 guard above has an
+    // INTENTIONAL delivered-byte side-effect worth calling out (the AGG-R8-06
+    // commit message's "no delivered-byte impact" was inaccurate). When an NCLX
+    // box leaves transfer "Unspecified" (code 2) but the ICC profile NAME
+    // asserts PQ/HLG, transferFunction keeps the ICC-name value (inferred at the
+    // top of this function) instead of being reset to 'unknown'. That makes
+    // isHdr=true, which the upload gate (images.ts: reject when isHdr &&
+    // !allowHdrIngest) treats as an HDR source and REJECTS by default — i.e. the
+    // file is no longer ingested (delivered-nothing). This is the correct
+    // behavior: a source whose ICC name asserts an HDR transfer IS HDR for the
+    // SDR-only pipeline. Pinned by color-detection.test.ts ("nclx code-2
+    // transfer + PQ-named ICC → isHdr true").
     const isHdr = transferFunction === 'pq' || transferFunction === 'hlg';
 
     return {

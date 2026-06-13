@@ -253,6 +253,25 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
+    // AGG-R8c3-01 / CRT-1 (run-8 c3): pin the *intentional* side-effect of the
+    // AGG-R8-06 per-field guard. When an NCLX box leaves transfer "Unspecified"
+    // (code 2) but the ICC profile NAME asserts PQ/HLG, the ICC-name-derived
+    // transfer now SURVIVES (pre-fix, `?? 'unknown'` forced it to 'unknown' →
+    // isHdr=false). So such a source resolves isHdr=true and — when
+    // allow_hdr_ingest=false (default) — is REJECTED at upload (images.ts:283).
+    // This IS intended: an HDR-named source is treated as HDR by the SDR-only
+    // pipeline. (It contradicts the AGG-R8-06 commit's "no delivered-byte
+    // impact" line — that claim is corrected in color-detection.ts; the
+    // behavior is pinned here so it is locked, not accidental.)
+    it('nclx code-2 transfer + PQ-named ICC → isHdr true (ICC HDR transfer survives the code-2 guard)', async () => {
+        const signals = await detectFromNclx(12, 2, 2, { icc: 'PQ HDR' as unknown as Buffer });
+        // Specified NCLX primaries still win.
+        expect(signals.colorPrimaries).toBe('p3-d65');
+        // Unspecified NCLX transfer keeps the ICC-name-derived 'pq' → HDR.
+        expect(signals.transferFunction).toBe('pq');
+        expect(signals.isHdr).toBe(true);
+    });
+
     it('maps nclx transfer=6 to gamma22', async () => {
         const signals = await detectFromNclx(1, 6, 1);
         expect(signals.transferFunction).toBe('gamma22');
