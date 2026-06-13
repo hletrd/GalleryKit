@@ -217,29 +217,31 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
             { id: 1, title: 'Mountain', description: 'A mountain', filename_jpeg: 'mountain.jpg', width: 1920, height: 1080, topic: 'nature', topic_label: 'Nature', camera_model: 'Sony A7IV' },
         ];
 
-        // Build a chainable mock that returns embeddings first, then images
-        let callCount = 0;
-        dbSelectMock.mockImplementation(() => {
-            callCount++;
-            if (callCount === 1) {
-                // Embedding query: db.select(...).from(imageEmbeddings).orderBy(...).limit(...)
-                return {
-                    from: vi.fn().mockReturnValue({
+        // AGG-R5C3-07 (TEST-R5C3-07): table-keyed dispatch (mirrors the
+        // checkout-route AGG-R5C2-53 fix) instead of a call-order counter. The
+        // previous `callCount === 1 → embeddings` coupling silently broke if the
+        // route ever reordered its two queries. Dispatch on which schema object
+        // was passed to `.from()`: imageEmbeddings has the unique `embedding`
+        // key; images does not.
+        dbSelectMock.mockImplementation(() => ({
+            from: (table: Record<string, unknown>) => {
+                const isEmbeddingQuery = 'embedding' in table;
+                if (isEmbeddingQuery) {
+                    // db.select(...).from(imageEmbeddings).orderBy(...).limit(...)
+                    return {
                         orderBy: vi.fn().mockReturnValue({
                             limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
                         }),
-                    }),
-                };
-            }
-            // Image enrichment query: db.select(...).from(images).leftJoin(...).where(...)
-            return {
-                from: vi.fn().mockReturnValue({
+                    };
+                }
+                // Image enrichment: db.select(...).from(images).leftJoin(...).where(...)
+                return {
                     leftJoin: vi.fn().mockReturnValue({
                         where: vi.fn().mockResolvedValue(mockImageRows),
                     }),
-                }),
-            };
-        });
+                };
+            },
+        }));
 
         // Provide a valid base64 embedding that decodes to EMBEDDING_BYTES.
         // Fill with 0.5 so cosine similarity with an identical query vector is 1.0.
