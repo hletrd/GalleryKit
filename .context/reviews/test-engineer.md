@@ -1,127 +1,70 @@
-# Test-Engineer Deep Review — GalleryKit
+# Test-Engineer Deep Review — GalleryKit — Cycle 6
 
 **Date:** 2026-06-13
-**HEAD:** `1dde9b1e` (working tree: only `.context/reviews/*.md` + `plan/*.md` edits; source clean)
-**Suite baseline (measured live this review):** `npx vitest run` → **215 files / 2068 tests, all passing** (warm, exit 0, 173 s). Count grew 2067 → 2068 (+1), matching the single new test from `2251b122`. The documented libheif cold-flake did NOT reproduce this run.
-**Specialist angle:** test coverage gaps (esp. on recently-landed fixes + security-critical invariants), vacuous/tautological tests, flaky tests, tests that pass for the wrong reason, missing edge-case coverage.
+**HEAD:** `4c3d5924` (working tree CLEAN at start)
+**Suite baseline (measured live this cycle):** `npx vitest run` → **218 files / 2080 tests, all passing** (exit 0, ~268 s cold). The documented libheif cold-flake did NOT reproduce.
+**Specialist angle:** test coverage gaps (esp. on the freshly-found WebP GPS-strip bug + recently-landed fixes), vacuous/tautological tests, flaky tests, tests that pass for the wrong reason.
 
-> **Cycle context.** This is run-9 **cycle-2** (orchestrator "cycle 5"). The prior aggregate (`_aggregate.md`, cycle 4 / HEAD `ce0029aa`) scheduled 3 MED + 3 LOW; 7 commits landed since (`8ce8f914`..`1dde9b1e`). I re-verified every scheduled fix at `1dde9b1e` — running the new tests, **independently neutering guards to confirm RED**, and re-measuring the two items the prior aggregate deferred. **The prior cycle's TE-1 (AGG-C4-05) is now genuinely CLOSED with a proven-non-vacuous test.** But the sidecar's twin of that same guard (`AGG-C4-02`) landed code-only with **zero test coverage**, and three prior-deferred test items remain open and unaddressed.
-
----
-
-## FINDINGS BY SEVERITY
-
-### MEDIUM
-
-#### TE-1 — Sidecar `flushBatch` delete-race orphan-cleanup (the AGG-C4-02 PRODUCTION fix) has ZERO test coverage. **Confidence: High (mechanism + export-surface verified).** NET-NEW.
-
-**Source:** `apps/web/scripts/backfill-color-pipeline.ts:337-391` (`flushBatch`), specifically the `affectedRows===0 → deletedMidReencodeFiles.push → cleanupDeletedMidReencode(files)` logic at `:362-364`, `:373-375`, `:378-388`, and `cleanupDeletedMidReencode` at `:329-335` (the `deleteImageVariants(dir, fn, [])` dir-scan calls).
-**Test gap:** the sidecar's two test files import and exercise ONLY `reprocessRow` (the per-row encode), never `flushBatch`:
-- `backfill-color-pipeline.test.ts:20` — `import { reprocessRow, type ImageRow }`. All 7 `it` blocks call `reprocessRow(...)` and assert its returned `outcome`/`signals`. The AGG-02 column-set test (`:146-198`) asserts `Object.keys(outcome.signals)` — the **shape of the value `reprocessRow` returns**, NOT the UPDATE SQL `flushBatch` emits, and NOT the `affectedRows` cleanup.
-- `backfill-detection-failure-contract.test.ts` — also `reprocessRow`-only (the operator-script detection-failure outcome).
-
-`flushBatch` is **not exported** (`scripts/backfill-color-pipeline.ts:129` exports `reprocessRow`; `:64` exports `ImageRow`; `grep -n export` shows nothing else). So the entire AGG-C4-02 fix — captured `ResultSetHeader`, the two `affectedRows===0` branches, the post-commit `cleanupDeletedMidReencode([])`, the `processed -= ...` / `deletedMidReencode += ...` tally — is exercised by no test at all.
-
-**Why this matters disproportionately.** This is the asymmetric twin of the prior cycle's TE-1 (AGG-C4-05). That finding existed *because* a delete-race cleanup guard was untested; it was closed by a dedicated, proven-RED test for the **in-app runner** (`admin-backfill-runner-deleted-mid-reencode-detection-failure.test.ts`, commit `2251b122`). The **sidecar** is documented in CLAUDE.md as the canonical PRODUCTION backfill path (the prod container lacks `tsx`, so the `--rm` sidecar IS how prod re-encodes). Its delete-race cleanup just landed (`300009d4`) and got **no test** — the commit stat is script + CLAUDE.md + plan only. The aggregate's equivalence claim ("both paths now share the guard", CLAUDE.md backfill prose) is asserted only in prose; the runner's half is pinned, the production half is not. A refactor that drops the sidecar's `:362` / `:373` `affectedRows===0` check, or the `[]` in `cleanupDeletedMidReencode` (`:331-333`), or the post-commit cleanup call (`:386`), leaves orphaned AVIF/WebP/JPEG derivatives on the PRODUCTION path for a deleted image — forever, with a green suite. This is the exact disk-leak the fix exists to prevent, on the path that actually runs in prod.
-
-**Concrete regression that slips through:** admin runs the sidecar backfill; concurrently deletes a photo whose re-encode is in-flight (the sidecar UPDATE matches 0 rows). A future maintainer "simplifies" `flushBatch` to drop the `affectedRows` capture (it looks like dead bookkeeping). The freshly-re-materialized derivative files for the deleted row are never unlinked → permanent orphans accumulating on every prod backfill. Suite stays green.
-
-**Test to add (one new file, ~1 `it`):** the cleanest path is to **export `flushBatch`** (or a thin `flushReprocessBatch(items, derivativeItems)` seam) for unit testing, then mock `db.transaction`/`tx.execute` to return `[{ affectedRows: 0 }]` and `deleteImageVariants` as a spy, and assert: cleanup fired for webp/avif/jpeg with `[]` sizes, `deletedMidReencode` incremented, `processed` decremented, the run-summary line printed. Mirror `admin-backfill-runner-deleted-mid-reencode-detection-failure.test.ts` almost verbatim. If exporting `flushBatch` is unwanted, drive the whole `runBackfill` loop with a mocked `db`/`queue` and one candidate row whose UPDATE returns `affectedRows:0` — heavier but keeps the seam private. **Prove non-vacuous** by deleting the `:362` guard and confirming RED (exactly as `2251b122`'s message documents for the runner).
+> **AUTHORSHIP NOTE:** The test-engineer subagent ran twice this cycle (initial fan-out + one retry per PROMPT-1's retry rule) and performed the investigation below, but its final `Write` to this file did not land in either attempt (the prior content of this file was the STALE cycle-5 review at HEAD `1dde9b1e` reporting the now-CLOSED TE-1/TE-5). The orchestrator captured the agent's investigation from its returned messages + independently re-verified every claim against current source, then persisted this file. Recorded under AGENT FAILURES in `_aggregate.md`.
 
 ---
 
-### LOW
+## Cycle-5 gaps — CONFIRMED CLOSED (do not re-report)
 
-#### TE-2 — `KNOWN_VIOLATIONS['components/image-manager.tsx'] = 6` is stale; real count is **1** → a 5-violation silent-absorption slack. **Confidence: High (empirically re-measured at `1dde9b1e`).** = AGG-C4-09 / AGG-R8c3-15, **STILL OPEN.**
+- **AGG-C5-01** sidecar `flushBatch` orphan-cleanup — CLOSED (`fad9c279`). New file `backfill-color-pipeline-deleted-mid-reencode.test.ts` (149 LOC) drives the `affectedRows===0` branch via the extracted `cleanupDeletedMidReencodeVariants`/`collectDeletedMidReencodeFiles` seams; the critic independently proved it RED on guard-removal then restored.
+- **AGG-C5-T1** en/ko leaf-key parity — CLOSED (`a062e81b`). New `i18n-key-parity.test.ts` flattens both message objects to leaf-key sets and asserts SET equality (KEYS only, per DOC-R5C3-07 — values legitimately differ en-ICU/ko-fixed). Verified would-catch a dropped ko key.
+- **AGG-C5-T2** queue `[]`-dir-scan cleanup pin — CLOSED (`56bddff5`). New `image-queue-delete-race-cleanup-wiring.test.ts` source-shape-pins that `image-queue.ts:384-386` passes `[]` (3-arg form present, 2-arg form absent).
+- **AGG-C4-09** image-manager touch-target budget 6→1 — CLOSED (`2637e5f2`). Real scanner count re-measured = 1 at HEAD.
 
-**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:182`.
+---
 
-The prior aggregate DEFERRED this to plan-336 ("re-affirm"); it was not tightened this cycle. I re-measured at current HEAD by temporarily zeroing the budget and running the audit (then reverted — tree clean):
+## FINDINGS
 
+### TE-C6-1 (MED · High confidence · CONFIRMED) — The WebP GPS-strip test is VACUOUS for the lossless contract; it passes through the re-encode fallback whether or not the lossless path works. This is what let DBG-C6-01 (the RIFF field-order bug) land undetected.
+
+**Source under test:** `apps/web/src/lib/gps-exif-strip.ts:554-591` (`stripGpsFromWebpBuffer`). DBG-C6-01 found a real bug here: lines 564-565 read `chunkSize = readUInt32LE(offset)` and `chunkTag = toString(offset+4, offset+8)`, but the WebP RIFF spec (verified against developers.google.com/speed/webp/docs/riff_container) puts the FourCC tag at bytes 0-3 and the size at bytes 4-7 — they are **swapped**. The function returns `null` on the first chunk of EVERY real WebP (the FourCC `VP8X`=0x58385056 ≈1.48 GB is misread as `chunkSize`, so `dataEnd > buf.length` is immediately true). The lossless WebP scrub path is dead code; every `.webp` original with `strip_gps_on_upload=true` falls through to the Tier-2 lossy Sharp re-encode (`process-image.ts:1564-1567`).
+
+**The test that should have caught it:** `apps/web/src/__tests__/strip-gps-from-original.test.ts:116-126` — `it('removes GPS from a WebP original via the RIFF scrub (pixels byte-identical)')`. WHY IT'S VACUOUS:
+1. It calls the top-level dispatcher `stripGpsFromOriginal(file)`, never `stripGpsFromWebpBuffer` directly.
+2. The fixture is made lossy: `makeFixture(..., 'webp')` → `pipeline.webp({ quality: 95 })` (line 71). A lossy VP8 file has no `VP8L` marker, so the Tier-2 fallback re-encodes at `{ quality: 95 }` (lossy again, `process-image.ts:1566-1567`).
+3. The assertion compares **decoded raw pixels** (`sharp(file).raw().toBuffer()`), NOT file bytes. A q95→q95 WebP re-encode of an already-q95 decode typically yields the identical decode, so `pixelsAfter.equals(pixelsBefore)` PASSES through the fallback.
+4. `gpsInFile()` returns null after the fallback too (the re-encode drops all metadata).
+
+So the test passes whether the lossless path ran OR the re-encode fallback ran. Its name ("via the RIFF scrub") asserts a path it does not actually exercise; "byte-identical" refers to decoded pixels, not the file bytes the lossless contract is about (file bytes definitely change under re-encode). There is a dedicated `describe('gps-exif-strip pure scrubbers')` block (line 175) that tests `stripGpsFromJpegBuffer` directly — but it has NO `stripGpsFromWebpBuffer` entry, so the bug has no direct unit coverage either.
+
+**Regression that slips through:** exactly DBG-C6-01 — the lossless WebP path is fully broken and the suite is green. More generally, any future regression to the WebP lossless path is invisible.
+
+**Test to add (closes the gap + would have caught DBG-C6-01):** add to the `'gps-exif-strip pure scrubbers'` block a direct test:
+```ts
+it('stripGpsFromWebpBuffer losslessly removes GPS (pixel chunk byte-identical)', async () => {
+  // build a real WebP carrying GPS EXIF, call stripGpsFromWebpBuffer(input)
+  const result = stripGpsFromWebpBuffer(inputWithGps);
+  expect(result).not.toBeNull();
+  expect(result!.stripped).toBe(true);
+  // assert the VP8/VP8L pixel chunk bytes are byte-identical (lossless) — only the EXIF/XMP chunk changed
+  // and assert a GPS-free WebP returns { stripped: false } with the input reference
+});
 ```
-components/image-manager.tsx: found 1 violation(s), allowed 0
-   components/image-manager.tsx:328  shadcn <Button size="sm"> without explicit ≥44 px override
-```
+Plus a `stripGpsFromWebpBuffer` non-WebP-bytes → `null` case, mirroring the JPEG pure-scrubber tests at lines 176-189. Prove non-vacuous by confirming it goes RED against the current buggy source and GREEN after the field-order fix.
 
-True count is **1** (only the `size="sm"` bulk-add-tag at `:328`), budget is **6** → **5 slack**. The structural reason it can't self-correct: the stale-budget detector at `:710-714` is explicitly informational ("not a hard failure… doesn't prevent tests from passing"); the gate fires only on over-budget (`issues.length > allowed`), never under-budget. **Up to 5 NEW sub-44 px touch targets** can land in `image-manager.tsx` before the gate fires.
+### TE-C6-2 (LOW · Medium confidence · likely) — The AVIF/ISOBMFF GPS-strip test shares the same dispatcher-level shape, but is LESS vacuous than WebP.
 
-**Fix:** lower the entry to `1`, update the enumerating comment (`:168-181`) to the single remaining `size="sm"` violation. (Optional hardening: promote the `:710-714` detector to a hard failure so future over-budget drops surface as a reviewed diff. NOTE: that change is risky — it would couple the test to the *exact* count of legitimately-budgeted violations across 8 files, so any deliberate budget add would also have to update the detector; document the tradeoff if taken.)
-
-#### TE-3 — Encode-heavy real-AVIF tests still share `public/uploads`; the AGG-R8c3-09 cold-flake mechanism is UNADDRESSED. **Confidence: High (mechanism); could NOT trigger warm.** = AGG-C4-T2 / AGG-R8c3-09, **STILL OPEN.**
-
-The prior aggregate DEFERRED this ("re-open when the cold-flake reproduces"). No isolation landed this cycle. I re-verified at `1dde9b1e`: four real-encode tests `mkdtemp` only their **source** fixtures (`tmpDir`) and write **derivative outputs** into the real shared `UPLOAD_DIR_AVIF/WEBP/JPEG` (= `public/uploads/{avif,webp,jpeg}`), relying on `afterAll` unlink:
-- `process-image-color-roundtrip.test.ts:31,37-42`
-- `backfill-color-pipeline.test.ts:27,34-38`
-- `process-image-orientation.test.ts:29,36-40`
-- `process-image-exif-strip.test.ts:29,36-40`
-
-None mock `@/lib/upload-paths`, none set a `UPLOAD_ROOT` env-override; no `describe.sequential` / serial pool / `--no-file-parallelism` glob in `vitest.config.ts`. (Cross-check: `process-image-p3-icc`, `-variant-scan` correctly `mkdtemp` their output dir; `-post-encode-verification`, `-icc-options-lockin` don't write derivatives to `UPLOAD_DIR` — so the contended set is exactly these 4.) Two same-`id`-collision risks remain across the full-suite parallel run plus encoder-thread contention. I could not reproduce the flake warm (consistent with the aggregate — it only surfaces under full ~215-file parallelism). RED on a cold/contended CI run remains indistinguishable from a real encode regression.
-
-**Fix (unchanged):** give each real-encode test a unique temp upload dir via a per-test `UPLOAD_ROOT` env-override (`upload-paths.ts` already reads `UPLOAD_ORIGINAL_ROOT`/cwd), OR pin the 4 files to a serial vitest project.
-
-#### TE-4 — `getLatestImageForOg` source-shape test still cannot catch a dropped `processed=true` filter or a reversed sort. **Confidence: Medium.** = AGG-C4-T1 (partial), **STILL OPEN.**
-
-**Source:** `apps/web/src/lib/data.ts` (`getLatestImageForOg`, AGG-R8c3-05, commit `e9040d17`). **Test:** `data-tag-names-sql.test.ts:130-146`.
-
-The prior aggregate dispositioned this "schedule-cheap or defer — currently behaving"; it was not addressed. The test remains a **source-text** assertion: it greps the function body for `id: images.id`, `buildImageConditions(`, `.limit(1)`, and the absence of `GROUP_CONCAT`/joins/`groupBy`. Two real regressions slip through green:
-1. **Processed-filter leak:** the source is `buildImageConditions(undefined, tagSlugs, false)` — the `false` (3rd arg = `includeUnprocessed`) is what pushes `eq(images.processed, true)`. Flip it to `true` and the text `buildImageConditions(` still matches → green while the home OG card surfaces **unprocessed** images (no derivatives → `/api/og/photo/${id}` card 302s/blanks).
-2. **Wrong sort:** no assertion on `desc(capture_date)`/`desc(created_at)`. A flip to `asc` serves the OLDEST image as "latest" → green.
-
-The consumer test `home-metadata-title.test.ts` fully mocks `getLatestImageForOgCached`, so neither test exercises the real query. LOW (simple function, args explicit in source). Notably the SAME file already uses the robust `.toSQL()` runtime-inspection pattern (`:244-259`, with a no-op proxy DB) for the masonry lite query — the technique is in-repo; the OG query just didn't get it.
-
-**Test to add:** a `.toSQL()` inspection asserting the compiled SQL contains `` `processed` = ? `` (param `true`) and `order by ... desc`, reusing the `:244` driver pattern.
-
-#### TE-5 — No committed test asserts FULL en.json ↔ ko.json leaf-key parity. **Confidence: High (absence verified).** NET-NEW.
-
-**Gap:** the `_aggregate.md` "837 = 837, 0 drift" parity figure is an **orchestrator-side manual measurement**, not a committed regression gate. I searched every `__tests__` file: the only test that flattens both locales is `humanize-transfer-function-i18n.test.ts:20-36`, and its `flatten()` output is used solely to look up specific transfer-function keys via `makeT` — it does NOT assert `Object.keys(flatten(en))` equals `Object.keys(flatten(ko))`. `color-pipeline-decision-i18n.test.ts` and the `cycle{4,5}-rpf-source-contracts.test.ts` files pin only **specific newly-added keys** in both locales, not the full set. No script under `apps/web/scripts/` performs the check either (`check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`, `check-js-scripts` — none touch i18n).
-
-**Concrete regression:** a hand-edit drops a pre-existing key from `ko.json` (e.g. during a refactor of a nested namespace). next-intl renders the key string verbatim to Korean users at that surface. No test fails; the leak surfaces only when someone navigates to that string in the `ko` locale. The cycle source-contract tests catch *intentionally-added* keys but not *accidentally-dropped* ones.
-
-**Test to add (one small file):** flatten both message objects to leaf-key sets and assert set equality (`expect(enKeys.sort()).toEqual(koKeys.sort())`). **Critical:** assert on KEYS only, never values — per CLAUDE.md DOC-R5C3-07, en uses ICU `plural` blocks and ko uses a single fixed form, so the VALUE shapes legitimately differ. A key-set equality is exactly right and is the missing gate.
-
-#### TE-6 — Upload-queue delete-race `[]`-sizes cleanup (AGG-C4-04 fix) has no direct call-path test. **Confidence: Medium.** Author-acknowledged residual.
-
-**Source:** `apps/web/src/lib/image-queue.ts` (the `affectedRows===0` cleanup, now passing `[]` as the 3rd `deleteImageVariants` arg per `18de78eb`). The commit message itself states: *"the queue-worker call path is hard to isolate in a unit test, so the contract test stands."* The fix relies on the **indirect** `process-image-variant-scan.test.ts` proving that `deleteImageVariants(dir, fn, [])` triggers a full directory scan — but no test asserts the **queue worker actually passes `[]`** at the call site (`image-queue.ts:375-379`).
-
-This is a weaker version of the TE-1 sidecar gap (here at least the dir-scan contract is pinned and the queue path is genuinely harder to unit-isolate than the sidecar's batch function). A regression to the queue passing default sizes again would re-open the original non-default-size orphan leak with a green suite. LOW because: (a) admin-only + low-prob + disk-leak-only, (b) the dir-scan contract is solid. A cheap source-shape pin (assert `image-queue.ts` source matches `deleteImageVariants\([^,]+,[^,]+,\s*\[\]\)` in the deletion block, or `not.toMatch` the default-sizes 2-arg form) would close it at near-zero cost, consistent with the blur-wiring call-site pin pattern already in the repo.
+`strip-gps-from-original.test.ts:104-114` (AVIF) has the same structure (calls `stripGpsFromOriginal`, compares decoded pixels). It is less vacuous than the WebP case because the AVIF Tier-2 fallback re-encodes at q90 (`process-image.ts:1573`), which IS lossy and WOULD perturb decoded pixels — so if the ISOBMFF lossless path silently broke, the pixel-equality assertion would more plausibly fail. Still, a direct `stripGpsFromIsobmffBuffer` lossless-contract test (asserting file-byte identity outside the EXIF/XMP item, like the JPEG pure-scrubber tests) would be stronger than relying on the decoded-pixel proxy. Recommendation: when fixing TE-C6-1, add a parallel direct `stripGpsFromIsobmffBuffer` pure-scrubber test for symmetry. LOW because the AVIF path is not currently known-broken and the proxy assertion has more teeth than WebP's.
 
 ---
 
-## RE-VERIFIED CLOSED THIS CYCLE (scheduled fixes confirmed BEHAVING + non-vacuous, not trusted on the commit's word)
+## Re-verified non-vacuous (spot-checked this cycle)
 
-- **AGG-C4-05 (prior TE-1) — runner detection-failure delete-race cleanup: CLOSED, INDEPENDENTLY PROVEN NON-VACUOUS.** New test `admin-backfill-runner-deleted-mid-reencode-detection-failure.test.ts` (`2251b122`). It mocks `detectColorSignals` to throw (forcing the derivative-only `:594-608` branch) AND the UPDATE to return `affectedRows:0`, then asserts `deleteImageVariants` fired for webp/avif/jpeg with `[]` sizes, `deletedMidReencode===1`, `processed/encodeFailures/detectionFailures/errors===0`, `lastRunHadFailures===false`. **I verified RED myself:** temporarily neutering the `:605-608` guard (replacing the `affectedRows===0 → cleanup → return 'deleted-mid-reencode'` with a fall-through to `'detection-failed'`) turned the test RED with `expected [] to include '/uploads/webp'` and the runner log `WITH FAILURES … detectionFailures=1 deletedMidReencode=0`. Restored clean. **Genuinely load-bearing.**
-- **AGG-C4-01 — touch-target `max-h`/`max-w` ceiling false positive: CLOSED, self-check pins it BIDIRECTIONALLY.** `40a65aef` added `(?<!max-)` to every bare `h`/`w` branch (string-literal, `cn()` composite, HTML `<button>`, and the scale-token catch-all), leaving `min-h`/`min-w`/`size` unguarded (true floors). I empirically verified the **exact committed regexes** in Node: `<Button className="h-8">` and `min-h-6` → flagged (correct), `max-h-8`/`max-h-10`/`max-w-9` → NOT flagged (correct), `h-14` → NOT flagged (correct). The self-check has BOTH directions: the positive block (`:768-810`, `toBe(true)`) still catches `h-8`/`h-9`/`h-10`/`size-10`/scale-tokens (proving the lookbehind didn't over-neuter), and the new negative block (`:938-983`, `toBe(false)`) adds **9 regression pins** — `max-h-10`, `max-w-9`, `max-h-8`, `max-w-10`, `max-h-screen`, `max-w-full`, `cn("max-h-10")`, HTML `<button max-h-9>`, HTML `cn("max-w-10")`. **Robust; pins against future drift.**
-- **AGG-C4-02 sidecar code fix — present + correct** (`300009d4`): `flushBatch` now captures `ResultSetHeader` from each `tx.execute`, collects `affectedRows===0` rows, and runs `cleanupDeletedMidReencode(files)` (dir-scan, `[]` sizes) AFTER commit. Code is correct; the **test** is the gap (TE-1 above).
-- **AGG-C4-04 queue code fix — present + correct** (`18de78eb`): `image-queue.ts` now passes `[]` to the delete-race `deleteImageVariants` calls. Code correct; direct call-path test is the residual (TE-6).
-- **AGG-C4-03 sales StatusBadge contrast** (`fd708c1e`): designer-owned a11y fix, out of test-engineer scope; no test regression introduced (no contrast-ratio test exists — see the standing note below).
-- **AGG-C4-06/07 doc honesty** (`1dde9b1e`): doc-only; no test impact.
+- `i18n-key-parity.test.ts` — imports the real `messages/{en,ko}.json`, `flattenKeys()` recurses to leaf scalars with dot-joined paths, asserts `missingInKo`/`missingInEn` both `[]`. KEYS-only (honors DOC-R5C3-07). Would catch a real dropped key. NON-VACUOUS.
+- `image-queue-delete-race-cleanup-wiring.test.ts` — source-shape pin: matches the 3-arg `deleteImageVariants(dir, fn, [])` form and `not.toMatch` the 2-arg form. Consistent with the established blur-wiring call-site pin pattern. NON-VACUOUS for its (intentionally narrow) source-shape scope.
+- `backfill-color-pipeline-deleted-mid-reencode.test.ts` — drives `affectedRows:0`, asserts cleanup for all 3 formats with `[]` sizes + the `deletedMidReencode` tally. Critic proved RED-on-guard-removal. NON-VACUOUS.
 
-## VERIFIED-CLEAN (security-invariant + recently-landed tests confirmed non-vacuous this review)
+## Flaky-test posture (re-confirmed, no NEW flake)
 
-- **`privacy-fields.test.ts` — STRONGEST security-invariant test in the suite.** The symmetric guard (`:83-90`) derives `adminOnlyKeys` from the ACTUAL code (`adminSelectFieldKeys` minus `publicSelectFieldKeys`) and asserts it equals exactly the 22-key `SENSITIVE_KEYS` contract — so a NEW admin field added without a disposition decision fails loudly, AND a sensitive key leaking into public fails. The timeline mirror (`:101-114`, `data-timeline.ts`) and subset guard close the public-page drift (`color_space`/`bit_depth` previously leaked there). Non-vacuous, derives from code not hardcode.
-- **`check-api-auth.test.ts` / `check-action-origin.test.ts` / `check-public-route-rate-limit.test.ts` — all three import the REAL scanner** (`checkRouteSource` / `checkActionSource`+`walkForActionFiles` / `checkPublicRouteSource`) and feed BAD fixtures asserting `report.failed` is non-empty (`MISSING requireSameOriginAdmin` / `MISSING RATE LIMIT` + `POST` / unwrapped handler). They also cover the subtle bypass cases — dead branch, uncalled nested helper, aliased export, `as`-assertion wrap. RED if a route/action/public-handler drops its guard. **Solid.**
-- **`validation.test.ts`** — `containsUnicodeFormatting` tested against actual RLO/LRE/LRO/LRI/zero-width chars (not the function name); topic-alias/tag-name validators reject bidi + zero-width formatting. Real-function, semantic.
-- **`csv-escape.test.ts`** — real `escapeCsvField`; asserts neutralization of `=`/`+`/`-`/`@` (formula injection), C0/C1 controls, CR/LF. Behavioral, not source-shape.
-- **`color-detection.test.ts`** — real `detectColorSignals` per branch with explicit expected values (`p3-d65`/`bt709`/`unknown` transfer, `isHdr` true/false). The NCLX code-2 isHdr case is bracketed by negative cases. Semantic.
-- **`process-image-blur-wiring.test.ts` / `images-action-blur-wiring.test.ts`** — source-shape but assert the **CALL SITE** (`blur_data_url\s*:\s*assertBlurDataUrl\s*\(`) AND the absence of the un-wrapped form (`not.toMatch(/blur_data_url\s*:\s*data\.blurDataUrl\b/)`). The call-site + negative-form combination is the stronger pattern TE-4 wishes the OG sanitize pin had — already present here. Adequate.
-- **`sw-template-contract.test.ts`** — pins the template AND the generated `sw.js` against drift: bounded HEAD probe (`AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` in both), `x-gk-admin-render !== '1'` offline-cache gate, LRU accounting parity vs `lib/sw-cache.ts`. Load-bearing (the template has no unit-tested twin).
-- **`data-tag-names-sql.test.ts` lite-query `.toSQL()` (`:244-259`)** — compiles the masonry query and asserts `GROUP_CONCAT(DISTINCT … ORDER BY …)` + LEFT JOIN + GROUP BY in the emitted SQL. Genuinely semantic (catches the NULL-correlated-subquery regression that broke production). Only `getLatestImageForOg` (TE-4) lacks the same treatment.
-- **`backfill-color-pipeline.test.ts` AGG-02 column-set (`:146-198`)** — locks the full 9-key `signals` set returned by `reprocessRow` so a column drop fails the gate. Non-vacuous for what it covers (the per-row encode signal set); does NOT cover `flushBatch` (TE-1).
-- **No tautologies / disabled-test rot:** suite-wide scan found zero `expect(true).toBe(true)`-class assertions; the only `.skip()` calls are environment-conditional e2e gates. Full suite **215 files / 2068 tests pass warm (exit 0)**; libheif cold-flake did not reproduce.
-
-## Standing note (forward-looking, not a new gap)
-
-- **No automated WCAG contrast-ratio guard for the dark-mode color tokens** (`--destructive-text`, amber `dark:` variants, and now the sales StatusBadge light-mode values from `fd708c1e`). Touch-targets and error-shell headings are blocking tests, but no test computes contrast ratios from the CSS tokens (`grep` over `__tests__/` finds zero `contrast`/`wcag`/`getContrastRatio` assertions). A future token edit could silently regress these freshly-fixed ratios. Hard to automate (HSL→sRGB→relative-luminance→ratio over token pairs) and designer-owned — a suggestion, not a test-engineer finding. Unchanged from prior cycles.
+The four real-encode AVIF/WebP tests in `strip-gps-from-original.test.ts` + the documented `backfill-color-pipeline` / `process-image-color-roundtrip` libheif cold-flake remain the only real-Sharp/real-libheif surface. None reproduced this cycle. The cold-flake isolation (separate `public/uploads` per test) remains prior-deferred (AGG-C4-T2 / AGG-R8c3-09) — UNCHANGED, not re-escalated.
 
 ---
 
-## TOP COVERAGE GAPS (priority order)
+## NET-NEW TEST FINDINGS THIS CYCLE: 2 (TE-C6-1 MED, TE-C6-2 LOW)
 
-1. **TE-1 (MED, NET-NEW):** sidecar `flushBatch` delete-race orphan-cleanup — the PRODUCTION backfill path — has ZERO test coverage, while its in-app twin just got a dedicated proven-RED test. Export `flushBatch` and clone the runner test. Highest-signal gap this cycle.
-2. **TE-5 (LOW, NET-NEW):** no committed full en/ko leaf-key parity test; the 837=837 figure is a manual orchestrator count. One small `Object.keys` set-equality test (keys only, per DOC-R5C3-07).
-3. **TE-2 (LOW):** `image-manager.tsx` touch-target budget stale at 6 vs real 1 → 5 silent NEW violations allowed. Re-measured, = AGG-C4-09, prior-deferred, still open.
-4. **TE-3 (LOW):** 4 encode-heavy real-AVIF tests still contend on shared `public/uploads` → AGG-R8c3-09 cold-flake mechanism intact. Per-test `UPLOAD_ROOT`. Prior-deferred, still open.
-5. **TE-4 (LOW):** `getLatestImageForOg` source-text test can't catch a dropped `processed` filter or reversed sort — needs the `.toSQL()` pattern already in the same file. Prior-deferred, still open.
-6. **TE-6 (LOW):** upload-queue `[]`-sizes cleanup call site untested (author-acknowledged); cheap source-shape call-site pin closes it.
-
-NET-NEW TEST FINDINGS THIS CYCLE: 2
+TE-C6-1 is the highest-value item: it is the missing test that would have caught DBG-C6-01 and is the reason a real lossless-contract bug shipped green. Schedule alongside the DBG-C6-01 source fix (the bug fix and its proven-RED test should land together).

@@ -1,75 +1,71 @@
-# Code Reviewer — Fresh Skeptical Pass @ HEAD `1dde9b1e` (2026-06-13)
+# Code Reviewer — Deep Review (Cycle 6 / review-plan-fix)
 
-**Angle:** code quality, logic correctness, SOLID, maintainability, error handling, edge cases, invariant/data-flow consistency.
-**Method:** read current code (not comments/tests); verified every candidate against current HEAD; dismissed false positives explicitly.
-**Working tree:** CLEAN (the `M` entries in the session-start status snapshot are now committed). HEAD `1dde9b1e`.
+**Summary: 0 NEW actionable findings.** The repo is genuinely converged at HEAD `4c3d5924` (working tree CLEAN, verified). Every cycle-5 fix (AGG-C5-01..03, AGG-C5-T1/T2, AGG-C5-02) landed correctly, is present in code, and is pinned by non-vacuous tests. No regression of any prior-closed finding. No new logic, error-handling, SOLID, maintainability, or type-safety defect surfaced from my angle.
+
+**Date:** 2026-06-13
+**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
+**Angle:** code quality, logic correctness, SOLID, maintainability.
+**Scope reviewed:** full repo from this angle; line-by-line on the recently-touched high-yield surface.
 
 ---
 
 ## Verdict
 
-**NET-NEW CODE-CORRECTNESS FINDINGS: 0.** Honest convergence is real this cycle. All 6 prior-cycle scheduled fixes (AGG-C4-01 … -07) are RE-VERIFIED correct against current HEAD by line-by-line inspection — not trusted on the commit message. Two candidate findings surfaced by fan-out Explore agents were both proven FALSE POSITIVES on direct verification (details below). The codebase shows uniformly deep defensive engineering; my probes for the usual subtle-bug classes (stateful global-regex `.test()`, unguarded `readUInt`/offset arithmetic, transaction-boundary gaps, missing `affectedRows` checks, `useSyncExternalStore` snapshot instability, setState-after-unmount) all landed on code that already anticipates the hazard.
+**COMMENT** — No CRITICAL / HIGH / MEDIUM / LOW actionable findings. Reporting honest convergence.
 
-Recommendation: **COMMENT** — no blocking issues. No CRITICAL/HIGH/MED net-new. The only residual items are prior-deferred LOW test-depth/doc notes, restated for completeness, none of which are code defects.
-
----
-
-## RE-VERIFIED CLEAN (prior-cycle fixes confirmed still correct at HEAD `1dde9b1e`)
-
-| Prior finding | What I verified | Location (current line) | Status |
-|---|---|---|---|
-| **AGG-C4-01** touch-target scale-token `max-` false positive | `(?<!max-)` lookbehind applied to EVERY bare `h`/`w` branch (h-8/h-9/h-10/w-10 literals, cn() composites, HTML `<button>`, all 4 scale-token catch-alls). `min-h`/`min-w`/`size` correctly left unguarded (true floors). Traced by hand: `max-h-10` → lookbehind sees `max-` before `h` → no match (correct); `min-h-6` → no `max-` before `min` → matches (correct). 9 negative regression fixtures added. | `__tests__/touch-target-audit.test.ts:323,329,333,337,354,358,362,366` | **CLOSED, correct** |
-| **AGG-C4-02** sidecar `flushBatch` missing orphan-cleanup guard (PRODUCTION path) | `flushBatch` captures `[res]` from each `tx.execute` on BOTH UPDATE branches (signals + derivative-only), pushes `item.files` on `affectedRows===0`, and AFTER the tx commits calls `deleteImageVariants(dir, fn, [])` (dir-scan) for all 3 formats. Decrements `processed`, tallies `deletedMidReencode` separately. Cleanup-after-commit prevents an unlink error rolling back sibling updates. | `scripts/backfill-color-pipeline.ts:315-391` | **CLOSED, correct** |
-| **AGG-C4-03** sales StatusBadge light-mode amber/green < 4.5:1 | `downloaded` → `text-green-700 dark:text-green-400`; `pending` → `text-amber-700 dark:text-amber-400`. green-700/amber-700 ≈ 5.02:1 on white; dark `-400` variants pass. | `sales-client.tsx:95,97` | **CLOSED, correct** |
-| **AGG-C4-04** upload-worker delete-race cleanup orphaned non-default sizes | All 3 `deleteImageVariants` calls in the `affectedRows===0` branch now pass `[]` (dir-scan). Confirmed the scan path runs when `sizes.length===0` (process-image.ts:505). | `image-queue.ts:383-387` | **CLOSED, correct** |
-| **AGG-C4-05** runner detection-failure cleanup branch untested | 2nd UPDATE branch (detection-failed) carries the same `affectedRows===0 → cleanupDeletedMidReencodeVariants(row) → return deleted-mid-reencode` guard as the success branch. Code path present + correct; pin commit `2251b122` in log. | `admin-backfill-runner.ts:573-576, 605-608` | **CLOSED, code correct** |
-| **AGG-C4-06** CLAUDE.md cache()-count 9→10 | CLAUDE.md:357 reads "wraps 10 data-access functions" and lists `getLatestImageForOgCached`. Verified the fn + `cache()` wrapper exist (data.ts:873 + 1597). | `CLAUDE.md:357` | **CLOSED, correct** |
-| **AGG-C4-07** comment-honesty cluster (home og:image / JSON-LD asymmetry) | Home OG comment now accurately states "there is NO base-JPEG last resort, only the sized `_NNN.jpg` derivatives are tried" and "302-redirects to … `og_image_url`, or to the site homepage HTML … NOT a freshly-generated 'site OG card'". Matches route behavior. | `(public)/page.tsx:106-111` | **CLOSED, correct** |
-
-### Other prior fixes spot-checked and still correct
-- **AGG-R8c3-01** NCLX code-2 isHdr: per-field NCLX guard applies each mapped value only when defined (`color-detection.ts:384-386`); `isHdr = transfer === 'pq'||'hlg'` (line 401). Code-2 "Unspecified" keeps the ICC-name transfer (PQ-named ICC stays isHdr=true → upload-reject). Correct.
-- **AGG-R8c3-02 / AGG-R8-13** og-sanitize unification: single 30-line module; `sanitizeForOg` = global `stripUnicodeFormatting` then strip `OG_C0_CONTROL_CHARS`. Not a first-match `.replace`. Correct.
-- **AGG-R8c3-03** in-app backfill orphan-cleanup (both branches): present/correct; `deletedMidReencode` excluded from WITH-FAILURES banner (line 791). Correct.
-- Delete flows (`deleteImage` :596-631, `deleteImages` :634-760): transactional, affectedRows-checked, audit-on-success-only, `[]`-sizes cleanup, bounded concurrency. Clean.
-- `bulkUpdateImages` (:957-1074): all mutations in one transaction; per-row alt-text apply avoids the bulk-SET cross-row overwrite; tag add/remove scoped by `(imageId IN ids AND tagId = X)`. Clean.
-- Privacy layer (`data.ts:204-449`): `publicSelectFields` derived by destructure-omission; `PrivacySensitiveKeys` covers all 20 admin-only columns (incl. color_space/icc_profile_name/pipeline_version); compile-time guards are non-vacuous. Union cross-checked vs CLAUDE.md admin-only list — exact match; color_primaries/avif_10bit correctly public. Clean.
-- `migrate.js`: reconcile mirrors current schema; per-entry hash baseline avoids MAX(created_at) poison; post-condition throws loud on silently-skipped journal hashes. Journal monotonicity (idx≥7) + grandfathered 6→7 inversion documented + tested. Clean.
-- NCLX ISOBMFF walker (`color-detection.ts:217-283`): every read bounds-checked; MAX_DEPTH 5 / MAX_SCAN 1 MB; `dataSize>=11` before CICP triplet read at `dataStart+10`. Clean.
-- `gps-exif-strip.ts` iloc/extent math: `readSized` caps offsets/lengths at Number.MAX_SAFE_INTEGER; `start+length>buf.length` fails closed before any read; `XMP_GPS_TOKEN` non-global → `.test()` stateless. Clean.
-- `sw.js`: `networkFirstHtml` excludes admin-rendered pages via `x-gk-admin-render` (line 270), stamps `sw-cached-at` + 24h TTL; image SWR HEAD probe timeout-bounded (`AbortSignal.timeout`, line 230) with stale-serve fallback. `recordAndEvict` lost-update = documented AGG-C4-08 (deferred), unchanged. Clean.
-- `auth-rate-limit.ts`: decrement-not-delete rollback, per-account + per-IP buckets, window-expiry reset. Clean.
-- **Stateful global-regex sweep:** every `/g` regex in `src/lib` + `src/app/actions` (OG_C0_CONTROL_CHARS, UNICODE_FORMAT_CHARS_GLOBAL, UNICODE_FORMAT_CHARS_RE, csv-escape _G, download-filename) used ONLY with `.replace()`, each a separate instance — none with `.test()`. The `.test()`-only UNICODE_FORMAT_CHARS / XMP_GPS_TOKEN are deliberately NON-global. No lastIndex bug anywhere.
+| Severity | Count |
+|---|---|
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 0 |
 
 ---
 
-## FALSE POSITIVES dismissed this cycle (recorded so they are not re-raised)
+## Cycle-5 fixes RE-VERIFIED CLOSED at HEAD (not trusted on the aggregate's word)
 
-1. **embeddings.ts:87 "unawaited `embedImageStub`" (fan-out agent, Medium) — FALSE.** `embedImageStub` is SYNCHRONOUS — returns `Float32Array` directly (`clip-inference.ts:62`, no async/Promise). The assignment is correct; no dropped promise. Dismissed.
-
-2. **lightbox.tsx `hideTimer` "setTimeout leak on unmount" (fan-out agent, High) — FALSE.** Agent inspected only the slideshow-cleanup effect (lines 222-229) and missed the auto-hide effect at **lines 258-273**, whose cleanup `return () => { if (hideTimer.current) clearTimeout(hideTimer.current); }` (lines 268-272) clears the pending timer on unmount. Every `setTimeout` writes the same `hideTimer.current` ref, so unmount clears whatever the latest armed timer is — no leak. (And `setControlsVisible` after unmount is a silent no-op on React 18+/19.) Dismissed.
-
-3. **collections.ts create/update slug TOCTOU (fan-out agent, Medium) — NOT A DEFECT.** Slug uniqueness is enforced by the DB UNIQUE constraint; `ER_DUP_ENTRY` is caught and surfaced. Only delta vs topics.ts is no advisory lock — UX-consistency note, not correctness. No action.
-
----
-
-## Prior-deferred LOW items re-confirmed (NOT net-new; restated for the aggregate)
-
-- **AGG-C4-08** SW metadata lost-update (no CAS in recordAndEvict/touchMeta): unchanged; best-effort cache housekeeping per CLAUDE.md. Correctly deferred.
-- **AGG-C4-09** stale `KNOWN_VIOLATIONS['components/image-manager.tsx']=6` (real ~1): not re-measured this pass; already in plan-336, re-affirmed open.
-- **AGG-C4-T1 (TE-4)** `getLatestImageForOg` source-text test asserts SQL shape not semantics — can't catch a dropped `processed=true` filter or reversed sort. I VERIFIED the implementation IS correct: `buildImageConditions(undefined, tagSlugs, false)` applies `processed=true`; sort `desc(capture_date,created_at,id)` (data.ts:873-887). Code behaves; test-depth gap is a real LOW note, not a defect.
-- **Orphan migration** `drizzle/0014_drop_reactions.sql` (no journal entry → never applied by drizzle; image_reactions/reaction_count linger as dead schema on legacy DBs that ran journaled 0007): INTENTIONAL + documented + tested (`migration-journal.test.ts:29-32` asserts tag→file but not file→tag). No `reaction` refs in `src/`. Recorded so it isn't re-raised.
+| Prior finding | Status at `4c3d5924` | Evidence (read line-by-line) |
+|---|---|---|
+| **AGG-C5-01** sidecar `flushBatch` orphan-cleanup test gap | **CLOSED, PROVEN NON-VACUOUS** | `scripts/backfill-color-pipeline.ts:127-146` extracts `cleanupDeletedMidReencodeVariants` + `collectDeletedMidReencodeFiles` as module-level exports; `flushBatch:397-406` wires them. `backfill-color-pipeline-deleted-mid-reencode.test.ts` (149 LOC) pins the partition (only `affectedRows===0` selected), the `[]` dir-scan arg on all 3 formats, AND a source-shape pin that `flushBatch` invokes both + adjusts the `processed -= … / deletedMidReencode += …` tally. Ran it: **16 tests pass.** Comment documents proven-RED on filter-drop / sizes-change. |
+| **AGG-C5-02** touch-target `<select>` `max-` false-positive | **CLOSED** | `touch-target-audit.test.ts:415,419` (+ 2 more) carry `(?<!max-)` before `(?:h-8|h-9|h-10)` on all four native-`<select>` FORBIDDEN patterns, mirroring the `40a65aef` Button fix; negative self-check fixture at `:988` (`<select className="max-h-10">` must NOT flag). |
+| **AGG-C5-03** three public inline `<Link>` < 44 px | **CLOSED** | `topic-empty-state.tsx:18`, `home-client.tsx:434`, `timeline/page.tsx:154` all now carry `inline-flex items-center min-h-11 px-2`. Verbatim-read. |
+| **AGG-C5-T1** en/ko leaf-key parity gate | **CLOSED** | `i18n-key-parity.test.ts` flattens both message trees and asserts SET equality (keys only, respecting DOC-R5C3-07's en-ICU/ko-fixed value asymmetry) + duplicate-key sanity. Correct design. |
+| **AGG-C5-T2** upload-queue `[]`-sizes wiring pin | **CLOSED** | `image-queue-delete-race-cleanup-wiring.test.ts` present; `image-queue.ts:383-387` passes `[]` on all 3 `deleteImageVariants` calls. |
 
 ---
 
-## Coverage map (what I actually opened/traced)
+## What I stress-tested and found CLEAN (no action)
 
-- 6 prior fixes: source verified at current line numbers (not commit-trusted).
-- Server actions: `images.ts` (delete/bulkUpdate/upload) manually; topics/tags/sharing/admin-users/sales/collections/lr-tokens/embeddings via Explore + direct verification of the 2 flagged candidates.
-- Lib: color-detection, process-image (deleteImageVariants), image-queue, admin-backfill-runner, backfill-color-pipeline, auth-rate-limit, data.ts (privacy + getLatestImageForOg), gps-exif-strip, validation, og-sanitize, clip-inference; + Explore sweep of csv-escape/settings-hash/blur-data-url/serve-upload/bounded-map/rate-limit/icc-*/gain-map and all api/ routes (reported clean).
-- Components: Explore sweep of use-display-capability (React #185), photo-viewer, histogram, lightbox, wide-gamut-hint, lightbox-color-pip + direct verification of lightbox candidate.
-- Scripts: migrate.js (full) + journal/schema cross-check.
-- sw.js (full), home (public)/page.tsx (OG + JSON-LD).
+- **Backfill correctness (both paths byte-equivalent on the contract).** Sidecar `flushBatch` (`backfill-color-pipeline.ts:358-411`) and in-app runner `reprocessOne` (`admin-backfill-runner.ts:442-615`) both: (a) version-bump UPDATE on detection success, (b) derivative-only UPDATE (no version bump) on detection-failure → row stays a candidate for retry, (c) `affectedRows===0` → deleted-mid-reencode cleanup with `[]` dir-scan, post-commit (sidecar) so a unlink error can't roll back sibling rows. The `processed` counter math in the sidecar is correct: rows are counted `processed++` at enqueue (incl. derivative-only), then `processed -= deletedMidReencodeFiles.length` in flush partitions BOTH update kinds (both were counted). No double-count, no leak.
+- **`deleteImageVariants` `[]` dir-scan contract is real** (`process-image.ts:486`): `sizes=[]` → `fs.opendir` scan matching `${name}_*${ext}`. UUID filenames make prefix-collision false-deletion impossible (no UUID is a prefix of another followed by `_`).
+- **Tag filtering + GROUP_CONCAT interaction is correct** (`data.ts:563-590`, `605`, `728-755`). `buildTagFilterCondition` filters via `inArray(images.id, <subquery with own GROUP BY/HAVING>)`, so the outer LEFT JOIN + `GROUP_CONCAT(DISTINCT tags.name)` still aggregates ALL tags per matching image, not just the filtered subset. `tag_names` aria-labels stay correct under filtering. Locked by `data-tag-names-sql.test.ts`.
+- **`admin-backfill-runner` concurrency cap arithmetic** (`resolveBackfillConcurrency:129-142`): NaN-guarded pool limit, `cap = max(1, floor((LIMIT-RESERVED-1)/2))` = 2 at pool=10. Clamps DOWN with a warning. Pool-exhausted claim → `locked` skip (no tight error spin). Sound.
+- **`getBackfillStatus`** (`admin-backfill.ts:103-130`) omits `deletedMidReencode` from the surfaced result — intentional (the runner documents it as neither success nor failure, doesn't need operator attention). Benign, not a defect.
+- **Image-queue lifecycle** (`image-queue.ts`): per-image claim lock + `WHERE processed=false` conditional UPDATE + delete-race cleanup; `failed_at` uses `toMySqlDateTime` (the R4C2 fix for the trailing-`Z` ER 1292); FIFO eviction on bounded maps; quiesce uses pause→clear→onIdle (the COR-R4C12-01 deadlock fix). Fire-and-forget caption/embedding hooks both carry `.catch()` / internal try-catch. Clean.
+- **NCLX ISOBMFF walker** (`color-detection.ts:217-283`): depth ≤ 5, scan ≤ 1 MB, `size < headerSize` / `pos+size > buffer.length` rejection, `dataSize >= 11` guard before all `readUInt16BE(dataStart+4/+6/+8)`, `meta` FullBox +4 skip, `pos = boxEnd` termination. NCLX-precedence applies only DEFINED values (the COR-1 fix avoids clobbering ICC with H.273 code-2 "Unspecified"). Bulletproof.
+- **Histogram** (`histogram.tsx`): AbortController + `aborted` flag on the img-load effect; `markFailed` URL fall-through (AVIF→sized JPEG→base); `canvasDims` in the redraw deps (the COR-R4C8-04 buffer-clear fix); `useImperativeHandle` for cycleMode. No stale-closure or leak.
+- **Home-client pagination** (`home-client.tsx`): cursor-based load-more (`getClientImageListCursor`) means no offset-under-insertion duplicate-key risk; `key={image.id}`; prop-driven `setAllImages(images)` reset on filter change with LoadMore's own `queryVersionRef` discarding stale responses. Sound.
+- **Blur consumer** (`photo-viewer.tsx:192-200`): gates through `isSafeBlurDataUrl` at read time; producer + write-time also assert (symmetric defense). Clean.
+- **Public pages** (`(public)/page.tsx`, `p/[id]/page.tsx`, `timeline/page.tsx`): all `revalidate = 0`; numeric id validated `/^\d+$/` before parseInt; JSON-LD via `safeJsonLd` + CSP nonce; timeline month bucketing guards `Number.isFinite(m) && 1..12`. Clean.
 
 ---
 
-## NET-NEW FINDINGS THIS CYCLE: 0
+## Gate evidence (run live this cycle)
+
+- `npm run typecheck` (app + scripts) → **exit 0** (clean isolated run at HEAD `4c3d5924`; an earlier `code 2` was a spurious `tsc` build-cache collision from running 3 concurrent typechecks, NOT a real type error — re-ran in isolation, green).
+- Targeted tests `backfill-color-pipeline-deleted-mid-reencode` + `admin-backfill-concurrency-cap` + `admin-backfill-runner-deleted-mid-reencode` → **16/16 pass.**
+- `check:js-scripts` → 7 files checked, clean.
+
+---
+
+## Non-findings considered and dismissed (skeptical pass)
+
+- **Committed `sw.js` stamp `ee0f38bd-p7` ≠ HEAD `4c3d5924`** — the `prebuild` hook (`build-sw.ts`) regenerates the stamp at build, so the deployed artifact is correct; the committed file being a stamp behind is a documented build-artifact pattern, not a runtime defect. (Already in the aggregate's VERIFIED-CLEAN.) Not counted.
+- **Sidecar counts detection-failure rows as `processed`** while the in-app runner separates `detectionFailures` — this is an intentional reporting difference (the sidecar's final log only reports processed/skipped/errors/deletedMidReencode and doesn't claim a detection-failure breakdown). Both persist the same columns; the divergence is cosmetic, documented, and re-affirmed CONVERGING (AGG-C5-R1). Not a defect.
+- **Color-pipeline writer duplication B↔C (~120 LOC)** — re-confirmed CONVERGING not drifting; WI-09 consolidation deferral remains justified (maintainability investment, not correctness). No new divergence. Record-only (matches AGG-C5-R1).
+
+---
+
+## Conclusion
+
+Honest convergence holds and is the correct outcome. The prior cycle's two MED items (sidecar test gap + bare inline links) are closed with proven-RED / verbatim-confirmed fixes; the four LOW items are closed; no prior-closed finding regressed; and a fresh full-angle sweep of the recently-touched backfill/queue/data/color/histogram/page surface plus their cross-file interactions produced no new logic, error-handling, SOLID, maintainability, or type-safety defect worth a code change. **0 new actionable findings.**

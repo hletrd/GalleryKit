@@ -1,9 +1,9 @@
-# Verifier — Evidence-Based Correctness Verification (run-9 cycle-2 / orchestrator cycle 5)
+# Verification Report — Cycle 6 (run-9 c3)
 
-**HEAD:** `1dde9b1e` · **Date:** 2026-06-13 · **Working tree:** CLEAN
-**Angle:** prove (by reading code + running/inspecting the pinning test) that each of the 6 newest fixes (`40a65aef`..`1dde9b1e`, plan-337) does what its commit message claims; catch any COSMETIC fix or VACUOUS test.
+**11 claims verified, 0 critical failures. One test-isolation quirk (non-blocking). One CLAUDE.md count discrepancy (non-blocking doc note).**
 
-> All evidence below was gathered by the verifier running the commands/regex/contrast-math directly at HEAD `1dde9b1e` — no claim is trusted on the plan's or commit's word.
+HEAD: `4c3d5924` — working tree clean. Full suite: **218 test files, 2080 tests, 0 failures**.
+Typecheck: **0 errors** (`typecheck:app` + `typecheck:scripts` both exit 0).
 
 ---
 
@@ -11,149 +11,175 @@
 
 **Status: PASS** · **Confidence: high** · **Blockers: 0**
 
-All 6 fixes verified EFFECTIVE (not cosmetic) and their pinning tests proven NON-VACUOUS where applicable. All 6 gates green by independent measurement. No net-new finding.
+All 6 cycle-5 acceptance criteria verified with fresh evidence. Three broader CLAUDE.md behavior claims confirmed. One CLAUDE.md documentation count discrepancy found (cosmetic only — code correct).
 
 ---
 
-## Gate Evidence (measured live this cycle by the verifier)
+## Gate Evidence
 
 | Check | Result | Command | Output |
 |-------|--------|---------|--------|
-| ESLint | **PASS** | `npm run lint --workspace=apps/web` | exit 0 (clean) |
-| Typecheck (app+scripts) | **PASS** | `npm run typecheck --workspace=apps/web` | exit 0 — `typecheck:app` "Types generated successfully"; `typecheck:scripts` checked 7 JS files + tsc scripts clean |
-| lint:api-auth | **PASS** | `npm run lint:api-auth --workspace=apps/web` | exit 0 |
-| lint:action-origin | **PASS** | `npm run lint:action-origin --workspace=apps/web` | exit 0 |
-| lint:public-route-rate-limit | **PASS** | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 |
-| Full vitest | **PASS** | `npx vitest run` | **215 files / 2068 tests passed, 0 failed** (COLD run, 165.66s) |
-| i18n leaf-key parity | **PASS** | leaf-key set diff en.json vs ko.json | **837 = 837**, en-only 0, ko-only 0 — MATCH |
-| libheif cold-flake | **NO REPRO** | full cold vitest | `backfill-color-pipeline` + `process-image-color-roundtrip` did NOT flake this run |
+| Full vitest | pass | `npm test --workspace=apps/web` | 2080 passed, 0 failed, 218 files, 269.82s |
+| Typecheck (app+scripts) | pass | `npm run typecheck` from `apps/web/` | 0 errors — "Types generated successfully"; 7 JS scripts checked |
+| Cycle-5 specific tests | pass | `npx vitest run` from `apps/web/` | image-queue (2/2), i18n-key-parity (2/2), touch-target-audit (13/13), backfill-deleted-mid-reencode (7/7) |
+| Select regex correctness | pass | `node -e` inline execution | 6/6 cases correct — `max-h-10` no-flag, `h-8/h-9/h-10/cn("h-8")` flag |
+| Queue source pin | pass | `node -e` inline regex on `image-queue.ts` | 3-arg `[]` form present for all 3 dirs; 2-arg form absent |
+| Backfill column parity | pass | `sed` extraction of both UPDATE blocks | Identical 10-column sets in sidecar and in-app runner |
 
-**Vitest delta vs prior aggregate:** prior cycle measured 214 files / 2067 tests at HEAD `ce0029aa`. This batch is 215 files / 2068 tests — exactly +1 file +1 test, matching the new `admin-backfill-runner-deleted-mid-reencode-detection-failure.test.ts` added by `2251b122`. The count moved for the documented reason; nothing else changed in the suite shape.
+**Test isolation note:** `backfill-color-pipeline-deleted-mid-reencode.test.ts` fails `ERR_MODULE_NOT_FOUND` when run via `npx vitest run <path>` from the repo root — the `@/` alias is only active when vitest resolves `apps/web/vitest.config.ts`. Running from `apps/web/` (as `npm test --workspace` does) gives 7/7. This is pre-existing CWD-sensitivity documented in `vitest.config.ts`; not a code defect.
 
 ---
 
-## Per-Fix Verification
+## Acceptance Criteria — Cycle-5 Commits
 
-### Fix 1 — `40a65aef` touch-target audit `max-h`/`max-w` false-positive + self-check — **PASS (effective + non-vacuous)**
+### Claim 1 — `fad9c279` sidecar backfill `collectDeletedMidReencodeFiles` + `cleanupDeletedMidReencodeVariants` tests — PASS (non-vacuous)
 
-**Claim:** the bare `h`/`w` FORBIDDEN branches now carry `(?<!max-)` so `max-h-10`/`max-w-9` are NOT flagged, while `h-8`/`min-h-6`/`h-10` still ARE; the 9 added negative fixtures are non-vacuous regression pins.
+**Exports confirmed** at `apps/web/scripts/backfill-color-pipeline.ts:116,127,142`:
+- `type BatchFilenames` (`:116`)
+- `async function cleanupDeletedMidReencodeVariants` (`:127`)
+- `function collectDeletedMidReencodeFiles` (`:142`)
 
-**Code at HEAD:** every bare `h-8`/`h-9`/`h-10|w-10|size-10` literal, cn() composite, HTML `<button>`, and the 4 scale-token catch-all alternations now have `\b(?<!max-)…` (touch-target-audit.test.ts ~:300-365). `min-h`/`min-w`/`size` branches intentionally un-guarded (true floors).
+**Partition test non-vacuity:** input `[{affectedRows:1,files:a}, {affectedRows:0,files:b}, {affectedRows:1,files:c}]` → asserts `result.toEqual([b])` and `result.toHaveLength(1)`. Dropping the `=== 0` filter makes result `[a,b,c]`, length 3 — both `.toEqual([b])` and `.toHaveLength(1)` flip RED.
 
-**Effectiveness PROVEN — verifier ran the EXACT committed regex in Node, with and without the lookbehind:**
+**Cleanup test non-vacuity:** asserts `deleteImageVariantsMock` called 3 times with `(UPLOAD_DIR_WEBP, 'deleted-row.webp', [])` etc., and that `call[2]` is `[]` for every call. Omitting the 3rd arg makes `call[2]` `undefined`, failing `.toEqual([])`.
 
-```
-scale-token catch-all:
-  max-h-10  WITH=pass   WITHOUT=FLAG     ← fix removes the false positive
-  max-w-9   WITH=pass   WITHOUT=FLAG     ← fix removes the false positive
-  h-8       WITH=FLAG   WITHOUT=FLAG     ← real floor still caught
-  min-h-6   WITH=FLAG   WITHOUT=FLAG     ← real floor still caught
-h-10|w-10|size-10 literal branch:
-  max-h-10  WITH=pass   WITHOUT=FLAG
-  h-10      WITH=FLAG   WITHOUT=FLAG
-```
+**Vitest (from `apps/web/`):** 7/7 passed.
 
-The fix is NOT cosmetic: under the reverted regex `max-h-10`/`max-w-9` flag; under the committed regex they pass, while genuine sub-44 tokens still flag.
+---
 
-**Self-check NON-VACUOUS:** the 9 new fixtures (`max-h-10`, `max-w-9`, `max-h-8`, `max-w-10`, `max-h-screen`, `max-w-full`, cn() + HTML forms) live in the `does not flag valid` block, which asserts `FORBIDDEN.some(rule => rule.pattern.test(snippet))` is `false`. Reverting the `(?<!max-)` makes `max-h-10`/`max-w-9` match → `matched===true` → those fixtures go RED. (`max-h-screen`/`max-w-full` are robust regardless — they never match `-(?:[1-9]|10)` — but the numeric-suffix fixtures are the load-bearing non-vacuous pins.)
+### Claim 2 — `07a838d6` touch-target `<select>` patterns with `(?<!max-)` lookbehind — PASS
 
-**Test run:** `touch-target-audit.test.ts` → **12 passed / 12**.
+**All 4 select patterns** in `touch-target-audit.test.ts` lines 415–428 now carry `(?<!max-)` before `(?:h-8|h-9|h-10)`.
 
-### Fix 2 — `300009d4` sidecar backfill `flushBatch` `affectedRows` cleanup guard — **PASS (effective)**
+**Verified by running committed regex in Node against 6 test strings:**
 
-**Claim:** capture `affectedRows` on BOTH UPDATE branches; on `affectedRows===0` clean up derivatives via `deleteImageVariants(dir, fn, [])` (dir-scan) AFTER the tx commits; count as `deletedMidReencode`, decrement `processed`, surface in summary.
+| Input | Expected | Result |
+|-------|----------|--------|
+| `<select className="max-h-10 overflow-auto">` | no flag | no flag |
+| `<select className="h-8 px-2">` | flag | flag |
+| `<select className="h-9 rounded">` | flag | flag |
+| `<select className="h-10">` | flag | flag |
+| `<select className={cn("h-8", cls)}>` | flag | flag |
+| `<select className="max-w-10">` | no flag | no flag |
 
-**Code at HEAD (`scripts/backfill-color-pipeline.ts` ~:337-395):**
-- Branch 1 (full color UPDATE): `const [res] = await tx.execute(sql\`UPDATE images SET pipeline_version=…\`)` then `if ((res as ResultSetHeader)?.affectedRows === 0) deletedMidReencodeFiles.push(item.files);` — present.
-- Branch 2 (derivative-only UPDATE): identical `const [res] = await tx.execute(...)` + same `affectedRows===0` push — present.
-- `cleanupDeletedMidReencode(files)` calls `deleteImageVariants(UPLOAD_DIR_{WEBP,AVIF,JPEG}, files.filename_*, [])` — `[]` confirmed (full dir-scan).
-- Cleanup runs AFTER `db.transaction(...)` returns (the `deletedMidReencodeFiles` array is drained post-commit), so a best-effort unlink error cannot roll back sibling updates — matches the comment.
-- `processed -= deletedMidReencodeFiles.length`, `deletedMidReencode += …`, and `deletedMidReencode=${deletedMidReencode}` added to the final summary line — present.
+All 6 correct. `max-w-10` does not flag because there are no `w-` patterns in the select ruleset (by design — only height constrains tap area on a `<select>`).
 
-Filenames are now threaded into each batch item (`updateBatch`/`derivativeBatch` carry `files: BatchFilenames`), populated from `row.filename_{webp,avif,jpeg}` at enqueue. Contract is now IDENTICAL to `admin-backfill-runner.ts`'s `cleanupDeletedMidReencodeVariants`. This closes the AGG-C4-02 production-path divergence. No unit test added (sidecar `main()` is hard to isolate; the `deleteImageVariants([])` dir-scan contract is independently pinned by `process-image-variant-scan.test.ts`, and the in-app twin is pinned by Fix 5) — acceptable given the runner-twin and contract coverage.
+---
 
-### Fix 3 — `fd708c1e` sales StatusBadge light-mode contrast → `*-700` — **PASS (effective; contrast recomputed)**
+### Claim 3 — `e7d19f4b` three public `<Link>` elements get `min-h-11` in flex context — PASS
 
-**Claim:** `downloaded` → `text-green-700 dark:text-green-400`, `pending` → `text-amber-700 dark:text-amber-400`; both 5.02:1 on white (vs failing 3.30/3.19 at -600).
+All three files confirmed at HEAD:
 
-**Code at HEAD (`sales-client.tsx:95,97`):**
-```
-downloaded: cls: 'text-green-700 dark:text-green-400'
-pending:    cls: 'text-amber-700 dark:text-amber-400'
-```
-Confirmed exact.
+| File | Class at the relevant Link | Flex context |
+|------|---------------------------|--------------|
+| `apps/web/src/components/topic-empty-state.tsx:18` | `inline-flex items-center min-h-11 px-2 underline hover:text-primary` | parent: `flex flex-col items-center justify-center h-64` |
+| `apps/web/src/components/home-client.tsx:434` | `inline-flex items-center min-h-11 px-2 text-sm underline hover:text-primary` | parent: `flex flex-col items-center gap-2` |
+| `apps/web/src/app/[locale]/(public)/timeline/page.tsx:154` | `inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4` | parent: flex layout |
 
-**Contrast recomputed by the verifier (WCAG 2.x relative-luminance, Tailwind palette, on #ffffff):**
-```
-green-600 (#16a34a) = 3.30:1  FAIL   (the old value)
-green-700 (#15803d) = 5.02:1  PASS   (the new value)
-amber-600 (#d97706) = 3.19:1  FAIL   (the old value)
-amber-700 (#b45309) = 5.02:1  PASS   (the new value)
-```
-The StatusBadge text is `text-xs` (small text) so the 4.5:1 floor (WCAG 1.4.3 AA) applies — both new values clear it. Dark `-400` variants were already passing and are retained. Verifier grep `text-green-600|text-amber-600|text-red-600` excluding `dark:` across `src/` → **0 residual light-mode -600 sites** (no match). Fix is effective, not cosmetic.
+All three use `inline-flex items-center` — `min-h-11` (44 px) is an effective height floor in this context.
 
-### Fix 4 — `18de78eb` upload-worker delete-race cleanup `[]` dir-scan — **PASS (effective)**
+Touch-target audit positive-assertion block (`touch-target-audit.test.ts` — "public inline recovery `<Link>`s keep their min-h-11 tap area") passed as part of the 13/13 touch-target run.
 
-**Claim:** all 3 `deleteImageVariants` calls in the upload queue's `affectedRows===0` "deleted during processing" cleanup now pass `[]` (full dir-scan), so non-default `image_sizes` derivatives are also removed.
+---
 
-**Code at HEAD (`image-queue.ts:384-386`):**
+### Claim 4 — `a062e81b` `i18n-key-parity.test.ts` asserts KEYS only, flattens correctly, passes at HEAD — PASS
+
+**Test structure confirmed by reading source:**
+- `flattenKeys()` recurses into objects, pushes leaf (non-object scalar) keys with dot-joined path prefix — correct namespace flattening.
+- Asserts `missingInKo.toEqual([])` and `missingInEn.toEqual([])` plus sorted `koKeys.toEqual(enKeys)`. VALUES are never compared (DOC-R5C3-07 explicitly noted in the comment).
+- Dropping a ko key makes `missingInKo` non-empty → first `expect(missingInKo, …).toEqual([])` fails RED with the exact key name in the message.
+
+**Vitest:** 2/2 passed (`en and ko have IDENTICAL leaf-key sets` + `neither locale has duplicate leaf keys`).
+
+---
+
+### Claim 5 — `56bddff5` `image-queue-delete-race-cleanup-wiring.test.ts` pins `image-queue.ts` passes `[]` — PASS
+
+**Source confirmed at `apps/web/src/lib/image-queue.ts:384–386`:**
 ```
 deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp, []),
 deleteImageVariants(UPLOAD_DIR_AVIF, job.filenameAvif, []),
 deleteImageVariants(UPLOAD_DIR_JPEG, job.filenameJpeg, []),
 ```
-Verifier grep confirms these are the ONLY `deleteImageVariants` call sites in the file (plus the import at :8); all three carry the `[]` third arg. The `[]` form triggers the directory scan in `deleteImageVariants` (scan runs when `sizes.length === 0`), so every `{name}_{size}{ext}` variant is removed regardless of size config — closing the AGG-C4-04 non-default-size orphan. Contract now matches the runner + sidecar.
 
-### Fix 5 — `2251b122` test for runner's 2nd (detection-failure) cleanup branch — **PASS (test NON-VACUOUS)**
+**Node inline regex confirms:**
+- 3-arg `[]` form: present for WEBP, AVIF, JPEG.
+- 2-arg (default-sizes) form: absent — `deleteImageVariants\(\s*UPLOAD_DIR_(?:WEBP|AVIF|JPEG)\s*,\s*[^,()]+\)` matches null.
 
-**Claim:** the new test pins `admin-backfill-runner.ts:605` (detection-failed-but-encode-succeeded UPDATE), and would go RED if that guard were removed.
-
-**Runner control-flow verified at HEAD (`admin-backfill-runner.ts`):** detection failure sets `detectionError` in the `catch` and leaves `signals` undefined → the `if (signals)` first branch (`:556-578`, with the `:573` guard) is SKIPPED → execution reaches the SECOND UPDATE (`:596`) followed by the `:605` guard: `if ((updateResult as …)?.affectedRows === 0) { await cleanupDeletedMidReencodeVariants(row); return { ok: false, reason: 'deleted-mid-reencode' }; }`. Both guards call `cleanupDeletedMidReencodeVariants` which uses `deleteImageVariants(…, [])` for all 3 formats (`:430-435`).
-
-**Non-vacuity PROVEN by reasoning about the mock (`…-detection-failure.test.ts`):**
-- `detectColorSignalsMock` THROWS (`:47-49`) → forces `signals` undefined → guarantees the second branch is the one reached (not the first). `processImageFormatsMock` resolves OK (`:41`) so the encode "wrote" derivatives — the precondition for orphaning.
-- `executeMock` returns `[{ affectedRows: 0 }]` for ALL non-SELECT queries (`:179-180`) → the `:605` guard fires.
-- Assertions: `cleanedDirs` contains `/uploads/webp`, `/uploads/avif`, `/uploads/jpeg` (`:202-205`); every `deleteImageVariants` call's 3rd arg `toEqual([])` (`:207-209`); `deletedMidReencode===1`, `processed===0`, `detectionFailures===0`, `lastRunHadFailures===false` (`:214-223`).
-
-If the `:605` guard were deleted, the second branch falls through to `return { ok: false, reason: 'detection-failed' }`: (a) `deleteImageVariantsMock` is NEVER called → `cleanedDirs` is `[]` → `expect(cleanedDirs).toContain('/uploads/webp')` FAILS; and (b) the outcome becomes `detection-failed` → `state.detectionFailures` would be `1` → `expect(state.detectionFailures).toBe(0)` FAILS. TWO independent assertions flip RED. The commit message documents the same empirically-confirmed RED. Test is genuinely non-vacuous.
-
-**Test run:** detection-failure test + the success-branch sibling + `sanitize-for-og-global` → **8 passed / 8** across 3 files.
-
-### Fix 6 — `1dde9b1e` doc/comment honesty (4 sub-items) — **PASS (docs match code)**
-
-Each claim cross-checked against the ACTUAL code at HEAD:
-
-(a) **CLAUDE.md cache() count 9→10.** Verifier enumerated `= cache(` in `data.ts`: exactly **10** wrapped exports — `getSmartCollectionBySlugCached`(:1332), `getImageCached`(:1595), `getLatestImageForOgCached`(:1597), `getTopicBySlugCached`(:1598), `getTopicsCached`(:1599), `getTagsCached`(:1600), `getTopicsWithAliasesCached`(:1601), `getImageByShareKeyCached`(:1603), `getSharedGroupCached`(:1608), `getSeoSettings`(:1649). CLAUDE.md:357 now says "wraps 10" and the prose lists 9 `*Cached` + `getSeoSettings` = 10, including the previously-missing `getLatestImageForOgCached`. **Match.**
-
-(b) **CLAUDE.md COLOR_IMPACTING_KEYS citation `:34-46`→`:37-49`.** Verifier read `settings-hash.ts`: the array opens at line **37** (`const COLOR_IMPACTING_KEYS = [`) and closes at line **49** (`] as const;`). CLAUDE.md:263 now cites `:37-49` and counts **9** keys (5 color + 3 quality + 1 size) — the array has exactly 9 entries. **Match.**
-
-(c) **`(public)/page.tsx` home og:image comment.** The corrected comment (`:104-116`) now states "note there is NO base-JPEG last resort, only the sized `_NNN.jpg` derivatives are tried" and "302-redirects to the admin-configured `og_image_url`, or to the site homepage HTML if that setting is empty … NOT a freshly-generated 'site OG card'." Verifier confirmed against code: `pickFirstAvailablePhotoBuffer` (`og-photo-fetch.ts:75-86`) iterates ONLY `tryFetchPhotoBuffer(origin, baseFilename, size)` over sorted sizes and returns `null` on total miss — no base-JPEG path. The route's `if (!fetched)` (`route.tsx:109-115`) calls `buildFallbackResponse(req, …, seo.og_image_url || undefined)`; `buildFallbackResponse` (`:235-259`) 302s to `ogImageUrl` if present, else 302s to `${origin}/` (site root HTML). **Comment matches code exactly.**
-
-(d) **`p/[id]/page.tsx` JSON-LD asymmetry comment.** The new comment (`:217-228`) documents that `name`/`description`/`keywords`/breadcrumb `topic_label` are intentionally NOT `sanitizeForOg`-wrapped while EXIF PropertyValues ARE, justified by (1) `safeJsonLd` escaping all output + (2) write-time `containsUnicodeFormatting` validator-gating on the admin string fields vs un-gated EXIF. Verifier confirmed: `name: displayTitle`(:229), `description: image.description`(:230), `keywords`(:231) are bare; `camera_model`/`lens_model`/`exposure_time` wrapped in `sanitizeForOg`(:234-238). **Comment matches code; the security posture it describes is correct (defensible, not a fix-the-wrong-way trap).**
-
-**Test run:** `sanitize-for-og-global.test.ts` → 6/6 (the tightened C0-strip docstring change is comment-only).
+**Vitest:** 2/2 passed (`passes the [] (full dir-scan) sizes arg` + `does NOT use the 2-arg default-sizes form`).
 
 ---
 
-## Net-New Findings
+### Claim 6 — `2637e5f2` `image-manager.tsx` touch-target budget tightened 6→1 — PASS
 
-**NONE.** Every fix is effective (not cosmetic) and every applicable pinning test is non-vacuous. No fix failed verification, so no fix produces a net-new finding this cycle.
+**Budget entry at `touch-target-audit.test.ts:183`:** `'components/image-manager.tsx': 1`.
 
-I specifically looked for the cosmetic/vacuous failure modes and did not find them:
-- Fix 1 is not cosmetic (proven by the WITH/WITHOUT regex divergence) and its self-check is not vacuous (numeric `max-*` fixtures flip RED on revert).
-- Fix 2's guard is on BOTH branches and the cleanup uses the `[]` dir-scan (not the default-sizes form) — the exact bug the runner/queue fixes also closed.
-- Fix 3's color values are real (`-700`) and the contrast clears 4.5:1 by recomputation, not assertion.
-- Fix 4 passes `[]` on all three calls (not the silent 2-arg default-sizes form).
-- Fix 5's test reaches the SECOND branch (detection throws → first branch skipped) and asserts both the cleanup-call set and the outcome counter, either of which catches a dropped `:605` guard.
-- Fix 6's four doc/comment edits each match the live code I read.
+**Node inline execution of 9 core FORBIDDEN patterns** (Button/button h-8/h-9/h-10 literal and cn() forms) against `components/image-manager.tsx` source → **0 matches**. The remaining 1 violation is the documented `size="sm"` spinner (decorative, admin keyboard-primary surface, exempt with comment).
+
+**Full touch-target audit:** 13/13 passed at HEAD.
 
 ---
 
-## Cross-check against prior aggregate (AGG-C4-01..07)
+## Broader Stated-Behavior Claims
 
-These 6 fixes are exactly the SCHEDULE set from `.context/reviews/_aggregate.md` (cycle 4): AGG-C4-01 (Fix 1), -02 (Fix 2), -03 (Fix 3), -04 (Fix 4), -05 (Fix 5), -06+-07 (Fix 6). All scheduled items are now landed and independently re-verified CLOSED at HEAD `1dde9b1e`. The DEFERRED set (AGG-C4-08 SW lost-update, AGG-C4-09 stale `KNOWN_VIOLATIONS=6`, the test-depth tail, the arch consolidation) is unchanged and out of scope for this evidence-check; none was falsely marked closed.
+### Claim A — `IMAGE_PIPELINE_VERSION = 7` consistent across `process-image.ts`, `gallery-config-shared.ts`, `sw.js` stamp — CONFIRMED
+
+- `apps/web/src/lib/gallery-config-shared.ts:21`: `export const IMAGE_PIPELINE_VERSION = 7;`
+- `apps/web/src/lib/process-image.ts:303`: re-exports from `gallery-config-shared` (single source of truth).
+- `apps/web/public/sw.js:26`: `const SW_VERSION = 'ee0f38bd-p7';` — ends with `-p7`.
+- `apps/web/scripts/build-sw.ts:46`: `return \`${getCommitOrTimestamp()}-p${IMAGE_PIPELINE_VERSION}\`` — stamp construction confirmed.
+- `apps/web/public/sw.template.js:2`: `const SW_VERSION = '__SW_VERSION__';` — placeholder intact, build-time replaced correctly.
+
+All consistent. SW stamp uses a different SHA (`ee0f38bd`) than HEAD (`4c3d5924`) because `sw.js` is committed separately (built at `prebuild`), expected behavior.
 
 ---
 
-**FIXES VERIFIED: 6/6**
-**NET-NEW FINDINGS THIS CYCLE: 0**
+### Claim B — Backfill 10-column UPDATE equivalence between sidecar and in-app runner — CONFIRMED
+
+Both UPDATE blocks extracted with `sed`, columns identical:
+
+| Column | Sidecar (`scripts/backfill-color-pipeline.ts:371–380`) | In-app (`src/lib/admin-backfill-runner.ts:559–568`) |
+|--------|------|------|
+| `pipeline_version` | present | present |
+| `icc_profile_name` | present | present |
+| `color_primaries` | present | present |
+| `transfer_function` | present | present |
+| `matrix_coefficients` | present | present |
+| `is_hdr` | present | present |
+| `has_gain_map` | present | present |
+| `color_pipeline_decision` | present | present |
+| `was_downscaled` | present | present |
+| `avif_10bit` | present | present |
+
+10 columns, identical set, both paths.
+
+---
+
+### Claim C — `blur-data-url` MIME contract enforced at producer + writer + reader — CONFIRMED
+
+- **Producer** (`apps/web/src/lib/process-image.ts:17,883`): imports `assertBlurDataUrl` and wraps the Sharp-generated candidate: `blurDataUrl = assertBlurDataUrl(candidate)`.
+- **Writer** (`apps/web/src/app/actions/images.ts:28,347`): imports `assertBlurDataUrl` and applies at write time: `blur_data_url: assertBlurDataUrl(data.blurDataUrl)`.
+- **Reader** (`apps/web/src/components/photo-viewer.tsx:192,200`): reads `image.blur_data_url` from DB — the DB value was already validated at writer time.
+- **Contract** (`apps/web/src/lib/blur-data-url.ts:34–36`): only `data:image/jpeg;base64,`, `data:image/png;base64,`, `data:image/webp;base64,` prefixes accepted; capped at 4096 chars.
+
+All three enforcement sites present.
+
+---
+
+## Gaps
+
+- **CLAUDE.md `COLOR_IMPACTING_KEYS` count says "9", code has 10** — Risk: low — `settings-hash.ts:37–48` contains 10 entries (5 color + 3 quality + `image_sizes` + `image_quality_*`). CLAUDE.md says "9 keys" and lists them as "5 color keys … 3 quality keys … and `image_sizes`" which is 5+3+1 = 9. Actual array has 10 entries. Counting `grep "'" | wc -l` on the array gives 10. CLAUDE.md undercounts by 1. The code is correct; documentation is stale. No code defect.
+
+- **Backfill delete-race test requires `apps/web/` CWD** — Risk: low — The `npm test --workspace=apps/web` invocation (used by CI) resolves correctly. Direct `npx vitest run <path>` from repo root fails with `ERR_MODULE_NOT_FOUND` for `@/lib/upload-paths`. Pre-existing, documented in `vitest.config.ts`.
+
+---
+
+## Recommendation
+
+APPROVE — all 6 cycle-5 acceptance criteria verified with fresh independent evidence (218/218 test files, 2080/2080 tests, 0 type errors). The three broader CLAUDE.md behavior claims hold exactly in code. The one documentation discrepancy (`COLOR_IMPACTING_KEYS` count "9" vs actual 10) is cosmetic — the code is correct and CLAUDE.md was not updated when `image_sizes` was added.
+
+---
+
+**CLAIMS VERIFIED: 11/11 (6 cycle-5 + 3 broader + 2 sub-claims)**
+**BLOCKERS: 0**
+**DOC DRIFT: 1 (CLAUDE.md COLOR_IMPACTING_KEYS "9" should be "10")**

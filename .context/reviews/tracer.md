@@ -1,8 +1,250 @@
-# Tracer Review — Run-9 Cycle-1 fixes follow-on (cycle 5 deep-review fan-out)
+# Tracer — Cycle 6 Deep Trace Report
 
-**Date:** 2026-06-13
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**HEAD:** `1dde9b1e` — working tree CLEAN (only `.context/reviews/*.md` peer outputs + plan files modified; no source residue).
+**One-line summary:** 3 flows traced (backfill delete-race, settings-hash/ETag invalidation, upload-queue restart-boundary), all sound — no new correctness or data-loss gap found; one cosmetic log-tally observation recorded.
+
+---
+
+## Trace Report
+
+### Flow 1: Backfill delete-race, full lifecycle across both paths
+
+#### Observation
+
+When an image row is deleted mid-backfill-re-encode, both paths (in-app runner `admin-backfill-runner.ts` and sidecar `scripts/backfill-color-pipeline.ts`) must detect the zero-affectedRows UPDATE and unlink every just-written derivative before the caller can consider the row handled. The question is whether there is any interleaving where derivatives are written AFTER the cleanup fires, and whether the two paths are genuinely equivalent.
+
+#### Hypothesis Table
+
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Both paths are sound: processImageFormats fully materializes all derivatives before the row enters its UPDATE path; cleanup fires post-commit with `[]` dir-scan; no interleaving can re-orphan after cleanup | High | Strong (direct code trace) | Code structure is sequential within each async task |
+| 2 | Sidecar tally gap: `processed--` fires after `flushBatch` returns but `processed++` fired earlier in the queue task; the two adjust on the same single JS thread so the final count is correct but the in-flight log value can be briefly inflated | Low | Moderate (code-path trace) | JS single-threaded; final tally is self-correcting |
+| 3 | Sidecar re-orphans under concurrency: a derivative is written AFTER cleanup fires because reprocessRow returns before processImageFormats completes | Eliminated | Strong (direct code trace) | processImageFormats is fully awaited inside reprocessRow before any return value is produced |
+
+#### Evidence For Hypothesis 1 (sound)
+
+**In-app runner path** (`admin-backfill-runner.ts`):
+
+- Lines 499-520: `processImageFormats(...)` is awaited in its own try block inside `reprocessOne`. It throws on encode failure (caught, returns `encode-failed`), so derivatives are fully on disk before execution continues.
+- Lines 557-578: the full-signals UPDATE branch. `db.execute(sql\`UPDATE … WHERE id = ${row.id}\`)` returns `[updateResult]`; the `affectedRows === 0` guard fires at line 573. `cleanupDeletedMidReencodeVariants(row)` is awaited (line 574) before return.
+- Lines 594-608: the detection-failure UPDATE branch has the identical guard at line 605. Both branches call `cleanupDeletedMidReencodeVariants` with the `CandidateRow` carrying `filename_webp/avif/jpeg`.
+- `cleanupDeletedMidReencodeVariants` (lines 431-440): `Promise.all` of three `deleteImageVariants(dir, name, [])` calls. The `[]` arg triggers a full directory scan regardless of configured sizes.
+- The per-image claim lock (line 486-614 try/finally) is held for the entire encode→detect→UPDATE window; released in `finally` at line 613 AFTER the UPDATE and cleanup. No concurrent worker or the live queue can write to the same derivative files while the backfill holds this lock.
+
+**Sidecar path** (`scripts/backfill-color-pipeline.ts`):
+
+- Lines 162-234: `reprocessRow(row, settings)` is a standalone exported async function. `processImageFormats(...)` is awaited at line 173. The function returns a `ReprocessResult` carrying `signals` or `derivativeOnly`; all derivative files are on disk before it returns.
+- Lines 358-411 (`flushBatch`): the `updateBatch` and `derivativeBatch` arrays are spliced out (lines 360-361) before the transaction. All UPDATEs run inside a single `db.transaction(...)` (line 367). After the transaction, `collectDeletedMidReencodeFiles(updateResults)` (line 397) filters `affectedRows === 0` entries. `cleanupDeletedMidReencodeVariants(files)` (line 406, exported helper at lines 127-133) issues `Promise.all` of three `deleteImageVariants(dir, name, [])` calls — identical contract to the in-app runner.
+- The cleanup runs AFTER the transaction commits (line 394 closes the `await db.transaction(...)` block), not inside it. This is the documented-intentional pattern: a failed unlink cannot roll back sibling-row UPDATEs.
+
+**No re-orphan after cleanup is possible** because:
+
+1. `reprocessRow` fully completes (all derivatives on disk) before the `queue.add` callback pushes to `updateBatch`.
+2. The `flushBatch` splice removes the batch from shared state before the transaction.
+3. No concurrent write to the same filename can happen post-cleanup: the sidecar does NOT hold a per-image lock, but the global advisory lock `gallerykit_color_pipeline_backfill` serializes both backfill paths. The upload-queue only touches `processed=false` rows which the sidecar ignores.
+4. `deleteImage`/`deleteImages` (images.ts lines 538, 634) does NOT acquire the per-image advisory lock, but runs its own `deleteImageVariants` with `[]`. If this fires AFTER the sidecar cleanup, the second unlink is ENOENT-tolerant. No orphan.
+
+#### Evidence For Hypothesis 2 (tally gap — cosmetic only)
+
+In the sidecar's `queue.add` callback (lines 416-417), `processed++` fires when `result.outcome === 'processed'`. Later in `flushBatch` (lines 404-405), `deletedMidReencode += deletedMidReencodeFiles.length` and `processed -= deletedMidReencodeFiles.length` are applied. Under concurrency >= 2, two workers could both increment `processed++` and push to `updateBatch`, then one worker triggers `flushBatch`. Inside `flushBatch`, one item's UPDATE returns 0 affectedRows, so `processed--` fires. The final `processed` count is therefore correct — both the increment and decrement execute on the same single JS thread before any external observer reads the tally.
+
+The concern is whether `processed` can mislead the in-flight progress log at line 441. In practice, `processed` is a function-local variable read only by `console.log` at lines 441 and 452; it is not exposed to any external status endpoint (unlike the in-app runner's `state.processed`). A transient value appears in the log but never causes a data-loss or orphan outcome. **This is cosmetic.**
+
+#### Evidence Against Hypothesis 3 (re-orphan under concurrency — eliminated)
+
+The purported mechanism requires a derivative file to be written AFTER cleanup. This requires `reprocessRow` to return (and push to `updateBatch`) BEFORE its `processImageFormats` completes — impossible because the `await processImageFormats(...)` call is synchronously awaited inside `reprocessRow` (line 173). The `queue.add` callback only pushes to `updateBatch` on `result.outcome === 'processed'`, which is only returned after `processImageFormats` completes successfully. Hypothesis 3 is eliminated.
+
+#### Rebuttal Round
+
+**Best challenge to H1 (sidecar path):** The sidecar does NOT hold a per-image advisory lock. If `retryFailedImage` (admin UI "Retry") claims the per-image lock and re-encodes the same row while the sidecar is mid-batch (encode done, awaiting flush), could both writes land and only the sidecar's UPDATE see 0 affectedRows?
+
+**Why H1 still stands:** The global `gallerykit_color_pipeline_backfill` advisory lock serializes the sidecar against the in-app runner, which itself claims the per-image lock. The sidecar documentation (lines 39-43) explicitly notes the KNOWN GAP: `retryFailedImage` is NOT serialized against the sidecar's per-row encode. However, `retryFailedImage` operates on `processed=false` rows, and the sidecar only selects `processed=TRUE` rows (line 299). A `retryFailedImage` call sets `processed=false`, removing the row from the sidecar's already-fetched snapshot but not from in-progress batch items. If the sidecar's UPDATE fires after `retryFailedImage` sets `processed=false`, the WHERE clause (no `processed` filter) still matches the row and sets `pipeline_version=CURRENT` — marking it as non-candidate while the queue worker may still be mid-encode. This is the documented known-gap (plan-322 rider), not a new finding.
+
+#### Convergence / Separation Notes
+
+The two paths converge on: `[]`-dir-scan cleanup, post-commit unlink, detection-failure no-version-bump semantics, and ENOENT tolerance. They genuinely differ on: per-image claim locking (in-app runner holds it; sidecar does not, documented), batched vs single-row UPDATEs (sidecar batches 100 rows per flush; runner does one per row), and tally counter exposure (sidecar counters are local; runner counters flow to the admin UI via `state.*`).
+
+#### Current Best Explanation
+
+Both paths are functionally sound for the delete-race scenario. No interleaving can orphan derivatives after cleanup on either path. The only deviation is cosmetic (sidecar `processed` tally can reflect a briefly-inflated count before the `processed--` correction in `flushBatch`) and the documented known-gap with `retryFailedImage` (plan-322 rider, pre-existing).
+
+#### Critical Unknown (Flow 1)
+
+Whether the sidecar's `processed--` applied during `flushBatch` correctly accounts for all batched items when `queue.onIdle()` and the final `flushBatch()` are reached after partial mid-loop flushes — specifically whether `processed` accurately reflects items that flushed mid-loop vs the final flush. This is a log-accuracy question only.
+
+#### Discriminating Probe (Flow 1)
+
+Instrument `processed` and `deletedMidReencode` in a test that drives two concurrent `reprocessRow` completions, a flush, and a 0-affectedRows UPDATE for one — verify `processed` equals 1 (not 2 or 0) after `flushBatch` returns.
+
+#### Uncertainty Notes
+
+The tally discrepancy under concurrency is a cosmetic log-accuracy issue, not a correctness or orphan issue. All cleanup paths are sound.
+
+---
+
+### Flow 2: Settings-hash → ETag → cache invalidation across a backfill re-encode
+
+#### Observation
+
+When an admin changes a COLOR_IMPACTING_KEY setting and then runs backfill, a previously-cached derivative must be invalidated on both the static serving path (Next.js static server, mtime+size ETag) and the serve-upload.ts path (custom `W/"v{V}-{mtime}-{size}-{hash}"` ETag). The question is whether there is a stale-serve window on either path.
+
+#### Hypothesis Table
+
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Both serving paths invalidate correctly: the static path rides the atomic-rename mtime+size change; the serve-upload path builds a fresh hash from current settings; no stale-serve window beyond Cache-Control max-age=3600 | High | Strong (direct code trace) | Atomic rename is implemented in process-image.ts:1228-1244 |
+| 2 | 5-second stale hash window on serve-upload path: a request arriving in the 5 s debounce window after a setting flip but before the hash cache TTL expires sees the stale hash but a changed mtime, so the ETag still changes | Medium | Strong (code trace) | mtime component changes independently of hash component |
+| 3 | The static path has a mtime-granularity risk on filesystems with 1 s mtime resolution (FAT32, some NFS mounts) | Low | Weak (theoretical) | Production is Linux+Docker, ext4, nanosecond mtime granularity |
+
+#### Evidence For Hypothesis 1 (sound, with bounded window)
+
+**Static serving path** (`next.config.ts` + `public/uploads/`):
+
+- `next.config.ts` lines 64-66: the `headers()` rule sets `Cache-Control: public, max-age=3600, must-revalidate` on `/uploads/:format(jpeg|webp|avif)/:file*`.
+- Next.js static asset ETag format: `W/"{hex-size}-{hex-mtime}"` (standard Next.js static behavior).
+- `process-image.ts` lines 1224-1247: the base-filename write uses an atomic rename chain: `link(outputPath, tmpPath)` then `rename(tmpPath, basePath)`, falling back to `copyFile + rename`, falling back to direct `copyFile`. `fs.rename` on the same filesystem is atomic on Linux/macOS and replaces the destination inode, changing its `mtimeMs`.
+- Since `rename` changes mtime, the static ETag `{size}-{mtime}` changes. A browser holding the old ETag will get 200 on next revalidation (after max-age=3600 s expires or on explicit revalidation).
+
+**Serve-upload path** (`serve-upload.ts`):
+
+- Line 200-201: `const settingsHash = await getServingColorSettingsHash()` then `const etag = \`W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"\``.
+- `getColorSettingsHash()` (`settings-hash.ts` lines 120-143): 5-second TTL cache on the no-arg (DB-read) form.
+- `stats.mtimeMs` is read fresh via `fs.stat` on every request (no caching). After a backfill atomic rename, even if `settingsHash` is stale for up to 5 s, the `mtimeMs` component changed — so the ETag differs from the browser's cached version regardless. The browser receives 200 immediately after the backfill without waiting for the hash cache to expire.
+
+**Concrete invalidation sequence for settings-flip + backfill:**
+
+1. Admin flips `force_srgb_derivatives=true`.
+2. Admin triggers backfill. Runner calls `processImageFormats` → atomic rename → new bytes, new mtime, new size on disk.
+3. Next browser request for the derivative:
+   - **Static path**: Next's static server computes `W/"{new-hex-size}-{new-hex-mtime}"`. Browser's cached ETag mismatches → 200 with new bytes. No stale window beyond max-age (max 3600 s).
+   - **Serve-upload path**: `stats.mtimeMs` is read fresh. Even if `settingsHash` is stale for up to 5 s, `mtimeMs` changed, so `v{V}-{new-mtime}-{new-size}-{stale-hash}` differs from the browser's cached `v{V}-{old-mtime}-{old-size}-{old-hash}`. Browser gets 200 immediately.
+
+**The settings-hash's primary role** is NOT mtime-independent invalidation on backfill (mtime already handles that). Its primary role is for the case where an admin flips a setting and does NOT immediately run backfill — in that case mtime does not change, the hash component IS the only discriminator on the serve-upload path, and the 5 s debounce is the relevant window. (The static path has no hash component and would NOT invalidate in this case — but the static path serves the PRE-backfill bytes, which are the correct bytes until backfill runs.)
+
+#### Evidence For Hypothesis 2 (5-second window — bounded, documented)
+
+- `settings-hash.ts:52`: `const CACHE_TTL_MS = 5_000`.
+- This window is explicitly documented in `settings-hash.ts` header (lines 24-28): "A multi-process deployment will see brief skew until each process refreshes — acceptable because every browser will revalidate within the next 5 s window."
+- The 5 s window is a KNOWN, DOCUMENTED, ACCEPTED behavior, not a gap.
+- After backfill, the mtime change makes the window irrelevant (ETag changes regardless of which hash is in cache).
+
+#### Evidence Against Hypothesis 3 (mtime granularity — theoretical)
+
+Production deployment uses Docker on Linux (`Dockerfile` multi-stage). Linux ext4 has nanosecond mtime granularity. `mtimeMs` from `fs.stat` on ext4 gives millisecond precision. A sub-second re-encode on the same file will produce a different `mtimeMs` value. The FAT32/NFS scenario is theoretical and does not apply to the documented production environment.
+
+#### Rebuttal Round
+
+**Best challenge to H1:** What if a client has `Cache-Control: public, max-age=3600` cached and the backfill runs within the 3600 s window? The browser will NOT revalidate until max-age expires — serving stale bytes for up to 1 hour.
+
+**Why H1 still stands:** This is by design. `must-revalidate` means the browser MUST revalidate after max-age expires, not before. The 1-hour window is the documented policy and is intentionally NOT `immutable` precisely because backfill can rewrite files (ARCH-R4C6-06 cited in CLAUDE.md). There is no mechanism to proactively purge a browser's local cache from the server, nor does the app attempt one. The window is documented-intentional.
+
+#### Convergence / Separation Notes
+
+Both serving paths converge on `must-revalidate` + mtime-based ETag as the primary invalidation signal after a backfill. The settings hash provides a secondary signal on the serve-upload path only (settings flip without backfill). The two paths are distinct in ETag format but equivalent in invalidation guarantees for the post-backfill scenario.
+
+#### Current Best Explanation
+
+Both serving paths correctly invalidate after a backfill re-encode. The static path relies on atomic-rename mtime change; the serve-upload path uses both mtime and the settings hash. The 5 s hash-TTL window on the serve-upload path is documented and accepted. No undocumented stale-serve gap exists.
+
+#### Critical Unknown (Flow 2)
+
+Whether the serve-upload route (`app/uploads/[...path]/route.ts`) is actually exercised in production for images that exist in `public/uploads/` — Next.js resolves `public/` files before route handlers, so the custom ETag logic may only fire for locale-prefixed URLs and missing files. This is a documentation-level question; the serving-precedence behavior is already documented in CLAUDE.md (ARCH-R4C6-06).
+
+#### Discriminating Probe (Flow 2)
+
+Confirm which requests actually reach `route.ts` vs the static server: `grep -n "matcher\|config\|uploads" apps/web/next.config.ts apps/web/src/app/uploads/\[...path\]/route.ts`.
+
+#### Uncertainty Notes
+
+The critical unknown is documentation-level, not a correctness gap. Both paths are correct for their respective request scopes.
+
+---
+
+### Flow 3: Upload → queue claim → process → conditional UPDATE → orphan cleanup across a restart boundary
+
+#### Observation
+
+When the Next.js server process restarts mid-processing, the bootstrap path re-enqueues `processed=false` rows. If the previous worker held the advisory lock `gallerykit:image-processing:{id}` and the process died (releasing the lock via connection close), the new worker acquires the lock and re-encodes. The question is whether any interleaving can orphan derivatives or double-write the DB.
+
+#### Hypothesis Table
+
+| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
+|------|------------|------------|-------------------|--------------------------|
+| 1 | Sound: advisory lock is connection-bound; process death releases it; conditional UPDATE `WHERE processed=false` ensures exactly one worker marks the row processed; affectedRows===0 cleanup handles concurrent deletes | High | Strong (direct code trace + MySQL advisory lock semantics) | MySQL releases GET_LOCK locks on connection close |
+| 2 | Gap: two bootstrap passes within the same new-process lifetime could enqueue the same id twice | Eliminated | Strong (code trace) | `state.enqueued: Set<number>` guard prevents re-enqueue within same process |
+| 3 | Gap: partial-write (AVIF written, WebP/JPEG not yet) leaves a corrupt base file that the new worker fails to overwrite | Eliminated | Strong (code trace) | Atomic rename replaces inode; verification step confirms all three formats non-zero before UPDATE |
+
+#### Evidence For Hypothesis 1 (sound)
+
+**Lock acquisition** (`image-queue.ts` lines 193-210):
+
+- `acquireImageProcessingClaim(jobId)`: `SELECT GET_LOCK(?, 0)` with 0-second timeout. Non-blocking: returns `null` if held.
+- MySQL advisory lock semantics: the lock is held per connection. Process death closes the connection; MySQL releases the lock automatically. The next `GET_LOCK` on a new connection succeeds.
+
+**Restart-boundary winning interleaving:**
+
+1. Worker A (old process) acquires lock for image 42. Process restarts.
+2. MySQL releases lock on old connection close.
+3. Bootstrap path in new process: `SELECT id FROM images WHERE processed=false` finds image 42.
+4. Worker B (new process) calls `acquireImageProcessingClaim(42)` — succeeds (lock is free).
+5. Worker B encodes, atomic-renames all three formats, verifies non-zero (lines 357-364), executes `UPDATE images SET processed=true WHERE id=42 AND processed=false`.
+6. `affectedRows === 1` → processed. No cleanup needed.
+
+**Double-UPDATE prevention:**
+
+- `image-queue.ts` line 368-370: the UPDATE uses `and(eq(images.id, job.id), eq(images.processed, false))`. If worker A completed its UPDATE before the process died (`processed=true`), Worker B's bootstrap query (`WHERE processed=false`) never enqueues image 42. No double-process.
+
+**Partial-write recovery (Hypothesis 3 eliminated):**
+
+- `process-image.ts` lines 1252-1257: `Promise.all([generateForFormat('webp',...), generateForFormat('avif',...), generateForFormat('jpeg',...)])`. Each format writes sized variants then atomically renames the base filename.
+- If process death occurs between format completions, the partially-written tmp file is abandoned. Worker B's `processImageFormats` creates fresh tmp files and atomically renames over the base filename. The verification step (image-queue.ts lines 357-364) confirms all three base files exist and are non-zero. If not, Worker B throws and retries.
+
+**Lock release in `finally`** (lines 527-530):
+
+- `finally { await releaseImageProcessingClaim(job.id, lockConnection).catch(...); }` — the lock is explicitly released even on error. `.catch()` swallows release failures (connection already dropped by process death — safe).
+
+**`enqueued` Set prevents same-process double-enqueue (Hypothesis 2 eliminated):**
+
+- `enqueueImageProcessing` (line ~229) checks `state.enqueued.has(job.id)` before adding to the queue. The bootstrap claim-retry path (lines 261-280) retries up to 10 times with escalating delay; after exhaustion it marks the job `permanentlyFailedIds` and schedules a bootstrap retry. Re-enqueue only occurs after the job leaves the `enqueued` Set (via `state.enqueued.delete(job.id)` in `finally` at line 532).
+
+#### Rebuttal Round
+
+**Best challenge to H1:** What if process A died after `processImageFormats` wrote all three base files but BEFORE the UPDATE executed? Row is `processed=false`; bootstrap B re-enqueues; Worker B re-encodes from the original and atomically overwrites the three base files.
+
+**Why H1 still stands:** The old and new bytes are structurally identical (same original, same pipeline, same settings assuming no admin change during the restart window). If settings DID change, the new encode uses current settings — correct behavior. The only cost is a redundant encode. No orphan, no stale derivative, no DB inconsistency.
+
+#### Convergence / Separation Notes
+
+H1, H2, and H3 all converge on the same root mechanism: per-image advisory lock + conditional `WHERE processed=false` UPDATE + `affectedRows===0` cleanup compose correctly across all restart-boundary interleaving sequences. H2 and H3 are eliminated by direct code evidence.
+
+#### Current Best Explanation
+
+The upload → queue claim → process → conditional UPDATE → orphan cleanup flow is sound across all restart-boundary interleaving sequences. No double-write, no orphan, and no stale derivative can result.
+
+#### Critical Unknown (Flow 3)
+
+Whether a sufficiently slow encode (exceeding the bootstrap-retry window) can cause the new process to exhaust claim retries and permanently fail a job that is still being processed by the old process on a shared filesystem where connections are reused. This is a deployment-topology question (single-writer per CLAUDE.md runtime topology) not a code gap.
+
+#### Discriminating Probe (Flow 3)
+
+Verify `enqueueImageProcessing` checks `state.enqueued.has(id)` before `state.queue.add`: `grep -n "enqueued.has\|enqueued.add\|enqueued.delete" apps/web/src/lib/image-queue.ts`.
+
+#### Uncertainty Notes
+
+No live-exploitable gap found. The `enqueued` Set is process-local and reset on restart; the advisory lock bridges restarts via MySQL. Both mechanisms compose correctly.
+
+---
+
+## VERIFIED-CLEAN (this cycle)
+
+All three flows traced to source with direct line-number evidence:
+
+- **Flow 1 (backfill delete-race):** Sound across all interleavings on both paths. No new gap. The sidecar `processed--` tally is cosmetic (no orphan, no data loss). Residual known-gap with `retryFailedImage` is pre-existing (plan-322 rider).
+- **Flow 2 (settings-hash → ETag → cache invalidation):** Both serving paths invalidate correctly after a backfill re-encode. The 5 s hash-debounce window is documented-intentional. The 1-hour stale-serve window is the deliberately-chosen `must-revalidate` policy (ARCH-R4C6-06).
+- **Flow 3 (upload → queue claim → process → conditional UPDATE → orphan cleanup):** Sound across all restart-boundary interleavings. Advisory lock + conditional UPDATE + affectedRows-0 cleanup compose correctly.
+
+## Record Item (no action required)
+
+**TRCR-C6-01 (informational):** In the sidecar's `main()` function, `processed++` fires at queue-task completion time (line 417) while `processed--` fires inside `flushBatch()` (line 405). Under `BACKFILL_CONCURRENCY >= 2`, the progress log at line 441 may briefly report `processed=N` for a row that `flushBatch` will subsequently discover was deleted mid-reencode and decrement. The final summary at line 452 is correct. This is a log-accuracy cosmetic issue only — no derivative files are orphaned, no DB state is incorrect. Not a scheduling candidate.
 **Angle:** evidence-driven causal tracing with competing hypotheses, evidence for/against, uncertainty tracking.
 
 **What changed since the prior tracer pass (`ce0029aa`):** six commits landed the cycle-4 (run-9 c1) scheduled batch —

@@ -1,100 +1,108 @@
-# Document-Specialist Review — Doc/Code Mismatch Pass
+# Document-Specialist Review — Cycle 6 (run-9 cycle-3)
 
-**HEAD:** `1dde9b1e` (`docs: 📝 correct cache() count + og:image/JSON-LD comment honesty`)
-**Date:** 2026-06-13
-**Working tree:** CLEAN at start.
-**Angle:** documentation-code mismatches. CLAUDE.md / AGENTS.md / inline code comments audited against the ACTUAL code at current HEAD. Code is ground truth.
-**Method:** read CLAUDE.md + AGENTS.md in full; for each concrete factual claim (counts, line cites, enum values, defaults, constants, invariants) grep/read the cited code and compare.
+**NEW findings: 1 genuine documentation omission. All prior 35+ claims re-confirmed accurate.**
 
 ---
 
-## Headline
+## Summary
 
-**The doc surface has fully converged.** Across ~35 distinct concrete claims verified this cycle — including every item on the high-value checklist plus a broad fresh sweep — **zero net-new doc/code mismatches** were found. All four prior-cycle (commit `1dde9b1e`) doc-honesty fixes RE-VERIFIED ACCURATE against the code they document. One borderline git-mechanics imprecision in AGENTS.md is recorded as an OBSERVATION (not counted) because the operative claim holds.
-
-This is the expected honest-convergence outcome the prompt anticipated: the doc has been scrubbed across many cycles and the low-hanging mismatches are gone.
-
-> **Note on the prompt's checklist framing:** the prompt's high-value list said to verify CLAUDE.md "React cache() wraps 10" and "COLOR_IMPACTING_KEYS '5 keys'". The current CLAUDE.md already says **10** (line 357) and **9** keys (line 263, corrected by AGG-R7-08) — both correct against code. The "5 keys" expectation in the prompt reflects an older doc state; the doc is ahead of the prompt and matches code.
+Cycle 5 landed 6 code/test fixes (plan-339 Items 1–6 all marked DONE). This review re-checked every cycle-5-touched doc claim against HEAD and found one genuine omission introduced by the AGG-C5-02 fix. All other claims verified accurate.
 
 ---
 
-## RE-VERIFIED — prior-cycle (`1dde9b1e`) doc fixes confirmed ACCURATE against code
+## FINDING 1 — GENUINE OMISSION (LOW)
 
-| Prior fix | Doc location | Code ground truth | Verdict |
-|---|---|---|---|
-| **AGG-C4-06** React `cache()` count 9->10 + add `getLatestImageForOgCached` | CLAUDE.md:357 says "wraps **10** data-access functions" and enumerates `getImageCached, getLatestImageForOgCached, getTopicBySlugCached, getTopicsCached, getTagsCached, getTopicsWithAliasesCached, getImageByShareKeyCached, getSharedGroupCached, getSmartCollectionBySlugCached` (9 `*Cached`) + `getSeoSettings` | `data.ts` has **13** `cache(` tokens, of which 3 are in comments (867, 1604, 1613); the **10** real wrappers are the 9 `*Cached` exports (1332, 1595, 1597-1601, 1603, 1608) + `getSeoSettings` (1649). `getLatestImageForOgCached` present at 1597. | ACCURATE — count is 10, name present, enumeration exact |
-| **AGG-C4-07(a)** home `og:image` comment honesty (no "site OG card"; -> `og_image_url`/site-root HTML, never base JPEG) | `(public)/page.tsx:98-118` comment: "point the home OG `<meta og:image>` at the per-photo OG ROUTE (`/api/og/photo/${id}`) … `pickFirstAvailablePhotoBuffer` and, when no SIZED derivative is on disk … the admin-configured `og_image_url`, or to the site homepage HTML if that setting is empty (AGG-C4-07 — NOT a freshly-generated 'site OG card')" | `og:image` URL built at :118 = `absoluteImageUrl('/api/og/photo/${latestImage.id}', seo.url)`; id from `getLatestImageForOgCached` (:93). OG route falls through sized derivatives then 302s to `og_image_url`/site root. | ACCURATE — matches the route's actual fallback chain |
-| **AGG-C4-07(b)** JSON-LD sanitize-asymmetry comment | `(public)/p/[id]/page.tsx:217-227` comment: "`name`/`description`/`keywords` and breadcrumb `topic_label` … intentionally NOT wrapped in sanitizeForOg, while EXIF PropertyValues ARE … (1) emitted via `safeJsonLd` … (2) write-time validator-gated (`containsUnicodeFormatting`) … EXIF … NOT validator-gated, so they get the extra sanitizeForOg pass" | Code: `name: displayTitle` (:228), `description: image.description` (:229), `keywords` (:230), breadcrumb `topic_label` (:257) — NO sanitizeForOg. EXIF: camera (:233), lens (:234), exposure (:237) — `sanitizeForOg(...)`. Both blocks emitted via `safeJsonLd` (:275, :282). | ACCURATE — the per-field wrapping in code exactly matches the comment |
-| **AGG-R8c3-02** JSON-LD page imports shared `sanitizeForOg` (no local copy) | `(public)/p/[id]/page.tsx:14` `import { sanitizeForOg } from '@/lib/og-sanitize'`; CLAUDE.md:101,181 "imported by … the JSON-LD photo page" / "all three consumers import the shared helper" | 3 non-test importers of `@/lib/og-sanitize`: `og/route.tsx:5`, `og/photo/[id]/route.tsx:8`, `(public)/p/[id]/page.tsx:14`. Exactly 3. | ACCURATE |
-| **AGG-C4-07(c)** `COLOR_IMPACTING_KEYS` line cite + count | CLAUDE.md:263 "all **9** `COLOR_IMPACTING_KEYS` (`settings-hash.ts:37-49`)" + enumerates 5 color + 3 quality + `image_sizes` | `settings-hash.ts:37` `const COLOR_IMPACTING_KEYS = [` … `:49` `] as const;` — **9** entries: `wide_gamut_jpeg_chroma, sdr_jpeg_chroma, avif_effort, force_srgb_derivatives, wide_gamut_max_source_pixels, image_quality_webp, image_quality_avif, image_quality_jpeg, image_sizes`. `HASH_LENGTH = 8` (:51). | ACCURATE — count 9, line range 37-49 exact, enumeration exact |
+### CLAUDE.md line 512: `<select>` touch-target description omits the `(?<!max-)` lookbehind added by AGG-C5-02
 
----
+**Doc location:** `CLAUDE.md:512`
 
-## FRESH SWEEP — additional concrete claims verified ACCURATE (no mismatch)
+**Current doc text:**
+> native `<select className="...h-8/h-9/h-10...">` literals, `cn()` composites, and sub-44 arbitrary `min-h-[NNpx]` values — hand-styled selects sit outside the shadcn `SelectTrigger` primitive's built-in `min-h-11` floor (R4C16 DES-R4C16-04).
 
-Every claim below was checked against code this cycle and MATCHES:
+**Code at HEAD:** `apps/web/src/__tests__/touch-target-audit.test.ts:415,419`
 
-**Versions / constants**
-- `IMAGE_PIPELINE_VERSION = 7` — `gallery-config-shared.ts:21` (definition), re-exported `process-image.ts:303`. CLAUDE.md:92 ("DEFINED in `gallery-config-shared.ts:21` and re-exported here") + :139 ("current: 7"). EXACT.
-- `MAX_BLUR_DATA_URL_LENGTH = 4096` — `blur-data-url.ts:45`. CLAUDE.md:222 ("4096 chars").
-- `OG_PHOTO_MAX_BYTES = 1024*1024` (1 MB) — `og-photo-fetch.ts:31`. CLAUDE.md:102.
-- Argon2id, memoryCost `65_536`, timeCost `3`, parallelism `4` — `password-hashing.ts:11-14`. CLAUDE.md:153. EXACT.
+The two `<select>` h-8/h-9/h-10 FORBIDDEN patterns now read:
+```
+/<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:h-8|h-9|h-10)\b/
+```
 
-**Color / HDR pipeline**
-- `COLOR_PIPELINE_DECISIONS` enum = `srgb, srgb-from-unknown, p3-from-displayp3, p3-from-dcip3, p3-from-adobergb, p3-from-prophoto, p3-from-rec2020` (7 values) — `color-pipeline-decisions.ts:22-30`. CLAUDE.md decision matrix (240-247) lists exactly these 7.
-- Admin tunable defaults — `gallery-config-shared.ts` DEFAULTS block: `avif_effort='6'` (:128), `wide_gamut_max_source_pixels='50000000'` (:134), `wide_gamut_jpeg_chroma='4:4:4'` (:125), `sdr_jpeg_chroma='4:2:0'` (:131), `force_srgb_derivatives='false'` (:116), `allow_hdr_ingest='false'` (:119), `force_show_color_chips='false'` (:122). Default sizes `[640,1536,2048,4096,5120,7680]` (:90). CLAUDE.md tunables table (277-283) + :218. ALL MATCH.
-- ISOBMFF walker bounds: `MAX_SCAN_BYTES = 1024*1024`, `MAX_DEPTH = 5` — `color-detection.ts:218-219`. CLAUDE.md:232 ("max box depth 5, max scan 1 MB").
-- NCLX primaries map `11: 'dci-p3'`, `12: 'p3-d65'` — `color-detection.ts:171-172`. CLAUDE.md:232 ("11=DCI-P3, 12=Display P3").
-- `force_show_color_chips` CSS: `:root[data-force-show-color-chips="true"] .gamut-p3-badge`/`.hdr-badge` — `globals.css:199-200`. CLAUDE.md:271.
+The `(?<!max-)` lookbehind is present (added by plan-339 Item 2 / AGG-C5-02). The CLAUDE.md description of the `<select>` pattern does not mention this lookbehind — it describes the pattern as simply matching `h-8/h-9/h-10`, which is incomplete. A future maintainer reading only the docs would not know that `<select className="max-h-10">` is intentionally NOT flagged.
 
-**DB schema / indexes / migrations**
-- All 8 documented `images`/`image_views`/`image_tags` indexes present — `schema.ts:114-118,132,232-233`: `(processed,capture_date,created_at)`, `(processed,created_at)`, `(topic,processed,capture_date,created_at)`, `(user_filename)`, `(uploaded_by)`, `image_tags(tag_id)`, `image_views(bot,viewed_at,country_code)`, `image_views(bot,viewed_at,referrer_host)`. CLAUDE.md:201-208. ALL MATCH.
-- Migration `0021_analytics_breakdown_indexes.sql` creates the two `image_views` breakdown indexes. CLAUDE.md:207-208 ("migration 0021").
-- migrate.js runbook: `getAllJournalMigrations` (:144, `folderMillis: entry.when`, `sha256` hash :156-157), `reconcileLegacySchema` (:247), `baselineAllJournalMigrations` (:642), `prepareLegacyDatabaseIfNeeded` (:659), `runMigrations` (:698) with "Drizzle silently skipped N migration(s)" throw (:713). CLAUDE.md:384-386. ALL functions present and behave as documented.
+The docs also correctly describe the `<Button>`/`<button>` scale-token patterns as having `(?<!max-)` (line 514, implicitly via the AGG-R8c3-06 description), but line 512 predates that level of detail for `<select>`.
 
-**Rate limits / caps / nginx**
-- Login rate limit: `LOGIN_WINDOW_MS = 15*60*1000` (`rate-limit.ts:62`), `LOGIN_MAX_ATTEMPTS = 5` (:63). CLAUDE.md:158 ("5 attempts / 15-min window").
-- Upload caps: `MAX_UPLOAD_FILE_BYTES = 200*1024*1024` (`upload-limits.ts:3`), `DEFAULT_MAX_TOTAL_UPLOAD_BYTES = 2 GiB` (:1), env var `UPLOAD_MAX_TOTAL_BYTES` (:15), `UPLOAD_MAX_FILES_PER_WINDOW` default 100 (:16). CLAUDE.md:457 references the env var name `UPLOAD_MAX_TOTAL_BYTES` (correct — it is the env var, not the constant `MAX_TOTAL_UPLOAD_BYTES`).
-- nginx body caps: 2M default (`nginx/default.conf:31`), 64K login/admin (:58), 250M /admin/db (:75), 216M /admin/dashboard (:92). CLAUDE.md:458 ("2 MiB / 64 KiB / 250 MiB / 216 MiB"). ALL MATCH.
+**The mismatch:** CLAUDE.md says the `<select>` patterns catch `h-8/h-9/h-10` — factually incomplete; they catch `(?<!max-)h-8/h-9/h-10`. The negative self-check fixtures for `max-h-10`/`max-h-8`/`cn("max-h-10")` (added at lines 990–993 of the test file) also go unmentioned.
 
-**Backfill**
-- 10-column write set: pipeline_version, icc_profile_name, color_primaries, transfer_function, matrix_coefficients, is_hdr, has_gain_map, color_pipeline_decision (`admin-backfill-runner.ts:543-549,559-561`), was_downscaled (:567,596), avif_10bit (:568,597) = 10. CLAUDE.md:291. EXACT.
-- Concurrency cap math: `BACKFILL_RESERVED_LIVE_CONNECTIONS = max(3, ceil(poolLimit/2))` (:105-106); `cap = max(1, floor((limit-reserved-1)/2))` (:139); at LIMIT=10 -> RESERVED=5, cap=**2** (in-code comment :122). CLAUDE.md:294. EXACT arithmetic match.
-- Both UPDATE branches guard `affectedRows` + cleanup (AGG-R8c3-03/AGG-C4-02). CLAUDE.md:291 ("Both paths ALSO guard the delete-during-reencode race identically … `deleteImageVariants(dir, fn, [])`") — consistent with the runner code.
+**Correct value:** The description should add that the `h-8/h-9/h-10` branch carries `(?<!max-)` (mirroring the Button fix), so `max-h-{8,9,10}` ceiling utilities are NOT flagged.
 
-**Service Worker / PWA**
-- `HEAD_REVALIDATE_TIMEOUT_MS = 300` (`sw.template.js:38`), `MAX_IMAGE_BYTES = 50 MB` (:31), `HTML_MAX_AGE_MS = 24 h` (:32), `MAX_HTML_ENTRIES = 50` (:33). CLAUDE.md:369-370 ("300 ms", "50 MB LRU cap", "24 h TTL; 50-entry cap"). ALL MATCH.
+**Recommended fix:** Update CLAUDE.md line 512 to:
 
-**Infra / misc**
-- Connection pool: `POOL_CONNECTION_LIMIT = 10` (`db/index.ts:23`), `queueLimit: 20` (:33), `enableKeepAlive: true` (:35). CLAUDE.md:210.
-- Health: `HEALTH_CHECK_DB !== 'true'` gate at `health/route.ts:18`. CLAUDE.md:461.
-- Stripe webhook handles `checkout.session.completed` (`stripe/webhook/route.ts:88`) but NOT `async_payment_succeeded` (noted as future TODO :92-99). CLAUDE.md:122 warning. ACCURATE.
-- OG card 1200x630: `og/route.tsx:205-206` + `og/photo/[id]/route.tsx:204-205`. CLAUDE.md:102.
-- i18n plural: en `photosCount` uses ICU `{count, plural, one {# photo} other {# photos}}` (`en.json:825`); ko uses fixed `{count}장` (`ko.json:147,149,150`, no plural block). CLAUDE.md:477 convention. MATCHES.
-- Touch-target audit AGG-C4-01 fix: `(?<!max-)` negative lookbehind on all bare `h`/`w` scale-token branches (`touch-target-audit.test.ts:301-337`) with explanatory header (:293-296). The `max-h-10`/`max-w-9` false-positive is fixed. (confirms the prior-cycle AGG-C4-01 regex fix landed)
-- `process-image.ts` fresh-instance-per-format cite (CLAUDE.md:219 "`process-image.ts:1019-1097`"): fresh `sharp(inputPath, …)` resize at :1023 (preamble comment ~:1015) inside `processImageFormats` (:946); the cited range brackets the actual fresh-decode block. Acceptable region cite.
+> native `<select className="...h-8/h-9/h-10...">` literals and `cn()` composites — each carries a `(?<!max-)` lookbehind so `max-h-{8,9,10}` ceiling utilities are NOT flagged (AGG-C5-02 closes the same false-positive the Button patterns got in AGG-C4-01) — and sub-44 arbitrary `min-h-[NNpx]` values — hand-styled selects sit outside the shadcn `SelectTrigger` primitive's built-in `min-h-11` floor (R4C16 DES-R4C16-04).
+
+**Confidence:** High (code verified; the lookbehind is present at lines 415, 419 of the test file; CLAUDE.md line 512 does not mention it).
+
+**Severity:** LOW — the docs describe the pattern as more permissive than it actually is (false positive that doesn't occur); no live defect; maintenance-documentation gap only.
+
+**Which side to change:** CLAUDE.md (the code is correct; the docs are incomplete).
 
 ---
 
-## OBSERVATION (recorded, NOT counted as a net-new mismatch)
+## VERIFIED ACCURATE — ALL CYCLE-5-TOUCHED CLAIMS
 
-**AGENTS.md:40 — "`.context/plans/` is gitignored — local plan-management artifacts only."** This is *imprecise* but not materially wrong:
-- `.gitignore:19-23` is `.context/*` with `!.context/reviews/` un-ignore. So the **rule** matches `.context/plans/`, and a NEW file (e.g. `99-brand-new-plan.md`) WOULD be ignored (`git check-ignore` confirms). The forward-looking intent ("local artifacts") holds.
-- BUT `.context/plans/` currently has **59 TRACKED files** (`README.md`, the entire `done/` subtree, the `35/36/37/48-*.md` specs) committed before the ignore rule was added — `git ls-files .context/plans` lists them. Once tracked, `.gitignore` does not untrack, so "is gitignored" is only true for new/untracked paths, not the historical tracked set.
+### 1. React `cache()` wraps 10 data-access functions (CLAUDE.md:357)
 
-**Why not counted:** this is a git-mechanics nuance about a *historical artifact*, not a doc claim that contradicts a code value or invariant. The `.gitignore` rule genuinely exists and governs new files (the operative meaning). Tightening the prose to "newly-created plan files are gitignored; pre-existing plan docs remain tracked" would be a nicety, not a correctness fix. Confidence that this is a real reportable mismatch: LOW. Recorded for completeness only.
+Claim: "React `cache()` wraps 10 data-access functions — every `data.ts` export ending in `Cached` (`getImageCached`, `getLatestImageForOgCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached`) plus `getSeoSettings`"
+
+Code: `apps/web/src/lib/data.ts` has exactly 10 `= cache(...)` assignments at lines 1332, 1595, 1597–1601, 1603, 1608, 1649. Names match exactly. **CORRECT.**
+
+### 2. Settings hash covers all 9 COLOR_IMPACTING_KEYS (settings-hash.ts:37-49) (CLAUDE.md:263)
+
+Code: `apps/web/src/lib/settings-hash.ts` lines 37–48 define exactly 9 keys: `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`, `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, `image_sizes`. Line 49 closes the array. HASH_LENGTH = 8 at line 51. **CORRECT.**
+
+### 3. Both backfill paths persist the SAME 10-column set (CLAUDE.md:291)
+
+Sidecar (`scripts/backfill-color-pipeline.ts` lines 371–380): UPDATE includes `pipeline_version`, `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit` — 10 columns.
+
+In-app runner (`apps/web/src/lib/admin-backfill-runner.ts` lines 558–570): same 10 columns.
+
+Both also handle the detection-failure case (derivative-only 2-column update for `was_downscaled`/`avif_10bit` without a `pipeline_version` bump). **CORRECT.**
+
+### 4. Touch-target `<select>` patterns have `(?<!max-)` for h-8/h-9/h-10 (code)
+
+Plan-339 Item 2 (AGG-C5-02) closed. The code at `touch-target-audit.test.ts:415,419` does carry `(?<!max-)` before the `h-8|h-9|h-10` group. Negative fixtures for `max-h-10`, `max-h-8`, `cn("max-h-10")`, `max-h-screen` added at lines 990–993. **CORRECT in code; omitted in CLAUDE.md — see Finding 1.**
+
+### 5. i18n key-parity test committed (CLAUDE.md:477 + Testing section)
+
+`apps/web/src/__tests__/i18n-key-parity.test.ts` exists and is tracked in git (plan-339 Item 4 / AGG-C5-T1). CLAUDE.md:477 references "the i18n key-parity check" as an existing enforcement gate. The test implements keys-only SET equality. **CORRECT.**
+
+### 6. IMAGE_PIPELINE_VERSION = 7 defined in gallery-config-shared.ts:21 (CLAUDE.md:92)
+
+Code: `apps/web/src/lib/gallery-config-shared.ts:21` = `export const IMAGE_PIPELINE_VERSION = 7;`. `process-image.ts:303` re-exports it. **CORRECT.**
+
+### 7. Concurrency cap formula at pool=10 → cap=2 (CLAUDE.md:294)
+
+Code: `apps/web/src/lib/admin-backfill-runner.ts:105–139`. `RESERVED = max(3, ceil(10/2)) = 5`. `cap = max(1, floor((10 – 5 – 1)/2)) = floor(4/2) = 2`. The inline comment at line 122–123 matches the CLAUDE.md formula. **CORRECT.**
+
+### 8. sanitizeForOg imported by all three consumers (CLAUDE.md:181)
+
+All three consumers verified at HEAD:
+- `apps/web/src/app/api/og/route.tsx:5` — imports `sanitizeForOg`
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:8` — imports `sanitizeForOg`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:14` — imports `sanitizeForOg`
+
+**CORRECT.**
+
+### 9. AGENTS.md:40 ".context/plans/ is gitignored"
+
+`.gitignore` at lines 19–21: `.context/*` (ignores all) + `!.context/reviews/` + `!.context/reviews/**` (un-ignores reviews). So `.context/plans/` IS covered by the `!` exception's absence and is gitignored for NEW files. However, the directory contains tracked files committed before the rule (as noted in the prior cycle's aggregate as an imprecision, not a contradiction). No change since last cycle — same imprecision, not a code-value mismatch. Prior cycle's observation stands; not escalated.
+
+### 10. Admin tunables table (CLAUDE.md:275–284) lists 7 settings
+
+The table header is "Admin tunables (color/HDR)". It lists 7 settings and does not include `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, or `image_sizes`. These 4 additional settings exist in `gallery-config-shared.ts` and are in `COLOR_IMPACTING_KEYS` (documented at CLAUDE.md:263). The table footer says "Flipping any of these requires a backfill pass" — "these" refers to the 7 in the table. This is an incomplete table, but the section is explicitly titled "color/HDR" tunables, and the 9-key ETag paragraph already names all 9. The omission is pre-existing (not introduced by cycle 5) and is arguably intentional scoping. Not escalated as a new finding.
 
 ---
 
-## What I did NOT find (explicitly stress-tested, clean)
+## CONCLUSION
 
-- No count drift (cache 10, COLOR_IMPACTING_KEYS 9, decision enum 7, backfill 10 columns, 8 indexes, 3 og-sanitize consumers — all exact).
-- No line-cite drift (settings-hash 37-49, IMAGE_PIPELINE_VERSION gallery-config-shared.ts:21 — both exact; process-image 1019-1097 acceptable region).
-- No default-value drift (every admin tunable default, Argon2 params, rate-limit numbers, nginx caps, SW timeouts/caps, pool config — all match).
-- No invariant-description drift (JSON-LD asymmetry, og:image fallback chain, HDR honesty gating, advisory-lock scope, migration runbook behavior — all match code).
-- No stale enum/mapping (NCLX primaries 11/12, transfer map references — match).
-- The just-landed `1dde9b1e` batch did NOT introduce any new inaccuracy; all four fixes describe the code correctly.
+**1 new LOW finding** (CLAUDE.md:512 select pattern description omits `(?<!max-)` lookbehind added by AGG-C5-02). All 35+ previously-verified claims and all cycle-5-touched claims are accurate at HEAD. The code is correct; the docs are incomplete on one detail.
 
----
-
-NET-NEW DOC MISMATCHES THIS CYCLE: 0
+**Recommended action:** Update CLAUDE.md:512 to mention the `(?<!max-)` lookbehind on the `<select>` h-8/h-9/h-10 patterns (mirrors the existing Button description). One-line doc fix.
