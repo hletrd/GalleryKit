@@ -102,3 +102,4 @@ After the above commits:
 ## Progress log
 
 - 2026-06-13 — Plan created from `_aggregate.md` cycle-6 (run-9 cycle-3). HEAD `4c3d5924`. 6 items (3 MED + 2 LOW + 1 optional LOW). Items 1+2 land together (bug + proven-RED test).
+- 2026-06-13 — ALL 6 ITEMS DONE + pushed. Commits: `b6c4f915` (Items 1+2 WebP RIFF fix + proven-RED test), `1a483f9b` (Item 3 back-nav links + positive pin), `26f68430` (Items 4+5 Link/a max- lookbehind + CLAUDE.md doc), `23f62c66` (Item 6 ISOBMFF pure-scrubber tests). All 6 GATES GREEN at HEAD `23f62c66`: eslint exit 0, typecheck (app+scripts) exit 0, vitest **218 files / 2086 tests passed** (was 2080; +6: 3 WebP + 2 ISOBMFF + 1 back-nav pin), lint:api-auth / lint:action-origin / lint:public-route-rate-limit all exit 0. DEPLOY: `npm run deploy` succeeded — image rebuilt, `gallerykit-web` recreated+started, `/api/live` → 200 at gallery.atik.kr. CYCLE COMPLETE.
