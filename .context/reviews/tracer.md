@@ -1,359 +1,174 @@
-# Tracer Report — GalleryKit deep-review fan-out (run-6 cycle-1)
+# Tracer Review — Run-8 Cycle-2 (review-plan-fix)
 
-Repo: `/Users/hletrd/flash-shared/gallery` (Next.js 16 / React 19 / TS6)
-Working tree: uncommitted change in `apps/web/src/lib/admin-backfill-runner.ts` + its
-companion test (AGG-5 concurrency cap). `.context/reviews/*.md` edits ignored as input.
-HEAD = `8fc403a2`. Recent relevant commits: `13ae79ca` (backfill honesty, AGG-1),
-`170297ed` (OG/JSON-LD global bidi strip, AGG-4).
-
-Method: evidence-driven causal tracing — each flow traced end-to-end, competing
-hypotheses stated, evidence for/against cited at file:line, conclusion with confidence.
-Three pinning tests executed live at HEAD (all pass: 12/12).
+**Date:** 2026-06-13
+**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
+**Angle:** Evidence-driven causal tracing of suspicious/complex flows — competing hypotheses, evidence for/against, uncertainty tracking.
+**Working tree:** CLEAN. HEAD = `77867144` (synced with origin/master; the prompt's HEAD list predates the run-7-fix commits — those landed at `0d17a362`..`77867144`).
+**Gates measured live this cycle:** `lint:action-origin` / `lint:api-auth` / `lint:public-route-rate-limit` → all exit 0. `npm run typecheck` (app + scripts) → exit 0. Migration tests (49) + backfill honesty tests (25) → all green.
 
 ---
 
-## Summary
+## Prior findings (run-7 AGG-R7-01..13) — VERIFIED CLOSED at HEAD
 
-**Confirmed defects: 1** (low-severity documentation drift; no behavioral impact).
-The four mandate flows that prior cycles flagged as dishonest/leaky are all **honest
-at HEAD** — the AGG-1 / AGG-3 / AGG-4 fixes landed correctly and are pinned by tests.
-The Stripe `async_payment_succeeded` gap (flow 2) is a confirmed, KNOWN, documented
-limitation — correctly handled defensively (no false entitlement), not a regression.
+Each verified against the actual code at HEAD, not just the commit message:
 
-| ID | Flow | Verdict | Confidence |
-|----|------|---------|-----------|
-| TRC-1 | Backfill last-run summary honesty | HONEST at HEAD (fixed) | High |
-| TRC-2 | Stripe ACH `async_payment_succeeded` gap | Real gap, KNOWN+documented, defended | High |
-| TRC-3 | EXIF bidi/zero-width → caption/title | FULLY STRIPPED (double defense) | High |
-| TRC-4 | OG/JSON-LD multi-char bidi strip | FULLY STRIPPED (global regex) | High |
-| TRC-5 | AGG-5 backfill concurrency-cap arithmetic | Logic correct; **stale doc comment** | High |
+| Prior ID | Closure commit | Evidence at HEAD |
+|---|---|---|
+| AGG-R7-01 (stale pool formula ×3 sites) | `0d17a362` | `admin-backfill-runner.ts:28-37` header + `db/index.ts:16-24` comment + body all state `cap = max(1, floor((LIMIT-RESERVED-1)/2))`, `RESERVED = max(3, ceil(LIMIT/2))` → cap=2 at LIMIT 10. Self-consistent. **CLOSED** |
+| AGG-R7-02 (backfill setTimeout leak) | `f11746cd` | `settings-client.tsx:83` timer-id ref + `:122-131` dedicated empty-deps unmount effect (`clearTimeout` all) + `:87,96` `backfillMountedRef` gate on the post-fire setState. **CLOSED** |
+| AGG-R7-03 (error-shell no visible heading) | `0d2312cd` | `admin/(protected)/error.tsx:30` visible `<h1 ... text-3xl font-semibold>` (not the faint `/30` glyph). **CLOSED** |
+| AGG-R7-04 (remaining aria-describedby) | `61cfd235` | wired across the remaining settings hints. **CLOSED** |
+| AGG-R7-05 (AGG-9/AGG-10 regression tests) | `d035de10` | `error-shell` visible-heading + home `title:{absolute}` pinned. **CLOSED** |
+| AGG-R7-07 (dropzone aria-disabled honesty) | `35d07f0b` | `upload-dropzone.tsx:412` `aria-disabled` + `:413` explicit `tabIndex:-1` fallback + useDropzone drops root handlers when disabled + `:419` `<input disabled>`. **CLOSED** |
+| AGG-R7-08 (doc-drift COLOR_IMPACTING_KEYS count) | `10d77324` | `settings-hash.ts:9-12` docstring + CLAUDE.md:260 both state **9** keys (5 color + 3 quality + `image_sizes`); `COLOR_IMPACTING_KEYS` array at `settings-hash.ts:37+` matches. **CLOSED** |
+| AGG-R7-09 (home-OG no on-disk fallback) | `4852bcf5` | `(public)/page.tsx:111` OG now uses base `/uploads/jpeg/${filename_jpeg}` (always exists per atomic-rename contract), not a `_${size}.jpg` sized derivative. Comment `:99-109` documents it. **CLOSED** |
+| AGG-10 (home title double-suffix) | `8fc403a2` | `(public)/page.tsx:49` `metadataTitle = { absolute: title }`, applied in both metadata branches (`:66`,`:119`). **CLOSED** |
+| AGG-R7-13 (Stripe `async_payment_succeeded`) | — | Still ALREADY-OWNED by plan-316 CRT-R5C1-04 per CLAUDE.md. NOT re-reported (per prompt). |
 
----
-
-## TRC-1 — Backfill last-run summary honesty (mandate flow 1)
-
-### Observation
-Prior cycle (AGG-1, commit `13ae79ca`) claimed the admin backfill last-run summary
-used to reconstruct `processed = lastQueuedCount − failures − skips`, dropping the
-fatal `errors` counter, so a run where every per-row UPDATE threw rendered
-"N re-encoded, 0 failures" with NO error line — reporting success and failure at once.
-
-### Flow (end-to-end)
-runner per-row catch (`errors++`, `state.lastError`) → `runBackfill` mirrors locals into
-`AdminBackfillState` → `readAdminBackfillState()` → `getBackfillStatus()` server action →
-`settings-client.tsx` render.
-
-### Competing hypotheses
-- **H1 (fixed):** UI now reads the runner's REAL `processed`/`errors` directly; a
-  fatal-only run renders an honest summary with a non-zero error line.
-- **H2 (dishonesty remains):** the reconstruction or a dropped-`errors` path survives.
-
-### Evidence FOR H1
-- `admin-backfill-runner.ts:642-654` — the per-row queue task `catch` increments
-  `errors++` AND sets `state.lastError = err.message` (the AGG-1 addition; previously
-  only the `encode-failed` branch set `lastError`).
-- `:657-662` + `:688-693` — `state.processed`/`state.errors`/skip counters are mirrored
-  from the function-locals continuously and on final flush. `processed` only increments
-  on `result.ok` (`:619-620`) — it is never derived from `lastQueuedCount`.
-- `:697-698` — `hadFailures = encodeFailures>0 || detectionFailures>0 || errors>0`;
-  `state.lastRunHadFailures = hadFailures`. A fatal-only run (errors>0) sets the flag.
-- `admin-backfill.ts:103-116` — `getBackfillStatus()` forwards `processed`, `errors`,
-  `encodeFailures`, `detectionFailures`, `lastRunHadFailures`, `lastError` straight
-  from state. No subtraction anywhere.
-- `settings-client.tsx:286-287` — renders `processed: String(backfillStatus.processed ?? 0)`
-  and `errors: String(backfillStatus.errors ?? 0)` DIRECTLY. `:308-312` renders the
-  `lastError` line whenever `lastRunHadFailures && lastError`.
-- **Live test (executed, passes):** `admin-backfill-runner-fatal-counters.test.ts:167-202`
-  drives a fatal-only run (every version-bump UPDATE throws "Deadlock") and asserts
-  `errors > 0`, `lastRunHadFailures === true`, `lastError` contains "Deadlock",
-  `processed === 0`, `encodeFailures === 0`, `detectionFailures === 0`,
-  `completedRuns > 0`. This is the exact dishonesty scenario, now pinned honest.
-
-### Evidence AGAINST H1 / FOR H2
-- None found. The reconstruction-subtraction shape no longer exists in any consumer.
-
-### Rebuttal round
-Strongest challenge to H1: could `lastError` be overwritten to a non-fatal message at
-concurrency > 1, masking the fatal error? — The scalar `lastError` IS last-writer-wins
-across workers (documented at `:649-651`), so the *message* may reflect whichever worker
-threw last. But the COUNTS (`errors`) stay correct, `lastRunHadFailures` stays true, and
-the summary still surfaces a non-zero error count + an error line. The honesty invariant
-("never report success and failure at once with no error line") holds regardless. H1 stands.
-
-### Conclusion — **HONEST at HEAD. No defect. Confidence: High.**
-The AGG-1 fix is correct and pinned. A FATAL-error-only run renders
-`processed=0, errors=N` plus the error message line.
-
-### Uncertainty / next probe
-At concurrency > 1 the displayed `lastError` is non-deterministic (last writer). If an
-operator needs the FIRST fatal error rather than the last, that would require an
-`errorSamples[]` array — a UX nicety, not a correctness defect. Not pursued.
+AGG-R7-06/10/11/12 were doc/test-depth items; the actionable ones above are closed. AGG-R7-11's "monotonicity checks adjacent pairs only" concern is **refuted** — see TRC-1 evidence: `migration-journal.test.ts:79-98` already asserts the global-max-of-all-prior invariant from idx 18 forward (the real `MAX(created_at)` cursor), not just adjacent pairs.
 
 ---
 
-## TRC-2 — Stripe paid-download entitlement / ACH gap (mandate flow 2)
+## Flows traced this cycle (5 candidate flows from the prompt)
 
-### Observation
-CLAUDE.md and the webhook docblock both state `checkout.session.async_payment_succeeded`
-is not handled: ACH / bank-transfer / OXXO / Boleto complete checkout but funds settle
-asynchronously, so the entitlement row is never written → download permanently 404s.
+### TRC #1 — Migration journal → migrate.js cursor → applied-set post-condition (NEW finding)
 
-### Flow (end-to-end)
-Stripe Checkout → `POST /api/stripe/webhook` → entitlement INSERT → customer clicks link →
-`GET/POST /api/download/[imageId]?token=…` → `validateDownloadRequest` → entitlement lookup.
+**Observation.** The journal has non-monotonic `when` timestamps (idx 6 = `1778304060000` / 2026-05-09, then idx 7-17 all in the 2025 `1746-1747M` band, then idx 18+ climb back above idx 6). `migrate.js` defends against the burned-once silent-skip with a per-entry hash baseline + a post-condition that throws if any journal hash is absent from `__drizzle_migrations` after `migrate()`.
 
-### Competing hypotheses
-- **H1 (gap real, defended):** only `checkout.session.completed` with `payment_status==='paid'`
-  is handled; async-settled methods get no entitlement; download returns 404 — but the
-  webhook NEVER mints a false entitlement for unpaid funds (correct defensive posture).
-- **H2 (silent false entitlement):** async sessions slip through and mint an entitlement
-  before funds settle (a worse bug — paying out access before payment).
-- **H3 (the gap is actually closed):** some other handler catches the async event.
+**Tracing target.** Can a REAL future migration silently skip (its SQL never executed on an existing production DB) while the deploy still reports success?
 
-### Evidence FOR H1
-- `webhook/route.ts:88` — the ENTIRE handler body is gated by
-  `if (event.type === 'checkout.session.completed')`. `grep` across `apps/web/src`
-  (non-test) finds exactly TWO references to async handling: the gate at `:88` and the
-  DEFERRED comment at `:99`. No `async_payment_succeeded` / `payment_intent.succeeded`
-  case exists.
-- `:105-118` — even within `completed`, `if (session.payment_status !== 'paid')` returns
-  `200 {received:true}` WITHOUT writing an entitlement. `'unpaid'` (the async happy path)
-  is logged at `console.warn` (not error, to avoid PagerDuty pages — C4-RPF-03). This is
-  H1's defensive core: an async session that fires `completed` while still `unpaid` is
-  correctly REJECTED rather than minting access. **This disproves H2.**
-- `download/[imageId]/route.ts:139-166` — when no entitlement row matches the token hash,
-  `validateDownloadRequest` returns `404 "Token not found"` (`:166`). (A used-but-cleared
-  row returns 410; an unknown token returns 404.) So the downstream symptom of the gap is
-  a permanent 404 — exactly as documented.
+**Hypotheses.**
+- **H1:** Following the documented rule (new `when` strictly > global max) is fully safe — drizzle applies, post-condition passes.
+- **H2:** The reconcile+baseline path baselines a new migration's hash BEFORE drizzle runs, so drizzle short-circuits it, and `reconcileLegacySchema` becomes the SOLE applier — meaning a forgotten reconcile entry silently drops the SQL while the post-condition still passes (hash present).
+- **H3:** The `migrate-reconcile-coverage` test fully closes H2.
 
-### Evidence AGAINST H1
-- None. The behavior matches the documented limitation precisely.
+**Evidence — control-flow order (decisive).**
+- `migrate.js:759-760`: `prepareLegacyDatabaseIfNeeded(...)` runs BEFORE `runMigrations(...)`.
+- `migrate.js:682-695`: on an existing DB, `journalCovered = migrations.every(hash recorded)`. A NEW migration's hash is not yet recorded → `journalCovered = false` → it calls `reconcileLegacySchema` + `baselineAllJournalMigrations`.
+- `migrate.js:642-657`: `baselineAllJournalMigrations` INSERTs a `__drizzle_migrations` row for every journal hash not already present — **including the brand-new migration's hash** — without executing its `.sql`.
+- `migrate.js:698-719`: `runMigrations` → drizzle `migrate()` then post-condition `missing = expectedMigrations.filter(hash not in recordedHashes)`. Because the new hash was just baselined, drizzle's MySQL migrator (which gates on hash presence) short-circuits the apply, and the post-condition sees the hash present → **passes silently**.
 
-### Rebuttal round
-Strongest challenge: does Stripe ever deliver `async_payment_succeeded` data inside a
-later `checkout.session.completed` with `payment_status==='paid'`? — No. For delayed
-payment methods Stripe fires `checkout.session.completed` (often `unpaid`/`processing`)
-THEN a SEPARATE `checkout.session.async_payment_succeeded` when funds clear. The second
-event type is the one not subscribed/handled here, so the settled customer never gets a
-row. H1 stands; the gap is real and customer-impacting for ACH/bank-transfer buyers.
+→ **Confirmed: on every existing-DB upgrade that adds a new migration, `reconcileLegacySchema` is the sole apply mechanism; drizzle's `migrate()` is effectively a no-op for new entries, and the post-condition cannot detect a forgotten reconcile entry because the baseline guarantees hash-presence.**
 
-### Conclusion — **Real gap, KNOWN + documented, correctly DEFENDED. Confidence: High.**
-This is NOT a regression and NOT a false-entitlement bug. It is a coverage gap for
-delayed-settlement payment methods: such a customer pays, funds settle, but no
-entitlement is ever written → their download link 404s forever, with no audit row tying
-the Stripe payment to the image. CLAUDE.md attributes the fix to plan-316 CRT-R5C1-04
-(not yet shipped). Card / immediate-payment methods are fully covered.
+**Evidence — what the safety net DOES catch (H3, partial).**
+- `migrate-reconcile-coverage.test.ts:67-82`: source tripwire asserting `migrate.js` contains `CREATE TABLE IF NOT EXISTS <table>` for every schema table AND mentions every column NAME. So a new-COLUMN or new-TABLE migration with a forgotten reconcile entry FAILS this test at commit time (provided CLAUDE.md step 4 — add the column to `schema.ts` — is followed). **This is real and closes the most common case.**
+- Live proof the contract is currently honored: migration 0021 (index-only) IS mirrored in `reconcileLegacySchema` via `ensureIndex` (`migrate.js:527-530`).
 
-### Next probe (fix shape, if prioritized)
-Add an `else if (event.type === 'checkout.session.async_payment_succeeded')` branch that
-re-runs the same paid-path body (it already re-checks `payment_status==='paid'`, validates
-metadata, and is idempotent via the `sessionId` SELECT + `onDuplicateKeyUpdate`). Confirm
-the Stripe webhook endpoint subscription includes that event type in the dashboard.
+**Evidence AGAINST full closure (the residual gap).**
+- The coverage test checks only column-NAME presence and `CREATE TABLE`. It does NOT verify: indexes, type/default changes (`ALTER ... MODIFY`), `DROP`s, or pure data migrations.
+- Therefore a future **index-only / type-change / data migration** whose author forgets to update `reconcileLegacySchema` will: (a) pass `migration-journal.test.ts` (the `when` is monotonic), (b) pass `migrate-reconcile-coverage.test.ts` (no new column name), (c) be baselined-without-applied on every existing DB, (d) pass the migrate.js post-condition. The schema change is **silently dropped** on existing deployments. (A fresh DB is unaffected only if reconcile mirrors it — same dependency.)
+
+**Conclusion.** DEFECT (latent, narrow). The silent-skip failure class that `migrate.js`'s post-condition was built to eliminate still survives for the migration subtypes the column-name coverage test cannot see. The protection is entirely dependent on CLAUDE.md step 3 (update `reconcileLegacySchema`) being followed for non-column migrations, with no test enforcing it.
+**Confidence:** High (control flow + tests machine-verified; the gap is in test coverage scope, not in a misread).
+**Severity:** LOW (requires a specific migration subtype + a process miss; no current instance — 0021 is correctly mirrored).
+**Next-probe / fix options (pick one):**
+1. Extend `migrate-reconcile-coverage.test.ts` to also assert every `CREATE INDEX <name>` from each `drizzle/*.sql` appears as an `ensureIndex('<name>'...)` in `migrate.js` (parse the SQL files, not just schema.ts). This catches the index subtype, which is the most likely future non-column migration.
+2. OR add an e2e/CI step that diffs a fresh-`init` DB's `information_schema` (indexes + column types) against a sequentially-`migrate()`-applied DB, failing on any divergence — the authoritative end-to-end check the coverage test's own docblock (`:18-19`) admits it cannot perform.
 
 ---
 
-## TRC-3 — EXIF bidi/zero-width → caption / title (mandate flow 3, AGG-3)
+### TRC #2 — Backfill run → state mirroring → getBackfillStatus → settings UI (VERIFIED HONEST)
 
-### Observation
-AGG-3 concern: a `Model` / title EXIF string carrying Unicode bidi (U+202E) or
-zero-width chars could survive to the stored DB value (caption stub → `images.title`).
+**Observation.** The admin "Re-encode existing photos" runner re-encodes `processed=TRUE` rows behind the `gallerykit_color_pipeline_backfill` advisory lock and surfaces per-run counters to the settings UI.
 
-### Flow (end-to-end)
-EXIF `Model` → `extractExifForDb` → `cleanString` = `cleanMetadataString` →
-`camera_model` → `enqueueImageProcessing` → `generateCaption(camera_model, capture_date)`
-→ `images.alt_text_suggested` → admin "apply alt as title" → `bulkUpdateImages`
-`applyAltSuggested` → `images.title` / `images.description`.
+**Tracing target.** Is the reported `processed`/`errors` count honest in EVERY branch (success, encode-fail, detection-fail, fatal-catch, missing-original, locked)?
 
-### Competing hypotheses
-- **H1 (stripped at source):** `cleanMetadataString` strips ALL bidi/zero-width chars at
-  ingest, so `camera_model` (and the caption derived from it) is clean before storage.
-- **H2 (survives):** the strip is missing, partial (non-global), or only at the reject
-  layer (which EXIF bypasses).
+**Evidence — per-row tally is 1:1 with the outcome.**
+- `admin-backfill-runner.ts:398-400`: `ReprocessResult` is a discriminated union; each `ok:false` carries a distinct `reason`.
+- `:622-659`: the queue task increments EXACTLY ONE counter per outcome — `processed++` on `ok:true`; the switch maps `missing-original→skippedMissingOriginal`, `locked→skippedLocked`, `encode-failed→encodeFailures (+ lastError)`, `detection-failed→detectionFailures`; an UNEXPECTED throw → `errors++ (+ lastError)`.
+- `:498-513` vs `:530-536`: `ok:true` (detection succeeded → version-bumped UPDATE) is mutually exclusive with `detection-failed` (no version bump; only `was_downscaled`/`avif_10bit` persisted) — a detection failure can NEVER be counted as `processed`. Confirmed by `admin-backfill-runner-detection-failure.test.ts`.
+- `:662-698`: all six counters are mirrored to shared `state` continuously (per-task) AND in a final flush. No reconstruction-by-subtraction (the AGG-1 hazard) anywhere.
+- `:702-703`: `lastRunHadFailures = encodeFailures>0 || detectionFailures>0 || errors>0` — skips (missing/locked) correctly do NOT count as failures.
 
-### Evidence FOR H1
-- `process-image.ts:574` — `cleanMetadataString` does
-  `(stripUnicodeFormatting(String(value)) ?? '').replace(/\0/g,'').trim()`. The
-  `stripUnicodeFormatting` call is the SOURCE defense; comment `:568-573` states EXIF
-  strings never pass the admin validation layer, so this is where they get scrubbed.
-- `validation.ts:82,92-94` — `stripUnicodeFormatting` uses `UNICODE_FORMAT_CHARS_GLOBAL =
-  new RegExp(UNICODE_FORMAT_CHARS.source, 'g')` and `value.replace(…GLOBAL, '')`. The
-  `/g` flag replace-alls — every bidi/zero-width char removed, not just the first.
-  `UNICODE_FORMAT_CHARS` (`:58`) covers U+180E, U+200B-200F, U+202A-202E, U+2060,
-  U+2066-2069, U+FEFF, U+FFF9-FFFB — the full Trojan-Source set.
-- `process-image.ts:1389` — `camera_model: cleanString(imageParams.Model)` →
-  `cleanString` = `cleanMetadataString` (`:1292-1294`). The `Model` tag is scrubbed.
-- `image-queue.ts:388-392` — `generateCaption(...)` output is stored into
-  `alt_text_suggested`; its inputs (`camera_model`, `capture_date`) are already cleaned.
-- **Second (write-time) defense:** `images.ts:1007` — `applyAltSuggested` copies
-  `stripUnicodeFormatting(stripStubPrefix(row.alt_text_suggested))` into `title`/
-  `description`. So even a pre-fix legacy row or future producer drift is re-stripped at
-  the persist boundary (`:998-1008` documents this belt-and-braces intent).
+**Evidence — status surface mirrors directly.**
+- `admin-backfill.ts:103-117`: `getBackfillStatus` returns every counter straight from `readAdminBackfillState()` — no derivation.
+- `settings-client.tsx:314-325`: the with-failures banner renders `processed`/`errors`/`encodeFailures`/`detectionFailures` from the mirrored fields; the clean banner renders `processed`. `lastError` shown only when `lastRunHadFailures && lastError` (`:337`).
 
-### Evidence AGAINST H1
-- None. Two independent strip points cover the path.
+**Evidence — the fatal-catch path is honest (the AGG-1 fix).**
+- `:647-658`: a fatal per-row throw (e.g. the version-bump UPDATE throws) increments `errors` AND sets `state.lastError`, so a fatal-only run no longer reads "N re-encoded, 0 failures" with no message.
 
-### Rebuttal round
-Strongest challenge: is there a write path to `images.title` that bypasses BOTH strips —
-e.g. a direct admin title edit with bidi chars? — Yes, but admin title edits go through
-the validation REJECT layer (`containsUnicodeFormatting`, `validation.ts:73-74`, applied
-to `image.title` per CLAUDE.md C5L-SEC-01), which rejects bidi at entry rather than
-stripping. So that path is also covered, by a different mechanism. The EXIF-derived path
-(this flow) is covered by stripping at source + persist. H1 stands.
-
-### Conclusion — **FULLY STRIPPED. No defect. Confidence: High.**
-A `Model`/title EXIF string with one OR many bidi/zero-width chars is fully scrubbed
-before it reaches the stored DB value, via the global-flag `stripUnicodeFormatting` at
-both `cleanMetadataString` (source) and `applyAltSuggested` (persist).
-
-### Uncertainty
-No dedicated test pins `cleanMetadataString`'s multi-char bidi strip directly (the
-function is internal/non-exported). The behavior is guaranteed by the shared
-`stripUnicodeFormatting` which IS tested (`sanitize-for-og-global.test.ts`). A direct
-fixture on `extractExifForDb` with a multi-bidi `Model` would harden against future
-refactors that bypass `cleanMetadataString`. Low priority.
+**Conclusion.** NO DEFECT. Every branch is honest; the counters cannot conflate a failure/skip with a success. 25 backfill tests pass (`admin-backfill-runner-{fatal-counters,detection-failure,batching,leak,concurrency-cap}.test.ts` + `admin-backfill-status-shape.test.ts` + `backfill-{color-pipeline,detection-failure-contract}.test.ts`).
+**Confidence:** High.
 
 ---
 
-## TRC-4 — OG / JSON-LD multi-char bidi strip (mandate flow 4, AGG-4)
+### TRC #3 — Auth: cookie → proxy.ts guard → server action `requireSameOriginAdmin`/`isAdmin` → DB sink (VERIFIED CLEAN)
 
-### Observation
-AGG-4 (commit `170297ed`): both `sanitizeForOg` helpers (OG image route + photo-page
-JSON-LD) used `value.replace(UNICODE_FORMAT_CHARS, '')` with a NON-global regex, so only
-the FIRST bidi/zero-width char was stripped; a `camera_model`/title with 2+ leaked the
-rest into the public OG card and structured data.
+**Tracing target.** Any path that reaches a mutating DB sink WITHOUT both an `isAdmin()` AND a `requireSameOriginAdmin()` check?
 
-### Flow
-`image.camera_model` / title (admin-controlled or EXIF-derived) → `sanitizeForOg(value)`
-→ OG `ImageResponse` text / JSON-LD `value` field served to the public.
+**Evidence — layered defense intact.**
+- `proxy.ts:81-116`: middleware is a presence/format gate only (token len ≥ 100, three non-empty colon segments) → redirect to login; full crypto validation deferred to server actions (defense in depth). `proxy.ts:137-140`: matcher EXCLUDES `/api/*`, so every `/api/admin/*` route must self-gate (enforced by `lint:api-auth`).
+- `lib/action-guards.ts:37-44`: `requireSameOriginAdmin` reads headers once, runs strict `hasTrustedSameOrigin`, returns a localized message on failure (caller returns early).
 
-### Competing hypotheses
-- **H1 (fixed):** both helpers now route through the global-flag `stripUnicodeFormatting`,
-  removing ALL bidi/zero-width chars.
-- **H2 (non-global survives):** one or both helpers still call the non-global
-  `UNICODE_FORMAT_CHARS.replace`, leaking all-but-first.
+**Evidence — lint gates pass live (the real enforcement).**
+- `lint:action-origin` exit 0: every mutating export in `actions/` (+ `db-actions.ts`) stores the `requireSameOriginAdmin()` result and returns early; read-only exports carry `@action-origin-exempt`.
+- `lint:api-auth` exit 0: every method export under `api/admin/**` wraps `withAdminAuth`.
+- `lint:public-route-rate-limit` exit 0.
 
-### Evidence FOR H1
-- `og/photo/[id]/route.tsx:8,36-37` — `import { stripUnicodeFormatting }`; `sanitizeForOg`
-  returns `(stripUnicodeFormatting(value) ?? '').replace(OG_C0_CONTROL_CHARS, '')`. Used
-  at `:98,100` for `siteTitle`/`displayTitle`.
-- `p/[id]/page.tsx:9,42-43` — `import { stripUnicodeFormatting }`; `sanitizeForOg` returns
-  `stripUnicodeFormatting(value) ?? ''`. Used at `:233-237` for camera_model, lens_model,
-  exposure_time JSON-LD values.
-- `validation.ts:82,92-94` — `stripUnicodeFormatting` is the `/g`-flag replace-all twin
-  (see TRC-3 evidence). Global ⇒ all occurrences removed.
-- **Live test (executed, passes):** `sanitize-for-og-global.test.ts` (49 lines) pins the
-  multi-char strip on both files AND forbids regression to the non-global
-  `.replace(UNICODE_FORMAT_CHARS, …)` call form. `grep` confirms zero non-global
-  `UNICODE_FORMAT_CHARS.replace` call sites in either file.
+**Evidence — exempt actions are genuinely read-only or self-gated.**
+- The 10 `@action-origin-exempt` sites are all read-only getters (`tags.ts:18`, `sales.ts:30`, `admin-users.ts:60`, `seo.ts:26`, `settings.ts:18`, `lr-tokens.ts:118`, `admin-backfill.ts:94` — all `isAdmin`-gated reads) OR explicitly-public analytics writes (`public.ts:353/370/391`, intentionally anonymous + rate-limited per architecture).
+- `admin-backfill.ts:32-40`: `triggerBackfill` (the one mutating backfill entry) gates on BOTH `isAdmin()` (`:34`) AND `requireSameOriginAdmin()` (`:37`) before `triggerAdminBackfill()`.
 
-### Evidence AGAINST H1
-- None.
-
-### Rebuttal round
-Strongest challenge: does `UNICODE_FORMAT_CHARS_GLOBAL`'s shared `lastIndex` state cause a
-stateful-regex skip bug across calls (the classic `/g` + `.test()` footgun)? — No.
-`stripUnicodeFormatting` uses `.replace()` (which resets `lastIndex` to 0 on each call,
-unlike `.test()`/`.exec()`), and `validation.ts:80-82` deliberately keeps the `/g`
-instance SEPARATE from the `.test()`-only `UNICODE_FORMAT_CHARS` so no `lastIndex`
-contamination leaks into the rejection helper. H1 stands.
-
-### Conclusion — **FULLY STRIPPED. No defect. Confidence: High.**
-A string with multiple bidi/zero-width chars is now fully sanitized in both the OG card
-and JSON-LD. The non-global regression is fixed and pinned.
+**Conclusion.** NO DEFECT. No mutating sink reachable without both checks. The lint-gate heuristic + the exempt-comment discipline hold at HEAD.
+**Confidence:** High (3 gates machine-verified + exempt sites hand-audited).
 
 ---
 
-## TRC-5 — AGG-5 backfill concurrency-cap arithmetic (chosen flow 5; live uncommitted change)
+### TRC #4 — Stripe webhook → entitlement → download-token validation/claim (VERIFIED CLEAN; ACH gap already-owned)
 
-### Observation
-The only NON-doc uncommitted change reworks `resolveBackfillConcurrency`
-(`admin-backfill-runner.ts`) from `floor((LIMIT-2)/2)` (cap 4 at LIMIT=10) to a
-reserved-headroom formula `floor((LIMIT-RESERVED-1)/2)` (cap 2 at LIMIT=10), where
-`RESERVED = max(3, ceil(LIMIT/2))`. Rationale: a single live `getImage()` fires a ~3-way
-`Promise.all`, so reserving only 1 connection starved live photo-page renders during a
-backfill.
+**Tracing target.** Can an unpaid/forged event mint an entitlement, or can a single-use download token be consumed twice (TOCTOU)?
 
-### Flow
-`ADMIN_BACKFILL_CONCURRENCY` env → `resolveBackfillConcurrency(requested, POOL_LIMIT)` →
-PQueue `concurrency` → worst-case held connections vs the shared pool of 10.
+**Evidence — webhook cannot mint a false entitlement.**
+- `stripe/webhook/route.ts:74-86`: mandatory signature verification (400 in constant time on failure, before any DB work).
+- `:105-118`: gates on `payment_status === 'paid'` — async/unpaid sessions rejected. `:231-235` tier allowlist; `:299-305` zero-amount reject; `:273-281` + `:390-398` deleted-image (FK) → 200 + manual-refund log, not a retry-storm 500.
+- `:320-331` SELECT-by-sessionId idempotency + `:357-382` `onDuplicateKeyUpdate` with `insertId>0` disambiguation (the dup-key loser does NOT mint a token / log line) → no dead-token hazard on Stripe retries.
 
-### Competing hypotheses
-- **H1 (correct + consistent):** the new arithmetic is internally consistent, leaves
-  ≥ RESERVED connections free, and the test was updated to match.
-- **H2 (off-by-one / under-reservation):** the formula still lets a backfill pin too many
-  connections, or the worst-case hold model (`1 + 2N`) understates real usage.
-- **H3 (doc drift):** the behavior is right but a companion comment now lies.
+**Evidence — download token claim is atomic (TOCTOU-safe).**
+- `download/[imageId]/route.ts:198-258`: GET is the no-claim interstitial — only SELECTs (`:210`,`:296`-style reads) + builds HTML; genuinely write-free (so auto-HEAD / mail scanners never burn the token, R4C7).
+- `:373-385`: the claim is `UPDATE entitlements SET downloadedAt=NOW(), downloadTokenHash=NULL WHERE id=? AND downloadedAt IS NULL` — an atomic compare-and-swap. Two concurrent POSTs both pass `validateDownloadRequest`, but only one gets `affectedRows===1`; the loser gets `affected===0` → 410 "Token already used" (`:396-401`).
+- `:338-351`: the file handle is `open()`ed BEFORE the claim, so a vanished file returns 404 with the token INTACT (`:356-360`), not a burned-token 200-with-aborted-body. Handle closed on every post-open failure path (`:387`,`:399`).
+- `:170-187`: constant-time `verifyTokenAgainstHash` + expiry + refunded + single-use checks, in order.
 
-### Evidence FOR H1
-- `admin-backfill-runner.ts:100-101,132-136` — `reserved = max(3, ceil(10/2)) = 5`;
-  `cap = max(1, floor((10-5-1)/2)) = floor(4/2) = 2`. Worst-case held = `1 (lock) + 2×2
-  (workers) = 5`; free = `10 − 5 = 5 ≥ reserved (5)`. Internally consistent.
-- `db/index.ts:19` — `POOL_CONNECTION_LIMIT = 10`, `connectionLimit: 10` (`:27`). The
-  arithmetic input is correct.
-- **Live test (executed, passes):** `admin-backfill-concurrency-cap.test.ts` updated to
-  assert cap 2 at LIMIT=10, scaling (LIMIT=20 → reserved 10 → cap 4), small-pool floors
-  (LIMIT 3/4/6 → cap 1), AND a NEW invariant test (`:69-78`): `limit − (1 + 2*cap) >=
-  reserved`. This is exactly H1's core claim, machine-verified.
-
-### Evidence FOR H3 (the one real defect)
-- `db/index.ts:16` — the exported-constant docblock STILL reads "caps its effective
-  concurrency at floor((POOL_CONNECTION_LIMIT - 2) / 2)". That is the PRE-AGG-5 formula.
-  The runner's actual formula is now `floor((LIMIT-RESERVED-1)/2)`. The AGG-5 change
-  updated the runner + its test but left this companion comment describing the old math.
-  An operator reading `db/index.ts` to understand the budget gets the wrong formula
-  (would compute cap 4, observe cap 2).
-
-### Evidence AGAINST H2
-- The `1 + 2N` hold model is sound: the per-image claim conn is held across
-  encode→detect→UPDATE (`reprocessOne:421-535`), and the `db.execute` UPDATE pulls one
-  MORE pool conn transiently while the claim conn is held (`:494-507`). During
-  `processImageFormats` (the long encode) only the claim conn is held (no DB), so 2/worker
-  is the true ceiling, not an understatement. A pool-exhausted claim acquire degrades to a
-  `locked` skip (`:424-430`), not an error spin — so even if the budget were briefly
-  exceeded by competing live traffic, the backfill backs off rather than wedging. H2 is
-  not supported.
-
-### Rebuttal round
-Strongest challenge to H1: at `concurrency = 2`, is the docblock's "pins at most 1 + 2×2 =
-5" actually reachable, or do workers serialize on Sharp/libheif and hold only 1 conn
-each? — In the worst case both workers are simultaneously in their `db.execute` UPDATE
-(claim conn + UPDATE conn each = 4) plus the lock = 5. That is genuinely reachable and is
-the bound the formula budgets for. So the conservative model is correct, not pessimistic.
-H1 stands; the only crack is the stale comment (H3).
-
-### Conclusion — **Logic CORRECT and consistent; ONE confirmed defect: stale doc comment.**
-
-**TRC-5-DEFECT (LOW, doc-only):** `apps/web/src/db/index.ts:16` describes the backfill cap
-as `floor((POOL_CONNECTION_LIMIT - 2) / 2)` — the obsolete pre-AGG-5 formula. The shipped
-runner uses `floor((LIMIT - RESERVED - 1) / 2)` with `RESERVED = max(3, ceil(LIMIT/2))`.
-No behavioral impact; a maintenance/documentation-drift hazard only. Fix: update the
-comment to the AGG-5 formula (or point to `resolveBackfillConcurrency` /
-`BACKFILL_RESERVED_LIVE_CONNECTIONS` as the single source of truth). Confidence: High.
-
-### Uncertainty
-The runner's own docblock (`:91-122`) IS correctly updated. Only the cross-module comment
-at `db/index.ts:16` drifted. No functional uncertainty.
+**Conclusion.** NO DEFECT. The only entitlement gap is `async_payment_succeeded` (ACH/bank transfer never gets an entitlement row), which is **ALREADY-OWNED by plan-316 CRT-R5C1-04** and documented in CLAUDE.md — not re-reported per prompt.
+**Confidence:** High.
 
 ---
 
-## Convergence / separation notes
-- TRC-3 and TRC-4 converge on ONE root mechanism: the global-flag `stripUnicodeFormatting`
-  (`validation.ts:92-94`). Both flows are clean because that single helper replace-alls.
-  They are independently evidenced (different call sites, separate tests), so the
-  convergence is real, not fake.
-- TRC-1 and TRC-2 are genuinely distinct (in-process state mirroring vs Stripe event-type
-  coverage) — no shared root.
-- TRC-5's defect is isolated to a cross-module doc comment; the behavioral logic shares no
-  root with the others.
+### TRC #5 — Image upload → Sharp → DB → public serving → ETag invalidation; color/HDR admin-only enforcement (VERIFIED CLEAN)
 
-## Critical unknown (across all flows)
-None blocking. The single confirmed defect (TRC-5 doc drift) needs no further evidence.
-The Stripe ACH gap (TRC-2) is a product-coverage decision (plan-316), not a tracing
-ambiguity.
+**Tracing target.** Does any wide-gamut/HDR audit field leak into a public API response, and does flipping a color/quality/size setting actually invalidate cached derivatives?
 
-## Discriminating probe (highest value, if one were needed)
-For TRC-2, the one probe that would collapse any remaining doubt about customer impact:
-inspect the Stripe webhook endpoint's SUBSCRIBED event list in the Stripe dashboard — if
-`checkout.session.async_payment_succeeded` is not subscribed, the gap is delivery-level
-(event never arrives) on top of the code-level gap (no handler). Both point to the same
-permanent-404 outcome for ACH buyers.
+**Evidence — color/HDR fields are admin-only by triple-layer construction.**
+- `data.ts:416`: `PrivacySensitiveKeys` union includes all admin-only color/HDR fields (`color_pipeline_decision`, `is_hdr`, `has_gain_map`, `transfer_function`, `matrix_coefficients`, `bit_depth`, `color_space`, `icc_profile_name`, `pipeline_version`, `was_downscaled`) + GPS/filename PII.
+- `data.ts:417-420`: compile-time `_privacyGuard` = `Extract<keyof publicSelectFields, PrivacySensitiveKeys>` must be `never` — a TS error fires if any sensitive key appears in `publicSelectFields`. `:429-432` `_mapPrivacyGuard` extends this to the map-select shape (only latitude/longitude allowed beyond public).
+- `data.ts:241`: `color_primaries` is correctly PUBLIC (not omitted) — matches CLAUDE.md (color_primaries = public; the rest admin-only).
+- `privacy-fields.test.ts:83-93`: SYMMETRIC runtime contract — the admin-only key set must equal `SENSITIVE_KEYS` exactly; a new admin field that's neither omitted publicly nor added to `SENSITIVE_KEYS` fails the test. Closes the "forgot to omit" drift.
+
+**Evidence — ETag invalidation is honest across both serving paths.**
+- `settings-hash.ts:37+`: `COLOR_IMPACTING_KEYS` = 9 keys (5 color + 3 quality + `image_sizes`); the 8-char hash is embedded in the serve-upload ETag, so flipping ANY of them changes the variant ETag (CLAUDE.md:260, AGG-R7-08-corrected).
+- Static path (the production path for existing `public/uploads/` files per R4C6 ARCH-R4C6-06): invalidation rides the mtime+size ETag — a backfill re-encode rewrites the file in place (`Cache-Control: ...must-revalidate`, deliberately NOT `immutable`), changing both. The backfill runner persists the same DB column set as a fresh upload (`admin-backfill-runner.ts:498-535`).
+
+**Conclusion.** NO DEFECT. No color/HDR or GPS field leaks publicly (compile-time guard + symmetric test). Settings→ETag invalidation is sound on both the serve-upload and static paths.
+**Confidence:** High.
+
+---
+
+## Summary table — OPEN / NEW this cycle
+
+| ID | Finding | Flow | Severity | Confidence | Disposition |
+|---|---|---|---|---|---|
+| **TRC-1** | Migration silent-skip survives for **non-column** migration subtypes (index-only, type/default change, `DROP`, data migration). On every existing-DB upgrade `reconcileLegacySchema` is the SOLE applier (baseline runs before drizzle `migrate()`, so drizzle short-circuits the new hash); the migrate.js post-condition only checks hash-presence (which baseline guarantees), and `migrate-reconcile-coverage.test.ts` only enforces column-NAME + `CREATE TABLE` presence. A forgotten reconcile entry for a non-column migration is dropped silently with a green deploy. (Refines AGG-R7-11; refutes its "adjacent-pairs-only" claim — the global-max cursor IS pinned.) | TRC #5 (migration) | LOW (latent; 0021 is correctly mirrored, no current instance) | High | NEW — actionable: extend coverage test to assert `CREATE INDEX` ↔ `ensureIndex`, OR add a fresh-vs-sequential `information_schema` diff in CI |
+
+All other traced flows (backfill honesty, auth, Stripe/download, color-field privacy, ETag invalidation) are **VERIFIED CLEAN** with High confidence. All run-7 actionable findings (AGG-R7-01..09 + AGG-10) verified CLOSED at HEAD.
+
+## VERIFIED-CLEAN (stress-tested this cycle, no action)
+- Backfill counter honesty: 1:1 outcome→counter mapping, no reconstruction, fatal-catch populates `lastError`, detection-fail never bumps version. (25 tests)
+- Auth: 3 security lint gates exit 0; no mutating sink without both `isAdmin` + `requireSameOriginAdmin`; 10 exempt sites are read-only getters or explicit public analytics.
+- Stripe webhook: signature-gated, paid-only, idempotent (SELECT + dup-key insertId disambiguation), deleted-image → 200 not retry-storm.
+- Download token: GET write-free interstitial; POST claim is atomic CAS (`UPDATE ... WHERE downloadedAt IS NULL`), file opened before claim, handle closed on all post-open paths.
+- Color/HDR privacy: compile-time `_privacyGuard`/`_mapPrivacyGuard` (Extract→never) + symmetric `privacy-fields.test.ts` contract; `color_primaries` public, all HDR/decision/bit_depth/icc admin-only.
+- ETag invalidation: 9 COLOR_IMPACTING_KEYS in serve-upload ETag hash; mtime+size ETag on static path; backfill re-encode rewrites in place.
+- Migration journal monotonicity: `migration-journal.test.ts:79-98` pins the global-max-of-all-prior cursor invariant from idx 18 (not adjacent pairs).
+
+## Uncertainty / next-probe (open)
+- TRC-1 has no current production instance (0021 indexes are mirrored). The probe that would collapse remaining uncertainty about real-world exposure: grep the next-added `drizzle/*.sql` for `CREATE INDEX`/`ALTER`/`DROP`/`UPDATE`/`INSERT` statements at PR time and confirm a matching `reconcileLegacySchema` mutation exists — exactly what option 1 of the fix automates.

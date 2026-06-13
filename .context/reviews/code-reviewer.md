@@ -1,113 +1,133 @@
-# Code Reviewer — Run-6 Cycle-1 Fan-out (GalleryKit)
+# Code Review — Run-8 Cycle-2 (deep review)
 
-**Reviewer:** `code-reviewer` agent (Opus, two-stage: spec-compliance -> code-quality)
-**Scope:** code quality, logic correctness, error-handling, SOLID, maintainability, data-flow/state-consistency, type-safety, dead code.
-**Baseline:** HEAD `8fc403a2` + working tree. **Gates re-verified live this pass:** `npm run lint` -> exit 0, zero findings; `npm run typecheck` -> exit 0 (app + scripts). `timeout` is unavailable on this macOS host, so the earlier `===EXIT:0===` lines were short-circuited bogus values — I re-ran both gates WITHOUT `timeout` and confirmed clean output.
-
----
-
-## Headline: the orchestrator's premise is factually wrong on the items I was told to verify
-
-I was instructed that AGG-8 and AGG-13 are "still unfixed at HEAD." **Both are already implemented.** So are the three plan-328/329 items in the working tree, and AGG-16. Verifying these (and confirming the prior aggregate's claims do NOT match the code) is itself the highest-signal output of this pass — re-scheduling already-done work would be wasted cycles. Evidence below.
-
-| Item | Claimed state | ACTUAL state at HEAD | Evidence |
-|---|---|---|---|
-| AGG-8 (TriState guard in `bulkUpdateImages`) | "still unfixed (~877-937), 500s on malformed payload" | **DONE — committed `652add51`** | `images.ts:907-916` — `isTriState()` helper narrows `mode` + requires string `value` on `'set'`; the `if (!isTriState(topic) || ...) return { error: t('invalidInput') }` guard runs immediately after the `ids` validation, BEFORE any `.mode` deref. |
-| AGG-13 (semantic-mode `<Select>` blank on legacy `'production'`) | "still unfixed (~602), `|| 'disabled'`" | **DONE** | `settings-client.tsx:622` already uses value-COERCION `['disabled','stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'` — exactly the prescription. The amber legacy warning below (637+) still reads the RAW stored value. |
-| AGG-1 (backfill honesty) | plan-328 item 2 | **DONE** (`13ae79ca`) | `AdminBackfillState.processed/errors` added + reset at run start (`runner:154-163, 558-559`), continuously mirrored (`657-658`), final-flushed (`688-689`), fatal-catch sets `state.lastError` (`652`); `getBackfillStatus` exposes both (`admin-backfill.ts:109-111`); UI reads `backfillStatus.processed` directly + surfaces `errors` (`settings-client.tsx:286-288`). |
-| AGG-2 (ESLint gate + AGG-15 leak) | plan-328 item 1 | **DONE** (`5b5de9d3`) | Live `npm run lint` exit 0, zero output lines. |
-| AGG-4 (`sanitizeForOg` global strip) | plan-328 item 4 | **DONE** (`170297ed`) | Both twins use `stripUnicodeFormatting(value) ?? ''`: `og/photo/[id]/route.tsx:37` (+ trailing `OG_C0_CONTROL_CHARS`) and `p/[id]/page.tsx:43`. |
-| AGG-16 (touch-target gate Link/anchor + root files) | plan-329 item 6, "still-open" | **DONE** | `touch-target-audit.test.ts` `SCAN_ROOTS` block adds `global-error.tsx`/`[locale]/not-found.tsx`/`error.tsx`/`layout.tsx` (lines 53-79); FORBIDDEN set has `<Link>` + `<a>` patterns for `h-8/h-9/h-10` literal, `cn()` composite, and sub-44 `min-h-[...]` (lines 397-420). |
-
-The working-tree changes (admin `error.tsx` H1 split = AGG-9, `admin-backfill-runner.ts` pool-budget formula = AGG-5, the matching concurrency-cap test) are correct and internally consistent — reviewed in detail below.
-
-**Net new defects found: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 4 LOW, 2 INFO.** This is a very mature, heavily-reviewed codebase; the remaining items are genuinely minor.
+**Date:** 2026-06-13
+**Reviewer angle:** code quality, logic bugs, SOLID, maintainability, error handling, invariant violations, data-flow / state-consistency.
+**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6 photo gallery, MySQL + Drizzle). Working tree CLEAN, HEAD == origin/master.
+**Method:** verified every prior AGG-R7-* finding against HEAD code (not the aggregate's claims), then a fresh fan-out across server actions, data access, image/color pipeline, auth/proxy, download route, and React components. Did not sample — read the load-bearing files end-to-end.
 
 ---
 
-## Findings table
+## Prior AGG-R7-* findings: verification at HEAD
 
-| ID | Severity | Confidence | File:line | One-line |
-|---|---|---|---|---|
-| COR-1 | LOW | High | `components/home-client.tsx:280` | `containIntrinsicSize` divides by `image.width`; a 0-width row yields `auto Infinitypx` (invalid CSS). Pre-existing, widened by the AGG-R5C3 estimate change. |
-| COR-2 | LOW | High | `lib/photo-title.ts:46` | `formatTitleAsTags` path does NOT `humanizeTagLabel` title words, but the tag-derived paths DO — underscored titles render `#Color_in_Music` while tags render `#Color in Music`. Cosmetic inconsistency. |
-| COR-3 | LOW | Medium | `app/[locale]/(public)/page.tsx:104` | Home-OG sized-derivative URL has no `pickFirstAvailablePhotoBuffer`-style fallback; a legacy/backfilling `latestImage` missing `_{size}.jpg` yields a 404 OG image (crawler only; self-heals post-backfill). |
-| COR-4 | LOW | Medium | `lib/admin-backfill-runner.ts:585` | Clamp-down warning compares `concurrency` against `Math.max(1, Math.floor(requestedConcurrency)||1)`, recomputing the floor inline instead of reusing the value `resolveBackfillConcurrency` already computed — correct today, but a divergence hazard if the floor rule changes in one place only. |
-| COR-5 | INFO | High | `app/actions/lr-tokens.ts:118-121` | `listLrTokens` carries `@action-origin-exempt: read-only` yet still calls `requireSameOriginAdmin()`. Harmless (extra safety) but the exemption comment is now misleading. |
-| COR-6 | INFO | High | `app/api/og/photo/[id]/route.tsx:99` | `getPhotoDisplayTitle(image, ...)` relies on `getImageCached` returning a `tags` array (it does, `data.ts:1068`) — VERIFIED correct, recorded so a future `getImageCached` shape change is known to affect OG titles. |
+| Prior ID | Status at HEAD | Evidence |
+|---|---|---|
+| **AGG-R7-01** (stale pool-budget formula ×3 sites) | **CLOSED** (commit 0d17a362) | `admin-backfill-runner.ts` header docblock (28-37), the `BACKFILL_RESERVED_LIVE_CONNECTIONS`/`resolveBackfillConcurrency` body comments (96-127), and the arithmetic all agree: `RESERVED = max(3, ceil(LIMIT/2))`, `cap = max(1, floor((LIMIT−RESERVED−1)/2))` = 2 at LIMIT 10. `db/index.ts` comment no longer asserts `(LIMIT-2)/2`. |
+| **AGG-R7-02** (backfill setTimeout leak) | **CLOSED** (commit f11746cd) | `settings-client.tsx`: `backfillPollTimers` ref (83) holds the +3s/+10s timer ids (169-172); dedicated unmount effect (122-131) clears them AND flips `backfillMountedRef=false`; `refreshBackfillStatus` gates `setBackfillStatus` behind `backfillMountedRef.current` (96). Both the un-fired-timer and already-fired-promise paths are covered. |
+| **AGG-R7-03** (admin error-shell visible heading) | **CLOSED** (commit 0d2312cd) | `admin/(protected)/error.tsx:30` renders a single visible readable `<h1 className="text-3xl font-semibold">` matching the public twin. No faint `/30` aria-hidden glyph remains. |
+| **AGG-R7-04** (remaining aria-describedby) | **CLOSED** (commit 61cfd235) | `settings-client.tsx`: all hint controls now wired — quality inputs (357/371/385), chroma/effort selects (469/486/512), wide-gamut-max-source-pixels (535), license inputs (702/715/728), plus strip-gps/slideshow/auto-alt/semantic-search. |
+| **AGG-R7-05** (regression tests for AGG-9/AGG-10) | **CLOSED** (commit d035de10) | `__tests__/error-shell-heading.test.ts` + `__tests__/home-metadata-title.test.ts` exist; home page is statically imported (commit 61607572) to de-flake. |
+| **AGG-R7-07** (dropzone aria-disabled honesty) | **CLOSED** (commit 35d07f0b) | `upload-dropzone.tsx:397-419`: `useDropzone({disabled})` drops root onClick/onKeyDown/tabIndex; inner `<input disabled>`; explicit `tabIndex={-1}` fallback + `aria-disabled` on the role="button". |
+| **AGG-R7-08** (doc drift batch) | **CLOSED** (commits 10d77324 + 61cfd235) | `settings-hash.ts:1-29` docstring now says "9 settings" and enumerates all 9 `COLOR_IMPACTING_KEYS` (5 color + 3 quality + image_sizes); CLAUDE.md corrected. |
+| **AGG-R7-09** (home-OG on-disk fallback) | **CLOSED** (commit 4852bcf5) | `(public)/page.tsx:109-116`: OG image now points at the always-present base `/uploads/jpeg/${filename_jpeg}` (encoder atomic-rename guarantee), not a `_${size}.jpg` derivative; the metadata path no longer fetches gallery config for `findNearestImageSize`. |
+| **AGG-R7-11** (test depth: backfill mixed-run + migration MAX cursor) | **PARTIAL** | Migration side substantially mitigated (commit bb463062): `migration-journal-monotonicity.test.ts` pins adjacent-pair monotonicity + a documented-inversion allowlist + the missing-hash predicate + the loud-fail post-condition throw — the post-condition IS the production safeguard against silent skips, so the "real MAX cursor" model test is now low-value. Backfill side STILL open: `admin-backfill-runner-fatal-counters.test.ts` has only the `processed===0` fatal-only case (167-195); no MIXED run (`processed>0 && errors>0`) asserting a fatal row is not mis-attributed to `processed`. Carried as **COR-5** below. |
+| **AGG-R7-10** (load-more setState-after-unmount) | **OPEN (latent, deferred)** | `load-more.tsx:36-88`: `queryVersionRef` guards stale-query resolution but there is no mounted ref; an in-flight `loadMoreImages()` resolving post-unmount still runs the setState block. Code unchanged since b3022f12 (pre-run-7). Carried as **COR-3**. |
+| **AGG-R7-12** (containIntrinsicSize divide-by-zero) | **OPEN (latent, deferred)** | `home-client.tsx:280`: `Math.round(estimatedCardWidth * image.height / image.width)` → `Infinitypx` for a 0-width row. `estimatedCardWidth` memo is guarded (197-201); the `/ image.width` in the style is not. NOT NULL Sharp metadata makes this near-impossible. Code unchanged since b3022f12. Carried as **COR-4**. |
+| **AGG-R7-A1/A3/A4** (single-pool arch tradeoffs) | RECORD-ONLY | Unchanged; inherent single-writer topology. Not defects. |
+| **AGG-R7-13** (Stripe async_payment_succeeded) | ALREADY-OWNED (plan-316) | `api/stripe/webhook/route.ts` still handles only `checkout.session.completed`+`paid`. CLAUDE.md explicitly scopes support to card/immediate-payment. Deferred per repo rules. Not re-owned. |
 
-No finding rises to a confidence/severity that gates a verdict, so there is no "Open Questions (low-confidence CRITICAL/HIGH)" section this pass.
-
----
-
-## Verification of the working-tree changes (AGG-5 + AGG-9)
-
-### AGG-5 — backfill pool-budget formula (`admin-backfill-runner.ts`) — CORRECT
-
-`resolveBackfillConcurrency` now computes `reserved = max(3, ceil(poolLimit/2))` then `cap = max(1, floor((limit - reserved - 1) / 2))`. I hand-verified the worst-case-connection invariant the new test pins:
-- At `limit=10`: `reserved=5`, `cap=floor((10-5-1)/2)=floor(2)=2`. Worst-case held = `1 (lock) + 2x2 = 5`; free = `10-5 = 5 >= reserved`. PASS — the invariant `limit - (1+2*cap) >= reserved` holds.
-- Edge `limit=3`: `reserved=3`, `floor((3-3-1)/2)=floor(-0.5)=-1`->`max(1,-1)=1`. The `max(1,...)` floor is load-bearing here and is present. At cap=1 worst-case held=3 = the whole pool — i.e. the "reserve >= reserved free" invariant is INTENTIONALLY violated for tiny pools (you can't reserve 3 of 3 and still run a worker). The test's invariant assertion only runs at `limit=10`, so it does not catch this — acceptable because POOL_CONNECTION_LIMIT ships at 10 and a 3-connection pool is a degenerate test-only config; worth a one-line comment but not a defect.
-- `limit=20`: `reserved=10`, `floor((20-10-1)/2)=floor(4.5)=4`. Matches the test.
-- Non-finite `poolLimit` -> falls back to 10 (guard at `:132`).
-
-The header comment arithmetic matches the implementation. The clamp-DOWN warning is preserved (`:585-590`). The test file (`admin-backfill-concurrency-cap.test.ts`) is updated to the new expectations (cap 2 at limit 10, the reserved-headroom invariant test, the larger-pool scale test). **No defect.** (Minor: COR-4 on the inline floor recompute.)
-
-### AGG-9 — admin error-shell H1 contrast split (`error.tsx`) — CORRECT
-
-The diff mirrors the public `error.tsx` twin exactly: decorative `<span aria-hidden="true" className="text-7xl ... text-muted-foreground/30 block">` for the faint glyph + `<h1 id="admin-route-error-title" className="sr-only">` for the accessible name; `aria-labelledby="admin-route-error-title"` still resolves to the H1. `sr-only` text has no WCAG contrast floor, so the accessible name is now AA-clean. **No defect.**
+**Net:** 8 of the prior cycle's actionable findings are genuinely CLOSED at HEAD. 4 remain (1 partial test-depth, 2 latent component guards, 1 owned-elsewhere). The run-7 fix batch landed cleanly and the doc-drift is resolved.
 
 ---
 
-## Detailed findings
+## NEW / OPEN findings this cycle
 
-### COR-1 (LOW, High) — `containIntrinsicSize` divide-by-`image.width`
-`home-client.tsx:280`: `containIntrinsicSize: "auto " + Math.round(estimatedCardWidth * image.height / image.width) + "px"`. If `image.width === 0`, this is `Math.round(Infinity)` -> `"auto Infinitypx"`, an invalid CSS value the browser drops (degrading content-visibility height estimation, not a crash). `estimatedCardWidth` itself is well-guarded (`home-client.tsx:196-202`, floors to 300, `w>0` check). The risk is solely a 0-width DB row. `images.width` is schema-`NOT NULL` and populated from Sharp `metadata.width` (>=1 for any decodable image), so this is near-impossible in practice and is PRE-EXISTING (the old `300 * h / w` had the identical divisor). The AGG-R5C3-04 change swapped the numerator constant for `estimatedCardWidth` but did not introduce the divisor.
-**Failure scenario:** a manually-corrupted/zero-width `images` row -> that one card reserves no intrinsic height -> minor layout shift on its first paint. **Fix (optional):** guard the divisor — `image.width > 0 ? Math.round(estimatedCardWidth * image.height / image.width) : estimatedCardWidth`. Low priority.
+### COR-1 — NCLX "unspecified" (CICP code 2) clobbers ICC-derived transfer/matrix to `unknown`
+**Severity: LOW · Confidence: High (static) · admin-only audit columns**
+**File:** `apps/web/src/lib/color-detection.ts:370-374`
 
-### COR-2 (LOW, High) — title-as-tags skips `humanizeTagLabel`
-`photo-title.ts:43-46`: when `options.formatTitleAsTags` is true, title words are emitted as `#${word}` directly. Every tag-derived path (`:39`, `:52`) maps through `humanizeTagLabel(tag.name)` (underscore->space). So a title `"Color_in_Music"` rendered as tags shows `#Color_in_Music` while a tag of the same text shows `#Color in Music`. Inconsistent visual treatment of the same separator. **Fix (optional):** apply `humanizeTagLabel(word)` (or at least `.replace(/_/g,' ')`) in the `formatTitleAsTags` branch for parity. Cosmetic; titles rarely use underscores.
+```js
+if (nclxCicp) {
+    colorPrimaries     = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries]      ?? 'unknown';
+    transferFunction   = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics] ?? 'unknown';
+    matrixCoefficients = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients]      ?? 'unknown';
+}
+```
 
-### COR-3 (LOW, Medium) — home-OG image URL lacks the sized-derivative fallback
-`page.tsx:102-109` builds the home OpenGraph image directly from `/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, "_" + ogImageSize + ".jpg")}` with NO existence check. The per-photo OG route (`og/photo/[id]/route.tsx:121`) deliberately uses `pickFirstAvailablePhotoBuffer` to walk configured sizes and fall back when the targeted derivative is missing during a backfill/`image_sizes` reconfigure window. The home metadata path has no such bridge: if `latestImage` is a legacy row (or mid-backfill) missing `_{ogImageSize}.jpg`, the social card 404s until the derivative exists. `findNearestImageSize` only picks from the *configured* list — it does not verify the file is on disk. The JSON-LD thumbnail on the same page (`:182`) correctly uses the base filename per the R21-M2 contract; the OG image does not get the same treatment.
-**Failure scenario:** admin adds a new size to `image_sizes`, the newest photo hasn't been backfilled, a crawler scrapes `/` -> broken OG preview image. Self-heals after backfill. **Fix (optional):** fall back to the base `filename_jpeg` (guaranteed by the encoder atomic-rename contract) for the home OG `url`, mirroring the JSON-LD thumbnail decision, OR resolve via the same fallback helper. Medium confidence because I did not confirm a live missing-derivative case — needs-manual-validation against a real backfill window.
+When an HEIF/AVIF carries an NCLX `colr` box, this branch **unconditionally** overrides all three signals. But the three `NCLX_*_MAP` tables (lines 168-208) do NOT include CICP code **2** ("unspecified"), which is a perfectly legal value an encoder writes when it knows the primaries but not the transfer/matrix. For such a file, `NCLX_TRANSFER_MAP[2]` and `NCLX_MATRIX_MAP[2]` return `undefined → 'unknown'`, **discarding** the ICC-derived `transferFunction`/`matrixCoefficients` that lines 344-345 already computed from the embedded ICC profile.
 
-### COR-4 (LOW, High) — clamp-warning recomputes the floor instead of reusing it
-`admin-backfill-runner.ts:583-585`: `const concurrency = resolveBackfillConcurrency(requestedConcurrency); if (concurrency < Math.max(1, Math.floor(requestedConcurrency)||1)) { warn }`. The `Math.max(1, Math.floor(requestedConcurrency)||1)` here re-derives the same normalization `resolveBackfillConcurrency` applies internally (`:135 const req = Math.max(1, Math.floor(requested)||1)`). They agree today, so the warning fires correctly. The hazard is duplication: if the request-normalization rule ever changes inside `resolveBackfillConcurrency` (e.g. a different floor), this call-site comparison silently drifts and the "clamped DOWN" warning becomes wrong. **Fix (optional):** have `resolveBackfillConcurrency` return `{ effective, requestedNormalized }` (or expose the normalizer) so the warning compares against the single source of truth. Pure maintainability; no behavior bug.
+**Failure scenario:** an AVIF authored with NCLX `primaries=12 (Display P3), transfer=2 (unspecified), matrix=2 (unspecified)` plus an embedded sRGB-IEC61966 ICC profile. After detection: `color_primaries='p3-d65'` (correct, NCLX), but `transfer_function='unknown'` and `matrix_coefficients='unknown'` — even though the ICC said sRGB. The audit panel and `is_hdr` derivation (line 376) lose information they had.
 
-### COR-5 (INFO, High) — stale exemption comment on `listLrTokens`
-`lr-tokens.ts:118`: `/** @action-origin-exempt: read-only list action; no mutation, no side effects */` sits above a body that nonetheless calls `await requireSameOriginAdmin()` (`:120`). The action-origin lint gate treats the comment as "doesn't need the check," yet the check is present (good — belt-and-braces). The comment is now misleading to a reader (implies no origin guard). **Fix (optional):** drop the exempt comment since the function genuinely performs the same-origin check, OR keep it and add "(origin check retained as defense-in-depth)". Documentation hygiene only.
+**Why it's a precedence violation:** the documented rule (line 351) is "NCLX > ICC chromaticity > ICC name" *per signal*. An "unspecified" NCLX field carries no information and should fall through to the ICC-derived value, not overwrite it.
 
-### COR-6 (INFO, High) — OG-title relies on `getImageCached` returning `tags`
-Recorded as a VERIFIED cross-file dependency, not a defect. `og/photo/[id]/route.tsx:99` calls `getPhotoDisplayTitle(image, "Photo #" + image.id)`; `getPhotoDisplayTitle` (`photo-title.ts:33`) reads `image.tags` (array). `getImageCached = cache(getImage)` and `getImage` returns `tags: imageTagsResult` (`data.ts:1068`), so the OG title correctly considers tags then falls back to title then `Photo #id`. If a future refactor narrows `getImageCached`'s returned shape (e.g. to a lite select without `tags`), the OG title silently loses tag-derivation with no type error (the param type is structural and `tags?` is optional). Worth a comment at the call-site noting the dependency.
-
----
-
-## Areas audited and found CLEAN (no defects)
-
-- **Privacy select-field guards (`data.ts:204-450`):** `adminSelectFields` -> `publicSelectFields`/`publicMapSelectFields` derived by destructure-omit (separate references); `PrivacySensitiveKeys` union + `_SensitiveKeysInPublic`/`_MapSensitiveKeysInPublicMap`/`_LargePayloadKeysInPublic` compile-time guards all in place and correctly typed. The map-select guard auto-derives from the canonical union via `Exclude`. Solid.
-- **`getImage` prev/next keyset navigation (`data.ts:923-1074`):** the dated/undated NULLS-LAST branch logic is meticulously reasoned and correct; `or(...conditions.filter(Boolean))` + `Promise.all` for tags/prev/next. No off-by-one, no NULL-ordering bug.
-- **`getImagesLitePage` (`data.ts:818-854`):** `COUNT(*) OVER()` after `GROUP BY images.id` correctly counts distinct images; `hasMore = rows.length > pageSize` with a `+1` fetch; `totalCount` independent of LIMIT. Correct pagination contract.
-- **`bulkUpdateImages` (`images.ts:870-1074`):** TriState guard (AGG-8) present; per-field validation (slug/title/description/licenseTier/applyAltSuggested) before any write; transaction-wrapped; alt-suggested copy strips stub-prefix + Unicode formatting and skips empty (`:1007-1008`); never auto-overwrites a non-empty target field.
-- **`uploadImages` (`images.ts:108-536`):** upload-contract advisory lock released in `finally` (`:533`); tracker registered up-front to close the cold-IP TOCTOU (`:191-195`); pre-increment AFTER all validation so no manual rollback needed; `settleUploadTrackerClaim` reconciles claimed vs actual on every exit path including all-failed (`:485`); GPS-strip on disk + DB; HDR/RAW/wide-gamut rejection buckets correct; `assertBlurDataUrl` write-barrier.
-- **`sharing.ts`:** photo + group share creation use in-memory pre-increment + DB-backed rate limit with symmetric BOTH-counter rollback on every early-return / FK-violation / exhausted-retry path; conditional `share_key IS NULL` UPDATE for race safety; `safeInsertId` for BigInt; revoke uses conditional `WHERE share_key = old` to avoid clobbering a concurrently-recreated key.
-- **`sales.ts`:** refund maps Stripe error types to stable codes (no raw `err.message` across the boundary), converges local state on `charge_already_refunded` (R4C4 fix — closes the live-token-after-Stripe-refund hole), idempotency-key on the refund POST.
-- **`checkout/[imageId]/route.ts`:** Pattern-2 rollback on every 4xx/5xx; strict `/^\d+$/` price parse; code-point-safe Stripe title truncation; idempotency key omitted only for unknown-IP (documented trade-off).
-- **`search/semantic/route.ts`:** same-origin + content-type prefix + chunked-encoding + body-size guards; `clampSemanticTopK` rejects non-number raw (booleans/arrays); rate-limit STAYS applied on unknown-IP (security control, correctly distinguished from the checkout idempotency-key case); fail-closed config read; `EMBEDDING_BYTES` length check per row.
-- **`admin-users.ts`:** validation-before-rate-limit ordering; advisory-lock-serialized last-admin-deletion with table-wide COUNT inside the lock; `audit_log` user_id NULL-detach before delete (errno 1451 fix); `safeInsertId`.
-- **`collections.ts` / `smart-collections.ts`:** both `JSON.parse` sites in try/catch; per-column operator narrowing (tag -> eq/contains only) at WRITE time; scalar-value runtime enforcement against mysql2 object-expansion; the unauthenticated `getSmartCollections` getter was correctly REMOVED.
-- **`lr-tokens.ts`:** expiry `Number.isFinite(parsed.getTime())` NaN-guard (prevents never-expiring tokens), past-date rejection, code-point label bound, no raw error relay.
-- **`embeddings.ts`:** bounded concurrency, per-item try/catch tallies, `onDuplicateKeyUpdate` idempotent upsert.
-- **`validation.ts`:** `UNICODE_FORMAT_CHARS` (test) + `UNICODE_FORMAT_CHARS_GLOBAL` (strip, derived from `.source` so it can't drift) + `safeInsertId` BigInt overflow throw. All consumers share one source of truth.
-- **`admin-tokens.ts:158`:** unawaited `db.execute` for `last_used_at` is INTENTIONAL fire-and-forget with `.catch()` ("never block verification"). Correct.
+**Fix:** apply the NCLX override per-signal only when the code maps to a known value:
+```js
+if (nclxCicp) {
+    const p = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries];
+    const tf = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics];
+    const mc = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients];
+    if (p) colorPrimaries = p;
+    if (tf) transferFunction = tf;
+    if (mc) matrixCoefficients = mc;
+}
+```
+This keeps NCLX authoritative when it actually specifies a value and preserves the ICC fallback for code-2 fields. (Caveat: this is admin-only metadata and the encoder still produces gamut-correct output; impact is audit-accuracy only.)
 
 ---
 
-## Positive observations
-- The two-stage backfill honesty fix (AGG-1) is exemplary: the detection-failure-no-version-bump resume contract (`runner:511-531`), continuous state mirroring for live polling, and last-writer-wins-message documented explicitly — no dishonest "success + failure" banner remains.
-- The privacy boundary is enforced at THREE layers (separate object references + compile-time `Extract` guards + the runtime select shape) and the map-select guard auto-derives from the canonical union — adding a sensitive column can't silently leak.
-- Rate-limit rollback discipline (Pattern 2) is applied uniformly across sharing/checkout/semantic/admin-users with symmetric in-memory + DB counter handling — a class of "legitimate user penalized for infra failure" bugs is systematically closed.
-- The touch-target audit's multi-line tag normalizer + Link/anchor/Badge/select coverage shows the team learned from each blind-spot incident (Badge R4C15, select R4C16, anchor AGG-16) and generalized the gate rather than patching one element.
+### COR-2 — `color_primaries` (NCLX) and `color_pipeline_decision` (ICC-name) can disagree about source gamut
+**Severity: LOW · Confidence: High (static) · admin-only audit columns + delivery is still correct**
+**Files:** `apps/web/src/lib/color-detection.ts:370-374` vs `apps/web/src/lib/process-image.ts:661-695` (`resolveColorPipelineDecision`) and `:736-766` (`resolveAvifIccProfile`)
 
-## Recommendation
+The two modules implement OPPOSITE precedence between NCLX and ICC name:
+- `detectColorSignals` makes **NCLX win** over the ICC name (line 371 overrides `inferColorPrimaries(iccName)`).
+- `resolveColorPipelineDecision` / `resolveAvifIccProfile` make the **ICC name win** — they string-match `iccProfileName` FIRST (process-image.ts:672-689 / 748-762) and only fall back to `signals.colorPrimaries` when the name is opaque (694 / 764).
 
-**COMMENT.** No CRITICAL/HIGH/MEDIUM defects at any confidence. The 4 LOW + 2 INFO findings are optional polish. Gates verified clean live (lint exit 0, typecheck exit 0). **Action item for the orchestrator/planner: do NOT re-schedule AGG-8, AGG-13, or AGG-16 — they are implemented at HEAD; the prior aggregate's "still-open" classification is stale.** If anything ships from this report, COR-3 (home-OG fallback) is the most defensible since it has a real (if crawler-only, self-healing) user-visible failure mode during backfill windows.
+**Failure scenario:** an AVIF with BOTH an embedded "Adobe RGB (1998)" ICC profile AND an NCLX box declaring `colourPrimaries=12` (Display P3). Then:
+- `detectColorSignals` stores `color_primaries='p3-d65'` (NCLX wins).
+- `resolveColorPipelineDecision('Adobe RGB...', {colorPrimaries:'p3-d65'})` matches "adobergb" first → stores `color_pipeline_decision='p3-from-adobergb'`, ignoring the NCLX `p3-d65`.
+
+The two persisted columns now contradict each other on what the source gamut was. The encoder still produces a valid gamut-preserved P3 output either way (both `p3-from-displayp3` and `p3-from-adobergb` land in the P3 10-bit branch), so there is no visible image corruption — but an operator reading the Color Details audit row sees an inconsistency, and any future logic that trusts `color_primaries` to match `color_pipeline_decision` would be wrong.
+
+**Why it matters for maintainability:** CLAUDE.md documents a single canonical precedence ("NCLX > ICC chromaticity > ICC name"). One module honors it, two violate it. A future change that relies on the documented invariant will be subtly wrong.
+
+**Fix (cheap, consistent):** have `resolveColorPipelineDecision`/`resolveAvifIccProfile` consult `signals.colorPrimaries` FIRST when it is a known non-`unknown` value, falling back to ICC-name matching only when signals are absent/unknown — i.e. mirror the same NCLX-wins precedence `detectColorSignals` uses. This is contained to the two resolver functions and both already accept the `signals` param. Real-world files rarely carry conflicting ICC-name + NCLX, so the behavior change is narrow.
+
+---
+
+### COR-3 — `load-more.tsx`: setState after unmount on in-flight load (carried from AGG-R7-10)
+**Severity: LOW · Confidence: High · latent**
+**File:** `apps/web/src/components/load-more.tsx:36-88`
+
+`loadMore()` captures `version = queryVersionRef.current` and short-circuits stale QUERY resolutions (line 46, 83), but there is no mounted guard. If the component unmounts while `loadMoreImages()` is in flight, the resolution still executes `setHasMore`/`onLoadMore`/`setStatusMessage`/`setOffset`/`setCursor` and the `finally` runs `setLoading(false)` on a dead tree. React 18+ no longer warns, but the work is wasted and `onLoadMore` (parent setState) fires post-unmount.
+
+**Fix:** add a `mountedRef` set false in the existing unmount cleanup (line 124 already returns an unmount effect — fold a `mounted.current=false` into it) and gate the setState block + `finally` on it, mirroring the AGG-R7-02 `backfillMountedRef` pattern that just landed in settings-client. Note: this was referenced in the run-7 plans but the file was never modified; confirm it is intentionally deferred rather than missed.
+
+---
+
+### COR-4 — `home-client.tsx:280`: `containIntrinsicSize` divides by `image.width` (carried from AGG-R7-12)
+**Severity: LOW · Confidence: High (theoretical) · latent**
+**File:** `apps/web/src/components/home-client.tsx:280`
+
+`containIntrinsicSize: `auto ${Math.round(estimatedCardWidth * image.height / image.width)}px`` produces `Infinitypx` when `image.width === 0`. The browser ignores an invalid `containIntrinsicSize`, so the visible failure is a lost content-visibility size hint (minor layout-shift), not a crash. NOT NULL Sharp-derived `width`/`height` make a 0 essentially impossible, hence LOW/theoretical. Guard with `image.width > 0 ? … : 300` (the documented fallback constant) for symmetry with the already-guarded `estimatedCardWidth` memo at lines 197-201.
+
+---
+
+### COR-5 — Backfill fatal-counter test lacks a MIXED-run case (carried from AGG-R7-11/TEST-5)
+**Severity: LOW · Confidence: Medium · test depth**
+**File:** `apps/web/src/__tests__/admin-backfill-runner-fatal-counters.test.ts:167-195`
+
+The only assertion is the fatal-ONLY run (`processed===0`, `errors>0`). The runner logic in `admin-backfill-runner.ts:622-659` tallies `processed++` (success) and `errors++` (fatal catch) on different branches and mirrors both into state. A regression that mis-routes a fatal row into the `processed` branch (or vice-versa) would survive the current test because with a single throwing row `processed===0` regardless. Add a 2-row fixture (one row succeeds, one throws on the version-bump UPDATE) and assert `processed===1 && errors===1 && lastRunHadFailures===true` to lock the partition. (The existing fatal-only test stays — it pins the `lastError` surfacing.)
+
+---
+
+## Observations (NOT defects — recorded for completeness)
+
+- **OBS-1 — auth-guard ordering is inconsistent across action files.** `images.ts` (873-875), `tags.ts`, `topics.ts` call `requireSameOriginAdmin()` BEFORE `isAdmin()`; `sharing.ts` (all 5 sites: 82/84, 183/185, 304/306, 344/346) and `admin-backfill.ts` (34/37) call `isAdmin()` first. **Not a security defect** — both checks run before any write and BOTH must pass, so net authorization is identical; only the error message a caller receives differs (origin-error vs unauthorized). The `lint:action-origin` gate enforces that the origin result is checked and returns early, not the ordering. Cosmetic; standardizing on one order would aid maintainability but is optional.
+
+- **OBS-2 — download route POST (`api/download/[imageId]/route.ts`) is exceptionally hardened.** File-open BEFORE the atomic single-use claim (349-351), realpath traversal containment (330-336), handle-leak coverage on every post-open path (355/387/399/456), Content-Length from the opened inode (351), RFC 6266+5987 Content-Disposition (434-438). The `affectedRows ?? 1` fallback-to-allow on driver-shape mismatch (397) is a deliberate false-410-avoidance tradeoff and is sound. No findings.
+
+- **OBS-3 — `refundEntitlement` (sales.ts:163-263)** double-click TOCTOU between the `!row.refunded` check (183) and `stripe.refunds.create` (203) is neutralized by the deterministic `refund-${entitlementId}` idempotency key (205) — Stripe dedups, the DB update is idempotent, and the `already-refunded` convergence path (231-249) heals a stale local state. No finding.
+
+- **OBS-4 — topic slug-rename transaction (topics.ts:247-286)** is correctly ordered (insert new → repoint images.topic + topicAliases → delete old) under the `LOCK_TOPIC_ROUTE_SEGMENTS` advisory lock, with `map_visible` threaded through to avoid the documented opt-in reset. No finding.
+
+- **OBS-5 — privacy field guards (data.ts:204-419)** remain airtight: `publicSelectFields`/`publicMapSelectFields` are derived by destructuring-omit from `adminSelectFields` (separate object refs), the compile-time `_SensitiveKeysInPublic extends never` guard (418-419) covers all 20 `PrivacySensitiveKeys`, and the `privacy-fields.test.ts` fixture lists all 20 (verified in sync). No finding.
+
+- **OBS-6 — `proxy.ts` `x-gk-admin-render` header (128-130)** is set on cookie *presence* only (not validity), by design — the SW offline-cache exclusion is conservative (an invalid cookie just over-excludes a page from offline cache, never under-excludes). No finding.
+
+---
+
+## Verdict
+
+**COMMENT.** No CRITICAL/HIGH issues at any confidence. The codebase is in excellent shape after 7+ review cycles — the run-7 fix batch (commits f11746cd, 0d2312cd, 61cfd235, 35d07f0b, d035de10, 4852bcf5, 10d77324, 0d17a362) closed 8 of the prior actionable findings cleanly. The 5 open items are all LOW: two genuinely-new color-detection precedence inconsistencies affecting admin-only audit columns (COR-1, COR-2 — worth fixing for correctness/maintainability even though delivery output is unaffected), two latent component guards carried forward (COR-3, COR-4), and one test-depth gap (COR-5).
+
+Gate status not re-run this cycle (working tree clean, no code changes proposed) — prior cycle measured all 19 gates green at this HEAD.
