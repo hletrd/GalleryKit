@@ -46,5 +46,9 @@ sqlite.db
 *.db-shm
 *.db-journal
 /public/uploads/*
+# AGG-R5C3-01: topic-image processing + its test suite write <uuid>.webp here;
+# track only the placeholder so the dir exists, ignore generated blobs.
+/public/resources/*
+!/public/resources/.gitkeep
 /src/site-config.json
 

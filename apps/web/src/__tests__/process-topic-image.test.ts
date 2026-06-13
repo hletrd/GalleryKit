@@ -62,6 +62,20 @@ async function makeTinyJpegFile(name = 'test.jpg', sizePx = 4): Promise<File> {
 // ---------------------------------------------------------------------------
 
 describe('processTopicImage', () => {
+    // AGG-R5C3-01: the two success-path tests below call the REAL Sharp
+    // pipeline, which writes a <uuid>.webp into RESOURCES_DIR
+    // (= <cwd>/public/resources under Vitest). Register every returned
+    // filename here and unlink in afterAll so the test suite stops leaking
+    // binary artifacts into the repo tree on every `npm test` / gate run.
+    const resourcesDir = path.join(process.cwd(), 'public', 'resources');
+    const writtenFiles: string[] = [];
+
+    afterAll(async () => {
+        await Promise.all(
+            writtenFiles.map((f) => fs.unlink(f).catch(() => {})),
+        );
+    });
+
     it('rejects files that are too large', async () => {
         const buf = new Uint8Array(201 * 1024 * 1024); // 201 MB — over limit
         const file = new File([buf], 'large.jpg', { type: 'image/jpeg' });
@@ -88,6 +102,7 @@ describe('processTopicImage', () => {
     it('returns a <uuid>.webp filename for a valid JPEG', async () => {
         const file = await makeTinyJpegFile();
         const filename = await processTopicImage(file);
+        writtenFiles.push(path.join(resourcesDir, filename));
         // Must be UUID.webp
         expect(filename).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/,
@@ -102,6 +117,7 @@ describe('processTopicImage', () => {
             .toBuffer();
         const file = new File([new Uint8Array(buf)], 'test.png', { type: 'image/png' });
         const filename = await processTopicImage(file);
+        writtenFiles.push(path.join(resourcesDir, filename));
         expect(filename).toMatch(/\.webp$/);
     });
 });
