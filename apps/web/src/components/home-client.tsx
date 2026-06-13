@@ -19,6 +19,11 @@ const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
 function useColumnCount() {
     const [count, setCount] = useState(2);
+    // DES-R5C3-04 (plan-315 item 26): also track the viewport width so callers
+    // can derive a per-card width estimate (container width / column count) for
+    // containIntrinsicSize, instead of the fixed 300 px constant. 0 means "not
+    // measured yet" (SSR / first paint) → callers fall back to 300.
+    const [viewportWidth, setViewportWidth] = useState(0);
 
     useEffect(() => {
         let rafId: number | null = null;
@@ -32,6 +37,7 @@ function useColumnCount() {
         // 5th slot would lazy-load (LCP regression).
         const update = () => {
             const w = window.innerWidth;
+            setViewportWidth(w);
             if (w < 640) setCount(1);
             else if (w < 768) setCount(2);
             else if (w < 1280) setCount(3);
@@ -53,7 +59,7 @@ function useColumnCount() {
         };
     }, []);
 
-    return count;
+    return { count, viewportWidth };
 }
 
 interface GalleryImage {
@@ -178,9 +184,22 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    const columnCount = useColumnCount();
+    const { count: columnCount, viewportWidth } = useColumnCount();
     const orderedImages = allImages;
     const itemCount = orderedImages.length;
+
+    // DES-R5C3-04 (plan-315 item 26): estimate the rendered card width from the
+    // measured viewport / column count (minus the gap-4 = 16 px gutters between
+    // columns) so containIntrinsicSize's reserved height matches the real layout
+    // box rather than assuming a 300 px column. Falls back to 300 before the
+    // viewport is measured (SSR / first paint) — the documented constant.
+    const estimatedCardWidth = useMemo(() => {
+        if (!viewportWidth || columnCount < 1) return 300;
+        const GAP_PX = 16; // Tailwind gap-4 between masonry columns
+        const usable = viewportWidth - GAP_PX * (columnCount - 1);
+        const w = Math.floor(usable / columnCount);
+        return w > 0 ? w : 300;
+    }, [viewportWidth, columnCount]);
 
     // Limit column count to actual item count so empty columns don't leave
     // unused whitespace on the right side of the masonry grid.
@@ -258,7 +277,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                             style={{
                                 aspectRatio: `${image.width} / ${image.height}`,
                                 backgroundColor: 'hsl(var(--muted))',
-                                containIntrinsicSize: `auto ${Math.round(300 * image.height / image.width)}px`,
+                                containIntrinsicSize: `auto ${Math.round(estimatedCardWidth * image.height / image.width)}px`,
                             }}
                         >
                             <Link
@@ -359,13 +378,13 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                             </span>
                                         </div>
                                     )}
-                                    <div className="absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/65 to-transparent p-3">
+                                    <div className="absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/75 to-transparent p-3">
                                         <h3 className="text-white text-sm font-medium truncate">{displayTitle}</h3>
                                         <p className="text-white/80 text-xs truncate">
                                             {(image.topic && topicsMap[image.topic]) || image.topic}
                                         </p>
                                     </div>
-                                    <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/60 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
+                                    <div className="absolute inset-x-0 bottom-0 hidden bg-gradient-to-t from-black/70 to-transparent p-4 sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity duration-300">
                                         <h3 className="text-white font-medium truncate">
                                             {displayTitle}
                                         </h3>
