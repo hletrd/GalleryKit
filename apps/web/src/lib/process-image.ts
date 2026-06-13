@@ -662,6 +662,24 @@ export function resolveColorPipelineDecision(
     iccProfileName: string | null | undefined,
     signals?: { colorPrimaries?: string | null } | null,
 ): ColorPipelineDecision {
+    // AGG-R8-06 / COR-2 (run-8 c2) precedence note: this resolver INTENTIONALLY
+    // prioritises the ICC profile NAME over the NCLX-derived `signals` for the
+    // DELIVERY decision, and falls back to NCLX primaries only when the ICC name
+    // is absent or opaque (below). That is the inverse of `detectColorSignals`
+    // in color-detection.ts, which populates the AUDIT `color_primaries` column
+    // NCLX-first. The divergence is by design, NOT a bug: the two answer
+    // different questions. `color_primaries` records what the SOURCE CONTAINER
+    // is tagged as (NCLX is the most authoritative container signal); the
+    // pipeline decision records which working-space the PHOTOGRAPHER edited in
+    // (the embedded ICC working-space profile is the authoritative editing
+    // intent and the right driver for "what gamut do we encode to"). For the
+    // overwhelming majority of files the two agree; on a deliberately
+    // mismatched container (e.g. an sRGB-named ICC inside a P3-tagged NCLX box)
+    // the admin audit row will show `color_primaries=p3-d65` with an
+    // `srgb`-family decision — an accurate, intentional record of the conflict,
+    // not a contradiction. Do not "unify" these by flipping the resolver to
+    // NCLX-first without a delivery-gamut regression plan: it would change
+    // delivered bytes for conflicting sources.
     if (!iccProfileName) {
         // P3-11: fall back to NCLX-derived primaries when ICC name is absent
         return resolveDecisionFromPrimaries(signals?.colorPrimaries);

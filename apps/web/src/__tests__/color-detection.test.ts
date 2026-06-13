@@ -154,6 +154,7 @@ describe('detectColorSignals', () => {
     // runs detectColorSignals, and cleans up.
     async function detectFromNclx(
         primaries: number, transfer: number, matrix: number,
+        metaOverride: Partial<import('sharp').Metadata> = {},
     ): Promise<ReturnType<typeof detectColorSignals>> {
         const tmpFile = path.join(os.tmpdir(), `gk-cicp-${primaries}-${transfer}-${Date.now()}.avif`);
         const ipco = makeIpco([makeColrNclx(primaries, transfer, matrix)]);
@@ -161,7 +162,7 @@ describe('detectColorSignals', () => {
         const metaBuf = makeMeta([iprp]);
         await fs.writeFile(tmpFile, metaBuf);
         try {
-            return await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif' }));
+            return await detectColorSignals(tmpFile, {}, makeMockMeta({ format: 'avif', ...metaOverride }));
         } finally {
             await fs.unlink(tmpFile).catch(() => {});
         }
@@ -233,6 +234,22 @@ describe('detectColorSignals', () => {
     it('maps nclx transfer=2 to unknown', async () => {
         const signals = await detectFromNclx(1, 2, 1);
         expect(signals.transferFunction).toBe('unknown');
+        expect(signals.isHdr).toBe(false);
+    });
+
+    // AGG-R8-06 / COR-1 (run-8 c2): an NCLX box that SPECIFIES primaries (12 =
+    // Display P3) but leaves transfer + matrix "Unspecified" (code 2) must NOT
+    // clobber the ICC-derived transfer/matrix with 'unknown'. NCLX still wins
+    // the field it specifies (primaries → p3-d65), but the unspecified fields
+    // fall back to the ICC name's values (sRGB ICC → transfer 'srgb', matrix
+    // 'identity'). Pre-fix, the unconditional `?? 'unknown'` erased both.
+    it('nclx code-2 (unspecified) transfer/matrix does NOT erase the ICC-derived values', async () => {
+        const signals = await detectFromNclx(12, 2, 2, { icc: 'sRGB IEC61966-2.1' as unknown as Buffer });
+        // Specified NCLX field wins.
+        expect(signals.colorPrimaries).toBe('p3-d65');
+        // Unspecified NCLX fields keep the ICC-derived values (not 'unknown').
+        expect(signals.transferFunction).toBe('srgb');
+        expect(signals.matrixCoefficients).toBe('identity');
         expect(signals.isHdr).toBe(false);
     });
 

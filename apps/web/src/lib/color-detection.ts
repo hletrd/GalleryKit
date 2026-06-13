@@ -368,9 +368,22 @@ export async function detectColorSignals(
     }
 
     if (nclxCicp) {
-        colorPrimaries = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries] ?? 'unknown';
-        transferFunction = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics] ?? 'unknown';
-        matrixCoefficients = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients] ?? 'unknown';
+        // AGG-R8-06 / COR-1 (run-8 c2): NCLX outranks the ICC-derived values
+        // (precedence comment above), but ONLY for fields it actually
+        // specifies. ITU-T H.273 code 2 = "Unspecified" — it is intentionally
+        // absent from every NCLX_*_MAP, so the prior `?? 'unknown'` form
+        // CLOBBERED a valid ICC-derived transfer/matrix/primary with 'unknown'
+        // whenever the NCLX box left that one field unspecified. Apply each
+        // mapped value only when it is defined (known); otherwise keep the
+        // lower-precedence ICC value already computed above. This keeps the
+        // documented "NCLX > ICC chromaticity > ICC name" order per-FIELD
+        // instead of letting a partially-specified NCLX box erase ICC data.
+        const nclxPrimaries = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries];
+        const nclxTransfer = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics];
+        const nclxMatrix = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients];
+        if (nclxPrimaries !== undefined) colorPrimaries = nclxPrimaries;
+        if (nclxTransfer !== undefined) transferFunction = nclxTransfer;
+        if (nclxMatrix !== undefined) matrixCoefficients = nclxMatrix;
     }
 
     const isHdr = transferFunction === 'pq' || transferFunction === 'hlg';
