@@ -84,12 +84,34 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
     it('returns title:{absolute} on the latest-photo branch (no-filter)', async () => {
         getSeoSettingsMock.mockResolvedValue({ ...SEO_BASE, og_image_url: undefined });
         getImagesLiteMock.mockResolvedValue([
-            { filename_jpeg: 'abc.jpg', width: 1200, height: 800, title: 'Sunset' },
+            { id: 42, filename_jpeg: 'abc.jpg', width: 1200, height: 800, title: 'Sunset' },
         ]);
         const meta = await generateMetadata({ searchParams: Promise.resolve({}) });
         // The contract is the {absolute} wrapper, not the inner string shape.
         expect(meta.title).toHaveProperty('absolute');
         expect((meta.title as { absolute: string }).absolute).toBe('GalleryKit');
+    });
+
+    it('latest-photo og:image is the per-photo OG route (1200x630), NOT the oversized base JPEG (AGG-R8-02)', async () => {
+        getSeoSettingsMock.mockResolvedValue({ ...SEO_BASE, og_image_url: undefined });
+        getImagesLiteMock.mockResolvedValue([
+            { id: 42, filename_jpeg: 'abc.jpg', width: 7680, height: 5120, title: 'Sunset' },
+        ]);
+        const meta = await generateMetadata({ searchParams: Promise.resolve({}) });
+        const ogImages = (meta.openGraph as { images?: Array<{ url: string; width?: number; height?: number }> })?.images;
+        expect(ogImages).toBeTruthy();
+        const ogUrl = ogImages![0].url;
+        // Must route through the capped, on-disk-fallback Satori card — NOT the
+        // base /uploads/jpeg/<file> derivative (the largest configured size,
+        // 6-12 MB, which Twitter/X reject at >5 MB).
+        expect(ogUrl).toContain('/api/og/photo/42');
+        expect(ogUrl).not.toContain('/uploads/jpeg/');
+        expect(ogImages![0].width).toBe(1200);
+        expect(ogImages![0].height).toBe(630);
+        // Twitter card mirrors the same URL.
+        const twitterImages = (meta.twitter as { images?: string[] })?.images;
+        expect(twitterImages?.[0]).toContain('/api/og/photo/42');
+        expect(twitterImages?.[0]).not.toContain('/uploads/jpeg/');
     });
 
     it('returns title:{absolute} (never a bare templated string) on the filtered branch', async () => {

@@ -95,22 +95,25 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
     : false;
 
-  // AGG-R7-09 (run-7 c1): point the home OG <meta og:image> at the BASE JPEG,
-  // not a `_${size}.jpg` sized derivative. The previous nearest-configured-size
-  // approach did NOT guarantee that derivative is on disk for a freshly-
-  // uploaded or legacy `latestImage` mid-backfill (or right after an
-  // `image_sizes` reconfigure), so a sized URL could 404 the social card until
-  // backfill catches up. The encoder atomic-rename contract
-  // guarantees the base filename always exists for a processed photo; a
-  // base-resolution card is fully valid and never 404s. (Unlike the per-photo
-  // OG ROUTE, which Satori-renders bytes server-side and so iterates sizes via
-  // pickFirstAvailablePhotoBuffer, this path only emits a URL string and cannot
-  // probe the filesystem cheaply — so prefer the always-present base.)
+  // AGG-R8-02 (run-8 c2): point the home OG <meta og:image> at the per-photo
+  // OG ROUTE (`/api/og/photo/${id}`) — the SAME card the `/p/[id]` pages use:
+  // a Satori-rendered 1200x630 card capped at OG_PHOTO_MAX_BYTES (1 MB). The
+  // earlier AGG-R7-09 fix pointed at the BASE JPEG to dodge a transient 404,
+  // but the base is the LARGEST configured size (default 7680px @ q90 ≈ 6-12 MB)
+  // and Twitter/X reject images > 5 MB (the card then renders image-less);
+  // LinkedIn similar. The per-photo route preserves the no-404 guarantee a
+  // different way: it iterates configured sizes server-side via
+  // pickFirstAvailablePhotoBuffer and falls back to the site OG card when no
+  // derivative is on disk yet (mid-backfill / legacy / post-reconfigure), so a
+  // freshly-uploaded `latestImage` is still safe. This makes the home card a
+  // properly-sized photo card consistent with all 4 sibling OG paths
+  // (p/[id], [topic], c/[slug], per-photo route) instead of the sole base-JPEG
+  // outlier.
   const ogImages = latestImage
     ? [{
-        url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg}`, seo.url),
-        width: latestImage.width,
-        height: latestImage.height,
+        url: absoluteImageUrl(`/api/og/photo/${latestImage.id}`, seo.url),
+        width: 1200,
+        height: 630,
         alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
       }]
     : [];
