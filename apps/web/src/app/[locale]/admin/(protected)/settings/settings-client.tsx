@@ -671,7 +671,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         longer storable and is treated as Disabled by the resolver. Tell the
                         admin truthfully instead of implying production search is running. */}
                     {settings.semantic_search_mode === 'production' && (
-                        <p className="text-xs text-amber-600 font-medium">
+                        <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
                             {t('settings.semanticSearchProductionWarning')}
                         </p>
                     )}

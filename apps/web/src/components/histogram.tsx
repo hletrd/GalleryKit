@@ -605,7 +605,7 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                 <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
                     {t('viewer.histogram')}
                     {gamutLabel && <span className="ml-1 opacity-70">{gamutLabel}</span>}
-                    {isClipped && <span className="ml-1 text-amber-700 font-medium">({t('viewer.histogramSrgbPreview')})</span>}
+                    {isClipped && <span className="ml-1 text-amber-700 dark:text-amber-300 font-medium">({t('viewer.histogramSrgbPreview')})</span>}
                     {/* R8-LOW: Rec.2020 sources are delivered as P3, so the
                         histogram canvas reflects Display-P3 space even though
                         the source primaries are Rec.2020. */}
