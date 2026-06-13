@@ -1,130 +1,123 @@
-# Test-Engineer Review — Cycle 3 (run-8 c2 fan-out)
+# Test-Engineer Deep Review — GalleryKit
 
-**HEAD:** `ada92ba5` · **Date:** 2026-06-13 · **Scope:** test-coverage / flakiness / TDD-opportunity
+**Date:** 2026-06-13
+**HEAD:** `ce0029aa` (working tree: only `.context/reviews/*.md` edits; source clean)
+**Suite baseline (measured live this review):** `npx vitest run` → **214 files / 2067 tests, all passing** (warm, exit 0). Matches the briefed baseline.
+**Specialist angle:** test coverage gaps, flaky tests, vacuous/tautological tests, tests that pass for the wrong reason, missing edge-case coverage.
 
-## Baseline (fresh run)
+> **Context vs the aggregate:** `_aggregate.md` is run-8 **cycle-3** against HEAD `ada92ba5`. Several of its findings were closed in commits AFTER that (`6454c4a3`, `0017a34e`, `22387f32`, `6be638d2`, `d70c1d98`, `e9040d17`, the og-sanitize commits). I re-verified every pin claimed to have landed and re-measured the two findings the briefing said were addressed. **Two of the aggregate's findings the briefing treated as closed are NOT actually fixed at `ce0029aa`** (AGG-R8c3-09 cold-flake, AGG-R8c3-15 stale budget) — see below.
 
-```
-cd apps/web && npx vitest run
-Test Files  213 passed (213)
-     Tests  2060 passed (2060)
-  Duration  146.26s
-```
+---
 
-All green on a cold run — no failures, so no flake re-runs were required for red tests. The stderr noise in the output is expected negative-path logging (`sales-refund-convergence`, `gallery-config` fallback) from tests that assert on thrown/logged errors. e2e (Playwright) not run (requires a live server + browser; out of scope for this unit pass).
+## FINDINGS BY SEVERITY
 
-## Verdict on the tests ADDED this cycle (prior-cycle deliverables)
+### MEDIUM
 
-I verified each new/changed test would FAIL if its fix were reverted, and is not a tautology. **All five hold up — no slop, no passing-for-wrong-reason.**
+#### TE-1 — Backfill runner's SECOND `affectedRows===0` cleanup branch (detection-failure delete-race) is UNTESTED. **Confidence: High.**
 
-| New test | Pins | Robust? | Anti-tautology guard present? |
+**Source:** `apps/web/src/lib/admin-backfill-runner.ts:594-608` (the detection-failure UPDATE branch).
+**Test gap:** every one of the 6 `admin-backfill-runner-*.test.ts` files plus `backfill-detection-failure-contract.test.ts` misses this branch.
+
+The AGG-R8c3-03 fix (commit `0017a34e`, "clean up orphaned derivatives when row is deleted mid-re-encode") added the `affectedRows===0 → cleanupDeletedMidReencodeVariants() → return 'deleted-mid-reencode'` guard to **BOTH** UPDATE branches in `reprocessOne`:
+- `:556-577` — the **version-bump** UPDATE (detection succeeded). Guard at `:573`.
+- `:594-608` — the **detection-failure-but-encode-succeeded** UPDATE (`was_downscaled`/`avif_10bit` only, no version bump). Guard at `:605`.
+
+The commit message explicitly says "**both** backfill UPDATE branches now read affectedRows." But the dedicated regression test `admin-backfill-runner-deleted-mid-reencode.test.ts` mocks `detectColorSignals` to **succeed** (`:89-97`, valid signals + `isHdr:false`), so it only exercises the **first** branch (`:573`). I verified the other candidates:
+- `admin-backfill-runner-detection-failure.test.ts` mocks detection to throw (`:77-78`) — the right setup — but returns `affectedRows: 1` for the UPDATE (`:162`), so it lands on the normal `:609 return 'detection-failed'` path, **never** the `:605` `affectedRows:0` sub-branch.
+- `backfill-detection-failure-contract.test.ts` tests the **operator script** (`reprocessRow`), not the in-app runner, and asserts `outcome:'processed'` with `derivativeOnly` columns — also not the `:605` path.
+
+**Bug that slips through green:** a refactor that consolidates the two branches' cleanup, or drops the `:605-607` guard while keeping `:573`, leaves orphaned AVIF/WebP/JPEG derivatives on disk when a delete races a re-encode whose color **detection also failed transiently** — for a row that no longer exists, forever. The suite stays green because no test drives detection-failure + `affectedRows:0` simultaneously. This is the exact disk-leak the AGG-R8c3-03 fix exists to prevent, on its harder-to-reach half.
+
+**Test to add:** clone `admin-backfill-runner-deleted-mid-reencode.test.ts`, mock `detectColorSignals` to **throw** (per the detection-failure test) AND make the UPDATE return `affectedRows: 0`. Assert `deleteImageVariants` fired for all 3 dirs with `sizes:[]`, `state.deletedMidReencode===1`, `state.detectionFailures===0`, `state.processed===0`, `lastRunHadFailures===false`. (One new `it` block; reuses the existing harness almost verbatim.)
+
+---
+
+### LOW
+
+#### TE-2 — `KNOWN_VIOLATIONS['components/image-manager.tsx'] = 6` is stale; real count is **1** → a 5-violation silent-absorption slack. **Confidence: High (empirically measured).** = AGG-R8c3-15, **STILL OPEN.**
+
+**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:182`.
+
+The briefing states AGG-R8c3-15 was addressed in commit `6454c4a3`. **It was not** — I confirmed `6454c4a3 --stat` touched only `admin-backfill-runner-fatal-counters.test.ts`, `migrate-reconcile-coverage.test.ts`, and `sw-template-contract.test.ts`; it never modified `touch-target-audit.test.ts`. The structural reason this can't self-fix: the stale-budget detection at `:710-714` is **explicitly informational, NOT a hard failure** ("This is informational, not a hard failure… doesn't prevent tests from passing"). The gate fires only on `issues.length > allowed` (over-budget), never on under-budget.
+
+I measured the true counts by temporarily zeroing `KNOWN_VIOLATIONS` and running the audit (then reverted — tree is clean):
+
+| File | Budget | **Real** | Slack |
 |---|---|---|---|
-| `og-sanitize.test.ts` + `sanitize-for-og-global.test.ts` | shared `sanitizeForOg` global-strip (replace-ALL bidi/zero-width + C0) | Yes — behavioral on the real fn + structural import grep | Yes (multi-occurrence cases; forbids non-global `.replace(UNICODE_FORMAT_CHARS`) |
-| `admin-backfill-runner-fatal-counters.test.ts` (mixed-run, AGG-R8-10) | `processed===1 && errors===1` coexist; `lastError` set; no `processed` inflation | Yes — drives the real runner via fire-and-forget + `vi.waitFor` on `running` | Yes (partitions fatal-only vs mixed; asserts `processImageFormats` actually called) |
-| `migrate-reconcile-coverage.test.ts` (index tripwire, AGG-R8-10/TRC-1) | every `CREATE INDEX` in drizzle SQL mirrored in `migrate.js` reconcile | Yes — introspects schema + scans SQL | Yes ("scanner sanity": `indexNames.length ≥ 10`, spot-checks known names — would not pass vacuously) |
-| `migration-journal-monotonicity.test.ts` (AGG-7) | journal `when` strictly advances except allowlist | Yes | Yes (allowlist-staleness check: each allowlisted idx must STILL be a real inversion) |
-| `client-server-only-boundary.test.ts` (AGG-R8-01 de-flake) | memoized reads + 60s timeout; assertion unchanged | Yes — still walks full closure, still fails on a real leak | Yes (`clientFiles.length > 0` sanity; explicit photo-title.ts pin) |
-| `touch-target-audit.test.ts` raw-checkbox (AGG-R8-03) | raw `<input type=checkbox/radio>` 44px floor | Yes — `scanRawCheckboxes` has violation + min-h-11 fix + radio + shadcn-no-false-positive fixtures | Partial (see TEST-5 for an untested window-distance edge) |
+| `components/image-manager.tsx` | **6** | **1** | **5** |
+| `components/admin-user-manager.tsx` | 2 | 2 | 0 |
+| `dashboard-client.tsx` | 5 | 5 | 0 |
+| `topic-manager.tsx` | 3 | 3 | 0 |
+| `tag-manager.tsx` | 3 | 3 | 0 |
+| `admin-header.tsx` / `seo-client.tsx` / `settings-client.tsx` | 1 / 1 / 1 | 1 / 1 / 1 | 0 |
 
-The cycle-2 `home-metadata-title.test.ts` additions (AGG-R8-02 home og:image → per-photo OG card, NOT oversized base JPEG) are also solid and behavioral. Do not re-open these.
+`image-manager.tsx` is the only mis-set entry. Its per-row `size="icon"` edit/delete buttons (`:538`,`:544`) gained explicit `h-11 w-11` overrides and the Share button (`:366-374`) gained `className="h-11"`, dropping the real count from 6 to 1 (only the `size="sm"` bulk-add-tag at `:328` remains) — but the budget was never lowered. **Up to 5 NEW sub-44px touch targets** could be added to `image-manager.tsx` before the gate fires.
 
----
+(I also confirmed the multi-line normalizer is working correctly — the Share button at `:366-374` is correctly excluded because its collapsed form carries `h-11`, so this is genuine budget staleness, not a normalizer regression.)
 
-## Findings
+**Fix:** lower the entry to `1` and update the enumerating comment (`:168-181`) to reflect the single remaining `size="sm"` violation. Optionally promote stale-budget detection (`:710-714`) from informational to a hard failure so future over-budgets surface as a reviewed diff rather than silent slack.
 
-### TEST-1 — Home OG route's `sanitizeForOg` application is UNGUARDED (the exact cycle-2 fix is not pinned for the home route). Confidence: High
+#### TE-3 — Encode-heavy real-AVIF tests still share `public/uploads`; AGG-R8c3-09 cold-flake mechanism is UNADDRESSED. **Confidence: High (mechanism); could NOT trigger warm.** = AGG-R8c3-09, **STILL OPEN.**
 
-**Where:** `src/app/api/og/route.tsx:82-88` applies `sanitizeForOg` to `topicLabel`, `siteTitle`, and each `tagList` entry — this is the symmetry-gap fix landed in commit `d5399742`. The only test that references this file is `src/__tests__/og-route-source-contracts.test.ts`, which asserts ONLY:
-```js
-expect(source).not.toContain('rollbackOgAttempt');
-expect(source).toContain("return new Response('Topic not found'");
-```
-It does **not** assert the route imports/uses `sanitizeForOg`.
+The briefing asked whether the flake was "isolated to a per-test temp dir or still shares `public/uploads`." **Still shares it.** Commit `6454c4a3` (the pin batch) did not touch either flaking file. I verified:
+- `process-image-color-roundtrip.test.ts:31` and `backfill-color-pipeline.test.ts:27` `mkdtemp` only the **source** fixtures; the derivative **outputs** still write into the real `UPLOAD_DIR_AVIF/WEBP/JPEG` (= `public/uploads/{avif,webp,jpeg}` via `upload-paths.ts:42-46`) through `processImageFormats` / `reprocessRow`. The `afterAll` cleanup confirms this ("Clean up any test-generated derivatives so we don't pollute public/uploads").
+- **At least 7 test files do REAL sharp/libheif encoding** (no `vi.mock('sharp')`): `process-image-color-roundtrip`, `backfill-color-pipeline`, `process-image-p3-icc`, `process-image-post-encode-verification`, `process-image-variant-scan`, `color-fixtures`, `process-image-icc-options-lockin`. Of these, FOUR (`-color-roundtrip`, `backfill-color-pipeline`, `process-image-orientation`, `process-image-exif-strip`) write derivatives into the **shared** `public/uploads` tree (others mock `UPLOAD_DIR` to `/tmp/test/...` or `mkdtemp` their outputs).
+- No `describe.sequential`, no serial pool, no per-test upload-dir override in `vitest.config.ts`.
 
-`sanitize-for-og-global.test.ts:54-67` pins the strip for the PHOTO route (`api/og/photo/[id]/route.tsx`) and the photo PAGE (`p/[id]/page.tsx`) via `it.each`, but the home/site route is absent from that list. I confirmed **zero tests import or invoke the home route's `GET` handler** (grep: only `og-route-source-contracts` + `og-sanitize` reference the file, neither exercises the handler). By contrast the photo route has 6 referencing tests (`og-photo-fallback`, `og-image-icc`, `photo-og-metadata`, etc.).
+I could NOT reproduce the flake in 4 rounds of the 10 encode-heavy files together (78/78 each) — consistent with the aggregate's finding that it only surfaces under FULL-suite parallelism (~214 files contending for encoder threads), not a 10-file subset with spare cores. RED on a cold/contended CI run remains indistinguishable from a real encode regression.
 
-**Why it matters:** This is the precise regression the cycle-2 work closed — the home card previously rendered `siteTitle`/`topicLabel`/tags RAW while the photo route stripped them. If a future edit drops the `sanitizeForOg(...)` wrappers from `route.tsx:82-88` (e.g. a refactor that inlines `clampDisplayText` and forgets the strip), the symmetry gap silently re-opens with no failing test. Admin-controlled + validator-rejected at write time, so not a live exploit — but the whole point of the defense-in-depth fix was the guarantee that BOTH OG surfaces strip; that guarantee is currently unenforced on the surface the fix was added to.
+**Fix (unchanged from AGG-R8c3-09):** give each real-encode test a unique temp upload dir (env-override `UPLOAD_ROOT` per test, since `upload-paths.ts` already reads `UPLOAD_ORIGINAL_ROOT`/cwd), OR pin the encode-heavy files to a serial vitest project / `--no-file-parallelism` glob. The cleanest is a per-test `UPLOAD_ROOT`.
 
-**Test to add (cheapest, highest-leverage):** extend the `it.each` in `sanitize-for-og-global.test.ts` to include the home route:
-```js
-['src/app/api/og/route.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],
-```
-and add to `og-route-source-contracts.test.ts` a structural assertion that every rendered string passes through `sanitizeForOg` (e.g. `expect(source).toMatch(/sanitizeForOg\(clampDisplayText\(topicRecord\.label/)`, the `seo.title` line, and that the `tagList` map calls `sanitizeForOg`). Stronger still (optional): a behavioral test that mocks `getTopicBySlug`/`getSeoSettings` to return a label containing two bidi-override chars and asserts the rendered `ImageResponse` element tree (Satori accepts a React element you can introspect) contains no bidi chars — mirrors how `photo-og-metadata.test.ts` invokes the handler.
+#### TE-4 — `getLatestImageForOg` source-shape test cannot catch a dropped `processed=true` filter or a wrong sort. **Confidence: Medium.**
 
----
+**Source:** `apps/web/src/lib/data.ts:874-882` (freshly landed, AGG-R8c3-05, commit `e9040d17`). **Test:** `data-tag-names-sql.test.ts:130-146`.
 
-### TEST-2 — AGG-R8-09 backfill width re-validation skip path has NO test. Confidence: High
+The test is a **source-text** assertion: it greps the function body for `id: images.id`, `buildImageConditions(`, `.limit(1)`, and the absence of `GROUP_CONCAT`/joins/`groupBy`. It does NOT verify runtime behavior. Two real regressions slip through green:
+1. **Processed-filter leak:** the source is `buildImageConditions(undefined, tagSlugs, false)` — the `false` (3rd arg = `includeUnprocessed`) is what pushes `eq(images.processed, true)` (verified in `buildImageConditions` at `data.ts:578-589`). If someone flipped it to `true`, the text `buildImageConditions(` still matches → the test passes while the home OG card starts surfacing **unprocessed** images (no derivatives yet → the `/api/og/photo/${id}` card 302s/blanks).
+2. **Wrong sort:** no assertion on `desc(images.capture_date)` / `desc(created_at)`. A refactor to `asc` would serve the OLDEST image as "latest" — green suite.
 
-**Where:** `src/lib/admin-backfill-runner.ts:430-436` — the cycle-2 guard that re-validates `row.width > 0` BEFORE `processImageFormats` and returns `{ ok: false, reason: 'encode-failed' }` (no version bump, distinct log) for a corrupt/legacy `width <= 0` row.
+The consumer test `home-metadata-title.test.ts` fully mocks `getLatestImageForOgCached`, so neither test exercises the real query path. This is LOW (simple function, args explicit in source), but the source-text guard gives false confidence that "the OG path filters correctly."
 
-All four `admin-backfill-runner-*.test.ts` files feed `width: 100` (valid) — confirmed by grep. The width<=0 branch is uncovered: no test drives a row with `width: 0` / `width: -1` / `width: NaN` through `reprocessOne`.
+**Test to add:** a runtime `.toSQL()` inspection (the sibling masonry test already uses the mysql-proxy driver pattern at `data-tag-names-sql.test.ts:159+`) asserting the compiled SQL contains `` `processed` = ? `` (param `true`) and `order by ... desc`.
 
-**Why it matters (data-integrity, the classification is load-bearing):** The whole correctness claim is "classified `encode-failed` so it stays idempotent — NO version bump — and remains a candidate for a future run after the row is repaired." If a future refactor mis-classified this as a `skip` (which in some accounting advances past the row) or accidentally let it fall through to a `processed++`, a corrupt-width row would be **falsely reported as re-encoded** and never retried — the exact dishonesty class the AGG-1 fatal-counter work fought. There is also a subtle ordering risk: the width guard sits *before* `acquireImageProcessingClaim`, so a regression that moves it after the claim would leak the claim connection on the early return.
+#### TE-5 — Home-OG-route sanitize pin asserts the IMPORT, not the CALL site. **Confidence: Medium.** (Residual of AGG-R8c3-11a / TEST-1.)
 
-**Test to add:** in `admin-backfill-runner-fatal-counters.test.ts` (it already has the full mock harness), add a describe that returns one candidate row with `width: 0`. Assert after drain: `s.encodeFailures` reflects it (or the documented counter), `s.processed === 0`, **`processImageFormats` was NOT called** (the guard short-circuits before encode), and the `pipeline_version` UPDATE was never issued (no version bump → still a candidate). A second case with `width: -1` and `width: NaN` (the `!Number.isFinite` arm).
+**Test:** `sanitize-for-og-global.test.ts:57-76`. The `it.each` now correctly covers all three consuming files including `src/app/api/og/route.tsx` (home/site OG) and the JSON-LD page — a real improvement that closes most of the gap. But each case asserts only (a) `from '@/lib/og-sanitize'` import presence and (b) absence of `.replace(UNICODE_FORMAT_CHARS,`.
 
----
+It does NOT assert the home route actually **calls** `sanitizeForOg(...)` on `topicLabel`/`siteTitle`/`tagList` (the values at `api/og/route.tsx:82-88`). A refactor that keeps the import but drops the call on one value (e.g. `topicLabel = clampDisplayText(...)` with the `sanitizeForOg` wrap accidentally removed) leaves that value un-stripped and passes both assertions — the exact "refactor silently re-opens the gap" failure mode AGG-R8c3-11a named. LOW because (i) not exploitable (`JSON.stringify`/`safeJsonLd` escape downstream), (ii) the import guard catches the wholesale-drop case.
 
-### TEST-3 — SW bounded-HEAD timeout (AGG-R8-05) is not pinned by the template-contract test. Confidence: High
+**Stronger pin:** assert the route source matches each value being wrapped, e.g. `/sanitizeForOg\(clampDisplayText\(topicRecord\.label/` and `/sanitizeForOg\(seo\.title/`.
 
-**Where:** `public/sw.template.js:213-248` adds `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` (`= 300`, line 38) to the synchronous cached-image HEAD ETag probe — the cycle-2 display-path latency bound (commit `9b7bb240`).
+#### TE-6 — `retryFailedImage` localized invalid-id branch has no behavioral test. **Confidence: Low.**
 
-`src/__tests__/sw-template-contract.test.ts` pins the LRU accounting, the lazy-revalidate closure, the 304 branch, the offline-HTML marker — but has **no assertion** that the HEAD probe carries an abort timeout. The unit-tested reference impl `lib/sw-cache.ts` does not implement HEAD probing at all (grep: zero `AbortSignal`/`HEAD`/`timeout` matches), so the only copy of this logic is the shipped template, and nothing locks it.
+**Source:** `apps/web/src/app/actions/images.ts:1087` (commit `6be638d2` switched the hardcoded `'Invalid image ID'` → `t('invalidImageId')`). The three retry-related test files don't assert it: `failed-image-retry.test.ts` is a source-shape test (query forms), `retry-failed-image-auth.test.ts` covers only the unauthorized path, `bulk-update-images.test.ts` is unrelated. The invalid-id branch (`!Number.isInteger(id) || id <= 0`) is untested for the new key. Trivial branch, now consistent with siblings — note only.
 
-**Why it matters:** The probe sits on the warm-paint DISPLAY path. The documented worst-case bound is the entire point — without the `signal`, a slow/hung network stalls EACH cached masonry tile for the full default fetch timeout before falling through to stale-serve (a visible per-tile hang on flaky networks). If a future SW edit drops the `signal:` line (easy in a `fetch` options refactor), the bound regresses with a green suite. `sw.template.js` is the SHIPPED service worker source; this is a real shippable regression surface, and `scripts/build-sw.ts` stamps it into `sw.js` so it goes straight to production.
+#### TE-7 — No automated contrast-ratio guard for the new dark-mode color tokens. **Confidence: Low (test-infra opportunity, not a defect).**
 
-**Test to add:** in `sw-template-contract.test.ts`, slice the `staleWhileRevalidateImage` fn and assert the HEAD `fetch` options object contains `signal: AbortSignal.timeout(` and that `HEAD_REVALIDATE_TIMEOUT_MS` is a small finite constant: `expect(TEMPLATE).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/)` and assert the matched value ≤ 1000. Mirror the existing slice-and-match style (lines 73-110). Cheap, no runtime.
+The a11y batch landed `--destructive-text` (`globals.css:40,67,95`) and amber `dark:` variants (AGG-R8c3-04/07/08). The repo enforces touch-targets (`touch-target-audit.test.ts`) and headings (`error-shell-heading.test.ts`) as blocking tests, but **no test computes WCAG contrast ratios** from the CSS tokens — I grepped: zero `contrast`/`wcag`/`getContrastRatio`/`--destructive-text` assertions in `__tests__/`. A future token edit could silently regress these freshly-fixed ratios. Hard to automate (requires HSL→sRGB→relative-luminance→ratio over the token pairs), and it's a designer-owned finding, so this is a forward-looking suggestion, not a new gap.
 
 ---
 
-### TEST-4 — Home-client 0-width CSS / CLS-reservation fallback has no test (logic inline in render). Confidence: Low
+## VERIFIED-CLEAN (pins I confirmed non-vacuous this review)
 
-**Where:** `src/components/home-client.tsx` (commit `e8fce327`) — `hasValidDims`, `cardAspectRatio` (`'1 / 1'` fallback), `cardIntrinsicHeight` guard against `aspectRatio: '0 / 0'` / `containIntrinsicSize: 'auto Infinitypx'`. No test (grep: zero references to `cardAspectRatio`/`containIntrinsic`/`hasValidDims`).
-
-**Why it matters:** Correctness of the CLS reservation when `width`/`height` is non-positive — but the guarded condition is "near-impossible given NOT NULL Sharp metadata," so the regression risk is genuinely low. The logic is also inline in the component's `.map()` render, so a unit test would require rendering the component or extracting a pure helper.
-
-**Recommendation:** Only worth a test if the denominator math is extracted to a pure `cardReservation(width, height, estWidth)` helper (the right refactor anyway). Then a 3-line unit test pins `(0, 100, 300) → { aspectRatio: '1 / 1', intrinsicHeight: 300 }`. Low priority — note it, don't block on it.
-
----
-
-### TEST-5 — Raw-checkbox scanner: window-distance and non-`<label>` wrapper edges untested. Confidence: Low
-
-**Where:** `src/__tests__/touch-target-audit.test.ts:611-640` (`scanRawCheckboxes`). The wrapper back-scan only matches a `<label>` carrying the sizing class within a hardcoded `WINDOW = 4` lines, and ONLY a `<label>` element (not a sizing `<div>`/`<span>` wrapper).
-
-Fixtures (lines 839-867) cover: violation, min-h-11 fix, radio, shadcn-no-false-positive. They do **not** cover: (a) the WINDOW boundary (label exactly 4 vs 5 lines above the input), or (b) a checkbox whose 44px tap area is supplied by a non-`<label>` wrapper.
-
-**Why it matters:** Both are *false-positive* risks (the audit is a blocking gate). A legitimate future pattern — e.g. a checkbox in a `min-h-11 <div>` wrapper, or a label pushed >4 lines up by an inserted comment/`<span className="sr-only">` block — would fail the gate spuriously and require a `KNOWN_VIOLATIONS` exemption for compliant code. The current two raw checkboxes both use the `<label>`-within-2-lines shape (verified against `image-manager.tsx`), so it's fine TODAY, but the scanner's robustness is unproven at its own boundaries.
-
-**Test to add:** two fixtures — (1) `<label min-h-11>` exactly `WINDOW` lines above the input (asserts clean) and `WINDOW+1` lines above (asserts flagged, documenting the boundary); (2) confirm/decide the non-`<label>` wrapper behavior (either broaden the back-scan to any element with the sizing class, or add a fixture asserting it IS flagged so the limitation is explicit). Low priority.
+- **TEST-2 width≤0 backfill skip (`admin-backfill-runner-fatal-counters.test.ts:315-386`):** asserts `encodeFailures===1`, `processed===0`, `processImageFormats` **NOT** called, and zero `UPDATE images SET` calls for a `width:0` row. Genuinely drives the `:430-436` guard before any encode. **Solid.**
+- **TEST-3 SW bounded HEAD (`sw-template-contract.test.ts:118-135`):** asserts `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` within the `method:'HEAD'` options window in BOTH `sw.template.js` AND the generated `sw.js`, plus the constant definition. Since the reference `sw-cache.ts` has no HEAD probing, this is the only copy and the pin is load-bearing. **Solid.**
+- **COR-3/CRT-5 comment-stripped migrate tripwire (`migrate-reconcile-coverage.test.ts:42-50,100,166`):** `MIGRATE_SRC_CODE = stripJsComments(...)` strips block + line comments before the column/index `.includes()` check, so a name in a comment can no longer satisfy the mirror requirement. Scanner-sanity guard (`:147-155`) requires ≥10 indexes + spot-checks two known names so it can't pass vacuously. **Solid, non-vacuous.**
+- **AGG-R8c3-03 first branch (`admin-backfill-runner-deleted-mid-reencode.test.ts`):** asserts `deleteImageVariants` fired for all 3 format dirs with `sizes:[]`, `processImageFormats` ran (real post-encode path), and the full counter partition (`deletedMidReencode===1`, `processed/encodeFailures/detectionFailures/errors===0`, `lastRunHadFailures===false`). Strongly non-vacuous — but only the **success** branch (see TE-1 for the uncovered sibling).
+- **AGG-R8c3-01 NCLX code-2 isHdr (`color-detection.test.ts:259`):** real `detectColorSignals` run; asserts `colorPrimaries==='p3-d65'`, `transferFunction==='pq'`, `isHdr===true`. Directionally complete — bracketed by the negative cases at `:235` (code-2, no ICC → `isHdr:false`) and `:246` (code-2 + sRGB ICC → `isHdr:false`). **Solid.**
+- **TEST-1 home-OG-route sanitize (`sanitize-for-og-global.test.ts:57-69`):** the `it.each` now covers all 3 consuming files (both OG image routes + JSON-LD page) for import presence + non-global-`.replace` absence. Substantially closes AGG-R8c3-11a (residual call-site gap noted as TE-5).
+- **Touch-target scale-token regex (`touch-target-audit.test.ts:341-356`, AGG-R8c3-06 / d70c1d98):** I stress-tested the new `(?:min-h|min-w|size|h|w)-(?:[1-9]|10)` patterns against 13 concrete className cases. The `\b` word boundaries correctly REJECT larger compliant tokens (`h-14`, `size-16`, `min-h-20`, `h-20`) as non-matches even though they're absent from the `h-1[12]` override list — because the body pattern itself never matches them. Catches `min-h-6`/`size-6`/`h-7` (the closed bug), respects co-present `h-11` overrides, and ignores `px-10`. **Robust, no false positives.**
+- **Checkbox blind-spot closure (`scanRawCheckboxes`, `:636-665` + self-test `:864-886`):** requires the input's own tag OR a wrapping `<label>` within 4 lines to clear 44px; self-test proves it catches a sub-44 checkbox AND radio and accepts a `min-h-11` label. (Minor: only `<label>` wrappers detected, back-scan only goes upward — both cause over-reporting, never under-reporting, so no real violation slips through.) **Non-vacuous.**
+- **Login-form vacuity fix (`:730-748`):** the historical silent `if(!exists) return` no-op was replaced with `expect(fs.existsSync(...)).toBe(true)` so a rename is now a hard failure. **Correct.**
+- **No tautologies / disabled-test rot:** suite-wide scan found zero `expect(true).toBe(true)`-class assertions; the only `.skip()` calls are environment-conditional e2e gates (CI-only / credential-gated admin + origin-guard specs) — appropriate posture, not vacuity. The 16 bare `toBeDefined()` instances I sampled are all paired with downstream value assertions.
+- **Full suite:** 214 files / 2067 tests pass warm (exit 0).
 
 ---
 
-### TEST-6 — load-more / settings-client unmount-guard symmetry is undocumented by tests. Confidence: Low
+## TOP COVERAGE GAPS (priority order)
 
-**Where:** `src/components/load-more.tsx` (commit `e8fce327`) adds `mountedRef` + unmount cleanup guarding the post-await `setState`. The comment claims it's "Symmetric with the settings-client backfill unmount guard." Grep finds **zero** tests referencing `mountedRef`/`unmount` anywhere in `__tests__/` — neither the load-more guard nor the settings-client one it mirrors is pinned.
-
-**Why it matters:** Low — the failure mode is a React "setState after unmount" warning on a fast route change, not data loss or a security issue. But two components now carry the same latent-bug guard with no regression test, so a refactor that drops either reintroduces the warning silently.
-
-**Recommendation:** Optional. A jsdom render-then-unmount test that resolves the awaited action after unmount and asserts no `act()` warning fires is possible but heavy for the value. Note and move on.
-
----
-
-## Areas verified as WELL-COVERED (no gap — do not re-report)
-
-- **NCLX code-2 (unspecified) branch** — `color-detection.test.ts:233-254` has BOTH "maps nclx transfer=2 to unknown" AND the critical AGG-R8-06 "code-2 unspecified transfer/matrix does NOT erase the ICC-derived values." The exact cycle-2 branch is pinned. Full NCLX map (transfer 4/5/6/7/8/11/13/14/15/16/17/18, primaries 11/12, matrix 8/10) is exhaustively tested.
-- **Privacy field guards** — `privacy-fields.test.ts` is exemplary: the "symmetric privacy guard" (set-difference `admin − public === SENSITIVE_KEYS` exactly) catches a NEW admin field leaking publicly, plus the `data-timeline` mirror subset check (TEST-R4C9-04). Cross-references real schema keys, not a fixture echo.
-- **The 3 lint-gate fixture tests** (`check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`) — behavioral: they exercise the actual scanner functions against synthetic source (function-decl, variable-export, aliased-export, export-specifier forms), not just grep route files. Robust.
-- **gps-exif-strip** (`process-image-exif-strip`, `strip-gps-from-original`), **image-processing claim race / advisory locks** (7 queue tests + `advisory-locks.test.ts`), **csv-escape / validation Unicode strip / sanitize** (10 files) — all have dedicated, substantive coverage.
-- **home og:image AGG-R8-02** — `home-metadata-title.test.ts:95-115` pins per-photo OG route (1200×630), NOT the oversized base JPEG, on both `openGraph.images` and `twitter.images`.
-- **advisory-locks.ts cycle-2 change** — doc-only (added `gallerykit_color_pipeline_backfill` to the blast-radius docblock); no behavior change → no test needed.
-
-## Flakiness scan
-
-No timing-dependent, real-clock, network, or filesystem-order flakes found in the new tests. The two `admin-backfill-runner-fatal-counters` tests use `vi.waitFor` on the authoritative `running` flag with a 20s timeout + 25ms interval (correct — drains the fire-and-forget runner deterministically, not a fixed sleep). The `client-server-only-boundary` de-flake (memoized reads + 60s explicit timeout) is the right fix for a slow-but-correct full-tree scan; the assertion still runs to completion. Filesystem walks (`migrate-reconcile`, `touch-target-audit`, `client-server-only`) sort/iterate `readdirSync` but assert on SETS/membership, not order — order-independent. Whole-suite cold run is 146s; nothing in the suite structure suggests an individual test >10s other than the deliberately-60s-budgeted boundary scan (single-digit seconds warm).
-
-## Top gaps (priority order)
-
-1. **TEST-1** (High) — pin home OG route `sanitizeForOg` (the cycle-2 fix is unguarded on the surface it was added to).
-2. **TEST-2** (High) — test the backfill `width<=0` skip classification (data-integrity / no-false-"re-encoded").
-3. **TEST-3** (High) — pin the SW HEAD `AbortSignal.timeout` bound (shippable display-path regression).
-4. TEST-4/5/6 (Low) — CLS-reservation helper extraction, raw-checkbox scanner boundary fixtures, unmount-guard symmetry.
+1. **TE-1 (MED):** backfill detection-failure + delete-race cleanup branch (`admin-backfill-runner.ts:605`) untested — orphaned-file leak slips through green. One `it` block fixes it.
+2. **TE-2 (LOW, but the most concrete regression-detection hole):** `image-manager.tsx` touch-target budget stale at 6 vs real 1 → 5 silent NEW violations allowed. = AGG-R8c3-15, **not fixed** despite the briefing's claim.
+3. **TE-3 (LOW):** encode-heavy real-AVIF tests still contend on shared `public/uploads` → AGG-R8c3-09 cold-flake mechanism intact, **not fixed**. Per-test `UPLOAD_ROOT` isolation.
+4. **TE-4 (LOW):** `getLatestImageForOg` source-text test can't catch a dropped `processed` filter or reversed sort — needs a `.toSQL()` runtime assertion.
+5. **TE-5 (LOW):** home-OG-route sanitize pin asserts import, not call site.

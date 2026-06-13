@@ -1,105 +1,100 @@
-# Security Review Report — GalleryKit (cycle 3, run-8)
+# Security Review — Deep Multi-Agent Sweep
 
-**Reviewer:** security-reviewer
-**HEAD:** `ada92ba5f28e9ecb743c9a375b14b1c8c7aec774`
 **Date:** 2026-06-13
-**Scope:** Full OWASP Top 10 + secrets + unsafe-patterns + authn/authz + injection + file-upload + privacy + payment + PAT + DB backup/restore + SSRF/ReDoS, verified against current HEAD.
-**Risk Level:** LOW
+**HEAD:** `ce0029aa` (working tree CLEAN — no tracked source modifications; only `.context/reviews/*.md` differ)
+**Reviewer angle:** OWASP Top 10, secrets/credential handling, unsafe patterns, auth/authz, injection (SQL/command/path), SSRF, XSS, CSRF, insecure deserialization, access control, sensitive-data exposure.
+**Scope:** `apps/web/src/app/api/**` (all routes incl. admin), `apps/web/src/app/actions/**`, `apps/web/src/lib/` (auth, session, api-auth, request-origin, admin-tokens, validation, og-sanitize, og-photo-fetch, smart-collections, download-tokens, csv-escape, db-actions), `apps/web/src/proxy.ts`, Stripe webhook + checkout, DB download/restore, paid-download route, semantic search, sharing.
 
 ## Summary
 
-- Critical Issues: 0
-- High Issues: 0
-- Medium Issues: 0
-- Low / Defense-in-depth Issues: 2 (SEC-1, SEC-2)
-- Informational (audit/dependency): 3 (SEC-3, SEC-4, SEC-5)
+- **Critical Issues: 0**
+- **High Issues: 0**
+- **Medium Issues: 0**
+- **Low / defense-in-depth notes: 0 new** (the two prior LOW/INFO notes — `style-src 'unsafe-inline'`, `LOG_PLAINTEXT_DOWNLOAD_TOKENS` opt-in — remain documented-intentional, no change required)
 
-GalleryKit is an exceptionally hardened, heavily-reviewed security surface. Every high-value sink I examined already carries layered defenses with explicit test locks and lineage comments. The prior-cycle OG-sanitize symmetry fix (AGG-R8-13, commits `d5399742` / `ada92ba5`) is confirmed landed and NOT regressed. I found **no live-exploitable vulnerability**. The two LOW findings are genuine defense-in-depth observations (one CSP hardening opportunity, one documented operational footgun); the three INFO items are dependency/audit notes. None block.
+**Risk Level: LOW.**
 
----
+**No live-exploitable vulnerability exists across the full OWASP Top 10.** This is an independent re-verification at HEAD `ce0029aa` (validated from code, not commit messages or comments). The run-8 cycle-3 security fixes — og-sanitize unification into the JSON-LD page (`0028ede4`) and the NCLX code-2 `isHdr` pin (`22387f32`) — are correct and opened no new holes. The prior sweep's "no live-exploitable vuln" verdict still holds; this cycle is honest convergence.
 
-## Verified-Clean Surfaces (high-value sinks, no findings)
+All three security lint gates pass on HEAD:
+- `lint:api-auth` → OK (every admin API route wraps `withAdminAuth`)
+- `lint:action-origin` → OK (every mutating server action returns early on `requireSameOriginAdmin()`)
+- `lint:public-route-rate-limit` → OK (every public mutating route rate-limited or carries an audited exempt tag)
 
-These were examined in depth and are correctly implemented — recorded so the next cycle does not re-litigate them:
+## Critical / High / Medium Issues
 
-- **Auth / session (`lib/session.ts`, `lib/password-hashing.ts`, `actions/auth.ts`):** Argon2id (64 MiB / t=3 / p=4, exceeds OWASP); `SESSION_SECRET` env-only in production (throws rather than DB-fallback — correct trust-domain separation); HMAC-SHA256 verified with `timingSafeEqual`; token shape regexes run AFTER crypto verify so they can't be a timing oracle; session token SHA-256-hashed for DB storage (DB leak ≠ usable cookie); timing-safe dummy-hash on login (anti-enumeration); rate-limit pre-increment BEFORE Argon2 verify (TOCTOU-closed); session-fixation prevented via transactional insert+delete-others; cookie `httpOnly`/`secure`(prod or TLS)/`sameSite:lax`.
-- **Dual-bucket rate limit (`lib/auth-rate-limit.ts`, `lib/rate-limit.ts`):** per-IP + per-account (`acct:<sha256-prefix>` — no username PII in keys); rollback via decrement (not delete) to survive concurrent rollbacks; bounded maps with eviction; DB-backed source of truth + in-memory fast path.
-- **Server-action authz:** all 3 lint gates pass clean at HEAD (`lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`). Every mutating action verifies `isAdmin()` + `requireSameOriginAdmin()`; `withAdminAuth` now centralizes origin verification (AGG9R-02) so a future admin route can't forget CSRF defense. `request-origin.ts` fails closed by default.
-- **Injection:** Drizzle parameterization throughout; raw `sql\`\`` surfaces (admin-tokens, topics, admin-backfill-runner, health) all use parameterized `${}` interpolation, no string concat of untrusted input. CSV escaping (`lib/csv-escape.ts`) strips C0/C1 + Unicode bidi/zero-width + CRLF-collapse + formula-prefix quote with leading-whitespace tolerance. Unicode-format rejection (`lib/validation.ts UNICODE_FORMAT_CHARS`) applied at every admin string write. All 6 JSON-LD `dangerouslySetInnerHTML` sites use `safeJsonLd` (`</script>` + U+2028/2029 escaped). `og-sanitize.ts` uses the GLOBAL-flag strip (replace-all) shared by both OG routes.
-- **File upload / path traversal (`lib/serve-upload.ts`, download route, admin db download route):** `SAFE_SEGMENT` + `ALLOWED_UPLOAD_DIRS` + `resolve`/`startsWith` containment + `lstat` symlink rejection + `realpath` re-check + stream-from-realpath (TOCTOU-closed); dir↔extension map prevents cross-serving. Decompression-bomb mitigation via Sharp `limitInputPixels` (in process-image).
-- **Privacy (`lib/data.ts`, `lib/gps-exif-strip.ts`):** `_PrivacySensitiveKeys` / `_SensitiveKeysInPublic` compile-time guards enforce admin-only fields; `publicSelectFields` is a separate object derived by omission. GPS strip is byte-level container surgery — `withMetadata()` appears ONLY in warning comments, never called (the documented privacy contract holds).
-- **Stripe webhook (`api/stripe/webhook/route.ts`):** mandatory `constructEvent` signature verify before any DB work; `payment_status==='paid'` gate; tier allowlist; zero-amount reject; idempotency by SELECT + `sessionId` UNIQUE + `affectedRows && insertId>0` dup-key-loser disambiguation; deleted-image → 200 (no retry storm); no PII at error level.
-- **Download route (`api/download/[imageId]/route.ts`):** single-use CAS done right — token-shape regex short-circuit → constant-time hash verify → open-file-BEFORE-claim → atomic `UPDATE … WHERE downloadedAt IS NULL` → 410 on 0-rows; FileHandle leak prevented on every post-open path; GET interstitial is claim-free (mail-scanner safe); ships its own restrictive CSP. Content-Disposition extension sanitized + RFC 5987 encoded.
-- **Lightroom PAT (`lib/admin-tokens.ts`, `api/admin/lr/upload/route.ts`):** `gk_<base64url-32B>` tokens, SHA-256-hashed at rest, constant-time `tokenHashesEqual`, scope-gated, fail-closed on missing table, plaintext never in query params. Upload route mirrors browser path incl. GPS strip, HDR gate, upload-tracker quota, contract lock.
-- **DB backup/restore (`admin/db-actions.ts`):** `MYSQL_PWD`/`MYSQL_USER` env (no `/proc/cmdline` leak), `HOME` excluded (no `~/.my.cnf`), `sanitizeStderr` redacts password+host+user+db, dangerous-SQL chunk scan + header validation + `--one-database`, advisory lock on dedicated connection, `0o600`/`0o700` modes.
-- **Checkout (`api/checkout/[imageId]/route.ts`):** rate-limit pre-increment Pattern-2, tier allowlist, strict `/^\d+$/` price parse, code-point-safe title truncation, only validated `imageId`/`tier` to Stripe metadata, idempotency key.
-- **Semantic search (`api/search/semantic/route.ts`):** same-origin + body-size + content-type-prefix + chunked-reject + rate-limit-before-work + fail-closed config gate; stub mode disclaimed.
-- **Last-admin lockout (`actions/admin-users.ts`):** advisory lock + transaction + `COUNT(*)<=1` guard; parameterized raw SQL.
-- **Refund (`actions/sales.ts`):** `isAdmin()`+`requireSameOriginAdmin()`, `Number.isFinite && >0` id validation, Stripe idempotency key. No IDOR (admin is fully trusted; no role model by design).
-- **SSRF / ReDoS:** the only dynamic `fetch()` (`lib/og-photo-fetch.ts`) targets `new URL(req.url).origin` (own origin, not attacker-controlled host) + server-generated UUID filename + fixed `/uploads/jpeg/` path + 10 s timeout + 1 MB cap → not SSRF. No catastrophic-backtracking regex patterns found; `XMP_GPS_TOKEN`, `isValidTopicAlias`, `EMAIL_SHAPE`, session-token shape regexes are all linear.
-- **Weak randomness:** none. Share keys/UUIDs/tokens use `crypto.randomBytes`/`randomUUID`; zero `Math.random` in security-relevant code.
+None.
 
----
+## Re-verification of the two freshly-landed run-8-c3 security fixes
 
-## Findings
+### 1. og-sanitize unification into the JSON-LD page (`0028ede4`) — CORRECT
+**Location:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:14`, `apps/web/src/lib/og-sanitize.ts:28`
+**Verified:** The JSON-LD page now imports the shared `sanitizeForOg` (`stripUnicodeFormatting` + `OG_C0_CONTROL_CHARS` strip) instead of the prior weaker local copy that stripped only Unicode-format chars and carried a docstring lie. All three consumers (both OG image routes + the JSON-LD page) now share one `@/lib/og-sanitize` module. The C0-strip is defense-in-depth here (the JSON-LD sink is additionally protected by `safeJsonLd`, which escapes `<` → `<`, U+2028, U+2029, and `JSON.stringify` escapes C0 in string values), but the symmetry and the doc honesty are now correct. Not exploitable before or after.
 
-### SEC-1. Production CSP uses `style-src 'unsafe-inline'` (and `img-src` includes `data:`/`blob:`)
-**Severity:** LOW (defense-in-depth)
-**Category:** A05 Security Misconfiguration
-**Location:** `apps/web/src/lib/content-security-policy.ts:108` (`"style-src 'self' 'unsafe-inline'"`), `:29` (`img-src ... 'data:' 'blob:'`)
-**Exploitability:** Not independently exploitable. `script-src` is correctly nonce-gated (`'nonce-…' 'self'`, no `unsafe-inline`/`unsafe-eval` in prod), `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'self'`, `form-action 'self'` are all present. The residual `style-src 'unsafe-inline'` only widens the CSS-injection surface (e.g. a stored-CSS gadget could exfil via background-image requests to an `img-src`-allowed origin), but the app already blocks Unicode-format/control injection at every admin string sink and there is no untrusted-HTML render path, so there is no known vector to plant inline styles. This is purely a "tighten the net" item.
-**Blast radius:** If a future feature ever introduced an untrusted HTML/style sink, `'unsafe-inline'` styles + `data:`/`blob:` images would soften the CSP's ability to contain it. No current exposure.
-**Why it persists:** Tailwind/Radix/shadcn and `next/og` previews lean on inline styles; nonce-based `style-src` requires threading the nonce through every styled-jsx/inline-style site, which is a non-trivial refactor. This is a common, accepted tradeoff.
-**Fix (optional, low priority):** Track migrating to nonce/hash-based `style-src` if/when a styling refactor makes it cheap. Document the `'unsafe-inline'` style decision explicitly alongside the existing CSP comments so it is a conscious, reviewed choice rather than an unaudited default. No code change required this cycle.
-```ts
-// Aspirational target (only when inline-style sites are eliminated):
-// "style-src 'self' 'nonce-<nonce>'",
-```
+### 2. NCLX code-2 `isHdr` pin (`22387f32`) — CORRECT, no security impact
+**Location:** `apps/web/src/lib/color-detection.ts:398`
+**Verified:** The change is purely additive (a documentation comment + the unchanged `const isHdr = transferFunction === 'pq' || transferFunction === 'hlg'` derivation). The behavioral effect (a rare NCLX-code-2 + PQ/HLG-named-ICC source is now rejected at upload when `allow_hdr_ingest=false`) is an upload-rejection, which fails CLOSED — it cannot create a delivery-honesty or exposure issue. No new attack surface.
 
-### SEC-2. `LOG_PLAINTEXT_DOWNLOAD_TOKENS` emits a live single-use credential to stdout
-**Severity:** LOW (operational footgun; already documented + opt-in)
-**Category:** A09 Security Logging Failures / A02 Cryptographic Failures (secret-at-rest-in-logs)
-**Location:** `apps/web/src/app/api/stripe/webhook/route.ts:437-449`
-**Exploitability:** Opt-in only (`process.env.LOG_PLAINTEXT_DOWNLOAD_TOKENS === 'true'`, off by default), and the token is single-use + 24 h-expiring. The hazard is operational: when enabled, the plaintext `dl_…` download token lands in stdout → any log shipper / `docker logs` reader with log access can claim the paid asset before the customer. The README documents this as the manual-distribution scaffold until the email pipeline ships, and the code already strips the token hash from the structured audit line — so this is a known, bounded scaffold, not a defect.
-**Blast radius:** Anyone with log-read access in a deployment that flipped the flag can download the purchased original once (consuming the customer's single use). Confined to log-access holders; default deployments are unaffected.
-**Fix:** No change required — flagging for completeness so the next cycle keeps it on the radar. When the email pipeline (US-P54-phase2) ships, delete this stdout branch entirely rather than leaving it as a permanent opt-in. Until then, the existing README warning + default-off posture is adequate.
+## VERIFIED-CLEAN (stress-tested this cycle, code-level confirmation)
 
-### SEC-3. Stripe `async_payment_succeeded` gap — ALREADY-OWNED (confirmed, not new)
-**Severity:** INFO (owned by plan-316 CRT-R5C1-04)
-**Category:** A04 Insecure Design (coverage gap, not a vuln)
-**Location:** `apps/web/src/app/api/stripe/webhook/route.ts:91-118`
-**Status:** Confirmed present and correctly handled in the safe direction: delayed-payment methods (ACH/bank transfer) land `payment_status==='unpaid'` on `checkout.session.completed` and are REJECTED (no entitlement minted, `console.warn` not `console.error`). The only impact is that a customer who pays via a delayed method never receives an entitlement until the missing `async_payment_succeeded` handler ships. This is documented in CLAUDE.md and owned by plan-316. **Not re-reported as new.** No fail-open exposure (the gap denies access, never grants it).
+### A01 — Broken Access Control: CLEAN
+- **Middleware guard** (`proxy.ts:54-116`): `isProtectedAdminRoute` correctly protects `/[locale]/admin/*` and default-locale `/admin/*` sub-routes; the login page (`/admin` exactly) is intentionally excluded. Cookie presence + format pre-check (≥100 chars, 3 non-empty colon-segments) is defense-in-depth; full crypto validation is in server actions. `/api/*` is excluded from the matcher (documented) — every `/api/admin/*` route uses `withAdminAuth`.
+- **`withAdminAuth`** (`api-auth.ts:49`): central CSRF (`hasTrustedSameOrigin`) + `isAdmin()` on every admin API route; token path (`allowTokenScope`) runs first and is scope-gated, bypassing same-origin by design for cross-origin PAT integrations. Adds `no-store` + `nosniff` defaults to handler responses.
+- **Server actions**: every mutating action enforces `isAdmin()` + `requireSameOriginAdmin()` (lint-gate-enforced). Public actions (`public.ts`) are intentionally anonymous, carry `@action-origin-exempt` tags, and are bounded by per-IP rate limits.
+- **IDOR**: share keys (`getImageByShareKey`, `data.ts:1117`) gated on `isBase56(key, 10)` (~2^58 keyspace, random, unguessable) + `processed = true` + `publicSelectFields` (PII-stripped). PAT revoke (`admin-tokens.ts:227`) is user-scoped (`WHERE id = ? AND user_id = ?`). No sequential-id object access on any public surface.
 
-### SEC-4. Dependency audit — all advisories build/dev-only, NOT prod-runtime-reachable
-**Severity:** INFO
-**Category:** A06 Vulnerable Components
-**Command:** `npm audit --workspace=apps/web` → 5 vulns (3 high, 2 moderate, 0 critical)
-**Detail:**
-- `esbuild` GHSA-gv7w-rqvm-qjhr (high, CVSS 8.1) — reachable only via `drizzle-kit` and `tsx`, both **devDependencies** used for migrations/scripts at build/CI time. The advisory is a dev-server request-forwarding issue; esbuild's dev server is never run in production. NOT in the prod-deps runtime tree (Dockerfile `prod-deps` stage excludes them).
-- `drizzle-kit` (high) / `tsx` (high) — same esbuild transitive; dev/CI only.
-- `postcss` GHSA-qx2v-qp2m-jg93 (moderate, XSS via `</style>` in stringify) → via `next` — PostCSS runs at **build time** (Tailwind compilation), not on runtime request paths; the CSS it emits is the app's own authored CSS, no untrusted input. NOT runtime-reachable.
-- `next` (moderate) — transitive of the postcss build-time issue; the fix is a major downgrade (`next@9.3.3`), inappropriate. The repo is intentionally on latest Next 16.
-**Action:** None required for production security. Optionally bump `tsx` (a non-major fix is available per the audit) to clear the dev-tree noise. Do NOT take the `isSemVerMajor` "fixes" (drizzle-kit 0.19.1 / next 9.3.3) — they are downgrades.
+### A02 — Cryptographic Failures: CLEAN
+- Argon2id (memoryCost 65536 / timeCost 3 / parallelism 4) for passwords; HMAC-SHA256 session tokens verified with `timingSafeEqual` (`session.ts:117`); session token shape asserted AFTER crypto verify (no timing oracle, `session.ts:124`).
+- `SESSION_SECRET` env-only in production — `getSessionSecret` THROWS in prod if absent rather than falling back to a DB-stored secret (`session.ts:30`), keeping the signing key out of the user-data trust domain.
+- Session tokens stored as SHA-256 hash (`hashSessionToken`) so DB compromise yields no usable cookie. PAT tokens stored as SHA-256 only; plaintext shown once.
+- Cookie attributes: `httpOnly`, `secure` (TLS or prod via trusted-proxy protocol normalization), `sameSite: lax`, `path: /`, 24h maxAge.
 
-### SEC-5. `style-src`/`img-src` breadth is the only CSP residue; everything else is tight — recorded as INFO baseline
-**Severity:** INFO
-**Category:** A05
-**Note:** Documented here so the CSP posture is captured as a baseline: script execution is nonce-gated with no `unsafe-eval`/`unsafe-inline` in production, GA hosts are wildcard-LHS-allowlisted per Google's documented contract (not advertising hosts), and `IMAGE_BASE_URL` is validated (https-in-prod, no credentials/query/hash). The interstitial and OG routes ship their own restrictive per-response CSPs since `/api` is excluded from the middleware matcher. This is a strong CSP; SEC-1 is the only tightening lever.
+### A03 — Injection (SQL / Command / Path / XSS): CLEAN
+- **SQL**: all queries use Drizzle ORM parameterization. Audited raw `sql\`\`` surfaces (`data.ts`, `admin-tokens.ts`, `smart-collections.ts`, `rate-limit.ts`, `data-timeline.ts`, `db-actions.ts`) interpolate only column references and `${value}` placeholders (bound as `?`), never string-concatenated untrusted input. `smart-collections.ts` additionally enforces `isScalarValue` (rejects objects/arrays/NaN that mysql2 would expand into SQL fragments), column allowlist via `Object.prototype.hasOwnProperty.call` (proto-pollution-safe), operator allowlist, per-column operator narrowing, depth cap, and LIKE-wildcard escaping (`/[%_\\]/g`).
+- **Command**: only `child_process` use is `spawn('mysqldump', [argv-array], {env})` in `db-actions.ts:157` — argv form (no shell), credentials via `MYSQL_PWD`/`MYSQL_*` env (not CLI flags, not in `/proc/cmdline`), minimal env (no HOME → no `~/.my.cnf`). No shell-string interpolation anywhere.
+- **Path traversal**: download route (`api/download/[imageId]:306`) and DB-download route (`api/admin/db/download:33`) both: validate filename shape (`isValidBackupFilename` / DB-stored UUID filename), `path.resolve` + `startsWith(dir + sep)` containment, `lstat` + `isSymbolicLink()` rejection, and realpath-resolved-path streaming (TOCTOU close). Upload paths use `SAFE_SEGMENT` + `ALLOWED_UPLOAD_DIRS` whitelist + UUID filenames.
+- **XSS**: all 8 `dangerouslySetInnerHTML` sites are JSON-LD via `safeJsonLd` (escapes `<`, U+2028, U+2029) — confirmed at page.tsx (home ×2), [topic], c/[slug], p/[id] (×2), timeline, year. OG routes render text into Satori images (no script sink) and additionally `sanitizeForOg` all rendered strings. No user HTML reaches a DOM sink.
 
----
+### A04 — Insecure Design: CLEAN
+- Single-use download CAS (`api/download/[imageId]`): open-file-handle BEFORE the atomic `UPDATE … SET downloadedAt=NOW() WHERE downloadedAt IS NULL`, `affectedRows===0 → 410`, handle closed on every failure path. A missing file never burns the token (validated before claim). GET interstitial is claim-free (mail-scanner safe, RFC-9110 §9.2.1 compliant).
+- Login: pre-increment rate limit BEFORE Argon2 (TOCTOU), dummy-hash timing equalization, per-IP + per-account buckets, session-fixation prevention (delete other sessions in a transaction), no rate-limit rollback on infra error (attacker can't farm extra attempts via DB overload).
+
+### A05 — Security Misconfiguration: CLEAN
+- `nosniff` global + per-route; `no-store` on all admin/sensitive responses; restrictive CSP on the download interstitial (`default-src 'none'; form-action 'self'`); production CSP nonce per request in `proxy.ts`. Debug not exposed; errors return generic messages (PII never in error bodies — Stripe webhook logs presence flags, not email values, at error level).
+
+### A06 — Vulnerable Components: UNCHANGED
+- `npm audit`: build/dev-time advisories only (esbuild via drizzle-kit/tsx, postcss via next) — absent from the prod runtime container. INFO only. The `isSemVerMajor` "fixes" are downgrades — do NOT take them.
+
+### A07 — Auth Failures: CLEAN
+- See A02. Password change rotates ALL sessions in a transaction, re-issues one fresh cookie, control-char-strips credentials, code-point length bounds (12–1024), separate rate-limit bucket. `unstable_rethrow` guards Next.js control-flow signals on both login and password-change.
+
+### A08 — Integrity Failures: CLEAN
+- Stripe webhook (`api/stripe/webhook:74`): `constructStripeEvent` signature verification is MANDATORY and runs before any DB work; forged/unsigned → 400 in constant time. Idempotency via `sessionId` SELECT + `ON DUPLICATE KEY UPDATE` + `insertId>0` disambiguation (the dup-key loser never logs a dead plaintext token). Gates on `payment_status==='paid'`, zero-amount reject, tier allowlist, deleted-image FK handling (200, no retry storm).
+
+### A09 — Logging Failures: CLEAN
+- `logAuditEvent` on login (success/failure), logout, password change, CSV export, DB backup, DB-backup download (with requester IP), PAT use. Customer PII (email) is NOT logged at error level; the `LOG_PLAINTEXT_DOWNLOAD_TOKENS` token-surfacing is opt-in (default OFF), documented-intentional.
+
+### A10 — SSRF: CLEAN
+- OG photo fetch (`og-photo-fetch.ts` + `api/og/photo/[id]:103`): `origin = new URL(req.url).origin` (the server's OWN host), path `${origin}/uploads/jpeg/${baseFilename}` where `baseFilename = image.filename_jpeg` (DB-stored UUID-derived, not user input). 10s AbortSignal timeout + 1 MB byte cap (Content-Length pre-check + post-buffer) per attempt. No user-controlled URL, host, or scheme reaches `fetch`. The home/site OG route fetches nothing external.
+
+### Commonly-missed classes — all CLEAN
+- **Open redirect**: the only `redirect()` with a variable target (`[topic]/page.tsx:160`) builds `localizePath(validatedLocale, /${topicData.slug})` from the DB canonical slug + length-capped, URLSearchParams-encoded `tags` — always same-origin relative. Login/logout/checkout redirects use validated locale + hardcoded/numeric paths.
+- **ReDoS**: every validation regex is linear (character classes, anchored `/^…$/`, no nested quantifiers) — `isValidSlug`, `isValidTagName`, `isWellFormedToken`, `UNICODE_FORMAT_CHARS`, `EMAIL_SHAPE`, etc.
+- **Prototype pollution**: smart-collections column lookup uses `Object.prototype.hasOwnProperty.call`; JSON ASTs are structurally re-validated (`validateNode`) with scalar-value enforcement; no merge of user JSON into existing objects.
+- **Insecure deserialization**: `JSON.parse` results (semantic-search body, smart-collection query) are shape-validated before use; size-capped (8 KB semantic body); no `eval`/`Function`/dynamic require of untrusted input (the only `child_process` import is the argv-array mysqldump/restore).
+- **Timing attacks**: session HMAC and PAT hash both use `timingSafeEqual`; login uses dummy-hash equalization; token-shape regex checks run AFTER crypto verify.
+- **Secrets in code**: high-signal sweep found NO hardcoded secrets/keys/tokens; all secrets via `process.env`.
+- **Upload content-type / decompression bomb**: per-file 200 MB cap + cumulative window cap + file-count cap; Sharp `limitInputPixels`; RAW rejected; HDR gated on admin setting; GPS stripped on both DB and on-disk original (both browser and LR PAT paths).
 
 ## Security Checklist
-
-- [x] No hardcoded secrets (grep clean; secrets via env; opt-in token logging documented — SEC-2)
-- [x] All inputs validated (Unicode-format reject, code-point length caps, strict integer parses, body-size guards)
-- [x] Injection prevention verified (Drizzle params, parameterized raw SQL, CSV escape, JSON-LD escape, no eval/Function/dynamic exec of untrusted input)
-- [x] Authentication/authorization verified (Argon2id, timing-safe, dual-bucket rate limit, 3 lint gates pass, withAdminAuth central origin check, last-admin lockout)
-- [x] CSRF/same-origin enforced on all mutating actions + admin API routes (fail-closed)
-- [x] File-upload path traversal + symlink + TOCTOU + decompression-bomb defenses verified
-- [x] Privacy guards (GPS byte-strip never via withMetadata; compile-time public-field guards) verified
-- [x] Payment flow (webhook signature, single-use CAS, idempotency, refund authz) verified
-- [x] SSRF (own-origin-only fetch) and ReDoS (no catastrophic regex) cleared
-- [x] Dependencies audited (SEC-4 — all advisories dev/build-only, none prod-runtime-reachable)
-
-## Prior-cycle regression check
-- AGG-R8-13 (shared `sanitizeForOg` across both OG routes): **CONFIRMED LANDED, NOT REGRESSED.** `lib/og-sanitize.ts` exports the shared sanitizer using the GLOBAL-flag `stripUnicodeFormatting` + C0-control strip; both `api/og/route.tsx` and `api/og/photo/[id]/route.tsx` import it. Contract test `ada92ba5` pins the global-strip behavior.
+- [x] No hardcoded secrets
+- [x] All inputs validated (code-point-aware length, Unicode-format strip, slug/tag/filename regex, body-size caps)
+- [x] Injection prevention verified (parameterized SQL, argv-array spawn, path containment + symlink rejection)
+- [x] Authentication / authorization verified (`withAdminAuth` + `requireSameOriginAdmin` lint-gated; Argon2id; timing-safe sessions; PAT scope gate)
+- [x] Dependencies audited (build/dev-only advisories; absent from prod runtime; downgrades rejected)
+- [x] XSS prevention verified (all JSON-LD via `safeJsonLd`; OG text via `sanitizeForOg`; no user HTML to DOM)
+- [x] CSRF verified (same-origin on every mutating action + admin API route, fail-closed)
+- [x] SSRF verified (OG fetch own-origin only, DB-filename path, no user URL)
+- [x] Sensitive-data exposure verified (`publicSelectFields` PII-strip + `_PrivacySensitiveKeys`/`_SensitiveKeysInPublic` compile-time guards; GPS strip; PII out of error logs)
+- [x] Single-use download token CAS verified (open-before-claim, atomic UPDATE, affectedRows gate)
+- [x] Stripe signature verification + idempotency verified

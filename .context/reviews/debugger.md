@@ -1,76 +1,91 @@
-# Debugger Review — Latent Bug Surface (Cycle 3 of review-plan-fix)
+# Debugger Review — Latent Bug Surface (run-8, post-cycle-3 fresh sweep)
 
 **Repo:** GalleryKit (`/Users/hletrd/flash-shared/gallery`)
-**HEAD reviewed:** `ada92ba5` (prompt stated `ada92ba5`; the `e8fce327` latent-bug-hardening batch is in history and verified intact below).
-**Scope:** boundary/parsing (ISOBMFF/ICC/GPS), async/lifecycle, concurrency, numeric/arithmetic, error handling.
-**Method:** Empirical — every finding traced to an exact code path; arithmetic and buffer bounds reasoned by hand. Working tree has only `.context/reviews/*` + new plan files dirty; no source drift vs HEAD.
+**HEAD reviewed:** `ce0029aa` (working tree clean save for `.context/reviews/*` + new plan files). **The prompt's stated `ce0029aa` baseline is 10 commits AHEAD of the prior debugger sweep's `ada92ba5`** — this pass re-verifies the new commits `22387f32` (NCLX code-2 comment), `0028ede4` (og-sanitize), `6454c4a3`/`6be638d2`/`ecd093ab` (tests/i18n/a11y), `5f097262`/`ce0029aa` (docs), and the **AGG-R8c3-03 backfill orphan-cleanup** (`admin-backfill-runner.ts`), none of which existed at the prior sweep.
+**Scope:** binary parsers (ISOBMFF/ICC/GPS), Sharp pipeline + queue, advisory locks / pool connections, SW, AbortController/timeout, React effect cleanup, boundary arithmetic, resource leaks, unhandled rejections, error-path correctness, `affectedRows` guards.
+**Method:** Empirical — every finding traced to an exact code path; buffer bounds and arithmetic reasoned by hand against adversarial input. I did NOT re-report the prior-sweep VERIFIED-CLEAN set unless I re-touched it and found a regression (none).
 
 ---
 
-## VERIFICATION of prior-cycle (e8fce327) hardening — ALL INTACT at HEAD
+## VERIFICATION of new commits since the prior sweep — ALL CLEAN
 
-| Guard | File:line | Status |
+| Change | File:line | Status |
 |---|---|---|
-| load-more setState-after-unmount | `components/load-more.tsx:36,51,88,133-138` | ✅ `mountedRef` flipped on unmount; checked before AND after the await, and in `finally`. Symmetric. |
-| home-client containIntrinsicSize / aspectRatio 0-width | `components/home-client.tsx:278-282` | ✅ `hasValidDims = width>0 && height>0`; falls back to `1/1` + square reservation. |
-| settings-client backfill poll unmount + timer cleanup | `settings/settings-client.tsx:83,87,96,122-130,169-171` | ✅ `backfillMountedRef` + `backfillPollTimers` cleared on unmount; status setState gated on the flag. |
-| admin-backfill-runner width re-validation | `lib/admin-backfill-runner.ts:430-436` | ✅ `!Number.isFinite(row.width) || row.width <= 0` → `encode-failed`, NO version bump (stays a candidate). |
+| **AGG-R8c3-03** backfill orphan-file cleanup (NEW) | `admin-backfill-runner.ts:421-440, 556-608` | ✅ Correct. Both UPDATE branches (success + detection-failed) check `affectedRows === 0` → `cleanupDeletedMidReencodeVariants(row)` → return `deleted-mid-reencode`. Mirrors the upload-queue `affectedRows===0` cleanup. `deletedMidReencode` is its OWN tally (not a failure → does not flip `lastRunHadFailures`, line 791). Variant cleanup passes `[]` sizes → full dir scan catches all prior-config variants; wrapped in `.catch()` (best-effort, like `deleteImage`). |
+| `getLatestImageForOg` minimal OG accessor (NEW, AGG-R8c3-05) | `data.ts:872-883`, used `page.tsx:93` | ✅ Sound. `buildImageConditions(undefined, tagSlugs, false)` → `processed=true` + optional tag `IN(subquery)`; topic is `undefined` so the `null` return is unreachable, and the caller handles `null` anyway (`latestImage ? […] : []`). `cache()`-wrapped for SSR dedup. `LIMIT 1` over the homepage composite index. No tag JOIN/GROUP_CONCAT. |
+| NCLX code-2 `isHdr` side-effect (comment-only, `22387f32`) | `color-detection.ts:384-399` | ✅ Behavior unchanged from the prior sweep's CHK-1; the diff adds only a clarifying comment. Per-field `!== undefined` guards preserve ICC transfer/matrix; code-2 absent from all NCLX maps; `isHdr = transfer in {pq,hlg}`. The documented upload-rejection side-effect is intentional. |
+| og-sanitize unification + i18n + a11y (`0028ede4`/`6be638d2`/`ecd093ab`) | (no logic on the latent-bug surface) | ✅ No parser/lifecycle/arithmetic impact. |
 
-None regressed. I did not re-report any of these.
+The prior sweep's e8fce327 hardening (load-more unmount, home-client 0-width, settings-client poll cleanup, backfill width guard) remains intact at `ce0029aa` — re-spot-checked, none regressed.
 
 ---
 
 ## CONFIRMED LATENT BUGS
 
-### BUG-2 — SW image-cache metadata is a lost-update under concurrent gallery paints — LOW (pre-existing, not from e8fce327)
-**File:** `public/sw.template.js` — `getMeta()`/`setMeta()` (70-91), `recordAndEvict()` (95-122), `touchMeta()` (152-161).
-**Precondition:** a masonry paint fires N concurrent `staleWhileRevalidateImage` calls; each cache-hit tile independently does `getMeta()` → mutate its own URL entry → `setMeta()` (whole-doc overwrite, no compare-and-swap).
-**Failure (silent-wrong-result):** classic read-modify-write race. Concurrent `touchMeta`/`recordAndEvict` each read the same meta snapshot and write back the entire doc → last-writer-wins → other tiles' size/timestamp updates are dropped. Effect: LRU `total` byte accounting drifts low (cache can exceed the 50 MB cap until the browser quota evicts) or recency timestamps are lost (suboptimal eviction order).
-**Likelihood:** High frequency, near-zero user impact — the 50 MB cap is best-effort and the browser quota is the real backstop. No effect on served bytes or correctness.
-**Fix:** serialize meta mutations behind a single-flight promise chain (module-level `metaWriteLock = metaWriteLock.then(mutate)`), OR accept as documented best-effort. A code change must also update `sw-template-contract.test.ts` (it pins the template) and re-stamp `sw.js` via `build-sw.ts`.
-**Confidence:** High that the race exists; High that impact is negligible. This is the only finding with any consequence, and it is consistent with the codebase's documented "best-effort LRU" posture, so deferring is defensible.
+### BUG-1 — SW image-cache metadata is a lost-update under concurrent gallery paints — LOW (pre-existing; = AGG-R8c3-10, KNOWN)
+**File:** `public/sw.js` — `getMeta()`/`setMeta()` (70-91), `recordAndEvict()` (95-122), `touchMeta()` (152-161). (Mirror in `public/sw.template.js`.)
+**Trigger:** a masonry paint fires N concurrent `staleWhileRevalidateImage` calls; each cache-hit tile independently does `getMeta()` → mutate its own URL entry → `setMeta()` — a whole-document overwrite with no compare-and-swap or single-flight lock.
+**Failure (silent-wrong-result):** classic read-modify-write race. Concurrent `touchMeta`/`recordAndEvict` each read the same meta snapshot and write back the entire doc → last-writer-wins → other tiles' size/timestamp updates are dropped. Effect: the LRU `total` byte accounting drifts LOW (the 50 MB image cache can exceed its cap until the browser quota evicts), or recency timestamps are lost → suboptimal eviction order.
+**Blast radius:** cache-housekeeping ONLY. No served-byte impact, no correctness impact, no crash/leak. The browser quota is the real backstop for the 50 MB cap.
+**Fix (only if the team wants a HARD cap):** serialize meta mutations behind a module-level single-flight promise chain (`metaWriteLock = metaWriteLock.then(mutate)`). A code change MUST also update `sw-template-contract.test.ts` (pins the template) and re-stamp `sw.js` via `scripts/build-sw.ts`.
+**Confidence:** High that the race exists; High that impact is negligible. **Defensible to DEFER** given the documented best-effort cache posture (CLAUDE.md "SW image-cache metadata is a lost-update … Defensible to DEFER").
+
+This is the **only** finding of any consequence, and it is unchanged from the prior cycle — explicitly carried as the known latent item AGG-R8c3-10.
 
 ---
 
-## CHECKED-AND-CORRECT (the surfaces the prompt flagged — no action)
+## NEEDS-VALIDATION / OBSERVATIONS (no defect, recorded for completeness)
 
-### CHK-1 — CICP code-2 ("Unspecified") branch in `color-detection.ts`
-**File:** `lib/color-detection.ts:175-200` (maps), `:343-345` (ICC inference), `:370-387` (NCLX per-field override).
-Code 2 is intentionally absent from every `NCLX_*_MAP`. The run-8 c2 fix (`74235265`) applies each mapped NCLX value **only when defined** (`if (nclxX !== undefined)`), so a partially-specified NCLX box no longer clobbers an ICC-derived transfer/matrix/primary with `'unknown'`. The documented "NCLX > ICC chromaticity > ICC name" precedence holds per-field. Final `isHdr` is `transfer in {pq,hlg}`. **Correct.**
+### OBS-1 — `baseOffset + extentOffset` HEIF-iloc sum could lose integer precision, but cannot OOB — INFO
+**File:** `gps-exif-strip.ts:514, 521`.
+`start = baseOffset + extentOffset`, where each addend is a `readSized` value (≤ 8 bytes, and `readSized` already rejects 8-byte values `> MAX_SAFE_INTEGER`). The SUM of two near-`MAX_SAFE_INTEGER` values can exceed `MAX_SAFE_INTEGER` (~9.0e15) and lose exact integer precision. **This is NOT exploitable:** line 521's `start + length > buf.length` compares against `buf.length` (≤ hundreds of MB ≈ 1e8). Any imprecise `start` near 1.8e16 is unambiguously `>> buf.length` → `return null`. The float imprecision never lands inside `[0, buf.length]`. No OOB read/write. **No action.** (Adversarial-input crafted to hit this still fails closed.)
 
-### CHK-2 — ISOBMFF / ICC / GPS parsers (adversarial input)
-Every `readUInt*` / `readBigUInt64BE` / `toString` in `parseCicpFromHeif` (color-detection 217-283), `hasGainMap` (gain-map-detection 57-291), `detectGamutFromIccChromaticity` (icc-chromaticity 220-322), `extractIccProfileName` (icc-extractor 45-127), and the five `stripGpsFrom*` walkers (gps-exif-strip) is **bounds-checked before access**, depth/scan/count-capped, and the top-level walk is `try/catch`-wrapped to return a safe default (null / false / unmodified buffer). I found **no** OOB read/write, ÷0, NaN-escape, or throw-to-caller in any of them:
-- `xyzToXy` rejects `|sum| < 1e-9`; `invert3x3` rejects `|det| < 1e-12`; `readS15Fixed16`/`readXyzTag`/`readChadMatrix` return NaN/null on OOB and every consumer checks `Number.isFinite`. (icc-chromaticity 106-200, 291-295)
-- gps-exif-strip `readSized` returns `null` for size ∉ {0,4,8} and rejects 8-byte values `> MAX_SAFE_INTEGER`; the final `start<0 || length<0 || start+length>buf.length` (521) bounds every `buf.fill`; `construction_method !== 0 → return null` (513). Adversarial iloc cannot drive an OOB write.
-- WebP last-chunk odd-size padding (585-588) lands `next` 1 byte past `buf.length`; the loop condition `offset+8 <= buf.length` terminates next iteration, and the TIFF/XMP read already validated `dataEnd > buf.length → return null`. Benign.
-- icc-extractor `desc` `strEnd = strStart + max(0, strLen-1)` intentionally drops the trailing NUL (ICC v2 `declaredLength` includes it) — correct, not an off-by-one.
+### OBS-2 — view-count flush timer is a bare `setTimeout(asyncFn)` but cannot reject — INFO
+**File:** `data.ts:54, 84, 160` schedule `setTimeout(flushGroupViewCounts, …)`; `flushGroupViewCounts` is `async`. Every per-group DB write inside `Promise.all` carries its own `.then(...).catch(...)` (the `.catch` returns), so `await Promise.all(...)` cannot reject, and the outer `try { … } finally { … }` body has no synchronously-throwing statement. `flushGroupViewCounts` therefore never produces an unhandled rejection from the detached timer. **No action.**
 
-### CHK-3 — Async/lifecycle (AbortController, timers, promise rejection)
-- **histogram.tsx:526-577** — worker terminated on unmount; the image-load effect uses BOTH a local `aborted` flag and `AbortController` + `signal.aborted` guard before every `setHistogramState`; `img.onload/onerror` nulled and `img.src=''` on cleanup. No setState-after-unmount, no double-fetch. **Correct.**
-- **og-photo-fetch.ts:52-66** — `AbortSignal.timeout` is per-fetch and caught locally (miss → null). No leak. **Correct.**
-- **admin-backfill-runner.ts:792-794** — fire-and-forget runner wrapped so its `finally` (742-745) is the single release point for `running`, the advisory lock, and the lock connection; the outer `.catch` swallows a synchronous pre-try throw to avoid `unhandledRejection`. **Correct.**
+### OBS-3 — copy-button `setTimeout(() => setCopied(false), 1200)` is not cleaned on unmount — INFO
+**File:** `color-details-section.tsx:276`, `lightbox-color-pip.tsx:100`. If the component unmounts within 1.2 s of a copy click, `setCopied(false)` fires post-unmount. In React 18+/19 a setState-after-unmount is a **silent no-op** (no warning, no leak — the dev-only warning was removed in React 18). Not a bug on this React version. **No action.**
+
+---
+
+## CHECKED-AND-CORRECT (the surfaces the prompt flagged — re-verified at `ce0029aa`)
+
+### CHK-1 — ISOBMFF / ICC / GPS parsers (adversarial input)
+Re-walked every `readUInt*` / `readBigUInt64BE` / `toString` / `subarray` / `fill` in `parseCicpFromHeif` (color-detection 217-283), `parseGainMapFromHeif` / `hasGainMap` (gain-map-detection), `detectGamutFromIccChromaticity` (icc-chromaticity), `extractIccProfileName` (icc-extractor), and the five `stripGpsFrom*` walkers (gps-exif-strip). Every access is bounds-checked before use; depth/scan/count-capped (`MAX_DEPTH=5`, `MAX_SCAN_BYTES=1MB`, `itemCount>4096`/`extentCount>64` rejects); the top-level walk is `try/catch`-wrapped to a safe default (null/false/unmodified buffer). **No OOB, no ÷0, no NaN-escape, no throw-to-caller.** Specifics:
+- `parseCicpFromHeif`: `size < headerSize || pos+size > buffer.length → break`; `colr` reads gated by `dataSize >= 11` (so `dataStart+10 < pos+size <= buffer.length`); size-1 64-bit path checks `pos+16 > buffer.length`. The double `dataSize >= 11` (lines 251, 253) is redundant but harmless.
+- `gps-exif-strip` HEIF iloc: `construction_method !== 0 → return null` (513); `headerOffset > length-8 → return null` (527, with `length>=8` from 525); `tiffStart` ∈ `[start, start+length-4]` ⊆ `[0, buf.length]` (521); the `start<0 || length<0 || start+length>buf.length` guard (521) bounds every `buf.fill` / `stripGpsFromTiffRegion`.
+- `gps-exif-strip` WebP: `dataEnd > buf.length → return null` (568); `next <= offset → return null` (587) kills any zero/negative-advance infinite loop; odd-size last-chunk padding lands `next` ≤ 1 byte past EOF and the loop terminates next iteration — benign, as the prior sweep found.
+- icc-chromaticity: `xyzToXy` rejects `|sum| < 1e-9`; `invert3x3` rejects `|det| < 1e-12`; every `readS15Fixed16`/`readXyzTag` consumer checks `Number.isFinite`.
+
+### CHK-2 — CICP code-2 ("Unspecified") branch (color-detection)
+As CHK-1 in the prior sweep, re-confirmed at HEAD with the new comment (`22387f32`). Per-field `!== undefined` override preserves ICC-derived transfer/matrix/primary; the documented NCLX>ICC-chromaticity>ICC-name precedence holds per-field; `isHdr` derivation correct.
+
+### CHK-3 — Async / lifecycle (AbortController, timers, promise rejection, StrictMode)
+- **histogram.tsx:526-577** — worker effect creates a fresh `Worker` and terminates it in cleanup (StrictMode double-mount safe); the image-load effect uses BOTH a local `aborted` flag AND `AbortController`/`signal.aborted` before every `setHistogramState`, and nulls `img.onload/onerror` + `img.src=''` on cleanup. No setState-after-unmount, no double-fetch, no leaked worker.
+- **optimistic-image.tsx:28** — retry `setTimeout` handle stored in a ref and `clearTimeout`'d on unmount. The `key={src}` remount resets state cleanly. Correct.
+- **og-photo-fetch.ts:53** — per-fetch `AbortSignal.timeout(OG_PHOTO_FETCH_TIMEOUT_MS)`, caught locally → null. No leak, no double-fire.
+- **sw.js:227-247** — the cached-image HEAD probe carries `AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS=300)`; abort/304/200-different-ETag all fall through cleanly to stale-serve + background revalidate (`startRevalidate()` is a single-flight lazy closure with `.catch(()=>null)`). No hang, no unhandled rejection.
+- **image-queue.ts** fire-and-forget caption (385-400) + embedding (424-453) hooks: each wrapped in `.then().catch()` / `try/catch` inside the IIFE — cannot escape as unhandledRejection. Bootstrap retry (560-564) + GC interval (675-681) both `.unref?.()` and guarded against double-arm; GC interval `clearInterval`'d before re-set.
 
 ### CHK-4 — Numeric / arithmetic
-- `resolveBackfillConcurrency` (admin-backfill-runner 129-142): `Number.isFinite(poolLimit)` fallback to 10, `Math.max(1, …)` floor, `req = Math.max(1, Math.floor(requested)||1)` — output always ≥ 1 and finite; can never freeze PQueue with NaN/0. The documented `cap=2` at pool=10 is correct.
-- `home-client.tsx:196-202,278-282` — `estimatedCardWidth` floors at 300 on non-positive; aspect/intrinsic-height guarded on 0-width. **Correct.**
-- `process-image.ts:1010-1029` — wide-gamut downscale `scale = sqrt(CAP/basePixels)`, `targetWidth = max(1, round(width*scale))`; `basePixels` uses guarded `baseHeight` (`>0 ? : 0`). Upload path rejects width/height ≤ 0 at 843-847. tmp intermediate unlinked in `finally` (1300-1304); `wasDownscaled` computed pre-finally and the finally never reassigns the var. **Correct.**
+- `resolveBackfillConcurrency` (admin-backfill-runner 129-142): `Number.isFinite(poolLimit)?:10` fallback, `Math.max(1, …)` floor, `req = Math.max(1, Math.floor(requested)||1)` — output always ≥ 1 and finite; can never freeze PQueue with NaN/0. `cap=2` at pool=10 correct.
+- `home-client.tsx` `estimatedCardWidth`/aspect/intrinsic-height 0-width guards intact (prior sweep CHK-4).
+- `process-image.ts` wide-gamut downscale `scale=sqrt(CAP/basePixels)`, `targetWidth=max(1,round(w*scale))`, upload rejects w/h ≤ 0, tmp unlinked in finally — intact.
 
-### CHK-5 — Concurrency (losing-worker / cleanup / leak correctness)
-- **Per-image claim (upload queue)** `image-queue.ts:259-281,372-380,520`: loser retries (escalating, max 10), winner runs conditional `UPDATE … WHERE processed=false`; `affectedRows===0` (deleted mid-process) → cleans its own 3 variant dirs; lock released in `finally`. No leak.
-- **Backfill claim (in-app)** `admin-backfill-runner.ts:333-358,464-568`: loser/pool-exhausted → `locked` skip, NO version bump; winner holds claim across encode→detect→UPDATE; detection-fail persists `was_downscaled`/`avif_10bit` WITHOUT version bump (resume contract, locked by `admin-backfill-runner-detection-failure.test.ts`). Released in `finally`.
-- **Backfill keyset non-snapshot walk** (377-401): termination rests on the backfill advisory lock + fresh uploads landing at CURRENT version; both hold.
-- **Delete-while-processing** `app/actions/images.ts:587-602`: DB txn + queue-state clear; in-flight worker detects `affectedRows===0` and self-cleans.
-- **Restore quiesce** `image-queue.ts:692-733`: pause→clear→onIdle (the COR-R4C12-01 deadlock fix present); `enqueueImageProcessing` fronts every path with `isRestoreMaintenanceActive()`, so a late claim-retry timer (275-280) is suppressed during maintenance.
-- **Topic create / tag batch** `topics.ts:145-175`, `tags.ts:387-456`: ER_DUP_ENTRY catch (TOCTOU-safe), `INSERT IGNORE` + collision detection, image-file cleanup on failure.
-All correct — no orphaned files, no leaked locks/connections, no half-written rows on the paths I traced.
+### CHK-5 — Concurrency (losing-worker / cleanup / lock+connection release / affectedRows)
+- **Per-image claim (upload queue)** `image-queue.ts:259-281, 372-381, 519-532`: claim-fail → `setTimeout(enqueueImageProcessing)` + `enqueued.delete` (so the re-enqueue passes the `enqueued.has` guard, line 245) — no lost job, no double-enqueue. Winner runs conditional `UPDATE … WHERE processed=false`; **`affectedRows===0` (deleted mid-process) → cleans its 3 variant dirs**. Claim connection released in `finally` (null-safe). MAX_CLAIM_RETRIES=10 / MAX_RETRIES=3 with permanently-failed FIFO-capped set.
+- **Backfill claim (in-app)** `admin-backfill-runner.ts:343-368, 442-615`: pool-exhausted/held → `locked` skip (no version bump); claim held across encode→detect→UPDATE; **both UPDATE branches now check `affectedRows===0` → cleanup + `deleted-mid-reencode`** (AGG-R8c3-03 — the gap the prior cycle flagged, now closed); detection-fail persists `was_downscaled`/`avif_10bit` WITHOUT version bump (resume contract); claim released in `finally`; whole-run advisory lock + lock connection released in `runBackfill`'s `finally` (805-808); fire-and-forget `runBackfill(...).catch()` swallows a synchronous pre-try throw.
+- **Restore quiesce** `image-queue.ts:692-733`: pause→clear→onIdle (COR-R4C12-01 deadlock fix) order correct; bootstrap retry timer `clearTimeout`'d; all retry maps cleared; `enqueueImageProcessing` fronts every path with `isRestoreMaintenanceActive()`.
+- **Topic create / tag batch** `topics.ts`, `tags.ts`: `ER_DUP_ENTRY` catch (TOCTOU-safe), `INSERT IGNORE` + collision detection, image-file cleanup on failure.
+All release locks/connections in `finally`, clean up orphaned files on the losing path, and (now on BOTH the upload and backfill paths) guard `affectedRows===0`. No orphaned files, no leaked locks/connections, no half-written rows on any path traced.
 
 ---
 
 ## BOTTOM LINE
 
 **Confirmed latent bugs of any consequence: 1**
-- **BUG-2** — SW image-cache metadata lost-update (LOW; pre-existing; best-effort cache only, browser quota is the backstop).
+- **BUG-1** — SW image-cache metadata lost-update (LOW; pre-existing; = known AGG-R8c3-10; best-effort cache only, browser quota is the backstop; **DEFER unless a hard 50 MB cap is wanted**).
 
-**No new CRIT/HIGH/MED latent bugs.** Every parser/lifecycle/concurrency/arithmetic surface the prompt flagged (CICP code-2, ISOBMFF walker, ICC desc/mluc, chromaticity ÷0/NaN, gain-map, GPS byte-strip on malformed/truncated files, the SW bounded-HEAD abort path, backfill concurrency math, 0-width CSS) is either already correctly defended at HEAD, an intended/bounded trade-off, or unreachable with adversarial input. The boundary parsers are uniformly bounds-checked and `try/catch`-wrapped; the e8fce327 hardening batch is intact and symmetric.
+**No new CRIT/HIGH/MED latent bug.** The 10 commits that landed since the prior debugger sweep are clean on the latent-bug surface: the **AGG-R8c3-03 backfill orphan-cleanup closed the one open concurrency gap** the prior cycle identified (now both the upload-queue AND in-app-backfill paths guard `affectedRows===0` and clean up orphaned derivatives on a delete-during-processing race); the new `getLatestImageForOg` accessor is sound; the NCLX code-2 change was comment-only. Every parser is bounds-checked and `try/catch`-wrapped against adversarial input; every lock/connection releases in `finally`; every fire-and-forget is caught; every detached timer is cleaned or `unref`'d; no integer-overflow/NaN/÷0 escapes; no unhandled rejection.
 
-**Recommendation this cycle:** optionally serialize SW meta writes (BUG-2) only if the team wants the 50 MB image-cache cap to be hard rather than best-effort. Otherwise no code changes are warranted on the latent-bug surface.
+**Recommendation this cycle:** no code change is warranted on the latent-bug surface. BUG-1 remains the sole optional hardening (serialize SW meta writes), and it is defensible to leave as documented best-effort.

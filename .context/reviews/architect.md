@@ -1,211 +1,93 @@
-# Architect Review — GalleryKit (cycle 3, review-plan-fix)
+# Architecture & Design Review — Run-9 (post run-8 cycle-3)
 
-- **HEAD reviewed:** `ada92ba5` (`test(security): pin shared og-sanitize global-strip contract`)
-- **Scope:** architectural / design-risk — coupling, layering, cohesion, abstraction boundaries, contract stability, scalability cliffs, single-points-of-failure.
-- **Method:** read every file region cited below; no claim without file:line evidence.
-- **Prior-cycle closed items NOT re-litigated:** advisory-locks.ts docblock (ARCH-1 prior), the new `lib/og-sanitize.ts` abstraction (evaluated fresh below, judged sound), documented-accepted tradeoffs (single-pool/single-writer, `view_count` in-memory buffer, `@/lib/storage` unwired, `revalidate=0`, advisory-locks scoped to MySQL server).
+**Agent:** architect (architectural/design risks, coupling, layering, module boundaries, abstraction leaks, scalability, separation of concerns)
+**Date:** 2026-06-13
+**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
+**HEAD at review:** `ce0029aa` (working tree clean; only `.context/reviews/*.md` carry edits)
+**Method:** Authoritative layering scans (`grep -rn "from '@/app/" lib/`, `@/db` importer enumeration, config-leaf purity), read of the three image-encode write sites, the storage seam, the ICC token ladders, and the data-access cache discipline. Cross-checked every finding against `_aggregate.md` (run-8 c3) and `plan-336` to avoid re-reporting deferred items as new.
 
 ---
 
 ## Summary
 
-The architecture is, on the whole, disciplined: the data-access privacy boundary, the config-flow layering, and the concurrency-lock design are all stronger than typical. The new `og-sanitize.ts` abstraction is correctly placed and closes a real symmetry gap. The genuine design risks are narrow and concentrated:
+The module layering is, on the whole, **disciplined**: `process-image.ts` and `gallery-config-shared.ts` are clean leaves (no upward imports), there is exactly **one** `lib`→`app` inversion (`api-auth.ts`, already recorded), and the admin tunable flow (`gallery-config-shared` → `gallery-config` → `image-queue`) is respected by every consumer. The substantive architectural risk this cycle is **not** a layering violation — it is **logic triplication of the color-encode write path across three independently-maintained sites** (`image-queue`, `admin-backfill-runner`, `scripts/backfill-color-pipeline`), coupled only by hand-written "mirrors X" comments. That risk has **already materialized once**: the AGG-R8c3-03 orphan-leak fix landed in the in-app runner but is **structurally absent from the sidecar script**, so the two backfill entry points the repo documents as equivalent now have divergent correctness guarantees. The triplicated ICC token ladder (AGG-R8c3-13, deferred) is the lower-stakes sibling of the same root cause.
 
-1. **ARCH-1 (Medium):** the in-app backfill runner re-encodes and writes derivative files but — unlike the upload queue worker — never checks `affectedRows` on its version-bump UPDATE, so a `deleteImage` that races a backfill leaks orphaned derivative files. The two writers diverge on a contract the queue worker explicitly enforces.
-2. **ARCH-2 (Medium):** `lib/api-auth.ts` imports `isAdmin` from `@/app/actions/auth`, an upward lib→app dependency. The auth primitive lives in the `app` layer, forcing a `lib` module to reach up into it — a layering inversion that couples the whole `lib` boundary to a server-action file.
-3. **ARCH-3 (Medium):** the ICC-name→gamut string-token matching is triplicated across three functions (`color-detection.inferColorPrimaries`, `process-image.resolveColorPipelineDecision`, `process-image.resolveAvifIccProfile`) with identical token sets but divergent outputs. A new gamut keyword must be added in three places or detection silently disagrees with delivery.
-4. **ARCH-4 (Low):** `COLOR_IMPACTING_KEYS` (settings-hash.ts) is a hand-maintained list that must track `GalleryConfig` shape; it already drifted once (3-key→9-key). Not derived from a single source.
-5. **ARCH-5 (Low):** the documented "SERVER-ONLY" libs (`data.ts`, `gallery-config.ts`, `image-queue.ts`, `process-image.ts`, etc.) enforce that boundary only by comment, not by the `server-only` package guard. One file (`caption-generator.ts`) does use it — the inconsistency is the tell.
-
-Top risk to action this cycle: **ARCH-1** (real disk leak with a clear, low-risk fix). ARCH-2/ARCH-3 are maintenance-hazard refactors worth scheduling but lower urgency.
+The `@/lib/storage` abstraction is a **dead seam** (390 LOC consumed only by its own index + a test), but it is honestly self-documented as unwired and is cheap to keep — record-only, not a defect.
 
 ---
 
-## Analysis
+## Findings by severity
 
-### New abstraction evaluation: `lib/og-sanitize.ts` — boundary is correct (no finding)
+### MEDIUM
 
-`apps/web/src/lib/og-sanitize.ts:1-30` exports `sanitizeForOg` + `OG_C0_CONTROL_CHARS`, consumed by both OG routes (`app/api/og/route.tsx:5`, `app/api/og/photo/[id]/route.tsx:8`) and locked by two contract tests (`__tests__/og-sanitize.test.ts`, `__tests__/sanitize-for-og-global.test.ts`).
+#### ARCH-R9-01 — The color-encode + column-write logic is triplicated across 3 sites; the orphan-leak fix is asymmetric (root cause already materialized)
+- **Boundary at issue:** the operation "re-run `processImageFormats`, re-run `detectColorSignals`, resolve `colorPipelineDecision`, write the 10-column color set, handle delete-mid-reencode" is implemented THREE times with no shared writer:
+  1. **Upload path** — `lib/image-queue.ts:335` (`processImageFormats`) + conditional UPDATE with the `affectedRows === 0 → cleanup` guard (`:367-382`).
+  2. **In-app backfill** — `lib/admin-backfill-runner.ts:541` (`detectColorSignals`) + UPDATE at `:557-570` **with** the AGG-R8c3-03 `affectedRows === 0 → cleanupDeletedMidReencodeVariants` guard on BOTH branches (`:573`, `:605`).
+  3. **Sidecar script** — `scripts/backfill-color-pipeline.ts:174` (`detectColorSignals`) + batched `flushBatch()` UPDATEs at `:320-342` **without** any `affectedRows` guard.
+- **Evidence of the coupling being comment-only:** `admin-backfill-runner.ts:523` "mirrors backfill-color-pipeline.ts"; `:582-590` "The operator script already has the correct semantics"; `scripts/backfill-color-pipeline.ts:98` "This mirrors `admin-backfill-runner.ts:268-273`", `:195` "Mirrors admin-backfill-runner.ts:268-273". The column LIST (`pipeline_version, icc_profile_name, color_primaries, transfer_function, matrix_coefficients, is_hdr, has_gain_map, color_pipeline_decision, was_downscaled, avif_10bit`) is byte-for-byte duplicated at `admin-backfill-runner.ts:559-568` and `backfill-color-pipeline.ts:322-331`.
+- **Why it's a maintainability/correctness risk:** the three copies are kept in sync by developer vigilance and per-file tests (`backfill-color-pipeline.test.ts` pins the script's column set; `admin-backfill-runner-detection-failure.test.ts` pins the runner's no-version-bump semantics), **not** by a shared function the tests could anchor on. CLAUDE.md asserts the two backfill paths "persist the SAME DB column set" and "never strand stale color metadata" — true for the column LIST, but **false for the delete-race guarantee**: the script's `flushBatch` is decoupled from the per-row encode, has no per-image lock (its docstring admits this, `:36-41`) AND no `affectedRows` check, so a `deleteImage` that races a sidecar re-encode of the same id leaks orphaned derivatives exactly as the runner did before AGG-R8c3-03 — the fix was applied to copy #2 and not copy #3.
+- **Concrete future-pain scenario:** WI-09 (HDR AVIF encoder) adds an `hdr_avif_filename` / `transfer_function='pq'` write. A developer updates the upload path and the in-app runner, runs the suite green (both per-file tests pass), and ships. The sidecar script — the path CLAUDE.md documents as the **production** backfill method (the prod container lacks `tsx`, so operators run the `--rm` sidecar) — silently writes the OLD column set on the next production backfill, stranding the new HDR metadata on every existing photo with no test failure.
+- **Fix (refactor direction):** extract a single `applyColorPipelineResult(db, id, { signals, wasDownscaled, avif10bit }): Promise<{ affectedRows }>` writer in a server lib leaf (e.g. `lib/color-pipeline-writer.ts`) that owns the column list AND the `affectedRows === 0 → cleanup` contract. Have all three callers import it. The script's batched-transaction shape can still call it per-row inside the `db.transaction` (the per-row UPDATE is already in a loop). Anchor ONE cross-site test on the shared writer instead of three per-file fixtures. At minimum (if the batched refactor is deemed too large this cycle): port the `affectedRows === 0 → unlink derivatives` guard into the script's `flushBatch` loop and update CLAUDE.md to stop claiming delete-race parity until then.
+- **Confidence:** High (all three sites read; the script's missing `affectedRows` confirmed by grep returning nothing).
+- **Relation to prior:** this is the architectural ROOT of AGG-R8c3-03 (which fixed only the symptom in the runner) and a higher-stakes sibling of AGG-R8c3-13 (deferred ICC-ladder duplication). Not previously reported as a single cross-site duplication finding.
 
-Assessment — the boundary is right:
-- **Placement in `lib/`:** correct. App-Router route files may only export conventional symbols (`runtime`, HTTP handlers); auxiliary helpers must live outside the route (same rationale as the sibling `og-photo-fetch.ts:1-8`). A shared cross-route helper belongs in `lib`.
-- **Client-safe classification:** it imports only `stripUnicodeFormatting` from `validation.ts` (`og-sanitize.ts:1`), and `validation.ts` itself imports only `@/lib/constants` + `@/lib/utils` (`validation.ts:1-2`) — no `fs`, no Sharp, no `@/db`, no `server-only`. So `og-sanitize` is genuinely client-safe even though it is presently consumed only server-side. This is the right default (no accidental server-only dependency baked in).
-- **Hidden coupling between the two OG routes:** the concern is unfounded. The shared module exposes a *pure string→string function* with no shared mutable state, no module-scoped cache, no I/O. Sharing it creates the intended coupling (one strip policy) without any hidden behavioral coupling. The "derive, don't copy" rationale in the docblock (`og-sanitize.ts:11-16`) is exactly the right call: the prior state had the per-photo route stripping while the home route rendered `siteTitle`/`topicLabel`/tags raw — a real defense-in-depth asymmetry, now closed.
+### LOW
 
-This is a model of how the repo handles its Unicode-format defenses (cf. `sanitize.ts:17` deriving `UNICODE_FORMAT_CHARS_RE` from the same `validation.ts` source). No change recommended.
+#### ARCH-R9-02 — `@/lib/storage` is a dead seam (390 LOC, zero production consumers) — record-only
+- **Boundary at issue:** `lib/storage/{index,local,types}.ts` exports a full backend abstraction — `getStorage()`, `getStorageSync()`, `switchStorageBackend()`, `getStorageBackendType()`, `getStorageBackendStatus()` (`index.ts:52-141`) — but the only importers are `lib/storage/index.ts` itself and `__tests__/storage-local.test.ts`. Production upload/processing/serving (`process-image.ts`, `serve-upload.ts`, `actions/images.ts`) use direct `fs`/`path`.
+- **Why it's a (minor) risk:** a seam that is never exercised by the real pipeline rots — the `StorageBackend` interface can drift away from what the fs code actually needs (path semantics, atomic-rename contract, ETag/mtime expectations) without anyone noticing, so the day someone tries to wire S3 they inherit an interface that was never validated against the real call sites. It also presents a `switchStorageBackend('local')` API that looks like a supported admin lever but is a no-op selector over a single backend.
+- **Disposition:** **RECORD-ONLY, not a defect.** CLAUDE.md explicitly states the storage backend "still exists as an internal abstraction… Do not document or expose S3/MinIO switching as a supported admin feature until the upload/processing/serving pipeline is wired end-to-end," and `index.ts:9-12` self-documents the unwired state honestly. This is a deliberate, documented placeholder. Keeping it is cheap; the honesty invariant is intact (no admin UI exposes it).
+- **Exit criterion / fix direction:** when storage backends become a real requirement, wire the abstraction at the `process-image` write site and the `serve-upload` read site FIRST (validating the interface against the real atomic-rename + ETag contract) before adding any second backend; until then, leave as-is. If it is decided storage backends will never ship, delete the module rather than let it accrue interface drift.
+- **Confidence:** High (import graph + CLAUDE.md cross-checked).
 
-### Data-access layer (`data.ts`) — privacy boundary is sound (no finding; one Low residual noted under ARCH-5 family)
+#### ARCH-R9-03 — 14 `@/db`-importing libs are server-only by docstring, enforced only by one boundary test (= AGG-R8c3-A5(b), severity re-assessed)
+- **Boundary at issue:** `data.ts, analytics-data.ts, tag-records.ts, admin-tokens.ts, rate-limit.ts, audit.ts, smart-collections.ts, image-queue.ts, gallery-config.ts, data-timeline.ts, session.ts, settings-hash.ts, admin-backfill-runner.ts, upload-processing-contract-lock.ts` all import `@/db`; **only** `caption-generator.ts:19` carries `import 'server-only'`.
+- **Why it's a risk:** the `lib/`↔client boundary is real (these modules pull the MySQL pool), but it is held by a single negative test (`__tests__/client-server-only-boundary.test.ts`) rather than per-module compiler guards. If that test is weakened or a new client component imports one of these transitively via a barrel, the server pool code can reach a client bundle — a much louder failure (build-time `server-only` error) is available for near-zero cost.
+- **Fix:** add `import 'server-only'` to the head of each of the 14 `@/db`-importing libs. This is a safe, mechanical change; it converts a test-time guard into a compile-time guarantee and makes the server boundary self-evident at each file.
+- **Disposition vs prior:** AGG-R8c3-A5 recorded this as LOW/deferred ("re-open during a server-only hardening pass"). I **concur with LOW** and with deferral — the boundary IS currently enforced. Re-stated here only to confirm status; the boundary-test still passes, so no escalation.
+- **Confidence:** High.
 
-The `adminSelectFields` → `publicSelectFields` / `adminListSelectFields` / `publicMapSelectFields` derivation (`data.ts:208-393`) is a genuinely strong architectural boundary, not fragile:
-- `adminSelectFields` is the single source of truth (`data.ts:208`).
-- Every narrower field set is **derived by destructuring-omit** from it (`data.ts:287-312`, `325-357`, `366-393`), so adding a field to the admin set does NOT silently leak it — the field lands in the public sets too unless explicitly omitted, and the *intent* of the omit list is visible at each derivation site.
-- THREE compile-time guards back it: `_privacyGuard` (`data.ts:417-419`), `_mapPrivacyGuard` (`data.ts:431`), `_largePayloadGuard` (`data.ts:448-449`), each using `Extract<keyof typeof publicSelectFields, _SensitiveKeys>` to force a TS error if a sensitive/large key reaches the public set.
-- `tagNamesAgg` (`data.ts:605`) is correctly shared across all four list queries (`getImagesLite:734`, `getImagesForFeed:783`, `getImagesLitePage:833`, `getImages:866`, `getAdminImagesLite:890`, `getImagesForSmartCollection:1326`), preventing the NULL-subquery regression documented in CLAUDE.md.
+#### ARCH-R9-04 — `lib/api-auth.ts` → `app/actions/auth` layering inversion (= AGG-R8c3-12, confirmed unchanged)
+- **Boundary at issue:** `lib/api-auth.ts:1` `import { isAdmin } from '@/app/actions/auth'` — the only `lib`→`app` edge in the codebase (authoritative scan confirms a single hit). `withAdminAuth` (mandatory on every admin API route) thus reaches UP into the server-action layer for its identity primitive.
+- **Why it's a risk:** unchanged from the prior write-up — no hard ESM cycle today, but a near-cycle that gets copied the moment a second `lib` module needs `isAdmin`. The identity read belongs in a leaf.
+- **Disposition:** **CONFIRMED STILL PRESENT, status unchanged, correctly deferred in plan-336 Deferred-3.** I concur with LOW/Med and with deferral: the auth check is correct; only the import direction is upside-down, and the extraction touches the auth surface (better landed in a dedicated cycle). No severity change.
+- **Fix direction (when picked up):** extract identity reads (`isAdmin`, session lookup) to `lib/auth-session.ts`; have both `app/actions/auth` and `lib/api-auth` import DOWN from it.
+- **Confidence:** Med (mechanism clear; impact latent).
 
-**Cached/non-Cached split coherence:** the eight `cache()` wrappers (`data.ts:1562-1573`, plus `getSmartCollectionBySlugCached:1299` and `getSeoSettings`) all wrap *per-request-stable, single-row-or-small-set, SSR-deduped reads* (image by id, topic by slug, tags, shared group). The uncached query functions are precisely the ones that should NOT be `cache()`-wrapped: paginated/cursor list queries (`getImagesLite`, `getImagesLitePage`, `getImages`, `getAdminImagesLite`) take pagination args that vary per call, and `searchImages`/`getMapImages`/`getImageIdsForSitemap` are one-shot. The split is coherent — `cache()` is applied exactly where request-scoped dedup pays off and withheld where argument variance would make it useless or wrong. No finding.
-
-The only residual is convention-dependence: the privacy guard only fires if a new sensitive key is added to BOTH `publicSelectFields` AND the `_PrivacySensitiveKeys` union. A dev who adds a sensitive column to `adminSelectFields`, forgets the omit, AND forgets the union entry leaks it silently. CLAUDE.md/AGENTS.md document the 3-step requirement, and the `privacy-fields.test.ts` fixture is a backstop, but the guard is not self-completing. Folded into ARCH-5 family (Low) rather than raised separately.
-
-### Config flow (`gallery-config-shared` → `gallery-config` → `image-queue`) — clean (no finding)
-
-- `gallery-config-shared.ts` has **zero imports** (verified) — a pure client-safe leaf of constants/types/validators (`GALLERY_SETTING_KEYS`, `isValidSettingValue`, `parseImageSizes`, etc.).
-- `gallery-config.ts` is the server layer: it imports `@/db` (`gallery-config.ts:12`), re-exports the shared symbols for server consumers (`gallery-config.ts:17-24`), resolves DB values with per-key validation + default fallback, and wraps the resolver in `cache()` (`gallery-config.ts:212`). The validate-vs-resolve responsibilities are cleanly separated across the two files.
-- `image-queue.ts` and `admin-backfill-runner.ts:597` both consume the resolved `GalleryConfig` and pass the encoder-relevant subset to `processImageFormats`. The dependency direction is strictly shared → config → consumer. No layering violation.
-
-The dual-path fallback inside `_getGalleryConfig` (`gallery-config.ts:107-208`) duplicates the defaults block, but that is a deliberate try/catch resilience pattern (DB-unreadable → all-defaults), not a layering smell. Acceptable.
-
----
-
-## Findings
-
-### ARCH-1 — Backfill runner leaks orphaned derivative files on delete-while-reencode (Medium, High confidence)
-
-**Files:** `apps/web/src/lib/admin-backfill-runner.ts:525-563`; contrast `apps/web/src/lib/image-queue.ts:367-382`; race partner `apps/web/src/app/actions/images.ts:538-620`.
-
-**Design smell — two writers, divergent delete-race contract.** GalleryKit has two code paths that write image derivative files: the upload queue worker and the in-app backfill runner. The queue worker treats "row deleted mid-processing" as a first-class case:
-
-```ts
-// image-queue.ts:368-382 — conditional UPDATE + orphan cleanup
-const [updateResult] = await db.update(images)
-    .set({ processed: true, pipeline_version: ..., ... })
-    .where(and(eq(images.id, job.id), eq(images.processed, false)));
-if (updateResult.affectedRows === 0) {
-    // Image was deleted during processing → clean up the files we just wrote
-    await Promise.all([ deleteImageVariants(...webp), ...(avif), ...(jpeg) ]);
-    return;
-}
-```
-
-The backfill runner does NOT mirror this. After re-encoding (which writes new derivative bytes via atomic rename) it issues an **unconditional** UPDATE keyed only on id and never inspects the result:
-
-```ts
-// admin-backfill-runner.ts:526-540
-await db.execute(sql`
-    UPDATE images SET pipeline_version = ${IMAGE_PIPELINE_VERSION}, ... WHERE id = ${row.id}
-`);
-return { ok: true };
-```
-
-**Why it's a risk — concrete leak sequence.** `deleteImage` (`images.ts:538`) does NOT acquire the per-image `gallerykit:image-processing:{id}` claim lock — it removes the row in a transaction (`images.ts:598-602`) and unlinks all derivatives best-effort (`images.ts:613-620`). The backfill *does* hold that claim lock during re-encode (`admin-backfill-runner.ts:455`), but the delete path ignores it. So:
-1. Backfill claims image N, begins re-encode.
-2. Admin deletes N: row gone, `deleteImageVariants` unlinks current `N*.{avif,webp,jpeg}`.
-3. Backfill's atomic renames land AFTER the unlink → `N_*.{avif,webp,jpeg}` re-materialize on disk.
-4. Backfill UPDATE matches 0 rows; runner does not check `affectedRows`; returns `{ ok: true }`, increments `processed`.
-5. **Orphaned derivative files for a deleted image persist forever**, and the run reports them as a successful re-encode.
-
-This is bounded (only when a delete races an active re-encode of the same row) and is a disk-leak, not data corruption — hence Medium, not High. But it is a direct inconsistency with a contract the sibling writer explicitly enforces, and the runner's own header advertises careful delete-safety ("If the process is killed mid-backfill, the next invocation will pick up where this one left off", `admin-backfill-runner.ts:48-51`) while missing this window.
-
-**Recommended refactor (in priority order):**
-1. Make the runner's version-bump UPDATE conditional and check the result, mirroring the queue worker. Change `WHERE id = ${row.id}` to also require the row still exists/processed, capture `affectedRows`, and on 0 run the same `deleteImageVariants` cleanup for webp/avif/jpeg before returning a new `{ ok:false, reason:'deleted-mid-reencode' }`. The runner already imports nothing extra-heavy; `deleteImageVariants` is exported from `process-image.ts` (used by `images.ts`).
-2. Add a `deleted-mid-reencode` tally to `AdminBackfillState` so the status surface distinguishes it from `processed` (consistent with the existing `skippedLocked`/`detectionFailures` discrimination).
-3. (Defense-in-depth, optional) have `deleteImage`/`deleteImages` acquire the `gallerykit:image-processing:{id}` claim lock before unlinking, so a delete waits for any active encode to finish. This is the more thorough fix but touches the delete hot path; the affectedRows guard (1) is sufficient and lower-risk.
-
-**Trade-off:** option 1 adds one cleanup branch and a counter — minimal surface, matches existing patterns. Option 3 is architecturally cleaner (delete honors the same lock every other writer respects) but adds a lock acquire + potential wait to user-facing deletes; defer unless the leak proves frequent.
-
-### ARCH-2 — `lib/api-auth.ts` depends upward on `app/actions/auth.ts` (layering inversion) (Medium, Medium confidence)
-
-**Files:** `apps/web/src/lib/api-auth.ts:1` (`import { isAdmin } from '@/app/actions/auth'`); the auth primitive's home `apps/web/src/app/actions/auth.ts:12-21` (imports ~10 `@/lib/*` modules).
-
-**Design smell — the `lib` boundary points up into `app`.** The dependency contract in this repo is otherwise consistent: `app/**` (routes, server actions) depends on `lib/**`; `lib/**` is the leaf. `app/actions/auth.ts` follows it (it imports `@/lib/session`, `@/lib/sanitize`, `@/lib/rate-limit`, `@/lib/auth-rate-limit`, `@/lib/audit`, `@/lib/request-origin`, etc.). But `lib/api-auth.ts` — the `withAdminAuth` wrapper that EVERY `/api/admin/**` route is required to use (per the `lint:api-auth` gate) — reaches back up into `app/actions/auth.ts` for `isAdmin` (`api-auth.ts:100`).
-
-**Why it's a risk:**
-- It creates a near-cycle at the module-graph level: `app/actions/auth.ts` pulls in a large `lib` subtree, and one `lib` module pulls `app/actions/auth.ts` back. There is no hard ESM import cycle today (auth.ts does not import api-auth.ts), but the boundary is no longer a DAG by layer — any future `lib`→`api-auth` import that also transitively reaches `auth.ts`'s lib deps risks a real cycle, and bundler/server-action boundary rules (`'use server'` files have special compilation semantics) make app→lib→app chains fragile.
-- It conceptually misplaces the auth primitive: `isAdmin()` is a pure-ish session/cookie check that the *lib* layer needs, yet it lives in the *server-action* layer. Anything in `lib` that wants to gate on admin identity must import an `app/actions` file — an inversion that will be copied by the next contributor.
-
-**Recommended refactor:** extract the session-identity primitives (`isAdmin`, `getCurrentUser`, and the cookie/session verification they wrap) into a `lib/auth-session.ts` (server-only) leaf, and have BOTH `app/actions/auth.ts` and `lib/api-auth.ts` import from there. `app/actions/auth.ts` keeps the `'use server'` login/logout mutations; the read-only identity checks move down a layer. This makes the layer graph a clean DAG again.
-
-**Trade-off:** the move touches every current `isAdmin` import site (~15 files, listed: `app/actions/*`, two `api/admin/*` routes, three admin pages). It is a mechanical re-point, but it is broad — schedule it as a focused refactor with the `lint:api-auth` + `lint:action-origin` gates as the safety net, not a drive-by. Confidence is Medium (not High) because the absence of a hard cycle today makes this a hygiene/future-proofing call rather than an active defect.
-
-### ARCH-3 — ICC-name→gamut string matching triplicated across detection and two delivery resolvers (Medium, High confidence)
-
-**Files:** `apps/web/src/lib/color-detection.ts:58-70` (`inferColorPrimaries`); `apps/web/src/lib/process-image.ts:661-713` (`resolveColorPipelineDecision`); `apps/web/src/lib/process-image.ts:754-785` (`resolveAvifIccProfile`).
-
-**Design smell — one fact, three hand-rolled parsers.** All three functions normalize the ICC name (`normalizeName`, shared from color-detection.ts — good) and then run the *same token ladder* over it:
-
-```
-displayp3 / p3d65 / dcip3 / adobe|adobergb / prophoto / bt2020|rec2020|iturbt2020 / srgb|iec61966
-```
-
-- `inferColorPrimaries` (color-detection.ts:62-67) maps those tokens → `colorPrimaries` enum (audit column).
-- `resolveColorPipelineDecision` (process-image.ts:690-707) maps the SAME tokens → `ColorPipelineDecision` enum (delivery).
-- `resolveAvifIccProfile` (process-image.ts:766-779) maps the SAME tokens → `AvifIccDecision` enum (AVIF output ICC).
-
-The docblock on `inferColorPrimaries` (color-detection.ts:56-57) even asserts it uses "the same canonical mapping as resolveColorPipelineDecision" — a comment promising a coupling the code does not structurally enforce.
-
-**Important distinction — the NCLX↔ICC *precedence inversion* is NOT a defect.** `detectColorSignals` resolves audit `color_primaries` NCLX-first (color-detection.ts:370-387), while `resolveColorPipelineDecision` resolves delivery ICC-name-first and falls back to NCLX only when the name is opaque (process-image.ts:665-685). The docblock (process-image.ts:665-682) explains this is intentional: the two answer different questions (what the container is tagged as vs. which working-space the photographer edited in). I agree — flipping the delivery resolver to NCLX-first would change delivered bytes for conflicting sources. Leave the precedence alone. The finding is strictly about the *duplicated token ladder*, not the precedence.
-
-**Why it's a risk.** When WI-09 (HDR/rec2100) lands, or any new gamut keyword needs recognizing (the comments at process-image.ts:709-712 and color-primaries.ts:33-34 already anticipate this), the keyword must be added to all THREE ladders. Miss one and detection disagrees with delivery — e.g. the audit panel shows `color_primaries=bt2020` while AVIF silently delivers sRGB because `resolveAvifIccProfile` did not learn the new token. That is a per-photo colorimetric correctness bug that no current test would catch (each function is tested in isolation against its own enum).
-
-**Recommended refactor:** introduce one canonical classifier in a client-safe module (alongside `color-primaries.ts`), e.g. `classifyIccNameToPrimaries(normalizedName): ColorPrimariesValue | null`, owning the single token ladder. Then:
-- `inferColorPrimaries` becomes `classifyIccNameToPrimaries(name) ?? 'unknown'`.
-- `resolveColorPipelineDecision` and `resolveAvifIccProfile` call the classifier first, then map the resulting `ColorPrimariesValue` through the existing `resolveDecisionFromPrimaries` (process-image.ts:649) / `resolveAvifFromPrimaries` (process-image.ts:745) — which already exist and already map primaries→decision. This collapses the three ladders into one and makes the primaries→decision step the only place delivery diverges. The precedence inversion is preserved (the resolvers still consult the ICC name before NCLX `signals`; only the *string-matching* is unified).
-- Lock with a test that walks every `ColorPrimariesValue` and asserts all three consumers agree on classification.
-
-**Trade-off:** modest refactor of three functions that already share `normalizeName` and already have primaries→decision helpers; risk is low because the token ladder is identical today (the refactor is behavior-preserving). The payoff is that the WI-09 gamut addition becomes a one-line change instead of a three-site change with a silent-disagreement failure mode.
-
-### ARCH-4 — `COLOR_IMPACTING_KEYS` is a hand-maintained list that must track `GalleryConfig` (Low, High confidence)
-
-**File:** `apps/web/src/lib/settings-hash.ts:37-46` (`COLOR_IMPACTING_KEYS`) + `buildHashFromConfig:79-93`.
-
-**Design smell — a second, manually-curated subset of the settings keys.** The ETag-invalidation hash is computed over a hardcoded list of 9 keys (settings-hash.ts:37-46). This list is NOT derived from `GALLERY_SETTING_KEYS` (gallery-config-shared) nor from the `GalleryConfig` shape; it is a separate literal that a developer must remember to extend whenever a new setting affects encoded bytes. The docblock itself records that it already drifted: "AGG-R7-08 corrected this docstring from a stale 3-key summary" (settings-hash.ts:6-7), and `buildHashFromConfig` (settings-hash.ts:81-90) re-lists the same 9 fields a third time as `config.*` accessors.
-
-**Why it's a risk.** Adding a new color/quality/size setting to `gallery-config-shared` + `GalleryConfig` + `image-queue` (the documented 3-step) but forgetting this list means cached derivatives are NOT invalidated when an admin flips the new setting — exactly the failure mode the hash exists to prevent (the docblock's own example: an admin flips `force_srgb_derivatives` to fix a colorimetric bug and ships it only to fresh browsers). The consequence is a subtle, hard-to-diagnose "stale bytes on existing clients" bug, deferred until someone changes the setting in production. Low severity because the list is correct today and changes to color-impacting settings are infrequent.
-
-**Recommended refactor:** drive the hash off the resolved `GalleryConfig` field set with a typed exhaustiveness check, OR add a single source-of-truth array (e.g. `COLOR_IMPACTING_CONFIG_FIELDS: (keyof GalleryConfig)[]`) consumed by both `buildHashFromConfig` and the DB-fetch path, with a `satisfies` assertion so a new color-impacting field that is not listed produces a type error. Pair with a test that asserts the DB-key list and the config-field list have matching cardinality.
-
-**Trade-off:** the typed approach removes the drift class entirely; cost is a small refactor of two functions that already enumerate the same fields. Worth doing opportunistically, not urgent.
-
-### ARCH-5 — "SERVER-ONLY" libs enforced by comment, not by `server-only` guard (Low, Medium confidence)
-
-**Files:** `apps/web/src/lib/gallery-config.ts:8-10` (comment "This module imports from @/db and is SERVER-ONLY"), and the same convention-only posture in `lib/data.ts`, `lib/image-queue.ts`, `lib/process-image.ts`, `lib/analytics-data.ts`, `lib/db-restore.ts`, `lib/admin-tokens.ts` (verified: zero `server-only` imports in any of them). Contrast `apps/web/src/lib/caption-generator.ts`, which DOES `import 'server-only'`.
-
-**Design smell — inconsistent enforcement of the most important `lib` sub-boundary.** The repo clearly knows the `server-only` package (caption-generator uses it). Yet the heaviest server-only modules — every `@/db`-importing data/config/queue file — declare their server-only-ness only in a docstring. Today nothing imports them from a client component (verified: no `components/**` imports `process-image`/`image-queue`), so there is no live bug. But the boundary that prevents a future client import from silently dragging `@/db` (and Sharp, and `mysql2`) into the client bundle is a comment, not a compiler error.
-
-**Why it's a risk.** A future contributor importing, say, a type or a small helper from `data.ts` into a client component would not get a build-time failure — they would get a bloated/broken client bundle or a confusing runtime error, instead of the clear "You're importing a Server Component module on the Client" message that `server-only` produces at build time. The lone `caption-generator.ts` guard makes the omission elsewhere look accidental rather than deliberate.
-
-**Recommended refactor:** add `import 'server-only';` to the top of the DB-touching server modules (`data.ts`, `gallery-config.ts`, `image-queue.ts`, `process-image.ts`, `analytics-data.ts`, `db-restore.ts`, `admin-tokens.ts`, `settings-hash.ts`). The split between these and their client-safe counterparts (`color-primaries.ts`, `color-pipeline-decisions.ts`, `gallery-config-shared.ts`, `validation.ts`, `og-sanitize.ts`) is already clean, so this is purely additive — it codifies the existing intent. Same family includes the data.ts privacy-guard convention-dependence noted in the Analysis section (the guard is sound but self-completes only if the dev also updates the `_PrivacySensitiveKeys` union).
-
-**Trade-off:** trivial change, no behavioral effect on correct code; the only "cost" is that it will surface any pre-existing illicit client import as a build error (which is the point). Low risk, low effort.
+#### ARCH-R9-05 — ICC-name→gamut token ladder triplicated (= AGG-R8c3-13, confirmed unchanged)
+- **Boundary at issue:** the `displayp3/dcip3/adobe/prophoto/bt2020/rec2020` keyword ladder is hand-rolled at `color-detection.ts:62-66` (`inferColorPrimaries`), `process-image.ts:690-703` (`resolveColorPipelineDecision` string branch), and `process-image.ts:766-778` (`resolveAvifIccProfile`) — plus a primaries-enum derivation at `process-image.ts:652-656`. Three+ copies of the same keyword set.
+- **Why it's a risk:** a new gamut keyword (WI-09 / Rec.2100) added to one ladder but not the others makes the admin color audit silently disagree with delivery, uncaught by per-function tests. (The NCLX-first-audit vs ICC-first-delivery PRECEDENCE inversion is intentional/documented — explicitly NOT part of this finding; only the duplicated keyword matching is.)
+- **Disposition:** **CONFIRMED STILL PRESENT, status unchanged, correctly deferred in plan-336 Deferred-4** ("land with WI-09"). I concur with LOW and deferral — the three ladders agree today; consolidating with the WI-09 keyword addition lets the shared helper + cross-module test land with the change that would otherwise introduce the drift. No severity change. **Note:** this and ARCH-R9-01 share a root cause (duplicated color logic) and should ideally be consolidated together — the `iccNameToGamut(name)` helper and the `applyColorPipelineResult` writer are the same refactor theme.
+- **Confidence:** High.
 
 ---
 
-## Trade-offs (cross-cutting)
+## Status of prior DEFERRED architecture items (plan-336)
 
-| Concern | Option A | Option B |
-|---|---|---|
-| ARCH-1 delete race | `affectedRows`-guarded UPDATE + cleanup in runner (small, mirrors queue worker) | `deleteImage` acquires per-image claim lock (cleaner DAG of writers, but adds lock wait to user-facing delete) |
-| ARCH-2 layering | Extract `isAdmin`/identity to `lib/auth-session.ts` leaf (fixes DAG, broad re-point ~15 files) | Leave as-is (no hard cycle today; accept the inversion) |
-| ARCH-3 color ladder | One `classifyIccNameToPrimaries` classifier feeding existing primaries→decision helpers (behavior-preserving) | Keep three ladders, add a cross-consumer agreement test as a tripwire (cheaper, doesn't remove the hazard) |
+All three architecture items the prompt flagged are **RECORDED in plan-336**, present in the code, and **unchanged in substance** since run-8 c3. I re-assessed each; none warrants re-classification:
 
----
+| Prior ID | plan-336 entry | Code status at `ce0029aa` | My re-assessment |
+|---|---|---|---|
+| **AGG-R8c3-12** (lib→app inversion, `api-auth.ts:1`) | Deferred-3 (LOW/Med) | **PRESENT** — sole `lib`→`app` edge (authoritative scan: 1 hit) | **Concur LOW/Med + defer.** See ARCH-R9-04. No new replication; exit criteria not yet met. |
+| **AGG-R8c3-13** (triplicated ICC ladder) | Deferred-4 (LOW/High) | **PRESENT** — `color-detection.ts:62-66` + `process-image.ts:690-703` + `:766-778` | **Concur LOW + defer to WI-09.** See ARCH-R9-05. Ladders still agree; no live audit-vs-delivery drift. |
+| **AGG-R8c3-A5** (COLOR_IMPACTING_KEYS hand-maintained; server-only by docstring) | Deferred-10 (LOW/Med-High) | **PRESENT** — `settings-hash.ts` keys hand-listed; 14 `@/db` libs unguarded, only `caption-generator.ts:19` has `import 'server-only'` | **Concur LOW + defer.** See ARCH-R9-03. Boundary test still enforces; key list correct at 9. |
 
-## Not findings (verified sound or documented-accepted)
+**One materially-changed status to flag (improvement, not a defect):** AGG-R8c3-05 (home page ran two uncached `GROUP_CONCAT` listing queries) is now **CLOSED** — `getLatestImageForOgCached` exists (`data.ts:1597`) and `generateMetadata` uses it (`(public)/page.tsx:93`), replacing the wasteful full-listing call on the metadata path. The data-access `cache()` discipline is otherwise intact: the 9 documented `Cached` wrappers are present (`data.ts:1595-1649`); the remaining uncached listing functions (`getImagesLite`, `getImagesLitePage`, `getImages`, `getAdminImagesLite`) are intentionally per-request (pagination/cursor inputs make `cache()` keys unstable) — that is correct, not a gap.
 
-- **`og-sanitize.ts` abstraction** — correct placement, correctly client-safe, no hidden coupling (pure function). Sound.
-- **`data.ts` select-field privacy boundary** — single-source `adminSelectFields` + derived omit + three compile-time guards. Strong.
-- **`data.ts` Cached/non-Cached split** — `cache()` applied exactly to per-request-stable single-row reads; withheld from paginated/one-shot queries. Coherent.
-- **Config flow** `gallery-config-shared` (zero-import leaf) → `gallery-config` (DB + cache) → `image-queue`/`backfill`. Clean DAG.
-- **Advisory-lock concurrency design** — backfill runner acquires run-level lock (non-blocking), per-image claim lock matching `image-queue.ts` semantics, reserves pool connections (`resolveBackfillConcurrency`), treats pool exhaustion as retryable `locked` skip. No new second-writer race introduced *except* the delete-side gap in ARCH-1 (which is a missing-guard, not a missing-lock-on-the-writer).
-- **NCLX↔ICC precedence inversion** (audit NCLX-first vs delivery ICC-first) — intentional and documented (process-image.ts:665-682); explicitly NOT re-litigated.
-- **og-photo-fetch SSRF surface** — fetches `${origin}/uploads/jpeg/<validated-filename>` where origin is the request's own origin and filename derives from a DB-stored validated record; path is fixed, no user-controlled host. Bounded.
-- **Documented-accepted tradeoffs** — single-pool/single-writer topology, `view_count` in-memory buffer, `@/lib/storage` unwired abstraction, `revalidate=0` public freshness, advisory-locks scoped to MySQL-server. Per CLAUDE.md; not defects.
+**Net architectural posture:** layering is clean except the single recorded `api-auth` inversion; the live risk is duplicated color-encode logic (ARCH-R9-01 substantive; ARCH-R9-05 latent), which the deferred-item set under-weights because it scoped the duplication to the ICC ladder and missed that the SAME duplication spans the full backfill write path and has already produced one asymmetric correctness guarantee.
 
 ---
 
 ## References
 
-- `apps/web/src/lib/og-sanitize.ts:1-30` — new shared OG sanitizer (sound boundary).
-- `apps/web/src/app/api/og/route.tsx:5,82-88` and `apps/web/src/app/api/og/photo/[id]/route.tsx:8,81-83` — both OG-route consumers.
-- `apps/web/src/lib/validation.ts:1-2,58,92` — confirms `og-sanitize` dep chain is client-safe.
-- `apps/web/src/lib/admin-backfill-runner.ts:455,525-563` — ARCH-1: unconditional UPDATE, no `affectedRows` orphan cleanup.
-- `apps/web/src/lib/image-queue.ts:367-382` — the conditional-UPDATE + orphan-cleanup contract the backfill omits.
-- `apps/web/src/app/actions/images.ts:538-620` — `deleteImage` does not take the per-image claim lock (ARCH-1 race partner).
-- `apps/web/src/lib/api-auth.ts:1,100` — ARCH-2: lib→app `isAdmin` import.
-- `apps/web/src/app/actions/auth.ts:12-21` — auth primitive's current (app-layer) home.
-- `apps/web/src/lib/color-detection.ts:58-70,370-387` — ARCH-3 ladder #1 + the intentional NCLX-first audit precedence.
-- `apps/web/src/lib/process-image.ts:649-713,745-785` — ARCH-3 ladders #2/#3 + the intentional ICC-first delivery precedence.
-- `apps/web/src/lib/settings-hash.ts:37-46,79-93` — ARCH-4: triple-listed `COLOR_IMPACTING_KEYS`.
-- `apps/web/src/lib/gallery-config.ts:8-10,107-212` — ARCH-5: comment-only server-only; clean validate/resolve split.
-- `apps/web/src/lib/gallery-config-shared.ts` — zero-import client-safe config leaf (config flow is clean).
-- `apps/web/src/lib/data.ts:208-401,605,1562-1573` — sound privacy boundary + coherent Cached split (no finding).
-- `apps/web/src/lib/caption-generator.ts:1` — the one lib that does use `server-only` (ARCH-5 inconsistency tell).
+- `apps/web/src/lib/image-queue.ts:335,367-382` — upload-path encode + `affectedRows` cleanup guard (the canonical correct shape).
+- `apps/web/src/lib/admin-backfill-runner.ts:541,557-570,573,594-607` — in-app backfill; column UPDATE + AGG-R8c3-03 cleanup on both branches.
+- `apps/web/scripts/backfill-color-pipeline.ts:36-41,98,174,320-342` — sidecar script; batched UPDATE with NO `affectedRows` guard (orphan-leak asymmetry) + docstring admitting the per-image-lock gap.
+- `apps/web/src/lib/storage/index.ts:9-12,52-141` — dead-seam abstraction, honestly self-documented as unwired.
+- `apps/web/src/lib/api-auth.ts:1` — sole `lib`→`app` import inversion.
+- `apps/web/src/lib/color-detection.ts:62-66` ; `apps/web/src/lib/process-image.ts:652-656,690-703,766-778` — triplicated ICC-name→gamut ladder.
+- `apps/web/src/lib/process-image.ts` (no upward imports) ; `apps/web/src/lib/gallery-config-shared.ts` (no `@/db`, no `@/lib/gallery-config`) — confirmed clean leaves.
+- `apps/web/src/lib/caption-generator.ts:19` — the ONLY `import 'server-only'` guard among server libs.
+- `apps/web/src/lib/data.ts:1595-1649` — the 9 `cache()` wrappers ; `:1597` `getLatestImageForOgCached` (AGG-R8c3-05 fix) ; `apps/web/src/app/[locale]/(public)/page.tsx:93` (consumes it).
+- `plan/plan-336-run8-cycle3-deferred.md:24-36,73-78` — Deferred-3/4/10 (the prior architecture items).
