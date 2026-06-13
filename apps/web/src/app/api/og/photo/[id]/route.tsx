@@ -5,7 +5,7 @@ import { getImageCached, getSeoSettings } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { pickFirstAvailablePhotoBuffer } from '@/lib/og-photo-fetch';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
-import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
+import { stripUnicodeFormatting } from '@/lib/validation';
 import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rate-limit';
 import siteConfig from '@/site-config.json';
 
@@ -25,10 +25,16 @@ const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
  * content; equally inappropriate inside an OG image string — Satori
  * renders them as missing glyphs or drops them, depending on font).
  * Mirrors the same defense in `lib/atom-feed.ts` (R17-L1).
+ *
+ * AGG-4 (run-6 c1): use `stripUnicodeFormatting` (the GLOBAL-flag twin) rather
+ * than a bare replace against the non-global UNICODE_FORMAT_CHARS regex. That
+ * regex has no `/g` flag, so a single replace strips only the FIRST bidi/
+ * zero-width char — a value with two or more leaked the rest into the public OG
+ * card and JSON-LD. stripUnicodeFormatting replace-alls.
  */
 const OG_C0_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
 function sanitizeForOg(value: string): string {
-    return value.replace(UNICODE_FORMAT_CHARS, '').replace(OG_C0_CONTROL_CHARS, '');
+    return (stripUnicodeFormatting(value) ?? '').replace(OG_C0_CONTROL_CHARS, '');
 }
 
 /**

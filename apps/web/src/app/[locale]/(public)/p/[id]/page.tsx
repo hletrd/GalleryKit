@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { TagInfo, formatShutterSpeed } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { UNICODE_FORMAT_CHARS } from '@/lib/validation';
+import { stripUnicodeFormatting } from '@/lib/validation';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -32,9 +32,15 @@ function toIsoTimestamp(value: string | Date | null | undefined) {
  * rejected at admin write time, but a cheap strip here closes any future gap
  * (e.g., data imported from a raw DB restore that bypasses validation).
  * Matches the `sanitizeForOg` in the OG image route.
+ *
+ * AGG-4 (run-6 c1): use `stripUnicodeFormatting` (GLOBAL-flag twin), not a bare
+ * replace against the non-global UNICODE_FORMAT_CHARS regex. The non-global
+ * regex strips only the FIRST bidi/zero-width char, so a value with two or more
+ * leaked the rest into the JSON-LD structured data (camera/lens/exposure
+ * PropertyValues).
  */
 function sanitizeForOg(value: string): string {
-    return value.replace(UNICODE_FORMAT_CHARS, '');
+    return stripUnicodeFormatting(value) ?? '';
 }
 
 
