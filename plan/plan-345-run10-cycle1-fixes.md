@@ -3,7 +3,7 @@
 **Created:** 2026-06-14
 **HEAD at planning:** `9c40d261` (working tree clean, in sync with origin/master)
 **Source:** `.context/reviews/_aggregate.md` (cycle-8 fan-out) + per-agent reviews
-**Status:** PENDING
+**Status:** COMPLETE — both items DONE (Item 2 `aa8a6f8a`, Item 1 committed below). All gates green; deployed per-cycle.
 
 ## Context
 
@@ -47,12 +47,13 @@ The test must be deterministic-enough to not flake: a 200k sample makes the corr
 
 ### Progress
 
-- [x] Add distribution test to `base56.test.ts`
-- [x] Verify RED against a naive `%56` mutation (local, reverted) — confirmed RED at ratio 1.316 > 1.20; restored code green at ratio 1.057
-- [x] Gates green
+- [x] Add distribution test to `base56.test.ts` (500k-sample char-frequency, `max/min ratio < 1.20`, every-char-appears)
+- [x] Verify GREEN on current rejection-sampled code (ratio ~1.04-1.06; isolated run 10/10 pass)
+- [x] Verify RED against a naive `%56` mutation (local, reverted; base56.ts confirmed byte-identical to HEAD afterward) — the new test FAILED with `expected 1.3124... to be less than 1.2`, while the other 9 length/charset/differ tests stayed GREEN (proving they were blind to the regression)
+- [x] Gates green (full vitest + typecheck)
 - [x] Commit + push (GPG-signed, conventional + gitmoji)
 
-**Implemented:** commit `4f3b6df3` — `test(security): ✅ pin generateBase56 rejection-sampling uniformity`. Added a deterministic 200k-sample char-frequency distribution test (`max/min ratio < 1.20`, plus every-char-appears assertion). Verified RED against a `% 56`-only mutation (ratio 1.316) and GREEN on the rejection-sampled code (ratio 1.057). Full suite 220 files / 2095 tests pass; typecheck app+scripts exit 0.
+**Implemented:** commit `__ITEM1_SHA__` — added a deterministic 500k-sample char-frequency distribution test to `base56.test.ts`. Empirically validated thresholds (500k samples, run 5×): correct rejection-sampled code ratio 1.0378-1.0601, naive `%56` ratio ~1.30; the 1.20 threshold sits safely between (non-flaky on correct code). RED-on-revert proven by mutating away the `while (randomValue >= 224)` loop. No production code change.
 
 ---
 
@@ -81,7 +82,7 @@ Update the `SCAN_ROOTS` description in CLAUDE.md:505 to add the third entry the 
 - [x] Update CLAUDE.md:505 to add `app/[locale]/(public)/`
 - [x] Commit + push (GPG-signed, conventional + gitmoji)
 
-**Implemented:** commit `__ITEM2_SHA__` — CLAUDE.md:505 sentence updated from "`components/` + the admin route group `app/[locale]/admin/`" to add "+ the public route group `app/[locale]/(public)/`". Matches the live 3-entry array.
+**Implemented:** commit `aa8a6f8a` — CLAUDE.md:505 sentence updated from "`components/` + the admin route group `app/[locale]/admin/`" to add "+ the public route group `app/[locale]/(public)/`". Matches the live 3-entry array.
 
 ---
 
