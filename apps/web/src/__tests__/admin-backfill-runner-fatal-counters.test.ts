@@ -311,3 +311,76 @@ describe('AGG-R8-10 (run-8 c2): a MIXED run reports processed>0 AND errors>0 sim
         expect(s.completedRuns).toBeGreaterThan(0);
     });
 });
+
+describe('AGG-R8c3-11/TEST-2 (run-8 c3): a corrupt-width row is skipped as encode-failed, never re-encoded', () => {
+    // AGG-R8-09 (run-8 c2) added a width re-validation BEFORE the lock-critical
+    // re-encode block: a legacy/corrupt row with width <= 0 (or non-finite)
+    // would otherwise reach processImageFormats → opaque Sharp .resize({width:0})
+    // throw. The guard classifies it as 'encode-failed' (NO version bump, stays
+    // a candidate) WITHOUT calling processImageFormats. This load-bearing
+    // data-integrity contract (a corrupt-width row must never be falsely
+    // reported re-encoded) had NO test — all 4 backfill suites used width:100.
+    beforeEach(() => {
+        _resetAdminBackfillStateForTesting();
+        queryMock.mockReset();
+        releaseMock.mockReset();
+        executeMock.mockReset();
+        processImageFormatsMock.mockClear();
+
+        queryMock.mockImplementation(async (sqlText: string) => {
+            if (typeof sqlText === 'string' && sqlText.includes('GET_LOCK')) return [[{ acquired: 1 }]];
+            if (typeof sqlText === 'string' && sqlText.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
+            return [[]];
+        });
+
+        // One candidate row with an invalid stored width (0). The guard must
+        // fire BEFORE any encode or UPDATE.
+        executeMock.mockImplementation(async (arg: unknown) => {
+            const text = staticSqlText(arg);
+            if (text.includes('SELECT')) {
+                return [
+                    [
+                        {
+                            id: 1,
+                            filename_original: 'original-1.jpg',
+                            filename_avif: 'a.avif',
+                            filename_webp: 'a.webp',
+                            filename_jpeg: 'a.jpg',
+                            icc_profile_name: null,
+                            color_primaries: null,
+                            width: 0,
+                        },
+                    ],
+                ];
+            }
+            return [{ affectedRows: 1 }];
+        });
+    });
+
+    it('width<=0 → encodeFailures, no processImageFormats call, no version-bump UPDATE', async () => {
+        const result = await triggerAdminBackfill();
+        expect(result.status).toBe('queued');
+        await vi.waitFor(
+            () => {
+                if (readAdminBackfillState().running) {
+                    throw new Error('backfill runner still draining');
+                }
+            },
+            { timeout: 20_000, interval: 25 },
+        );
+
+        const s = readAdminBackfillState();
+        // Classified as encode-failed (NO version bump → stays a candidate).
+        expect(s.encodeFailures).toBe(1);
+        // Never falsely reported as re-encoded.
+        expect(s.processed).toBe(0);
+        // The guard fired BEFORE the encode — processImageFormats not called.
+        expect(processImageFormatsMock).not.toHaveBeenCalled();
+        // No version-bump UPDATE was issued for the corrupt row.
+        const updateCalls = executeMock.mock.calls
+            .map((c) => staticSqlText(c[0]))
+            .filter((t) => t.includes('UPDATE images SET'));
+        expect(updateCalls.length).toBe(0);
+        expect(s.completedRuns).toBeGreaterThan(0);
+    });
+});

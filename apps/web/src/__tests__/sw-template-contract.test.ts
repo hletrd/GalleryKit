@@ -108,6 +108,31 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(fn).toMatch(/const fresh = await startRevalidate\(\);/);
         expect(fn).toMatch(/const response = await startRevalidate\(\);/);
     });
+
+    // AGG-R8c3-11/TEST-3 (run-8 c3): the synchronous HEAD ETag probe MUST be
+    // bounded by AbortSignal.timeout so a slow/hung network does not stall the
+    // warm-cache masonry paint per tile (AGG-R8-05). The reference
+    // lib/sw-cache.ts does NOT implement HEAD probing, so the template is the
+    // ONLY copy of this logic — dropping the signal would silently regress the
+    // bound with a green suite. Pin the bounded HEAD on the probe fetch.
+    it('the HEAD ETag probe is bounded by AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)', () => {
+        const fn = imageFn();
+        // The HEAD probe fetch must carry both method: 'HEAD' and the abort signal.
+        const headIdx = fn.indexOf("method: 'HEAD'");
+        expect(headIdx).toBeGreaterThan(-1);
+        // The signal must appear within the same fetch options object (a small
+        // window after the method key).
+        const optionsWindow = fn.slice(headIdx, headIdx + 200);
+        expect(optionsWindow).toMatch(/signal:\s*AbortSignal\.timeout\(HEAD_REVALIDATE_TIMEOUT_MS\)/);
+        // The timeout constant is defined (and small — a few hundred ms).
+        expect(TEMPLATE).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
+    });
+
+    it('the generated sw.js carries the same bounded HEAD probe as the template', () => {
+        const generated = readFileSync(resolve(__dirname, '../../public/sw.js'), 'utf-8');
+        expect(generated).toMatch(/signal:\s*AbortSignal\.timeout\(HEAD_REVALIDATE_TIMEOUT_MS\)/);
+        expect(generated).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/);
+    });
 });
 
 describe('proxy.ts admin-render marker (COR-R4C6-05)', () => {

@@ -30,6 +30,25 @@ const MIGRATE_SRC = fs.readFileSync(
     'utf8',
 );
 
+/**
+ * AGG-R8c3-16(a) / COR-3 / CRT-5 (run-8 c3): the column + index tripwires below
+ * previously used a bare `MIGRATE_SRC.includes(name)`, which is satisfied by the
+ * name appearing ONLY in a comment — a developer who documents "we should add an
+ * idx_foo index" in a comment but forgets the actual ensureIndex/DDL would pass.
+ * Strip line (`// …`) and block (`/* … *\/`) comments so the presence check runs
+ * against executable code only. (String/template literals are kept — index and
+ * column names legitimately appear inside DDL string literals.)
+ */
+function stripJsComments(src: string): string {
+    return src
+        // Block comments (non-greedy, across newlines).
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        // Line comments to end of line.
+        .replace(/\/\/[^\n]*/g, ' ');
+}
+
+const MIGRATE_SRC_CODE = stripJsComments(MIGRATE_SRC);
+
 function collectTables(): Array<{ table: string; columns: string[] }> {
     const out: Array<{ table: string; columns: string[] }> = [];
     for (const exported of Object.values(schema)) {
@@ -76,7 +95,9 @@ describe('reconcileLegacySchema mirrors the full Drizzle schema (COR-R4C1-13)', 
     it.each(tables.map((t) => [t.table, t.columns] as const))(
         'migrate.js mentions every column of %s',
         (_table, columns) => {
-            const missing = columns.filter((c) => !MIGRATE_SRC.includes(c));
+            // AGG-R8c3-16(a): match against comment-stripped source so a column
+            // mentioned only in a comment cannot satisfy the mirror requirement.
+            const missing = columns.filter((c) => !MIGRATE_SRC_CODE.includes(c));
             expect(missing).toEqual([]);
         },
     );
@@ -138,9 +159,11 @@ describe('reconcileLegacySchema mirrors every drizzle SQL index (AGG-R8-10 / TRC
         (indexName) => {
             // Present either as a standalone ensureIndex('<name>', …) call or as
             // an inline `INDEX <name> (...)` inside a CREATE TABLE body — both
-            // embed the index name as a literal token in migrate.js.
+            // embed the index name as a literal token in migrate.js code.
+            // AGG-R8c3-16(a): comment-stripped so a name mentioned only in a
+            // comment cannot satisfy the mirror requirement.
             expect(
-                MIGRATE_SRC.includes(indexName),
+                MIGRATE_SRC_CODE.includes(indexName),
                 `Index \`${indexName}\` is declared in a drizzle/*.sql migration but is NOT mirrored in scripts/migrate.js reconcileLegacySchema. ` +
                 `An existing-DB upgrade baselines the migration hash first, so reconcile is the sole applier — this index would be silently dropped. ` +
                 `Add an ensureIndex(...) call (or inline INDEX in the CREATE TABLE) per CLAUDE.md "Adding a new migration" step 3.`,
