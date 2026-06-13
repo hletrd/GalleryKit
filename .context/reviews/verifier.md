@@ -1,85 +1,159 @@
-# Verifier Review — Run-8 Cycle-3 (evidence-based correctness pass)
+# Verifier — Evidence-Based Correctness Verification (run-9 cycle-2 / orchestrator cycle 5)
 
-**Date:** 2026-06-13
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**HEAD verified against:** `ce0029aa` (working tree CLEAN, in sync with origin/master)
-**Mandate:** independently verify — against the actual code at HEAD, not the plan's word — that the 17 run-8 cycle-3 findings (AGG-R8c3-01..17) were addressed, and that the pinning tests are non-vacuous and the gates are actually green.
+**HEAD:** `1dde9b1e` · **Date:** 2026-06-13 · **Working tree:** CLEAN
+**Angle:** prove (by reading code + running/inspecting the pinning test) that each of the 6 newest fixes (`40a65aef`..`1dde9b1e`, plan-337) does what its commit message claims; catch any COSMETIC fix or VACUOUS test.
+
+> All evidence below was gathered by the verifier running the commands/regex/contrast-math directly at HEAD `1dde9b1e` — no claim is trusted on the plan's or commit's word.
+
+---
 
 ## Verdict
 
-**Status: PASS.** All 6 gates green (run live by me). All 10 findings the cycle CLAIMED as code-fixed are CONFIRMED-CLOSED with present, correct code AND non-vacuous pinning tests. The other 7 findings were DELIBERATELY DEFERRED to plan-336 (RECORDED, severity preserved) per the repo's deferred-fix rule — none was falsely marked closed. **Zero new correctness issues found. Zero incomplete/regressed fixes.**
+**Status: PASS** · **Confidence: high** · **Blockers: 0**
+
+All 6 fixes verified EFFECTIVE (not cosmetic) and their pinning tests proven NON-VACUOUS where applicable. All 6 gates green by independent measurement. No net-new finding.
 
 ---
 
-## 1. Gate baseline (run live by verifier this pass)
+## Gate Evidence (measured live this cycle by the verifier)
 
-| Gate | Command | Exit | Result |
-|---|---|---|---|
-| ESLint | `npm run lint --workspace=apps/web` | **0** | clean |
-| Typecheck | `npm run typecheck --workspace=apps/web` | **0** | `typecheck:app` (next typegen + tsc) + `typecheck:scripts` (7 JS files) both clean |
-| API-auth lint | `npm run lint:api-auth` | **0** | OK: 2 admin routes wrap `withAdminAuth` |
-| Action-origin lint | `npm run lint:action-origin` | **0** | "All mutating server actions enforce same-origin provenance." |
-| Public-route RL lint | `npm run lint:public-route-rate-limit` | **0** | OK: live/og(×2)/semantic/stripe-webhook |
-| Vitest (full) | `cd apps/web && npx vitest run` | **0** | **214 files passed (214) / 2067 tests passed (2067) / 0 failed**, 194.78s |
-| i18n leaf-key parity | leaf-count diff en.json↔ko.json | n/a | **837 = 837, 0 drift** (`only in en: []`, `only in ko: []` → MATCH) |
+| Check | Result | Command | Output |
+|-------|--------|---------|--------|
+| ESLint | **PASS** | `npm run lint --workspace=apps/web` | exit 0 (clean) |
+| Typecheck (app+scripts) | **PASS** | `npm run typecheck --workspace=apps/web` | exit 0 — `typecheck:app` "Types generated successfully"; `typecheck:scripts` checked 7 JS files + tsc scripts clean |
+| lint:api-auth | **PASS** | `npm run lint:api-auth --workspace=apps/web` | exit 0 |
+| lint:action-origin | **PASS** | `npm run lint:action-origin --workspace=apps/web` | exit 0 |
+| lint:public-route-rate-limit | **PASS** | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 |
+| Full vitest | **PASS** | `npx vitest run` | **215 files / 2068 tests passed, 0 failed** (COLD run, 165.66s) |
+| i18n leaf-key parity | **PASS** | leaf-key set diff en.json vs ko.json | **837 = 837**, en-only 0, ko-only 0 — MATCH |
+| libheif cold-flake | **NO REPRO** | full cold vitest | `backfill-color-pipeline` + `process-image-color-roundtrip` did NOT flake this run |
 
-**Cold-flake note (AGG-R8c3-09):** the documented cold-flake (`backfill-color-pipeline` + `process-image-color-roundtrip` under full parallelism) **DID NOT reproduce** on my cold run — the full suite passed 2067/2067 on the first try, no isolation rerun needed. Test count grew 2060→2067 (+7), consistent with the new pinning tests added this cycle. No RED observed at any point.
-
----
-
-## 2. Per-finding verification verdicts
-
-### 2a. Code-fixed this cycle (plan-335, commits 0017a34e..6be638d2) — 10 findings
-
-| Finding | Sev | Commit | Verdict | Evidence (file:line + what I checked) |
-|---|---|---|---|---|
-| **AGG-R8c3-01** NCLX code-2 isHdr side-effect: pin branch + correct false claim | MED | `22387f32` | **CONFIRMED-CLOSED** | `color-detection.ts:389-401` adds an honest comment at the live `const isHdr = transferFunction === 'pq' \|\| 'hlg'` derivation documenting the intentional reject-at-upload side-effect (the AGG-R8-06 "no delivered-byte impact" claim, which lived only in the immutable commit msg, is corrected here). Test `color-detection.test.ts` (`detectFromNclx(12, 2, 2, {icc:'PQ HDR'})`) is **non-vacuous**: the helper writes a REAL AVIF with an NCLX `colr` box transfer=2 and feeds a PQ-named ICC, then asserts `colorPrimaries==='p3-d65'` (NCLX primaries win) + `transferFunction==='pq'` + `isHdr===true`. Genuinely exercises the code-2 guard path. |
-| **AGG-R8c3-02** third `sanitizeForOg` copy + lying docstring | LOW | `0028ede4` | **CONFIRMED-CLOSED** | `(public)/p/[id]/page.tsx:14` now `import { sanitizeForOg } from '@/lib/og-sanitize'` — local copy + lying docstring deleted. All JSON-LD value sites (`:222,223,226`) use it. The shared `og-sanitize.ts:28-29` strips Unicode-format AND C0 (`OG_C0_CONTROL_CHARS` `:25`). C0-parity is **behaviorally** pinned by `og-sanitize.test.ts:34-43` (`sanitizeForOg('a\x00b\x07c\x1F')→'abc'`, tab/LF/CR preserved) and **structurally** by `sanitize-for-og-global.test.ts:66` (JSON-LD page imports the shared helper). |
-| **AGG-R8c3-03** backfill orphaned-file leak on delete-race (substantive) | MED | `0017a34e` | **CONFIRMED-CLOSED** | `admin-backfill-runner.ts` reads `affectedRows` on BOTH UPDATE branches — success (`:573`) and detection-failed (`:605`) — and on `=== 0` calls `cleanupDeletedMidReencodeVariants(row)` (`:430-442`) which `deleteImageVariants(DIR, fn, [])` for webp/avif/jpeg. The `sizes=[]` arg genuinely scans the dir (`process-image.ts:505-522` `fs.opendir`, matches `{name}_*{ext}`) → "removes ALL variants" claim is accurate. New `deleted-mid-reencode` reason is its own tally (`:720-726`); `hadFailures` (`:791`) excludes it so the WITH-FAILURES banner is not flipped. Test `admin-backfill-runner-deleted-mid-reencode.test.ts` is **non-vacuous**: forces `affectedRows:0`, asserts `processImageFormatsMock` WAS called (genuinely on the post-encode path), cleanup fired for all 3 dirs with `sizes===[]`, `deletedMidReencode===1`, `processed===0`, all failure counters 0, `lastRunHadFailures===false`. |
-| **AGG-R8c3-04** `text-destructive` dark-mode contrast 1.99:1 (widest public a11y) | MED | `77013cd0` | **CONFIRMED-CLOSED (math-verified)** | New `--destructive-text` token in `globals.css`: light `0 73.7% 41.8%` (`:43`), **dark `0 90.6% 70.8%`** (`:69,:97`), oklch dark `oklch(71% 0.17 22)` (`:139,:147`). `ui/alert.tsx:13` switched to `text-destructive-text`. Migration breadth verified complete: **grep for bare `text-destructive` text-color usages returns EMPTY** — all 20 sites converted to `text-destructive-text`, including public `login-form.tsx` + the shared `ui/alert.tsx` primitive. I computed the contrast: OLD L=30.6% on dark `--card`(L=3.9%) = **1.98:1** (matches reported 1.99:1, fails); NEW L=70.8% on dark card = **7.16:1** (clears 4.5:1). Even the `[data-theme]` card (L=14.9%) → 5.38:1. WCAG failure genuinely resolved. |
-| **AGG-R8c3-05** home page two uncached heavy GROUP_CONCAT queries | MED | `e9040d17` | **CONFIRMED-CLOSED (improved on plan)** | New `getLatestImageForOg` (`data.ts:873-887`) selects ONLY `{id, title}` (`:877`) — **no `leftJoin(imageTags)`, no `tagNamesAgg`/GROUP_CONCAT, no `groupBy`** (contrast `getImages` `:893-913` which has all three). Tag filter rides `buildImageConditions` as IN-subquery. And it's `cache()`-wrapped (`getLatestImageForOgCached` `:1597`) — the home metadata path uses the cached form (`page.tsx:93`), beating the plan's "uncached minimal query" target. Body still uses `getImagesLitePage` (`page.tsx:162`, the legitimate listing). Redundant heavy metadata query eliminated. |
-| **AGG-R8c3-06** 24px alias button + scale-token audit blind spot | MED | `d70c1d98` | **CONFIRMED-CLOSED (probe-verified)** | `categories/topic-manager.tsx:333` button now `min-h-11 min-w-11` (was `min-h-6 min-w-6`). Audit `touch-target-audit.test.ts:341-356` adds 4 scale-token FORBIDDEN patterns (`(?:min-h\|min-w\|size\|h\|w)-(?:[1-9]\|10)` on `<Button>`/`<button>`, literal + cn(), with a `≥44` override lookahead). I **probed the regexes directly**: live-bug `min-h-6 min-w-6` → matches (true); fixed `min-h-11 min-w-11` → does NOT match (false, lookahead works); `size-6` + cn()`min-h-7` → match. Genuinely closes the blind spot. |
-| **AGG-R8c3-07/08** amber dark-mode contrast ×2 | LOW | `ecd093ab` | **CONFIRMED-CLOSED** | `histogram.tsx:608` now `text-amber-700 dark:text-amber-300` (sRGB-preview span); `settings/settings-client.tsx:674` now `text-amber-700 dark:text-amber-400` (was the outlier `text-amber-600` no-dark). |
-| **AGG-R8c3-11 (TEST-1/2/3)** + **16(a)** test depth + migrate tripwire | LOW | `6454c4a3` (+`0028ede4` TEST-1) | **CONFIRMED-CLOSED (all 3 non-vacuous)** | **TEST-1:** home OG route `api/og/route.tsx` now pinned at `sanitize-for-og-global.test.ts:68` (`it.each` import assertion). **TEST-2:** new `describe` block at `admin-backfill-runner-fatal-counters.test.ts:314+` uses `width: 0` and asserts `encodeFailures===1`, `processed===0`, `processImageFormats NOT called`, **zero `UPDATE images SET` calls** — strong data-integrity contract. **TEST-3:** `sw-template-contract.test.ts:118-134` asserts `method:'HEAD'` + `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` + the timeout const in BOTH `sw.template.js` AND generated `sw.js`. **16(a):** `migrate-reconcile-coverage.test.ts:42-50` adds `stripJsComments` (block `:45` + line `:47`) → `MIGRATE_SRC_CODE`; column (`:100`) and index (`:166`) tripwires now match comment-stripped source — a name in a comment no longer satisfies. |
-| **AGG-R8c3-14** CLAUDE.md doc-completeness ×4 | LOW | `5f097262` | **CONFIRMED-CLOSED** | All 4 present at HEAD: DOC-1 SW bounded HEAD `AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` 300ms (`CLAUDE.md:369`); DOC-2 raw checkbox/radio scanner (`:513`) + scale-token pattern; DOC-3 og-sanitize runtime layer + all 3 consumers (`:181`); DOC-4 per-photo OG card route + home og:image→it via `getLatestImageForOgCached` (`:101-102`). |
-| **AGG-R8c3-16(b)** localize `retryFailedImage` invalid-id string | LOW | `6be638d2` | **CONFIRMED-CLOSED** | `images.ts:1087` now `t('invalidImageId')` (matches siblings `:553,659,806,887`). Key present in BOTH `en.json` and `ko.json` (1 each) → parity holds. |
-
-### 2b. Deliberately DEFERRED to plan-336 (RECORDED, severity preserved) — 7 findings
-
-These were NOT claimed code-fixed; they are recorded in `plan-336-run8-cycle3-deferred.md` with preserved severity + exit criteria. This is consistent with the repo's deferred-fix rule (LOW hygiene / record-only / already-owned). I confirmed each is genuinely deferred, not silently dropped:
-
-| Finding | Sev | plan-336 entry | Disposition |
-|---|---|---|---|
-| AGG-R8c3-09 encode-test parallelism flake | LOW | Deferred 1 | test-infra noise; warm-green (and did not reproduce for me) |
-| AGG-R8c3-10 SW meta lost-update (no CAS) | LOW | Deferred 2 | best-effort cache by design |
-| AGG-R8c3-12 lib→app layering inversion | LOW | Deferred 3 | no live ESM cycle; refactor-scope |
-| AGG-R8c3-13 triplicated ICC token ladder | LOW | Deferred 4 | DRY; land with WI-09 keyword |
-| AGG-R8c3-15 stale `KNOWN_VIOLATIONS['image-manager.tsx']=6` | LOW | Deferred 5 | **VERIFIED still 6** at `touch-target-audit.test.ts:182`, untouched this cycle — correctly deferred ("recount after Item 4"), NOT a missed fix |
-| AGG-R8c3-17 design polish (DES-5/6/7) | LOW | Deferred 6 | no WCAG fail; polish pass |
-| AGG-R8c3-A1..A5 + OWNED-1 (Stripe ACH) | LOW–HIGH | Deferred 7–11 | record-only tradeoffs; Stripe ACH already plan-316 (fails CLOSED, repo-rule-permitted) |
-
-**Note on AGG-R8c3-16(c) (CRT-3 home-og comment honesty):** this was a sub-item of AGG-R8c3-16; the substantive 16(a) tripwire + 16(b) i18n shipped. The comment-honesty nuance is subsumed by the DOC-4 CLAUDE.md update (`:101-102`) which now accurately states `pickFirstAvailablePhotoBuffer` behavior and the home og:image target. No outstanding falsehood found.
+**Vitest delta vs prior aggregate:** prior cycle measured 214 files / 2067 tests at HEAD `ce0029aa`. This batch is 215 files / 2068 tests — exactly +1 file +1 test, matching the new `admin-backfill-runner-deleted-mid-reencode-detection-failure.test.ts` added by `2251b122`. The count moved for the documented reason; nothing else changed in the suite shape.
 
 ---
 
-## 3. New correctness issues found while verifying
+## Per-Fix Verification
 
-**None.** I specifically stress-tested the high-risk areas:
-- **Backfill orphan-cleanup polarity** (AGG-R8c3-03): the `sizes=[]` directory-scan semantics are correct (`process-image.ts:505`), both UPDATE branches guarded symmetrically, counter partition exact. No regression to the f3667858 mixed-run counter contract.
-- **text-destructive migration breadth** (AGG-R8c3-04): grep confirms ZERO bare `text-destructive` text-color usages remain — no public surface (login/validation) missed.
-- **Scale-token audit non-vacuity** (AGG-R8c3-06): direct regex probe confirms the patterns fire on the exact live-bug shape and correctly exempt the fix.
-- **og-sanitize C0-parity** (AGG-R8c3-02): the shared function's C0-strip is behaviorally tested; the import is structurally pinned for all 3 consumers.
-- **NCLX code-2 test reachability** (AGG-R8c3-01): the helper writes a real AVIF box, not a stub — the guard path is genuinely exercised.
+### Fix 1 — `40a65aef` touch-target audit `max-h`/`max-w` false-positive + self-check — **PASS (effective + non-vacuous)**
 
-All claimed pinning tests assert the right behavior (no vacuous `expect(true).toBe(true)` or import-only checks where behavior matters). The SW TEST-3 and backfill TEST-2 in particular are strong contracts.
+**Claim:** the bare `h`/`w` FORBIDDEN branches now carry `(?<!max-)` so `max-h-10`/`max-w-9` are NOT flagged, while `h-8`/`min-h-6`/`h-10` still ARE; the 9 added negative fixtures are non-vacuous regression pins.
+
+**Code at HEAD:** every bare `h-8`/`h-9`/`h-10|w-10|size-10` literal, cn() composite, HTML `<button>`, and the 4 scale-token catch-all alternations now have `\b(?<!max-)…` (touch-target-audit.test.ts ~:300-365). `min-h`/`min-w`/`size` branches intentionally un-guarded (true floors).
+
+**Effectiveness PROVEN — verifier ran the EXACT committed regex in Node, with and without the lookbehind:**
+
+```
+scale-token catch-all:
+  max-h-10  WITH=pass   WITHOUT=FLAG     ← fix removes the false positive
+  max-w-9   WITH=pass   WITHOUT=FLAG     ← fix removes the false positive
+  h-8       WITH=FLAG   WITHOUT=FLAG     ← real floor still caught
+  min-h-6   WITH=FLAG   WITHOUT=FLAG     ← real floor still caught
+h-10|w-10|size-10 literal branch:
+  max-h-10  WITH=pass   WITHOUT=FLAG
+  h-10      WITH=FLAG   WITHOUT=FLAG
+```
+
+The fix is NOT cosmetic: under the reverted regex `max-h-10`/`max-w-9` flag; under the committed regex they pass, while genuine sub-44 tokens still flag.
+
+**Self-check NON-VACUOUS:** the 9 new fixtures (`max-h-10`, `max-w-9`, `max-h-8`, `max-w-10`, `max-h-screen`, `max-w-full`, cn() + HTML forms) live in the `does not flag valid` block, which asserts `FORBIDDEN.some(rule => rule.pattern.test(snippet))` is `false`. Reverting the `(?<!max-)` makes `max-h-10`/`max-w-9` match → `matched===true` → those fixtures go RED. (`max-h-screen`/`max-w-full` are robust regardless — they never match `-(?:[1-9]|10)` — but the numeric-suffix fixtures are the load-bearing non-vacuous pins.)
+
+**Test run:** `touch-target-audit.test.ts` → **12 passed / 12**.
+
+### Fix 2 — `300009d4` sidecar backfill `flushBatch` `affectedRows` cleanup guard — **PASS (effective)**
+
+**Claim:** capture `affectedRows` on BOTH UPDATE branches; on `affectedRows===0` clean up derivatives via `deleteImageVariants(dir, fn, [])` (dir-scan) AFTER the tx commits; count as `deletedMidReencode`, decrement `processed`, surface in summary.
+
+**Code at HEAD (`scripts/backfill-color-pipeline.ts` ~:337-395):**
+- Branch 1 (full color UPDATE): `const [res] = await tx.execute(sql\`UPDATE images SET pipeline_version=…\`)` then `if ((res as ResultSetHeader)?.affectedRows === 0) deletedMidReencodeFiles.push(item.files);` — present.
+- Branch 2 (derivative-only UPDATE): identical `const [res] = await tx.execute(...)` + same `affectedRows===0` push — present.
+- `cleanupDeletedMidReencode(files)` calls `deleteImageVariants(UPLOAD_DIR_{WEBP,AVIF,JPEG}, files.filename_*, [])` — `[]` confirmed (full dir-scan).
+- Cleanup runs AFTER `db.transaction(...)` returns (the `deletedMidReencodeFiles` array is drained post-commit), so a best-effort unlink error cannot roll back sibling updates — matches the comment.
+- `processed -= deletedMidReencodeFiles.length`, `deletedMidReencode += …`, and `deletedMidReencode=${deletedMidReencode}` added to the final summary line — present.
+
+Filenames are now threaded into each batch item (`updateBatch`/`derivativeBatch` carry `files: BatchFilenames`), populated from `row.filename_{webp,avif,jpeg}` at enqueue. Contract is now IDENTICAL to `admin-backfill-runner.ts`'s `cleanupDeletedMidReencodeVariants`. This closes the AGG-C4-02 production-path divergence. No unit test added (sidecar `main()` is hard to isolate; the `deleteImageVariants([])` dir-scan contract is independently pinned by `process-image-variant-scan.test.ts`, and the in-app twin is pinned by Fix 5) — acceptable given the runner-twin and contract coverage.
+
+### Fix 3 — `fd708c1e` sales StatusBadge light-mode contrast → `*-700` — **PASS (effective; contrast recomputed)**
+
+**Claim:** `downloaded` → `text-green-700 dark:text-green-400`, `pending` → `text-amber-700 dark:text-amber-400`; both 5.02:1 on white (vs failing 3.30/3.19 at -600).
+
+**Code at HEAD (`sales-client.tsx:95,97`):**
+```
+downloaded: cls: 'text-green-700 dark:text-green-400'
+pending:    cls: 'text-amber-700 dark:text-amber-400'
+```
+Confirmed exact.
+
+**Contrast recomputed by the verifier (WCAG 2.x relative-luminance, Tailwind palette, on #ffffff):**
+```
+green-600 (#16a34a) = 3.30:1  FAIL   (the old value)
+green-700 (#15803d) = 5.02:1  PASS   (the new value)
+amber-600 (#d97706) = 3.19:1  FAIL   (the old value)
+amber-700 (#b45309) = 5.02:1  PASS   (the new value)
+```
+The StatusBadge text is `text-xs` (small text) so the 4.5:1 floor (WCAG 1.4.3 AA) applies — both new values clear it. Dark `-400` variants were already passing and are retained. Verifier grep `text-green-600|text-amber-600|text-red-600` excluding `dark:` across `src/` → **0 residual light-mode -600 sites** (no match). Fix is effective, not cosmetic.
+
+### Fix 4 — `18de78eb` upload-worker delete-race cleanup `[]` dir-scan — **PASS (effective)**
+
+**Claim:** all 3 `deleteImageVariants` calls in the upload queue's `affectedRows===0` "deleted during processing" cleanup now pass `[]` (full dir-scan), so non-default `image_sizes` derivatives are also removed.
+
+**Code at HEAD (`image-queue.ts:384-386`):**
+```
+deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp, []),
+deleteImageVariants(UPLOAD_DIR_AVIF, job.filenameAvif, []),
+deleteImageVariants(UPLOAD_DIR_JPEG, job.filenameJpeg, []),
+```
+Verifier grep confirms these are the ONLY `deleteImageVariants` call sites in the file (plus the import at :8); all three carry the `[]` third arg. The `[]` form triggers the directory scan in `deleteImageVariants` (scan runs when `sizes.length === 0`), so every `{name}_{size}{ext}` variant is removed regardless of size config — closing the AGG-C4-04 non-default-size orphan. Contract now matches the runner + sidecar.
+
+### Fix 5 — `2251b122` test for runner's 2nd (detection-failure) cleanup branch — **PASS (test NON-VACUOUS)**
+
+**Claim:** the new test pins `admin-backfill-runner.ts:605` (detection-failed-but-encode-succeeded UPDATE), and would go RED if that guard were removed.
+
+**Runner control-flow verified at HEAD (`admin-backfill-runner.ts`):** detection failure sets `detectionError` in the `catch` and leaves `signals` undefined → the `if (signals)` first branch (`:556-578`, with the `:573` guard) is SKIPPED → execution reaches the SECOND UPDATE (`:596`) followed by the `:605` guard: `if ((updateResult as …)?.affectedRows === 0) { await cleanupDeletedMidReencodeVariants(row); return { ok: false, reason: 'deleted-mid-reencode' }; }`. Both guards call `cleanupDeletedMidReencodeVariants` which uses `deleteImageVariants(…, [])` for all 3 formats (`:430-435`).
+
+**Non-vacuity PROVEN by reasoning about the mock (`…-detection-failure.test.ts`):**
+- `detectColorSignalsMock` THROWS (`:47-49`) → forces `signals` undefined → guarantees the second branch is the one reached (not the first). `processImageFormatsMock` resolves OK (`:41`) so the encode "wrote" derivatives — the precondition for orphaning.
+- `executeMock` returns `[{ affectedRows: 0 }]` for ALL non-SELECT queries (`:179-180`) → the `:605` guard fires.
+- Assertions: `cleanedDirs` contains `/uploads/webp`, `/uploads/avif`, `/uploads/jpeg` (`:202-205`); every `deleteImageVariants` call's 3rd arg `toEqual([])` (`:207-209`); `deletedMidReencode===1`, `processed===0`, `detectionFailures===0`, `lastRunHadFailures===false` (`:214-223`).
+
+If the `:605` guard were deleted, the second branch falls through to `return { ok: false, reason: 'detection-failed' }`: (a) `deleteImageVariantsMock` is NEVER called → `cleanedDirs` is `[]` → `expect(cleanedDirs).toContain('/uploads/webp')` FAILS; and (b) the outcome becomes `detection-failed` → `state.detectionFailures` would be `1` → `expect(state.detectionFailures).toBe(0)` FAILS. TWO independent assertions flip RED. The commit message documents the same empirically-confirmed RED. Test is genuinely non-vacuous.
+
+**Test run:** detection-failure test + the success-branch sibling + `sanitize-for-og-global` → **8 passed / 8** across 3 files.
+
+### Fix 6 — `1dde9b1e` doc/comment honesty (4 sub-items) — **PASS (docs match code)**
+
+Each claim cross-checked against the ACTUAL code at HEAD:
+
+(a) **CLAUDE.md cache() count 9→10.** Verifier enumerated `= cache(` in `data.ts`: exactly **10** wrapped exports — `getSmartCollectionBySlugCached`(:1332), `getImageCached`(:1595), `getLatestImageForOgCached`(:1597), `getTopicBySlugCached`(:1598), `getTopicsCached`(:1599), `getTagsCached`(:1600), `getTopicsWithAliasesCached`(:1601), `getImageByShareKeyCached`(:1603), `getSharedGroupCached`(:1608), `getSeoSettings`(:1649). CLAUDE.md:357 now says "wraps 10" and the prose lists 9 `*Cached` + `getSeoSettings` = 10, including the previously-missing `getLatestImageForOgCached`. **Match.**
+
+(b) **CLAUDE.md COLOR_IMPACTING_KEYS citation `:34-46`→`:37-49`.** Verifier read `settings-hash.ts`: the array opens at line **37** (`const COLOR_IMPACTING_KEYS = [`) and closes at line **49** (`] as const;`). CLAUDE.md:263 now cites `:37-49` and counts **9** keys (5 color + 3 quality + 1 size) — the array has exactly 9 entries. **Match.**
+
+(c) **`(public)/page.tsx` home og:image comment.** The corrected comment (`:104-116`) now states "note there is NO base-JPEG last resort, only the sized `_NNN.jpg` derivatives are tried" and "302-redirects to the admin-configured `og_image_url`, or to the site homepage HTML if that setting is empty … NOT a freshly-generated 'site OG card'." Verifier confirmed against code: `pickFirstAvailablePhotoBuffer` (`og-photo-fetch.ts:75-86`) iterates ONLY `tryFetchPhotoBuffer(origin, baseFilename, size)` over sorted sizes and returns `null` on total miss — no base-JPEG path. The route's `if (!fetched)` (`route.tsx:109-115`) calls `buildFallbackResponse(req, …, seo.og_image_url || undefined)`; `buildFallbackResponse` (`:235-259`) 302s to `ogImageUrl` if present, else 302s to `${origin}/` (site root HTML). **Comment matches code exactly.**
+
+(d) **`p/[id]/page.tsx` JSON-LD asymmetry comment.** The new comment (`:217-228`) documents that `name`/`description`/`keywords`/breadcrumb `topic_label` are intentionally NOT `sanitizeForOg`-wrapped while EXIF PropertyValues ARE, justified by (1) `safeJsonLd` escaping all output + (2) write-time `containsUnicodeFormatting` validator-gating on the admin string fields vs un-gated EXIF. Verifier confirmed: `name: displayTitle`(:229), `description: image.description`(:230), `keywords`(:231) are bare; `camera_model`/`lens_model`/`exposure_time` wrapped in `sanitizeForOg`(:234-238). **Comment matches code; the security posture it describes is correct (defensible, not a fix-the-wrong-way trap).**
+
+**Test run:** `sanitize-for-og-global.test.ts` → 6/6 (the tightened C0-strip docstring change is comment-only).
 
 ---
 
-## 4. Summary
+## Net-New Findings
 
-- **Gates:** 6/6 green (lint 0, typecheck 0, 3 security lints 0, vitest 2067/2067 pass exit 0) + i18n parity 837=837.
-- **Findings claimed code-fixed (10):** **10/10 CONFIRMED-CLOSED**, all with present+correct code and non-vacuous tests. Two MED items (AGG-R8c3-04 contrast, AGG-R8c3-06 audit) additionally hand-verified by independent computation/probe.
-- **Findings deferred (7):** all genuinely RECORDED in plan-336 with preserved severity; none falsely closed (notably AGG-R8c3-15 KNOWN_VIOLATIONS=6 correctly left for the deferred plan).
-- **New issues:** 0. **Incomplete fixes:** 0. **Regressions:** 0.
+**NONE.** Every fix is effective (not cosmetic) and every applicable pinning test is non-vacuous. No fix failed verification, so no fix produces a net-new finding this cycle.
 
-**Recommendation: APPROVE.** The run-8 cycle-3 batch does what it claims; this is a convergence-clean cycle.
+I specifically looked for the cosmetic/vacuous failure modes and did not find them:
+- Fix 1 is not cosmetic (proven by the WITH/WITHOUT regex divergence) and its self-check is not vacuous (numeric `max-*` fixtures flip RED on revert).
+- Fix 2's guard is on BOTH branches and the cleanup uses the `[]` dir-scan (not the default-sizes form) — the exact bug the runner/queue fixes also closed.
+- Fix 3's color values are real (`-700`) and the contrast clears 4.5:1 by recomputation, not assertion.
+- Fix 4 passes `[]` on all three calls (not the silent 2-arg default-sizes form).
+- Fix 5's test reaches the SECOND branch (detection throws → first branch skipped) and asserts both the cleanup-call set and the outcome counter, either of which catches a dropped `:605` guard.
+- Fix 6's four doc/comment edits each match the live code I read.
+
+---
+
+## Cross-check against prior aggregate (AGG-C4-01..07)
+
+These 6 fixes are exactly the SCHEDULE set from `.context/reviews/_aggregate.md` (cycle 4): AGG-C4-01 (Fix 1), -02 (Fix 2), -03 (Fix 3), -04 (Fix 4), -05 (Fix 5), -06+-07 (Fix 6). All scheduled items are now landed and independently re-verified CLOSED at HEAD `1dde9b1e`. The DEFERRED set (AGG-C4-08 SW lost-update, AGG-C4-09 stale `KNOWN_VIOLATIONS=6`, the test-depth tail, the arch consolidation) is unchanged and out of scope for this evidence-check; none was falsely marked closed.
+
+---
+
+**FIXES VERIFIED: 6/6**
+**NET-NEW FINDINGS THIS CYCLE: 0**

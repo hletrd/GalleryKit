@@ -1,84 +1,149 @@
-# Critic — Multi-Perspective Skeptical Review (run-8 cycle-4 follow-on)
+# Critic — Fresh Multi-Perspective Critique (Cycle 5)
 
+**HEAD:** `1dde9b1e` (`docs: 📝 correct cache() count + og:image/JSON-LD comment honesty`)
 **Date:** 2026-06-13
 **Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**HEAD reviewed:** `ce0029aa` (working tree clean except concurrent reviewer `.md` files)
-**Angle:** seams BETWEEN concerns — fixes that created inconsistency elsewhere, commit-message overstatement, tests that pass for the wrong reason, asymmetric duplicated logic.
-**Scope:** the `0017a34e`..`ce0029aa` fix batch that just closed the 17 cycle-3 findings (`_aggregate.md`), verified line-by-line against the actual code, NOT on the commit's word.
+**Working tree:** CLEAN at start.
+**Angle:** multi-perspective critique — question the recently-landed fixes themselves, hunt for the adjacent gap a fix re-opened, audit test-gate false-positive/negative behavior, fact-check CLAUDE.md against code, find sibling divergence.
+
+---
 
 ## VERDICT: ACCEPT-WITH-RESERVATIONS
 
-The cycle-3 fix batch is genuinely high quality — most fixes are complete, correct, and well-tested. Independent verification confirms the two substantive behavior-touching fixes (backfill orphan-cleanup, NCLX isHdr) hold across all interleavings, and the wide a11y token migration is contrast-correct on every surface I computed (including tinted backgrounds the aggregate didn't check). **One MAJOR finding:** the new touch-target audit scale-token regex (commit `d70c1d98`) has empirically-verified FALSE POSITIVES on legitimate `max-h-*`/`max-w-*` Button utilities — a regression gate that will block valid code with a misleading message. Two LOW findings (a pre-existing upload-worker cleanup asymmetry the new code's "mirror" claim exposes; a commit-message overstatement). Everything else verified clean.
+The prior cycle's 6 scheduled fixes (commits `40a65aef`, `300009d4`, `fd708c1e`, `18de78eb`, `2251b122`, `1dde9b1e`) ALL landed and are independently RE-VERIFIED CORRECT — not trusted on the commit messages. All 6 gates GREEN at HEAD (vitest 215 files / 2068 tests / 0 fail on a COLD run; lint 0; typecheck app+scripts 0; 3 security-lint gates OK). The two backfill writers are now genuinely equivalent on the cleanup contract.
 
-**Pre-commitment predictions vs. actual:** I predicted the batch likely left 1-2 adjacent gaps (the per-cycle pattern), with the backfill cleanup and the audit regex as top risk candidates. Actual: backfill cleanup is CORRECT (prediction wrong — pleasant surprise); the audit regex IS the gap (prediction correct). The og-sanitize "fourth copy" prediction came up empty — migration is complete and adequately pinned across two test files. The a11y "token wrong in light mode / missed sites" prediction came up empty — fully complete.
+BUT the AGG-C4-01 touch-target `max-` fix was applied to **N-1 of N** sibling patterns: it closed the `max-h`/`max-w` false-positive on `<Button>`/`<button>` but left the **identical blind spot open on the native `<select>` h-8/h-9/h-10 patterns** (lines 409, 413). This is the exact "fix one sibling, miss the others" theme that has recurred every cycle — and here the AGG-C4-01 fix itself re-introduced the very class of bug it closed, one tag-name over. Latent (green today, no current `<select max-h-…>`), LOW severity (same rating AGG-C4-01 carried), but it should be closed in the same breath since the fix is mechanically identical.
 
----
-
-## MAJOR FINDINGS
-
-### CRT-1 (MAJOR, High) — touch-target audit scale-token regex false-positives on `max-h-*` / `max-w-*` Buttons; the new enforcement gate will block legitimate code with a lying message
-
-- **Where:** `apps/web/src/__tests__/touch-target-audit.test.ts` — the 4 new FORBIDDEN patterns added by commit `d70c1d98` (AGG-R8c3-06 / DES-2), e.g.:
-  ```
-  /<Button\b(?![^>]*\b(?:h-1[12]|...)\b)[^>]*\bclassName=["'][^"']*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/
-  ```
-- **The seam:** the match body alternation includes a bare `h` and `w` guarded only by `\b`. A word boundary exists between the `-` and the `h`/`w` inside compound tokens like `max-h-10`, `max-w-9`, so `\bh-10\b` matches the `-h-10` substring of `max-h-10`. The negative lookahead only suppresses the match when a 44px+ token (`h-11`/`min-h-11`/`size-11`/etc.) is ALSO present — a `max-h-10` constraint with no explicit height floor is flagged.
-- **Empirically verified** (Node, against the exact committed regex):
-  - `<Button className="max-h-10 px-4">` → **FLAG** (false positive — max-height does not shrink rendered height)
-  - `<Button className="max-w-9">` → **FLAG** (false positive)
-  - `<Button className="overflow-h-8">` → **FLAG** (false positive on any `*-h-N≤10` compound)
-  - `<Button className="min-h-6 min-w-6">` → FLAG (true positive — intended)
-  - `<Button className="h-11 w-11">` → pass (correct)
-  - `leading-9` / `whitespace-nowrap` → pass (correct — no `h-`/`w-` boundary)
-- **Why it passes today (and why it's latent):** `grep -E '<Button[^>]*max-[hw]-(?:[1-9]|10)'` over `components/` + admin returns ZERO current matches, so the suite is green. The false positive is dormant until a developer adds a legitimate `max-h-N`/`max-w-N` (N≤10) constraint to a Button — a common pattern (scrollable dropdown trigger, clamped-height action button).
-- **Failure scenario:** developer adds `<Button className="max-h-10 overflow-y-auto">` (valid — caps a button's height, does not set a sub-44 floor). CI fails with `'<Button className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below 44 px floor'`. The message is FALSE (the button renders ≥44px from its variant floor; `max-h` is a ceiling). The developer either reverse-engineers the regex or — worse — adds a bogus `min-h-11` to silence the gate, learning to distrust the audit. A regression gate that cries wolf erodes the very enforcement it provides.
-- **Why MAJOR (Realist Check applied):** test-only, immediate CI detection, no production/user impact, no data/security risk — that caps severity below CRITICAL. But it's more than cosmetic: a false-positive in a *security/a11y enforcement gate* with a lying diagnostic actively trains developers to add silencing tokens, which defeats future true-positive detection. Mitigated by: test-only + immediate detection.
-- **Fix:** anchor the alternation so bare `h`/`w` only match at a className-token start, not after another prefix. Either (a) require a leading boundary that is whitespace or quote (not `-`): change `\b(?:min-h|min-w|size|h|w)-` to `(?:^|["'\s])(?:min-h|min-w|size|h|w)-` within the className capture; or (b) drop bare `h`/`w` from the alternation and rely on `min-h`/`min-w`/`size`/`h-`/`w-` matched only when preceded by a token boundary; or (c) explicitly exclude the `max-` prefix with a `(?<!max-)` lookbehind before the `h`/`w` branch. Add the three false-positive cases above as `pass` assertions in the test's own self-check block so the regex can't regress into over-matching again.
+Pre-commitment predictions (made before investigation) vs reality below.
 
 ---
 
-## LOW FINDINGS
+## Pre-commitment Predictions vs Findings
 
-### CRT-2 (LOW, High) — the upload-queue worker's delete-during-processing cleanup leaks non-default-size variants; the backfill fix's "mirror" claim exposes this pre-existing asymmetry
-
-- **Where:** `apps/web/src/lib/image-queue.ts:375-379` vs `apps/web/src/lib/admin-backfill-runner.ts` (new `cleanupDeletedMidReencodeVariants`).
-- **The seam:** commit `0017a34e` says the new backfill cleanup "mirrors the upload queue worker (image-queue.ts: affectedRows===0 → cleanup)." But the two are NOT mirrors:
-  - **Upload worker** writes derivatives with admin-**configured** `imageSizes` (`image-queue.ts:342` → `processImageFormats(... imageSizes ...)`), but its delete-race cleanup calls `deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp)` with **no sizes arg → defaults to `DEFAULT_OUTPUT_SIZES`** (the hardcoded default, `process-image.ts:486`). No directory scan.
-  - **Backfill** (correctly) passes `sizes=[]` → full directory scan → removes ALL `{name}_*{ext}` variants regardless of config.
-- **Failure scenario:** admin configures non-default sizes (adds 3840px, or removes a default size). An upload races a concurrent delete of the same id. The upload worker's cleanup deletes only the `DEFAULT_OUTPUT_SIZES` filenames → the variants written at the *configured* sizes that aren't in the default list ORPHAN. Exactly the leak the backfill fix avoided. Admin-only, low-probability (concurrent delete during processing + non-default sizes), disk-leak only.
-- **Honesty note:** the backfill fix is actually BETTER than what it claims to mirror — the commit message slightly overstates symmetry. The new code is correct; the worker it points at is the one with the latent leak.
-- **Fix:** change `image-queue.ts:376-378` to pass `[]` as the third arg to all three `deleteImageVariants` calls, matching `deleteImage` (`images.ts:617-619`) and the new backfill cleanup — both of which already use `[]` for exactly this reason. One-line-per-format change; makes the worker a true mirror.
-
-### CRT-3 (LOW, High) — `sanitize-for-og-global.test.ts` docstring overstates what THAT file pins ("C0-strip-locked"), though coverage exists in a sibling
-
-- **Where:** `apps/web/src/__tests__/sanitize-for-og-global.test.ts:65` comment claims the JSON-LD page import assertion makes "the JSON-LD path C0-strip-locked."
-- **The seam:** that file's `it.each` only asserts each consumer **imports** `sanitizeForOg from '@/lib/og-sanitize'` and does NOT call the old `.replace(UNICODE_FORMAT_CHARS` form. It does NOT itself assert any C0-strip behavior. The phrase "C0-strip-locked" is imprecise for THIS file in isolation.
-- **Why it's only LOW (not a real gap):** the C0-strip behavior IS pinned — by the sibling `og-sanitize.test.ts:33-46` (`'a\x00b\x07c\x1F'` → C0 stripped, `\t\n\r` preserved). Together (import-pin + behavioral-C0 pin) the suite DOES lock "all three consumers get C0 stripping." So this is a comment-precision nit, not a coverage hole — the aggregate's AGG-R8c3-02 concern ("passes for the wrong reason") is genuinely closed across two files.
-- **Fix:** soften the `:65` comment to "asserts the JSON-LD path consumes the shared helper; the C0-strip behavior itself is pinned in og-sanitize.test.ts" — so a future reader doesn't trust this one file to guard C0.
+| Prediction (before investigation) | Outcome |
+|---|---|
+| The `(?<!max-)` fix over- or under-corrects, or OTHER prefixes (`leading-`, arbitrary) still false-positive | **PARTIAL HIT** — the `<Button>`/`<button>` fix is correct AND well-pinned; `leading-`/`gap-`/`mh-` correctly pass; but the SIBLING `<select>` patterns were left un-fixed (NET-NEW NF-1) |
+| The triplicated color-pipeline writers still diverge subtly after all 3 got the cleanup guard | **MISS (good news)** — the two backfill writers' 10-column success set + 2-column derivative-only set + `[]`-cleanup contract are now genuinely IDENTICAL; the upload worker legitimately writes no color cols (INSERT-time). Triplication smell persists (AGG-C4-R1) but no behavioral divergence remains |
+| KNOWN_VIOLATIONS counts still stale | **HIT** — image-manager.tsx budget=6, measured real=1 (AGG-C4-09 re-confirmed, magnitude exact) |
+| A recent fix introduced a new adjacent gap | **HIT** — NF-1 (the `<select>` max- gap re-opened by the AGG-C4-01 fix) |
 
 ---
 
-## VERIFIED-CLEAN (stress-tested this pass, NO action)
+## NET-NEW Findings
 
-- **Backfill orphan-cleanup fix (`0017a34e`) — CORRECT across all interleavings.** I traced delete (`images.ts:538` — read row → tx delete imageTags+row → `deleteImageVariants(...,[])` ×3) against backfill `reprocessOne` (`processImageFormats` write → `UPDATE WHERE id` → `affectedRows===0` → cleanup). Every ordering resolves with no orphan: the cleanup runs after `processImageFormats` is fully awaited and after the UPDATE, so freshly-renamed files are always caught; concurrent double-unlink is ENOENT-safe (`fs.unlink(...).catch(()=>{})`). Root cause (deleteImage not holding the per-image lock) is mitigated by the affectedRows-cleanup rather than by serializing deletes behind backfills — the right tradeoff. The test (`admin-backfill-runner-deleted-mid-reencode.test.ts`) is non-vacuous: forces `affectedRows:0`, asserts cleanup fired on all 3 dirs with `sizes=[]`, and pins the counter partition (`deletedMidReencode=1`, processed/encodeFailures/detectionFailures/errors=0, `lastRunHadFailures=false`).
-- **NCLX code-2 isHdr fix (`22387f32`) — doc+test only, no behavior change; comment is accurate.** The added `color-detection.ts` comment correctly documents the intentional upload-rejection side-effect and corrects the false "no delivered-byte impact" claim (which lived only in the immutable `74235265` commit msg). `images.ts:283` does gate upload rejection on `data.colorSignals?.isHdr && !uploadConfig.allowHdrIngest` exactly as the comment states. Verified the upload gate path.
-- **`text-destructive` → `text-destructive-text` migration (`77013cd0`) — complete and contrast-correct everywhere.** No remaining unmigrated `text-destructive` text sites (`grep` exit 1). Token defined in `:root` (line 43), `.dark` (69), `.oled` (97), + matching oklch fallbacks (130/139/147). **Computed actual WCAG ratios** (not trusting the docstring): light dt-on-white 6.47:1, dark dt-on-darkcard 7.19:1, oled 7.16:1 — AND on the tinted seams the aggregate didn't check: `bg-destructive/10` 5.54:1 light / 6.99:1 dark, `bg-destructive/5` 5.98:1 light / 7.10:1 dark. All clear 4.5:1 with margin. Docstring claims (5.9/7) are honestly conservative.
-- **i18n localize fix (`6be638d2`) — correct namespace + key parity.** `retryFailedImage`'s `t` binds `getTranslations('serverActions')` (`images.ts:1078`), same as all 5 siblings; `invalidImageId` exists in both `en.json:504` and `ko.json:504`. No raw-key-render risk.
-- **og-sanitize unification (`0028ede4`) — all three consumers (both OG image routes + JSON-LD page) import the shared `@/lib/og-sanitize`; no fourth copy.** `grep` of all `sanitizeForOg`/`stripUnicodeFormatting` sites confirms no surviving local copy. The HTML `<meta og:title>` in `generateMetadata` correctly does NOT use `sanitizeForOg` (Next.js HTML-escapes; validation layer rejects bidi/zero-width at write time; OG-sanitize is specifically for the Satori SVG renderer + JSON-LD defense-in-depth) — consistent, intentional asymmetry. JSON-LD's partial `sanitizeForOg` application (camera/lens/exposure sanitized; description/topic_label/keywords not) is pre-existing, non-exploitable (`safeJsonLd` escapes `</script>` + `<`; validation rejects at write), already covered by the aggregate.
-- **migrate-coverage tripwire hardening (`6454c4a3`) — comment-strip is an honest improvement.** `stripJsComments` removes `//` and `/* */`; the docstring is HONEST that string literals are kept by design (real DDL names live in string literals), so the residual "name in a `console.warn` string satisfies the check" loophole is an acknowledged inherent limit of a text-presence check, not a regression.
-- **SW bounded-HEAD test pin (`6454c4a3`) — non-vacuous; sw.js matches.** `sw-template-contract.test.ts` now asserts `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` within the HEAD-fetch options window in BOTH the template and generated `sw.js` (`public/sw.js:230`, `HEAD_REVALIDATE_TIMEOUT_MS=300` at `:38`). `git diff 9b7bb240 HEAD -- public/sw.js` is empty (template untouched this batch).
-- **SW_VERSION stamp drift (informational, NOT a finding):** committed `sw.js` carries `SW_VERSION='ee0f38bd-p7'` while HEAD is `ce0029aa` — the stamp doesn't track HEAD in the repo. The `prebuild` hook (`package.json:10` → `build-sw.ts`) RE-STAMPS from git short-SHA on every deploy build, so production gets the correct `ce0029aa-p7`. The committed stale stamp is cosmetic-in-repo only; documented behavior.
+### NF-1 (LOW severity / MAJOR-class mechanism, LOW real impact) — The AGG-C4-01 `max-` fix skipped its native-`<select>` siblings: `<select className="max-h-10">` still false-positives
+
+**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:409` (string-literal `<select>`) and `:413` (cn-composite `<select>`)
+**Confidence:** HIGH (empirically verified in Node against the exact committed regexes).
+
+The AGG-C4-01 fix (`40a65aef`) added `(?<!max-)` to every bare `h`/`w` branch on `<Button>` / `<button>` (literal, cn, scale-token catch-all). It did NOT touch the native `<select>` patterns, which carry the same bare `(?:h-8|h-9|h-10)` reach with no lookbehind:
+
+```
+409:  pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+413:  pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+```
+
+Empirical proof (Node, exact committed pattern):
+- `<select className="max-h-10">` -> **FLAGS** "renders below the 44 px floor" — FALSE (`max-height` is a ceiling, never constrains the tap target). Exactly the AGG-C4-01 false positive, one tag-name over.
+- `<select className="h-10">` -> flags (correct).
+- The arbitrary-value `<select>` branches (`:417`, `:421`) are SAFE — they require the literal `min-h-` prefix, so `max-h-[40px]` correctly passes.
+
+**Why it matters:** A blocking regression-gate that mis-fires on valid code. The moment a `<select className="max-h-{8,9,10}">` legitimately lands (e.g. a scrollable-dropdown ceiling), the gate fires with a lying message — training the dev to silence it with a bogus `min-h-11` or a `KNOWN_VIOLATIONS` bump, defeating the audit. This is the *recurring* triplicated-call-site theme: the very fix that closed the Button blind spot re-opened it in the sibling.
+**Failure scenario:** Dev adds `<select className="max-h-60 overflow-y-auto">` to cap a long topic-picker dropdown -> CI red with "renders below the 44 px floor" -> dev adds `min-h-11` (wrong, it's already a full-height select) or raises the file's KNOWN_VIOLATIONS -> audit trust eroded.
+**Green today only** because no current `<select>` uses `max-h-{8,9,10}` (verified: `grep -rnE '<select\b[^>]*max-h-(8|9|10)\b'` -> none). Latent, exactly as AGG-C4-01 was before it was found.
+**Also note:** the self-check block (`:938-985`) tests `max-` negative fixtures ONLY for `<Button>`/`<button>` — `grep -c "select.*max-"` = 0. So even the regression-pin coverage has the same gap; the fix should add `<select className="max-h-10">` to the does-not-flag fixtures.
+**Fix:** Add `(?<!max-)` before the `(?:h-8|h-9|h-10)` alternation in the two `<select>` patterns at `:409` and `:413`, and add two `<select className="max-h-10">` / cn-composite negative fixtures to the self-check block at `:971-979`.
+**Realist check:** real a11y impact zero (it's a false-positive in a test gate, not a shipped UI defect); real impact is test-gate trust + a future spurious CI failure. `max-h` on a `<select>` is rarer than on a Button, hence LOW (not MED). Detection is immediate (blocking gate). Mitigated by: the trigger is rare and the gate is green today.
 
 ---
 
-## CROSS-AGENT CORRELATION
+## RE-CONFIRMED (prior-deferred, still open at HEAD)
 
-- **CRT-1 (audit regex false-positive)** is NEW — no other reviewer's narrow lens (designer checks visual contrast/sizes, test-engineer checks coverage presence) would catch an over-matching regex that's green today. This is the cycle's primary "next-layer adjacent gap" the fix batch introduced, directly analogous to how the cycle-3 critic caught the NCLX isHdr side-effect and the og-sanitize third copy.
-- **CRT-2 (upload-worker cleanup asymmetry)** is adjacent to AGG-R8c3-03's fix — it's the seam the fix's own "mirror the upload worker" claim points at. A focused backfill reviewer would stop at "the backfill is now correct"; the cross-file lens reveals the worker it mirrors is the leaky one.
-- The other 15 cycle-3 findings are CLOSED-and-behaving per independent re-verification — I found no "fixed on paper" item among them beyond the comment-precision nit (CRT-3).
+### AGG-C4-09 (LOW) — `KNOWN_VIOLATIONS['components/image-manager.tsx'] = 6` is stale; measured real count is **1**
 
-## TOP CONCERNS (priority order)
+**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:182`
+**Confidence:** HIGH (measured via the test module's own exported `scanSource` against the live file).
 
-1. **CRT-1 (MAJOR)** — fix the audit regex over-match before it bites a future `max-h-*` Button with a misleading CI failure. Cheap one-line regex anchor + 3 self-check assertions.
-2. **CRT-2 (LOW)** — make the upload worker a true mirror (`sizes=[]`) to close its pre-existing non-default-size variant leak; aligns it with `deleteImage` and the new backfill cleanup.
-3. **CRT-3 (LOW)** — soften one overstated test docstring; coverage is fine.
+Measured every budgeted file via the real `scanSource` predicate (temp vitest harness, since removed):
+
+```
+components/image-manager.tsx          :: REAL=1  (documented 6)   <- stale by 5
+components/admin-user-manager.tsx     :: REAL=2  (documented 2)  OK
+.../dashboard/dashboard-client.tsx    :: REAL=5  (documented 5)  OK
+.../categories/topic-manager.tsx      :: REAL=3  (documented 3)  OK
+.../tags/tag-manager.tsx              :: REAL=3  (documented 3)  OK
+.../settings/settings-client.tsx      :: REAL=1  (documented 1)  OK
+.../seo/seo-client.tsx                :: REAL=1  (documented 1)  OK
+components/admin-header.tsx           :: REAL=1  (documented 1)  OK
+```
+
+**image-manager.tsx is the SOLE stale budget**, and the magnitude (real=1) matches what the prior cycle measured. Root cause, now confirmed at code level: there ARE 6 `size="sm"/"icon"` buttons (lines 314, 328, 368, 382, 538, 544), but **5 of them carry an explicit `h-11` / `h-11 w-11` override** (the override lookahead correctly suppresses them) and only the bare `size="sm"` `batchAddButton` at **line 328** trips the scanner. The two raw checkboxes (lines 422, 447) are correctly wrapped in `min-h-11 min-w-11` `<label>`s (lines 418, 444) and don't count.
+
+**The documented rationale at `:168-181` is now factually WRONG:** it asserts the 6 violations (bulk-add-tag, share, delete-selected, per-row-edit, per-row-delete, bulk-edit) "all use size='sm' or size='icon'" as if uncovered — but share (368->`h-11`), delete-selected (382->`h-11`), per-row-edit (538->`h-11 w-11`), per-row-delete (544->`h-11 w-11`), and bulk-edit (314->`h-11`) have ALL since been given overrides. Only batchAddButton remains bare.
+
+**Why it matters:** the budget of 6 absorbs up to 5 NEW `size="sm"/"icon"` belt-and-braces hits in this one file before the gate fires. The stale-budget detector at `:710-714` is informational, not a hard failure, so nothing catches the drift.
+**Realist check downgrades the real-world severity:** because `ui/button.tsx` floors `sm`=`min-h-11` and `icon`=`size-11` (verified `:24-29`), even a bare `size="sm"` renders 44px-compliant. The literal `h-8`/`min-h-6` downsize patterns (which DO render sub-44) are caught regardless of the budget. So the budget slack masks only belt-and-braces hits that are 44px-compliant anyway — near-zero real a11y risk, real test-hygiene slack. LOW. (Already in plan-336; re-affirm.)
+**Fix:** recount image-manager.tsx to 1, rewrite the `:168-181` rationale to reflect that 5 of the 6 now carry `h-11` overrides and only batchAddButton (line 328) is the documented belt-and-braces hit.
+
+---
+
+## Minor Findings
+
+### MIN-1 — Freshly-landed JSON-LD comment slightly overstates what `safeJsonLd` neutralizes
+
+**File:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:213-216` (added by `1dde9b1e`)
+**Confidence:** MEDIUM. Borderline precision nit, not a defect.
+
+The new comment says the unsanitized `name`/`description`/`keywords` are safe because "(1) every value rendered here is JSON-serialized and emitted via `safeJsonLd`, which escapes `</script>` **and JSON-escapes control chars in string values**." `safeJsonLd` (`lib/safe-json-ld.ts:28-31`) does `JSON.stringify().replace(/</g,'<').replace( ).replace( )`. `JSON.stringify` does mandatorily escape C0 controls — so the claim is literally true for C0 — but the framing implies `safeJsonLd` defends the bidi/zero-width/Trojan-Source class, which it does NOT (`JSON.stringify` passes U+202A-202E, U+2066-2069, U+200B-200F through verbatim). The REAL defense for those fields is arm (2): write-time `containsUnicodeFormatting` validator-gating — which holds (`keywords` = tag names, validator-gated per C4L-SEC-01). Not a security hole; could mislead a future reader into thinking `safeJsonLd` is a bidi backstop (it isn't). Optional one-word tightening: change "JSON-escapes control chars" -> "JSON-escapes C0 control chars (NOT bidi/zero-width — those rely on the write-time validator gate)".
+
+---
+
+## What's Missing
+
+- **NF-1 self-check fixtures** — the does-not-flag block (`:938-985`) pins `max-` negatives only for `<Button>`/`<button>`; the `<select>` sibling has zero `max-` regression fixtures even before the lookbehind is added.
+- **No cross-site test anchors the two backfill writers' equivalence.** The 10-column set is identical between `admin-backfill-runner.ts:558-568` and `backfill-color-pipeline.ts:349-359` TODAY, but only by hand-mirroring + comments. AGG-C4-R1 (extract `applyColorPipelineResult()`) remains correctly deferred; until then a single cross-site fixture (assert the column SET written by both paths matches) would catch the next divergence at commit time. (Record, not schedule — consistent with prior disposition.)
+
+---
+
+## Multi-Perspective Notes
+
+- **As the EXECUTOR (could I follow the fixes blindly?):** the AGG-C4-01 fix comment (`:349-352`) explicitly says "`min-h`/`min-w`/`size` stay un-guarded (true floors)" and "Verified by the scale-token self-check block below" — accurate and followable. But it does NOT mention the `<select>` patterns at all, which is exactly how NF-1 slipped: an executor reading the fix would not know the `<select>` siblings exist 60 lines down.
+- **As the STAKEHOLDER (do the fixes solve the stated problem?):** YES for all 6 scheduled items. The two MED data-hygiene fixes (sidecar + upload-worker cleanup) close a real (admin-only, low-prob) disk-leak on the production backfill path; the sales-badge fix brings both light-mode values to 5.02:1 (independently recomputed: green-700 #15803d and amber-700 #b45309 on white both >= 4.5:1) AND I verified ZERO other `text-{green,amber,red}-600` light-mode sites remain in src (`grep -rEn "text-(green|amber|red)-600"` -> none), and the sibling `refunded`/`expired` statuses use audited theme tokens (`text-destructive-text` 6.46:1 / `text-muted-foreground`).
+- **As the SKEPTIC (strongest argument the convergence is false):** the strongest case is NF-1 — a fix that re-opens its own bug class in a sibling is a signal the codebase's regex-gate surface is large enough that point-fixes systematically miss siblings (Button/button/select/Badge x literal/cn x h/w/min-h-arbitrary = a wide matrix). But this is a KNOWN structural smell (AGG-C4-R1 / the recurring triplication theme), the impact is contained (test-gate false-positive, not shipped defect), and the substantive correctness/security surface is genuinely clean. Convergence is real on correctness; the long tail is test-gate-completeness hygiene.
+
+---
+
+## VERIFIED-CLEAN (stress-tested this cycle, NO action)
+
+- **All 6 prior-cycle fixes RE-VERIFIED CORRECT (not trusted on commit messages):**
+  - `40a65aef` (AGG-C4-01 max-) — `<Button>`/`<button>` branches correct + 9 negative self-check fixtures asserting `FORBIDDEN.some()===false`; `leading-8`/`gap-8`/`mh-8` correctly pass; `min-h-8` correctly flags (true sub-44 floor); 12/12 audit tests green. (Sibling `<select>` gap = NF-1.)
+  - `300009d4` (AGG-C4-02 sidecar) — `flushBatch` threads per-format filenames into `updateBatch` + `derivativeBatch`, captures `ResultSetHeader`, on `affectedRows===0` collects rows and cleans up AFTER tx commit via `cleanupDeletedMidReencode(files)` with `[]` (full dir scan). `processed -= N; deletedMidReencode += N` net-accounting matches.
+  - `fd708c1e` (AGG-C4-03 sales badge) — now `text-{green,amber}-700 dark:text-{green,amber}-400`; no other -600 light sites; sibling statuses clean.
+  - `18de78eb` (AGG-C4-04 upload-worker) — all 3 `deleteImageVariants` calls at `image-queue.ts:384-386` now pass `[]`.
+  - `2251b122` (AGG-C4-05 test) — non-vacuous: mocks `detectColorSignals` throw + UPDATE `affectedRows:0`, asserts cleanup for webp/avif/jpeg with `[]` sizes + outcome partition (`deletedMidReencode:1, processed:0, detectionFailures:0, errors:0, lastRunHadFailures:false`). Commit claims proven RED with the `:605` guard disabled.
+  - `1dde9b1e` (AGG-C4-06/07 docs) — CLAUDE.md `cache()` count corrected to 10 (verified: 9 `*Cached` exports + `getSeoSettings` = 10); `COLOR_IMPACTING_KEYS` citation `:37-49` matches the real 9-key array (5 color + 3 quality + image_sizes); the `(public)/page.tsx` og:image comment now honestly states "NO base-JPEG last resort" + "302-redirects to og_image_url or homepage HTML" — VERIFIED against `og-photo-fetch.ts:50` (only `_${size}.jpg`) and `og/photo/[id]/route.tsx:231-253` (302 to og_image_url else site root); the JSON-LD asymmetry comment is accurate (EXIF wrapped, validator-gated fields not); the `sanitize-for-og-global.test.ts` docstring honestly says it pins the IMPORT only and the C0 behavior is pinned by `og-sanitize.test.ts:33-41` (verified — that file directly tests `'a\x00b\x07c\x1F'` strip + tab/newline/CR preserve).
+- **Two backfill writers genuinely equivalent (cleanup contract):** runner `admin-backfill-runner.ts` 10-col success (`:558-568`) + derivative-only (`:595-598`) + cleanup `:430-435` (`[]`); sidecar `backfill-color-pipeline.ts` 10-col success (`:349-359`) + derivative-only (`:368-371`) + cleanup `:329-335` (`[]`) — column sets IDENTICAL, both branches' `affectedRows===0` -> `[]`-scan cleanup. Both correctly leave `pipeline_version` UNBUMPED on detection-failure (resume contract). Outcome partitioning differs structurally (runner decides outcome inline per-row; sidecar counts `processed++` then `processed-=N` in flushBatch) but is behaviorally net-equivalent; final flush at `:430` guarantees the decrement always runs.
+- **Upload worker color-column UPDATE (`image-queue.ts:369`) writes NO color cols — correct, NOT a divergence:** color columns are written at INSERT time (`actions/images.ts:350-357`). `retryFailedImage` (`actions/images.ts:1140-1146`) correctly re-enqueues with the STORED color signals (stable source-file properties), so a retry never strands color metadata.
+- **CLAUDE.md vs code spot-check:** `cache()`=10 OK; `COLOR_IMPACTING_KEYS`=9 (line 263 says "all 9", no contradictory "5" elsewhere on disk — the "5" in the session context snapshot is the pre-AGG-R7-08 stale text, not the current file) OK; `ui/button.tsx` size floors (`sm`=min-h-11, `icon`=size-11, `lg`=min-h-12) OK.
+- **All 6 GATES green at HEAD:** vitest 215 files / 2068 tests / 0 fail (COLD run, +1 from 2067 = the new 2251b122 pin; documented libheif cold-flake did NOT reproduce); `npm run lint` exit 0; `npm run typecheck` app+scripts exit 0; `lint:api-auth` / `lint:action-origin` / `lint:public-route-rate-limit` all OK.
+
+---
+
+## Verdict Justification
+
+**ACCEPT-WITH-RESERVATIONS.** Review operated in THOROUGH mode throughout — no CRITICAL and no 3+-MAJOR pattern triggered escalation to ADVERSARIAL. The single net-new finding (NF-1) is a LOW-severity latent test-gate false-positive, mechanically identical to the just-fixed AGG-C4-01, sitting in the un-touched `<select>` sibling. It is real and should be closed (the fix is a one-line lookbehind on two patterns + two self-check fixtures), but it ships no user-facing defect and the gate is green today. AGG-C4-09 is re-confirmed unchanged (prior-deferred, plan-336). The prior aggregate's conclusion — "honest convergence is near" — holds and is now stronger: the 6 scheduled fixes are independently verified correct, the two backfill writers are genuinely equivalent (the prior cycle's biggest structural worry), and the only open items are test-gate-completeness hygiene, not correctness, security, or data-loss.
+
+Realist Check recalibrations applied: NF-1 kept at LOW (rare trigger, test-gate-only impact); AGG-C4-09 confirmed LOW (button.tsx variant floor means the budget slack masks only 44px-compliant belt-and-braces hits, not real sub-44 targets).
+
+To upgrade to ACCEPT: close NF-1 (lookbehind on `:409`/`:413` + 2 self-check fixtures) and recount image-manager.tsx budget to 1 with a corrected rationale.
+
+---
+
+## Open Questions (unscored)
+
+- AGG-C4-R1 (triplicated color-pipeline writer) consolidation remains deferred to WI-09; a cheap cross-site column-set fixture would anchor the now-equivalent contract before the next divergence — record-only, consistent with prior disposition.
+- The FORBIDDEN regex matrix (Button/button/select/Badge x literal/cn/arbitrary x h/w/min-h) is wide enough that point-fixes systematically risk missing a sibling (NF-1 is the second instance of this class in two cycles). A structural alternative — one shared token-extraction helper feeding a single floor predicate — would eliminate the per-sibling-pattern duplication, but that is a larger refactor than this loop's scope. Record for a future test-infra consolidation.
+
+---
+
+NET-NEW FINDINGS THIS CYCLE: 1
