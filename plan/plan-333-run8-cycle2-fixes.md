@@ -112,13 +112,15 @@ AGG-R8-13 (SEC-1 OG home sanitize hygiene — LOW, non-exploitable), AGG-R8-A1 (
 
 | # | Finding | Severity | Commit | Status |
 |---|---|---|---|---|
-| 1 | AGG-R8-01 (cold-run test flake) | MED | — | TODO |
-| 2 | AGG-R8-02 (home-OG oversized card) | MED | — | TODO |
-| 3 | AGG-R8-03 (checkbox 44px + audit pattern) | MED | — | TODO |
-| 4 | AGG-R8-04 (active tag-chip contrast) | MED | — | TODO |
-| 5 | AGG-R8-05 (SW HEAD bounded timeout) | MED | — | TODO |
-| 6 | AGG-R8-06 (NCLX/ICC precedence ×2) | LOW | — | TODO |
-| 7 | AGG-R8-07/08/09 (latent-bug batch) | LOW | — | TODO |
-| 8 | AGG-R8-10 (test-depth ×3) | LOW | — | TODO |
-| 9 | AGG-R8-11/12 + plan-330 Unit B (doc/comment) | LOW | — | TODO |
-| 10 | AGG-R8-13 (shared sanitizeForOg) | LOW | — | TODO (optional / else defer) |
+| 1 | AGG-R8-01 (cold-run test flake) | MED | 02af4f95 | DONE — memoized file reads (~43s→0.9s) + 60s explicit timeout; assertion unchanged |
+| 2 | AGG-R8-02 (home-OG oversized card) | MED | 73496d2f | DONE — home og:image now /api/og/photo/{id} (1200x630, capped); regression test added |
+| 3 | AGG-R8-03 (checkbox 44px + audit pattern) | MED | fbf91baa | DONE — both labels min-h-11 min-w-11; raw-checkbox FORBIDDEN scan + fixture test |
+| 4 | AGG-R8-04 (active tag-chip contrast) | MED | ee0f38bd | DONE — active count inherits text-primary-foreground/90 (≥4.5:1 both themes) |
+| 5 | AGG-R8-05 (SW HEAD bounded timeout) | MED | 9b7bb240 | DONE — AbortSignal.timeout(300ms); synchronous freshness bounded, not removed; sw.js regenerated |
+| 6 | AGG-R8-06 (NCLX/ICC precedence ×2) | LOW | 74235265 | DONE — COR-1 NCLX code-2 no longer clobbers ICC values (test); COR-2 documented (not flipped) |
+| 7 | AGG-R8-07/08/09 (latent-bug batch) | LOW | e8fce327 | DONE — load-more mountedRef; home-client 0-width guard; backfill width re-validate |
+| 8 | AGG-R8-10 (test-depth ×3) | LOW | f3667858 (+73496d2f home-OG) | DONE — mixed backfill run; migration index-coverage tripwire; home-OG regression (Item 2) |
+| 9 | AGG-R8-11/12 + plan-330 Unit B (doc/comment) | LOW | 007768c3 | DONE — AGENTS deploy creds + test count; advisory-lock backfill scope; lastError + TOCTOU notes |
+| 10 | AGG-R8-13 (shared sanitizeForOg) | LOW | (this cycle) | DONE — extracted @/lib/og-sanitize; both OG routes import it; fixture test |
+
+**All 10 items DONE.** No item deferred from plan-333 (Item 10 implemented rather than deferred).

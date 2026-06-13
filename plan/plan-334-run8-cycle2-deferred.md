@@ -52,4 +52,4 @@ This list contains ONLY existing review findings. No new refactors/features are 
 | Deferred 2 (decode-once perf) | LOW perf — scope/CPU-only, safe | RECORDED |
 | Deferred 3 (single-pool/single-writer) | MED observations — documented topology | RECORDED |
 | Deferred 4 (Stripe ACH) | HIGH — already plan-316, repo-rule-permitted | RECORDED |
-| Deferred 5 (OG home sanitize) | LOW security hygiene — scheduled plan-333 Item 10 else recorded | RECORDED |
+| Deferred 5 (OG home sanitize) | LOW security hygiene — IMPLEMENTED this cycle as plan-333 Item 10 (shared @/lib/og-sanitize), NOT deferred | DONE |
