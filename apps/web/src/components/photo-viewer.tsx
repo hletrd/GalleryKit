@@ -801,7 +801,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
                 {/* Info Sidebar — hidden on mobile; only shown on lg+ via desktop pin/toggle */}
                 <div className={cn(
-                    "space-y-6 transition-all duration-500 ease-in-out overflow-hidden transform hidden lg:block",
+                    // DES-R5C3-05 (plan-315 item 30): animate only opacity+transform,
+                    // NOT width. `transition-all` against this `overflow-hidden`
+                    // container was animating `lg:w-0` (layout-thrashing width
+                    // tween); fade+slide instead — width snaps, the I toggle still
+                    // reflows the grid correctly at the lg breakpoint.
+                    "space-y-6 transition-[opacity,transform] duration-500 ease-in-out overflow-hidden transform hidden lg:block",
                      showInfo ? "lg:opacity-100 lg:translate-x-0" : "lg:opacity-0 lg:translate-x-10 lg:w-0 lg:p-0"
                 )}>
                     {showInfo && (
