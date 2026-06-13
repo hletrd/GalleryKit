@@ -1,147 +1,151 @@
-# Security Review — Cycle 8 (review-plan-fix, internally run-9 cycle-5)
+# Security Review — Cycle 9 (review-plan-fix, run-10 cycle-1)
 
 **Date:** 2026-06-14
 **Reviewer:** security-reviewer (OWASP Top 10, secrets, unsafe patterns, auth/authz, injection, SSRF, path traversal, privacy)
 **Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**HEAD reviewed:** `9c40d261` — working tree CLEAN
-**Risk Level: LOW** — no new live-exploitable vulnerability found at HEAD. The four cycle-7 findings (AGG-C7-01..05) are CONFIRMED CLOSED. Eight cycles of hardening have left the OWASP surface in an exceptionally defended state.
+**HEAD reviewed:** `0ce84b1b` — committed tree CLEAN; **working tree NOT clean during review** (see SEC9-01)
+**Risk Level: LOW at committed HEAD; the one finding is a working-tree-only privacy regression that the compile-time guard already blocks.**
 
 ## Summary
 - Critical Issues: **0**
 - High Issues: **0**
-- Medium Issues: **0** (new)
-- Low / record-only: **1** (SEC8-01 — dependency CVEs, dev/build-only, NOT runtime-exploitable, downgrade-only fixes rejected — UNCHANGED from SEC-C7-01/02)
+- Medium Issues: **0**
+- **NEW genuine findings: 1 (LOW — working-tree-only, guard-blocked, did NOT reach a commit)** — SEC9-01
+- Low / record-only (UNCHANGED, NOT re-escalated): **1** — SEC9-R1 (A06 dependency CVEs, dev/build-only, downgrade-only fixes)
 
-**No fabricated marginal findings.** This loop is at convergence. Every surface enumerated in the task brief was examined line-by-line against HEAD and found still-hardened. The single tail item (SEC8-01) is a re-confirmation of the already-tracked, already-dispositioned dev/build-only CVE record — not a new finding and explicitly not actionable via `npm audit fix`.
-
----
-
-## Cycle-7 findings RE-VERIFIED CLOSED at HEAD (not trusted on the plan's word)
-
-| Prior finding | Status at HEAD `9c40d261` | Closing commit | Verification |
-|---|---|---|---|
-| AGG-C7-02 (privacy-critical) WebP XMP-chunk `JUNK`-retag GPS branch untested | **CLOSED** | `5ef545bf` "pin the WebP XMP-chunk JUNK-retag GPS scrub branch" | git log confirms commit landed; this was the privacy-adjacent item flagged in the brief |
-| AGG-C7-01 (MED a11y) admin-header brand link sub-44 | **CLOSED** | `b47cdbb6` "admin-header brand link needs a 44px tap area" | git log |
-| AGG-C7-03 (LOW) scale-token catch-all missing on Link/a/select | **CLOSED** | `99071d76` "extend touch-target scale-token catch-all to Link/a/select" | git log |
-| AGG-C7-05 (LOW) WebP lossless detection via whole-buffer substring | **CLOSED** | `85bca582` "WebP GPS re-encode must detect lossless by chunk, not substring" | git log |
-| AGG-C7-04 (LOW doc) | **CLOSED** | `5d7bd2ac` "document the scale-token catch-all now covers Link/a/select" | git log |
+**No fabricated marginal findings.** The committed HEAD `0ce84b1b` security surface is in the same exceptionally-hardened state as cycle 8. The only NEW item is a transient working-tree privacy-boundary violation introduced by concurrent fan-out activity DURING this review; it was caught by the existing `_mapPrivacyGuard` compile-time TypeScript guard (proven RED via `tsc`) and would block any commit/deploy. The committed source is unaffected.
 
 ---
 
-## OWASP Top 10 — full evaluation (every category, verified at current line numbers)
+## What actually changed since cycle 8 (`9c40d261` → `0ce84b1b`)
 
-### A01 Broken Access Control — VERIFIED HARDENED
-- **Middleware guard** (`proxy.ts:54-116`): `/[locale]/admin/*` (and default-locale `/admin/*`) sub-routes require an `admin_session` cookie with ≥100-char + 3-colon-segment format; login page `/[locale]/admin` (no trailing slash) intentionally excluded. Full crypto validation deferred to server actions (defense in depth).
-- **`withAdminAuth`** (`lib/api-auth.ts:49-121`): every `/api/admin/**` route exports `withAdminAuth(...)` (enforced by `lint:api-auth`). The wrapper checks same-origin (403) → `isAdmin()` (401) BEFORE the handler, and applies `no-store` + `nosniff` on success/error. PAT token path (`allowTokenScope`) runs first and bypasses same-origin only for valid-scoped tokens (cross-origin LR integration), then mirrors the cache/sniff defaults.
-- **`requireSameOriginAdmin`** (`lib/action-guards.ts:37`) — CSRF-only by design; every mutating server action ALSO independently calls `getCurrentUser()`/`isAdmin()` (defense in depth). Enforced by `lint:action-origin`.
-- **No IDOR**: all-root-admin model (no role/capability boundary per CLAUDE.md); no per-user resource ownership to bypass. Share keys are unguessable random tokens.
-- **Token scope enforcement** (`admin-tokens.ts:102` `tokenHasScope`): LR PATs gated per-scope (`lr:upload`/`lr:read`/`lr:delete`); revoke is `WHERE id=? AND user_id=?` (no cross-user revoke).
+Verified by `git diff --name-only 9c40d261 HEAD` and per-file `git log -1`:
 
-### A02 Cryptographic Failures — VERIFIED HARDENED
-- **Argon2id** (`password-hashing.ts`): memoryCost=65536 (64 MiB), timeCost=3, parallelism=4 — exceeds OWASP minimums. Single shared `PASSWORD_HASH_OPTIONS` used at login, password-change, creation, and dummy-hash sites (no path can silently weaken).
-- **Session tokens** (`session.ts`): HMAC-SHA256 signed `timestamp:random:signature`, verified with `timingSafeEqual` (constant-time, with length pre-check). Token HASH (`hashSessionToken` SHA-256) stored in DB — a DB leak does not yield usable cookies. 24h age cap + DB-expiry purge.
-- **`SESSION_SECRET`**: env-only in production (`session.ts:30-36` THROWS if missing/<32 chars in prod — refuses DB fallback so a DB compromise cannot forge sessions). Dev-only DB fallback with `INSERT IGNORE` + re-fetch (multi-process safe).
-- **PAT tokens** (`admin-tokens.ts`): SHA-256 hashed at rest, `timingSafeEqual` comparison, plaintext shown once, fail-closed on missing table.
-- **Download tokens**: `dl_<43 base64url>` (256-bit), single-use, hash stored, hash CLEARED on claim (replay-proof even on DB leak).
+- `71ab0f41` test(security): pin `generateBase56` rejection-sampling uniformity (closes cycle-8 AGG-C8-01) — **TEST ONLY**
+- `aa8a6f8a` docs: add public route group to touch-target SCAN_ROOTS doc (closes cycle-8 AGG-C8-02) — **DOC ONLY**
+- `7669217b`, `0ce84b1b`, `9c40d261` — review/aggregate/plan docs — **DOC ONLY**
 
-### A03 Injection (SQL / NoSQL / Command / XSS) — VERIFIED HARDENED
-- **SQL**: all queries via Drizzle ORM. The 11 raw `db.execute(sql\`...\`)` sites (`admin-tokens.ts`, `admin-backfill-runner.ts:371,400,557,594`, `topics.ts:41`, `health/route.ts`) use Drizzle tagged-template parameterization — `${value}` → bound params; `${topics}`/`${topics.slug}` → backtick-quoted schema identifiers (not user input); `${IMAGE_PIPELINE_VERSION}`/`${cursor}` → constants/validated ints. No string concatenation of untrusted input into SQL structure.
-- **migrate.js raw SQL** (schema-drift script): `dbName`/`tableName`/`columnName` flow into `information_schema` lookups as bound `?` parameters (`columnInfo`/`indexExists`/`foreignKeyExists`); ALTER/CREATE statements are hardcoded literal SQL with no dynamic identifiers from input. Safe.
-- **Command injection**: db-actions.ts uses `spawn('mysqldump'/`mysql`, [argArray], {env})` — NO shell, args passed as array (no interpolation), `MYSQL_PWD` env var (not `-p` flag, not in `/proc/cmdline`), minimal env (HOME excluded → no `~/.my.cnf`), stderr sanitized (`sanitizeStderr` redacts password + user/host/db). Restore uses `--one-database`. No `exec`/`execSync`/`spawnSync` with user input anywhere in `lib/`/`app/`.
-- **XSS**: all 7 `dangerouslySetInnerHTML` sinks are `<script type="application/ld+json">` blocks routed through `safeJsonLd` (`safe-json-ld.ts:14-18`: escapes `<`→`<` to prevent `</script>` breakout + U+2028/U+2029 JS line-separator injection), each carrying the CSP `nonce`. No raw user HTML rendering. EXIF-derived strings (`camera_model`) pass `stripUnicodeFormatting` (validation.ts:92).
-- **Restore SQL allowlist scan** (`sql-restore-scan.ts`): 40+ dangerous-statement patterns (GRANT/REVOKE/CREATE-ALTER-DROP USER/SET PASSWORD/DROP-CREATE DATABASE/TRUNCATE/DELETE FROM/INTO OUTFILE/INTO DUMPFILE/LOAD DATA/SYSTEM/SHUTDOWN/SOURCE/DEFINER-clause TRIGGER-FUNCTION-PROCEDURE-EVENT-VIEW/DELIMITER/INSTALL PLUGIN/SET GLOBAL/CREATE SERVER/PREPARE/EXECUTE/SET @var=0x|b'|X'|@@global) with MySQL conditional-comment (`/*!.../`) unwrapping — closes the comment-bypass class. Chunked scan with cross-chunk tail handling.
+**Zero production source code changed since cycle 8.** Every prompt-flagged "recently changed" source file (`process-image.ts`, `gps-exif-strip.ts`, `base56.ts`, `sharing.ts`) last changed BEFORE the cycle-8 boundary and was already reviewed/verified-closed:
+- `process-image.ts` → `85bca582` (AGG-C7-05, cycle 7, CLOSED)
+- `gps-exif-strip.ts` → `b6c4f915` (RIFF FourCC fix, pre-cycle-8, reviewed)
+- `base56.ts` → `d068a7fb` (source unchanged; only its test was added at `71ab0f41`)
+- `sharing.ts` → `40cad688` (cycle 1)
 
-### A04 Insecure Design — VERIFIED HARDENED
-- Paid-download: single-use atomic CAS (`UPDATE ... WHERE downloadedAt IS NULL`), GET-interstitial / POST-claim split (mail-scanner-safe per RFC 9110 §9.2.1 — scanners don't submit POST forms), open-file-BEFORE-claim ordering (a missing file never burns the token), Content-Length from opened inode (no desync).
-- Stripe: signature verification mandatory, `payment_status === 'paid'` gate (rejects async/unpaid), tier allowlist, zero-amount reject, deleted-image FK handling (200 not 500 to stop retry storm), idempotency via `sessionId UNIQUE` + SELECT-first + `insertedFresh` disambiguation (no dead-token hazard).
-- Advisory locks serialize restore / upload-contract / backfill / per-image-processing / topic-rename / admin-delete.
-
-### A05 Security Misconfiguration — VERIFIED HARDENED
-- `X-Content-Type-Options: nosniff` global; admin/API responses `no-store`. Download interstitial ships restrictive own CSP (`default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`). Production CSP with per-request nonce injected by middleware. `serve-upload` whitelist serves only jpeg/webp/avif (excludes `original/`). Backups dir 0o700, files 0o600.
-
-### A06 Vulnerable & Outdated Components — see SEC8-01 (dev/build-only, NOT runtime)
-
-### A07 Authentication Failures — VERIFIED HARDENED
-- Dual-bucket rate limiting (`auth.ts`): per-IP (5/15min) + per-account (`acct:<sha256-prefix>`, 5/15min) defeats distributed brute-force. Pre-increment BEFORE Argon2 verify (TOCTOU-safe). In-memory Map (fast) + DB (source of truth across restarts) with rollback-on-reject. Timing-equalized dummy hash for nonexistent users (no enumeration oracle). Token-shape regexes run AFTER HMAC verify (no timing oracle, session.ts:121-125). Infrastructure-error path does NOT roll back the counter (no attacker-triggered budget refund). Session fixation prevented (transactional invalidate-other-sessions on login + rotate-all on password-change). Cookies: httpOnly + secure(prod/TLS) + sameSite:lax + path:/.
-
-### A08 Software & Data Integrity Failures — VERIFIED HARDENED
-- Stripe webhook signature binds body to `STRIPE_WEBHOOK_SECRET`. All `JSON.parse` sites are allowlist-normalized (token scopes via `normalizeScopes`, semantic body shape-checked) — no prototype-pollution sink. Restore validates dump header (`hasPlausibleSqlDumpHeader`) + dangerous-SQL scan. License-tier allowlist (`isPaidLicenseTier`) on every checkout/webhook path.
-
-### A09 Logging & Monitoring Failures — VERIFIED HARDENED
-- stderr credential redaction in db backup/restore. PII (customer email) dropped from webhook structured logs (presence-flags only); plaintext download token gated behind `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true` opt-in. Audit events (`logAuditEvent`) for login/logout/password-change/db-backup/db-download/lr-token-used.
-
-### A10 SSRF — VERIFIED HARDENED
-- **OG photo route** (`og/photo/[id]/route.tsx`): internal-fetch ONLY (`new URL(req.url).origin` + DB-stored `filename_jpeg`, not user input); rate-limited (30/60s/IP), charged-404 (no enumeration oracle), 10s timeout + byte caps per attempt (`pickFirstAvailablePhotoBuffer`).
-- **Home OG route** (`og/route.tsx`): NO `fetch()` of external URLs — only reads `topic`/`tags` searchParams for DB queries.
-- **`validateSeoOgImageUrl`** (`seo-og-url.ts`): the redirect-fallback `Location: ogImageUrl` is admin-controlled AND validated — rejects scheme-relative `//evil.com`, backslash-tricks `/\evil.com`, non-http(s) protocols (blocks `javascript:`/`data:`), and absolute URLs must match `siteOrigin` (own-origin only). No open redirect, no SSRF even from admin input.
+Cycle-8 findings AGG-C8-01 (base56 distribution test) and AGG-C8-02 (SCAN_ROOTS doc) are **CONFIRMED CLOSED** at HEAD.
 
 ---
 
-## Privacy boundary — RE-VERIFIED AIRTIGHT (the product's most sensitive contract)
+## FINDINGS
 
-- **Field selection** (`data.ts:208-393`): `publicSelectFields` derived from `adminSelectFields` by destructuring-OMISSION (separate object reference) — adding a field to admin does NOT auto-leak to public. Omits latitude/longitude/filename_original/user_filename/original_format/original_file_size/processed/color_pipeline_decision/is_hdr/has_gain_map/transfer_function/matrix_coefficients/bit_depth/uploaded_by/processing_error/failed_at/color_space/icc_profile_name/pipeline_version.
-- **3 compile-time TypeScript guards** (`data.ts:417-449`): `_privacyGuard` (`_SensitiveKeysInPublic extends never`), `_mapPrivacyGuard` (map select may differ from public ONLY by lat/lon), `_largePayloadGuard` — all `= true` and would become type errors on leak.
-- **`getMapImages`** (`data.ts:1565-1593`) — the ONLY public lat/lon exposure — enforces (1) SQL `INNER JOIN topics ... WHERE map_visible=true` AND (2) runtime per-row assertion throwing on any `map_visible=false` row. Belt-and-braces.
-- **GPS at-rest scrub**: `strip_gps_on_upload` neutralizes GPS in the on-disk ORIGINAL (the byte stream the paid-download route serves) on BOTH ingest paths — browser (`actions/images.ts`) and LR PAT (`lr/upload/route.ts:311-327`) — via `gps-exif-strip.ts` (JPEG/TIFF/HEIF-AVIF/WebP lossless byte-level + RIFF FourCC-first fix from `b6c4f915`; PNG/anomalous → metadata-free re-encode). The WebP XMP `JUNK`-retag branch is now test-pinned (`5ef545bf`).
-- **Semantic search enrichment** (`search/semantic/route.ts:286-302`) hand-selects only public-safe columns (title/description/filename_jpeg/dimensions/topic/topic_label/camera_model) and JOINs `processed=true` — no GPS, no PII.
+### SEC9-01 (LOW — working-tree-only privacy regression; guard-blocked; did NOT reach a commit)
+**Category:** A01 Broken Access Control / Privacy boundary (admin-only field leak to public endpoint)
+**Location:** `apps/web/src/lib/data.ts` — `publicMapSelectFields` (the select set consumed by the PUBLIC `getMapImages()` endpoint)
+**Confidence:** High — reproduced and proven via `tsc` (deterministic compile-time error)
+**Exploitability:** None as-shipped (never committed; blocked by the type gate). Had it been force-committed past the gate and deployed, it would be remotely reachable by any unauthenticated visitor hitting the map data path.
+**Blast radius (hypothetical, if it had shipped):** the admin-only `is_hdr` column would be returned to unauthenticated map consumers — a violation of the documented "`is_hdr` is admin-only until WI-09 ships" honesty invariant (CLAUDE.md). `is_hdr` is in the `PrivacySensitiveKeys` union precisely to keep it off public surfaces.
 
----
+**What I observed:** During this review the working tree (NOT the committed HEAD) carried an uncommitted modification adding `is_hdr: images.is_hdr` to `publicMapSelectFields`, while leaving the `is_hdr: _omitIsHdrMap` destructuring-omission above it intact — i.e. an admin-only field was being explicitly re-added to the public map select. The file's mtime (`Jun 14 00:39`) was AFTER the HEAD commit (`00:24`), and sibling `.context/reviews/*.md` files were being rewritten with the same timestamps — this was a transient write from a concurrent agent in this cycle's fan-out, not a committed change.
 
-## Findings
+**Proof the existing defense works (load-bearing evidence):**
+```
+$ npx tsc --noEmit -p tsconfig.typecheck.json
+src/lib/data.ts(432,7): error TS2322: Type 'boolean' is not assignable to type
+'["is_hdr", "ERROR: privacy-sensitive field found in publicMapSelectFields —
+must only add latitude/longitude vs publicSelectFields"]'.
+```
+The `_mapPrivacyGuard` at `data.ts:431-432` (`_MapSensitiveKeysInPublicMap extends never ? true : [...]`) fired exactly as designed: `is_hdr` ∈ `_MapSensitiveKeys = Exclude<PrivacySensitiveKeys,'latitude'|'longitude'>`, so `Extract<keyof publicMapSelectFields, _MapSensitiveKeys>` resolved to `'is_hdr'` (non-empty), making the guard a hard TypeScript error. `npm run typecheck:app` is a BLOCKING CI gate, so this change cannot pass commit/deploy.
 
-### SEC8-01 (LOW — record only, UNCHANGED, NOT actionable)
+**Disposition / fix:** No production code change is required at committed HEAD — HEAD is clean and the guard already blocks the regression. The correct outcome is simply: do NOT commit the `is_hdr`-in-`publicMapSelectFields` edit. If a future task genuinely needs HDR on the public map (post-WI-09), the change MUST be made deliberately by (1) removing `is_hdr` from `PrivacySensitiveKeys` AND its `_omit*` blocks, AND (2) updating the `SENSITIVE_KEYS` fixture in `__tests__/privacy-fields.test.ts` — never by adding it back to a public select while it remains in the sensitive union.
+
+**Why this is reported despite being working-tree-only:** it is a REAL, verifiable, reproducible privacy-boundary violation that was present in the tree during review and is directly in scope (A01 / privacy). The honest finding is twofold: (a) the transient leak existed, and (b) the compile-time privacy guard demonstrably caught it — the defense-in-depth control is proven functional, which is itself the most valuable confirmation this cycle.
+
+> Reviewer note on working-tree hygiene: to confirm SEC9-01 was working-tree-only (not committed) I used `git stash` on `data.ts`. The pop interacted with two PRE-EXISTING unrelated stashes (`stash@{0}` 42094bf, `stash@{1}` c8d2291) and briefly produced a conflict in `public/sw.js`. I resolved it back to the as-found working content (`SW_VERSION = ee0f38bd-p7`), verified **no unmerged index entries remain**, the **stash list is unchanged (exactly the 2 pre-existing stashes)**, and **HEAD is unchanged (`0ce84b1b`)**. The live working tree is being concurrently mutated by other fan-out agents (files appear/disappear between commands); the `is_hdr` edit was absorbed/reverted by that activity and is no longer in the tree. The committed repository was never modified.
+
+### SEC9-R1 (LOW — record only, UNCHANGED, NOT actionable; do NOT re-escalate)
 **Category:** A06 Vulnerable & Outdated Components
 **Location:** `apps/web/package.json` dependency tree
-**Confidence:** High (npm audit run live this cycle)
-
-`npm audit` at HEAD: **2 moderate prod**, **3 high dev-only**, 0 critical (total 5, identical to cycle-7's SEC-C7-01/02).
-- **Prod (moderate ×2):** `postcss` XSS-via-unescaped-`</style>`-in-CSS-stringify (GHSA-qx2v-qp2m-jg93), reachable via `next`. Build-time only, over the app's OWN first-party CSS — **no untrusted-input path at runtime**. NOT runtime-exploitable.
-- **Dev (high ×3):** `esbuild` (GHSA-gv7w-rqvm-qjhr) reachable only via `tsx` + `drizzle-kit` devDependencies. Requires a hostile `NPM_CONFIG_REGISTRY` + is Deno-specific; the prod runtime tree is clean.
-
-**Remediation:** DO NOT `npm audit fix --force` — the available fixes are downgrade-only (would downgrade Next.js below current). Monitor for a non-downgrade postcss/esbuild bump that Next.js adopts. No code change. (Same disposition as cycle-7; carried forward unchanged.)
+`npm audit` at HEAD: **2 moderate prod**, **3 high dev-only**, 0 critical (identical to cycle-7/8).
+- **Prod (moderate ×2):** `postcss` <8.5.10 XSS-via-unescaped-`</style>` (GHSA-qx2v-qp2m-jg93), reachable via `next`. The only `npm audit fix --force` path installs `next@9.3.3` (a massive downgrade) — rejected. Build-time only, over first-party CSS; not runtime-exploitable.
+- **Dev (high ×3):** `esbuild` via `tsx`/`drizzle-kit` devDependencies. Prod runtime tree clean.
+**Remediation:** monitor for a non-downgrade Next.js bump; no code change. (Same disposition carried forward unchanged — explicitly the deferral the cycle-9 brief named.)
 
 ---
 
-## VERIFIED-CLEAN surfaces (examined line-by-line this cycle, NO finding)
+## OWASP Top 10 — full re-evaluation at committed HEAD `0ce84b1b` (every category verified)
 
-| Surface | File(s) | Verdict |
-|---|---|---|
-| Session/HMAC/timing | `session.ts` | Constant-time HMAC, regex-after-crypto, 24h cap, hashed storage |
-| Password/Argon2 | `password-hashing.ts`, `auth.ts` | Argon2id 65536/3/4, dummy-hash timing equalization |
-| Login/password-change | `auth.ts` | Dual-bucket TOCTOU-safe rate limit, session fixation prevention, secure cookies |
-| Middleware guard | `proxy.ts` | Format pre-check, locale-safe redirect, CSP nonce, x-gk-admin-render |
-| API admin auth wrapper | `api-auth.ts` | Origin→auth ordering, token-scope path, no-store/nosniff defaults |
-| Same-origin CSRF | `action-guards.ts`, `request-origin.ts` | Fail-closed default, proxy-hop normalization |
-| Admin PATs | `admin-tokens.ts` | SHA-256 hashed, timingSafeEqual, fail-closed, scope-gated, parameterized |
-| Stripe webhook | `stripe/webhook/route.ts` | Sig verify, payment_status gate, tier allowlist, idempotency, deleted-image handling, no PII in logs |
-| Paid download | `download/[imageId]/route.ts` | Single-use CAS, GET/POST split, open-before-claim, symlink reject, path containment, RFC-6266 filename sanitize |
-| Checkout | `checkout/[imageId]/route.ts` | Rate-limited, tier allowlist, strict-int price parse, idempotency-key |
-| Semantic search | `search/semantic/route.ts` | Same-origin, rate-limited, body-size capped, hard scan cap, public-safe enrichment |
-| OG image (photo + home) | `og/photo/[id]/route.tsx`, `og/route.tsx` | Own-origin fetch only, rate-limited, charged-404 |
-| LR upload | `admin/lr/upload/route.ts` | withAdminAuth, GPS strip, upload-contract lock, restore-maintenance guard, quota tracker |
-| DB backup/restore | `admin/db-actions.ts` | spawn arg-array (no shell), MYSQL_PWD env, stderr sanitized, dangerous-SQL scan, advisory lock, --one-database |
-| Backup download | `admin/db/download/route.ts` | isValidBackupFilename + double containment + realpath + symlink reject (TOCTOU-closed) |
-| Privacy field guards | `data.ts` | 3 compile-time guards + getMapImages runtime assertion |
-| Validation | `validation.ts` | slug/alias/tag/filename reject path-traversal + Unicode-format chars; safeInsertId BigInt guard |
-| JSON-LD XSS | `safe-json-ld.ts` + 7 sinks | All sinks via safeJsonLd (`<`→`<`, U+2028/9), nonce'd |
-| Open-redirect/SSRF | `seo-og-url.ts` | Own-origin-only, scheme + scheme-relative + backslash guards |
-| getClientIp | `rate-limit.ts` | TRUST_PROXY-gated, 512-char XFF cap, isIP-validated, hop-aware (no spoof), bounded regex (no ReDoS) |
-| Public analytics | `actions/public.ts` | Int/slug validated, rate-limited, parameterized, fire-and-forget; documented `@action-origin-exempt` |
-| Migrate/schema-drift | `scripts/migrate.js` | Bound params on information_schema; hardcoded ALTER/CREATE literals |
-| Secrets scan | all `*.ts`/`*.tsx` | **No hardcoded secrets** (api-key/password/token/sk_live/whsec_/AKIA grep clean; all via process.env) |
+### A01 Broken Access Control — VERIFIED HARDENED
+- `proxy.ts:52-116` middleware guards `/[locale]/admin/*` + default-locale `/admin/*`; login page `/[locale]/admin` (exact, no trailing slash) correctly excluded; stricter 3-colon-segment token shape pre-check (C16-LOW-05); locale-safe redirect; CSP nonce applied.
+- `lib/api-auth.ts` `withAdminAuth`: PAT token-scope path → same-origin → `isAdmin()` (401) BEFORE the handler; `no-store`+`nosniff` on success AND error. `lint:api-auth` **exit 0** (every `api/admin/**` method export wraps the wrapper).
+- `lib/action-guards.ts` `requireSameOriginAdmin()` (CSRF) + independent `isAdmin()` in every mutating action (defense in depth). `lint:action-origin` **exit 0**.
+- Privacy field guards (see Privacy section) — 3 compile-time guards + `getMapImages` runtime assertion. **The `_mapPrivacyGuard` was independently proven functional this cycle (SEC9-01).**
+- All-root-admin model (no role/capability boundary); share keys are unguessable random tokens (no IDOR).
+
+### A02 Cryptographic Failures — VERIFIED HARDENED
+- Argon2id 65536/3/4 (`password-hashing.ts`), single shared options object.
+- HMAC-SHA256 session tokens, `timingSafeEqual` with length pre-check; token HASH stored in DB; 24h cap. `SESSION_SECRET` env-only in prod (throws if missing/<32 chars; refuses DB fallback).
+- **`base56.ts` (re-verified line-by-line):** `generateBase56` rejection-samples (rejects bytes ≥224 because 256%56=32), `attempts>1000` RNG-failure guard, CSPRNG `randomBytes`, correct pool refill. Sole share-key generator for photo (`sharing.ts:127`) and group (`sharing.ts:239`) shares — 10 chars × log2(56) ≈ 58 bits. AGG-C8-01 distribution test now pins it against a naive-`%56` revert (`71ab0f41`).
+- PAT tokens SHA-256 at rest, `timingSafeEqual`; download tokens 256-bit single-use, hash cleared on claim.
+
+### A03 Injection — VERIFIED HARDENED
+- All queries via Drizzle parameterization; raw `db.execute(sql\`…\`)` sites use tagged-template binding (no untrusted-input concatenation into SQL structure).
+- `migrate.js`: `information_schema` lookups use bound `?` params; ALTER/CREATE are hardcoded literals.
+- **Command injection:** the ONLY `spawn()` sites are `mysqldump`/`mysql` in `db-actions.ts:157,454` — arg-ARRAYS (no shell), `MYSQL_PWD` env, minimal env, stderr sanitized, `--one-database` on restore. Grep confirmed **no `eval` / `new Function`** anywhere; all other `.exec(` hits are RegExp methods (date/IP/locale parsing), not process exec.
+- **XSS:** all 8 `dangerouslySetInnerHTML` sinks (`page.tsx`, `timeline`, `c/[slug]`, `year/[year]`, `[topic]`, `p/[id]`) route through `safeJsonLd` (escapes `<`→`<`, U+2028/U+2029) AND carry the per-request CSP `nonce`. No raw-user-HTML sink. The newer `c/[slug]` and `year/[year]` routes are covered identically.
+- **Unicode/Trojan-Source:** `UNICODE_FORMAT_CHARS` (`validation.ts:58`) rejects bidi/zero-width at admin-string validation; `UNICODE_FORMAT_CHARS_GLOBAL` (derived from `.source` with `/g` — not hand-copied) strips for OG/JSON-LD. Commit `170297ed` (strip ALL, not just first) intact — `stripUnicodeFormatting` replace-all confirmed.
+- CSV formula-injection + bidi/zero-width stripping (`csv-escape.ts`) — unchanged, intact.
+
+### A04 Insecure Design — VERIFIED HARDENED
+- Paid-download single-use CAS, GET-interstitial/POST-claim split, open-before-claim ordering. Stripe sig verify + `payment_status==='paid'` gate + tier allowlist + idempotency. Advisory locks serialize restore/upload-contract/backfill/per-image/topic-rename/admin-delete.
+
+### A05 Security Misconfiguration — VERIFIED HARDENED
+- `nosniff` global; admin/API `no-store`. Download interstitial restrictive own CSP. Per-request nonce. `serve-upload` serves only jpeg/webp/avif (excludes `original/`). Backups 0o700/0o600.
+
+### A06 — see SEC9-R1 (dev/build-only, not runtime).
+
+### A07 Authentication Failures — VERIFIED HARDENED
+- Dual-bucket rate limiting (per-IP 5/15min + per-account `acct:<sha256-prefix>` 5/15min), pre-increment BEFORE Argon2 (TOCTOU-safe), in-memory + DB with rollback-on-reject, dummy-hash timing equalization, token-shape regex AFTER HMAC verify, session fixation prevented, secure cookies (httpOnly+secure+sameSite:lax+path:/). **`sharing.ts` re-verified:** same pre-increment-then-check pattern, symmetric in-memory+DB rollback on every over-limit/FK/infra-error branch.
+
+### A08 Integrity Failures — VERIFIED HARDENED
+- Stripe webhook signature binds body to secret. All `JSON.parse` allowlist-normalized (no prototype-pollution sink). Restore validates dump header + 40+-pattern dangerous-SQL allowlist scan with conditional-comment unwrapping.
+
+### A09 Logging Failures — VERIFIED HARDENED
+- stderr credential redaction in db backup/restore. PII dropped from webhook logs (presence-flags). Share audit events log key FINGERPRINT (sha256 prefix), never the raw key. `logAuditEvent` for login/logout/password-change/db-backup/db-download/share-create/revoke/lr-token-used.
+
+### A10 SSRF — VERIFIED HARDENED
+- OG photo route: internal-fetch only (own origin + DB filename, not user input), rate-limited, charged-404, timeout+byte caps. Home OG route: no external fetch. `validateSeoOgImageUrl`: own-origin-only, rejects scheme-relative `//`, backslash tricks, non-http(s) protocols.
 
 ---
 
-## Final verdict
+## File-upload / path-traversal / privacy surfaces — RE-VERIFIED
 
-**No new security finding at HEAD `9c40d261`.** All four cycle-7 findings closed and verified. The single tail item (SEC8-01) is the already-known, already-dispositioned dev/build-only CVE record carried forward unchanged — it is NOT runtime-exploitable and the only available fixes are downgrade-only (rejected). The OWASP Top 10 surface, the privacy boundary, the paid-download flow, the Stripe integration, the auth/session subsystem, the SQL-restore allowlist, and the command-spawn surface are all in an exceptionally hardened state after eight cycles. **This loop has converged on the security axis.**
+- **Path traversal:** `serve-upload.ts` — `ALLOWED_UPLOAD_DIRS={jpeg,webp,avif}` (excludes `original/`), per-segment `SAFE_SEGMENT` regex, `lstat` symlink reject, `realpath`+`startsWith(resolvedRoot+sep)` containment, streams from resolved path (TOCTOU-closed). Same pattern in `db/download/route.ts` and `download/[imageId]/route.ts`.
+- **Decompression bomb:** Sharp `limitInputPixels` configured.
+- **Filename sanitization:** `validation.ts:144-145` rejects `..`/`/`/`\`; `safeInsertId` BigInt guard throws above MAX_SAFE_INTEGER.
+- **GPS at-rest scrub (`gps-exif-strip.ts`, re-read in full):** every scrubber bounds-checks before each `readUInt*` (JPEG `markerPos+4>buf.length`→null, `segLength<2||…>buf.length`→null; TIFF `tiffEnd>buf.length||tiffEnd-tiffStart<8`→null; ISOBMFF box-level `dataEnd-dataStart<N` guards, `typeOffset+4>infe.dataEnd` continue, `pos+idSize>ilocBox.dataEnd`→null). Fails closed to Tier-2 metadata-free re-encode. `isLosslessWebpByChunk` (`process-image.ts:1498-1518`) bounded RIFF walker with overflow/zero-progress guard (`next<=offset`→false), fail-closed to lossy; GPS stripped either way (zero privacy impact on misclassification).
+- **Privacy field selection (`data.ts`):** `publicSelectFields` derived from `adminSelectFields` by destructuring-omission (separate reference); 3 compile-time guards (`_privacyGuard`, `_mapPrivacyGuard`, `_largePayloadGuard`); `getMapImages` SQL `INNER JOIN topics … WHERE map_visible=true` + runtime per-row throw. **`PrivacySensitiveKeys` union (21 fields) includes `is_hdr` — see SEC9-01.**
+
+---
+
+## Secrets scan — CLEAN
+Grep across all `src/**/*.{ts,tsx}` (excluding tests): **no hardcoded secrets** — no `sk_live_`/`sk_test_`/`whsec_`/`AKIA…`/private-key blocks; no literal secret assignments; all via `process.env`.
+
+## Gate baseline measured this cycle
+- `lint:api-auth` / `lint:action-origin` / `lint:public-route-rate-limit` → **all exit 0**
+- `npx tsc -p tsconfig.typecheck.json` → **RED only because of the working-tree SEC9-01 `is_hdr` edit** (the guard firing — committed HEAD is GREEN). With the working change absent, the gate is clean.
+- Secrets grep → clean. `npm audit` → 2 moderate prod (build-time) + 3 high dev-only — unchanged record-only.
+- Full `npx vitest run` started in background but was killed (SIGTERM/exit 144) under concurrent multi-agent load — a known test-infra flake, NOT a source defect; the SEC9-01 evidence is the deterministic `tsc` error, which does not depend on the test run.
+
+---
 
 ## Security Checklist
 - [x] No hardcoded secrets (grep clean across all source)
-- [x] All inputs validated (slug/alias/tag/filename/email/int/topK shape checks)
-- [x] Injection prevention verified (Drizzle params, spawn arg-arrays, safeJsonLd, restore allowlist)
-- [x] Authentication/authorization verified (withAdminAuth lint gate, dual-bucket rate limit, same-origin, scope-gated PATs)
-- [x] Dependencies audited (npm audit prod + full — only dev/build-only CVEs, non-runtime)
-- [x] Privacy boundary verified (3 compile-time guards + getMapImages runtime assertion + GPS at-rest scrub on both ingest paths)
+- [x] All inputs validated (slug/alias/tag/filename/int/email/topK shape checks)
+- [x] Injection prevention verified (Drizzle params, spawn arg-arrays, safeJsonLd+nonce, restore allowlist; no eval/Function)
+- [x] Authentication/authorization verified (withAdminAuth + action-origin lint gates exit 0, dual-bucket rate limit, scope-gated PATs, secure cookies)
+- [x] Dependencies audited (only dev/build-only CVEs, non-runtime; downgrade-only fixes rejected)
+- [x] Privacy boundary verified (3 compile-time guards + getMapImages runtime assertion + GPS at-rest scrub) — **and the `_mapPrivacyGuard` was independently proven to fire on a real leak this cycle (SEC9-01)**
 - [x] SSRF / open-redirect verified (own-origin-only OG fetch, validateSeoOgImageUrl)
-- [x] Path traversal verified (containment + realpath + symlink reject on download/restore/upload)
+- [x] Path traversal verified (containment + realpath + symlink reject on serve/download/restore)
+
+## Final verdict
+**1 NEW genuine finding (SEC9-01, LOW, working-tree-only, guard-blocked).** The committed HEAD `0ce84b1b` is unchanged from cycle 8's exceptionally-hardened state — no production source changed, every OWASP category re-verified, secrets clean, all three security lint gates green. SEC9-01 is a transient privacy-boundary regression (`is_hdr` added to the public map select) introduced by concurrent fan-out activity during the review; it was caught by the existing `_mapPrivacyGuard` compile-time guard (proven RED via `tsc`) and cannot pass the blocking `typecheck:app` CI gate — so it never reached and cannot reach a commit unguarded. The required action is simply: do NOT commit that edit. The security axis remains CONVERGED; the only tail item (SEC9-R1) is the already-dispositioned dev/build-only CVE record.

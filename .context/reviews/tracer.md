@@ -1,157 +1,154 @@
-# Tracer — Cycle 8 Deep Review (evidence-driven causal tracing)
+# Tracer — Cycle 9 Deep Review (evidence-driven causal tracing)
 
 **Date:** 2026-06-14
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**HEAD:** `9c40d261` (working tree clean except pre-existing `.context/**` + `plan/**` artifacts). Cycle-7 fixes AGG-C7-01..05 confirmed landed in commits `5ef545bf`..`9c40d261`.
-**Method:** end-to-end flow tracing with line-cited evidence, competing hypotheses, evidence for/against, and runtime probes where the code alone could not certify a flow.
+**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16.2 / React 19 / TS6)
+**HEAD:** `0ce84b1b` — working tree CLEAN for SOURCE (verified `git status` shows only concurrent-agent `.context/**` mutations + pre-existing `plan/**` artifacts; every traced source file confirmed unchanged vs HEAD with `git diff --quiet HEAD -- <file>`).
+**Method:** end-to-end flow tracing with line-cited evidence, competing hypotheses with evidence for/against, runtime probes (5 contract test files run green; GPS-strip flake re-characterized over 3 isolated runs), and HEAD-vs-working-tree discrimination to neutralize concurrent-agent perturbations.
 
 ---
 
 ## TL;DR
 
-Five priority flows traced. **Four are sound** with strong line-cited evidence (upload→queue→encode→cleanup, color-signal precedence → encoder → ETag invalidation, session/auth guard chain, migration silent-skip post-condition). The **fifth (GPS-strip) is functionally sound** — every per-format scrubber neutralizes GPS on the delivered bytes. The **one finding (TRC8-01, LOW)** is a *test-gate* nit: the WebP XMP-chunk JUNK-retag test `strip-gps-from-original.test.ts:282` is a **flaky gate** — it failed once on this session's first cold invocation (`stripGpsFromWebpBuffer` returned `null` → `expect(result).not.toBeNull()` at `:300`) and then passed 4 combined runs + 12 isolated cold-process runs + 1 full-suite run (2093/2093). This is a **test/encoder cold-flake, NOT a source defect** — the privacy scrubber is proven correct; the gate is non-deterministic under concurrent worker contention. The full suite is reliably green at HEAD.
+**NEW GENUINE FINDINGS: 0.**
+
+All five priority flows re-traced against committed HEAD `0ce84b1b` and confirmed **SOUND** with strong line-cited evidence. The cycle-8 findings (AGG-C8-01 base56 uniformity test `71ab0f41`, AGG-C8-02 SCAN_ROOTS doc `aa8a6f8a`) landed clean. The prior cycle-8 tracer's only finding (TRC8-01, the WebP XMP cold-flake) is a **test-infra non-determinism, not a source defect** — re-characterized this cycle as 3/3 PASS in isolated runs; it does not recur and is already documented as a deferred test-hardening item. No CRITICAL/HIGH/MEDIUM/LOW source defect on any of the five flows. **Convergence holds.**
+
+Contract gates run live this cycle (all green):
+- `sw-template-contract.test.ts` + proxy admin-render marker → **14 passed**
+- `migration-journal-monotonicity.test.ts` + `migration-journal.test.ts` + `migrate-reconcile-coverage.test.ts` → **63 passed**
+- `admin-backfill-runner-detection-failure.test.ts` → green (in the 14)
+- `strip-gps-from-original.test.ts` → **28 passed × 3 isolated runs**
+- `backfill-color-pipeline.test.ts` → **6 passed**
 
 ---
 
-## Flow 1 — Upload → original save → PQueue claim → Sharp encode → conditional UPDATE → orphan cleanup
+## File inventory (the five flows)
 
-**Observation (code-traced):** `enqueueImageProcessing` (`apps/web/src/lib/image-queue.ts:229-542`) is the single processing pipeline; both ingest writers feed it.
-
-**Competing hypotheses on multi-worker safety:**
-- **H1 "two workers can both encode the same image"** — REFUTED. `acquireImageProcessingClaim` (`image-queue.ts:193-210`) does `SELECT GET_LOCK(?, 0)` on a DEDICATED pool connection before any work; a non-acquiring worker returns `null` and reschedules with escalating backoff (`:260-281`). Lock name is per-job (`getImageProcessingLockName(jobId)`), released in `finally` (`:528`). Paired with the open-before-claim row check (`:284-289`) and the conditional `UPDATE … WHERE processed = false` (`:368-370`).
-- **H2 "delete-while-processing orphans variant files"** — REFUTED. On `affectedRows === 0` (image deleted mid-encode) the handler runs `deleteImageVariants(dir, name, [])` for all 3 formats (`:383-387`); the `[]` empty-sizes arg forces a FULL directory scan (AGG-C4-04), so non-default configured sizes are also removed.
-- **H3 "crash between link and rename leaves .tmp orphans forever"** — MITIGATED. `cleanOrphanedTmpFiles` (`:30-71`) runs on every bootstrap pass (`:672`), scans the 3 dirs in parallel, unlinks `*.tmp`, narrows the catch to non-ENOENT (`:56-68`).
-- **H4 "restore mid-processing deadlocks the queue"** — REFUTED with strong evidence. `quiesceImageProcessingQueueForRestore` (`:700-741`) does `pause(); clear(); await onIdle()` IN THAT ORDER (`:724-726`); the docblock `:704-723` documents the prior `pause(); await onIdle()` deadlock (COR-R4C12-01) and why clear-first is required. `beginRestoreMaintenance()` runs before quiesce so `enqueueImageProcessing` rejects (`:231`).
-
-**Confidence:** High that the flow is sound — advisory-lock claim + conditional UPDATE + open-before-claim + `[]`-scan cleanup are all present and correctly ordered.
-
-**Verdict:** SOUND. No finding.
+| Flow | Core files (line counts at HEAD) |
+|---|---|
+| 1 GPS-strip dispatch | `lib/gps-exif-strip.ts` (595), `lib/process-image.ts` `stripGpsFromOriginal` (`:1561-1638`), `app/api/download/[imageId]/route.ts` (463), call sites `actions/images.ts:306-312` + `api/admin/lr/upload/route.ts:311-326` |
+| 2 image-processing claim/race | `lib/image-queue.ts` (753), `lib/advisory-locks.ts` (`getImageProcessingLockName`) |
+| 3 backfill (both entry points) | `lib/admin-backfill-runner.ts` (871), `scripts/backfill-color-pipeline.ts` (471), `app/actions/admin-backfill.ts` (130) |
+| 4 migration cursor | `scripts/migrate.js` (775) |
+| 5 SW HTML offline personalization | `public/sw.template.js` (364), `public/sw.js` (built, byte-matched on the gate), `src/proxy.ts` (141), consumer `app/[locale]/(public)/p/[id]/page.tsx` |
 
 ---
 
-## Flow 2 — Paid-download original streaming → GPS-EXIF strip → per-format dispatch
+## Flow 1 — GPS-strip dispatch → per-format scrubber → paid-download streamed original
 
-**Observation:** `stripGpsFromOriginal` (`apps/web/src/lib/process-image.ts:1561-1638`) is invoked at upload time by BOTH ingest writers under the `stripGpsOnUpload` snapshot: browser `apps/web/src/app/actions/images.ts:306-312`, Lightroom `apps/web/src/app/api/admin/lr/upload/route.ts:311-327` (byte-identical call). The paid-download route (`apps/web/src/app/api/download/[imageId]/route.ts`) streams the on-disk original verbatim.
+**Observation (code-traced):** `stripGpsFromOriginal(filePath)` (`process-image.ts:1561-1638`) is invoked at upload time by BOTH ingest writers under the `stripGpsOnUpload` snapshot — browser `actions/images.ts:311`, Lightroom `api/admin/lr/upload/route.ts:326` (byte-identical call). The paid-download POST (`api/download/[imageId]/route.ts:406`) streams the on-disk original from `UPLOAD_DIR_ORIGINAL/filename_original` verbatim. The scrub writes the cleaned bytes back to that EXACT path via `writeFile(tmp)` → `rename(tmp, filePath)` (`:1586-1587`, `:1627-1628`), so the streamed file IS the scrubbed file.
 
-**Dispatch trace (`process-image.ts:1564-1626`), per-format:**
-| ext | Tier-1 scrubber | Tier-2 fallback on `null` |
+**Per-format dispatch (`:1564-1626`):**
+| ext | Tier-1 lossless scrubber | Tier-2 fallback on `null` |
 |---|---|---|
-| `.jpg/.jpeg` | `stripGpsFromJpegBuffer` (`:1570`) | re-encode q95 4:4:4 (`:1602`) |
-| `.tif/.tiff` | `stripGpsFromTiffBuffer` (`:1572`) | re-encode lzw (`:1612`) |
-| `.heic/.heif/.avif` | `stripGpsFromIsobmffBuffer` (`:1574`) | AVIF→re-encode q90 (`:1615`); HEIC/HEIF→`return` loud error, GPS retained (`:1621`) |
-| `.webp` | `stripGpsFromWebpBuffer` (`:1576`) | re-encode, lossless-by-chunk (`:1608-1609`) |
+| `.jpg/.jpeg` (+ FFD8 magic guard `:1569`) | `stripGpsFromJpegBuffer` | re-encode q95 4:4:4 (`:1602`) |
+| `.tif/.tiff` | `stripGpsFromTiffBuffer` | re-encode lzw (`:1612`) |
+| `.heic/.heif/.avif` | `stripGpsFromIsobmffBuffer` | AVIF→re-encode q90 (`:1615`); HEIC/HEIF→loud error, GPS retained (`:1621`) |
+| `.webp` | `stripGpsFromWebpBuffer` | re-encode, lossless-by-chunk (`:1608-1609`) |
+| `.png` | none (Tier-1 skipped — falls to Tier-2) | re-encode pixel-lossless (`:1599`) |
 | `.gif/.bmp` | none → `return` (`:1577-1581`) | n/a (no standardized GPS carriage) |
 | other | none | `return` loud error (`:1624`) |
 
-**Competing hypothesis: "does any branch leave GPS readable on the deliverable?"**
-- **JPEG** — REFUTED. `stripGpsFromTiffRegion` (`gps-exif-strip.ts:103-189`) zeroes every GPS-IFD entry value (inline + offset-referenced, `:130-135`), collapses the IFD to 0 entries (`:140-141`); GPS-bearing XMP APP1 (standard + ExtendedXMP, including offset-ordered reconstruction `:316-320`) is DROPPED (`:329-349`). A post-EOI trailer (MPF/Motion-Photo secondary) is a structural anomaly → `null` → Tier-2 re-encode drops the trailer (`:262-279`, SEC-R4C10-01). The lossless path fails CLOSED when it can't certify a trailer is GPS-free.
-- **ISOBMFF (HEIC/AVIF)** — mostly REFUTED, ONE residual gap (already documented, not a regression). Exif items located via iinf/infe + iloc (file-offset construction only; `constructionMethod !== 0` → `null`, `:513`), TIFF-scrubbed; XMP mime items zeroed (`:536-542`). **Residual:** a structurally-anomalous HEIC/HEIF that defeats the lossless scrub CANNOT be re-encoded (prebuilt Sharp has no HEVC encoder) — `process-image.ts:1616-1622` logs `console.error` and RETURNS with GPS intact on disk. This is an honest, loudly-logged limitation already in CLAUDE.md ("structurally anomalous HEIC… original retains GPS"). AVIF anomalies DO re-encode (q90, `:1615`). Confidence High this is known/documented, not new.
-- **WebP** — REFUTED (scrubber correct). EXIF chunk → TIFF scrub (`gps-exif-strip.ts:571-578`); GPS-bearing `XMP ` chunk → FourCC retagged to `JUNK` at `buf.write('JUNK', offset, 4)` (offset = sub-chunk start = correct per RIFF `[FourCC][LEsize]` layout, `:584`) + payload zeroed (`:585`); odd payload even-padded (`:589`). I independently reproduced the exact failing-test fixture (64×48 q95 WebP, inject `XMP ` GPS chunk before `VP8 `): `stripGpsFromWebpBuffer` returns `{stripped:true, len:196}`, GPS gone, `VP8 ` pixel chunk byte-identical (chunk walk `@12:'XMP '/101→121 @122:'VP8 '/66→196`).
-- **Re-encode fallback metadata** — REFUTED. Tier-2 uses `sharp(…, {autoOrient:true}).keepIccProfile()` with NO `withMetadata()` (`process-image.ts:1596-1597`) — Sharp strips EXIF/XMP by default. The R4C8 docblock (`:1529-1536`) explains the historical `withMetadata()` keep-all bug.
-- **AGG-C7-05 lossless-WebP detection** — VERIFIED FIXED. `isLosslessWebpByChunk` (`process-image.ts:1498-1518`) walks sub-chunks, returns true ONLY on a genuine `VP8L` pixel chunk (`:1511`), false on `VP8 ` (`:1512`), default-false on malformation (`:1517`) — replacing the prior whole-buffer `includes('VP8L')` substring scan. Privacy-safe regardless of the lossless/lossy choice.
+**Competing hypothesis: "does any branch leave GPS readable on the deliverable original?"**
 
-**Paid-download claim ordering (route.ts):** open-before-claim holds — `lstat`+`realpath` traversal check (`:322-336`) → `open()` (`:349`) → `stat().size` from the OPENED inode (`:351`, Content-Length can't desync on concurrent replace) → atomic `UPDATE … WHERE downloadedAt IS NULL` (`:379-385`) → stream (`:406`). Handle closed on EVERY failure path (`:355,387,399,456`); success closes via autoClose. A missing file fails BEFORE the claim (`:356-360`) so the token is never burned with zero bytes (C3-RPF-05). GET is claim-free interstitial (`:198-258`); POST claims (R4C7).
+- **H1a "a format branch silently no-ops, leaving GPS"** — REFUTED. Every ext maps to a scrubber OR an explicit documented no-GPS-carriage `return` (`.gif/.bmp`) OR a loud-error `return` (unknown ext `:1624`, HEVC-HEIF `:1621`). There is no fall-through that writes nothing while reporting success. The PNG case correctly falls through Tier-1 (no `.png` branch in the `if/else if` chain `:1569-1581`) into Tier-2 pixel-lossless re-encode (`:1598-1599`), which strips all metadata by default.
+- **H1b "the scrubber returns `{stripped:true}` but didn't actually zero the GPS bytes"** — REFUTED by reading each scrubber:
+  - **JPEG/TIFF core** (`stripGpsFromTiffRegion`, `:103-189`): zeroes every GPS-IFD entry value (inline AND offset-referenced, `:130-135`), zeroes the 12-byte entries, collapses count to 0 (`:140-141`), zeroes the trailing next-IFD pointer. GPS-bearing XMP TIFF tag (0x02BC) value zeroed when `XMP_GPS_TOKEN` matches (`:177-178`). Bounds-checked throughout (`inBounds`, `:112`); returns `null` on any structural anomaly so the caller re-encodes.
+  - **JPEG container** (`:212-350`): GPS-IFD scrubbed inside every APP1 Exif segment; standard XMP APP1 + ExtendedXMP overflow chunks token-tested (per-chunk `:300-301` AND offset-ordered reconstruction `:316-320`, SEC-R4C9-01) and DROPPED from the rebuilt stream (`:329-349`). Post-EOI trailer (MPF secondary / Motion Photo) → structural anomaly `null` → Tier-2 re-encode drops the trailer (`:262-279`, SEC-R4C10-01). Fails CLOSED.
+  - **ISOBMFF** (`:369-546`): Exif items located via meta→iinf→infe + iloc file-offset extents (`constructionMethod !== 0` → `null`, `:513`); TIFF-scrubbed; XMP mime items zeroed when GPS token matches (`:536-542`). Bounded walk (MAX_DEPTH 5, itemCount cap 4096, extentCount cap 64).
+  - **WebP** (`:554-595`): EXIF chunk → TIFF scrub (`:571-578`); GPS-bearing `XMP ` chunk → FourCC retagged to `JUNK` at the sub-chunk start `buf.write('JUNK', offset, 4)` (`:584` — correct per RIFF `[FourCC][LEsize]` layout) + payload zeroed (`:585`); even-padding handled (`:589`); fails CLOSED on `dataEnd > buf.length` (`:570`) and zero-progress (`:591`).
+- **H1c "the Tier-2 re-encode keeps metadata via Sharp"** — REFUTED. Tier-2 uses `sharp(filePath, {autoOrient:true}).keepIccProfile()` (`:1596-1597`) with NO `withMetadata()`. Sharp 0.33+ strips EXIF/XMP/IPTC by default; the R4C8 docblock (`:1530-1547`) documents the historical `withMetadata()` keep-all bug this avoids. `keepIccProfile()` keeps ONLY the color profile, not GPS.
+- **H1d "the streamed file desyncs from the scrubbed file under concurrent replace"** — REFUTED. The download route opens the inode (`open()`, `:349`) and reads `Content-Length` from `fileHandle.stat().size` (`:351`, from the OPENED inode), so a concurrent rename can't desync the length. The atomic rename in `stripGpsFromOriginal` (`:1587`/`:1628`) is the only writer of that path post-upload.
 
-**Confidence:** High that the privacy scrubbers are correct on all delivered bytes. The ONE honest residual (anomalous HEVC-HEIF can't be re-encoded → GPS retained, loudly logged) is documented and unchanged.
+**Paid-download claim ordering (re-verified `route.ts`):** open-before-claim holds — `lstat`+symlink reject (`:322-325`) → parallel `realpath` containment (`:330-336`) → `open()` (`:349`) → `stat().size` (`:351`) → atomic `UPDATE … WHERE downloadedAt IS NULL` (`:379-385`) → stream (`:440`). Handle closed on EVERY post-open failure path (`:355` stat-throw, `:387` claim-UPDATE-throw, `:399` already-used, `:456` stream-setup-throw); success path autoCloses. A missing file fails BEFORE the claim (`:356-360` ENOENT → 404) so the single-use token is never burned with zero bytes (C3-RPF-05). GET is claim-free interstitial; only POST claims (R4C7 COR-R4C7-01/02). The `affectedRows` shape-guard falls back to 1 on driver-shape drift (`:396-397`) to avoid a false-410.
 
-**Verdict:** SOUND (privacy contract intact). See TRC8-01 for the test-gate flake on the WebP XMP branch.
+**Evidence ranking:** Tier-2 source read (primary artifact, tight provenance) + the prior cycle-8 tracer's independent fixture reproduction of the WebP JUNK-retag + 28×3 green test runs this cycle. No contradicting evidence.
+
+**Verdict:** SOUND. The privacy contract is intact on every delivered-bytes branch. The ONE honest residual — a structurally-anomalous HEVC-compressed HEIC that defeats the lossless scrub CANNOT be re-encoded (prebuilt Sharp has no HEVC encoder) and the original retains GPS, LOUDLY logged (`:1621`) — is documented in CLAUDE.md and is unchanged / not a regression. **No finding.**
 
 ---
 
-## TRC8-01 — WebP XMP-chunk JUNK-retag test is a FLAKY GATE (not a source defect)
+## Flow 2 — PQueue job → per-image advisory lock → conditional UPDATE → orphan cleanup
 
-**Severity:** LOW · **Confidence:** High (reproduced once + extensively characterized) · **Class:** test-gate non-determinism / cold-encode flake · **needs-manual-validation:** NO (root cause isolated to the encoder cold path, not the scrubber)
+**Observation:** `enqueueImageProcessing` (`image-queue.ts:229-542`) is the single processing pipeline. Both ingest writers feed it.
 
-**Observation (runtime evidence):** On this session's FIRST vitest invocation —
-```
-npx vitest run src/__tests__/strip-gps-from-original.test.ts \
-                src/__tests__/process-image-webp-lossless-detect.test.ts
-→ 1 failed | 31 passed (32)
-  FAIL > stripGpsFromWebpBuffer neutralizes a GPS-bearing XMP chunk (JUNK-retag…)
-  AssertionError: expected null not to be null
-    ❯ strip-gps-from-original.test.ts:313 → expect(pixelsAfter).not.toBeNull()
-```
-The root assertion is at `:300 expect(result).not.toBeNull()` — `stripGpsFromWebpBuffer(withXmp)` returned `null`; `:313` is the downstream symptom once `result!` is null.
+**Competing hypotheses on the two-worker race:**
+- **H2a "two workers can both encode the same image (double-encode / interleaved variant writes)"** — REFUTED. `acquireImageProcessingClaim(job.id)` (`:193-210`) does `SELECT GET_LOCK(name, 0)` (non-blocking) on a DEDICATED pool connection (`:194`) BEFORE any encode work. The losing worker gets `null` (`:260`) and reschedules with escalating backoff (`:272-280`, up to 25 s, capped at MAX_CLAIM_RETRIES=10). Lock name is per-job (`getProcessingLockName(jobId)`); released in `finally` (`:527-530`) — the acquire (`:259`) and the protected `try` (`:258`) are adjacent so a throw cannot leak the claim connection.
+- **H2b "delete-while-processing orphans variant files"** — REFUTED. AFTER the lock, an open-before-claim row check `WHERE processed = false` (`:284-285`) and a conditional `UPDATE … WHERE processed = false` (`:368-370`) gate the success path. On `affectedRows === 0` (image deleted mid-encode) the handler runs `deleteImageVariants(dir, name, [])` for all 3 formats (`:383-387`); the `[]` empty-sizes arg forces a FULL directory scan (AGG-C4-04) so NON-default configured sizes (`image_sizes` admin-tunable up to 8) are also removed. Matches the backfill runner's `cleanupDeletedMidReencodeVariants` and the sidecar.
+- **H2c "lock leaks the dedicated connection on a throw between acquire and finally"** — REFUTED. The whole body runs in a single `try` (`:258`) whose `finally` (`:527`) releases the claim and prunes the enqueued/retry maps. `acquireImageProcessingClaim` itself releases the connection on its own internal throw (`:204-205`) and on a non-acquire (`:208`).
+- **H2d "restore mid-processing deadlocks the queue"** — REFUTED. `quiesceImageProcessingQueueForRestore` (`:700+`) documents the prior `pause(); await onIdle()` deadlock (COR-R4C12-01) and the clear-first fix; `beginRestoreMaintenance()` runs before quiesce so `enqueueImageProcessing` rejects new jobs (`:231`).
+
+**Evidence ranking:** primary source read of the claim/UPDATE/cleanup/finally window (tight provenance), corroborated by the documented invariant in CLAUDE.md ("Per-image-processing claim" + "Delete-while-processing").
+
+**Verdict:** SOUND. Advisory-lock claim + open-before-claim check + conditional UPDATE + `[]`-scan cleanup + finally-release are all present and correctly ordered. **No finding.**
+
+---
+
+## Flow 3 — Backfill (sidecar script + admin button) → no-version-bump-on-detection-failure
+
+**Observation:** Two entry points re-encode behind the same `gallerykit_color_pipeline_backfill` advisory lock: `admin-backfill-runner.ts` (in-app) and `scripts/backfill-color-pipeline.ts` (sidecar). Both must satisfy the resume contract: a row whose re-encode SUCCEEDS but whose color detection THEN fails must NOT have its `pipeline_version` advanced, so a later run retries detection.
 
 **Competing hypotheses:**
-- **H-A "source defect — the JUNK-retag branch (`gps-exif-strip.ts:579-588`) is wrong"** — REFUTED. I reproduced the EXACT fixture path (64×48 q95 WebP via `toFile`→`readFile`, same injected XMP GPS payload) in an isolated probe: `RESULT={"stripped":true,"len":196}`, GPS removed, `VP8 ` byte-identical. The branch is reachable and correct.
-- **H-B "deterministic order-dependent failure"** — REFUTED. The same two-file combination passed 3/3 on immediate re-run (`Tests 32 passed (32)` ×3). The single file alone: `28 passed (28)`. Twelve isolated cold-process runs of a standalone probe of the exact fixture: 12/12 PASS, 0 NULL. Full suite cold: `219 files / 2093 tests passed`, exit 0.
-- **H-C "encoder cold-flake — the first libvips/WebP encode in a fresh worker transiently emits a buffer that trips a `stripGpsFromWebpBuffer` null-path"** — BEST-SUPPORTED. The ONLY `null`-returns reachable for this XMP-only fixture (no EXIF chunk) are: the RIFF magic check (`:555-559`, constructed by the test → can't fail), `dataEnd > buf.length` (`:570`), or the zero-progress guard (`:591`). All three depend on the encoder-produced `base` buffer's chunk sizes. A transient first-encode anomaly (short/odd buffer, or libheif/libvips init racing the WebP encode under concurrent vitest workers) makes the injected top-level RIFF size or `VP8 ` chunk extent overrun `buf.length`, hitting `:570`.
+- **H3a "the in-app runner strands stale color metadata at CURRENT version on detection failure"** — REFUTED. `reprocessOne` (`admin-backfill-runner.ts:442-615`): on `signals` present, the UPDATE sets `pipeline_version = IMAGE_PIPELINE_VERSION` + all color columns (`:557-570`). On detection failure (`signals === null`), the SEPARATE branch (`:594-599`) UPDATEs ONLY `was_downscaled` + `avif_10bit` — NO `pipeline_version`, NO color columns — and returns `detection-failed` (`:609`). The candidate query (`:404`) selects `pipeline_version IS NULL OR pipeline_version < CURRENT`, so a detection-failed row stays a candidate. The explanatory comment (`:580-593`, R-run2c1 AGG-01) documents that bumping here previously stranded the row.
+- **H3b "the sidecar script disagrees with the in-app runner"** — REFUTED. `backfill-color-pipeline.ts` `reprocessRow` (`:162+`): detection-failure branch (`:223-232`) returns `derivativeOnly: { was_downscaled, avif_10bit }` only; the success branch (`:211-220`) carries full `signals`. The batched UPDATE applies `pipeline_version = CURRENT` ONLY on the signals path (`:370-374`); the derivative-only path persists just the two delivered-bit-depth columns without a version bump (AGG2-01, `:349-351`). Header docblock (`:94-101`) documents both paths persist the SAME columns on detection failure. The contract is locked by `backfill-color-pipeline.test.ts` (column set) + `admin-backfill-runner-detection-failure.test.ts` (no version bump) — both green this cycle.
+- **H3c "deleted-mid-reencode orphans the just-written derivatives"** — REFUTED. BOTH the success branch (`:573-576`) and the detection-failed branch (`:605-608`) check `affectedRows === 0` and call `cleanupDeletedMidReencodeVariants(row)` with `[]` sizes (full scan, `:430-440`), classifying it as `deleted-mid-reencode` (its own tally, NOT a failure — `:787-792` so it doesn't flip the WITH-FAILURES banner). AGG-R8c3-03.
+- **H3d "the per-image claim races the live queue worker into a double-encode"** — REFUTED. The runner claims the SAME `gallerykit:image-processing:{id}` lock as the queue worker (non-blocking, `:343-359`, TRC-R5C2-01) for the full re-encode→detect→UPDATE window, released in `finally` (`:610-614`). A held lock → `locked` skip, no version bump, retried next run. A pool-exhausted acquire is also treated as `locked` (`:487-490`, AGG-R5C3-05) so a saturated pool degrades to "retry next run" instead of a tight error spin.
+- **H3e "concurrency clamp yields NaN and freezes PQueue"** — REFUTED. `resolveBackfillConcurrency` (`:129-142`) guards a non-finite pool limit with a fallback of 10 (`:137`), so the cap arithmetic never yields NaN; the request is floored to ≥1 (`:140`).
 
-**Evidence for/against H-C:**
-- FOR: failure appeared only on the cold first run; `vitest.config.ts` sets no `pool`/`isolate`/`fileParallelism` override (default forks pool with file-parallelism), so two encode-heavy files share worker contention on a cold process. The repo already documents two flaky-gate families in THIS exact suite — the `.next/standalone` phantom-path flake (fixed by the `exclude` in `vitest.config.ts`) and the "libheif cold-flake" / shared-`public/uploads` isolation note (aggregate AGG-C7-R7 / AGG-C4-T2). This WebP cold-flake is the same shape.
-- AGAINST: I could not re-catch the `null` after the first occurrence (16+ subsequent runs all green), so I could not capture the exact malformed `base` bytes. Root cause is inferred from the reachable null-paths + the one-shot reproduction, not from a captured failing buffer.
+**Evidence ranking:** primary source read of both detection-failure branches in both files (controlled comparison), corroborated by two green contract tests pinning the column set + no-version-bump invariant.
 
-**Failure scenario (if it recurs in CI):** a cold CI worker hits the transient encoder anomaly → the JUNK-retag test goes RED with `expected null not to be null` → the per-iteration deploy gate fails on a NON-deterministic test, not on any product regression. **No privacy/runtime impact** — the scrubber is correct; only the gate is unreliable.
-
-**Critical unknown:** the exact byte-shape of the `base` WebP buffer in the failing cold run (which null-path fired). Not captured because the flake did not recur.
-
-**Discriminating probe / recommended fix (test-hardening only, cheapest first):** make the fixture deterministic instead of encoder-dependent —
-1. add a guard in the test: if `webpPixelChunk(base) === null` after encode, re-encode once before injecting (removes the cold-encode dependency from the assertion path); OR
-2. assert the encoder output's chunk extents are well-formed before injection and skip-with-warning on a malformed cold encode; OR
-3. move the WebP `base` encode into `beforeAll` so libvips is warmed once and the buffer is reused (matching the JPEG fixtures that already run earlier and warm libvips).
-
-The product `stripGpsFromWebpBuffer` needs NO change — it is proven correct.
+**Verdict:** SOUND. Stale color metadata is NEVER stranded at the current `pipeline_version` on either entry point; both persist only the delivered-bit-depth columns on detection failure and leave the row a candidate. **No finding.**
 
 ---
 
-## Flow 3 — Color signal precedence → encoder decision → derivative gamut → ETag invalidation
+## Flow 4 — Migration cursor → journal hash check → reconcile → baseline → post-condition
 
-**Observation:** `detectColorSignals` (`apps/web/src/lib/color-detection.ts:300-411`) resolves primaries; `resolveColorPipelineDecision` / `resolveAvifIccProfile` (`process-image.ts:661/754`) pick the encode path.
+**Observation:** `migrate.js` orchestration `:744-775`. The historical production incident: drizzle's MySQL migrator decides apply-or-skip by `MAX(created_at) < folderMillis`, and this repo's journal has non-monotonic `when` timestamps, so a single max-row baseline poisons the cursor and silently skips entries.
 
-**Precedence trace (`color-detection.ts:343-401`):** the documented order NCLX > ICC chromaticity > ICC name is correctly implemented:
-1. ICC-name inference first (`:343-345`).
-2. ICC chromaticity UPGRADES only when name is `unknown` + medium/high confidence (`:357-368`), mapping `srgb`→`bt709` at the boundary.
-3. NCLX (when present) outranks, applied PER-FIELD with the ITU-T code-2 "Unspecified" guard (`:381-387`) — `if (nclxX !== undefined)` so a partially-specified NCLX box does NOT clobber valid ICC data with `unknown` (AGG-R8-06 / COR-1). `isHdr` derived from final `transferFunction in (pq,hlg)` (`:401`).
+**Competing hypotheses:**
+- **H4a "a poisoned MAX(created_at) baseline still silently skips entries"** — REFUTED. `getAllJournalMigrations` (`:144-160`) returns ONE record per journal entry with `hash = SHA256(file content)` (`:157`). `baselineAllJournalMigrations` (`:642-657`) inserts one `__drizzle_migrations` row PER entry keyed by hash (`:644` filters `!haveHashes.has(m.hash)`), so the cursor can't be poisoned by a synthetic max row.
+- **H4b "the legacy-detection still uses a timestamp comparison"** — REFUTED. `prepareLegacyDatabaseIfNeeded` (`:659-696`) checks `migrations.every(m => haveHashes.has(m.hash))` (`:683`), a per-entry hash set membership — NOT `MAX(created_at)` vs `Math.max(...whens)`.
+- **H4c "a completely fresh DB falls through to drizzle.migrate() and dies on entry 7-17"** — REFUTED. A fresh DB (`!hasGalleryTables`, `:662`) now takes the SAME deterministic `reconcileLegacySchema` + `baselineAllJournalMigrations` path (`:677-679`, R4C1 COR-R4C1-12), after which `drizzle.migrate()` is a verified no-op.
+- **H4d "a future silently-skipped migration boots on a half-applied schema"** — REFUTED. The post-condition in `runMigrations` (`:708-716`) recomputes recorded hashes after `migrate()` and `throw`s `Drizzle silently skipped N migration(s): <tags>` if any journal hash is missing → the deploy fails LOUD. `reconcileLegacySchema` mirrors all schema state idempotently (CLAUDE.md migration step 3) so a reconcile-bootstrapped DB doesn't fail the first INSERT.
 
-**Competing hypothesis: "does a setting flip invalidate cache on BOTH paths?"**
-- **serve-upload path** — VERIFIED. ETag at `apps/web/src/lib/serve-upload.ts:201` = `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`. `settingsHash` covers **9** `COLOR_IMPACTING_KEYS` (`settings-hash.ts:37-49`): 5 color keys + 3 quality keys + `image_sizes`. `HASH_LENGTH=8`, used verbatim (no `.slice` at the site). Flipping any of the 9 changes the hash → `must-revalidate` 304→200 cycle. The config-arg form (`getColorSettingsHash(config)`, `settings-hash.ts:72-85`) computes from VALIDATED config values (R8-H1), so an invalid stored value the encoder clamps to default doesn't misalign the ETag.
-- **static path** — VERIFIED by reasoning. Files already in `public/uploads/` are served by Next's static server with a `W/"{size}-{mtime}"` ETag (CLAUDE.md R4C6 ARCH-R4C6-06). A settings flip alone does NOT change those — invalidation rides the BACKFILL re-encode: re-encoding rewrites the file in place under the same filename, changing both mtime and size → static ETag changes. Policy is `public, max-age=3600, must-revalidate` (deliberately NOT `immutable`) so the conditional revalidate actually fires.
+**Evidence ranking:** primary source read of the hash-based baseline + per-entry coverage check + post-condition assertion (tight provenance), corroborated by 63 green tests across `migration-journal-monotonicity` + `migration-journal` + `migrate-reconcile-coverage`.
 
-**Doc nuance (NOT a defect):** the CLAUDE.md snippet in this session's context says the hash covers "**5**" keys, but the code has 9. The aggregate (AGG-C7-R3) already established the on-disk CLAUDE.md was corrected to 9 and the "5" is a stale paraphrase. Code is authoritative and correct; no flow impact.
-
-**Confidence:** High. Precedence, per-field NCLX guard, and dual-path invalidation all verified.
-
-**Verdict:** SOUND. No finding.
+**Verdict:** SOUND. The hash-based per-entry baseline + post-condition assertion structurally eliminate the silent-skip class. **No finding.**
 
 ---
 
-## Flow 4 — Session mint → cookie → proxy guard → isAdmin() defense-in-depth → rate limit
+## Flow 5 — SW HTML offline-fallback personalization (proxy `x-gk-admin-render` → `networkFirstHtml`)
 
-**Observation:** mint in `apps/web/src/lib/session.ts:82-89`; verify in `verifySessionToken` (`session.ts:94-151`); proxy presence-guard in `apps/web/src/proxy.ts:54-116`; per-action check via `isAdmin()`→`getCurrentUser()` (`apps/web/src/app/actions/auth.ts:33-56`).
+**Observation:** the SW caches 200 GET HTML as an OFFLINE-ONLY fallback (24 h TTL, 50-entry cap). The risk: an admin-rendered public page cached then served to an anonymous visitor offline. The defense is the server-set `x-gk-admin-render: 1` header (the SW cannot read the request `Cookie` header — Fetch-spec forbidden).
 
-**Competing hypothesis: "bypass or TOCTOU in the guard chain?"**
-- **H1 "proxy presence-check is the only auth → forgeable cookie bypasses"** — REFUTED. `proxy.ts` does a PRESENCE + shape check only (`token.length >= 100`, 3 non-empty colon parts; `:90-115`) and the comment is explicit that "Full cryptographic validation happens in verifySessionToken() within server actions." Every mutating action independently calls `isAdmin()`. A forged cookie passes the proxy shape check but fails HMAC in `verifySessionToken`.
-- **H2 "HMAC compare is a timing oracle"** — REFUTED. `verifySessionToken` (`session.ts:108-119`) computes expected HMAC, length-guards (`:113`), then `timingSafeEqual` (`:117`). Shape regexes for `random`/`signature` run AFTER the crypto compare (`:124-125`) — comment explicitly notes this prevents a timing oracle. 24h age cap (`:127-134`), hashed-token DB lookup (`:136-138`); expired session deleted (`:145-148`).
-- **H3 "DB-stored secret enables forgery on DB compromise"** — REFUTED in production. `getSessionSecret` (`session.ts:30-36`) THROWS in production if `SESSION_SECRET` env is absent/short; DB fallback is dev/test only.
-- **H4 "API admin routes skip the proxy guard"** — by-design + covered. `proxy.ts:140` matcher excludes `/api`; the `lint:api-auth` gate requires every `/api/admin/**` method to wrap `withAdminAuth`. The `x-gk-admin-render` header (`:128-130`) reflects only the requester's own cookie back to the same client (no cross-user disclosure), presence-only.
+**Leak surface is REAL and material (so the gate is load-bearing):** the public photo page `app/[locale]/(public)/p/[id]/page.tsx:151-157` renders DIFFERENT content for admins — `isAdmin()` resolves `canShare={isAdminUser}` / `isAdmin={isAdminUser}` (`:291-292`). An admin viewing `/en/p/123` gets HTML carrying admin affordances. Caching+serving that to an anon visitor WOULD be a cross-user disclosure of admin UI state.
 
-**Confidence:** High. The two-layer model (presence guard + cryptographic per-action check) holds; no TOCTOU because the action re-verifies cryptographically.
+**Competing hypotheses:**
+- **H5a "an admin-rendered public page can be cached and served to an anon"** — REFUTED. Two independent gates:
+  1. **Fetch dispatch** (`sw.template.js:349`): `if (isAdminRoute(pathname)) return;` — admin URLs never reach `networkFirstHtml`. (But the photo page is a PUBLIC URL, so this gate does NOT cover it — gate 2 does.)
+  2. **Cache decision** (`:270`): `if (networkResponse.ok && networkResponse.headers.get('x-gk-admin-render') !== '1')`. A public URL rendered WITH an admin session carries the header → the `put` is skipped. This is DOUBLE-SAFE: `.ok` requires 200-299 (a redirect to login isn't `.ok`), AND the marker must be absent.
+- **H5b "the proxy doesn't set the header for some admin-viewed public page (header absent → cached)"** — REFUTED. The public photo page is `export const revalidate = 0` (`:38`) → dynamically rendered → the proxy middleware ALWAYS runs (no static-HTML bypass). The proxy sets `x-gk-admin-render: 1` whenever the `admin_session` cookie is present (`proxy.ts:128-130`), on the `intlMiddleware` response that propagates to the final RSC response. The matcher `/((?!api|_next|_vercel|.*\..*).*)` (`:140`) excludes only `/api`, `_next`, and dotted-static paths — none of which is a cacheable personalized HTML page. A dotted path would be a static asset, not an `isHtmlRoute` (`Accept: text/html`) response carrying admin content.
+- **H5c "a CDN/nginx strips the header before the SW sees it"** — REFUTED. `nginx/default.conf` `proxy_hide_header` removes only `X-Powered-By` (`:54`); no rule touches `x-gk-admin-render`. It passes through to the browser.
+- **H5d "the shipped sw.js drifted from the template and lost the gate"** — REFUTED. `git diff HEAD -- public/sw.js public/sw.template.js` is empty; `sw.js:270` is byte-identical to `sw.template.js:270` (`if (networkResponse.ok && networkResponse.headers.get('x-gk-admin-render') !== '1') {`). The contract test `sw-template-contract.test.ts:41` pins the EXACT `.ok && marker` condition and asserts the `htmlCache.put` is inside that gated block (`:48-49`); `:139-140` pins the proxy header-set. 14 tests green this cycle.
+- **H5e "even non-admin responses can leak via isSensitiveResponse bypass on HTML"** — N/A (not a leak). The HTML path deliberately does NOT use `isSensitiveResponse` (which keys on `no-store`) because every public page is `revalidate=0` → Next emits `no-cache` → an `isSensitiveResponse`-gated HTML cache would be permanently empty (R4C6 COR-R4C6-05). The HTML path instead gates on `.ok && !admin-render`, and the cache is OFFLINE-ONLY (served only when the network is unreachable, `:285-301`, with a 24 h TTL purge). The image path keeps full `isSensitiveResponse` semantics (`:55` pinned by test).
 
-**Verdict:** SOUND. No finding.
+**Evidence ranking:** primary artifacts with tight provenance (proxy header-set source, SW gate source, committed-sw.js byte match, public photo page admin-branch, nginx config, `revalidate=0`), plus the contract test pinning both producer and consumer. Multiple independent sources converge. No contradicting evidence.
 
----
-
-## Flow 5 — Migration apply → drizzle silent-skip post-condition
-
-**Observation:** `apps/web/scripts/migrate.js` orchestration `:744-775`; the non-monotonic journal `when` problem is the historical production incident.
-
-**Competing hypothesis: "does the non-monotonic journal silent-skip actually get caught now?"**
-- **H1 "a poisoned MAX(created_at) baseline still silently skips entries"** — REFUTED. `getAllJournalMigrations` (`:144-160`) returns one record per journal entry with `hash = SHA256(file content)`. `prepareLegacyDatabaseIfNeeded` (`:659-696`) checks `migrations.every(m => haveHashes.has(m.hash))` (`:683`), NOT a max-timestamp comparison. `baselineAllJournalMigrations` (`:642-657`) inserts one `__drizzle_migrations` row PER entry (hash + its own `when`), so the cursor can't be poisoned by a synthetic max row.
-- **H2 "fresh DB falls through to drizzle.migrate() and dies on entry 7-17"** — REFUTED. A completely fresh DB (`!hasGalleryTables`, `:662`) now goes through the SAME `reconcileLegacySchema` + `baselineAllJournalMigrations` deterministic path (`:677-679`), then `drizzle.migrate()` is a verified no-op (R4C1 COR-R4C1-12).
-- **H3 "a future silently-skipped migration boots on a half-applied schema"** — REFUTED. The post-condition in `runMigrations` (`:708-718`) recomputes recorded hashes after `migrate()` and `throw`s `Drizzle silently skipped N migration(s): <tags>` if any journal hash is missing → the deploy fails LOUD. `reconcileLegacySchema` mirrors all color/HDR/gain-map columns (`:364-380`) so a reconcile-bootstrapped DB doesn't fail the first INSERT (R4C1 COR-R4C1-13).
-
-**Confidence:** High. The hash-based per-entry baseline + post-condition assertion structurally eliminate the silent-skip class.
-
-**Verdict:** SOUND. No finding.
+**Verdict:** SOUND. An admin-rendered page can NEVER be cached and served to an anonymous visitor: the cache `put` is gated on `.ok && x-gk-admin-render !== '1'`, the proxy reliably sets the marker on every dynamically-rendered admin-cookie request, nginx passes it through, and the shipped SW matches the template under a pinning test. **No finding.**
 
 ---
 
-## Cross-check against prior aggregate (`_aggregate.md`, cycle 7 @ `d0920957`)
+## TRC8-01 re-characterization (prior cycle's only finding — confirmed test-infra, NOT a source defect)
 
-- Cycle-7 fixes (AGG-C7-01..05) confirmed present at HEAD `9c40d261`: AGG-C7-02 test landed `5ef545bf` (`strip-gps-from-original.test.ts:282-333`), AGG-C7-03 scale-token catch-all `99071d76`, AGG-C7-05 chunk-detection `85bca582` (`isLosslessWebpByChunk`, `process-image.ts:1498`).
-- The aggregate's VERIFIED-CLEAN claim "full vitest green, libheif cold-flake did NOT reproduce" was at HEAD `d0920957`. At HEAD `9c40d261` the full suite is green (2093/2093) BUT the WebP XMP-branch cold-flake DID reproduce once this session → TRC8-01. This is a refinement, not a contradiction: the flake is real and intermittent; the cycle-7 run simply didn't hit it.
-- No prior closed finding re-opened. No new architectural/security-runtime/perf/privacy defect.
+The cycle-8 tracer's TRC8-01 (WebP XMP JUNK-retag test returned `null` once on a cold concurrent run, then passed 16+ subsequent runs) was re-characterized this cycle: `strip-gps-from-original.test.ts` ran **28 passed × 3 isolated cold runs**, 0 failures. The flake did NOT recur in isolation — consistent with the prior root-cause inference (a transient cold-encoder buffer anomaly under concurrent vitest worker contention, hitting the `dataEnd > buf.length` null-path `:570`, NOT a scrubber bug). The product `stripGpsFromWebpBuffer` is proven correct. This remains a DEFERRED test-hardening item (warm the encoder in `beforeAll` / guard-and-retry on a malformed cold `base`), not a schedulable source defect. Same flaky-gate family as the documented `.next/standalone` phantom-path and libheif cold-flake notes (AGG-C7-R7 / AGG-C4-T2 / AGG-C8-R-FLAKE).
+
+---
+
+## Cross-check against prior aggregate (`_aggregate.md` cycle 8 @ `9c40d261`)
+
+- Cycle-8 scheduled fixes confirmed landed at HEAD `0ce84b1b`: AGG-C8-01 base56 uniformity test (`71ab0f41`), AGG-C8-02 SCAN_ROOTS doc (`aa8a6f8a`). Plan-345 SHA backfill (`0ce84b1b`).
+- No prior closed finding re-opened. No new architectural / security-runtime / perf / privacy / migration defect across the five traced flows.
+- Concurrent-agent tree mutations observed in `.context/reviews/**` (code-reviewer, critic, perf-reviewer, security-reviewer, test-engineer, verifier) — these are RED-proof probe artifacts; every SOURCE file in the five flows verified unchanged vs HEAD. I left the tree byte-identical for source (no perturbation; ran read-only probes + isolated test runs only).
 
 ---
 
@@ -159,6 +156,11 @@ The product `stripGpsFromWebpBuffer` needs NO change — it is proven correct.
 
 | ID | Severity | Conf | Disposition |
 |---|---|---|---|
-| **TRC8-01** | LOW | High | SCHEDULE-cheap (test hardening only) OR DEFER. Make the WebP XMP fixture deterministic / warm the encoder in `beforeAll` / guard-and-retry on a malformed cold `base`. Product `stripGpsFromWebpBuffer` needs NO change — the scrubber is proven correct. Same flaky-gate family as the documented `.next/standalone` phantom-path and libheif cold-flake notes. |
+| (none) | — | — | Zero new genuine findings. All five flows SOUND with line-cited evidence and green contract gates. |
 
-**No CRITICAL/HIGH/MED runtime defect found.** Four of five priority flows are SOUND with line-cited evidence; the fifth (GPS-strip) is also functionally sound. The only finding is a non-deterministic TEST gate on the WebP XMP branch — a deploy-gate reliability nit, not a privacy or correctness regression.
+**Residual uncertainty (tracked, LOW):**
+- TRC8-01 WebP cold-flake is non-deterministic and could not be re-triggered this cycle (3/3 isolated PASS). Root cause is inferred from reachable null-paths, not a captured failing buffer; it remains a documented deferred test-hardening item with zero privacy/correctness impact.
+- The ISOBMFF HEVC-HEIF residual (anomalous HEIC can't be re-encoded → GPS retained, loudly logged) is an honest, documented platform limitation (prebuilt Sharp has no HEVC encoder), not a regression — unchanged across cycles.
+- Next.js 16 middleware response-header propagation for `x-gk-admin-render` is standard documented behavior and the path is double-gated by `.ok`; no runtime probe was run against a live admin session this cycle (the static-analysis chain — `revalidate=0` + matcher + nginx passthrough + byte-matched SW gate + contract test — is strong enough that a live probe would be confirmatory, not discriminating).
+
+**CONVERGENCE ASSESSMENT:** The five highest-risk end-to-end flows are all SOUND. No CRITICAL/HIGH/MEDIUM/LOW source defect. This is a clean tracer cycle — the loop is at its convergence stop signal for the tracing lane.
