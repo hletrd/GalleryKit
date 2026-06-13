@@ -289,44 +289,52 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<Button\b(?![^>]*\b(?:h-1[12]|size-1[12])\b)[^>]*\bsize=["']icon["']/,
         description: '<Button size="icon"> without explicit ≥44 px override (belt-and-braces: variant currently floors at size-11, see header note)',
     },
+    // AGG-C4-01 (run-9 c1 CRT-1): the bare `h-`/`w-` token branches below are
+    // anchored with `(?<!max-)` so they do NOT match the same token inside a
+    // `max-h-…`/`max-w-…` utility. `max-height`/`max-width` are CEILINGS, not
+    // floors, and never constrain the tap target — without the lookbehind,
+    // `\bh-10\b` matched the `h-10` inside `max-h-10` and falsely flagged a
+    // compliant Button. `min-h`/`min-w`/`size` are distinct tokens (real
+    // floors) and are intentionally NOT guarded. Verified by the scale-token
+    // self-check block below.
     {
-        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\bh-8\b/,
+        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\b(?<!max-)h-8\b/,
         description: '<Button className="...h-8..."> renders 32 px — below 44 px floor',
     },
     {
-        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\bh-9\b/,
+        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\b(?<!max-)h-9\b/,
         description: '<Button className="...h-9..."> renders 36 px — below 44 px floor',
     },
     {
-        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\b(?:h-10|w-10|size-10)\b/,
+        pattern: /<Button\b[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:h-10|w-10|size-10)\b/,
         description: '<Button className="...h-10/w-10/size-10..."> renders 40 px on one axis — below 44 px floor',
     },
     // <Button className={cn("...h-8...", ...)}> composites. The cn()
     // helper preserves literal strings that Tailwind emits.
     {
-        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bh-8\b/,
+        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)h-8\b/,
         description: '<Button className={cn("...h-8...")}> composite renders 32 px — below 44 px floor',
     },
     {
-        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bh-9\b/,
+        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)h-9\b/,
         description: '<Button className={cn("...h-9...")}> composite renders 36 px — below 44 px floor',
     },
     {
-        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-10|w-10|size-10)\b/,
+        pattern: /<Button\b[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-10|w-10|size-10)\b/,
         description: '<Button className={cn("...h-10/w-10/size-10...")}> composite renders 40 px on one axis — below 44 px floor',
     },
     // HTML <button> elements (lowercase b) with literal h-8 / h-9.
     // Excludes `<button type="submit"` etc that don't carry a sizing class.
     {
-        pattern: /<button\b[^>]*\bclassName=["'][^"']*\bh-8\b/,
+        pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?<!max-)h-8\b/,
         description: 'HTML <button className="...h-8..."> renders 32 px — below 44 px floor',
     },
     {
-        pattern: /<button\b[^>]*\bclassName=["'][^"']*\bh-9\b/,
+        pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?<!max-)h-9\b/,
         description: 'HTML <button className="...h-9..."> renders 36 px — below 44 px floor',
     },
     {
-        pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?:h-10|w-10|size-10)\b/,
+        pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:h-10|w-10|size-10)\b/,
         description: 'HTML <button className="...h-10/w-10/size-10..."> renders 40 px on one axis — below 44 px floor',
     },
     // AGG-R8c3-06 (run-8 c3 DES-2): sub-44 Tailwind SCALE tokens
@@ -338,20 +346,24 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // floor; the usual ≥44 override lookahead (h-11/min-h-11/size-11) wins when
     // a compliant utility is co-present. Covers min-h / min-w / size / h / w on
     // both <Button> and <button>, in string-literal and cn() composite forms.
+    // AGG-C4-01 (run-9 c1 CRT-1): `(?<!max-)` before the bare `h`/`w` reach of
+    // this alternation prevents matching `h`/`w` inside `max-h-…`/`max-w-…`
+    // (a ceiling, not a floor). Without it `<Button className="max-h-10">`
+    // falsely flagged. `min-h`/`min-w`/`size` stay un-guarded (true floors).
     {
-        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
         description: '<Button className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below 44 px floor',
     },
     {
-        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
         description: '<Button className={cn("...{min-h|min-w|size|h|w}-1..10...")}> composite scale token renders ≤40 px — below 44 px floor',
     },
     {
-        pattern: /<button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        pattern: /<button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
         description: 'HTML <button className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below 44 px floor',
     },
     {
-        pattern: /<button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        pattern: /<button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
         description: 'HTML <button className={cn("...{min-h|min-w|size|h|w}-1..10...")}> composite scale token renders ≤40 px — below 44 px floor',
     },
     // Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02: arbitrary-value
@@ -951,6 +963,20 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'plain text <Link> (no sizing)', snippet: `<Link href="/x" className="text-sm text-muted-foreground hover:text-primary">x</Link>` },
             { name: 'HTML <a className="min-h-[44px]">', snippet: `<a href="/x" className="min-h-[44px] px-2">x</a>` },
             { name: '<a className="h-10 min-h-11"> (override wins)', snippet: `<a href="/x" className="h-10 min-h-11">x</a>` },
+            // AGG-C4-01 (run-9 c1 CRT-1): `max-h-…`/`max-w-…` are CEILINGS, not
+            // floors — they never constrain the tap target and MUST NOT be
+            // flagged. Before the `(?<!max-)` lookbehind, `\bh-10\b` matched the
+            // `h-10` inside `max-h-10` and falsely flagged a compliant Button.
+            // These are the regression pins for the false positive.
+            { name: '<Button className="max-h-10"> (ceiling, not a floor)', snippet: `<Button className="max-h-10">x</Button>` },
+            { name: '<Button className="max-w-9"> (ceiling, not a floor)', snippet: `<Button className="max-w-9">x</Button>` },
+            { name: '<Button className="max-h-8"> (ceiling)', snippet: `<Button className="max-h-8">x</Button>` },
+            { name: '<Button className="max-w-10"> (ceiling)', snippet: `<Button className="max-w-10">x</Button>` },
+            { name: '<Button className="max-h-screen"> (named ceiling)', snippet: `<Button className="max-h-screen">x</Button>` },
+            { name: '<Button className="max-w-full"> (named ceiling)', snippet: `<Button className="max-w-full">x</Button>` },
+            { name: '<Button className={cn("max-h-10", ...)}> (cn ceiling)', snippet: `<Button className={cn("max-h-10", "px-4")}>x</Button>` },
+            { name: 'HTML <button className="max-h-9"> (ceiling)', snippet: `<button className="max-h-9" type="button">x</button>` },
+            { name: 'HTML <button className={cn("max-w-10", ...)}> (cn ceiling)', snippet: `<button className={cn("max-w-10", "px-4")} type="button">x</button>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
