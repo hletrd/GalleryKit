@@ -58,9 +58,9 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { connection, db, POOL_CONNECTION_LIMIT } from '@/db';
 import { sql } from 'drizzle-orm';
-import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, type ImageQualitySettings } from '@/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '@/lib/process-image';
 import { detectColorSignals } from '@/lib/color-detection';
-import { resolveOriginalUploadPath } from '@/lib/upload-paths';
+import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName } from '@/lib/advisory-locks';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
@@ -208,6 +208,12 @@ interface AdminBackfillState {
      * retries detection (documented resume contract).
      */
     detectionFailures: number;
+    /**
+     * AGG-R8c3-03: rows whose version-bump UPDATE matched 0 rows because the
+     * image was deleted DURING this re-encode. The just-written derivative
+     * files were cleaned up (no orphan). Neither a success nor a fatal error.
+     */
+    deletedMidReencode: number;
 }
 
 function getState(): AdminBackfillState {
@@ -226,6 +232,7 @@ function getState(): AdminBackfillState {
             skippedLocked: 0,
             encodeFailures: 0,
             detectionFailures: 0,
+            deletedMidReencode: 0,
             lastRunHadFailures: false,
         };
     }
@@ -238,6 +245,7 @@ function getState(): AdminBackfillState {
     s.skippedLocked ??= 0;
     s.encodeFailures ??= 0;
     s.detectionFailures ??= 0;
+    s.deletedMidReencode ??= 0;
     s.lastRunHadFailures ??= false;
     return s;
 }
@@ -268,6 +276,7 @@ export function _resetAdminBackfillStateForTesting(): void {
         skippedLocked: 0,
         encodeFailures: 0,
         detectionFailures: 0,
+        deletedMidReencode: 0,
         lastRunHadFailures: false,
     };
 }
@@ -286,6 +295,7 @@ export function readAdminBackfillState(): Readonly<AdminBackfillState> {
         skippedLocked: s.skippedLocked,
         encodeFailures: s.encodeFailures,
         detectionFailures: s.detectionFailures,
+        deletedMidReencode: s.deletedMidReencode,
         lastRunHadFailures: s.lastRunHadFailures,
     };
 }
@@ -406,7 +416,28 @@ async function fetchCandidateBatch(cursor: number): Promise<CandidateRow[]> {
 // reason maps 1:1 to a real early-return path below.
 type ReprocessResult =
     | { ok: true }
-    | { ok: false; reason: 'missing-original' | 'locked' | 'encode-failed' | 'detection-failed'; error?: unknown };
+    | { ok: false; reason: 'missing-original' | 'locked' | 'encode-failed' | 'detection-failed' | 'deleted-mid-reencode'; error?: unknown };
+
+// AGG-R8c3-03 (run-8 c3): when the version-bump UPDATE matches 0 rows the image
+// was deleted DURING this re-encode (deleteImage does NOT hold the per-image
+// processing lock the backfill claims, so a concurrent delete unlinks the old
+// files while we are mid-encode, then our processImageFormats re-materializes
+// fresh derivatives — orphaning them for a row that no longer exists). Mirror
+// the upload queue worker's behavior (image-queue.ts: affectedRows===0 →
+// cleanup) by removing the just-written variant files. Pass [] sizes so the
+// directory scan removes ALL size variants we may have written, not only the
+// current config's sizes.
+async function cleanupDeletedMidReencodeVariants(row: CandidateRow): Promise<void> {
+    await Promise.all([
+        deleteImageVariants(UPLOAD_DIR_WEBP, row.filename_webp, []),
+        deleteImageVariants(UPLOAD_DIR_AVIF, row.filename_avif, []),
+        deleteImageVariants(UPLOAD_DIR_JPEG, row.filename_jpeg, []),
+    ]).catch((err) => {
+        // Best-effort, like deleteImage's own cleanup — log but don't throw,
+        // so a stray unlink failure doesn't escalate to a fatal per-row error.
+        console.warn(`[admin-backfill] id=${row.id} deleted-mid-reencode variant cleanup incomplete:`, err);
+    });
+}
 
 async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promise<ReprocessResult> {
     const originalPath = await resolveOriginalUploadPath(row.filename_original);
@@ -523,7 +554,7 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         }
 
         if (signals) {
-            await db.execute(sql`
+            const [updateResult] = await db.execute(sql`
                 UPDATE images SET
                     pipeline_version = ${IMAGE_PIPELINE_VERSION},
                     icc_profile_name = ${signals.icc_profile_name ?? null},
@@ -537,6 +568,12 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
                     avif_10bit = ${avif10bit}
                 WHERE id = ${row.id}
             `);
+            // AGG-R8c3-03: 0 rows affected ⇒ deleted mid-re-encode. Clean up the
+            // derivatives processImageFormats just wrote so they don't orphan.
+            if ((updateResult as { affectedRows?: number } | undefined)?.affectedRows === 0) {
+                await cleanupDeletedMidReencodeVariants(row);
+                return { ok: false, reason: 'deleted-mid-reencode' };
+            }
             return { ok: true };
         }
 
@@ -554,12 +591,21 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         // the freshly-encoded derivatives' was_downscaled / avif_10bit so
         // those public-facing fields reflect the new bytes even while the
         // color columns await a successful detection retry.
-        await db.execute(sql`
+        const [updateResult] = await db.execute(sql`
             UPDATE images SET
                 was_downscaled = ${wasDownscaled},
                 avif_10bit = ${avif10bit}
             WHERE id = ${row.id}
         `);
+        // AGG-R8c3-03: the encode succeeded and wrote derivatives even though
+        // detection failed; if the row vanished mid-re-encode the new files
+        // would orphan exactly as in the success branch. Clean up and report
+        // deleted-mid-reencode (the row is gone, so detection-failed retry is
+        // moot).
+        if ((updateResult as { affectedRows?: number } | undefined)?.affectedRows === 0) {
+            await cleanupDeletedMidReencodeVariants(row);
+            return { ok: false, reason: 'deleted-mid-reencode' };
+        }
         return { ok: false, reason: 'detection-failed', error: detectionError };
     } finally {
         // Release the per-image claim AFTER the DB UPDATE so the lock window
@@ -593,6 +639,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         state.skippedLocked = 0;
         state.encodeFailures = 0;
         state.detectionFailures = 0;
+        state.deletedMidReencode = 0;
         state.lastRunHadFailures = false;
         const config = await getGalleryConfig();
         const settings: RunnerSettings = {
@@ -631,6 +678,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         let skippedLocked = 0;
         let encodeFailures = 0;
         let detectionFailures = 0;
+        let deletedMidReencode = 0;
         let cursor = 0;
 
         for (;;) {
@@ -669,6 +717,13 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
                                 case 'detection-failed':
                                     detectionFailures++;
                                     break;
+                                case 'deleted-mid-reencode':
+                                    // AGG-R8c3-03: row vanished during re-encode;
+                                    // variants cleaned up. Not a success, not a
+                                    // failure — its own tally so the counter
+                                    // partition (f3667858) stays exact.
+                                    deletedMidReencode++;
+                                    break;
                             }
                         }
                     } catch (err) {
@@ -692,13 +747,15 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
                     state.skippedLocked = skippedLocked;
                     state.encodeFailures = encodeFailures;
                     state.detectionFailures = detectionFailures;
+                    state.deletedMidReencode = deletedMidReencode;
                     const handled =
-                        processed + skippedMissingOriginal + skippedLocked + encodeFailures + detectionFailures + errors;
+                        processed + skippedMissingOriginal + skippedLocked + encodeFailures + detectionFailures + deletedMidReencode + errors;
                     if (handled % 25 === 0) {
                         console.log(
                             `[admin-backfill] progress: processed=${processed} errors=${errors} ` +
                                 `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
-                                `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures}`,
+                                `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures} ` +
+                                `deletedMidReencode=${deletedMidReencode}`,
                         );
                     }
                 });
@@ -723,16 +780,22 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         state.skippedLocked = skippedLocked;
         state.encodeFailures = encodeFailures;
         state.detectionFailures = detectionFailures;
+        state.deletedMidReencode = deletedMidReencode;
         // AGG-R5C3-04: a run is "complete" whether or not rows failed, but the
         // completion signal must distinguish the two. completedRuns increments
         // either way; lastRunHadFailures records whether the run was clean.
+        // AGG-R8c3-03: deletedMidReencode is NOT a failure — the row was
+        // deliberately deleted concurrently and the orphaned derivatives were
+        // cleaned up; it does not need an operator's eye, so it must not flip
+        // the WITH-FAILURES banner.
         const hadFailures = encodeFailures > 0 || detectionFailures > 0 || errors > 0;
         state.lastRunHadFailures = hadFailures;
         console.log(
             `[admin-backfill] Run complete ${hadFailures ? 'WITH FAILURES' : '(clean)'}: ` +
                 `processed=${processed} errors=${errors} ` +
                 `skippedMissingOriginal=${skippedMissingOriginal} skippedLocked=${skippedLocked} ` +
-                `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures}`,
+                `encodeFailures=${encodeFailures} detectionFailures=${detectionFailures} ` +
+                `deletedMidReencode=${deletedMidReencode}`,
         );
         state.completedRuns++;
     } catch (err) {
