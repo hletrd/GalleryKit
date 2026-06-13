@@ -113,15 +113,17 @@ AGG-R8c3-09 (encode-test parallelism flake — test-infra isolation, no logic de
 
 ## Progress
 
-| Item | Finding | Severity | Status |
-|---|---|---|---|
-| 1 | AGG-R8c3-03 backfill orphaned-file leak on delete-race | MED | DONE |
-| 2 | AGG-R8c3-04 text-destructive dark contrast 1.99:1 | MED | DONE |
-| 3 | AGG-R8c3-05 home page two uncached heavy queries | MED | DONE |
-| 4 | AGG-R8c3-06 24px alias button + scale-token audit blind spot | MED | DONE |
-| 5 | AGG-R8c3-01 NCLX code-2 isHdr side-effect — pin branch + fix claim | MED | DONE |
-| 6 | AGG-R8c3-02 third sanitizeForOg copy + lying docstring | LOW | DONE |
-| 7 | AGG-R8c3-07/08 amber dark-mode contrast ×2 | LOW | DONE |
-| 8 | AGG-R8c3-14 CLAUDE.md doc-completeness ×4 | LOW | DONE |
-| 9 | AGG-R8c3-11 + 16(a) test depth ×3 + tripwire | LOW | DONE |
-| 10 | AGG-R8c3-16(b) localize retryFailedImage string | LOW | DONE |
+| Item | Finding | Severity | Commit | Status |
+|---|---|---|---|---|
+| 1 | AGG-R8c3-03 backfill orphaned-file leak on delete-race | MED | 0017a34e | DONE — affectedRows===0 → cleanup variants + deleted-mid-reencode tally + test |
+| 2 | AGG-R8c3-04 text-destructive dark contrast 1.99:1 | MED | 77013cd0 | DONE — --destructive-text token (red-700 light / red-400 dark) + Tailwind utility + ~28 text sites switched |
+| 3 | AGG-R8c3-05 home page two uncached heavy queries | MED | e9040d17 | DONE — getLatestImageForOgCached (id+title, no JOIN/GROUP_CONCAT) + SQL-shape test |
+| 4 | AGG-R8c3-06 24px alias button + scale-token audit blind spot | MED | d70c1d98 | DONE — alias button min-h-11 min-w-11 + 4 scale-token FORBIDDEN patterns |
+| 5 | AGG-R8c3-01 NCLX code-2 isHdr side-effect — pin branch + fix claim | MED | 22387f32 | DONE — color-detection.test pins NCLX code-2 + PQ-ICC → isHdr; comment corrects the false claim |
+| 6 | AGG-R8c3-02 third sanitizeForOg copy + lying docstring | LOW | 0028ede4 | DONE — JSON-LD page imports shared sanitizeForOg; it.each pins all 3 consumers (also closed TEST-1 home-OG pin) |
+| 7 | AGG-R8c3-07/08 amber dark-mode contrast ×2 | LOW | ecd093ab | DONE — histogram + settings-client amber got dark: variants |
+| 8 | AGG-R8c3-14 CLAUDE.md doc-completeness ×4 | LOW | 5f097262 | DONE — SW HEAD, audit patterns, og-sanitize, home OG card documented |
+| 9 | AGG-R8c3-11 + 16(a) test depth ×3 + tripwire | LOW | 6454c4a3 (+0028ede4 TEST-1) | DONE — width<=0 test, SW bounded-HEAD pin (template+sw.js), comment-stripped migrate tripwire |
+| 10 | AGG-R8c3-16(b) localize retryFailedImage string | LOW | 6be638d2 | DONE — t('invalidImageId') |
+
+**All 10 items DONE.** No item deferred from plan-335 (Item 9's TEST-1 home-OG-route pin was implemented as part of Item 6's og-sanitize migration).
