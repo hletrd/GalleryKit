@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { containsUnicodeFormatting, hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug, safeInsertId } from '@/lib/validation';
+import { containsUnicodeFormatting, stripUnicodeFormatting, hasMySQLErrorCode, isValidSlug, isValidFilename, isValidTopicAlias, isReservedTopicRouteSegment, isValidTagName, isValidTagSlug, safeInsertId } from '@/lib/validation';
 
 describe('isValidSlug', () => {
     it('accepts lowercase alphanumeric with hyphens and underscores', () => {
@@ -238,6 +238,41 @@ describe('containsUnicodeFormatting', () => {
         expect(containsUnicodeFormatting('a﻿b')).toBe(true); // BOM
         expect(containsUnicodeFormatting('a᠎b')).toBe(true); // MVS
         expect(containsUnicodeFormatting('a￹b')).toBe(true); // interlinear anchor
+    });
+});
+
+// AGG-R5C3-12 (SEC-R5C3-01): EXIF-derived strings (camera_model, lens, etc.)
+// never pass through the admin reject layer; cleanMetadataString uses
+// stripUnicodeFormatting as the SOURCE defense before they reach captions /
+// titles / OG images. Construct the dangerous chars from code points so this
+// test file stays ASCII-portable.
+describe('stripUnicodeFormatting', () => {
+    const RLO = String.fromCharCode(0x202e); // right-to-left override
+    const ZWSP = String.fromCharCode(0x200b); // zero-width space
+    const BOM = String.fromCharCode(0xfeff);
+
+    it('returns null for null/undefined', () => {
+        expect(stripUnicodeFormatting(null)).toBeNull();
+        expect(stripUnicodeFormatting(undefined)).toBeNull();
+    });
+
+    it('leaves clean ASCII / CJK / emoji untouched', () => {
+        expect(stripUnicodeFormatting('Canon EOS R5')).toBe('Canon EOS R5');
+        expect(stripUnicodeFormatting('안녕하세요')).toBe('안녕하세요');
+        expect(stripUnicodeFormatting('🎉')).toBe('🎉');
+    });
+
+    it('strips bidi-override and zero-width chars from an EXIF-style Model string', () => {
+        const dangerous = `Canon${RLO} EOS${ZWSP} R5${BOM}`;
+        const cleaned = stripUnicodeFormatting(dangerous);
+        expect(cleaned).toBe('Canon EOS R5');
+        // The cleaned output must itself be clean by the rejection guard.
+        expect(containsUnicodeFormatting(cleaned)).toBe(false);
+    });
+
+    it('strips ALL occurrences (global replace), not just the first', () => {
+        const dangerous = `${RLO}a${RLO}b${RLO}`;
+        expect(stripUnicodeFormatting(dangerous)).toBe('ab');
     });
 });
 

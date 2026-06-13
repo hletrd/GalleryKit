@@ -25,6 +25,7 @@ import {
 } from '@/lib/gps-exif-strip';
 import { extractIccProfileName } from '@/lib/icc-extractor';
 export { extractIccProfileName } from '@/lib/icc-extractor';
+import { stripUnicodeFormatting } from '@/lib/validation';
 // C5-A3 / C5-COL-MED-2: canonical color_pipeline_decision enum source-of-truth
 // lives in `lib/color-pipeline-decisions.ts` (client-safe — no Sharp / fs deps)
 // so the i18n smoke test can import the same array this resolver narrows.
@@ -564,7 +565,13 @@ function clampUtf8Bytes(value: string, maxBytes: number = MAX_DB_VARCHAR_BYTES):
 
 function cleanMetadataString(value: unknown, maxBytes: number = MAX_DB_VARCHAR_BYTES): string | null {
     if (value === undefined || value === null) return null;
-    const s = String(value).replace(/\0/g, '').trim();
+    // AGG-R5C3-12 (SEC-R5C3-01): strip Unicode bidi/zero-width formatting chars
+    // alongside the NUL strip. EXIF strings (camera_model, lens, etc.) are
+    // machine-derived and never pass through the admin validation layer, but they
+    // flow into rendered captions (caption stub), persisted titles, the photo
+    // viewer, and OG images. A U+202E-laden Model tag would otherwise reach those
+    // surfaces unscrubbed — this is the SOURCE defense for every EXIF string.
+    const s = (stripUnicodeFormatting(String(value)) ?? '').replace(/\0/g, '').trim();
     if (s.length === 0) return null;
     // Only reject literal 'undefined'/'null' strings when the input was not
     // already a string — prevents dropping legitimate EXIF metadata that

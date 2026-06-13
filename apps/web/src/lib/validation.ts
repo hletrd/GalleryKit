@@ -74,6 +74,26 @@ export function containsUnicodeFormatting(value: string | null | undefined): boo
     return !!value && UNICODE_FORMAT_CHARS.test(value);
 }
 
+// Global-flag twin of UNICODE_FORMAT_CHARS for STRIPPING (replace-all) rather
+// than rejecting. DERIVED from UNICODE_FORMAT_CHARS.source (NOT a hand-copied
+// pattern) so the character set cannot drift \u2014 same C17-VR-09 discipline that
+// sanitize.ts's UNICODE_FORMAT_CHARS_RE uses. A fresh non-shared instance keeps
+// the `/g` lastIndex state out of the `.test()`-only UNICODE_FORMAT_CHARS.
+const UNICODE_FORMAT_CHARS_GLOBAL = new RegExp(UNICODE_FORMAT_CHARS.source, 'g');
+
+/**
+ * AGG-R5C3-12 (SEC-R5C3-01): strip Unicode bidi/invisible formatting chars from
+ * a string. Used as a SOURCE defense on machine-derived strings (EXIF metadata
+ * such as `camera_model`) that flow into rendered captions / persisted titles
+ * but never pass through the admin validation layer — those reject at entry, but
+ * a U+202E-laden EXIF `Model` tag would otherwise reach the photo viewer and OG
+ * images unscrubbed. Returns null for null/empty input.
+ */
+export function stripUnicodeFormatting(value: string | null | undefined): string | null {
+    if (value === null || value === undefined) return null;
+    return value.replace(UNICODE_FORMAT_CHARS_GLOBAL, '');
+}
+
 // Allow CJK characters, emojis, and most symbols for aliases, but disallow:
 // - Slashes (path separators)
 // - Dots because locale middleware treats dotted pathnames as asset requests

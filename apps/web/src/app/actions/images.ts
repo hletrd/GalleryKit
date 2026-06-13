@@ -9,7 +9,7 @@ import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG,
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
-import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, safeInsertId } from '@/lib/validation';
+import { isValidSlug, isValidFilename, isValidTagName, isValidTagSlug, safeInsertId, stripUnicodeFormatting } from '@/lib/validation';
 import { countCodePoints } from '@/lib/utils';
 import { enqueueImageProcessing, getProcessingQueueState } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
@@ -970,13 +970,23 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
                 const toUpdate: { id: number; caption: string }[] = [];
                 for (const row of rows) {
                     if (!row.alt_text_suggested) continue;
-                    if (applyAltSuggested === 'title' && row.title) continue;
-                    if (applyAltSuggested === 'description' && row.description) continue;
+                    // TRC-R5C3-04: only skip when the target field is genuinely
+                    // present (non-null AND non-empty). The bare-truthiness guard
+                    // also skipped on a stored empty string, which is the same as
+                    // "absent" here — make the intent explicit rather than relying
+                    // on '' being falsy.
+                    if (applyAltSuggested === 'title' && row.title != null && row.title !== '') continue;
+                    if (applyAltSuggested === 'description' && row.description != null && row.description !== '') continue;
                     // CRT-R5C2-02: strip the [AUTO] stub prefix before copying into
                     // title/description so the prefix never persists in stored metadata.
+                    // AGG-R5C3-12 (belt-and-braces): also strip Unicode bidi/zero-width
+                    // formatting from the copied caption. The source (alt_text_suggested)
+                    // derives from EXIF, now scrubbed at the cleanMetadataString source,
+                    // but defense-in-depth on the persist path catches any pre-fix rows
+                    // or future producer drift before the value lands in title/description.
                     // If stripping produces an empty/whitespace-only value, skip the row
                     // (leave title/description unchanged rather than storing empty string).
-                    const stripped = stripStubPrefix(row.alt_text_suggested).trim();
+                    const stripped = (stripUnicodeFormatting(stripStubPrefix(row.alt_text_suggested)) ?? '').trim();
                     if (!stripped) continue;
                     toUpdate.push({ id: row.id, caption: stripped });
                 }
