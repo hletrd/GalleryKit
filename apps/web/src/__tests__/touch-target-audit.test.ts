@@ -419,6 +419,19 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: 'native <select className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
     },
+    // AGG-C7-03: scale-token catch-all for native <select> (same gap/fix as
+    // <Link>/<a>). A height-bearing scale token (`h-7`/`min-h-6`/…) on a
+    // hand-styled select shipped unseen by the literal patterns. The override
+    // lookahead gains h-1[12]/min-h-1[12] (selects are height-sized, so size-
+    // / w- are not the relevant 44 px floor for the closed-state trigger).
+    {
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:min-h|h)-(?:[1-9]|10)\b/,
+        description: 'native <select className="...{min-h|h}-1..10..."> scale token renders ≤40 px — below the 44 px floor',
+    },
+    {
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:min-h|h)-(?:[1-9]|10)\b/,
+        description: 'native <select className={cn("...{min-h|h}-1..10...")}> composite scale token renders ≤40 px — below the 44 px floor',
+    },
     {
         pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
         description: 'native <select className="...min-h-[<44px]..."> arbitrary value below the 44 px floor',
@@ -444,6 +457,25 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: '<Link className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
     },
+    // AGG-C7-03 (run-9 c4 CRT-NF-1): sub-44 Tailwind SCALE tokens
+    // (`h-7`/`size-8`/`min-h-6`/…, i.e. scale 1-10 = 4-40 px) evaded every
+    // <Link>/<a> pattern above — those matched only the h-8/h-9/h-10 literals
+    // and the min-h-[NNpx] arbitrary values, never the scale shorthands. This
+    // is the SAME gap AGG-R8c3-06 closed for <Button>/<button>, alive one tag
+    // class over (the textbook "fix one sibling, miss the next" theme — proven
+    // in Node: `<Link className="h-7">` (28 px) MISSED by the literal patterns,
+    // FLAGGED by the Button catch-all). Mirror the Button scale-token pair
+    // exactly: the ≥44 override lookahead (now incl. w-1[12]/min-w-1[12] since
+    // the token reaches `w`) lets a co-present 44 px utility win, and the
+    // `(?<!max-)` lookbehind keeps `max-h`/`max-w` ceilings from false-flagging.
+    {
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: '<Link className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below the 44 px floor',
+    },
+    {
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: '<Link className={cn("...{min-h|min-w|size|h|w}-1..10...")}> composite scale token renders ≤40 px — below the 44 px floor',
+    },
     {
         pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
         description: '<Link className="...min-h-[<44px]..."> arbitrary value below the 44 px floor',
@@ -461,6 +493,15 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     {
         pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: 'HTML <a className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
+    },
+    // AGG-C7-03: scale-token catch-all for HTML <a> (same gap/fix as <Link>).
+    {
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: 'HTML <a className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below the 44 px floor',
+    },
+    {
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: 'HTML <a className={cn("...{min-h|min-w|size|h|w}-1..10...")}> composite scale token renders ≤40 px — below the 44 px floor',
     },
     {
         pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
@@ -808,6 +849,22 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'HTML <a className="h-8">', snippet: `<a href="/x" className="h-8 px-2">x</a>` },
             { name: 'HTML <a className="min-h-[40px]">', snippet: `<a href="/x" className="min-h-[40px] px-2">x</a>` },
             { name: 'HTML <a className={cn("h-10", ...)}>', snippet: `<a href="/x" className={cn("h-10", "px-2")}>x</a>` },
+            // AGG-C7-03 (run-9 c4 CRT-NF-1): sub-44 SCALE tokens on <Link>/<a>/
+            // <select> (the gap one tag class past the AGG-C6-04 lookbehind fix —
+            // these h-7/size-8/min-h-6 shapes were MISSED by the literal
+            // h-8/h-9/h-10 patterns until the scale-token catch-all was mirrored
+            // from <Button>/<button>). Proven in Node: `<Link className="h-7">`
+            // (28 px) slipped through before this fix.
+            { name: '<Link className="h-7"> (28 px scale token)', snippet: `<Link href="/x" className="flex h-7 items-center">x</Link>` },
+            { name: '<Link className="size-8"> (32 px scale token)', snippet: `<Link href="/x" className="size-8">x</Link>` },
+            { name: '<Link className="min-h-6"> (24 px scale token)', snippet: `<Link href="/x" className="min-h-6 px-2">x</Link>` },
+            { name: '<Link className={cn("h-7", ...)}>', snippet: `<Link href="/x" className={cn("h-7", "px-2")}>x</Link>` },
+            { name: 'HTML <a className="h-7"> (28 px scale token)', snippet: `<a href="/x" className="h-7 px-2">x</a>` },
+            { name: 'HTML <a className="size-8"> (32 px scale token)', snippet: `<a href="/x" className="size-8">x</a>` },
+            { name: 'HTML <a className={cn("min-h-7", ...)}>', snippet: `<a href="/x" className={cn("min-h-7", "px-2")}>x</a>` },
+            { name: 'native <select className="h-7"> (28 px scale token)', snippet: `<select className="h-7 w-full" value={v}>x</select>` },
+            { name: 'native <select className="min-h-6"> (24 px scale token)', snippet: `<select className="min-h-6 w-full" value={v}>x</select>` },
+            { name: 'native <select className={cn("h-7", ...)}>', snippet: `<select className={cn("h-7", "w-full")} value={v}>x</select>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
@@ -1001,6 +1058,19 @@ describe('touch-target audit (44 px floor)', () => {
             { name: '<Link className={cn("max-h-9", ...)}> (cn ceiling)', snippet: `<Link href="/x" className={cn("max-h-9", "px-2")}>x</Link>` },
             { name: 'HTML <a className="max-h-9"> (ceiling)', snippet: `<a href="/x" className="max-h-9 block">x</a>` },
             { name: 'HTML <a className={cn("max-w-10", ...)}> (cn ceiling)', snippet: `<a href="/x" className={cn("max-w-10", "px-2")}>x</a>` },
+            // AGG-C7-03 (run-9 c4 CRT-NF-1): the scale-token catch-all on
+            // <Link>/<a>/<select> must NOT trip on a `max-h`/`max-w` SCALE
+            // ceiling (`max-h-7`), and a co-present ≥44 utility (`h-7 min-h-11`)
+            // must win — exactly the false-positive guards the Button catch-all
+            // already carries, mirrored to the new tag classes.
+            { name: '<Link className="max-h-7"> (scale ceiling, not a floor)', snippet: `<Link href="/x" className="max-h-7 overflow-auto">x</Link>` },
+            { name: '<Link className="max-w-6"> (scale ceiling)', snippet: `<Link href="/x" className="max-w-6 truncate">x</Link>` },
+            { name: '<Link className="h-7 min-h-11"> (override wins)', snippet: `<Link href="/x" className="h-7 min-h-11">x</Link>` },
+            { name: '<Link className="size-8 size-11"> (override wins)', snippet: `<Link href="/x" className="size-8 size-11">x</Link>` },
+            { name: 'HTML <a className="max-h-7"> (scale ceiling)', snippet: `<a href="/x" className="max-h-7 block">x</a>` },
+            { name: 'HTML <a className="h-7 min-h-11"> (override wins)', snippet: `<a href="/x" className="h-7 min-h-11">x</a>` },
+            { name: 'native <select className="max-h-7"> (scale ceiling)', snippet: `<select className="max-h-7 w-full" value={v}>x</select>` },
+            { name: 'native <select className="h-7 min-h-11"> (override wins)', snippet: `<select className="h-7 min-h-11 w-full" value={v}>x</select>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
