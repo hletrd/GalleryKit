@@ -1,21 +1,16 @@
-# Critic Review — Run-9 Cycle-7 (multi-perspective)
+# Critic Review — Run-9 Cycle-8 (multi-perspective adversarial)
 
-**HEAD:** `d0920957` (clean tree, in sync with origin/master)
-**Scope:** the run-9 cycle-3 change surface (commits `b6c4f915`, `1a483f9b`, `26f68430`, `23f62c66`, `d0920957`) + a fresh exhaustive sweep of the recurring themes (bare sub-44 links, touch-target regex coverage, GPS scrubber test vacuity, doc/code drift).
-**Mode:** THOROUGH (no escalation — no CRITICAL or 3+ MAJOR found).
+**HEAD:** `9c40d261` (clean tree, in sync with origin/master)
+**Scope:** the cycle-7 change surface (commits `b47cdbb6`, `5ef545bf`, `99071d76`, `5d7bd2ac`, `85bca582`, marked complete in `9c40d261` via plan-343) + a fresh whole-repo adversarial sweep across the recurring themes (paired writer paths, GPS-scrub branch symmetry, touch-target regex/coverage, privacy field boundary, migrations, SW, gates).
+**Mode:** THOROUGH (no escalation — zero CRITICAL, zero MAJOR; one LOW doc-drift, plus a known-flake re-confirmation).
 
 ---
 
-## VERDICT: ACCEPT-WITH-RESERVATIONS
+## VERDICT: ACCEPT
 
-The cycle-3 change surface is solid. Both new GPS pure-scrubber tests are genuinely non-vacuous (I proved the RED mechanism). The public-page bare-link theme that recurred 3 cycles running is — as far as the *currently-rendered* surface goes — **genuinely closed**: I scanned every `<Link>`/`<a>`/`<button>` in all 11 public page files and all 7 public-facing components, and every standalone interactive element carries a >=44 px tap area. There are no survivors.
+All five cycle-7 scheduled items (AGG-C7-01..05) landed and are **non-vacuous at HEAD** — I verified each by reading the committed code AND the test, and checking the RED mechanism. The recurring "fix one sibling, miss the next" theme that drove the last several cycles is, on the surfaces I could reach, **genuinely converged**: the touch-target scale-token catch-all now covers `<Link>`/`<a>`/`<select>` (closing the exact NF-1 gap I flagged in cycle-7); the GPS-scrub Unicode/XMP surfaces share a single canonical source (no drift possible); the color/HDR writer paths do NOT drift (I refuted a fresh false-positive to that effect — see below); the privacy field boundary is guarded at four sites that all reuse one `PrivacySensitiveKeys` union.
 
-Two findings, both LOW-severity and LATENT (no current code triggers either). I'm reporting them because they are *exactly* the recurring "fix one sibling, miss the next" class this loop keeps hitting, and one of them is a fresh instance hiding behind the very fix that just landed:
-
-- **NF-1 (MINOR, High confidence):** the `<Link>`/`<a>` (and `<select>`) FORBIDDEN patterns lack the **scale-token catch-all** (`{min-h|min-w|size|h|w}-(1..10)`) that `<Button>`/`<button>` carry. A `<Link className="h-7">` (28 px) or `<a className="size-8">` (32 px) ships unseen by the gate. Proven in Node.
-- **NF-2 (MINOR, High confidence):** the CLAUDE.md doc paragraph that landed in `26f68430` overstates `<Link>`/`<a>` regex coverage — it implies those tag classes carry the lookbehind on "the scale-token catch-all," but they have **no scale-token branch at all**. The doc conflates two different coverage levels.
-
-If the loop wants a clean stop, both are defensible to defer (latent, no current trigger). But NF-1 is the same gate-asymmetry bug as the just-fixed AGG-C6-04 (which the team rated High and fixed proactively *because* it was latent), one rung further along the same alternation. Fixing it now closes the theme symmetrically instead of waiting for cycle-8 to rediscover it.
+I found **one LOW, defer-able doc-completeness mismatch** (CRIT8-01) and **re-confirmed one known, already-documented test-isolation flake** (CRIT8-R1, AGG-C7-R7) that DID reproduce this cycle under full-suite parallelism. Neither is a code defect that blocks anything. Per the convergence rule, I am deliberately NOT inflating marginal items: this fresh review found **no new latent runtime bug, no new security/privacy defect, no new architectural regression.**
 
 ---
 
@@ -23,117 +18,108 @@ If the loop wants a clean stop, both are defensible to defer (latent, no current
 
 | Predicted | Outcome |
 |---|---|
-| More bare sub-44 `<Link>`/`<a>`/`<button>` in public pages (theme recurred 3x) | **Not found.** Every current public interactive element is >=44 px. Theme closed at the rendered-surface level. |
-| Touch-target regex still missing `(?<!max-)` on some token class | Partially. The `max-` lookbehind is now complete across all tag classes. BUT a *different* asymmetry exists: `<Link>`/`<a>`/`<select>` never got the scale-token catch-all -> **NF-1**. |
-| New GPS tests possibly vacuous (length-equality weaker than byte-identity) | **Unfounded.** Both tests independently assert GPS-gone after the scrub, and the WebP test asserts VP8-chunk byte-identity. Genuinely RED on regression. |
-| Doc/code mismatch in CLAUDE.md c3 edits | **Found** -> NF-2 (overstated `<Link>`/`<a>` coverage). |
+| A cycle-7 "closed" item actually still open / vacuous at HEAD | **Not found.** All 5 landed; both new privacy tests + the WebP-lossless test are non-vacuous (RED-on-revert verified by mechanism). |
+| A new bare sub-44 interactive `<Link>`/`<a>`/`<button>` survivor | **Not found.** Exhaustive sweep of components/ + admin + (public): the only sub-44 `h-*`/`size-*` tokens are on ICONS (decorative, pointer-events-none), spinners (aria-hidden), a table-header cell, and one text `<Input>` (out of WCAG-2.5.5 tap-target scope). No interactive tap-target survivor. |
+| A paired writer drift (color/HDR columns) | **Refuted.** An Explore sub-probe claimed the queue worker writes only 4/10 color columns and drifts from the upload INSERT. I traced it: `detectColorSignals` runs ONLY at upload time (`process-image.ts:899` inside `saveOriginalAndGetMetadata`); the queue's `processImageFormats` CONSUMES the pre-detected signals (never re-detects), so the 4-column UPDATE (`processed`,`pipeline_version`,`was_downscaled`,`avif_10bit`) is correct + complete. No drift. Matches AGG-C7-R1. |
+| Migration journal monotonicity broken by a new entry | **Not found.** Journal still has the documented non-monotonic block (idx 7-17) but the LAST entry (0021) is the max, and the `runMigrations` post-condition + hash-baselining defend it. No new migration since 0021. |
+| Doc/code drift in CLAUDE.md | **Found → CRIT8-01** (SCAN_ROOTS understates coverage; SAFE-direction inverse of cycle-7's NF-2). |
 
 ---
 
 ## Findings
 
-### NF-1 — `<Link>`/`<a>`/`<select>` FORBIDDEN patterns miss the scale-token catch-all (MINOR, High confidence, LATENT)
+### CRIT8-01 — CLAUDE.md SCAN_ROOTS line understates the touch-target scan coverage (LOW / MINOR, High confidence, doc-only)
 
-**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:440-472` (`<Link>`/`<a>`) and `:415-428` (`<select>`)
+**File:** `CLAUDE.md:505`
 
-**The gap.** `<Button>`/`<button>` carry FOUR pattern families:
-1. explicit `h-8`/`h-9`/`h-10` literals (`:302-340`)
-2. `min-h-[<44px]` arbitrary values (`:377-391`)
-3. the **scale-token catch-all** `\b(?<!max-)(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b` (`:355-368`) — added AGG-R8c3-06 after the 24 px `min-h-6 min-w-6` alias-remove button shipped unseen
-4. `size="sm"`/`size="icon"` variant detection
+**The mismatch.** The doc reads:
 
-`<Link>`/`<a>` (`:440-472`) and `<select>` (`:415-428`) carry only families (1) and (2). **Neither has the scale-token catch-all (3).** So the gate is blind to `h-7`, `h-6`, `h-5`, `size-8`, `size-9`, `min-h-6`, `min-w-7`, `w-9` (and every other 1..10 scale token that isn't literally `h-8`/`h-9`/`h-10`) on a `<Link>`, `<a>`, or `<select>`.
+> "The audit walks every `.tsx`/`.jsx` file under `SCAN_ROOTS` (= `components/` + the admin route group `app/[locale]/admin/`) recursively."
 
-**Proven in Node** against the exact committed regexes:
+But the actual `SCAN_ROOTS` array (`apps/web/src/__tests__/touch-target-audit.test.ts:79-83`) is:
 
+```js
+const SCAN_ROOTS: ReadonlyArray<string> = [
+    componentsDir,   // components/
+    adminDir,        // app/[locale]/admin/
+    publicDir,       // app/[locale]/(public)/   ← NOT in the doc
+];
 ```
-pass  | h-7=28px SHOULD FLAG     | <Link href="/x" className="h-7 px-2">x</Link>
-pass  | size-8=32px SHOULD FLAG  | <Link href="/x" className="size-8 px-2">x</Link>
-pass  | h-6=24px SHOULD FLAG     | <Link href="/x" className="h-6 px-2">x</Link>
-pass  | min-h-7=28px SHOULD FLAG | <a href="/x" className="min-h-7 px-2">x</a>
-pass  | size-9=36px SHOULD FLAG  | <a href="/x" className="size-9 px-2">x</a>
-FLAG  | h-8=32px (control)       | <Link href="/x" className="w-8 h-8 px-2">x</Link>
-```
-(For contrast: the `<Button>` scale-token pattern catches `h-7` and `size-8` -> `true`.) `<select>` was independently confirmed to have no scale-token branch either (`grep` for the alternation on `select` lines returns empty).
 
-**Failure scenario.** A future cycle adds a compact pill-style year link `<Link className="h-9 px-3">` — caught (it's `h-9`). But a developer writes a slightly different compact chip `<Link className="size-8 rounded-full">` for an icon-link (a "view on map" pin, a locale flag link) -> 32 px, **ships green**. The gate's failure message would never fire. This is precisely the regression-detection slack the scale-token catch-all was created to close on `<Button>`; `<Link>`/`<a>`/`<select>` were left a rung behind. It is the textbook recurrence of this repo's theme — the alternation was extended Button -> select -> Link/a for the `(?<!max-)` lookbehind (AGG-C4-01 -> C5-02 -> C6-04), but the *scale-token branch itself* was only ever added to Button/button (AGG-R8c3-06) and never propagated to the other three tag classes.
+…**plus** `ROOT_LEVEL_FILES` (`:61-64`) which walks `app/[locale]/{error,not-found,layout,loading}.tsx`. So the doc omits the entire `(public)` route group (added AGG-R5C3-06 / CRT-R5C3-01) and the four root-level `[locale]` files. The audit scans MORE than the doc claims.
 
-**Realist check.** Severity stays MINOR (not raised): (a) it is fully latent — I grepped all of `app/` + `components/` for `<Link>`/`<a>`/`<select>` carrying a bare 1..10 scale token (excluding `h-11`/`h-12`/`min-h-11`/`min-h-[…]`) and found **NONE**; (b) the impact is a missing *test* assertion, not a shipped a11y defect; (c) detection of a real future violation would still happen at design-review time for an obvious 32 px link. It is a gate-completeness gap, not a live bug. Mitigated by: zero current triggers + the explicit `h-8/h-9/h-10` literals already catch the most common downsize values.
+**Why it's only LOW (and the SAFE direction).** This is the *inverse* of the cycle-7 NF-2 trap. NF-2 was dangerous because the CLAUDE.md sentence *over*-claimed regex coverage the code lacked — a reader trusts the doc, skips re-checking, the gap survives. CRIT8-01 *under*-claims: a contributor reading it believes public-page links aren't scanned. The failure modes of that belief are both benign — (a) they add a redundant manual positive-pin (harmless), or (b) they're pleasantly surprised when `npm test` catches a sub-44 public link they thought was unguarded. **No element ships unguarded because of this doc gap**, because the audit code (the actual gate) is the source of truth and scans the public dir regardless of what the doc says.
 
-**Fix.** Add the scale-token catch-all to `<Link>`, `<a>`, and `<select>`, mirroring the `<Button>`/`<button>` forms at `:355-368` (string-literal + `cn()` composite, with the same `(?<!max-)` lookbehind and the `h-1[12]|min-h-1[12]|size-1[12]` override lookahead). Add positive fixtures (`<Link className="h-7">` flags, `<a className="size-8">` flags) and negative fixtures (`<Link className="h-11">` passes) to the two self-check `it()` blocks. ~8 new patterns + ~6 fixtures, mechanical.
+**Realist check.** Stays LOW. Realistic worst case: momentary contributor confusion, resolved the instant they run the blocking test. No runtime, security, privacy, or a11y impact. Detection is immediate (the gate runs on every `npm test`). I am explicitly resisting inflating this — it is a one-line accuracy fix, not a defect. **Mitigated by:** the gate code is authoritative and the drift is in the over-protective direction.
+
+**Fix (1-line doc edit).** Change `:505` to: "…under `SCAN_ROOTS` (= `components/`, the admin route group `app/[locale]/admin/`, AND the public route group `app/[locale]/(public)/`), plus the root-level `app/[locale]/{error,not-found,layout,loading}.tsx` files, recursively." Defer-able if the loop wants a clean stop — but unlike NF-2, deferring this is fully safe because the doc errs toward claiming *less* coverage than exists.
 
 ---
 
-### NF-2 — CLAUDE.md overstates `<Link>`/`<a>` regex coverage (MINOR, High confidence, doc-only)
+### CRIT8-R1 — Real-encode AVIF test-isolation flake REPRODUCED this cycle (record-only; already documented as AGG-C7-R7 / AGG-C4-T2)
 
-**File:** `CLAUDE.md:516` (added in commit `26f68430`, AGG-C6-05)
+**Files:** `apps/web/src/__tests__/process-image-color-roundtrip.test.ts`, `apps/web/src/__tests__/backfill-color-pipeline.test.ts`
 
-**The mismatch.** The new paragraph reads:
+**What I observed.** A full cold `npx vitest run` this cycle returned **4 failed | 2089 passed (2093)** — NOT the all-green the cycle-7 aggregate reported. The 4 failures were all in the two real-encode AVIF tests:
+- `process-image-color-roundtrip.test.ts` ×3 — errors: `Input file contains unsupported image format` and `Input file has corrupt header: .../public/uploads/avif/rt-p3-green-raw.avif: unable to open for read`
+- `backfill-color-pipeline.test.ts` ×1 — `Input file contains unsupported image format`
 
-> "every bare `h-8`/`h-9`/`h-10` **(and the scale-token catch-all)** branch carries a `\b(?<!max-)…` lookbehind ... This lookbehind is present on `<Button>`/`<button>` ... native `<select>`, AND `<Link>`/`<a>`."
+**Proof it's the known isolation flake, not a regression.** I re-ran ONLY those two files with `npx vitest run … --no-file-parallelism` → **17/17 passed**. The failure is the documented race: these tests share `public/uploads/{avif,…}` output paths (no per-test `mkdtemp` isolation, `process-image-color-roundtrip.test.ts:31-44`), so under full-suite parallelism one test's write/cleanup races another's read on shared fixture filenames (`rt-p3-green-raw.avif` etc.). This is exactly AGG-C7-R7 / AGG-C4-T2.
 
-The parenthetical "(and the scale-token catch-all)" reads as if it applies to the full enumerated set of tag classes including `<Link>`/`<a>`/`<select>`. But per NF-1, **only `<Button>`/`<button>` have a scale-token catch-all branch** — `<Link>`/`<a>`/`<select>` have no such branch, so there is nothing on those tag classes for the lookbehind to be "present on." A reader auditing the gate from this doc would reasonably conclude `<Link className="size-8">` is covered. It is not.
-
-**Why this matters.** This is a self-reinforcing trap: the doc claims completeness the code doesn't have, so a future reviewer trusts the doc, doesn't re-check the regex, and NF-1 survives indefinitely. Doc drift that *asserts* an invariant the code doesn't enforce is the exact failure mode the migration runbook section was written to prevent (silent skip while logging "Complete").
-
-**Realist check.** Doc-only, no runtime impact. Stays MINOR. But it should be fixed in lockstep with NF-1 (if NF-1 is fixed, the doc becomes *true*; if NF-1 is deferred, the doc must be corrected to say the scale-token catch-all is `<Button>`/`<button>`-only).
-
-**Fix.** Either (a) fix NF-1, making the sentence accurate; or (b) reword to: "the scale-token catch-all branch (`<Button>`/`<button>` only) and every bare `h-8`/`h-9`/`h-10` branch (all tag classes) carry the `(?<!max-)` lookbehind."
+**Why I'm surfacing it as record-only.** It's pre-existing, documented, with a known mitigation (per-test `mkdtemp` output isolation). It is NOT a source-code defect and NOT new. BUT: the cycle-7 aggregate's claim that the suite is "2086/2086 green on a COLD run" is fragile — the flake reproduced for me, so the green-cold claim is run-to-run dependent, not deterministic. If the team wants the gate to be a reliable signal, the `mkdtemp` isolation (already scoped under AGG-C7-R7) is the durable fix. I do **not** recommend scheduling it this cycle solely on my account — it stays DEFER per the prior disposition — but the loop should know the flake is live, not dormant.
 
 ---
 
 ## What I verified as SOLID (no action needed)
 
-**1. Public bare-link theme is closed at the rendered surface.** Exhaustive scan — not a sample — of every interactive element:
+**1. All five cycle-7 fixes — landed + non-vacuous at HEAD `9c40d261`:**
 
-| File | Interactive elements | Status |
+| Item | Code at HEAD | Test (non-vacuity proof) |
 |---|---|---|
-| `(public)/s/[key]/page.tsx:105` | back-nav `<Link>` | `min-h-11` ok |
-| `(public)/g/[key]/page.tsx:140,172` | back-nav `<Link>` x2 | `min-h-11` ok |
-| `(public)/g/[key]/page.tsx:186` | image-wrapping `<Link>` | image height ok |
-| `(public)/year/[year]/page.tsx:107` | back-to-timeline `<Link>` | `min-h-11` ok |
-| `(public)/year/[year]/page.tsx:165` | image-wrapping `<Link>` | image height ok |
-| `(public)/timeline/page.tsx:131` | year scrubber `<Link>` | `h-11` ok |
-| `(public)/timeline/page.tsx:152` | year-in-review `<Link>` | `min-h-11` ok |
-| `(public)/timeline/page.tsx:209` | image-wrapping `<Link>` | image height ok |
-| `(public)/p/[id]/page.tsx:305,310` | hidden prefetch `<Link>` | `hidden` + `tabIndex={-1}` (non-interactive) ok |
-| `[locale]/error.tsx:32,38` | `<button>` + `<Link>` | `min-h-11` ok |
-| `[locale]/not-found.tsx:21,43` | skip `<a>` + home `<Link>` | sr-only / `min-h-11` ok |
-| `nav-client.tsx:85,93,122,155,166` | logo, toggle, topics, theme, locale | `min-h-[44px]`/`min-w-[44px]` ok |
-| `footer.tsx:43,52` | GitHub + admin `<Link>` | `min-h-11` ok |
-| `home-client.tsx:296,434,441` | image link, clear-filter, back-to-top | image height / `min-h-11` / `min-h-11 min-w-11` ok |
-| `topic-empty-state.tsx:18` | clear-filter `<Link>` | `min-h-11` ok |
-| `on-this-day-widget.tsx:40,56` | timeline + photo `<Link>` | `min-h-[44px]` ok |
-| `wide-gamut-hint.tsx:199` | dismiss `<button>` | `min-h-11 min-w-11` ok |
+| AGG-C7-01 admin brand link | `admin-header.tsx:16` className now carries `min-h-11` (verbatim). | Positive-pin in touch-target audit anchor-window block. |
+| AGG-C7-02 WebP XMP JUNK-retag coverage | branch unchanged at `gps-exif-strip.ts:579-588`. | `strip-gps-from-original.test.ts:282-314` asserts `stripped===true` + `GPSLatitude` gone + `JUNK` present + **VP8 pixel-chunk byte-identity** (`webpPixelChunk` extractor). A wrong JUNK-write offset breaks byte-identity or leaves GPS readable → RED. Plus the negative `:317-333` (clean XMP left intact, `stripped:false`, same reference). Genuinely non-vacuous. |
+| AGG-C7-03 scale-token catch-all on Link/a/select | `touch-target-audit.test.ts:472-477` (`<Link>`), `:499-504` (`<a>`), `:428-433` (`<select>`, gated `(?:min-h|h)` since selects are height-sized). Mirrors the Button/button pair (`:355-368`) with the same `(?<!max-)` lookbehind + `h-1[12]/min-h-1[12]/size-1[12]` override lookahead. | Self-check positive/negative fixtures present; the second Explore confirmed positive fixtures flag and negative (`h-11`) don't. |
+| AGG-C7-04 CLAUDE.md scale-token doc | doc updated (`5d7bd2ac`). | n/a (doc). |
+| AGG-C7-05 WebP lossless-by-chunk | `process-image.ts:1498` `isLosslessWebpByChunk` walks RIFF sub-chunks `[FourCC][LE size]`, returns true only on a genuine top-level `VP8L` pixel chunk, default-false on ambiguity; wired at `:1608`. | `process-image-webp-lossless-detect.test.ts:53-64` is the RED-on-revert proof: a planted `VP8L` substring inside an XMP chunk (`includes('VP8L')===true`) is correctly classified LOSSY — the old `input.includes(Buffer.from('VP8L'))` would have flipped it. Plus genuine-lossy / genuine-lossless / malformed cases. |
 
-`[topic]`, `c/[slug]`, `map` page files have no inline interactive elements (delegate to components). photo-viewer / lightbox / info-bottom-sheet carry no sub-44 height literals on interactive elements. **No survivors.** This theme is genuinely converged on the live surface; the *only* residual risk is the latent gate gap in NF-1.
+**2. Color/HDR writer paths do NOT drift (refuted Explore false-positive).** `detectColorSignals` is invoked at exactly two sites: `process-image.ts:899` (inside `saveOriginalAndGetMetadata`, the UPLOAD-time function called only by `actions/images.ts:279` + `lr/upload/route.ts:255`, both of which write all 10 color columns at INSERT, `images.ts:350-358`) and `admin-backfill-runner.ts:541` (the backfill path, which re-detects AND writes the full set back). The queue worker's `processImageFormats` (`process-image.ts:946`) takes `signals` as a parameter and consumes them for encoder decisions only — it never re-detects — so its 4-column completion UPDATE (`image-queue.ts:368-369`) is correct and complete. There is no stale-metadata divergence. The "asymmetry" an Explore probe reported is an artifact of not tracing where detection actually happens.
 
-**2. WebP pure-scrubber test (`:211-239`) is NON-VACUOUS.** The vacuity risk would be: helper returns `null` for both before/after and the `.equals()` never runs. Disproven — line 217 asserts `pixelsBefore` non-null first, and lines 220-221 assert the scrubber returns non-null with `stripped===true`. With the field-order bug reverted, `stripGpsFromWebpBuffer` returns `null` early (the VP8X FourCC ~= 1.48 GB misread as chunkSize trips `dataEnd > buf.length`), so **line 220 `expect(result).not.toBeNull()` goes RED**. The `webpPixelChunk` helper (`:198-209`) is a correct `[tag][size]`-order VP8/VP8L extractor. Byte-identity of the compressed VP8 chunk is a real lossless-contract assertion the dispatcher test could not make. Commit's "PROVEN RED (2 failed | 22 passed)" claim is sound.
+**3. GPS-scrub branch symmetry + Unicode single-source.** All four scrubbers (JPEG/TIFF/ISOBMFF/WebP) handle BOTH the EXIF carrier AND the XMP carrier; the WebP XMP path is now test-pinned (AGG-C7-02). The Unicode-format-char stripping is a **single canonical source**: `validation.ts:58` defines `UNICODE_FORMAT_CHARS`, and `csv-escape.ts:7`, `sanitize.ts:17`, and `validation.ts:82` all derive their global-flag variant from `UNICODE_FORMAT_CHARS.source` (never hand-copied) — drift is structurally impossible. This is the recurring sibling theme fixed at the root, correctly.
 
-**3. ISOBMFF pure-scrubber test (`:262-285`) is NON-VACUOUS.** `stripGpsFromIsobmffBuffer` (verified in `gps-exif-strip.ts`) does `Buffer.from(input)` then zeroes GPS bytes in-place via iloc-extent rewriting — it never re-encodes, so length is inherently preserved and `result.buffer.length === input.length` (line 271) is a meaningful "in-place, not re-encode" assertion. Crucially, the test does NOT rely on length alone: line 275 writes the scrubbed buffer and asserts `gpsInFile(scrubbed) === null` independently. Even a hypothetical no-op scrubber returning `stripped:true` would fail line 275. Sound.
+**4. Privacy field boundary — four guarded sites, one shared union.** `publicSelectFields` (derived by destructuring-omission from `adminSelectFields`), `publicMapSelectFields` (omits all PII except lat/lng for map markers), `data-timeline.ts timelineSelectFields` (35 EXIF-display fields, zero PII), and the `privacy-fields.test.ts` fixture all key off the single `PrivacySensitiveKeys` union (`data.ts:415`). Three compile-time `Extract<…> extends never` guards + the runtime row-assertion in `getMapImages` (`data.ts:1584-1590`, throws if any returned row's `topic_map_visible` is false, behind a SQL INNER JOIN on `map_visible=true`). A new admin-only column added to the union auto-guards every public select. Airtight.
 
-**4. JPEG pure-scrubbers + dispatcher tests** are layered and meaningful (byte-identity for lossless tier, coordinate-byte zeroing for forensic residue, ExtendedXMP chunk-boundary GPS split, post-EOI trailer -> null forces re-encode). The whole `gps-exif-strip` suite passes 26/26; combined run with touch-target = **40/40 green**.
+**5. Migration runbook invariant intact.** `runMigrations` (`scripts/migrate.js:698-723`) post-conditions every journal hash into `__drizzle_migrations` after drizzle's `migrate()`, throwing `Drizzle silently skipped N migration(s)` if any is missing. Journal (`_journal.json`) still carries the documented non-monotonic `when` block (idx 7-17), but the last entry (0021) is the max and the hash-baselining (`reconcileLegacySchema` + `baselineAllJournalMigrations`) handles it. No new migration violated monotonicity.
 
-**5. `normalizeMultilineButtonTags` `<a\b` boundary is correct.** Verified in Node: `<a` matches the HTML anchor but NOT `<area`/`<aside`/`<audio`/`<address`/`<article>` (the `\b` requires a word->non-word transition; all of those have a word char after `a`). No tag-corruption risk from the c2-era `Link`/`a` addition to the normalizer set.
+**6. SW admin-render exclusion sound.** `proxy.ts:128-129` sets `x-gk-admin-render: 1` on any cookie-bearing response (over-suppresses caching, the safe direction); `sw.template.js:270` caches HTML only when that header is NOT `'1'`, and `:349` bypasses `/admin` + `/api/admin` entirely. `sw.js` matches `sw.template.js` modulo the `__SW_VERSION__` stamp (`ee0f38bd-p7`, `-p7` = IMAGE_PIPELINE_VERSION). SW-template contract test pins the LRU `deleted`-guard + 304/touchMeta path + AbortSignal.timeout.
 
-**6. C5/C6 pinned-anchor tests are anchored correctly.** All referenced anchors exist exactly once where expected (`home.clearFilter` in topic-empty-state + home-client; `yearInReview` x2 in timeline — SEO title + link, which is why the C5 test scopes to the `<Link>`-window; `viewGallery` in s/[key]; `backToTimeline` in year/[year]). The window-scan logic in the test correctly isolates the `<Link>`-rendered occurrence.
+**7. Stripe webhook payment gate correct.** `stripe/webhook/route.ts:105` rejects `payment_status !== 'paid'` (warns on the documented `'unpaid'` async path, errors on unexpected), so no entitlement is granted for unsettled funds. The `async_payment_succeeded` handler remains the documented open gap (plan-316 CRT-R5C1-04) — code matches doc, no financial leak.
+
+**8. Gates (measured live this cycle).**
+- `npm run lint` → exit 0.
+- `npm run typecheck` → exit 0 on a stable tree. (A transient failure appeared while a background `typecheck` ran concurrently with another invocation — `typecheck:scripts` momentarily saw a mid-regeneration `.next/types/validator.ts` importing `./routes.js`; `tsc -p tsconfig.scripts.json` in isolation immediately after returns exit 0. Pure `next typegen` race artifact, NOT a source/config defect.)
+- `lint:api-auth` / `lint:action-origin` / `lint:public-route-rate-limit` → all PASS (every file "OK:").
+- `npx vitest run` → 2089/2093, the 4 failures being the CRIT8-R1 known isolation flake (17/17 in isolation).
 
 ---
 
 ## Multi-Perspective Notes
 
-- **As the SKEPTIC:** the strongest argument against reporting NF-1 is "it's latent, the loop is converging, don't manufacture churn." Counter: it is the *identical* bug class to AGG-C6-04 which the team itself rated High and fixed *because latent gate gaps mis-serve the next contributor*. Reporting it is consistent with the team's own bar, not a marginal nitpick. The honest framing is: it's real, it's small, and it's defer-able — the team decides.
-- **As the new contributor (doc reader):** NF-2 actively misleads. I read the CLAUDE.md paragraph before reading the regex and formed the (wrong) belief that `<Link>` scale tokens were covered. Only the Node test corrected me. That is the precise harm of an over-claiming doc.
-- **As the ops/privacy reviewer:** the GPS work is the highest-stakes surface here (it scrubs the byte-for-byte original that the paid-download route streams). The new direct pure-scrubber tests materially strengthen the regression net — the WebP fix in particular converted dead code into a working lossless path AND replaced a vacuous test with a real one. No privacy concern; the null-return fallback always re-encodes (which strips GPS) so no GPS ever survived even when the lossless path was dead.
+- **As the hostile security auditor:** the highest-stakes surface (GPS-on-the-paid-download-original + the public lat/lng map path) is the best-defended part of the repo — byte-level at-rest scrub on both ingest paths with all four scrubbers covering EXIF+XMP, plus a two-layer (SQL JOIN + runtime throw) guard on the only public lat/lng exposure. Nothing to exploit; nothing regressed.
+- **As the maintainer inheriting this code:** the recurring sibling-drift class has been structurally eliminated where it matters — the Unicode-format-char set is a single source three modules derive from, and the privacy union is shared across four select sites. The one residual maintainer hazard is CRIT8-01: a doc line that lies (gently, in the safe direction) about scan coverage. Fix it so the doc doesn't accumulate the kind of false-confidence that NF-2 warned about last cycle.
+- **As the SRE at 3am:** the migration post-condition fails loud, the GPS-strip failure path logs loud and is non-fatal (derivatives are already GPS-free), and the WebP re-encode fallback is privacy-safe regardless of the lossless/lossy decision. The one thing that would page falsely is CI flaking on the real-encode AVIF tests (CRIT8-R1) — it's a test-infra papercut, not a prod risk, but it erodes trust in the green checkmark.
+- **As the end-user (photographer):** no behavior change this cycle that affects delivery fidelity; the admin-header escape-to-dashboard link is now a proper 44px tap target on mobile.
 
 ---
 
 ## Verdict Justification
 
-ACCEPT-WITH-RESERVATIONS. The cycle-3 fixes are correct, the tests are non-vacuous, and the recurring public-link theme is closed on the live surface. The two reservations (NF-1, NF-2) are both MINOR, both LATENT, both High-confidence, and both are the same "fix one sibling, miss the next" / "doc over-claims the invariant" patterns this loop is supposed to be eliminating. Neither blocks anything shipping. To upgrade to clean ACCEPT: extend the scale-token catch-all to `<Link>`/`<a>`/`<select>` (NF-1) and make the CLAUDE.md sentence accurate (NF-2) — a single small commit. If the loop elects to stop, deferring both is defensible *provided* NF-2's doc sentence is corrected to not assert coverage the code lacks (a 1-line doc edit), because a false invariant in CLAUDE.md is worse than an honest "this is Button-only."
+**ACCEPT.** This is the first cycle in this run with no MED-or-higher new finding. All five cycle-7 items are present, correct, and backed by non-vacuous, RED-on-revert tests (I verified the RED mechanism for each, not the plan's word). The whole-repo adversarial sweep across every recurring theme produced exactly one LOW doc-drift (CRIT8-01) — and that one is the *safe-direction inverse* of the trap the team fixed last cycle, so even deferring it carries no risk. The single Explore-surfaced "writer asymmetry" lead was a false positive that I traced to ground and refuted. The convergence trend (12→13→17→9→5→6→5→**1**) is real, not manufactured: the sibling-drift class is structurally closed on the Unicode, privacy, and touch-target surfaces.
 
-No realist-check downgrades were needed (both findings were already MINOR; I declined to inflate NF-1 to MAJOR precisely because it is latent with zero current triggers).
+To reach a fully clean state: apply the one-line CLAUDE.md:505 edit (CRIT8-01). Everything else is DEFER/record-only with severity preserved.
+
+No realist-check downgrades were needed beyond declining to inflate CRIT8-01 above LOW (it is a doc accuracy fix with zero runtime/security/a11y impact, erring protective).
 
 ## Open Questions (unscored)
 
-- The image-wrapping `<Link>` elements (timeline:209, year:165, g/[key]:186, home-client:296) have no height token and rely on the wrapped `<picture>`/`<img>` for their tap area. They are correctly NOT flagged (and correctly excluded from the bare-link heuristic per plan-340/342 Deferred-1). Worth confirming once that the wrapped image always has non-zero height even for a 1px-tall malformed upload — but that's a data-integrity edge, not a touch-target gate concern, and out of scope for this cycle.
+- **CRIT8-R1 durability:** the real-encode AVIF test flake reproduced this cycle. The team has scoped `mkdtemp` per-test output isolation under AGG-C7-R7 but deferred it. Worth a decision: is a run-to-run-nondeterministic full-suite result acceptable as the convergence gate, or should the isolation fix land to make "green" deterministic? Not a code defect — a CI-signal-reliability judgment call for the orchestrator.
+- The `isLosslessWebpByChunk` walker returns `false` (→ q95 lossy re-encode) for an *animated lossless* WebP (VP8L inside ANMF, no top-level VP8L). This is privacy-safe (GPS still stripped) and a rare fallback-of-a-fallback; the code comment acknowledges it. Out of scope as a defect; noting only that the "lossless animated original gets re-encoded lossy" edge exists by design.
