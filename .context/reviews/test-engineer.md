@@ -1,128 +1,130 @@
-# Test-Engineer Review — Run-8 Cycle-2
+# Test-Engineer Review — Cycle 3 (run-8 c2 fan-out)
 
-**Date:** 2026-06-13
-**Run/cycle:** run-8 cycle-2 of the review-plan-fix loop.
-**Repo:** GalleryKit (Next.js 16 / React 19 / TS6). Test surface: **213 Vitest files** in `apps/web/src/__tests__/` + Playwright e2e in `apps/web/e2e/`.
-**HEAD:** `77867144` (working tree CLEAN, synced with origin/master).
-**Suite health:** **1 failing test at HEAD — a deterministic timeout flake (TEST-0 below), NOT a code regression.** Full `npx vitest run` = **1 failed | 2034 passed (2035)**, 337.5 s. The one failure is `client-server-only-boundary.test.ts` timing out at the default 15000ms; it reproduces in ISOLATION (42.7 s for that single `it`), so it is a test-budget defect, not flakiness in the usual order-dependent sense, and not a real boundary violation. Everything else is GREEN: targeted run of the 7 most-relevant recently-touched files = **42/42 pass, 0 flakes** (`npx vitest run home-metadata-title error-shell-heading migration-journal-monotonicity admin-backfill-runner-fatal-counters settings-hash privacy-fields advisory-locks`, 91.5 s). The full suite is import-heavy (`import 1060.90s` cumulative across workers).
+**HEAD:** `ada92ba5` · **Date:** 2026-06-13 · **Scope:** test-coverage / flakiness / TDD-opportunity
 
----
+## Baseline (fresh run)
 
-## Prior test obligations — verification against HEAD
-
-| Prior ID | Obligation | Status at HEAD | Evidence |
-|---|---|---|---|
-| **AGG-R7-05 / TEST-1 (prior)** | AGG-9 error-shell heading regression test | **CLOSED** | `error-shell-heading.test.ts` (commit `d035de10`) — source-fixture, 6 tests across BOTH `error.tsx` shells: asserts a VISIBLE `<h1>{t('error.title')}</h1>` (not `sr-only`), the `aria-labelledby` id resolves, and no `text-muted-foreground/30` element carries the title. Matches the actual shipped shape (single visible `text-3xl font-semibold` h1, no faint glyph). |
-| **AGG-R7-05 / TEST-2 (prior)** | AGG-10 home title `{absolute}` regression test | **CLOSED** | `home-metadata-title.test.ts` (commit `d035de10`, de-flaked in `61607572`) — invokes `generateMetadata` with mocked deps, asserts `title:{absolute}` on the og-image branch, the latest-photo branch, AND the filtered (`#sunset \| GalleryKit`) branch. De-flake = static top-level import instead of per-test dynamic `import()`. |
-| **AGG-R7-11 / TEST-3 (prior)** — migration cursor depth | Strengthen monotonicity test to model the real `MAX(created_at)` cursor (prefix-max), not just adjacent pairs | **PARTIALLY CLOSED** | `migration-journal-monotonicity.test.ts` (commit `bb463062`) pins: adjacent-pair monotonicity (idx-7 allowlisted), the no-stale-allowlist guard, the missing-hash predicate shape, and the `migrate.js` "Drizzle silently skipped" throw + `recordedHashes.has(m.hash)` regex. **The prefix-max / globally-increasing-MAX assertion I recommended was NOT added** — see **TEST-2** below (still OPEN). |
-| **AGG-R7-11 / TEST-5 (prior)** — mixed backfill run | Add a MIXED run (`processed>0 && errors>0`) regression test | **NOT CLOSED** | `admin-backfill-runner-fatal-counters.test.ts:167` still fires a **single throwing row** (asserts `processed===0`). No mixed-run case exists. See **TEST-3** below (still OPEN). |
-| AGG-R7-06 / TEST-4 (prior) — withAdminAuth 403/401 branches | Correct deferral; pin 403 origin-mismatch + 401 not-admin | Not re-verified this pass (LOW, prior deferral). Carried forward as **TEST-6** (low priority). |
-
-**Net:** the two MED prior obligations (error-shell heading, home title) are fully CLOSED. Two LOW prior obligations (migration prefix-max, mixed backfill run) were re-scheduled but landed only partially or not at all — re-stated below with sharper acceptance criteria.
-
----
-
-## OPEN / NEW findings
-
-| ID | Sev | Conf | File:line | Gap | Risk |
-|---|---|---|---|---|---|
-| **TEST-0** | HIGH | High | `__tests__/client-server-only-boundary.test.ts:120` | The `no 'use client' module transitively imports a server-only file` test **FAILS at HEAD** — it times out at the default 15000ms. Reproduces in ISOLATION (42.7 s for the single `it`). It is a synchronous full-`src` transitive-import-graph walk whose runtime has grown past the default budget; it sets NO explicit `timeout`. | A blocking CI gate (`npm test`) is RED right now. Worse, the failure mode is silent rot: as the codebase grows the walk slows, and once it crosses 15 s it flips from "boundary verified" to "timeout" — so a future REAL client→server-only violation would be masked behind an indistinguishable timeout. CI signal is currently meaningless for this guard. |
-| **TEST-1** | MED | High | `app/[locale]/(public)/page.tsx:111` | AGG-R7-09 home OG base-JPEG fix (commit `4852bcf5`) shipped with **NO** regression test. `home-metadata-title.test.ts` asserts only `meta.title` — zero assertions on `openGraph.images` / `/uploads/jpeg/`. | A refactor re-introducing `findNearestImageSize` (→ `_2048.jpg`) silently re-breaks the social card during the backfill window / after an `image_sizes` reconfigure — the exact 404 this fix closed. The fix's intent is untested. |
-| **TEST-2** | LOW | Med | `__tests__/migration-journal-monotonicity.test.ts:62-76` | Monotonicity test checks ADJACENT pairs only; does NOT model the real `MAX(created_at)` cursor. idx 8-17 all sit below idx 6's `when` (`1778304060000`) yet pass the adjacent check. (Prior TEST-3, re-scheduled in AGG-R7-11 but the prefix-max half was not added.) | A NEW migration appended with `when` above its predecessor but BELOW the historical MAX is silently skipped by drizzle — and the test passes anyway, giving false confidence that "monotonic-vs-predecessor ⟹ drizzle applies it" (FALSE for the historical block). |
-| **TEST-3** | MED | High | `lib/admin-backfill-runner.ts:625-693` | No MIXED-run test (some rows succeed `processed++`, some throw `errors++`, optionally some `encode-failed`/`detection-failed`) in ONE run. `admin-backfill-runner-fatal-counters.test.ts` covers only a single `processed===0` fatal-only run. (Prior TEST-5, re-scheduled in AGG-R7-11, not landed.) | The realistic production shape (deadlock on a few rows, success on the rest) is unverified. A regression that resets `processed` in the catch, or mis-attributes a thrown row to `processed`, survives — re-opening the AGG-1 dishonesty class for mixed runs. The 6 counters are independent locals all mirrored to `state`; only their isolated single-row paths are pinned. |
-| **TEST-4** | LOW | Med | `lib/settings-hash.ts:36-46` (`COLOR_IMPACTING_KEYS`) | No test locks the EXACT 9-key SET. `settings-hash.test.ts` proves each key individually changes the hash (via `_buildHashForTesting({key:…})`), but nothing asserts the membership/cardinality of `COLOR_IMPACTING_KEYS` itself. | DROPPING a key from the array (e.g. removing `image_sizes` or an `image_quality_*` during a refactor) silently stops invalidating the ETag for that setting — cached clients keep stale bytes after that admin setting changes. The per-key tests still pass because they pass the key explicitly. This is the same blind-spot class as the privacy-guard `_PrivacySensitiveKeys` symmetric contract (which IS locked) — settings-hash lacks the equivalent. |
-| **TEST-5** | LOW | Med | `serve-upload.ts` ETag formula / `__tests__/serve-upload.test.ts:74` | ETag test asserts only the `^W/"v${VERSION}-` PREFIX. No test pins the full 4-component shape `W/"v{VERSION}-{mtimeMs}-{size}-{settingsHash}"` in the documented order. | A regression dropping `{size}` or reordering the components (e.g. losing the settings-hash tail) is caught only indirectly (the settings-debounce test proves the hash participates, but not its position/presence in the canonical formula). Drift in the ETag shape vs CLAUDE.md's documented contract survives. |
-| **TEST-6** | LOW | Med | `lib/api-auth.ts` (cookie origin-mismatch 403 + not-admin 401 branches) | Only the token wrong-scope **401** is pinned (`api-auth-response-headers.test.ts:103`). The cookie origin-mismatch **403** (CSRF reject) and not-admin **401** branches are unpinned. (Carried from prior TEST-4; the AGG-R7-06 deferral correctly noted the lint gate enforces wrapper PRESENCE, not reject status.) | A 403→200 origin-check regression (CSRF hole) or a 403/401 status drift survives. The 403 origin-mismatch return is the CSRF defense; a missing `hasTrustedSameOrigin` guard would be silent. |
-| **TEST-7** | LOW | Low | `app/[locale]/admin/(protected)/settings/settings-client.tsx` (timer cleanup, commit `f11746cd`) | AGG-R7-02 timer-cleanup fix (clear post-trigger `setTimeout`s + `mountedRef` setState gate on unmount) shipped with **no test**. No settings-client unmount/timer test exists. | A refactor dropping the `clearTimeout`/`mountedRef` cleanup re-introduces the "setState on unmounted tree" warning + wasted state write. Low because it's a dev-only warning and an RTL render+unmount+fake-timers test is comparatively expensive for the payoff. |
-
-**Severity counts:** 0 CRITICAL · 1 HIGH (TEST-0) · 2 MEDIUM (TEST-1, TEST-3) · 5 LOW (TEST-2, TEST-4, TEST-5, TEST-6, TEST-7).
-
----
-
-## Detail + concrete tests
-
-### TEST-0 (HIGH) — blocking boundary test is RED (timeout, not a real violation)
-
-The full suite has exactly one failure: `client-server-only-boundary.test.ts:120` times out at 15000ms. It reproduces deterministically in isolation (`npx vitest run client-server-only-boundary` → that `it` runs 42.7 s, the second cheap `it` passes). The test (line 120-148) walks every file under `src`, filters `'use client'` modules, and for each calls `findServerOnlyInClosure` — a synchronous traversal of the entire transitive import closure, reading + regex-scanning each reachable file. With 213 test files plus the full app source, that synchronous walk now exceeds the default Vitest `testTimeout` on this machine. The test sets no explicit timeout.
-
-This is the WORST class of flake for a security/boundary guard: when it times out it neither passes nor reports a violation, so a genuine client→server-only leak (the AGG-R5C3-21 regression this guard exists to catch) would be indistinguishable from the timeout. The CI gate is currently both red AND blind.
-
-**Fix (test-only, two parts):**
-1. **Make the budget honest:** pass an explicit generous per-test timeout (e.g. `it('…', () => {…}, 120_000)`) so the existing synchronous walk completes deterministically. This unblocks CI immediately.
-2. **Make it cheap + non-rotting (preferred, do alongside 1):** the dominant cost is re-reading + re-parsing the same files across overlapping closures. Memoize per-file: cache `readFileSync` results and each file's parsed import list, and memoize `findServerOnlyInClosure` per visited module (a `Map<file, boolean>` "does this module's closure touch server-only") so each file is parsed once regardless of how many client closures reach it. This collapses the O(clients × closure) re-walk to O(files) and keeps the test sub-second as the codebase grows — eliminating the silent-rot path entirely. Verify it still FAILS on a synthetic `'use client'` file that imports a `server-only` module (the guard must keep its teeth).
-
-This is the only finding that is actionable as a CI-unblock; do it first.
-
-### TEST-1 (MED) — home OG base-JPEG fix is unpinned
-
-`page.tsx:109-117` builds the latest-photo OG image as:
-```ts
-const ogImages = latestImage
-  ? [{ url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg}`, seo.url), … }]
-  : [];
 ```
-The base `filename_jpeg` (no `_${size}` suffix) is the contract — the encoder atomic-rename guarantee makes it always-present, unlike a nearest-configured-size `_2048.jpg` mid-backfill. The fix (commit `4852bcf5`) even dropped the `getGalleryConfig()` + `findNearestImageSize` import from this path. But `home-metadata-title.test.ts` never inspects `meta.openGraph` — it asserts only `meta.title`.
+cd apps/web && npx vitest run
+Test Files  213 passed (213)
+     Tests  2060 passed (2060)
+  Duration  146.26s
+```
 
-**Add** to the existing `home-metadata-title.test.ts` (the `latestImage` mock with `filename_jpeg:'abc.jpg'` is ALREADY set up in the latest-photo `it`, so this is ~3 lines):
-- assert `(meta.openGraph!.images as Array<{url:string}>)[0].url` ends with `/uploads/jpeg/abc.jpg` and contains NO `_` size token (`expect(url).not.toMatch(/_\d+\.jpg$/)`);
-- assert `meta.twitter!.images![0]` is the same base URL.
-This pins the AGG-R7-09 intent precisely against a `findNearestImageSize` reintroduction. Cheapest high-value lock in this pass.
+All green on a cold run — no failures, so no flake re-runs were required for red tests. The stderr noise in the output is expected negative-path logging (`sales-refund-convergence`, `gallery-config` fallback) from tests that assert on thrown/logged errors. e2e (Playwright) not run (requires a live server + browser; out of scope for this unit pass).
 
-### TEST-2 (LOW) — monotonicity test does not model the `MAX(created_at)` cursor
+## Verdict on the tests ADDED this cycle (prior-cycle deliverables)
 
-`migration-journal-monotonicity.test.ts:62-76` checks each entry vs its immediate predecessor. The production footgun (CLAUDE.md runbook) is the `MAX(created_at)` cursor: drizzle skips any entry whose `when` < the max already-applied `when`. The real journal has idx 8-17 (`1746576000000`-`1747156800000`) ALL below idx 6 (`1778304060000`) — they pass the adjacent check (each advances vs idx 7) yet are exactly the block a naive MAX baseline would skip. A NEW migration appended with `when` above its predecessor but below the historical MAX is the live risk; the test gives false confidence.
+I verified each new/changed test would FAIL if its fix were reverted, and is not a tautology. **All five hold up — no slop, no passing-for-wrong-reason.**
 
-**Strengthen** with a prefix-max assertion: walk entries in idx order, track `runningMax = Math.max(runningMax, e.when)`, and assert every NON-allowlisted entry's `when` is `> runningMaxBeforeIt` (i.e. `e.when` strictly exceeds the max of all prior `when`s). Same idx-7 allowlist. Add a comment that idx 8-17 are protected ONLY by `migrate.js`'s per-entry-hash baselining, not the `when` cursor — and assert `migrate.js` contains `baselineAllJournalMigrations` (or the per-entry-hash baseline call) so that protection can't be dropped silently.
+| New test | Pins | Robust? | Anti-tautology guard present? |
+|---|---|---|---|
+| `og-sanitize.test.ts` + `sanitize-for-og-global.test.ts` | shared `sanitizeForOg` global-strip (replace-ALL bidi/zero-width + C0) | Yes — behavioral on the real fn + structural import grep | Yes (multi-occurrence cases; forbids non-global `.replace(UNICODE_FORMAT_CHARS`) |
+| `admin-backfill-runner-fatal-counters.test.ts` (mixed-run, AGG-R8-10) | `processed===1 && errors===1` coexist; `lastError` set; no `processed` inflation | Yes — drives the real runner via fire-and-forget + `vi.waitFor` on `running` | Yes (partitions fatal-only vs mixed; asserts `processImageFormats` actually called) |
+| `migrate-reconcile-coverage.test.ts` (index tripwire, AGG-R8-10/TRC-1) | every `CREATE INDEX` in drizzle SQL mirrored in `migrate.js` reconcile | Yes — introspects schema + scans SQL | Yes ("scanner sanity": `indexNames.length ≥ 10`, spot-checks known names — would not pass vacuously) |
+| `migration-journal-monotonicity.test.ts` (AGG-7) | journal `when` strictly advances except allowlist | Yes | Yes (allowlist-staleness check: each allowlisted idx must STILL be a real inversion) |
+| `client-server-only-boundary.test.ts` (AGG-R8-01 de-flake) | memoized reads + 60s timeout; assertion unchanged | Yes — still walks full closure, still fails on a real leak | Yes (`clientFiles.length > 0` sanity; explicit photo-title.ts pin) |
+| `touch-target-audit.test.ts` raw-checkbox (AGG-R8-03) | raw `<input type=checkbox/radio>` 44px floor | Yes — `scanRawCheckboxes` has violation + min-h-11 fix + radio + shadcn-no-false-positive fixtures | Partial (see TEST-5 for an untested window-distance edge) |
 
-### TEST-3 (MED) — mixed success+fatal backfill run untested
-
-`runBackfill` (runner.ts:625-665) increments six independent locals — `processed`, `errors`, `skippedMissingOriginal`, `skippedLocked`, `encodeFailures`, `detectionFailures` — and mirrors all six to `state` continuously (660-672) and on final flush (686-693). The fatal-counters test covers only ONE throwing row (`processed===0`). There is NO test where, say, 3 rows succeed and 2 throw, asserting final `processed===3 && errors===2 && lastRunHadFailures===true`.
-
-**Add** a case to `admin-backfill-runner-fatal-counters.test.ts` (the harness — fake `fetchCandidateBatch` + a `reprocessOne`/UPDATE that throws conditionally — is already built):
-- seed N candidate rows; make the per-row work succeed for some ids and throw `ER_LOCK_DEADLOCK` for others;
-- drain via `vi.waitFor(() => !readAdminBackfillState().running)`;
-- assert final `processed === <#success>`, `errors === <#throw>`, `processed + errors === N`, `lastRunHadFailures === true`, `lastError` contains `'Deadlock'`.
-Optionally add a 4-way mixed run (success + encode-failed + detection-failed + fatal) asserting each counter independently and that they sum to the candidate count — this locks the "every outcome lands in exactly one bucket" invariant that the single-row tests cannot.
-
-### TEST-4 (LOW) — COLOR_IMPACTING_KEYS exact set is unlocked
-
-`settings-hash.test.ts` proves `image_quality_webp/avif/jpeg` and `image_sizes` each change the hash, but each test passes that key explicitly to `_buildHashForTesting`, so DROPPING a key from the `COLOR_IMPACTING_KEYS` array would not fail any of them. CLAUDE.md documents the set as authoritative ("5 color + 3 quality + 1 size = 9"). The privacy guard has a symmetric `_PrivacySensitiveKeys` contract test; settings-hash should have the equivalent.
-
-**Add** a key-set lock: export `COLOR_IMPACTING_KEYS` for testing (or read it via a `_keysForTesting` helper) and assert `[...COLOR_IMPACTING_KEYS].sort()` equals the expected 9-key array verbatim (`toEqual`), plus `toHaveLength(9)`. Any add/remove forces a deliberate test update + the reviewer's eye on the ETag-invalidation consequence.
-
-### TEST-5 (LOW) — full ETag shape not pinned
-
-`serve-upload.test.ts:74` asserts `^W/"v${IMAGE_PIPELINE_VERSION}-`. CLAUDE.md documents the full formula `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`. The settings-debounce test proves the hash participates but not its position; nothing asserts `{size}` is present or the 4-component order.
-
-**Strengthen** the existing assertion to a full-shape regex: `expect(etag).toMatch(/^W\/"v\d+-\d+-\d+-[0-9a-f]{8}"$/)` — pins 4 hyphen-separated components, the trailing 8-hex settings hash, and that none were dropped/reordered. Cheap; the test already obtains a live ETag.
-
-### TEST-6 (LOW) — withAdminAuth cookie-path reject statuses unpinned
-
-`api-auth.ts` has three reject branches: token wrong-scope→401 (the only one tested, `api-auth-response-headers.test.ts:103`), cookie origin-mismatch→403 (CSRF reject), not-admin→401. The 403 origin-mismatch is the CSRF defense.
-
-**Add** two cases to `api-auth-response-headers.test.ts` (the wrapper is already imported there): (1) cookie path with `hasTrustedSameOrigin`→false (mock it) returns **403** + `no-store` + handler NOT called; (2) same-origin true but `isAdmin`→false returns **401** + `no-store` + handler NOT called. Pins both the CSRF-reject status and the auth-reject status — the lint gate enforces only wrapper PRESENCE.
-
-### TEST-7 (LOW) — settings-client timer cleanup unpinned
-
-The AGG-R7-02 fix (commit `f11746cd`) tracks post-trigger `setTimeout` ids in a ref, clears them in a dedicated unmount effect, and gates `refreshBackfillStatus`'s `setState` behind a `mountedRef`. No test covers it. Low priority because it's a dev-only warning and the test is comparatively expensive (RTL render → trigger backfill → unmount → advance fake timers → assert no `setBackfillStatus` after unmount). If pursued, use `vi.useFakeTimers()` + `@testing-library/react` `render`/`unmount` and spy that the status fetch's resolution post-unmount produces no state write. Acceptable to leave unpinned this cycle given the cost/payoff.
+The cycle-2 `home-metadata-title.test.ts` additions (AGG-R8-02 home og:image → per-photo OG card, NOT oversized base JPEG) are also solid and behavioral. Do not re-open these.
 
 ---
 
-## What is genuinely well-covered (no action — recorded so future cycles don't re-flag)
+## Findings
 
-- **Privacy guard** (`privacy-fields.test.ts`): symmetric `SENSITIVE_KEYS` contract — admin-only keys form EXACTLY the sensitive set (`toEqual` both directions), every sensitive key absent from `publicSelectFields`, present in `adminSelectFields`. A new admin-only column that isn't added to both lists fails. Strong.
-- **Color-pipeline decision matrix** (`color-pipeline-decision.test.ts`): all 7 decisions covered (sRGB, srgb-from-unknown, p3-from-{displayp3,dcip3,adobergb,prophoto,rec2020}), name variants (case/space/hyphen/underscore), NCLX-signal fallback for opaque custom-monitor names (Eizo/X-Rite/BenQ), and the R7-H1 "opaque name without signal → srgb-from-unknown" path. Exhaustive.
-- **Advisory locks** (`advisory-locks.test.ts`): all 5 global `LOCK_*` constants pinned to documented strings, per-image `gallerykit:image-processing:{jobId}` builder, all-distinct + per-image-namespaced-from-globals. Complete.
-- **Backfill detection-failure contract** (`backfill-detection-failure-contract.test.ts`): locks the AGG2-01 invariant — detection throwing AFTER a successful encode returns `derivativeOnly` with NO color signals (`result.signals === undefined`), so `pipeline_version` stays behind and the row remains a retry candidate. Plus `admin-backfill-runner-detection-failure.test.ts` (no version bump on detection failure). Strong, matches CLAUDE.md's stated contract.
-- **Unicode sanitizers** (`validation.test.ts`, `sanitize-admin-string.test.ts`): bidi-override (U+202A LRE etc.) + zero-width (U+200B, U+FEFF BOM) reject/strip cases on validation, admin-string, and EXIF-Model surfaces, plus the C17-VR-09 cross-file regex-sync guard (`sanitize.ts stripControlChars` ⟺ `validation.ts UNICODE_FORMAT_CHARS`). Negative cases present.
-- **Settings-hash participation** (`serve-upload-settings-debounce.test.ts`): the 9-key hash is folded into the ETag and the 5 s debounce works (stale→re-resolve after TTL). Covers the wiring; the gaps above (TEST-4 key-set, TEST-5 full shape) are the residual edges.
-- **Migration silent-skip post-condition** (`migration-journal-monotonicity.test.ts`): the `migrate.js` "Drizzle silently skipped N migration(s)" throw + `recordedHashes.has(m.hash)` predicate are source-pinned. Only the cursor-model depth (TEST-2) is missing.
+### TEST-1 — Home OG route's `sanitizeForOg` application is UNGUARDED (the exact cycle-2 fix is not pinned for the home route). Confidence: High
+
+**Where:** `src/app/api/og/route.tsx:82-88` applies `sanitizeForOg` to `topicLabel`, `siteTitle`, and each `tagList` entry — this is the symmetry-gap fix landed in commit `d5399742`. The only test that references this file is `src/__tests__/og-route-source-contracts.test.ts`, which asserts ONLY:
+```js
+expect(source).not.toContain('rollbackOgAttempt');
+expect(source).toContain("return new Response('Topic not found'");
+```
+It does **not** assert the route imports/uses `sanitizeForOg`.
+
+`sanitize-for-og-global.test.ts:54-67` pins the strip for the PHOTO route (`api/og/photo/[id]/route.tsx`) and the photo PAGE (`p/[id]/page.tsx`) via `it.each`, but the home/site route is absent from that list. I confirmed **zero tests import or invoke the home route's `GET` handler** (grep: only `og-route-source-contracts` + `og-sanitize` reference the file, neither exercises the handler). By contrast the photo route has 6 referencing tests (`og-photo-fallback`, `og-image-icc`, `photo-og-metadata`, etc.).
+
+**Why it matters:** This is the precise regression the cycle-2 work closed — the home card previously rendered `siteTitle`/`topicLabel`/tags RAW while the photo route stripped them. If a future edit drops the `sanitizeForOg(...)` wrappers from `route.tsx:82-88` (e.g. a refactor that inlines `clampDisplayText` and forgets the strip), the symmetry gap silently re-opens with no failing test. Admin-controlled + validator-rejected at write time, so not a live exploit — but the whole point of the defense-in-depth fix was the guarantee that BOTH OG surfaces strip; that guarantee is currently unenforced on the surface the fix was added to.
+
+**Test to add (cheapest, highest-leverage):** extend the `it.each` in `sanitize-for-og-global.test.ts` to include the home route:
+```js
+['src/app/api/og/route.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],
+```
+and add to `og-route-source-contracts.test.ts` a structural assertion that every rendered string passes through `sanitizeForOg` (e.g. `expect(source).toMatch(/sanitizeForOg\(clampDisplayText\(topicRecord\.label/)`, the `seo.title` line, and that the `tagList` map calls `sanitizeForOg`). Stronger still (optional): a behavioral test that mocks `getTopicBySlug`/`getSeoSettings` to return a label containing two bidi-override chars and asserts the rendered `ImageResponse` element tree (Satori accepts a React element you can introspect) contains no bidi chars — mirrors how `photo-og-metadata.test.ts` invokes the handler.
 
 ---
 
-## Final sweep — commonly-missed gaps checked
+### TEST-2 — AGG-R8-09 backfill width re-validation skip path has NO test. Confidence: High
 
-- **Tests that pass for the wrong reason:** `admin-backfill-status-shape.test.ts` is a pure forwarding test (mocks `readAdminBackfillState`, asserts `getBackfillStatus` returns the same values) — pins WIRING, cannot catch a field-VALUE transform. Acceptable today (the action is a pure forward); noted in case a future transform lands there.
-- **Flaky/timeout-prone:** the home-metadata-title timeout flake (commit `61607572`, static import) is fixed, but a SECOND timeout-prone test surfaced this pass — `client-server-only-boundary.test.ts` (TEST-0, HIGH, currently RED). Both are the same root cause class: a full-source synchronous walk whose cost has grown past the default 15 s budget. TEST-0's fix should set an explicit timeout AND memoize the file-read/closure traversal so it does not re-rot. Worth a sweep for any other whole-`src`-walk tests on the default timeout (the touch-target audit, source-contract scanners, and check-* lint-fixture tests are candidates — none failed in this run, but they share the growth risk).
-- **Negative/malformed-input cases:** bulk-update TriState (4 malformed cases), blur-data-url MIME contract, CSV escape, validation Unicode — all present. No obvious missing malformed-input class found this pass.
-- **Over-mocking:** the backfill runner tests drive the REAL `triggerAdminBackfill`/`runBackfill` (fire-and-forget, drained via `vi.waitFor`), not a stubbed runner — good. The detection-failure contract test mocks ONLY `color-detection.detectColorSignals` to throw while using real encode — appropriately surgical.
+**Where:** `src/lib/admin-backfill-runner.ts:430-436` — the cycle-2 guard that re-validates `row.width > 0` BEFORE `processImageFormats` and returns `{ ok: false, reason: 'encode-failed' }` (no version bump, distinct log) for a corrupt/legacy `width <= 0` row.
+
+All four `admin-backfill-runner-*.test.ts` files feed `width: 100` (valid) — confirmed by grep. The width<=0 branch is uncovered: no test drives a row with `width: 0` / `width: -1` / `width: NaN` through `reprocessOne`.
+
+**Why it matters (data-integrity, the classification is load-bearing):** The whole correctness claim is "classified `encode-failed` so it stays idempotent — NO version bump — and remains a candidate for a future run after the row is repaired." If a future refactor mis-classified this as a `skip` (which in some accounting advances past the row) or accidentally let it fall through to a `processed++`, a corrupt-width row would be **falsely reported as re-encoded** and never retried — the exact dishonesty class the AGG-1 fatal-counter work fought. There is also a subtle ordering risk: the width guard sits *before* `acquireImageProcessingClaim`, so a regression that moves it after the claim would leak the claim connection on the early return.
+
+**Test to add:** in `admin-backfill-runner-fatal-counters.test.ts` (it already has the full mock harness), add a describe that returns one candidate row with `width: 0`. Assert after drain: `s.encodeFailures` reflects it (or the documented counter), `s.processed === 0`, **`processImageFormats` was NOT called** (the guard short-circuits before encode), and the `pipeline_version` UPDATE was never issued (no version bump → still a candidate). A second case with `width: -1` and `width: NaN` (the `!Number.isFinite` arm).
+
+---
+
+### TEST-3 — SW bounded-HEAD timeout (AGG-R8-05) is not pinned by the template-contract test. Confidence: High
+
+**Where:** `public/sw.template.js:213-248` adds `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` (`= 300`, line 38) to the synchronous cached-image HEAD ETag probe — the cycle-2 display-path latency bound (commit `9b7bb240`).
+
+`src/__tests__/sw-template-contract.test.ts` pins the LRU accounting, the lazy-revalidate closure, the 304 branch, the offline-HTML marker — but has **no assertion** that the HEAD probe carries an abort timeout. The unit-tested reference impl `lib/sw-cache.ts` does not implement HEAD probing at all (grep: zero `AbortSignal`/`HEAD`/`timeout` matches), so the only copy of this logic is the shipped template, and nothing locks it.
+
+**Why it matters:** The probe sits on the warm-paint DISPLAY path. The documented worst-case bound is the entire point — without the `signal`, a slow/hung network stalls EACH cached masonry tile for the full default fetch timeout before falling through to stale-serve (a visible per-tile hang on flaky networks). If a future SW edit drops the `signal:` line (easy in a `fetch` options refactor), the bound regresses with a green suite. `sw.template.js` is the SHIPPED service worker source; this is a real shippable regression surface, and `scripts/build-sw.ts` stamps it into `sw.js` so it goes straight to production.
+
+**Test to add:** in `sw-template-contract.test.ts`, slice the `staleWhileRevalidateImage` fn and assert the HEAD `fetch` options object contains `signal: AbortSignal.timeout(` and that `HEAD_REVALIDATE_TIMEOUT_MS` is a small finite constant: `expect(TEMPLATE).toMatch(/const HEAD_REVALIDATE_TIMEOUT_MS\s*=\s*\d{2,4};/)` and assert the matched value ≤ 1000. Mirror the existing slice-and-match style (lines 73-110). Cheap, no runtime.
+
+---
+
+### TEST-4 — Home-client 0-width CSS / CLS-reservation fallback has no test (logic inline in render). Confidence: Low
+
+**Where:** `src/components/home-client.tsx` (commit `e8fce327`) — `hasValidDims`, `cardAspectRatio` (`'1 / 1'` fallback), `cardIntrinsicHeight` guard against `aspectRatio: '0 / 0'` / `containIntrinsicSize: 'auto Infinitypx'`. No test (grep: zero references to `cardAspectRatio`/`containIntrinsic`/`hasValidDims`).
+
+**Why it matters:** Correctness of the CLS reservation when `width`/`height` is non-positive — but the guarded condition is "near-impossible given NOT NULL Sharp metadata," so the regression risk is genuinely low. The logic is also inline in the component's `.map()` render, so a unit test would require rendering the component or extracting a pure helper.
+
+**Recommendation:** Only worth a test if the denominator math is extracted to a pure `cardReservation(width, height, estWidth)` helper (the right refactor anyway). Then a 3-line unit test pins `(0, 100, 300) → { aspectRatio: '1 / 1', intrinsicHeight: 300 }`. Low priority — note it, don't block on it.
+
+---
+
+### TEST-5 — Raw-checkbox scanner: window-distance and non-`<label>` wrapper edges untested. Confidence: Low
+
+**Where:** `src/__tests__/touch-target-audit.test.ts:611-640` (`scanRawCheckboxes`). The wrapper back-scan only matches a `<label>` carrying the sizing class within a hardcoded `WINDOW = 4` lines, and ONLY a `<label>` element (not a sizing `<div>`/`<span>` wrapper).
+
+Fixtures (lines 839-867) cover: violation, min-h-11 fix, radio, shadcn-no-false-positive. They do **not** cover: (a) the WINDOW boundary (label exactly 4 vs 5 lines above the input), or (b) a checkbox whose 44px tap area is supplied by a non-`<label>` wrapper.
+
+**Why it matters:** Both are *false-positive* risks (the audit is a blocking gate). A legitimate future pattern — e.g. a checkbox in a `min-h-11 <div>` wrapper, or a label pushed >4 lines up by an inserted comment/`<span className="sr-only">` block — would fail the gate spuriously and require a `KNOWN_VIOLATIONS` exemption for compliant code. The current two raw checkboxes both use the `<label>`-within-2-lines shape (verified against `image-manager.tsx`), so it's fine TODAY, but the scanner's robustness is unproven at its own boundaries.
+
+**Test to add:** two fixtures — (1) `<label min-h-11>` exactly `WINDOW` lines above the input (asserts clean) and `WINDOW+1` lines above (asserts flagged, documenting the boundary); (2) confirm/decide the non-`<label>` wrapper behavior (either broaden the back-scan to any element with the sizing class, or add a fixture asserting it IS flagged so the limitation is explicit). Low priority.
+
+---
+
+### TEST-6 — load-more / settings-client unmount-guard symmetry is undocumented by tests. Confidence: Low
+
+**Where:** `src/components/load-more.tsx` (commit `e8fce327`) adds `mountedRef` + unmount cleanup guarding the post-await `setState`. The comment claims it's "Symmetric with the settings-client backfill unmount guard." Grep finds **zero** tests referencing `mountedRef`/`unmount` anywhere in `__tests__/` — neither the load-more guard nor the settings-client one it mirrors is pinned.
+
+**Why it matters:** Low — the failure mode is a React "setState after unmount" warning on a fast route change, not data loss or a security issue. But two components now carry the same latent-bug guard with no regression test, so a refactor that drops either reintroduces the warning silently.
+
+**Recommendation:** Optional. A jsdom render-then-unmount test that resolves the awaited action after unmount and asserts no `act()` warning fires is possible but heavy for the value. Note and move on.
+
+---
+
+## Areas verified as WELL-COVERED (no gap — do not re-report)
+
+- **NCLX code-2 (unspecified) branch** — `color-detection.test.ts:233-254` has BOTH "maps nclx transfer=2 to unknown" AND the critical AGG-R8-06 "code-2 unspecified transfer/matrix does NOT erase the ICC-derived values." The exact cycle-2 branch is pinned. Full NCLX map (transfer 4/5/6/7/8/11/13/14/15/16/17/18, primaries 11/12, matrix 8/10) is exhaustively tested.
+- **Privacy field guards** — `privacy-fields.test.ts` is exemplary: the "symmetric privacy guard" (set-difference `admin − public === SENSITIVE_KEYS` exactly) catches a NEW admin field leaking publicly, plus the `data-timeline` mirror subset check (TEST-R4C9-04). Cross-references real schema keys, not a fixture echo.
+- **The 3 lint-gate fixture tests** (`check-api-auth`, `check-action-origin`, `check-public-route-rate-limit`) — behavioral: they exercise the actual scanner functions against synthetic source (function-decl, variable-export, aliased-export, export-specifier forms), not just grep route files. Robust.
+- **gps-exif-strip** (`process-image-exif-strip`, `strip-gps-from-original`), **image-processing claim race / advisory locks** (7 queue tests + `advisory-locks.test.ts`), **csv-escape / validation Unicode strip / sanitize** (10 files) — all have dedicated, substantive coverage.
+- **home og:image AGG-R8-02** — `home-metadata-title.test.ts:95-115` pins per-photo OG route (1200×630), NOT the oversized base JPEG, on both `openGraph.images` and `twitter.images`.
+- **advisory-locks.ts cycle-2 change** — doc-only (added `gallerykit_color_pipeline_backfill` to the blast-radius docblock); no behavior change → no test needed.
+
+## Flakiness scan
+
+No timing-dependent, real-clock, network, or filesystem-order flakes found in the new tests. The two `admin-backfill-runner-fatal-counters` tests use `vi.waitFor` on the authoritative `running` flag with a 20s timeout + 25ms interval (correct — drains the fire-and-forget runner deterministically, not a fixed sleep). The `client-server-only-boundary` de-flake (memoized reads + 60s explicit timeout) is the right fix for a slow-but-correct full-tree scan; the assertion still runs to completion. Filesystem walks (`migrate-reconcile`, `touch-target-audit`, `client-server-only`) sort/iterate `readdirSync` but assert on SETS/membership, not order — order-independent. Whole-suite cold run is 146s; nothing in the suite structure suggests an individual test >10s other than the deliberately-60s-budgeted boundary scan (single-digit seconds warm).
+
+## Top gaps (priority order)
+
+1. **TEST-1** (High) — pin home OG route `sanitizeForOg` (the cycle-2 fix is unguarded on the surface it was added to).
+2. **TEST-2** (High) — test the backfill `width<=0` skip classification (data-integrity / no-false-"re-encoded").
+3. **TEST-3** (High) — pin the SW HEAD `AbortSignal.timeout` bound (shippable display-path regression).
+4. TEST-4/5/6 (Low) — CLS-reservation helper extraction, raw-checkbox scanner boundary fixtures, unmount-guard symmetry.

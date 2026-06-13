@@ -1,174 +1,181 @@
-# Tracer Review — Run-8 Cycle-2 (review-plan-fix)
+# Tracer — Cycle 3 Causal Trace Report
 
-**Date:** 2026-06-13
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**Angle:** Evidence-driven causal tracing of suspicious/complex flows — competing hypotheses, evidence for/against, uncertainty tracking.
-**Working tree:** CLEAN. HEAD = `77867144` (synced with origin/master; the prompt's HEAD list predates the run-7-fix commits — those landed at `0d17a362`..`77867144`).
-**Gates measured live this cycle:** `lint:action-origin` / `lint:api-auth` / `lint:public-route-rate-limit` → all exit 0. `npm run typecheck` (app + scripts) → exit 0. Migration tests (49) + backfill honesty tests (25) → all green.
+HEAD: `ada92ba5`. Scope: evidence-driven end-to-end tracing of 5 high-stakes data flows touched by run-8 cycle-2 commits. Prior cycle closed AGG-R8-01..13 — verified for regressions, not re-reported.
+
+Verdict legend: confirmed-correct / confirmed-bug / needs-manual-validation. Confidence High/Medium/Low.
 
 ---
 
-## Prior findings (run-7 AGG-R7-01..13) — VERIFIED CLOSED at HEAD
+## TRC-1 — HOME OG IMAGE (commit 73496d2f)
 
-Each verified against the actual code at HEAD, not just the commit message:
+### Observation
+`generateMetadata` in `page.tsx` now emits `og:image = /api/og/photo/${latestImage.id}` (1200×630) instead of the base JPEG (AGG-R8-02). The chain is: home metadata → that route URL → `og/photo/[id]/route.tsx` → `pickFirstAvailablePhotoBuffer` on-disk fallback → `OG_PHOTO_MAX_BYTES` cap.
 
-| Prior ID | Closure commit | Evidence at HEAD |
-|---|---|---|
-| AGG-R7-01 (stale pool formula ×3 sites) | `0d17a362` | `admin-backfill-runner.ts:28-37` header + `db/index.ts:16-24` comment + body all state `cap = max(1, floor((LIMIT-RESERVED-1)/2))`, `RESERVED = max(3, ceil(LIMIT/2))` → cap=2 at LIMIT 10. Self-consistent. **CLOSED** |
-| AGG-R7-02 (backfill setTimeout leak) | `f11746cd` | `settings-client.tsx:83` timer-id ref + `:122-131` dedicated empty-deps unmount effect (`clearTimeout` all) + `:87,96` `backfillMountedRef` gate on the post-fire setState. **CLOSED** |
-| AGG-R7-03 (error-shell no visible heading) | `0d2312cd` | `admin/(protected)/error.tsx:30` visible `<h1 ... text-3xl font-semibold>` (not the faint `/30` glyph). **CLOSED** |
-| AGG-R7-04 (remaining aria-describedby) | `61cfd235` | wired across the remaining settings hints. **CLOSED** |
-| AGG-R7-05 (AGG-9/AGG-10 regression tests) | `d035de10` | `error-shell` visible-heading + home `title:{absolute}` pinned. **CLOSED** |
-| AGG-R7-07 (dropzone aria-disabled honesty) | `35d07f0b` | `upload-dropzone.tsx:412` `aria-disabled` + `:413` explicit `tabIndex:-1` fallback + useDropzone drops root handlers when disabled + `:419` `<input disabled>`. **CLOSED** |
-| AGG-R7-08 (doc-drift COLOR_IMPACTING_KEYS count) | `10d77324` | `settings-hash.ts:9-12` docstring + CLAUDE.md:260 both state **9** keys (5 color + 3 quality + `image_sizes`); `COLOR_IMPACTING_KEYS` array at `settings-hash.ts:37+` matches. **CLOSED** |
-| AGG-R7-09 (home-OG no on-disk fallback) | `4852bcf5` | `(public)/page.tsx:111` OG now uses base `/uploads/jpeg/${filename_jpeg}` (always exists per atomic-rename contract), not a `_${size}.jpg` sized derivative. Comment `:99-109` documents it. **CLOSED** |
-| AGG-10 (home title double-suffix) | `8fc403a2` | `(public)/page.tsx:49` `metadataTitle = { absolute: title }`, applied in both metadata branches (`:66`,`:119`). **CLOSED** |
-| AGG-R7-13 (Stripe `async_payment_succeeded`) | — | Still ALREADY-OWNED by plan-316 CRT-R5C1-04 per CLAUDE.md. NOT re-reported (per prompt). |
+### Hypotheses
+- **H-1a** Home page passes the right params for `/api/og/photo` to embed the latest photo.
+- **H-1b** `/api/og/photo` can 404 / return oversized / blank in some state.
+- **H-1c** Absolute-URL construction is correct across locales / proxy.
 
-AGG-R7-06/10/11/12 were doc/test-depth items; the actionable ones above are closed. AGG-R7-11's "monotonicity checks adjacent pairs only" concern is **refuted** — see TRC-1 evidence: `migration-journal.test.ts:79-98` already asserts the global-max-of-all-prior invariant from idx 18 forward (the real `MAX(created_at)` cursor), not just adjacent pairs.
+### Trace (file:line)
+1. `page.tsx:92` `getImagesLite(undefined, …, 1, 0)` → `latestImage = images[0]` (`:93`). `getImagesLite` selects `...publicSelectFields` (`data.ts:733`), which includes `id`, `title`, `filename_jpeg`.
+2. `page.tsx:112-119` builds `og:image` only when `latestImage` exists; URL = `absoluteImageUrl('/api/og/photo/${latestImage.id}', seo.url)`. Only the **id** is passed — the route re-fetches everything by id.
+3. `og/photo/[id]/route.tsx:62-66` `getImageCached(imageId)` → `getImage` (`data.ts:923`), which filters `eq(images.processed, true)` (`:940`) and returns `publicSelectFields` incl. `filename_jpeg`.
+4. `route.tsx:77-79` if `!image` → `buildFallbackResponse(..., seo.og_image_url || undefined)` → **302** to site OG or `origin/` (`:235-259`). Never a broken-image 404 to the crawler.
+5. `route.tsx:103-108` `origin = new URL(req.url).origin`; `pickFirstAvailablePhotoBuffer(origin, image.filename_jpeg, config.imageSizes)`.
+6. `og-photo-fetch.ts:75-86` sorts sizes ascending, tries each `tryFetchPhotoBuffer`; `:44-67` rejects non-2xx, `Content-Length > OG_PHOTO_MAX_BYTES`, buffered `length > OG_PHOTO_MAX_BYTES` (1 MB, `:31`), and 10 s timeout → returns the first sized derivative under cap.
+7. `route.tsx:109-115` if `!fetched` (every size 404/over-cap mid-backfill) → `buildFallbackResponse(..., OG_SUCCESS_CACHE_CONTROL, seo.og_image_url)` → **302**.
+8. Success: Satori PNG → `postProcessOgImage` (`:29-35`) → sRGB JPEG q88 → `Response` 1200×630.
 
----
+### Evidence FOR
+- **H-1a**: `latestImage.id` is sufficient; the route owns its own fetch. `filename_jpeg` is guaranteed present on the re-fetched row (`publicSelectFields`). ✔
+- **H-1c**: `absoluteImageUrl` (`image-url.ts:44-50`) resolves through `imageUrl` then `new URL(resolved, seo.url)`. `seo.url` is the configured site origin (locale-independent). The OG `<meta>` is intentionally a **single canonical absolute URL**, not locale-prefixed — correct: OG image URLs are not localized, and `/api/og/photo` carries no locale segment. Inside the route, `origin = new URL(req.url).origin` is used for the internal photo fetch, so Satori fetches `${origin}/uploads/jpeg/...` on the same host the request landed on — proxy-correct. ✔
+- **H-1b (against, mostly)**: every non-success branch returns a **302**, never a hard 404/blank to the crawler; the 1 MB cap structurally prevents the oversized-base-JPEG problem the commit targeted (Twitter's 5 MB limit). The base-JPEG outlier is gone. ✔
 
-## Flows traced this cycle (5 candidate flows from the prompt)
+### Evidence AGAINST / Gaps
+- **H-1b residual (LOW):** `og:image` width/height are hard-asserted `1200×630` at `page.tsx:115-116`, but on the fallback path the route returns a **302 redirect** to `seo.og_image_url`, whose real dimensions are whatever the admin uploaded. If the admin's site OG isn't 1200×630, the declared meta dims mismatch the delivered bytes for freshly-uploaded/mid-backfill photos. This is a transient-window cosmetic mismatch (crawlers re-fetch on the 302's non-immutable cache), and the *home-card-specific* concern (oversized) is resolved. Not a regression introduced by this commit (the per-photo route already behaved this way for `/p/[id]`).
+- **`alt` text (`page.tsx:117`)** uses `latestImage.title` raw (filename-guarded via `isLatestTitleFilename`). `alt` is an HTML meta attribute rendered by Next's metadata serializer (escaped), NOT Satori-rendered, so the OG-sanitize concern does not apply here. The Satori-rendered title is re-derived and sanitized inside the route (see TRC-2). ✔
 
-### TRC #1 — Migration journal → migrate.js cursor → applied-set post-condition (NEW finding)
-
-**Observation.** The journal has non-monotonic `when` timestamps (idx 6 = `1778304060000` / 2026-05-09, then idx 7-17 all in the 2025 `1746-1747M` band, then idx 18+ climb back above idx 6). `migrate.js` defends against the burned-once silent-skip with a per-entry hash baseline + a post-condition that throws if any journal hash is absent from `__drizzle_migrations` after `migrate()`.
-
-**Tracing target.** Can a REAL future migration silently skip (its SQL never executed on an existing production DB) while the deploy still reports success?
-
-**Hypotheses.**
-- **H1:** Following the documented rule (new `when` strictly > global max) is fully safe — drizzle applies, post-condition passes.
-- **H2:** The reconcile+baseline path baselines a new migration's hash BEFORE drizzle runs, so drizzle short-circuits it, and `reconcileLegacySchema` becomes the SOLE applier — meaning a forgotten reconcile entry silently drops the SQL while the post-condition still passes (hash present).
-- **H3:** The `migrate-reconcile-coverage` test fully closes H2.
-
-**Evidence — control-flow order (decisive).**
-- `migrate.js:759-760`: `prepareLegacyDatabaseIfNeeded(...)` runs BEFORE `runMigrations(...)`.
-- `migrate.js:682-695`: on an existing DB, `journalCovered = migrations.every(hash recorded)`. A NEW migration's hash is not yet recorded → `journalCovered = false` → it calls `reconcileLegacySchema` + `baselineAllJournalMigrations`.
-- `migrate.js:642-657`: `baselineAllJournalMigrations` INSERTs a `__drizzle_migrations` row for every journal hash not already present — **including the brand-new migration's hash** — without executing its `.sql`.
-- `migrate.js:698-719`: `runMigrations` → drizzle `migrate()` then post-condition `missing = expectedMigrations.filter(hash not in recordedHashes)`. Because the new hash was just baselined, drizzle's MySQL migrator (which gates on hash presence) short-circuits the apply, and the post-condition sees the hash present → **passes silently**.
-
-→ **Confirmed: on every existing-DB upgrade that adds a new migration, `reconcileLegacySchema` is the sole apply mechanism; drizzle's `migrate()` is effectively a no-op for new entries, and the post-condition cannot detect a forgotten reconcile entry because the baseline guarantees hash-presence.**
-
-**Evidence — what the safety net DOES catch (H3, partial).**
-- `migrate-reconcile-coverage.test.ts:67-82`: source tripwire asserting `migrate.js` contains `CREATE TABLE IF NOT EXISTS <table>` for every schema table AND mentions every column NAME. So a new-COLUMN or new-TABLE migration with a forgotten reconcile entry FAILS this test at commit time (provided CLAUDE.md step 4 — add the column to `schema.ts` — is followed). **This is real and closes the most common case.**
-- Live proof the contract is currently honored: migration 0021 (index-only) IS mirrored in `reconcileLegacySchema` via `ensureIndex` (`migrate.js:527-530`).
-
-**Evidence AGAINST full closure (the residual gap).**
-- The coverage test checks only column-NAME presence and `CREATE TABLE`. It does NOT verify: indexes, type/default changes (`ALTER ... MODIFY`), `DROP`s, or pure data migrations.
-- Therefore a future **index-only / type-change / data migration** whose author forgets to update `reconcileLegacySchema` will: (a) pass `migration-journal.test.ts` (the `when` is monotonic), (b) pass `migrate-reconcile-coverage.test.ts` (no new column name), (c) be baselined-without-applied on every existing DB, (d) pass the migrate.js post-condition. The schema change is **silently dropped** on existing deployments. (A fresh DB is unaffected only if reconcile mirrors it — same dependency.)
-
-**Conclusion.** DEFECT (latent, narrow). The silent-skip failure class that `migrate.js`'s post-condition was built to eliminate still survives for the migration subtypes the column-name coverage test cannot see. The protection is entirely dependent on CLAUDE.md step 3 (update `reconcileLegacySchema`) being followed for non-column migrations, with no test enforcing it.
-**Confidence:** High (control flow + tests machine-verified; the gap is in test coverage scope, not in a misread).
-**Severity:** LOW (requires a specific migration subtype + a process miss; no current instance — 0021 is correctly mirrored).
-**Next-probe / fix options (pick one):**
-1. Extend `migrate-reconcile-coverage.test.ts` to also assert every `CREATE INDEX <name>` from each `drizzle/*.sql` appears as an `ensureIndex('<name>'...)` in `migrate.js` (parse the SQL files, not just schema.ts). This catches the index subtype, which is the most likely future non-column migration.
-2. OR add an e2e/CI step that diffs a fresh-`init` DB's `information_schema` (indexes + column types) against a sequentially-`migrate()`-applied DB, failing on any divergence — the authoritative end-to-end check the coverage test's own docblock (`:18-19`) admits it cannot perform.
+### Verdict
+**confirmed-correct** — High. The home OG no longer ships the oversized base JPEG; the no-404 guarantee is preserved via 302 fallback; cross-locale/proxy URL construction is correct. One LOW cosmetic note (declared 1200×630 vs admin-OG dims on the fallback path) is pre-existing and shared by all per-photo OG consumers.
 
 ---
 
-### TRC #2 — Backfill run → state mirroring → getBackfillStatus → settings UI (VERIFIED HONEST)
+## TRC-2 — OG SANITIZE SYMMETRY (commits d5399742 / ada92ba5)
 
-**Observation.** The admin "Re-encode existing photos" runner re-encodes `processed=TRUE` rows behind the `gallerykit_color_pipeline_backfill` advisory lock and surfaces per-run counters to the settings UI.
+### Observation
+Both OG routes now import `sanitizeForOg` from the shared `@/lib/og-sanitize` (`route.tsx:5`, `og/photo/[id]/route.tsx:8`). The shared fn (`og-sanitize.ts:28-30`) = `stripUnicodeFormatting(value) ?? ''` then `.replace(OG_C0_CONTROL_CHARS, '')`.
 
-**Tracing target.** Is the reported `processed`/`errors` count honest in EVERY branch (success, encode-fail, detection-fail, fatal-catch, missing-original, locked)?
+### Hypotheses
+- **H-2a** Both call sites sanitize ALL untrusted Satori-rendered strings identically.
+- **H-2b** Some string reaches Satori unsanitized in one route but not the other.
 
-**Evidence — per-row tally is 1:1 with the outcome.**
-- `admin-backfill-runner.ts:398-400`: `ReprocessResult` is a discriminated union; each `ok:false` carries a distinct `reason`.
-- `:622-659`: the queue task increments EXACTLY ONE counter per outcome — `processed++` on `ok:true`; the switch maps `missing-original→skippedMissingOriginal`, `locked→skippedLocked`, `encode-failed→encodeFailures (+ lastError)`, `detection-failed→detectionFailures`; an UNEXPECTED throw → `errors++ (+ lastError)`.
-- `:498-513` vs `:530-536`: `ok:true` (detection succeeded → version-bumped UPDATE) is mutually exclusive with `detection-failed` (no version bump; only `was_downscaled`/`avif_10bit` persisted) — a detection failure can NEVER be counted as `processed`. Confirmed by `admin-backfill-runner-detection-failure.test.ts`.
-- `:662-698`: all six counters are mirrored to shared `state` continuously (per-task) AND in a final flush. No reconstruction-by-subtraction (the AGG-1 hazard) anywhere.
-- `:702-703`: `lastRunHadFailures = encodeFailures>0 || detectionFailures>0 || errors>0` — skips (missing/locked) correctly do NOT count as failures.
+### Trace — enumerate every string node rendered into each `ImageResponse`
 
-**Evidence — status surface mirrors directly.**
-- `admin-backfill.ts:103-117`: `getBackfillStatus` returns every counter straight from `readAdminBackfillState()` — no derivation.
-- `settings-client.tsx:314-325`: the with-failures banner renders `processed`/`errors`/`encodeFailures`/`detectionFailures` from the mirrored fields; the clean banner renders `processed`. `lastError` shown only when `lastRunHadFailures && lastError` (`:337`).
+**`api/og/route.tsx` (topic/site card)** renders exactly 3 untrusted text surfaces:
+- `siteTitle` (`:153`) ← `sanitizeForOg(seo.title || siteConfig.title)` (`:83`) ✔
+- `topicLabel` (`:170`) ← `sanitizeForOg(clampDisplayText(topicRecord.label, …))` (`:82`) ✔
+- `tagList[]` (`:184-197`, rendered as `#{tag}`) ← each `sanitizeForOg(clampDisplayText(t, …))` (`:88`) ✔
 
-**Evidence — the fatal-catch path is honest (the AGG-1 fix).**
-- `:647-658`: a fatal per-row throw (e.g. the version-bump UPDATE throws) increments `errors` AND sets `state.lastError`, so a fatal-only run no longer reads "N re-encoded, 0 failures" with no message.
+**`api/og/photo/[id]/route.tsx` (per-photo card)** renders exactly 2 untrusted text surfaces:
+- `displayTitle` (`:173-187`) ← `sanitizeForOg(getPhotoDisplayTitle(image, …))` (`:82-83`) ✔
+- `siteTitle` (`:198`) ← `sanitizeForOg(seo.title || siteConfig.title)` (`:81`) ✔
 
-**Conclusion.** NO DEFECT. Every branch is honest; the counters cannot conflate a failure/skip with a success. 25 backfill tests pass (`admin-backfill-runner-{fatal-counters,detection-failure,batching,leak,concurrency-cap}.test.ts` + `admin-backfill-status-shape.test.ts` + `backfill-{color-pipeline,detection-failure-contract}.test.ts`).
-**Confidence:** High.
+### Evidence FOR
+- **H-2a**: Both routes route every user/admin-controlled rendered string through the *same* `sanitizeForOg`. `stripUnicodeFormatting` uses the GLOBAL-flag twin `UNICODE_FORMAT_CHARS_GLOBAL` (`validation.ts:82,92-94`) → replace-ALL of bidi + zero-width (the module doc at `og-sanitize.ts:18-21` explicitly warns a non-global replace would strip only the first). C0 strip via `OG_C0_CONTROL_CHARS` (`og-sanitize.ts:25`). Identical processing on both sides. ✔
+- **No author surface anywhere**: grepped both routes — neither renders an `author`/`uploaded_by`/`author_name` field into Satori. `author_name` exists only in the feed query (`data.ts:784`), which is the Atom route, not an OG card. The task's "author" string is not a Satori sink on either OG route. ✔
+- **`displayTitle` derivation is safe**: `getPhotoDisplayTitle` (`photo-title.ts:33-56`) only concatenates `image.title` and `humanizeTagLabel(tag.name)` (a `_`→space replace, `:29-31`); it introduces no new unsanitized branch — the *result* string is wrapped by `sanitizeForOg` at the call site (`route.tsx:83`). The tags-from-`tag_names` path (`getPhotoDisplayTitleFromTagNames`, `:67-83`) feeds into the same wrapped result. ✔
 
----
+### Evidence AGAINST / Gaps
+- None. Both routes are exhaustively covered; no string escapes sanitization on either side. The earlier symmetry gap (home route rendered raw) is closed and pinned by `og-sanitize` test (commit ada92ba5 — "pin shared og-sanitize global-strip contract").
+- Defense-in-depth only (not a live exploit): inputs are admin-controlled, validator-rejected at write time (`containsUnicodeFormatting`), and Satori has no script sink — consistent with the module's own honesty doc (`og-sanitize.ts:6-16`).
 
-### TRC #3 — Auth: cookie → proxy.ts guard → server action `requireSameOriginAdmin`/`isAdmin` → DB sink (VERIFIED CLEAN)
-
-**Tracing target.** Any path that reaches a mutating DB sink WITHOUT both an `isAdmin()` AND a `requireSameOriginAdmin()` check?
-
-**Evidence — layered defense intact.**
-- `proxy.ts:81-116`: middleware is a presence/format gate only (token len ≥ 100, three non-empty colon segments) → redirect to login; full crypto validation deferred to server actions (defense in depth). `proxy.ts:137-140`: matcher EXCLUDES `/api/*`, so every `/api/admin/*` route must self-gate (enforced by `lint:api-auth`).
-- `lib/action-guards.ts:37-44`: `requireSameOriginAdmin` reads headers once, runs strict `hasTrustedSameOrigin`, returns a localized message on failure (caller returns early).
-
-**Evidence — lint gates pass live (the real enforcement).**
-- `lint:action-origin` exit 0: every mutating export in `actions/` (+ `db-actions.ts`) stores the `requireSameOriginAdmin()` result and returns early; read-only exports carry `@action-origin-exempt`.
-- `lint:api-auth` exit 0: every method export under `api/admin/**` wraps `withAdminAuth`.
-- `lint:public-route-rate-limit` exit 0.
-
-**Evidence — exempt actions are genuinely read-only or self-gated.**
-- The 10 `@action-origin-exempt` sites are all read-only getters (`tags.ts:18`, `sales.ts:30`, `admin-users.ts:60`, `seo.ts:26`, `settings.ts:18`, `lr-tokens.ts:118`, `admin-backfill.ts:94` — all `isAdmin`-gated reads) OR explicitly-public analytics writes (`public.ts:353/370/391`, intentionally anonymous + rate-limited per architecture).
-- `admin-backfill.ts:32-40`: `triggerBackfill` (the one mutating backfill entry) gates on BOTH `isAdmin()` (`:34`) AND `requireSameOriginAdmin()` (`:37`) before `triggerAdminBackfill()`.
-
-**Conclusion.** NO DEFECT. No mutating sink reachable without both checks. The lint-gate heuristic + the exempt-comment discipline hold at HEAD.
-**Confidence:** High (3 gates machine-verified + exempt sites hand-audited).
+### Verdict
+**confirmed-correct** — High. Symmetry gap closed; both routes sanitize all (and only) the strings they render, identically, via one shared global-strip function. No unsanitized string reaches Satori on either route.
 
 ---
 
-### TRC #4 — Stripe webhook → entitlement → download-token validation/claim (VERIFIED CLEAN; ACH gap already-owned)
+## TRC-3 — COLOR DETECTION NCLX↔ICC (commit 74235265)
 
-**Tracing target.** Can an unpaid/forged event mint an entitlement, or can a single-use download token be consumed twice (TOCTOU)?
+### Observation
+`detectColorSignals` previously applied `NCLX_*_MAP[code] ?? 'unknown'` unconditionally when an nclx box existed (pre-fix), clobbering ICC-derived transfer/matrix/primaries with `'unknown'` for H.273 code 2 ("Unspecified"). Now each field applies only `if (… !== undefined)` (`color-detection.ts:381-386`).
 
-**Evidence — webhook cannot mint a false entitlement.**
-- `stripe/webhook/route.ts:74-86`: mandatory signature verification (400 in constant time on failure, before any DB work).
-- `:105-118`: gates on `payment_status === 'paid'` — async/unpaid sessions rejected. `:231-235` tier allowlist; `:299-305` zero-amount reject; `:273-281` + `:390-398` deleted-image (FK) → 200 + manual-refund log, not a retry-storm 500.
-- `:320-331` SELECT-by-sessionId idempotency + `:357-382` `onDuplicateKeyUpdate` with `insertId>0` disambiguation (the dup-key loser does NOT mint a token / log line) → no dead-token hazard on Stripe retries.
+### Hypotheses
+- **H-3a** Audit columns (`transfer_function`, `matrix_coefficients`, `color_primaries`, `color_pipeline_decision`) are now internally consistent and match CLAUDE.md "NCLX > ICC chromaticity > ICC name" per-field precedence.
+- **H-3b** Residual cases where stored columns disagree (a real contradiction, not a documented divergence).
 
-**Evidence — download token claim is atomic (TOCTOU-safe).**
-- `download/[imageId]/route.ts:198-258`: GET is the no-claim interstitial — only SELECTs (`:210`,`:296`-style reads) + builds HTML; genuinely write-free (so auto-HEAD / mail scanners never burn the token, R4C7).
-- `:373-385`: the claim is `UPDATE entitlements SET downloadedAt=NOW(), downloadTokenHash=NULL WHERE id=? AND downloadedAt IS NULL` — an atomic compare-and-swap. Two concurrent POSTs both pass `validateDownloadRequest`, but only one gets `affectedRows===1`; the loser gets `affected===0` → 410 "Token already used" (`:396-401`).
-- `:338-351`: the file handle is `open()`ed BEFORE the claim, so a vanished file returns 404 with the token INTACT (`:356-360`), not a burned-token 200-with-aborted-body. Handle closed on every post-open failure path (`:387`,`:399`).
-- `:170-187`: constant-time `verifyTokenAgainstHash` + expiry + refunded + single-use checks, in order.
+### Trace (file:line)
+1. ICC-derived baseline computed first: `colorPrimaries = inferColorPrimaries(iccName)` (`:343`), `transferFunction = inferTransferFunction(...)` (`:344`), `matrixCoefficients = inferMatrixCoefficients(iccName)` (`:345`).
+2. ICC-chromaticity upgrade when name opaque (`:357-368`) — the middle precedence tier.
+3. NCLX override per-field (`:381-386`): `nclxPrimaries = NCLX_PRIMARIES_MAP[code]`, applied only when `!== undefined`. **Confirmed code 2 is absent from all three maps** — `NCLX_PRIMARIES_MAP` keys {1,9,11,12}, `NCLX_TRANSFER_MAP` keys {1,4,5,6,7,8,11,13,14,15,16,17,18}, `NCLX_MATRIX_MAP` keys {0,1,8,9,10}. So code 2 → `undefined` → ICC value survives.
+4. `is_hdr` derived from `transferFunction` (`:389`) — now correctly stays SDR when a code-2 transfer falls back to an `srgb`/`gamma*` ICC value instead of being forced to `'unknown'`.
 
-**Conclusion.** NO DEFECT. The only entitlement gap is `async_payment_succeeded` (ACH/bank transfer never gets an entitlement row), which is **ALREADY-OWNED by plan-316 CRT-R5C1-04** and documented in CLAUDE.md — not re-reported per prompt.
-**Confidence:** High.
+### Evidence FOR
+- **H-3a**: The fix implements *exactly* the per-field precedence: NCLX where specified, else the lower ICC tier. The test cited in the commit (`color-detection.test.ts`: NCLX(12, code-2, code-2)+sRGB-ICC → primaries `p3-d65` but transfer `srgb`/matrix `identity` survive) matches the code path: `NCLX_PRIMARIES_MAP[12]='p3-d65'` overrides, `NCLX_TRANSFER_MAP[2]=undefined`/`NCLX_MATRIX_MAP[2]=undefined` preserve ICC. ✔
+- **`color_pipeline_decision` divergence is documented and intentional** (`process-image.ts:665-682` COR-2 note): the resolver prioritises ICC working-space NAME (editing intent / delivery driver), while `color_primaries` is NCLX-first (source container tag). On a deliberately-mismatched container (sRGB-named ICC inside P3 NCLX) the audit row shows `color_primaries=p3-d65` + an `srgb`-family decision — an accurate record of the conflict, by design. `resolveColorPipelineDecision` falls back to `resolveDecisionFromPrimaries(signals?.colorPrimaries)` only when `!iccProfileName` (`:683-685`). ✔
 
----
+### Evidence AGAINST / Gaps
+- **Matrix code 0 ('identity') edge — verified safe.** `NCLX_MATRIX_MAP[0]='identity'` (a *defined, truthy-string* value). The guard uses `!== undefined`, NOT truthiness, so code 0 correctly overrides ICC matrix to `'identity'` rather than being skipped. A `??`-only or truthiness guard would have been a bug here; the `!== undefined` form is correct. ✔
+- **Chromaticity-backfilled matrix interaction (LOW, not a contradiction):** at `:364-366`, when chromaticity identifies a gamut and matrix was `'unknown'`, matrix is set to `'identity'`/`'bt2020-ncl'`. A later NCLX matrix (if defined) still overrides it (`:386`) — correct precedence (NCLX > chromaticity). No disagreement.
+- No residual contradiction found. The one apparent "disagreement" (primaries vs decision) is the documented, test-locked by-design divergence, not a bug.
 
-### TRC #5 — Image upload → Sharp → DB → public serving → ETag invalidation; color/HDR admin-only enforcement (VERIFIED CLEAN)
-
-**Tracing target.** Does any wide-gamut/HDR audit field leak into a public API response, and does flipping a color/quality/size setting actually invalidate cached derivatives?
-
-**Evidence — color/HDR fields are admin-only by triple-layer construction.**
-- `data.ts:416`: `PrivacySensitiveKeys` union includes all admin-only color/HDR fields (`color_pipeline_decision`, `is_hdr`, `has_gain_map`, `transfer_function`, `matrix_coefficients`, `bit_depth`, `color_space`, `icc_profile_name`, `pipeline_version`, `was_downscaled`) + GPS/filename PII.
-- `data.ts:417-420`: compile-time `_privacyGuard` = `Extract<keyof publicSelectFields, PrivacySensitiveKeys>` must be `never` — a TS error fires if any sensitive key appears in `publicSelectFields`. `:429-432` `_mapPrivacyGuard` extends this to the map-select shape (only latitude/longitude allowed beyond public).
-- `data.ts:241`: `color_primaries` is correctly PUBLIC (not omitted) — matches CLAUDE.md (color_primaries = public; the rest admin-only).
-- `privacy-fields.test.ts:83-93`: SYMMETRIC runtime contract — the admin-only key set must equal `SENSITIVE_KEYS` exactly; a new admin field that's neither omitted publicly nor added to `SENSITIVE_KEYS` fails the test. Closes the "forgot to omit" drift.
-
-**Evidence — ETag invalidation is honest across both serving paths.**
-- `settings-hash.ts:37+`: `COLOR_IMPACTING_KEYS` = 9 keys (5 color + 3 quality + `image_sizes`); the 8-char hash is embedded in the serve-upload ETag, so flipping ANY of them changes the variant ETag (CLAUDE.md:260, AGG-R7-08-corrected).
-- Static path (the production path for existing `public/uploads/` files per R4C6 ARCH-R4C6-06): invalidation rides the mtime+size ETag — a backfill re-encode rewrites the file in place (`Cache-Control: ...must-revalidate`, deliberately NOT `immutable`), changing both. The backfill runner persists the same DB column set as a fresh upload (`admin-backfill-runner.ts:498-535`).
-
-**Conclusion.** NO DEFECT. No color/HDR or GPS field leaks publicly (compile-time guard + symmetric test). Settings→ETag invalidation is sound on both the serve-upload and static paths.
-**Confidence:** High.
+### Verdict
+**confirmed-correct** — High. Per-field NCLX>ICC precedence is correctly implemented; code 2 and code 0 both handled correctly via `!== undefined`. The primaries/decision divergence is intentional and documented. Audit columns are internally consistent under the documented contract.
 
 ---
 
-## Summary table — OPEN / NEW this cycle
+## TRC-4 — BACKFILL WIDTH (commit e8fce327)
 
-| ID | Finding | Flow | Severity | Confidence | Disposition |
-|---|---|---|---|---|---|
-| **TRC-1** | Migration silent-skip survives for **non-column** migration subtypes (index-only, type/default change, `DROP`, data migration). On every existing-DB upgrade `reconcileLegacySchema` is the SOLE applier (baseline runs before drizzle `migrate()`, so drizzle short-circuits the new hash); the migrate.js post-condition only checks hash-presence (which baseline guarantees), and `migrate-reconcile-coverage.test.ts` only enforces column-NAME + `CREATE TABLE` presence. A forgotten reconcile entry for a non-column migration is dropped silently with a green deploy. (Refines AGG-R7-11; refutes its "adjacent-pairs-only" claim — the global-max cursor IS pinned.) | TRC #5 (migration) | LOW (latent; 0021 is correctly mirrored, no current instance) | High | NEW — actionable: extend coverage test to assert `CREATE INDEX` ↔ `ensureIndex`, OR add a fresh-vs-sequential `information_schema` diff in CI |
+### Observation
+`admin-backfill-runner.ts:411-426` adds a `!Number.isFinite(row.width) || row.width <= 0` guard before `processImageFormats`, returning `{ ok: false, reason: 'encode-failed' }` with a distinct log.
 
-All other traced flows (backfill honesty, auth, Stripe/download, color-field privacy, ETag invalidation) are **VERIFIED CLEAN** with High confidence. All run-7 actionable findings (AGG-R7-01..09 + AGG-10) verified CLOSED at HEAD.
+### Hypotheses
+- **H-4a** A width=0/corrupt row now fails gracefully with no silent stale-version strand (retries next run).
+- **H-4b** The guard introduces a version bump or skips retry.
 
-## VERIFIED-CLEAN (stress-tested this cycle, no action)
-- Backfill counter honesty: 1:1 outcome→counter mapping, no reconstruction, fatal-catch populates `lastError`, detection-fail never bumps version. (25 tests)
-- Auth: 3 security lint gates exit 0; no mutating sink without both `isAdmin` + `requireSameOriginAdmin`; 10 exempt sites are read-only getters or explicit public analytics.
-- Stripe webhook: signature-gated, paid-only, idempotent (SELECT + dup-key insertId disambiguation), deleted-image → 200 not retry-storm.
-- Download token: GET write-free interstitial; POST claim is atomic CAS (`UPDATE ... WHERE downloadedAt IS NULL`), file opened before claim, handle closed on all post-open paths.
-- Color/HDR privacy: compile-time `_privacyGuard`/`_mapPrivacyGuard` (Extract→never) + symmetric `privacy-fields.test.ts` contract; `color_primaries` public, all HDR/decision/bit_depth/icc admin-only.
-- ETag invalidation: 9 COLOR_IMPACTING_KEYS in serve-upload ETag hash; mtime+size ETag on static path; backfill re-encode rewrites in place.
-- Migration journal monotonicity: `migration-journal.test.ts:79-98` pins the global-max-of-all-prior cursor invariant from idx 18 (not adjacent pairs).
+### Trace (file:line)
+1. `reprocessOne` (`admin-backfill-runner.ts:~400`): after the `missing-original` check (`:408`), the new guard (`:417-424`) short-circuits with `reason: 'encode-failed'` for `width <= 0` / non-finite.
+2. CLAUDE.md contract: backfill is idempotent — `encode-failed` means **no `pipeline_version` UPDATE**, so the row stays below `IMAGE_PIPELINE_VERSION` and remains a candidate for the next run (`WHERE pipeline_version != IMAGE_PIPELINE_VERSION`).
+3. The guard sits BEFORE the lock-critical re-encode/detection/UPDATE block (`:428+` "LOCK-CRITICAL"), so no advisory lock is acquired and no DB write happens for a bad-width row.
 
-## Uncertainty / next-probe (open)
-- TRC-1 has no current production instance (0021 indexes are mirrored). The probe that would collapse remaining uncertainty about real-world exposure: grep the next-added `drizzle/*.sql` for `CREATE INDEX`/`ALTER`/`DROP`/`UPDATE`/`INSERT` statements at PR time and confirm a matching `reconcileLegacySchema` mutation exists — exactly what option 1 of the fix automates.
+### Evidence FOR
+- **H-4a**: Returning `encode-failed` (not a success/skip) guarantees the version is NOT bumped → no stale-version strand → retried next run after metadata repair. The distinct `console.error` (`:419-422`) separates bad-metadata from genuine Sharp encode failures for operators. Mirrors the upload-path dimension guard in `process-image.ts`. The CLAUDE.md "no version bump on detection failure" invariant (Run-2 Cycle 1 AGG-01/02), pinned by `admin-backfill-runner-detection-failure.test.ts`, is consistent with this classification. ✔
+- The `Number.isFinite` check also catches `NaN`/`Infinity`/`null`-coerced widths, not just `<= 0` — broader than the strict requirement. ✔
+
+### Evidence AGAINST / Gaps
+- **Counter-classification (LOW, by design):** a bad-width row is counted as `encode-failed` in the run summary, conflating "needs metadata repair" with "real encode failure." The commit explicitly accepts this (the distinct log is the mitigation) and `width` is `NOT NULL` in schema, so this is defensive-only. Commit f3667858 ("mixed-run counter partition") landed after, addressing counter accuracy — out of this commit's scope.
+- No path observed where a `width<=0` row could reach `processImageFormats` and bump the version. ✔
+
+### Verdict
+**confirmed-correct** — High. Width-corrupt rows fail gracefully pre-lock, no version bump, idempotent retry preserved. The `encode-failed` classification is intentional and the distinct log addresses operator triage.
+
+---
+
+## TRC-5 — SW BOUNDED HEAD (commit 9b7bb240)
+
+### Observation
+`staleWhileRevalidateImage` (`sw.template.js:163-260`) wraps the synchronous HEAD ETag probe with `AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS=300)` (`:230`, const at `:35`).
+
+### Hypotheses
+- **H-5a** The 300 ms-abort path falls through to serve-stale + background revalidate, with no double-fetch and no unhandled rejection.
+- **H-5b** The abort causes a double GET, an unhandled rejection, or a stuck path.
+
+### Trace (file:line)
+1. `startRevalidate` (`:180-196`) is a LAZY single-flight closure: guarded by `if (!revalidatePromise)` so it dispatches **at most one** body GET per invocation; chain ends in `.catch(() => null)` (`:193`) — no unhandled rejection from the body fetch.
+2. HEAD probe in a `try` (`:226-231`) with `signal: AbortSignal.timeout(300)`.
+   - **304** (`:232-237`): serve `cached`, `touchMeta(...).catch(() => {})` (`:235`, swallowed) — no body GET. ✔
+   - **200 + differing ETag** (`:238-243`): `fresh = await startRevalidate()`; if `fresh` return it. The *only* body GET in the function.
+   - **200 + same ETag**: falls through to `:253` `startRevalidate()` (background) + `return cached`.
+3. **Abort / network throw** → `catch {}` (`:245-247`) "fall through to stale-serve below" → `:253` `startRevalidate(); return cached;`. ✔
+4. No-cache path (`:257-259`): `await startRevalidate()` then `?? 503`.
+
+### Evidence FOR
+- **H-5a (no double-fetch):** the HEAD (`method: 'HEAD'`) and the GET (`startRevalidate`) are distinct request methods — a HEAD is not a GET, so even when both fire (200+differing-ETag) there is exactly one *body* GET. On the abort path, the HEAD is aborted (no body) and exactly one background GET is dispatched via `startRevalidate`. The single-flight `revalidatePromise` guard prevents two GETs regardless. ✔
+- **No unhandled rejection:** the aborted HEAD throws into the `try/catch` (`:245`); the body fetch chain self-catches (`:193`); `touchMeta` is `.catch`-guarded (`:235`). Every async edge is handled. ✔
+- **Correct fall-through:** abort lands in the same `catch` as a network failure, which the code (`:245-254`) routes to serve-stale + background revalidate — exactly the documented one-paint self-heal window. ✔
+
+### Evidence AGAINST / Gaps
+- **Subtle ordering (LOW, benign):** on the 200+differing-ETag branch, if `startRevalidate()` resolves `null` (body fetch failed/sensitive), `:242` `if (fresh) return fresh;` does NOT early-return, so control falls to `:253` which calls `startRevalidate()` again — but single-flight returns the *same already-settled* promise (not awaited there) and `return cached`. Net: serve stale, no second GET. Behaviorally correct, just a non-obvious double-call of the idempotent closure. ✔
+- `AbortSignal.timeout` is supported in all SW-capable target runtimes (Chrome 103+, FF 100+, Safari 16+) — no feature-detection needed. ✔
+- No path observed that leaves the function without returning a `Response` or that fires two body GETs.
+
+### Verdict
+**confirmed-correct** — High. The 300 ms abort correctly falls through to serve-stale + single background revalidate; no double body-fetch (HEAD≠GET, single-flight guard); no unhandled rejection (all async edges caught). One benign non-obvious double-call of the idempotent `startRevalidate` closure on a rare branch — no behavioral impact.
+
+---
+
+## Summary of verdicts
+
+| ID | Flow | Verdict | Confidence |
+|----|------|---------|-----------|
+| TRC-1 | Home OG image (73496d2f) | confirmed-correct | High |
+| TRC-2 | OG sanitize symmetry (d5399742/ada92ba5) | confirmed-correct | High |
+| TRC-3 | Color NCLX↔ICC per-field precedence (74235265) | confirmed-correct | High |
+| TRC-4 | Backfill width guard (e8fce327) | confirmed-correct | High |
+| TRC-5 | SW bounded HEAD probe (9b7bb240) | confirmed-correct | High |
+
+**No confirmed bugs. No regressions of the prior-closed AGG-R8-01..13.** Three LOW cosmetic/observational notes (none actionable as bugs):
+- TRC-1: declared `og:image` 1200×630 vs admin-site-OG dims on the 302 fallback path (pre-existing, shared by all per-photo OG consumers).
+- TRC-4: bad-width rows counted under `encode-failed` (by design; distinct log mitigates; counter-partition follow-up landed in f3667858).
+- TRC-5: benign non-obvious double-call of the idempotent single-flight `startRevalidate` on the 200+differing-ETag-then-null branch (no behavioral impact).
+
+No next-probes required — all five flows resolved to high-confidence verdicts from direct source evidence.

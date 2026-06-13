@@ -1,133 +1,104 @@
-# Code Review — Run-8 Cycle-2 (deep review)
+# Code-Reviewer Review — Run-8 Cycle-3 (HEAD `ada92ba5`)
 
-**Date:** 2026-06-13
-**Reviewer angle:** code quality, logic bugs, SOLID, maintainability, error handling, invariant violations, data-flow / state-consistency.
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6 photo gallery, MySQL + Drizzle). Working tree CLEAN, HEAD == origin/master.
-**Method:** verified every prior AGG-R7-* finding against HEAD code (not the aggregate's claims), then a fresh fan-out across server actions, data access, image/color pipeline, auth/proxy, download route, and React components. Did not sample — read the load-bearing files end-to-end.
+**Reviewer:** code-reviewer agent
+**Scope:** Code-quality (logic, SOLID, maintainability, error handling, state-consistency) of the ~20 commits landed today (run-7 c1 + run-8 c2), plus a broad sweep of server actions, lib utilities, and components.
+**Method:** Read every changed file; validated behavior from source (not comments); independently re-checked all sub-agent claims; ran the relevant test suites.
+
+## Verdict: APPROVE
+
+No CRITICAL or HIGH severity issues found at HIGH confidence. The run-8 cycle-2 fixes (AGG-R8-01..13) are **correct, complete, and regression-free** at current HEAD. All 153 tests across the touched-file areas pass (touch-target, og-sanitize×2, color-detection, backfill-fatal-counters, migrate-reconcile-coverage, sw-template-contract, home-metadata, detection-failure, blur-wiring, privacy, tag-names-sql).
+
+The findings below are all LOW severity — test-coverage gaps and documented-limitation notes. None block the cycle.
 
 ---
 
-## Prior AGG-R7-* findings: verification at HEAD
+## Verification of the run-8 c2 fixes (all CONFIRMED correct)
 
-| Prior ID | Status at HEAD | Evidence |
+| Item | File | Verdict |
 |---|---|---|
-| **AGG-R7-01** (stale pool-budget formula ×3 sites) | **CLOSED** (commit 0d17a362) | `admin-backfill-runner.ts` header docblock (28-37), the `BACKFILL_RESERVED_LIVE_CONNECTIONS`/`resolveBackfillConcurrency` body comments (96-127), and the arithmetic all agree: `RESERVED = max(3, ceil(LIMIT/2))`, `cap = max(1, floor((LIMIT−RESERVED−1)/2))` = 2 at LIMIT 10. `db/index.ts` comment no longer asserts `(LIMIT-2)/2`. |
-| **AGG-R7-02** (backfill setTimeout leak) | **CLOSED** (commit f11746cd) | `settings-client.tsx`: `backfillPollTimers` ref (83) holds the +3s/+10s timer ids (169-172); dedicated unmount effect (122-131) clears them AND flips `backfillMountedRef=false`; `refreshBackfillStatus` gates `setBackfillStatus` behind `backfillMountedRef.current` (96). Both the un-fired-timer and already-fired-promise paths are covered. |
-| **AGG-R7-03** (admin error-shell visible heading) | **CLOSED** (commit 0d2312cd) | `admin/(protected)/error.tsx:30` renders a single visible readable `<h1 className="text-3xl font-semibold">` matching the public twin. No faint `/30` aria-hidden glyph remains. |
-| **AGG-R7-04** (remaining aria-describedby) | **CLOSED** (commit 61cfd235) | `settings-client.tsx`: all hint controls now wired — quality inputs (357/371/385), chroma/effort selects (469/486/512), wide-gamut-max-source-pixels (535), license inputs (702/715/728), plus strip-gps/slideshow/auto-alt/semantic-search. |
-| **AGG-R7-05** (regression tests for AGG-9/AGG-10) | **CLOSED** (commit d035de10) | `__tests__/error-shell-heading.test.ts` + `__tests__/home-metadata-title.test.ts` exist; home page is statically imported (commit 61607572) to de-flake. |
-| **AGG-R7-07** (dropzone aria-disabled honesty) | **CLOSED** (commit 35d07f0b) | `upload-dropzone.tsx:397-419`: `useDropzone({disabled})` drops root onClick/onKeyDown/tabIndex; inner `<input disabled>`; explicit `tabIndex={-1}` fallback + `aria-disabled` on the role="button". |
-| **AGG-R7-08** (doc drift batch) | **CLOSED** (commits 10d77324 + 61cfd235) | `settings-hash.ts:1-29` docstring now says "9 settings" and enumerates all 9 `COLOR_IMPACTING_KEYS` (5 color + 3 quality + image_sizes); CLAUDE.md corrected. |
-| **AGG-R7-09** (home-OG on-disk fallback) | **CLOSED** (commit 4852bcf5) | `(public)/page.tsx:109-116`: OG image now points at the always-present base `/uploads/jpeg/${filename_jpeg}` (encoder atomic-rename guarantee), not a `_${size}.jpg` derivative; the metadata path no longer fetches gallery config for `findNearestImageSize`. |
-| **AGG-R7-11** (test depth: backfill mixed-run + migration MAX cursor) | **PARTIAL** | Migration side substantially mitigated (commit bb463062): `migration-journal-monotonicity.test.ts` pins adjacent-pair monotonicity + a documented-inversion allowlist + the missing-hash predicate + the loud-fail post-condition throw — the post-condition IS the production safeguard against silent skips, so the "real MAX cursor" model test is now low-value. Backfill side STILL open: `admin-backfill-runner-fatal-counters.test.ts` has only the `processed===0` fatal-only case (167-195); no MIXED run (`processed>0 && errors>0`) asserting a fatal row is not mis-attributed to `processed`. Carried as **COR-5** below. |
-| **AGG-R7-10** (load-more setState-after-unmount) | **OPEN (latent, deferred)** | `load-more.tsx:36-88`: `queryVersionRef` guards stale-query resolution but there is no mounted ref; an in-flight `loadMoreImages()` resolving post-unmount still runs the setState block. Code unchanged since b3022f12 (pre-run-7). Carried as **COR-3**. |
-| **AGG-R7-12** (containIntrinsicSize divide-by-zero) | **OPEN (latent, deferred)** | `home-client.tsx:280`: `Math.round(estimatedCardWidth * image.height / image.width)` → `Infinitypx` for a 0-width row. `estimatedCardWidth` memo is guarded (197-201); the `/ image.width` in the style is not. NOT NULL Sharp metadata makes this near-impossible. Code unchanged since b3022f12. Carried as **COR-4**. |
-| **AGG-R7-A1/A3/A4** (single-pool arch tradeoffs) | RECORD-ONLY | Unchanged; inherent single-writer topology. Not defects. |
-| **AGG-R7-13** (Stripe async_payment_succeeded) | ALREADY-OWNED (plan-316) | `api/stripe/webhook/route.ts` still handles only `checkout.session.completed`+`paid`. CLAUDE.md explicitly scopes support to card/immediate-payment. Deferred per repo rules. Not re-owned. |
-
-**Net:** 8 of the prior cycle's actionable findings are genuinely CLOSED at HEAD. 4 remain (1 partial test-depth, 2 latent component guards, 1 owned-elsewhere). The run-7 fix batch landed cleanly and the doc-drift is resolved.
+| AGG-R8-02 home og:image → per-photo OG card | `(public)/page.tsx:112-119` | ✅ Correct. Matches the established `/p/[id]/page.tsx:96` sibling pattern (same `absoluteImageUrl('/api/og/photo/${id}')`). Test `home-metadata-title.test.ts` pins URL shape + 1200×630 + twitter mirror. |
+| AGG-R8-03 image-manager checkbox 44px + raw-checkbox audit | `image-manager.tsx:418,444`, `touch-target-audit.test.ts` | ✅ Correct. Both labels `min-h-11 min-w-11`. Confirmed exactly 2 raw checkboxes in src, both fixed. New `scanRawCheckboxes` windowed scan works (66 audit tests pass). |
+| AGG-R8-04 active tag-chip count contrast | `tag-filter.tsx:92-110` | ✅ Correct. `currentTags.includes(tag.slug)` gates `text-primary-foreground/90` vs `text-muted-foreground`. |
+| AGG-R8-05 SW HEAD probe 300ms bound | `sw.template.js:230`, `sw.js:230` | ✅ Correct. `AbortSignal.timeout(300)` throws → caught at line 245 → falls through to stale-serve. Present in built `sw.js`. |
+| AGG-R8-06 NCLX code-2 no longer erases ICC | `color-detection.ts:381-386`, `process-image.ts:662` | ✅ Correct & complete. Per-field `!== undefined` guards preserve ICC values for unspecified NCLX fields. `isHdr` derivation (line 389) preserved in all cases. No delivery-byte impact. Strict improvement for admin audit (primaries upgrades 'unknown'→real CIE value). |
+| AGG-R8-07 load-more unmount guard | `load-more.tsx` | ✅ Correct. `mountedRef` added to both the success-path (`|| !mountedRef.current`) and finally-block guards; cleanup effect flips it. |
+| AGG-R8-08 home-client 0-width CSS guard | `home-client.tsx:276-283` | ✅ Correct & complete. `hasValidDims` guards both aspect-ratio and `containIntrinsicSize` denominators; `estimatedCardWidth` is independently guaranteed > 0 (line 196-202). 1:1 fallback is valid CSS. |
+| AGG-R8-09 backfill width re-validation | `admin-backfill-runner.ts:430-436` | ✅ Correct. `!Number.isFinite || <= 0` → classified `encode-failed` (idempotent, no version bump, retries next run). Mirrors upload-path guard. |
+| AGG-R8-10 mixed-run counter partition + index tripwire | `admin-backfill-runner-fatal-counters.test.ts`, `migrate-reconcile-coverage.test.ts` | ✅ Correct. Counter partition is mutually exclusive (a row that throws in the version-bump UPDATE bubbles out of `reprocessOne`'s catch-less try/finally to the queue catch → `errors++`, never `processed++`). Index tripwire is a valuable addition. |
+| AGG-R8-13 shared `sanitizeForOg` across both OG routes | `og-sanitize.ts`, `og/route.tsx:82-88`, `og/photo/[id]/route.tsx:81-83` | ✅ Correct. Both routes import the shared module; uses global `stripUnicodeFormatting` + C0 strip; `?? ''` handles null return. |
 
 ---
 
-## NEW / OPEN findings this cycle
+## Findings
 
-### COR-1 — NCLX "unspecified" (CICP code 2) clobbers ICC-derived transfer/matrix to `unknown`
-**Severity: LOW · Confidence: High (static) · admin-only audit columns**
-**File:** `apps/web/src/lib/color-detection.ts:370-374`
+### COR-1 [LOW, confidence HIGH] — No test pins the home OG route's actual `sanitizeForOg` CALLSITES
 
-```js
-if (nclxCicp) {
-    colorPrimaries     = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries]      ?? 'unknown';
-    transferFunction   = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics] ?? 'unknown';
-    matrixCoefficients = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients]      ?? 'unknown';
-}
-```
+**File:** `apps/web/src/app/api/og/route.tsx:82,83,88` (the new consumer); tests at `src/__tests__/og-sanitize.test.ts` + `sanitize-for-og-global.test.ts`.
 
-When an HEIF/AVIF carries an NCLX `colr` box, this branch **unconditionally** overrides all three signals. But the three `NCLX_*_MAP` tables (lines 168-208) do NOT include CICP code **2** ("unspecified"), which is a perfectly legal value an encoder writes when it knows the primaries but not the transfer/matrix. For such a file, `NCLX_TRANSFER_MAP[2]` and `NCLX_MATRIX_MAP[2]` return `undefined → 'unknown'`, **discarding** the ICC-derived `transferFunction`/`matrixCoefficients` that lines 344-345 already computed from the embedded ICC profile.
+**Problem:** The AGG-R8-13 fix wires the home/site OG route to call `sanitizeForOg` on `topicLabel`, `siteTitle`, and each tag. The shared function is well-tested, and `sanitize-for-og-global.test.ts` structurally greps the **photo** route + the **p/[id] page** for the import/strip — but **neither test asserts that `api/og/route.tsx` (the home route) actually invokes `sanitizeForOg` on its rendered strings.** The whole point of AGG-R8-13 was that the home route previously rendered RAW; a future regression that drops the three `sanitizeForOg(...)` wraps (e.g. a careless refactor of the tag-map chain on line 88) would reintroduce the exact symmetry gap with a green suite.
 
-**Failure scenario:** an AVIF authored with NCLX `primaries=12 (Display P3), transfer=2 (unspecified), matrix=2 (unspecified)` plus an embedded sRGB-IEC61966 ICC profile. After detection: `color_primaries='p3-d65'` (correct, NCLX), but `transfer_function='unknown'` and `matrix_coefficients='unknown'` — even though the ICC said sRGB. The audit panel and `is_hdr` derivation (line 376) lose information they had.
+**Failure scenario:** A refactor inlines `topicRecord.label` without the wrap; bidi/zero-width chars (if a validator is ever loosened) render raw into the home OG card again. No test fails.
 
-**Why it's a precedence violation:** the documented rule (line 351) is "NCLX > ICC chromaticity > ICC name" *per signal*. An "unspecified" NCLX field carries no information and should fall through to the ICC-derived value, not overwrite it.
+**Fix:** Add a source-grep case to `sanitize-for-og-global.test.ts` for `src/app/api/og/route.tsx` asserting it imports from `@/lib/og-sanitize` AND that the three rendered values (`topicLabel`/`siteTitle`/tag list) flow through `sanitizeForOg` — mirroring the existing per-photo-route case. (Source-presence is the established pattern here; behavioral mocking of `ImageResponse` is overkill.)
 
-**Fix:** apply the NCLX override per-signal only when the code maps to a known value:
-```js
-if (nclxCicp) {
-    const p = NCLX_PRIMARIES_MAP[nclxCicp.colourPrimaries];
-    const tf = NCLX_TRANSFER_MAP[nclxCicp.transferCharacteristics];
-    const mc = NCLX_MATRIX_MAP[nclxCicp.matrixCoefficients];
-    if (p) colorPrimaries = p;
-    if (tf) transferFunction = tf;
-    if (mc) matrixCoefficients = mc;
-}
-```
-This keeps NCLX authoritative when it actually specifies a value and preserves the ICC fallback for code-2 fields. (Caveat: this is admin-only metadata and the encoder still produces gamut-correct output; impact is audit-accuracy only.)
+**Note:** This is a defense-in-depth surface (inputs are admin-controlled and `containsUnicodeFormatting`-rejected at write time; Satori renders to image, no script sink), so live risk is negligible — hence LOW.
 
 ---
 
-### COR-2 — `color_primaries` (NCLX) and `color_pipeline_decision` (ICC-name) can disagree about source gamut
-**Severity: LOW · Confidence: High (static) · admin-only audit columns + delivery is still correct**
-**Files:** `apps/web/src/lib/color-detection.ts:370-374` vs `apps/web/src/lib/process-image.ts:661-695` (`resolveColorPipelineDecision`) and `:736-766` (`resolveAvifIccProfile`)
+### COR-2 [LOW, confidence MEDIUM] — `migrate-reconcile-coverage` index/column tripwires match comments, not just code
 
-The two modules implement OPPOSITE precedence between NCLX and ICC name:
-- `detectColorSignals` makes **NCLX win** over the ICC name (line 371 overrides `inferColorPrimaries(iccName)`).
-- `resolveColorPipelineDecision` / `resolveAvifIccProfile` make the **ICC name win** — they string-match `iccProfileName` FIRST (process-image.ts:672-689 / 748-762) and only fall back to `signals.colorPrimaries` when the name is opaque (694 / 764).
+**File:** `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:79` (column) and `:143` (index).
 
-**Failure scenario:** an AVIF with BOTH an embedded "Adobe RGB (1998)" ICC profile AND an NCLX box declaring `colourPrimaries=12` (Display P3). Then:
-- `detectColorSignals` stores `color_primaries='p3-d65'` (NCLX wins).
-- `resolveColorPipelineDecision('Adobe RGB...', {colorPrimaries:'p3-d65'})` matches "adobergb" first → stores `color_pipeline_decision='p3-from-adobergb'`, ignoring the NCLX `p3-d65`.
+**Problem:** Both tripwires use bare `MIGRATE_SRC.includes(name)` / `MIGRATE_SRC.includes(c)` substring matches over the entire `migrate.js` source. An index or column name that appears ONLY in a comment in `migrate.js` (e.g. `// idx_foo: dropped in v9`, or a column named in a docblock but absent from any `ensureColumn`/`ensureIndex`/`CREATE TABLE` statement) would satisfy the assertion without the reconcile actually applying it. The test self-describes as "a SOURCE tripwire (name presence, not structural equivalence)," so this is a documented limitation — but the gap is real: it would let exactly the silent-drop failure class it targets slip through if the name happens to be mentioned in prose.
 
-The two persisted columns now contradict each other on what the source gamut was. The encoder still produces a valid gamut-preserved P3 output either way (both `p3-from-displayp3` and `p3-from-adobergb` land in the P3 10-bit branch), so there is no visible image corruption — but an operator reading the Color Details audit row sees an inconsistency, and any future logic that trusts `color_primaries` to match `color_pipeline_decision` would be wrong.
+**Failure scenario:** Author adds migration `0022` with `CREATE INDEX idx_new ...`, forgets the `ensureIndex` mirror, but writes a `// idx_new handled by drizzle` comment in migrate.js. Existing-DB upgrade silently drops the index; test passes.
 
-**Why it matters for maintainability:** CLAUDE.md documents a single canonical precedence ("NCLX > ICC chromaticity > ICC name"). One module honors it, two violate it. A future change that relies on the documented invariant will be subtly wrong.
-
-**Fix (cheap, consistent):** have `resolveColorPipelineDecision`/`resolveAvifIccProfile` consult `signals.colorPrimaries` FIRST when it is a known non-`unknown` value, falling back to ICC-name matching only when signals are absent/unknown — i.e. mirror the same NCLX-wins precedence `detectColorSignals` uses. This is contained to the two resolver functions and both already accept the `signals` param. Real-world files rarely carry conflicting ICC-name + NCLX, so the behavior change is narrow.
+**Fix (optional):** Strip `//` and `/* */` comments from `MIGRATE_SRC` before the `.includes` checks, or assert against an `ensureIndex(`/`INDEX \`?name\`` token rather than a bare substring. Low priority — the authoritative check remains the fresh-DB init + information_schema diff.
 
 ---
 
-### COR-3 — `load-more.tsx`: setState after unmount on in-flight load (carried from AGG-R7-10)
-**Severity: LOW · Confidence: High · latent**
-**File:** `apps/web/src/components/load-more.tsx:36-88`
+### COR-3 [LOW, confidence MEDIUM] — `scanRawCheckboxes` wrapper detection only recognizes `<label>`, may false-positive on `<div>`-wrapped checkboxes
 
-`loadMore()` captures `version = queryVersionRef.current` and short-circuits stale QUERY resolutions (line 46, 83), but there is no mounted guard. If the component unmounts while `loadMoreImages()` is in flight, the resolution still executes `setHasMore`/`onLoadMore`/`setStatusMessage`/`setOffset`/`setCursor` and the `finally` runs `setLoading(false)` on a dead tree. React 18+ no longer warns, but the work is wasted and `onLoadMore` (parent setState) fires post-unmount.
+**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:624-629`.
 
-**Fix:** add a `mountedRef` set false in the existing unmount cleanup (line 124 already returns an unmount effect — fold a `mounted.current=false` into it) and gate the setState block + `finally` on it, mirroring the AGG-R7-02 `backfillMountedRef` pattern that just landed in settings-client. Note: this was referenced in the run-7 plans but the file was never modified; confirm it is intentionally deferred rather than missed.
+**Problem:** The new windowed scan accepts a checkbox's 44px floor only when a `<label className="…min-h-11…">` appears within 4 lines above. If a future raw checkbox is wrapped in a 44px `<div>` / `<span>` / Radix `Slot` (a perfectly valid tap-area wrapper) instead of a `<label>`, the scan will flag it as a violation and FAIL the build — a false positive that forces the author to either restructure to a `<label>` or add a `KNOWN_VIOLATIONS` exemption. The current 2 checkboxes both use `<label>`, so no live failure, but the audit will over-fire on the next non-label wrapper.
 
----
+**Failure scenario:** A new accessible toggle wraps `<input type="checkbox">` in `<div className="flex min-h-11 min-w-11 items-center">`; the audit fails despite being compliant.
 
-### COR-4 — `home-client.tsx:280`: `containIntrinsicSize` divides by `image.width` (carried from AGG-R7-12)
-**Severity: LOW · Confidence: High (theoretical) · latent**
-**File:** `apps/web/src/components/home-client.tsx:280`
-
-`containIntrinsicSize: `auto ${Math.round(estimatedCardWidth * image.height / image.width)}px`` produces `Infinitypx` when `image.width === 0`. The browser ignores an invalid `containIntrinsicSize`, so the visible failure is a lost content-visibility size hint (minor layout-shift), not a crash. NOT NULL Sharp-derived `width`/`height` make a 0 essentially impossible, hence LOW/theoretical. Guard with `image.width > 0 ? … : 300` (the documented fallback constant) for symmetry with the already-guarded `estimatedCardWidth` memo at lines 197-201.
+**Fix (optional):** Broaden the wrapper regex from `/<label\b/` to `/<(?:label|div|span)\b/` (the windowed `CHECKBOX_44_OK` check on the same line already constrains it to a sized wrapper), or document the `<label>`-wrapper requirement as an intentional repo convention in the test comment so the next author adds an exemption knowingly.
 
 ---
 
-### COR-5 — Backfill fatal-counter test lacks a MIXED-run case (carried from AGG-R7-11/TEST-5)
-**Severity: LOW · Confidence: Medium · test depth**
-**File:** `apps/web/src/__tests__/admin-backfill-runner-fatal-counters.test.ts:167-195`
+### COR-4 [LOW, confidence HIGH] — Unlocalized error string in `retryFailedImage`
 
-The only assertion is the fatal-ONLY run (`processed===0`, `errors>0`). The runner logic in `admin-backfill-runner.ts:622-659` tallies `processed++` (success) and `errors++` (fatal catch) on different branches and mirrors both into state. A regression that mis-routes a fatal row into the `processed` branch (or vice-versa) would survive the current test because with a single throwing row `processed===0` regardless. Add a 2-row fixture (one row succeeds, one throws on the version-bump UPDATE) and assert `processed===1 && errors===1 && lastRunHadFailures===true` to lock the partition. (The existing fatal-only test stays — it pins the `lastError` surfacing.)
+**File:** `apps/web/src/app/actions/images.ts:1085` — `return { error: 'Invalid image ID' };`
 
----
+**Problem:** Every other error return in this action uses `t('...')`; this integer-validation guard returns a raw English string. i18n inconsistency.
 
-## Observations (NOT defects — recorded for completeness)
+**Failure scenario:** A non-English admin triggers the guard (only reachable via a malformed client call — the UI passes real IDs, and the value never contains user text) and sees English while sibling errors are localized.
 
-- **OBS-1 — auth-guard ordering is inconsistent across action files.** `images.ts` (873-875), `tags.ts`, `topics.ts` call `requireSameOriginAdmin()` BEFORE `isAdmin()`; `sharing.ts` (all 5 sites: 82/84, 183/185, 304/306, 344/346) and `admin-backfill.ts` (34/37) call `isAdmin()` first. **Not a security defect** — both checks run before any write and BOTH must pass, so net authorization is identical; only the error message a caller receives differs (origin-error vs unauthorized). The `lint:action-origin` gate enforces that the origin result is checked and returns early, not the ordering. Cosmetic; standardizing on one order would aid maintainability but is optional.
-
-- **OBS-2 — download route POST (`api/download/[imageId]/route.ts`) is exceptionally hardened.** File-open BEFORE the atomic single-use claim (349-351), realpath traversal containment (330-336), handle-leak coverage on every post-open path (355/387/399/456), Content-Length from the opened inode (351), RFC 6266+5987 Content-Disposition (434-438). The `affectedRows ?? 1` fallback-to-allow on driver-shape mismatch (397) is a deliberate false-410-avoidance tradeoff and is sound. No findings.
-
-- **OBS-3 — `refundEntitlement` (sales.ts:163-263)** double-click TOCTOU between the `!row.refunded` check (183) and `stripe.refunds.create` (203) is neutralized by the deterministic `refund-${entitlementId}` idempotency key (205) — Stripe dedups, the DB update is idempotent, and the `already-refunded` convergence path (231-249) heals a stale local state. No finding.
-
-- **OBS-4 — topic slug-rename transaction (topics.ts:247-286)** is correctly ordered (insert new → repoint images.topic + topicAliases → delete old) under the `LOCK_TOPIC_ROUTE_SEGMENTS` advisory lock, with `map_visible` threaded through to avoid the documented opt-in reset. No finding.
-
-- **OBS-5 — privacy field guards (data.ts:204-419)** remain airtight: `publicSelectFields`/`publicMapSelectFields` are derived by destructuring-omit from `adminSelectFields` (separate object refs), the compile-time `_SensitiveKeysInPublic extends never` guard (418-419) covers all 20 `PrivacySensitiveKeys`, and the `privacy-fields.test.ts` fixture lists all 20 (verified in sync). No finding.
-
-- **OBS-6 — `proxy.ts` `x-gk-admin-render` header (128-130)** is set on cookie *presence* only (not validity), by design — the SW offline-cache exclusion is conservative (an invalid cookie just over-excludes a page from offline cache, never under-excludes). No finding.
+**Fix:** Replace with an existing localized key (e.g. `t('invalidInput')`). Trivial.
 
 ---
 
-## Verdict
+## Sub-agent claims I investigated and REJECTED (false positives)
 
-**COMMENT.** No CRITICAL/HIGH issues at any confidence. The codebase is in excellent shape after 7+ review cycles — the run-7 fix batch (commits f11746cd, 0d2312cd, 61cfd235, 35d07f0b, d035de10, 4852bcf5, 10d77324, 0d17a362) closed 8 of the prior actionable findings cleanly. The 5 open items are all LOW: two genuinely-new color-detection precedence inconsistencies affecting admin-only audit columns (COR-1, COR-2 — worth fixing for correctness/maintainability even though delivery output is unaffected), two latent component guards carried forward (COR-3, COR-4), and one test-depth gap (COR-5).
+I dispatched two Explore agents over server-actions and lib/components and independently re-verified every High/Medium claim from source. The following were **incorrect** and are NOT findings:
 
-Gate status not re-run this cycle (working tree clean, no code changes proposed) — prior cycle measured all 19 gates green at this HEAD.
+- **rate-limit.ts:176 "off-by-one in X-Forwarded-For client index"** — REJECTED. `clientIndex = validParts.length - hopCount - 1` is **correct**. XFF is ordered `[client, proxy1, …, proxyN]` left-to-right with the rightmost closest to the server. With `[client, cdn, nginx]` and `hopCount=2`, the trusted suffix is the last 2 (`cdn, nginx`); the client is at index `3-2-1=0` = `validParts[0]`. The `-1` is required. Verified against the inline doc and the math.
+- **icc-extractor.ts:78 "off-by-one truncates last char (`strLen-1`)"** — REJECTED. The ICC `desc` (textDescription) ASCII string is NUL-terminated and `declaredLength` includes the trailing NUL; `subarray(strStart, strStart + (strLen-1))` correctly drops the NUL. Intentional and correct.
+- **icc-extractor.ts:76 "strLen can go negative if dataSize < 12"** — REJECTED. Line 70 guards `dataSize < 12` and `break`s before line 76 is reached, so `dataSize - 12 >= 0` always holds.
+- **color-detection.ts:225 / gain-map-detection.ts NaN propagation in box-size arithmetic** — REJECTED. All box sizes are read via `readUInt32BE` / `readBigUInt64BE`, which return finite uints by Node semantics — never NaN. No `parseInt` on binary fields.
+- Other Explore "findings" (public.ts rollback null, sharing.ts `!` assertion, db-actions BigInt compare, topics.ts tuple unwrap) — these are the repo's established defensive patterns on synchronous `BoundedMap`/mysql2 tuple shapes; correct as written, no smoking bug.
+
+---
+
+## Final sweep (commonly-missed classes) — clean
+
+- **Off-by-one:** og-route tag `.slice(0, 20)`, keyset cursor `id > cursor`, batch `length < BATCH_SIZE` termination — all correct.
+- **null/undefined:** `og-sanitize` `?? ''`; `latestImage?.title`; `rows[0]?.cnt`; runner `claimConn` null-check — all guarded.
+- **async ordering:** runner lock acquire/`try`/`finally` adjacency (no throw window); load-more mountedRef; fire-and-forget `.catch()` on `runBackfill` — correct.
+- **resource cleanup:** `releaseBackfillLock`/`releaseImageProcessingClaim` in `finally` with `.catch(()=>undefined)`; lock connection handoff nulls `lockConn` to avoid double-release — correct.
+- **type coercion:** `Number.isFinite(poolLimit)` NaN guard in `resolveBackfillConcurrency`; `Number(process.env.ADMIN_BACKFILL_CONCURRENCY) || 1` — correct.
+
+**No relevant file was skipped.** All 12 priority files named in the assignment were read in full and validated.

@@ -1,108 +1,149 @@
-# Verifier Review — Run-8 Cycle-2 (review-plan-fix)
+# Verifier Report — Cycle 3 (review-plan-fix)
 
+**HEAD:** `ada92ba5` (`test(security): ✅ pin shared og-sanitize global-strip contract`)
 **Date:** 2026-06-13
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**Agent:** verifier (evidence-based correctness — RUN things, observe, don't just read)
-**HEAD:** `77867144eeb05e467ca62cbf01666e9d94e0dc42` — working tree CLEAN, in sync with `origin/master`
-(note: the session-start gitStatus snapshot showing `M`/`??` files was stale; `git status --short` returned empty this cycle.)
-
----
-
-## Measured gate baseline (all run live this cycle)
-
-| Gate | Command | Exit | Evidence |
-|---|---|---|---|
-| ESLint | `npm run lint --workspace=apps/web` | **0** | clean, no output |
-| Typecheck | `npm run typecheck --workspace=apps/web` | **0** | typecheck:app (next typegen + tsc tsconfig.typecheck.json) + typecheck:scripts (7 JS files + tsc tsconfig.scripts.json) both pass |
-| API-auth lint | `npm run lint:api-auth --workspace=apps/web` | **0** | 2 admin routes OK (db/download, lr/upload) |
-| Action-origin lint | `npm run lint:action-origin --workspace=apps/web` | **0** | 44 mutating actions enforce same-origin; 8 read-only exempt-by-comment |
-| Public-route rate-limit lint | `npm run lint:public-route-rate-limit --workspace=apps/web` | **0** | 8 public route files OK (helpers or exempt tags) |
-| Vitest (full) — run 1 (COLD) | `npx vitest run` | **1 failed** | **2034 passed / 1 failed (2035 total), 212 files** — the single failure is `client-server-only-boundary.test.ts` TIMEOUT (see VER-1). Wall 321s, `import 1096.61s` (cold transform cache, heavy parallel pressure). |
-| Vitest (full) — run 2 (WARM) | `npx vitest run` | **0** | **2035 passed / 2035, 212 files, exit 0.** Wall 85.73s, `import 282.01s`. Clean. |
-
-**19 of 19 gates green on a warm run.** The cold run-1 failure was the known timeout-flake test (`client-server-only-boundary.test.ts`), same test as run-7; the warm run-2 passed all 2035. **It is NOT a functional regression and NOT deterministic** — it is a genuine cache-warmth-dependent flake (cold run trips the 15s timeout, warm rerun passes). The production boundary it guards is intact (0 violations whenever it completes). Detail + a correction to the prior aggregate's specific timing claim below (VER-1).
-
-### Vitest failure forensics (CONFIRMED by running, 5 separate runs)
-
-- Full suite run 1 (cold): `client-server-only-boundary.test.ts` → `Test timed out in 15000ms` (configured `testTimeout: 15000` in `vitest.config.ts:38`). Wall 321s, import 1096s.
-- Full suite run 2 (warm): **ALL 2035 PASS, exit 0.** Wall 85.73s, import 282s.
-- Isolated, immediately after the cold full run (cold OS page cache): **timed out at 25.8s** (`tests 25.85s`).
-- Isolated with `--testTimeout=120000`: **PASSES**, but `tests 35.25s` — the **test body itself runs 35s** (transform 340ms, import 536ms — so it is NOT import/transform overhead; it is the synchronous filesystem walk).
-- Isolated again with `--testTimeout=120000` (warm cache): **PASSES in `tests 6.45s`**, then a third run `tests 8.60s` (exit 0).
-
-**Conclusion:** the test's runtime is wildly cache-dependent on this host (6.5s warm → 35s cold), and the 15s `testTimeout` is not a safe margin for it on a COLD run. The full suite is effectively **2035/2035 green** — the warm rerun is clean; only a cold first run (or heavy contention) trips this one test. The prior run-7 aggregate correctly called it a flake; its specific "~2.2s isolated" timing was optimistic (isolated-cold it blows past 15s here). Both halves are functionally correct (0 violations whenever it finishes); the defect is purely test-runtime fragility, not a regression.
-
----
-
-## Prior-cycle fixes — EMPIRICALLY VERIFIED to hold at HEAD
-
-All run-7 (AGG-R7-*) open findings were spot-checked by reading code and running the landed tests. **Every one is closed or addressed.**
-
-| Run-7 ID | Claim | Verified status at HEAD | Evidence (CONFIRMED by reading code / running tests) |
-|---|---|---|---|
-| **AGG-R7-01** | stale pool-budget formula in 3 doc sites | **FIXED (all 3)** | `lib/admin-backfill-runner.ts:33-34` header + `:108-127` body + `db/index.ts:16-20` all now say `cap = max(1, floor((LIMIT−RESERVED−1)/2))`, `RESERVED = max(3, ceil(LIMIT/2))` → cap=2 @ pool 10. Self-consistent. `resolveBackfillConcurrency` (`:129-142`) matches. |
-| **AGG-R7-02** | backfill poll setTimeout leak (no clearTimeout) | **FIXED** | `settings-client.tsx:83` `backfillPollTimers` ref; `:122-131` dedicated unmount `useEffect` does `timers.current.forEach(clearTimeout)`; `:169-172` the +3s/+10s timers are pushed into the ref; `backfillMountedRef` (`:87`) guards the already-fired case. Test `admin-backfill-runner-leak.test.ts` passes. |
-| **AGG-R7-03** | both error.tsx render NO visible heading (faint /30 glyph) | **FIXED** | `admin/(protected)/error.tsx:30` renders a single VISIBLE `<h1 className="text-3xl font-semibold tracking-tight">{t('error.title')}</h1>`; no `aria-hidden` /30 glyph. Mirrors the public twin. |
-| **AGG-R7-04** | ~10 settings hints unwired via aria-describedby (8 wired) | **FIXED** | `settings-client.tsx` now has **18** `aria-describedby`. Previously-unwired controls all wired: quality inputs (357/371/385), wide-gamut/avif/sdr chroma selects (469/486/512), wide-gamut-max-source-pixels (535), 3 license inputs (702/715/728). |
-| **AGG-R7-05** | AGG-9/AGG-10 fixes shipped WITHOUT regression tests | **FIXED (high-quality tests)** | `error-shell-heading.test.ts` asserts a VISIBLE (non-`sr-only`) `<h1>` + matching aria-labelledby id + explicitly NO faint `/30` title element, for BOTH shells. `home-metadata-title.test.ts` asserts `title:{absolute}` on all 3 return paths (OG-image / latest-photo / filtered). Both pin the real invariant; both pass. |
-| **AGG-R7-07** | dropzone aria-disabled honesty gap (still focusable/clickable) | **FIXED** | `upload-dropzone.tsx:399-413` — when `uploading || !hasTopics`, the root `onClick`/`onKeyDown` handlers are removed AND `tabIndex={-1}` applied, alongside `aria-disabled`. Disabled affordance now enforced for keyboard/AT users. |
-| **AGG-R7-08** | doc drift: COLOR_IMPACTING_KEYS count wrong (said 5/3, actually 9) | **FIXED** | `settings-hash.ts:4-13` docstring now says "the 9 settings" (5 color + 3 quality + image_sizes, enumerated). `CLAUDE.md:260` now says "all **9** COLOR_IMPACTING_KEYS" with the full enumeration. Both match the array at `settings-hash.ts:37`. |
-| **AGG-R7-09** | home-OG image URL has no on-disk fallback | **ADDRESSED (design change)** | `(public)/page.tsx:98-114` — the OG `og:image` now points at the BASE JPEG (`/uploads/jpeg/${filename_jpeg}`), the always-present atomic-rename target, instead of a sized derivative that could 404 mid-backfill. Documented decision, not a buffer-existence check (a metadata route cannot stream bytes). Resolves the original 404-card concern. |
-| **AGG-4** (run-6) | sanitizeForOg must use global-flag stripUnicodeFormatting (both sites) | **VERIFIED HOLDS** | `api/og/photo/[id]/route.tsx:37` `(stripUnicodeFormatting(value) ?? '').replace(OG_C0_CONTROL_CHARS,'')`; `(public)/p/[id]/page.tsx:43` `stripUnicodeFormatting(value) ?? ''`. Both global-strip. |
-
-### Landed-fix test bundle (run live)
-
-`npx vitest run` on the 7 fix/regression files →  **7 files, 27 tests, ALL PASS, exit 0**:
-`admin-backfill-runner-fatal-counters` · `admin-backfill-status-shape` · `migration-journal-monotonicity` · `error-shell-heading` · `home-metadata-title` · `admin-backfill-runner-leak` · `admin-backfill-concurrency-cap`.
-
-### admin-backfill-runner.ts honesty invariant (CONFIRMED by reading)
-
-`state.processed` / `state.errors` are reset at run start (`:563-564`), mirrored continuously after every row (`:662-663`), and flushed finally (`:693-694`). `lastError` is populated in BOTH the `encode-failed` branch (`:639-640`) AND the fatal `catch` (`:657`). `lastRunHadFailures` set from `encodeFailures||detectionFailures||errors` (`:702-703`). The detection-failed branch (`:530-536`) does NOT bump `pipeline_version` (resume contract preserved). All as documented in CLAUDE.md.
-
----
-
-## OPEN / NEW findings at HEAD
-
-### VER-1 — `client-server-only-boundary.test.ts` cold-run timeout flake (15s budget too tight for its filesystem walk) — **LOW/MED (test-infra) · CONFIRMED by running 5×**
-
-- **Command/observed:** full `npx vitest run` COLD → **1 failed / 2034 passed**; failure is `src/__tests__/client-server-only-boundary.test.ts:120` `Error: Test timed out in 15000ms`. Full `npx vitest run` WARM (immediate rerun) → **2035/2035 pass, exit 0**. So the full-suite gate is **green on rerun** and the failure is **NOT deterministic** — it is cache-warmth dependent.
-- **Expected vs actual:** ideal — green on the first cold run too. Actual — a cold run (cold OS page cache + cold transform cache → import 1096s) can trip the test's 15s timeout; a warm run (import 282s) passes everything. The prior aggregate's "~2.2s isolated" timing was optimistic (isolated-cold it ran 25–35s here), but its "flake, effectively all-pass" characterization is correct.
-- **Root cause (static, High):** the test (`:120-147`) calls `listFilesRecursive(srcRoot)` over the entire `src/` tree (~300+ files) and, for every `'use client'` module, walks its full transitive `@/lib`/`@/db` static-import closure via synchronous `fs.readFileSync` + regex (`findServerOnlyInClosure`, `:85-113`). With many client components this is thousands of synchronous reads whose latency is dominated by OS page-cache warmth; a file shared by N client closures is re-read N times. Cold, that exceeds 15s; warm it is 6.5s.
-- **Why it matters (modest):** a cold first run of the cycle gate can flap RED then GREEN on rerun, costing a retry and slightly eroding signal. The functional invariant it guards (no client→server-only import) IS intact (0 violations whenever it completes). This is the SAME test the prior cycle flagged; it has not been hardened.
-- **Suggested fix (any one):** (a) raise this test's timeout locally — `it(..., { timeout: 120_000 })` or a file-level override — its 6.5–35s runtime is legitimate work, not a hang; (b) memoize file reads into a Map keyed by path (eliminate the N× re-reads of shared modules) — this alone likely brings cold runtime under 15s; (c) mark it `sequential` so it doesn't contend with the parallel transform pool. (a)+(b) together are cheapest and remove the fragility without weakening the assertion.
-- **Confidence:** High that it is a cold-run flake (reproduced: 1 cold full-suite FAIL, 1 warm full-suite PASS, plus 3 isolated runs spanning 6.5s→35s); High that it is NOT a functional regression (passes with 0 violations given time / warmth).
-
-### VER-2 — `load-more.tsx` setState-after-unmount on an in-flight `loadMoreImages()` (guarded for stale-query, NOT for unmount) — **LOW (latent) · CONFIRMED by reading**
-
-- **Where:** `src/components/load-more.tsx:36-88`. `loadMore` stamps `const version = queryVersionRef.current` (`:41`) and bails if the version changed (`:46`), but `queryVersionRef` only advances on a *query-key change* (`:96-103`), NOT on unmount. The unmount effect (`:124`) disconnects the IntersectionObserver only. So if the component unmounts while the awaited `loadMoreImages()` is in flight, the post-await block still runs `setHasMore`/`onLoadMore`/`setStatusMessage`/`setOffset`/`setCursor` (`:48-62`) on a dead tree.
-- **Expected vs actual:** ideal — no setState after unmount. Actual — React 18+ silently no-ops setState-after-unmount (no warning, no crash), so this is benign today; it is the same class as the now-fixed AGG-R7-02 but lower-stakes (no leaked timer, just a one-shot post-resolve write that React drops).
-- **Disposition:** carried over from run-7 AGG-R7-10, still open, still LOW. Record-only unless `load-more` becomes a correctness surface. If touched, add a `mountedRef` and guard the `version === current` block with it (mirror the settings-client AGG-R7-02 pattern).
-- **Confidence:** High (static read of the control flow).
-
-### VER-3 — `home-client.tsx` `containIntrinsicSize` divides by `image.width` with no zero-guard — **LOW (theoretical) · CONFIRMED by reading**
-
-- **Where:** `src/components/home-client.tsx:280` — `containIntrinsicSize: \`auto ${Math.round(estimatedCardWidth * image.height / image.width)}px\``. A 0-width row yields `Infinitypx`.
-- **Expected vs actual:** width is Sharp-derived and NOT NULL, so 0 is effectively impossible in practice; unguarded nonetheless. Same finding as run-7 AGG-R7-12.
-- **Disposition:** record-only / latent. A `image.width || 1` (or skip the style when width is falsy) closes it if ever touched.
-- **Confidence:** High the divide is unguarded; the trigger condition is near-impossible.
-
----
-
-## VERIFIED-CLEAN this cycle (stress-checked, NO action)
-
-- **All 19 gates green on a warm run** (lint, typecheck app+scripts, 3 security lint gates, full vitest 2035/2035 on the warm rerun).
-- **All 7 run-7 landed-fix tests (27 tests)** run as a focused bundle → green.
-- **Pool-budget arithmetic** (`resolveBackfillConcurrency`): code matches the now-corrected comments (cap=2 @ pool 10); `admin-backfill-concurrency-cap.test.ts` passes.
-- **Backfill honesty** (processed/errors mirroring, lastError on both failure paths, no version-bump on detection-failure): code matches CLAUDE.md + tests pass.
-- **OG/JSON-LD Unicode strip** (both sanitizeForOg sites global-flag): confirmed in code.
-- **Error-shell + home-title regression tests**: assert the correct invariants (not just exist-and-pass).
+**Scope:** Evidence-based correctness verification. Every gate RUN, not trusted. Prior-cycle fixes re-verified against live code. CLAUDE.md claims spot-checked against source.
 
 ---
 
 ## Verdict
 
-**Status:** PASS — all 19 gates green on a warm run (full vitest 2035/2035, exit 0); all run-7 (AGG-R7-*) findings verified closed at HEAD; no functional regression.
-**Confidence:** High.
-**Blockers:** 0. The only open issue is VER-1, a non-blocking COLD-RUN flake in one test (`client-server-only-boundary.test.ts`) whose guarded invariant is intact and which passes on a warm rerun.
+**Status:** PASS (with 1 flaky-test caveat — non-blocking, see VER-1)
+**Confidence:** High
+**Blockers:** 0
 
-**Recommendation:** APPROVE. Optionally harden VER-1 (raise its local timeout / memoize its file reads) so a cold first run of the cycle gate stops flapping — LOW/MED test-infra, not a correctness defect. VER-2/VER-3 are LOW/latent, record-only.
+All six declared gates (eslint, typecheck, vitest, lint:api-auth, lint:action-origin, lint:public-route-rate-limit) are GREEN. The single vitest RED on the first run was proven to be a pre-existing parallel-contention flake (passed clean on a second full run + every isolation run); it does not touch this cycle's changes. All five prior-cycle fixes (AGG-R8-01/02/03/05/13) verified behaving as claimed.
+
+---
+
+## STEP 1 — Gate Results Table
+
+| Gate | Command | Exit | Result |
+|------|---------|------|--------|
+| ESLint | `npm run lint --workspace=apps/web` | 0 | **PASS** (clean) |
+| Typecheck | `npm run typecheck --workspace=apps/web` | 0 | **PASS** — typecheck:app (next typegen + tsc tsconfig.typecheck.json) + typecheck:scripts (7 JS files) both clean |
+| lint:api-auth | `npm run lint:api-auth --workspace=apps/web` | 0 | **PASS** — all admin route method-exports wrap `withAdminAuth` |
+| lint:action-origin | `npm run lint:action-origin --workspace=apps/web` | 0 | **PASS** — "All mutating server actions enforce same-origin provenance." |
+| lint:public-route-rate-limit | `npm run lint:public-route-rate-limit --workspace=apps/web` | 0 | **PASS** — semantic-search uses helper; stripe webhook carries exempt tag; OG/live routes have no mutating handlers |
+| Vitest (full) | `npx vitest run` (run 1) | **1** | **RED** → 2 failed / 2058 passed (2060). Both failures = AVIF flake (VER-1). |
+| Vitest (full) | `npx vitest run` (run 2) | **0** | **GREEN** → 213 files / **2060 passed (2060)**. Confirms flake. |
+
+**Net gate status: GREEN.** The vitest RED is a non-deterministic flake (VER-1), not a regression — the authoritative second full run is 2060/2060.
+
+---
+
+## VER-1 — Vitest flake: AVIF color tests fail under full parallelism (LOW, non-blocking)
+
+**Confidence:** High
+
+**Run 1 failures (exact output):**
+```
+FAIL  src/__tests__/backfill-color-pipeline.test.ts > … P3 source → P3-tagged AVIF output via backfill (A2)
+AssertionError: expected 'error' to be 'processed'   (backfill-color-pipeline.test.ts:124)
+
+FAIL  src/__tests__/process-image-color-roundtrip.test.ts > … P3-source AVIF raw pixel values preserved (R10-C1)
+Error: Input file has corrupt header: VipsForeignLoad: ".../public/uploads/avif/rt-p3-green-raw.avif" is not a known file format
+   (process-image-color-roundtrip.test.ts:152, readRawPixel → toBuffer)
+
+ Test Files  2 failed | 211 passed (213)
+      Tests  2 failed | 2058 passed (2060)
+```
+
+**Isolation re-runs (all GREEN):**
+| Re-run | Exit | Result |
+|--------|------|--------|
+| `npx vitest run backfill-color-pipeline` | 0 | 6/6 passed |
+| `npx vitest run process-image-color-roundtrip` | 0 | 11/11 passed |
+| both color files together | 0 | 17/17 passed |
+| **`npx vitest run` (2nd full)** | **0** | **2060/2060 passed** |
+
+**Root cause:** 13 test files funnel through `processImageFormats` / `reprocessRow` into the SHARED real `apps/web/public/uploads/{avif,webp,jpeg}` tree (verified via `grep -rl processImageFormats`). The roundtrip test writes derivatives to `UPLOAD_DIR_AVIF` (not a per-test tmpdir; tmpdir holds only the source) and reads them back with `sharp(...).raw().toBuffer()`. `vitest.config.ts` sets NO pool override → default `fileParallelism: true` at CPU count. Under full 213-file parallel load the AVIF/libheif encoder transiently produces a truncated/invalid file (→ "corrupt header") or rejects (→ `outcome: 'error'`). The config comment in `vitest.config.ts` (testTimeout note) already documents contention-induced flakiness on this host.
+
+**Not introduced this cycle:** neither file appears in the last 10 commits' name-only log (`git log --oneline -10 --name-only | grep …` → empty). Last touch was `37cca4c6` / `124cccbc` (earlier runs).
+
+**Suggestion (LOW):** isolate AVIF-writing color tests into per-test `mkdtemp` output roots (parameterize `UPLOAD_DIR_AVIF` for tests) OR mark the AVIF-encode color files `test.sequential` / a dedicated single-fork pool project. Do NOT widen the pixel tolerances — the flake is encoder I/O under contention, not a tolerance issue. Risk if unaddressed: intermittent red CI runs that look like color regressions but aren't.
+
+---
+
+## STEP 2 — Prior-cycle fixes re-verified
+
+### AGG-R8-01 — client-server-only-boundary cold-run + timeout + memoization → VERIFIED
+- `npx vitest run client-server-only-boundary` cold → **exit 0, 2/2 passed, 1.18s**.
+- Explicit timeout present: `}, 60_000);` at `apps/web/src/__tests__/client-server-only-boundary.test.ts:177` ("AGG-R8-01: generous explicit timeout").
+- Memoized file reads: `const readCache = new Map<…>()` (line 39) + `const importSpecCache = new Map<…>()` (line 53). Docstring (lines 28-33) explains the prior un-cached `readFileSync` flake that masked real violations. **Behaves as claimed.**
+
+### AGG-R8-02 — home og:image points at OG route (1200×630), not base JPEG → VERIFIED
+- `apps/web/src/app/[locale]/(public)/page.tsx:112-116`: `ogImages = latestImage ? [{ url: absoluteImageUrl(\`/api/og/photo/${latestImage.id}\`, seo.url), width: 1200, height: 630, … }] : []`.
+- Points at the per-photo **OG route** `/api/og/photo/[id]` (Satori-rendered 1200×630 card, capped at `OG_PHOTO_MAX_BYTES`), consistent with the 4 sibling OG paths — NOT the base JPEG. (Nuance vs prompt wording "/api/og": the home card reuses the per-photo card route, which IS the correct 1200×630 OG surface; intent satisfied.)
+- Fallback (`seo.og_image_url`, 1200×630) at line 64 when no latest image.
+- **Regression tests:** `home-metadata-title.test.ts`, `og-photo-fallback.test.ts`, `photo-og-metadata.test.ts` → `npx vitest run` these 3 → **exit 0, 20/20 passed**.
+
+### AGG-R8-03 — image-manager checkboxes `min-h-11 min-w-11` + audit scans raw checkboxes → VERIFIED
+- `apps/web/src/components/image-manager.tsx`: both checkboxes wrapped in `<label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">` (select-all line 418, per-row line 444). Inner `<input type="checkbox">` is the visible 20px box; the label supplies the 44px tap area.
+- `touch-target-audit.test.ts` adds `scanRawCheckboxes` (line 602), wired into `scanSource` at line 598 (`issues.push(...scanRawCheckboxes(relPath, lines))`).
+- **Synthetic-violation proof (the prompt's ask):** I imported the REAL `scanSource` in a throwaway vitest probe and stripped the first label's sizing class. Result written to `/tmp/probe_report.json`:
+  - Baseline image-manager: `scanSource` → 1 total issue, **0** raw-checkbox issues (properly wrapped).
+  - After stripping `min-h-11 min-w-11` → label: raw-checkbox issues **0 → 1** (flagged at line 414), total 1 → 2.
+  - → `scanRawCheckboxes` genuinely catches a sub-44 checkbox. Probe removed; tree clean.
+- Dedicated unit test `scanSource catches a raw <input type="checkbox"> … (AGG-R8-03)` at line 839 covers: violating `min-h-8` wrapper (flagged), compliant `min-h-11` wrapper (empty), radio variant (flagged), and shadcn `<Checkbox>` primitive (NOT false-positived). `npx vitest run touch-target-audit` → **exit 0, 12/12 passed**.
+
+> **Side observation (VER-2, LOW, pre-existing, non-blocking):** `KNOWN_VIOLATIONS['components/image-manager.tsx'] = 6` (line 182) is STALE — the file's actual `scanSource` count is now 1. The aggregate assertion is `issues.length > allowed`, so up to 5 *new* violations in THIS one file would slip past the aggregate test (a fresh raw checkbox there would need to push the count above 6). The dedicated checkbox unit test still independently guards the checkbox logic, so AGG-R8-03's mechanism is sound; only the per-file budget for this single file is loose. The test itself documents stale entries as "informational, not a hard failure." Suggestion: tighten `image-manager.tsx` budget toward its real count when convenient. Not a regression introduced this cycle.
+
+### AGG-R8-05 — SW HEAD probe bounded by AbortSignal.timeout in BOTH template and generated, matching → VERIFIED
+- `public/sw.template.js`: `const HEAD_REVALIDATE_TIMEOUT_MS = 300;` (line 38), `signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS)` on `method: 'HEAD'` (line 230).
+- `public/sw.js` (generated): **identical** — `HEAD_REVALIDATE_TIMEOUT_MS = 300` (line 38), `AbortSignal.timeout(...)` (line 230), same surrounding AGG-R8-05 comment block at the same line numbers. They match in this region.
+- Contract test `npx vitest run sw-template-contract` → **exit 0, 11/11 passed** (pins template↔generated against drift).
+
+### AGG-R8-13 — both OG routes import the SAME sanitizeForOg from lib/og-sanitize → VERIFIED
+- `apps/web/src/app/api/og/route.tsx:5`: `import { sanitizeForOg } from '@/lib/og-sanitize';` (used lines 82, 83, 88).
+- `apps/web/src/app/api/og/photo/[id]/route.tsx:8`: `import { sanitizeForOg } from '@/lib/og-sanitize';` (used lines 81, 83). Comment line 19 confirms the relocation ("sanitizeForOg now lives in @/lib/og-sanitize (AGG-R8-13)").
+- Both import from the SAME module. Contract tests `npx vitest run sanitize-for-og-global og-sanitize` → **exit 0, 10/10 passed (2 files)**.
+
+---
+
+## STEP 3 — CLAUDE.md claims vs code
+
+| Claim | Source-of-truth | Observed | Status |
+|-------|-----------------|----------|--------|
+| i18n key parity (en==ko) | `messages/en.json` / `ko.json` | **837 leaf keys each, 0 missing either direction** (recursive leaf-key diff) | VERIFIED |
+| `IMAGE_PIPELINE_VERSION = 7` | `src/lib/gallery-config-shared.ts:21` | `export const IMAGE_PIPELINE_VERSION = 7;` | VERIFIED (value 7). Doc imprecision: CLAUDE.md attributes it to `process-image.ts`; actual canonical def is `gallery-config-shared.ts` (re-used there). |
+| `COLOR_IMPACTING_KEYS` count | `src/lib/settings-hash.ts:37` | **9 keys** (5 color + 3 quality `image_quality_{webp,avif,jpeg}` + 1 `image_sizes`) | **MISMATCH vs CLAUDE.md (VER-3)** |
+| SW_VERSION stamp freshness | `public/sw.js:26` | `ee0f38bd-p7` — `ee0f38bd` is 8 commits BEHIND HEAD `ada92ba5` | **STALE in committed source (VER-4)** |
+
+### VER-3 — CLAUDE.md ETag section understates COLOR_IMPACTING_KEYS (LOW, doc-only)
+**Confidence:** High. CLAUDE.md (ETag/cache-invalidation section) states the settings hash "covers all **5** `COLOR_IMPACTING_KEYS`" and lists only the 5 color keys. The authoritative array in `settings-hash.ts:37-48` has **9** entries (adds `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg` per R7-H2 and `image_sizes` per R8-R6). The **code's own docstring (lines 6-14) is correct** and already lists all three groups (AGG-R7-08 corrected it from a stale 3-key summary). Only the top-level CLAUDE.md prose is stale. No functional defect — the hash correctly covers 9 keys at runtime. Suggestion: update the CLAUDE.md ETag paragraph "5" → "9" and list the quality + size keys.
+
+### VER-4 — committed sw.js stamp is 8 commits stale (LOW, cosmetic)
+**Confidence:** High. `public/sw.js` carries `SW_VERSION = 'ee0f38bd-p7'`; `ee0f38bd` is a real ancestor but HEAD is 8 commits ahead (`git rev-list --count ee0f38bd..HEAD` → 8). The `prebuild` hook (`apps/web/package.json:10` → `tsx scripts/build-sw.ts`) re-stamps `sw.js` with the live `git rev-parse --short HEAD` on every production build, so the DEPLOYED SW always carries the deploy-time SHA — the staleness is confined to the committed artifact and does not affect cache-busting in production. `-p7` correctly matches `IMAGE_PIPELINE_VERSION=7`. CLAUDE.md's "After editing the template, regenerate and commit sw.js" guidance was not followed for the last 8 commits, but none of those edited the SW template (only `9b7bb240` touched SW logic, and it DID re-stamp at the time). Suggestion: re-run `tsx scripts/build-sw.ts` and commit before the next release, or accept that prebuild handles it. Non-blocking.
+
+---
+
+## Evidence Summary
+
+| Check | Result | Command | Output |
+|-------|--------|---------|--------|
+| ESLint | pass | `npm run lint -w apps/web` | exit 0, clean |
+| Types | pass | `npm run typecheck -w apps/web` | exit 0 |
+| api-auth | pass | `npm run lint:api-auth -w apps/web` | exit 0 |
+| action-origin | pass | `npm run lint:action-origin -w apps/web` | exit 0 |
+| public-rate-limit | pass | `npm run lint:public-route-rate-limit -w apps/web` | exit 0 |
+| Vitest | pass* | `npx vitest run` (2nd run) | 2060/2060 (1st run 2 AVIF flakes, VER-1) |
+| Prior fixes | 5/5 verified | per-test runs | AGG-R8-01/02/03/05/13 all confirmed behaving |
+| i18n parity | pass | leaf-key diff | 837==837, 0 drift |
+
+\* gate is GREEN on the authoritative full run; first-run RED is the VER-1 flake.
+
+---
+
+## Findings Index
+
+| ID | Severity | Blocking | Summary |
+|----|----------|----------|---------|
+| VER-1 | LOW | No | AVIF color tests (backfill-color-pipeline, process-image-color-roundtrip) flake under full vitest parallelism (shared public/uploads + encoder contention). Pass clean in isolation and on 2nd full run. Not introduced this cycle. |
+| VER-2 | LOW | No | `KNOWN_VIOLATIONS['components/image-manager.tsx']=6` is stale (actual scanSource count 1); aggregate could miss up to 5 new violations in that one file. Dedicated checkbox unit test still guards AGG-R8-03 logic. Pre-existing. |
+| VER-3 | LOW | No | CLAUDE.md ETag section says "5 COLOR_IMPACTING_KEYS"; code has 9 (code docstring is correct). Doc-only drift. |
+| VER-4 | LOW | No | Committed `public/sw.js` SW_VERSION stamp (`ee0f38bd-p7`) is 8 commits behind HEAD; prebuild re-stamps at build so deploy is unaffected. Cosmetic. |
+
+## Recommendation
+
+**APPROVE.** All six gates GREEN (vitest authoritative run 2060/2060). All five prior-cycle fixes (AGG-R8-01/02/03/05/13) independently re-verified behaving as claimed, including a synthetic-violation proof for the AGG-R8-03 checkbox scanner. The four findings are all LOW/non-blocking: one pre-existing test flake (VER-1) and three minor doc/test-hygiene items (VER-2/3/4). No correctness regression in this cycle's changes. The flake (VER-1) is the only item with CI-noise impact and is the highest-value follow-up.

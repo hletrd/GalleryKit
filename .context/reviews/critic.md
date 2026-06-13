@@ -1,111 +1,198 @@
-# Critic — Deep Review (Run-8 Cycle-2)
+# Critic — Deep Review (Run-8 Cycle-3 / review-plan-fix)
 
 **Date:** 2026-06-13
 **Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**HEAD:** `77867144` — working tree CLEAN, synced with origin/master.
-**Angle:** multi-perspective whole-system critique. Invariant violations, code-vs-doc contradictions, half-applied fixes, asymmetric fixes, dishonest UX, missing test obligations, stale plan/doc tables.
+**HEAD:** `ada92ba5` — code surface committed; only uncommitted files are concurrent `.context/reviews/*.md` from sibling agents (no code).
+**Special charge:** scrutinize whether the 13 just-landed run-8 cycle-2 fixes (AGG-R8-01..13, commits `02af4f95`..`ada92ba5`) are actually correct, complete, free of over-correction / new bugs, and whether their tests pin the RIGHT invariant.
 
-**Mode:** THOROUGH (did NOT escalate to ADVERSARIAL — no CRITICAL and < 3 MAJOR; the prior cycle's work is high-quality and the change surface is clean).
+**Mode:** THOROUGH, with adversarial scrutiny applied to the two MAJOR areas (NCLX precedence fix, og-sanitize unification). Did NOT fully escalate to ADVERSARIAL: 0 CRITICAL, 2 MAJOR — below the 3-MAJOR escalation threshold. The cycle-2 batch is genuinely high-quality; the findings below are edge-cases and honesty gaps, not broken fixes.
 
-**Gate baseline (re-verified LIVE this cycle, all green at HEAD):**
-- `npm run lint` → **exit 0**
-- `npm run typecheck` (app + scripts) → **exit 0**
-- `lint:api-auth` / `lint:action-origin` / `lint:public-route-rate-limit` → **all exit 0**
-- `npx vitest run` (full suite) → **exit 0**; targeted re-run of the new a11y tests → 9/9 pass
-- i18n key parity en↔ko → **837 = 837**, zero asymmetry
+**Gates / tests re-verified LIVE this cycle:**
+- Targeted re-run of the cycle-2-affected suites: `color-detection.test.ts` + `og-sanitize.test.ts` → **49/49 pass** (8.6s). The new NCLX-code-2 test and the shared-sanitizer tests are green and genuine (not tautologies).
+- Each of the 11 commit diffs read in full and verified against the current source on disk.
 
 ---
 
-## Pre-commitment predictions (made before detailed investigation)
+## Pre-commitment predictions (made BEFORE detailed diff reading)
 
-1. A half-applied fix landed in one place but not the symmetric place (the recurring run-6/run-7 theme). → **Investigated all 12 prior findings; none remain half-applied. The pool-formula fix is now consistent across all 3 sites + CLAUDE.md.**
-2. CLAUDE.md count/attribution claims drifted again after 10d77324. → **Re-verified all 4 sub-items against code; all correct now.**
-3. The new regression tests (d035de10) assert the wrong thing. → **Both tests are correct and genuinely fail the reverted shape.**
-4. The home-OG base-JPEG fix (4852bcf5) introduced its own correctness issue. → **CONFIRMED — see CRT-1. The fix traded a transient 404 for a permanent oversized-social-card regression and broke consistency with 4 sibling OG paths.**
-5. The pool-formula recalculation has a remaining stale site. → **No — all sites consistent.**
+1. The "share one sanitizeForOg across both OG routes" fix has a subtle behavioral difference or leaves a third copy un-unified. → **CONFIRMED — CRT-2. The photo PAGE keeps a weaker local copy that does NOT strip C0 controls, and its docstring lies ("Matches the sanitizeForOg in the OG image route").**
+2. The NCLX code-2 precedence fix has an inverted condition or a case where it should win but now doesn't, or vice-versa. → **CONFIRMED a different shape — CRT-1. The per-field fallback is correct, but it newly enables `isHdr` to flip true from an ICC-name signal, contradicting the commit's "no delivered-byte impact" claim and the upload-rejection gate. Untested.**
+3. The SW 300ms timeout fails to serve stale on abort. → **REFUTED — the catch falls through to stale-serve correctly. Clean fix.**
+4. The backfill width guard / mixed-run counter double-counts or strands metadata. → **REFUTED — the width guard returns before the version-bump UPDATE; no strand. Counter partition is correct.**
+5. The home og:image change emits `/api/og/photo/undefined` because `getImagesLite` doesn't select `id`. → **REFUTED — `publicSelectFields` retains `id`. But a different issue surfaced: CRT-3, the no-derivative fallback degrades to a 302→HTML, and the comment overstates it.**
 
-Net: 4 of 5 predictions found the prior cycle did clean work; prediction 4 surfaced the one genuinely-NEW finding.
-
----
-
-## Prior findings VERIFIED CLOSED at HEAD (run-7 cycle-1 → all 12 open + 1 partial)
-
-All run-7 findings (AGG-R7-01 … AGG-R7-13) are either landed with a verified commit or deferred with a concrete, severity-preserved exit criterion. Each was independently re-verified against HEAD this cycle — not taken on the plan's word:
-
-| Finding | Commit | Verification at HEAD |
-|---|---|---|
-| AGG-R7-01 (stale pool formula x3 sites) | `0d17a362` | `admin-backfill-runner.ts` header docblock (28-40), function-body docblock (96-128), `db/index.ts:13-22` comment, AND `CLAUDE.md:291` ALL state cap=2 / RESERVED=max(3,ceil(LIMIT/2)). No stale `(LIMIT-2)/2`/`=4` site remains. Arithmetic internally consistent (10-5-1)/2=2, holds 1+2x2=5, leaves 5. **CLOSED.** |
-| AGG-R7-02 (setTimeout unmount leak) | `f11746cd` | `settings-client.tsx:83` timer-id ref + `:122-131` dedicated empty-deps unmount effect clearing all timers + `:87/96` `backfillMountedRef` gating the already-fired-promise setState. Both halves landed. **CLOSED.** |
-| AGG-R7-03 (error-shell visible heading) | `0d2312cd` | Both `error.tsx` twins render a visible `<h1 className="text-3xl font-semibold">` carrying `t('error.title')`; `aria-labelledby` resolves; no faint `/30` glyph survives. Consistent across both shells. **CLOSED.** |
-| AGG-R7-04 (remaining aria-describedby) | `61cfd235` | 18 `aria-describedby` refs, each resolving to exactly one `id="...-help"` (16 unique; `license-price-help` shared by 3 inputs as designed). Zero dangling refs, zero dup ids. **CLOSED.** |
-| AGG-R7-05 (AGG-9/AGG-10 regression tests) | `d035de10` | `error-shell-heading.test.ts` (source-fixture, fails the AGG-9 sr-only/`/30` shape) + `home-metadata-title.test.ts` (pins `title:{absolute}` in both branches + filtered). 9/9 pass. **CLOSED.** |
-| AGG-R7-06 (401/403 deferral-note correction) | `57f17229` | `plan-330` lines 66-72 carry a precise `[CORRECTION run-7]` note: wrong-scope=**401** (`api-auth.ts:85`, pinned by `api-auth-response-headers.test.ts:103`), cross-origin=**403** (`:95`, residual LOW, plan-332 deferred #6). No contradictory 403-for-wrong-scope test was written. **CLOSED (correctly deferred residual).** |
-| AGG-R7-07 (dropzone disabled affordance) | `35d07f0b` | `upload-dropzone.tsx:413` conditional `tabIndex={-1}` (spread AFTER `getRootProps()` so it wins) + `:416` conditional `cursor-pointer`. `aria-disabled` retained. **CLOSED.** |
-| AGG-R7-08 (doc-drift batch x4) | `10d77324` | (a) `COLOR_IMPACTING_KEYS`=9 in `settings-hash.ts:37-49` and CLAUDE.md:260 with line ref; (b) Sharp clone() wording corrected (CLAUDE.md:216 now matches WI-14 reality + `process-image.ts` line ref); (c) `IMAGE_PIPELINE_VERSION` attributed to `gallery-config-shared.ts:21`; (d) both backfill env vars documented (CLAUDE.md:291-292). **CLOSED.** |
-| AGG-R7-09 (home-OG on-disk fallback) | `4852bcf5` | The 404 IS fixed (base JPEG always exists). **BUT the fix introduced a new regression — see CRT-1.** |
-| AGG-R7-10 / -11 / -12 (load-more unmount / test depth / containIntrinsicSize) | deferred | plan-332 deferred #2/#3/#4 — original severity preserved (LOW), concrete next-edit exit criteria. Re-confirmed sound. |
-| AGG-R7-13 (Stripe async_payment_succeeded) | deferred | plan-332 deferred #7 — already-owned by plan-316, CLAUDE.md-documented. Re-confirmed deferred. |
-| Plan hygiene (stale 329/330 tables AGG-8/10/13/16/18) | `57f17229` | `[CORRECTION run-7: verified DONE at HEAD]` annotations added in-place to plan-329 (line 55) and plan-330 (lines 58, 80). **CLOSED.** |
-
-The run-7 cycle was honest and thorough: every landed fix carries its symmetric counterpart and (where a regression risk existed) a regression test. This is materially better discipline than the run-6 cycle the prior aggregate criticized.
+A self-audit retraction is recorded at the end (a CLAUDE.md "5 vs 9" finding turned out to be a STALE PROMPT-CONTEXT artifact; the on-disk doc is correct).
 
 ---
 
-## OPEN / NEW findings
+## VERDICT: ACCEPT-WITH-RESERVATIONS
 
-### CRT-1 — Home-page `og:image` now points at the full-resolution base JPEG (multi-MB), silently breaking the social card on Twitter/LinkedIn for default-config galleries; also inconsistent with all 4 sibling OG paths
-
-**Severity:** MED (lower bound LOW for small-`image_sizes` galleries; see Realist Check) · **Confidence:** HIGH (facts) / MEDIUM (real-world severity) · **Class:** regression introduced by the AGG-R7-09 fix (`4852bcf5`)
-
-**Where:**
-- `apps/web/src/app/[locale]/(public)/page.tsx:109-115` — the home `generateMetadata` latest-photo branch:
-  - `url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg}`, seo.url)`
-  - `width: latestImage.width, height: latestImage.height`
-- `filename_jpeg` is the BASE filename = `sortedSizes[sortedSizes.length - 1]` = the **LARGEST** configured size (`process-image.ts:1196-1206`). Default largest = **7680 px** (`DEFAULT_IMAGE_SIZES`, CLAUDE.md), default JPEG quality = **90** (`gallery-config-shared.ts:99`).
-
-**Why it matters / failure scenario:**
-- A 7680x5120 quality-90 JPEG of a detailed photo is routinely **6-12 MB**. Social-card scrapers enforce byte limits: **Twitter/X rejects images > 5 MB** (card renders with NO image), LinkedIn ~5 MB practical, Facebook downsamples but can skip very large ones. So sharing the home URL yields a broken/image-less social preview on the highest-SEO surface, **permanently**, for any gallery on the DEFAULT `image_sizes`.
-- This is the OPPOSITE extreme from what the codebase already decided is correct. The per-photo OG route's own helper documents the rule explicitly (`og-photo-fetch.ts:11-14, 31`): "The OG canvas is 1200x630. Any derivative >= 1024 px is sufficient. Iterating sizes ASCENDING biases toward smaller files that comfortably fit under the 1 MB byte cap" — `OG_PHOTO_MAX_BYTES = 1 MB`.
-- **Inconsistency with every sibling OG path** (the strongest signal this is a mistake, not a deliberate tradeoff):
-  - `p/[id]/page.tsx:96-101` → `/api/og/photo/${id}` (Satori, **1200x630**, <=1 MB embedded, ascending-picked, degrades to site-default on backfill miss).
-  - `[topic]/page.tsx:87-89` → `/api/og?...` (Satori, **1200x630**).
-  - `c/[slug]/page.tsx:50` → admin site OG image at **1200x630** (or none).
-  - The home page is the ONLY one pointing `og:image` at a raw multi-MB derivative at full source resolution.
-- The fix's stated rationale ("a SIZED derivative does not guarantee it exists on disk") is **over-stated** — `og-photo-fetch.ts` proves sized derivatives DO reliably exist for `processed = true` photos (it iterates them); the only gap is the transient backfill/reconfigure window, which the per-photo route bridges by ascending-iterate-then-fall-back-to-site-default. The home fix solved a TRANSIENT 404 by creating a PERMANENT oversized-card problem.
-
-**Note (NOT a bug):** the JSON-LD `contentUrl`/`thumbnailUrl` correctly use the base JPEG (`p/[id]/page.tsx:198,206`, `[topic]/page.tsx:194,198`) — JSON-LD `contentUrl` is the canonical full-resolution image, so large is correct THERE. The distinction the fix missed is that `og:image` is a social-card EMBED (must be small + ~1200x630), not the canonical image.
-
-**Fix (pick one, in preference order):**
-1. **Match the topic pattern** — render the home card via the existing `/api/og` Satori route (1200x630, byte-capped). Most consistent, fixes both 404 and byte-size, declares correct dimensions.
-2. **Use a mid-sized derivative** — point at a ~1536/2048-px sized derivative (`absoluteImageUrl(sizedImageFilename(latestImage.filename_jpeg, 2048, config.imageSizes), seo.url)`), declaring `width/height` for that size. Still ~always-present for processed photos; far under scraper limits. (Re-introduces the `getGalleryConfig`/`sizedImageFilename` the fix removed — acceptable.)
-3. **Minimal:** keep the base JPEG URL but clamp the declared `width`/`height` to a sane card aspect AND document the byte-size caveat inline. (Weakest — does not fix the actual byte payload the scraper fetches.)
-
-**Realist Check (applied):** Worst realistic case = image-less social card on Twitter/LinkedIn for default-config galleries; title+description still render, so the share is degraded, not broken; no crash, no data loss. Silently detected (no log; operator notices only on a manual share test). For galleries that reduce `image_sizes` to <= ~2048 px, the base JPEG is < 1 MB and the card works — hence the LOW lower bound. Net: kept at **MED** because (a) it regresses the DEFAULT configuration's highest-SEO surface, (b) it is silently undetected, and (c) it is trivially avoidable by matching any sibling path. Mitigated-down to not-HIGH by: title/description still present, no functional breakage, and config-dependent blast radius.
+The cycle-2 batch closed all 13 findings with real, test-backed, mostly-symmetric commits. Two MAJOR honesty/completeness gaps and three MINOR items remain. None blocks the work; all are worth a follow-on plan item. No fix needs reverting.
 
 ---
 
-## What's Missing (gaps — none rise to a standalone scored finding)
+## CRITICAL Findings
 
-- **No regression test pins the home-OG image SIZE/shape.** `home-metadata-title.test.ts` covers only `title:{absolute}`; its fixture uses `width: 1200` (a benign small case) so it would not catch CRT-1. If CRT-1 is fixed, the fix should be pinned (assert the home `og:image` URL is a Satori route OR a sized derivative, NOT the bare `filename_jpeg` base) so a future revert to the base can't ship silently. (This mirrors exactly the AGG-R7-05 test-obligation logic the prior cycle applied to AGG-9/AGG-10.)
-- **`home-metadata-title.test.ts:75` mocks `getGalleryConfig`** which the metadata function no longer calls post-`4852bcf5`. Harmless dead mock, slightly misleading. Trivial; fold into the CRT-1 test update if touched.
+None.
+
+---
+
+## MAJOR Findings
+
+### CRT-1 — NCLX code-2 fix (74235265 / AGG-R8-06 COR-1) can flip `isHdr` true and is NOT "no delivered-byte impact"; the new path is untested
+
+**File:** `apps/web/src/lib/color-detection.ts:381-389`; gate at `apps/web/src/app/actions/images.ts:283`.
+
+**What the fix did (correctly):** replaced the unconditional `NCLX_*_MAP[code] ?? 'unknown'` with a per-field "apply only when the map entry is defined" form, so an NCLX `colr` box that specifies primaries but leaves transfer/matrix = code 2 ("Unspecified") no longer clobbers the ICC-derived transfer/matrix with `'unknown'`. The precedence logic is sound and the new test (`detectFromNclx(12, 2, 2, {icc:'sRGB IEC61966-2.1'})`) genuinely proves the per-field fallback.
+
+**The problem the fix and its review both missed:** `transferFunction` is now allowed to inherit the ICC-name-inferred value when NCLX leaves transfer unspecified. `inferTransferFunction` (`color-detection.ts:86-93`) returns `'pq'` or `'hlg'` whenever the ICC profile NAME contains `pq` / `st2084` / `smpte 2084` / `hlg` / `hybrid log` / `arib`. And `isHdr = transferFunction === 'pq' || 'hlg'` (`:389`).
+
+Therefore, for an AVIF/HEIF source with:
+- an NCLX `colr` box whose `transferCharacteristics = 2` (Unspecified), AND
+- an embedded ICC profile whose description contains a PQ/HLG token,
+
+the behavior changed:
+- **Before:** `transferFunction = NCLX_TRANSFER_MAP[2] ?? 'unknown'` = `'unknown'` → `isHdr = false`.
+- **After:** `nclxTransfer === undefined` → keep ICC-inferred `'pq'`/`'hlg'` → **`isHdr = true`**.
+
+`isHdr` is NOT audit-only. `images.ts:283`: `if (data.colorSignals?.isHdr && !uploadConfig.allowHdrIngest)` → the upload is **rejected** (original deleted, `hdrRejectedCount++`). With `allow_hdr_ingest=false` (the default), a file that previously uploaded successfully would now be REJECTED at ingest.
+
+**Competing interpretations:**
+- (A — author's framing) "Admin-only audit columns; no delivered-byte impact." This is the commit-message claim, inherited from the prior cycle's AGG-R8-06 rating ("LOW … no delivered-byte impact").
+- (B — adversarial) The per-field fallback changes `isHdr`, which feeds the upload-rejection gate; for the specific source shape above the delivered bytes go from "SDR-encoded photo" to "no photo at all (rejected)."
+
+(B) is correct as a matter of code reachability. (A) is the more likely outcome in practice (the trigger is rare), but the COMMIT MESSAGE asserts a property the code does not have, and the test does not cover the HDR-flip path — it only tests an sRGB ICC, where the ICC infers `'srgb'`, never `'pq'`.
+
+**Concrete failure scenario:** A photographer exports an AVIF from a tool that writes a generic NCLX (`transfer=2`) but embeds a working-space ICC literally named with a "PQ" token (some HDR-adjacent export presets do this even for SDR-graded output). Pre-fix: ingests, delivered as SDR. Post-fix: rejected at upload with the HDR-disabled error, and the photographer cannot tell why a file that worked last week now fails.
+
+**Realist check:** Worst realistic case = a narrow class of oddly-tagged AVIF/HEIF files become un-ingestible until `allow_hdr_ingest` is toggled. No data loss, no security impact, detectable (the upload reports `hdrRejectedCount`). Mitigated by: the trigger requires a self-contradictory container (NCLX-transfer-unspecified + PQ-named ICC), which is uncommon. Severity held at MAJOR (not CRITICAL) on that basis, but NOT downgraded to MINOR because (a) it changes ingest acceptance, a user-visible delivered-byte outcome, and (b) the false "no delivered-byte impact" claim will mislead the next person who reasons about this code.
+
+- Confidence: **HIGH** (code-path reachability is verified; only the field-population frequency is uncertain).
+- Why it matters: a commit that says "no delivered-byte impact" should have none; a reviewer trusting that claim will not add the missing test or guard.
+- **Fix:** Either (a) add `if (nclxTransfer === undefined && <ICC value is pq/hlg>) keep 'unknown'` — i.e., do not let an ICC-NAME-only PQ/HLG signal drive `isHdr` when NCLX explicitly declined to specify transfer (NCLX code-2 is a deliberate "unspecified," arguably a stronger signal than a profile-name token); OR (b) accept the new behavior as MORE correct, but then CORRECT the commit-message/CLAUDE.md framing to "may change `isHdr` (and thus ingest acceptance) for sources with NCLX-unspecified transfer + an HDR-named ICC," and add a regression test `detectFromNclx(9, 2, 1, {icc:'Rec2020 PQ'})` asserting the chosen `isHdr` value. Decide deliberately; do not leave the claim and the behavior in conflict.
+
+### CRT-2 — og-sanitize unification (d5399742 / AGG-R8-13) is half-applied; the photo PAGE's local `sanitizeForOg` drifted (no C0 strip) and its docstring lies
+
+**Files:** shared module `apps/web/src/lib/og-sanitize.ts:28-30`; un-unified copy `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:34-44`; test that enshrines the divergence `apps/web/src/__tests__/sanitize-for-og-global.test.ts`.
+
+**What the fix did:** extracted `sanitizeForOg` + `OG_C0_CONTROL_CHARS` into `@/lib/og-sanitize` and imported it into BOTH OG image routes (`/api/og/route.tsx`, `/api/og/photo/[id]/route.tsx`), invoking the repo's "derive, don't copy" discipline. Good — the two OG IMAGE routes are now symmetric.
+
+**The gap:** there is a THIRD consumer of a function literally named `sanitizeForOg` — the photo PAGE (`p/[id]/page.tsx:42`), used to scrub JSON-LD structured-data fields (`camera_model`, `lens_model`, `exposure_time`). It was NOT migrated and is a WEAKER copy:
+
+```ts
+// p/[id]/page.tsx:42-44
+function sanitizeForOg(value: string): string {
+    return stripUnicodeFormatting(value) ?? '';   // NO C0-control strip
+}
+```
+
+vs the shared module:
+
+```ts
+// og-sanitize.ts:28-30
+export function sanitizeForOg(value: string): string {
+    return (stripUnicodeFormatting(value) ?? '').replace(OG_C0_CONTROL_CHARS, '');
+}
+```
+
+The page's version omits the `.replace(OG_C0_CONTROL_CHARS, '')` step. Yet its docstring (`page.tsx:34`) says **"Matches the `sanitizeForOg` in the OG image route."** After d5399742 that statement is FALSE: the OG route strips C0 controls, the page does not.
+
+**Why one interpretation is the real problem:** The d5399742 commit's entire stated rationale is to prevent drift ("a future loosened validator can't leak formatting chars into one OG card while the other strips them"). It then leaves a same-named, drifted, C0-non-stripping copy on the JSON-LD surface with a comment asserting parity. The cycle "closed the symmetry gap" on two surfaces and left it open on a third — while the docstring claims it's closed.
+
+**Concrete failure scenario:** an EXIF `camera_model` containing a C0 control char (e.g. `\x1F`) reaches `<script type="application/ld+json">` on the photo page un-stripped. RFC 8259 requires control chars U+0000–U+001F to be escaped in JSON; Next's serializer normally escapes them so this is NOT an XSS sink, but a strict JSON-LD consumer (Google Rich Results) can reject the block as malformed, silently dropping the page's structured data — the exact thing the OG route's C0 strip (R17-L4) exists to prevent.
+
+**The test pins the WRONG invariant (passes for the wrong reason):** `sanitize-for-og-global.test.ts` asserts the page file merely "uses `stripUnicodeFormatting`." It does NOT assert the page's C0-strip parity with the shared module. So the guard is green while the parity it purports to protect is broken.
+
+**Realist check:** EXIF model/lens strings with embedded C0 controls are rare (cameras write clean ASCII). Worst realistic case = a malformed-but-rare camera string drops one photo's JSON-LD rich-result eligibility; no security/data impact; recoverable. Mitigated by rarity + Next's escaping (no script-injection). Held at MAJOR (not CRITICAL/MINOR) because it is a doc-that-lies + a test-that-pins-the-wrong-thing + an explicitly-invoked-but-half-applied principle — exactly the class this critic exists to catch — not because of runtime blast radius.
+
+- Confidence: **HIGH** (the divergence and the false docstring are both verified by reading both files).
+- Why it matters: an honest "we unified the sanitizer" should leave no same-named drifted copy claiming parity; the next maintainer will trust the comment.
+- **Fix:** import `sanitizeForOg` from `@/lib/og-sanitize` in `p/[id]/page.tsx`, delete the local copy and its lying docstring (this also adds the missing C0 strip to JSON-LD — a real defense improvement). Then extend `sanitize-for-og-global.test.ts` to assert the page imports from `@/lib/og-sanitize` (mirroring the OG-route assertion), so the guard pins true parity.
+
+---
+
+## MINOR Findings
+
+### CRT-3 — Home og:image fix (73496d2f / AGG-R8-02): comment overstates the fallback; the no-derivative case degrades to a 302→HTML, not "the site OG card"
+
+**File:** `apps/web/src/app/[locale]/(public)/page.tsx:98-119`; route `apps/web/src/app/api/og/photo/[id]/route.tsx:109-114, 235-259`; helper `apps/web/src/lib/og-photo-fetch.ts:75-86`.
+
+The fix points the home og:image at `/api/og/photo/${id}` (1200×630, ≤1 MB) instead of the oversized base JPEG — a genuine improvement (Twitter/X reject >5 MB; the base default is ~6–12 MB). `latestImage.id` is safe (`publicSelectFields` retains `id`; verified `data.ts:325-357`).
+
+But the page comment claims the route "falls back to the site OG card when no derivative is on disk yet (mid-backfill / legacy / post-reconfigure)." Two inaccuracies:
+1. `pickFirstAvailablePhotoBuffer` only tries `_${size}.jpg` SIZED derivatives — it never tries the base `filename_jpeg` as a last resort. A processed photo that has ONLY the base on disk (a legacy photo pre-dating sized derivatives, as the "latest" photo) yields `null`.
+2. On `null`, the route returns `buildFallbackResponse(req, …, seo.og_image_url || undefined)`. The home page only REACHES this og-route path when `seo.og_image_url` is UNSET (`page.tsx:63` early-returns otherwise). So the fallback's `ogImageUrl` is `undefined` → it 302-redirects to the **site root `/` (an HTML page)**, NOT "the site OG card."
+
+So in the (rare) no-sized-derivative case the home og:image resolves to an HTML 302 target, which most crawlers will not treat as an image. The prior AGG-R7-09 base-JPEG approach was immune (base always exists per atomic-rename).
+
+**Realist check:** Triggers only when the latest-by-capture-date photo lacks every configured sized derivative AND `og_image_url` is unset. Freshly-uploaded photos have all current sizes, so this is a narrow legacy/mid-reconfigure window. Net change is still an improvement (5 MB Twitter rejection was the common, guaranteed failure). Severity MINOR: comment-accuracy + a rare degraded (not broken) fallback.
+
+- Confidence: **HIGH** (verified `pickFirstAvailablePhotoBuffer` has no base fallback and the page only reaches this path with `og_image_url` unset).
+- **Fix (pick one):** (a) correct the comment to "falls back to a 302 redirect to the site root when neither a sized derivative nor `og_image_url` exists"; OR (b) add the base `filename_jpeg` as the final attempt in `pickFirstAvailablePhotoBuffer` so the per-photo card is produced even for a base-only legacy photo (closes the gap for ALL 5 OG paths, not just home).
+
+### CRT-4 — touch-target checkbox scanner (fbf91baa / AGG-R8-03) is formatting-fragile: false-positives a `<div>`-wrapped or multi-line-`<label>`-wrapped compliant checkbox
+
+**File:** `apps/web/src/__tests__/touch-target-audit.test.ts:528-572` (normalizer), `:600-637` (`scanRawCheckboxes`).
+
+The new raw-`<input type=checkbox|radio>` scan is a correct, valuable blind-spot closure (the two real image-manager checkboxes are now caught and fixed). But the wrapper back-scan only accepts a `<label\b … min-h-11 …>` on a SINGLE line within a 4-line window:
+- `label` is NOT in the normalizer's collapse set (`Button|button|Badge|select|Link|a|input`), so a Prettier-wrapped multi-line `<label className="…\n min-h-11 …">` has `<label` and `min-h-11` on different physical lines → the scan finds `<label` without the class → **false POSITIVE** on a compliant checkbox.
+- A checkbox wrapped in a `<div className="min-h-11">` (not a `<label>`) is also a false positive (back-scan only matches `<label\b`).
+
+Both directions ERR SAFE (over-flag, never under-flag), so this never lets a real sub-44 checkbox through — it just risks a spurious gate failure on a future legitimate pattern. MINOR.
+
+- Confidence: **HIGH** (the scan logic requires `<label` and the sizing class on the same line `j`).
+- **Fix (optional):** add `label` to the normalizer's collapse set so multi-line labels become one logical line before the back-scan, and/or accept any wrapping element (not only `<label>`) carrying the sizing class. Not urgent — no current violation, and over-flagging is the safe failure mode for a gate.
+
+### CRT-5 — index-coverage tripwire (f3667858 / AGG-R8-10 TRC-1) is a name-presence check; a name in a comment / DROP INDEX satisfies it
+
+**File:** `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts` (the `migrate.js reconcile mirrors index %s` block).
+
+The tripwire asserts `MIGRATE_SRC.includes(indexName)` for every `CREATE INDEX <name>` in `drizzle/*.sql`. This catches the real failure class (an index-only migration with no reconcile mirror — silently dropped on existing-DB upgrades, since `migrate.js` baselines the hash first and reconcile becomes the sole applier). I verified the indexes are GENUINELY created via `ensureIndex(...)` in `migrate.js:527-602`, so the invariant holds at HEAD.
+
+The weakness (which the test docstring honestly acknowledges) is that name-presence would also be satisfied by the index name appearing in a COMMENT, a `DROP INDEX`, or an unrelated string — a future false-negative. The test itself flags this as a "SOURCE tripwire (name presence, not structural equivalence)." MINOR / informational — the authoritative check remains a fresh-DB init + `information_schema` diff.
+
+- Confidence: **HIGH**.
+- **Fix (optional):** tighten the assertion to require the name inside an `ensureIndex(` call or an inline `INDEX <name> (` token rather than anywhere in the file. Low priority given the documented end-to-end backstop.
+
+---
+
+## What's Missing (gaps / unstated assumptions)
+
+- **Regression test for the CRT-1 HDR-flip path.** `color-detection.test.ts` covers NCLX-code-2 + sRGB-ICC (transfer survives as `'srgb'`) but never NCLX-code-2 + PQ/HLG-named ICC (where `isHdr` now flips). The most behaviorally-consequential branch of the AGG-R8-06 fix is untested.
+- **Parity assertion for the CRT-2 page sanitizer.** No test pins that the photo page's JSON-LD sanitizer strips C0 controls equivalently to the shared module. The existing guard only checks `stripUnicodeFormatting` presence.
+- **Base-JPEG final fallback in `pickFirstAvailablePhotoBuffer` (CRT-3).** The "every configured size eventually exists" atomic-rename contract is true for photos processed under the CURRENT pipeline, but the helper has no safety net for a base-only legacy row, and the home OG path now depends on it.
+- **`OG_C0_CONTROL_CHARS` is an exported module-level `/g` regex.** Safe inside `sanitizeForOg` (`.replace` resets `lastIndex`), and the test manually resets `lastIndex` between `.test()` calls — but any future caller using `OG_C0_CONTROL_CHARS.test()` without resetting `lastIndex` will get alternating true/false. Not a current bug; worth a one-line "do not call `.test()` on this exported regex; it is stateful" note, or freezing it behind a factory.
+
+---
 
 ## Multi-Perspective Notes
 
-- **Executor:** every landed fix is followable from its commit + inline comment; the pool-formula single-source-of-truth pointer ("see resolveBackfillConcurrency") is good practice. No executor would get stuck on the closed items.
-- **Stakeholder (photographer):** CRT-1 directly undermines the "share my gallery" surface — the home page is what a photographer pastes into social/chat. An image-less preview on the default config is a real (if cosmetic) product regression on the highest-traffic share target.
-- **Skeptic:** I tried to find a half-applied or asymmetric fix among the 12 closed items (the prior-cycle failure mode) and could not — the pool formula, both error twins, all aria-describedby refs, and both sanitizer sites are symmetric. The one thing the cycle got wrong is CRT-1, and it got it wrong by NOT looking at the 4 sibling OG paths it was inconsistent with — a cross-surface-consistency gap, not a half-applied fix.
+- **Executor:** The cycle-2 commits are individually small, well-commented, and each carries a focused test. An implementer picking up CRT-1/CRT-2 has everything needed: exact files/lines, the competing-precedence decision to make, and the test to add. No blockers.
+- **Stakeholder:** The two MAJOR items are honesty gaps (a false commit claim; a lying docstring), not user-facing breakage. They erode the "fixes land clean and honest" property that the prior aggregate celebrates — which is the whole point of this review loop. Worth one follow-on plan unit to keep that property true.
+- **Skeptic:** The strongest argument that cycle-2 is fully done is "all 13 findings closed, 49/49 targeted tests green, full suite green warm." That's true and the work is good. But two of the closures (AGG-R8-06, AGG-R8-13) achieved the LETTER of the finding while leaving an adjacent contradiction the finding's spirit covered — the classic "fixed on paper" pattern this charge asked me to hunt. CRT-1 and CRT-2 are exactly those.
 
-## Verified-clean (stress-tested this cycle, NO action)
+---
 
-- **SW version stamp lag** (`sw.js` = `61607572-p7`, HEAD = `77867144`): inherent stamp-then-commit lag (you cannot embed your own future SHA). The `prebuild` hook re-stamps on every production build, the committed value only needs to DIFFER from the prior deploy's (it does), and `-p7` matches `IMAGE_PIPELINE_VERSION = 7`. NOT a defect.
-- **Privacy guard intact:** home OG `latestImage` comes from `getImagesLite` (public select — no `filename_original`/`user_filename`/GPS); the OG `alt` guards filename-as-title leak via `isLatestTitleFilename` and falls back to `t('latestPhoto')`. `images.title` is bidi/zero-width-rejected at the write layer (`validation.ts`), and the OG `alt` is an escaped HTML attribute, so the missing `sanitizeForOg` on the home `alt` (unlike the per-photo route) is not exploitable. No finding.
-- **Dropzone `tabIndex` ordering** (`upload-dropzone.tsx:409` spreads `getRootProps()` then `:413` conditionally overrides `tabIndex`): correct precedence; relies on documented + verified react-dropzone disabled behavior; belt-and-braces `aria-disabled` retained. Solid.
-- **i18n parity** 837=837, no orphan keys.
+## Verdict Justification
 
-## Verdict
+**ACCEPT-WITH-RESERVATIONS.** Every cycle-2 fix is real, compiles, passes its test, and addresses its finding; none should be reverted. The reservations are two MAJOR honesty/completeness gaps (CRT-1: a "no delivered-byte impact" claim that the code contradicts via the `isHdr` ingest gate, untested; CRT-2: an explicitly-invoked "derive, don't copy" unification that left a drifted, parity-claiming third copy on the JSON-LD surface) plus three MINOR robustness/accuracy items. 
 
-**ACCEPT-WITH-RESERVATIONS.** The run-7 cycle closed all 12 open + 1 partial findings with verified, symmetric, test-backed fixes and honest severity-preserved deferrals — materially clean work. The single reservation is **CRT-1** (MED): the AGG-R7-09 home-OG fix corrected a transient 404 by introducing a permanent oversized-social-card regression that is also inconsistent with all 4 sibling OG paths. It is config-dependent (MED for the default 7680-px largest size, LOW for small `image_sizes`), silently detected, and trivially avoidable by matching any sibling path. Schedule CRT-1 (with a pinning test) next cycle; nothing here blocks the current state.
+Mode stayed THOROUGH (0 CRITICAL, 2 MAJOR < 3-MAJOR escalation bar), with adversarial scrutiny focused on the two precedence/symmetry fixes most prone to over-correction — which is where both MAJOR findings surfaced. Realist checks held CRT-1 and CRT-2 at MAJOR (not inflated to CRITICAL: narrow triggers, no data/security loss, recoverable) and declined to downgrade them to MINOR (both change a real behavior or enshrine a false claim/test).
+
+**To upgrade to ACCEPT:** correct or guard the CRT-1 `isHdr` behavior + claim and add its regression test; migrate the CRT-2 page sanitizer to the shared module and pin parity in the test.
+
+---
 
 ## Open Questions (unscored)
 
-- Does any production gallery currently run the default 7680-px largest size? If `image_sizes` is reduced in practice, CRT-1's blast radius is LOW and it can be batched with other LOW work; if the default ships, treat the MED rating as live. (Cannot determine from the repo — depends on the operator's admin settings.)
+- **CRT-1 direction:** is the post-fix `isHdr=true` for NCLX-unspecified-transfer + PQ-named-ICC the DESIRED behavior (more honest) or an unwanted side-effect (a deliberate NCLX "unspecified" should arguably outrank a profile-name token)? This is a product-intent call for the color pipeline owner, not a pure code bug. Either way the commit claim and a test must be reconciled with the chosen answer.
+- Does any real-world export tool actually emit `transfer=2` NCLX alongside a PQ/HLG-tokened ICC name? If provably never, CRT-1 collapses to a pure doc-honesty fix (still worth doing). I could not source a concrete sample within this review's scope.
+
+---
+
+## Self-Audit Retraction (false positive caught before reporting)
+
+I initially flagged a CLAUDE.md contradiction: the ETag section appeared to say "covers all **5** COLOR_IMPACTING_KEYS" while `settings-hash.ts` defines **9**. On verification against the file ON DISK (`CLAUDE.md:260`), the doc correctly says **"covers all 9 COLOR_IMPACTING_KEYS"** and enumerates all nine, explicitly noting "AGG-R7-08 corrected the count from a stale '5'." The "5" came from the STALE embedded copy of CLAUDE.md in this session's system-reminder context, not from the repository. **Retracted — no finding.** (Recorded as a reminder that the prompt-embedded CLAUDE.md can lag the on-disk file; always verify against source.)
+
+---
+*Ralplan summary row:* N/A — this is a code/fix review, not a ralplan consensus-plan review.
