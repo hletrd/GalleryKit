@@ -354,8 +354,9 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.image_quality_webp || ''}
                                 onChange={(e) => handleChange('image_quality_webp', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_webp')}
+                                aria-describedby="image-quality-webp-help"
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.qualityHintWebp')}</p>
+                            <p id="image-quality-webp-help" className="text-xs text-muted-foreground">{t('settings.qualityHintWebp')}</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="image-quality-avif">{t('settings.avifQuality')}</Label>
@@ -367,8 +368,9 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.image_quality_avif || ''}
                                 onChange={(e) => handleChange('image_quality_avif', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_avif')}
+                                aria-describedby="image-quality-avif-help"
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.qualityHintAvif')}</p>
+                            <p id="image-quality-avif-help" className="text-xs text-muted-foreground">{t('settings.qualityHintAvif')}</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="image-quality-jpeg">{t('settings.jpegQuality')}</Label>
@@ -380,8 +382,9 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.image_quality_jpeg || ''}
                                 onChange={(e) => handleChange('image_quality_jpeg', e.target.value)}
                                 placeholder={getPlaceholder('image_quality_jpeg')}
+                                aria-describedby="image-quality-jpeg-help"
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.qualityHintJpeg')}</p>
+                            <p id="image-quality-jpeg-help" className="text-xs text-muted-foreground">{t('settings.qualityHintJpeg')}</p>
                         </div>
                     </div>
 
@@ -463,7 +466,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.wide_gamut_jpeg_chroma || ''}
                                 onValueChange={(value) => handleChange('wide_gamut_jpeg_chroma', value)}
                             >
-                                <SelectTrigger id="wide-gamut-jpeg-chroma">
+                                <SelectTrigger id="wide-gamut-jpeg-chroma" aria-describedby="wide-gamut-jpeg-chroma-help">
                                     <SelectValue placeholder={getPlaceholder('wide_gamut_jpeg_chroma')} />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -472,7 +475,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                     <SelectItem value="4:2:0">{t('settings.chroma420')}</SelectItem>
                                 </SelectContent>
                             </Select>
-                            <p className="text-xs text-muted-foreground">{t('settings.wideGamutJpegChromaHint')}</p>
+                            <p id="wide-gamut-jpeg-chroma-help" className="text-xs text-muted-foreground">{t('settings.wideGamutJpegChromaHint')}</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="avif-effort">{t('settings.avifEffort')}</Label>
@@ -480,7 +483,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.avif_effort || ''}
                                 onValueChange={(value) => handleChange('avif_effort', value)}
                             >
-                                <SelectTrigger id="avif-effort">
+                                <SelectTrigger id="avif-effort" aria-describedby="avif-effort-help">
                                     <SelectValue placeholder={getPlaceholder('avif_effort')} />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -494,7 +497,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                     ))}
                                 </SelectContent>
                             </Select>
-                            <p className="text-xs text-muted-foreground">{t('settings.avifEffortHint')}</p>
+                            <p id="avif-effort-help" className="text-xs text-muted-foreground">{t('settings.avifEffortHint')}</p>
                         </div>
                     </div>
 
@@ -506,7 +509,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.sdr_jpeg_chroma || ''}
                                 onValueChange={(value) => handleChange('sdr_jpeg_chroma', value)}
                             >
-                                <SelectTrigger id="sdr-jpeg-chroma">
+                                <SelectTrigger id="sdr-jpeg-chroma" aria-describedby="sdr-jpeg-chroma-help">
                                     <SelectValue placeholder={getPlaceholder('sdr_jpeg_chroma')} />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -515,7 +518,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                     <SelectItem value="4:2:0">{t('settings.chroma420')}</SelectItem>
                                 </SelectContent>
                             </Select>
-                            <p className="text-xs text-muted-foreground">{t('settings.sdrJpegChromaHint')}</p>
+                            <p id="sdr-jpeg-chroma-help" className="text-xs text-muted-foreground">{t('settings.sdrJpegChromaHint')}</p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="wide-gamut-max-source-pixels">{t('settings.wideGamutMaxSourcePixels')}</Label>
@@ -529,8 +532,9 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.wide_gamut_max_source_pixels || ''}
                                 placeholder={getPlaceholder('wide_gamut_max_source_pixels')}
                                 onChange={(e) => handleChange('wide_gamut_max_source_pixels', e.target.value)}
+                                aria-describedby="wide-gamut-max-source-pixels-help"
                             />
-                            <p className="text-xs text-muted-foreground">{t('settings.wideGamutMaxSourcePixelsHint')}</p>
+                            <p id="wide-gamut-max-source-pixels-help" className="text-xs text-muted-foreground">{t('settings.wideGamutMaxSourcePixelsHint')}</p>
                         </div>
                     </div>
                 </CardContent>
@@ -695,6 +699,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.license_price_editorial_cents || ''}
                                 onChange={(e) => handleChange('license_price_editorial_cents', e.target.value)}
                                 placeholder={getPlaceholder('license_price_editorial_cents')}
+                                aria-describedby="license-price-help"
                             />
                         </div>
                         <div className="space-y-2">
@@ -707,6 +712,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.license_price_commercial_cents || ''}
                                 onChange={(e) => handleChange('license_price_commercial_cents', e.target.value)}
                                 placeholder={getPlaceholder('license_price_commercial_cents')}
+                                aria-describedby="license-price-help"
                             />
                         </div>
                         <div className="space-y-2">
@@ -719,10 +725,11 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                                 value={settings.license_price_rm_cents || ''}
                                 onChange={(e) => handleChange('license_price_rm_cents', e.target.value)}
                                 placeholder={getPlaceholder('license_price_rm_cents')}
+                                aria-describedby="license-price-help"
                             />
                         </div>
                     </div>
-                    <p className="text-xs text-muted-foreground">{t('settings.licensePriceHint')}</p>
+                    <p id="license-price-help" className="text-xs text-muted-foreground">{t('settings.licensePriceHint')}</p>
                 </CardContent>
             </Card>
         </div>
