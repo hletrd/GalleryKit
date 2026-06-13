@@ -68,8 +68,8 @@
 
 ## Progress
 
-- [ ] Item 1 — AGG-C4-01 scale-token regex `max-` false positive + self-check
-- [ ] Item 2 — AGG-C4-02 sidecar backfill `affectedRows` cleanup guard
+- [x] Item 1 — AGG-C4-01 scale-token regex `max-` false positive + self-check — DONE (commit `40a65aef`): `(?<!max-)` on every bare h/w branch + 9 negative regression fixtures; 12/12 audit + typecheck green.
+- [x] Item 2 — AGG-C4-02 sidecar backfill `affectedRows` cleanup guard — DONE: `flushBatch` captures `affectedRows` on both UPDATE branches, threads per-format filenames into batch items, cleans up via `deleteImageVariants(dir, fn, [])` after commit, tallies `deletedMidReencode` (decremented from `processed`); CLAUDE.md backfill prose updated; typecheck:scripts green.
 - [ ] Item 3 — AGG-C4-03 sales StatusBadge light-mode contrast
 - [ ] Item 4 — AGG-C4-04 upload-worker delete-race cleanup `[]` dir scan
 - [ ] Item 5 — AGG-C4-05 test backfill runner 2nd cleanup branch

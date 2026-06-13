@@ -48,11 +48,11 @@ dotenv.config({ path: '.env.local' });
 
 import fs from 'fs/promises';
 import PQueue from 'p-queue';
-import type { RowDataPacket } from 'mysql2';
+import type { RowDataPacket, ResultSetHeader } from 'mysql2';
 import sharp from 'sharp';
-import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, type ImageQualitySettings } from '../src/lib/process-image';
+import { processImageFormats, IMAGE_PIPELINE_VERSION, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '../src/lib/process-image';
 import { detectColorSignals } from '../src/lib/color-detection';
-import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
+import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL } from '../src/lib/advisory-locks';
 import { getGalleryConfig } from '../src/lib/gallery-config';
 import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
@@ -298,26 +298,54 @@ async function main() {
     let skipped = 0;
     let processed = 0;
     let errors = 0;
+    // AGG-C4-02: rows whose UPDATE matched 0 rows because the image was deleted
+    // mid-reencode. NOT a failure (the image is gone, idempotent retry is moot)
+    // and NOT counted as processed — surfaced separately.
+    let deletedMidReencode = 0;
     const reportEvery = Math.max(1, Math.floor(rows.length / 20));
 
     // R7-L8: batch DB updates to reduce round-trips.
-    const updateBatch: { id: number; signals: ReprocessSignals }[] = [];
+    // AGG-C4-02 (run-9 c1 ARCH-R9-01): carry the per-format filenames into each
+    // batch item so a row deleted mid-reencode (its UPDATE matches 0 rows) can
+    // have its freshly-written derivative files cleaned up — mirroring the
+    // affectedRows===0 guard the in-app runner (admin-backfill-runner.ts) and
+    // the upload queue (image-queue.ts) already carry. Without this, a delete
+    // that races a backfill re-encode of the SAME id (deleteImage does NOT take
+    // the per-image processing lock) orphans the just-written variants on disk.
+    type BatchFilenames = { filename_webp: string; filename_avif: string; filename_jpeg: string };
+    const updateBatch: { id: number; signals: ReprocessSignals; files: BatchFilenames }[] = [];
     // AGG2-01: detection-failure rows persist only the derivative columns
     // (no pipeline_version bump, no color columns) so they remain backfill
     // candidates for a later detection retry.
-    const derivativeBatch: { id: number; derivative: ReprocessDerivativeOnly }[] = [];
+    const derivativeBatch: { id: number; derivative: ReprocessDerivativeOnly; files: BatchFilenames }[] = [];
 
     function pendingUpdates(): number {
         return updateBatch.length + derivativeBatch.length;
+    }
+
+    // AGG-C4-02: full-directory-scan cleanup ({size}=[] form) so EVERY variant
+    // is removed regardless of the configured size list — identical contract to
+    // admin-backfill-runner.ts's cleanupDeletedMidReencodeVariants.
+    async function cleanupDeletedMidReencode(files: BatchFilenames): Promise<void> {
+        await Promise.all([
+            deleteImageVariants(UPLOAD_DIR_WEBP, files.filename_webp, []),
+            deleteImageVariants(UPLOAD_DIR_AVIF, files.filename_avif, []),
+            deleteImageVariants(UPLOAD_DIR_JPEG, files.filename_jpeg, []),
+        ]);
     }
 
     async function flushBatch(): Promise<void> {
         if (pendingUpdates() === 0) return;
         const items = updateBatch.splice(0, updateBatch.length);
         const derivativeItems = derivativeBatch.splice(0, derivativeBatch.length);
+        // Collect rows whose UPDATE matched 0 rows (deleted mid-reencode). The
+        // filesystem cleanup runs AFTER the transaction commits so a best-effort
+        // unlink error can never roll back legitimate sibling-row updates in the
+        // same batch.
+        const deletedMidReencodeFiles: BatchFilenames[] = [];
         await db.transaction(async (tx) => {
             for (const item of items) {
-                await tx.execute(sql`
+                const [res] = await tx.execute(sql`
                     UPDATE images SET
                         pipeline_version = ${IMAGE_PIPELINE_VERSION},
                         icc_profile_name = ${item.signals.icc_profile_name ?? null},
@@ -331,17 +359,35 @@ async function main() {
                         avif_10bit = ${item.signals.avif_10bit}
                     WHERE id = ${item.id}
                 `);
+                if ((res as ResultSetHeader)?.affectedRows === 0) {
+                    deletedMidReencodeFiles.push(item.files);
+                }
             }
             for (const item of derivativeItems) {
-                await tx.execute(sql`
+                const [res] = await tx.execute(sql`
                     UPDATE images SET
                         was_downscaled = ${item.derivative.was_downscaled},
                         avif_10bit = ${item.derivative.avif_10bit}
                     WHERE id = ${item.id}
                 `);
+                if ((res as ResultSetHeader)?.affectedRows === 0) {
+                    deletedMidReencodeFiles.push(item.files);
+                }
             }
         });
-        console.log(`  [batch-flush] ${items.length} row(s) updated, ${derivativeItems.length} derivative-only`);
+        if (deletedMidReencodeFiles.length > 0) {
+            // The row was deleted while we re-encoded it. The deletion already
+            // unlinked the original variants; deleteImageVariants is
+            // ENOENT-tolerant, so this only removes the leftover files our
+            // re-encode just re-materialized. Not a failure — adjust the
+            // processed tally and surface the count.
+            deletedMidReencode += deletedMidReencodeFiles.length;
+            processed -= deletedMidReencodeFiles.length;
+            await Promise.all(deletedMidReencodeFiles.map(cleanupDeletedMidReencode));
+            console.log(`  [batch-flush] ${deletedMidReencodeFiles.length} row(s) deleted mid-reencode — orphaned derivatives cleaned up`);
+        }
+        const updatedOk = items.length + derivativeItems.length - deletedMidReencodeFiles.length;
+        console.log(`  [batch-flush] ${updatedOk} row(s) updated (${derivativeItems.length} derivative-only)`);
     }
 
     for (const [index, row] of rows.entries()) {
@@ -349,12 +395,17 @@ async function main() {
             const result = await reprocessRow(row, backfillSettings);
             if (result.outcome === 'processed') {
                 processed++;
+                const files: BatchFilenames = {
+                    filename_webp: row.filename_webp,
+                    filename_avif: row.filename_avif,
+                    filename_jpeg: row.filename_jpeg,
+                };
                 if (result.signals) {
-                    updateBatch.push({ id: row.id, signals: result.signals });
+                    updateBatch.push({ id: row.id, signals: result.signals, files });
                 } else if (result.derivativeOnly) {
                     // AGG2-01: detection failed but encode succeeded — persist
                     // the derivative columns without bumping pipeline_version.
-                    derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly });
+                    derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly, files });
                 }
                 if (pendingUpdates() >= BATCH_SIZE) {
                     await flushBatch();
@@ -378,7 +429,7 @@ async function main() {
     // Flush any remaining rows.
     await flushBatch();
 
-    console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors}`);
+    console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors} deletedMidReencode=${deletedMidReencode}`);
 
     // Release advisory lock explicitly before closing the connection.
     try {
