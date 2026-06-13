@@ -561,8 +561,10 @@ export function stripGpsFromWebpBuffer(input: Buffer): GpsStripResult | null {
     let stripped = false;
     let offset = 12;
     while (offset + 8 <= buf.length) {
-        const chunkSize = buf.readUInt32LE(offset);
-        const chunkTag = buf.toString('ascii', offset + 4, offset + 8);
+        // RIFF sub-chunk layout is [FourCC tag: 4 bytes][size: 4 bytes LE][data]
+        // — the tag comes FIRST, then the size (per the WebP RIFF container spec).
+        const chunkTag = buf.toString('ascii', offset, offset + 4);
+        const chunkSize = buf.readUInt32LE(offset + 4);
         const dataStart = offset + 8;
         const dataEnd = dataStart + chunkSize;
         if (dataEnd > buf.length) return null;
@@ -577,7 +579,9 @@ export function stripGpsFromWebpBuffer(input: Buffer): GpsStripResult | null {
         } else if (chunkTag === 'XMP ') {
             const xmp = buf.toString('latin1', dataStart, dataEnd);
             if (XMP_GPS_TOKEN.test(xmp)) {
-                buf.write('JUNK', offset + 4, 4, 'ascii');
+                // Retag the chunk's FourCC (bytes 0-3 of the sub-chunk) to JUNK
+                // so readers skip it; the size field (bytes 4-7) is preserved.
+                buf.write('JUNK', offset, 4, 'ascii');
                 buf.fill(0, dataStart, dataEnd);
                 stripped = true;
             }

@@ -31,7 +31,7 @@
   2. Fix the XMP-retag write to target the tag field: `buf.write('JUNK', offset, 4, 'ascii');` (the `buf.fill(0, dataStart, dataEnd)` payload zero is already correct).
   3. Re-read the surrounding bounds math (`dataStart = offset + 8`, `dataEnd = dataStart + chunkSize`, `paddedSize = chunkSize + (chunkSize % 2)`, the `next <= offset` anti-stall guard at `:587`) to confirm it is all consistent once tag/size are correct — these were already written for the correct layout; only the two reads + the one write were inverted.
 - **Acceptance:** with a real WebP-with-GPS input, `stripGpsFromWebpBuffer(input)` returns `{ stripped: true }` and the output's VP8/VP8L pixel chunk bytes are byte-identical to the input (lossless) while the EXIF/XMP chunk is neutralized; a GPS-free WebP returns `{ stripped: false }` with the input reference; non-WebP bytes still return `null`. The new test (Item 2) proves this RED before / GREEN after. `npm test --workspace=apps/web` green; `npm run typecheck --workspace=apps/web` green. **Land WITH Item 2 in the same commit** (the bug fix and its proven-RED test land together, per the repo's established practice).
-- **Status:** PENDING
+- **Status:** DONE (commit pending push). Field order swapped at `gps-exif-strip.ts:566-567` (tag@offset, size@offset+4); JUNK write fixed to `offset` (the tag field). End-to-end verified: lossless WebP scrub now returns `{stripped:true}`, VP8 pixel chunk byte-identical, GPS entries→0.
 
 ## Item 2 — AGG-C6-02: the WebP GPS-strip test is vacuous (MED test depth · test-engineer + debugger · same root as Item 1)
 
@@ -44,7 +44,7 @@
   3. Assert a GPS-FREE WebP returns `{ stripped: false }` with the input reference (mirror the JPEG `stripped=false` test at `:176-183`).
   4. Assert non-WebP bytes return `null` (mirror `:185-189`).
 - **Acceptance:** the new test goes RED against the CURRENT (buggy) `gps-exif-strip.ts` and GREEN after Item 1's field-order fix — capture this RED-before/GREEN-after in the commit body (the repo's established proof practice). `npm test --workspace=apps/web` green; `npm run typecheck --workspace=apps/web` green. Land in the SAME commit as Item 1.
-- **Status:** PENDING
+- **Status:** DONE (commit pending push). 3 direct `stripGpsFromWebpBuffer` pure-scrubber tests added to `strip-gps-from-original.test.ts` (lossless byte-identity + EXIF-neutralized, GPS-free stripped:false+input-ref, non-WebP null). PROVEN RED: reverting the field-order fix flips the 2 lossless-contract tests RED (2 failed | 22 passed), restored GREEN (24/24). Sharp WebP fixture confirmed to carry a real RIFF EXIF chunk (VP8X/VP8 /EXIF).
 
 ## Item 3 — AGG-C6-03: two more public back-nav `<Link>`s render ~20 px (MED a11y · designer · adjacent gap of AGG-C5-03)
 

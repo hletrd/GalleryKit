@@ -186,6 +186,73 @@ describe('gps-exif-strip pure scrubbers', () => {
         expect(stripGpsFromJpegBuffer(Buffer.from('not a jpeg'))).toBeNull();
     });
 
+    // AGG-C6-01 / AGG-C6-02: the lossless WebP RIFF scrub. These pin the
+    // pure scrubber DIRECTLY — the dispatcher-level WebP test above asserts
+    // only decoded-pixel equality, which the lossy re-encode FALLBACK also
+    // satisfies, so it passed green even while the scrubber returned null on
+    // every real WebP (a RIFF field-order inversion: it read [size][tag]
+    // instead of the spec's [tag][size]). These tests go RED against that
+    // buggy version (stripped:false / null) and GREEN once tag/size are read
+    // in the correct order. The VP8 pixel-chunk byte-identity check is what
+    // proves the LOSSLESS contract (no re-encode) — exactly what was broken.
+    function webpPixelChunk(b: Buffer): Buffer | null {
+        let off = 12;
+        while (off + 8 <= b.length) {
+            const tag = b.toString('ascii', off, off + 4);
+            const size = b.readUInt32LE(off + 4);
+            if (tag === 'VP8 ' || tag === 'VP8L' || tag === 'VP8X') {
+                if (tag !== 'VP8X') return b.subarray(off + 8, off + 8 + size);
+            }
+            off = off + 8 + size + (size % 2);
+        }
+        return null;
+    }
+
+    it('stripGpsFromWebpBuffer losslessly removes GPS (VP8 pixel chunk byte-identical, EXIF neutralized)', async () => {
+        const file = await makeFixture('pure-gps.webp', 'webp', true);
+        const input = await fs.readFile(file);
+        // Precondition: the fixture really carries GPS in a RIFF EXIF chunk.
+        expect(await gpsInFile(file)).not.toBeNull();
+        const pixelsBefore = webpPixelChunk(input);
+        expect(pixelsBefore).not.toBeNull();
+
+        const result = stripGpsFromWebpBuffer(input);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+
+        // Lossless contract: the compressed pixel chunk is byte-identical —
+        // i.e. the original was NOT decoded/re-encoded (the whole point of
+        // the byte-surgery path). This is the assertion the dispatcher test
+        // could not make (it compared decoded pixels, which survive a q95
+        // re-encode of an already-q95 decode).
+        const pixelsAfter = webpPixelChunk(result!.buffer);
+        expect(pixelsAfter).not.toBeNull();
+        expect(pixelsAfter!.equals(pixelsBefore!)).toBe(true);
+
+        // GPS is actually gone from the scrubbed EXIF block.
+        const parsed = exifReader(
+            (await sharp(result!.buffer).metadata()).exif ?? Buffer.alloc(0),
+        ) as { GPSInfo?: Record<string, unknown>; gps?: Record<string, unknown> };
+        const gps = parsed.GPSInfo ?? parsed.gps ?? null;
+        const meaningful = gps ? Object.entries(gps).filter(([, v]) => v != null) : [];
+        expect(meaningful.length).toBe(0);
+    });
+
+    it('stripGpsFromWebpBuffer reports stripped=false and returns the input reference for GPS-free WebP', async () => {
+        const file = await makeFixture('pure-nogps.webp', 'webp', false);
+        const input = await fs.readFile(file);
+        const result = stripGpsFromWebpBuffer(input);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(false);
+        expect(result!.buffer).toBe(input);
+    });
+
+    it('stripGpsFromWebpBuffer returns null for non-WebP bytes', () => {
+        // 12+ bytes so the length guard is not what trips it — the RIFF/WEBP
+        // magic check must reject.
+        expect(stripGpsFromWebpBuffer(Buffer.from('not a webp file at all'))).toBeNull();
+    });
+
     it('stripGpsFromJpegBuffer drops GPS-bearing XMP APP1 segments', async () => {
         const file = await makeFixture('xmp.jpg', 'jpeg', false);
         const original = await fs.readFile(file);
