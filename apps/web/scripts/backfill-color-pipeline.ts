@@ -112,6 +112,39 @@ interface ReprocessResult {
     derivativeOnly?: ReprocessDerivativeOnly;
 }
 
+/** Per-format derivative filenames for a single image row. */
+export type BatchFilenames = { filename_webp: string; filename_avif: string; filename_jpeg: string };
+
+/**
+ * AGG-C5-01 (run-9 c2): the delete-mid-reencode orphan-cleanup, extracted to a
+ * module-level export so the production sidecar's `affectedRows===0` cleanup
+ * contract is unit-testable in isolation (the in-`main` `flushBatch` is a closure
+ * and cannot be reached from a test). Uses the full-directory-scan ({size}=[])
+ * form so EVERY variant is removed regardless of the configured size list —
+ * identical contract to admin-backfill-runner.ts's
+ * cleanupDeletedMidReencodeVariants. ENOENT-tolerant via deleteImageVariants.
+ */
+export async function cleanupDeletedMidReencodeVariants(files: BatchFilenames): Promise<void> {
+    await Promise.all([
+        deleteImageVariants(UPLOAD_DIR_WEBP, files.filename_webp, []),
+        deleteImageVariants(UPLOAD_DIR_AVIF, files.filename_avif, []),
+        deleteImageVariants(UPLOAD_DIR_JPEG, files.filename_jpeg, []),
+    ]);
+}
+
+/**
+ * AGG-C5-01: pure decision helper — given each batched UPDATE's affectedRows and
+ * the per-row filenames, return the files whose row was deleted mid-reencode
+ * (affectedRows===0) and must have their just-written derivatives cleaned up.
+ * Extracted so the sidecar's delete-race partitioning is testable without a live
+ * DB; `flushBatch` feeds it the ResultSetHeader.affectedRows it reads back.
+ */
+export function collectDeletedMidReencodeFiles(
+    results: { affectedRows: number; files: BatchFilenames }[],
+): BatchFilenames[] {
+    return results.filter((r) => r.affectedRows === 0).map((r) => r.files);
+}
+
 interface BackfillSettings {
     quality: ImageQualitySettings;
     sizes: number[];
@@ -312,7 +345,6 @@ async function main() {
     // the upload queue (image-queue.ts) already carry. Without this, a delete
     // that races a backfill re-encode of the SAME id (deleteImage does NOT take
     // the per-image processing lock) orphans the just-written variants on disk.
-    type BatchFilenames = { filename_webp: string; filename_avif: string; filename_jpeg: string };
     const updateBatch: { id: number; signals: ReprocessSignals; files: BatchFilenames }[] = [];
     // AGG2-01: detection-failure rows persist only the derivative columns
     // (no pipeline_version bump, no color columns) so they remain backfill
@@ -323,17 +355,6 @@ async function main() {
         return updateBatch.length + derivativeBatch.length;
     }
 
-    // AGG-C4-02: full-directory-scan cleanup ({size}=[] form) so EVERY variant
-    // is removed regardless of the configured size list — identical contract to
-    // admin-backfill-runner.ts's cleanupDeletedMidReencodeVariants.
-    async function cleanupDeletedMidReencode(files: BatchFilenames): Promise<void> {
-        await Promise.all([
-            deleteImageVariants(UPLOAD_DIR_WEBP, files.filename_webp, []),
-            deleteImageVariants(UPLOAD_DIR_AVIF, files.filename_avif, []),
-            deleteImageVariants(UPLOAD_DIR_JPEG, files.filename_jpeg, []),
-        ]);
-    }
-
     async function flushBatch(): Promise<void> {
         if (pendingUpdates() === 0) return;
         const items = updateBatch.splice(0, updateBatch.length);
@@ -342,7 +363,7 @@ async function main() {
         // filesystem cleanup runs AFTER the transaction commits so a best-effort
         // unlink error can never roll back legitimate sibling-row updates in the
         // same batch.
-        const deletedMidReencodeFiles: BatchFilenames[] = [];
+        const updateResults: { affectedRows: number; files: BatchFilenames }[] = [];
         await db.transaction(async (tx) => {
             for (const item of items) {
                 const [res] = await tx.execute(sql`
@@ -359,9 +380,7 @@ async function main() {
                         avif_10bit = ${item.signals.avif_10bit}
                     WHERE id = ${item.id}
                 `);
-                if ((res as ResultSetHeader)?.affectedRows === 0) {
-                    deletedMidReencodeFiles.push(item.files);
-                }
+                updateResults.push({ affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
             }
             for (const item of derivativeItems) {
                 const [res] = await tx.execute(sql`
@@ -370,11 +389,12 @@ async function main() {
                         avif_10bit = ${item.derivative.avif_10bit}
                     WHERE id = ${item.id}
                 `);
-                if ((res as ResultSetHeader)?.affectedRows === 0) {
-                    deletedMidReencodeFiles.push(item.files);
-                }
+                updateResults.push({ affectedRows: (res as ResultSetHeader)?.affectedRows ?? 0, files: item.files });
             }
         });
+        // AGG-C5-01: partition + cleanup via the module-level exported helpers
+        // (unit-tested in backfill-color-pipeline-deleted-mid-reencode.test.ts).
+        const deletedMidReencodeFiles = collectDeletedMidReencodeFiles(updateResults);
         if (deletedMidReencodeFiles.length > 0) {
             // The row was deleted while we re-encoded it. The deletion already
             // unlinked the original variants; deleteImageVariants is
@@ -383,7 +403,7 @@ async function main() {
             // processed tally and surface the count.
             deletedMidReencode += deletedMidReencodeFiles.length;
             processed -= deletedMidReencodeFiles.length;
-            await Promise.all(deletedMidReencodeFiles.map(cleanupDeletedMidReencode));
+            await Promise.all(deletedMidReencodeFiles.map(cleanupDeletedMidReencodeVariants));
             console.log(`  [batch-flush] ${deletedMidReencodeFiles.length} row(s) deleted mid-reencode — orphaned derivatives cleaned up`);
         }
         const updatedOk = items.length + derivativeItems.length - deletedMidReencodeFiles.length;
