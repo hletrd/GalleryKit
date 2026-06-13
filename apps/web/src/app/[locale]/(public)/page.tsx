@@ -39,6 +39,15 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const title = tagSlugs.length > 0
     ? `${tagLabels.map(tag => '#' + tag).join(' ')} | ${seo.title}`
     : seo.title;
+  // AGG-10 (run-6 c1): the root layout sets title.template = `%s | ${seo.title}`,
+  // which Next applies to any string `metadata.title`. The home page already
+  // bakes the site name into `title` (the no-filter branch IS the site root =
+  // `seo.title`; the filtered branch ends `… | ${seo.title}`), so a string title
+  // here double-suffixes: `GalleryKit | GalleryKit` (no-filter) and
+  // `#tag | GalleryKit | GalleryKit` (filtered). `{ absolute }` opts the page out
+  // of the template. OpenGraph/Twitter titles are NOT templated by Next, so those
+  // keep the plain `title` string.
+  const metadataTitle = { absolute: title } as const;
 
   const description = tagSlugs.length > 0
     ? t('browsePhotosWithTag', { tags: tagLabels.join(', '), site: seo.title })
@@ -55,7 +64,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   if (seo.og_image_url) {
     const ogImages = [{ url: seo.og_image_url, width: 1200, height: 630, alt: seo.title }];
     return {
-      title,
+      title: metadataTitle,
       description,
       alternates: { canonical: pageUrl, languages: alternateLanguages, types: { 'application/atom+xml': atomFeedUrl } },
       robots,
@@ -100,7 +109,7 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     : [];
 
   return {
-    title: title,
+    title: metadataTitle,
     description: description,
     alternates: { canonical: pageUrl, languages: alternateLanguages, types: { 'application/atom+xml': atomFeedUrl } },
     robots,
