@@ -1,241 +1,141 @@
-# Critic Deep Review — Run 5 Cycle 1 (Whole-State, Multi-Perspective)
+# Critic — Run-6 Cycle-1 Adversarial Multi-Perspective Critique
 
-Reviewer: oh-my-claudecode:critic
-Date: 2026-06-11
-Scope: Whole current state of GalleryKit (apps/web). Focus per assignment: product-coherence gaps,
-doc↔code drift, risky assumptions, half-finished features (storage abstraction, HDR WI-09, CLIP
-embeddings, Stripe entitlements, Lightroom PATs, smart collections, auto alt-text), operational
-risk (single-writer topology, in-memory state, deploy pipeline), and blind spots the prior 20
-cycles plausibly anchored past.
-
-## Mode
-
-Operated in THOROUGH mode. Did NOT escalate to ADVERSARIAL: the security-critical surfaces
-(Stripe webhook, paid-download, LR PAT upload, semantic route, smart-collection compiler) are
-unusually well-hardened — dozens of cited prior-cycle fixes, defense-in-depth, fail-closed
-patterns throughout. The findings below are concentrated in the HALF-FINISHED / STUB feature
-seams the prior photographer-anchored cycles toured less, exactly where the assignment pointed.
-
-## Pre-commitment Predictions (made before deep reading)
-
-1. CLIP/semantic public route is a stub but reachable in some config → **CONFIRMED (CRT-R5C1-01)**.
-2. Stripe webhook signature/refund/async edge cases → checked, found robust. Not a finding.
-3. Lightroom PAT upload weaker than admin routes → checked, found at PARITY with browser path. Not a finding.
-4. Smart-collection executes admin-controlled query fragments on a public page → checked,
-   parameter-bound + allowlisted + processed-gated + is_public-gated. Not a finding.
-5. Storage abstraction partially wired and leaks → checked, ZERO non-test imports. Genuinely
-   unintegrated, matches docs. Not a finding (but see CRT-R5C1-05 for the doc-debt angle).
-
-Net: the predicted Stripe/PAT/smart-collection hazards were already closed by prior cycles. The
-real residue is in the STUB ML features (semantic search, auto alt-text) and dead feature-flag
-scaffolding — the surfaces that were added late and reviewed least.
+**Reviewer:** critic agent (deep-review fan-out)
+**Scope:** uncommitted working tree (AGG-5 pool formula, AGG-9 error-H1) + the three in-flight plans (328/329/330) + stated CLAUDE.md invariants.
+**Mode:** started THOROUGH, escalated to ADVERSARIAL after finding 2 plan deferrals built on factually-wrong premises + half-applied in-file fixes (a systemic plan/reality-drift pattern, not isolated mistakes). Adversarial back-half checked adjacent files (global-error.tsx, the runner module header docblock, the api-auth origin-vs-scope code paths, the absence of a home-title regression test).
+**Verdict:** **REVISE** — the shipped code is correct, but the *narration* (plan text, in-file comments, deferral rationales) is drifting from reality in ways that will mislead the next implementer. No CRITICAL; the defects are doc/plan-honesty and one missing test, not runtime bugs.
 
 ---
 
-## CRITICAL Findings
+## Pre-commitment predictions vs. findings
 
-### CRT-R5C1-01 — `semantic_search_mode = 'production'` is selectable in admin UI but serves RANDOM stub results to the public
-- Severity: **CRIT** · Confidence: **High** · Classification: **confirmed**
-- Evidence:
-  - `src/app/api/search/semantic/route.ts:18-19` docblock: "WARNING: The stub encoder returns
-    RANDOM results. Do NOT enable semantic_search_mode in production until the stub is replaced
-    with real ONNX inference."
-  - `route.ts:169-174` only rejects when mode `!== 'production'`. When mode **is** `'production'`,
-    the route proceeds to `embedTextStub(query)` (`route.ts:190`).
-  - `src/lib/clip-inference.ts` is a pure stub: `deterministicEmbedding` from a SHA-256 of the
-    input. `embedTextStub` produces a vector with **no semantic relationship** to image content.
-  - `src/app/[locale]/admin/(protected)/settings/settings-client.tsx:540` renders
-    `<SelectItem value="production">` — an admin can pick it. The only guard is a soft amber
-    paragraph (`settings-client.tsx:544-548`) reading "search results will be semantically random"
-    (`messages/en.json:727`). Nothing in code prevents the selection or the save.
-  - `gallery-config-shared.ts:168` validator ACCEPTS `'production'` as a valid stored value.
-- Why it matters: A single admin mis-click (or an operator who reads "Production (requires ONNX)"
-  in `messages/en.json:726` and assumes "production-ready") flips a PUBLIC, same-origin,
-  rate-limited-but-unauthenticated endpoint into serving cosine-ranked **noise** as
-  "semantic search results" — complete with enriched thumbnails/titles. End users get
-  authoritative-looking, wrong results. This is a public correctness failure gated only by prose.
-- Concrete failure scenario: Photographer enables semantic search to "try it," picks the only
-  option labelled production-grade, saves. Visitors search "sunset" and receive a deterministic
-  but content-unrelated set of photos that looks intentional. No error, no telemetry, no rollback.
-- Suggested fix: Make `'production'` **unselectable** until real inference exists. Concretely:
-  (a) gate the `<SelectItem value="production">` behind a runtime capability probe
-  (`onnxruntime-node` present AND model files on disk), OR (b) reject `'production'` in
-  `isValidSettingValue('semantic_search_mode', …)` while the stub is the only encoder, returning
-  the value to `'stub'`, AND (c) in the route, treat `'production'` as 503 when the real encoder
-  module is absent (capability check, not config check). The current "warn and allow" posture is
-  the documented anti-pattern this codebase otherwise avoids everywhere (fail-closed elsewhere).
-- Realist Check: Realistic worst case is reputational/quality, not data-loss or security; results
-  are noise, not a breach. Detection is **silent** (looks intentional). Mitigated only by the soft
-  warning and that the feature is off by default. The silent-detection + public-facing + "looks
-  legitimate" combination keeps it CRIT despite no security impact: a quality gate that can be
-  crossed with one click and no signal is exactly the false-approval class this role guards.
+| Prediction | Outcome |
+|---|---|
+| AGG-5 "getImage needs 3 simultaneous connections" premise may be false (pool serializes) | **CONFIRMED as overclaim** — codebase's own `data.ts:100` says "the connection pool (10) serializes execution anyway." Formula is defensible on worst-case acquisition, but the comment states certainty the code elsewhere contradicts. (CRT-2) |
+| AGG-9 split correct but check sibling parity + DES-07 | **CONFIRMED correct**; DES-07 NOT actually closed (global-error.tsx untouched, uses a different pattern). (CRT-7) |
+| AGG-1 honesty: UI may still reconstruct by subtraction | **REFUTED — genuinely fixed** at HEAD across all 3 files. (verified clean) |
+| AGG-16 still lacks `<Link>`/`<a>` + root-file scan | **REFUTED — already closed** at HEAD (commit c1a1227a). Plan-329 item 6 re-schedules closed work. (CRT-1) |
+| Plan-330 Stripe deferral may be circular self-justification | **PARTIALLY CONFIRMED** — deferral is defensible but leans on a CLAUDE.md note that is itself the artifact of the same deferral chain. (CRT-5) |
 
 ---
 
-## MAJOR Findings
+## Findings table
 
-### CRT-R5C1-02 — Auto alt-text stub leaks the literal `[AUTO] ` engineering prefix into PUBLIC photo titles/headings and SEO
-- Severity: **MAJOR** · Confidence: **High** · Classification: **confirmed**
-- Evidence:
-  - `src/lib/caption-generator.ts:27` `ALT_TEXT_STUB_PREFIX = '[AUTO] '`; `:33-40`
-    `generateCaptionStub` returns `"[AUTO] Photo taken with <camera>"` or `"[AUTO] Photo"`.
-  - `generateCaption(input, autoAltTextEnabled)` (`:50-61`) writes that string to
-    `alt_text_suggested` when `auto_alt_text_enabled === 'true'` (`gallery-config-shared.ts:39,105`).
-  - `src/lib/data.ts:263-264`: `alt_text_suggested` is explicitly marked **PUBLIC** and is in
-    `publicSelectFields`.
-  - `src/lib/photo-title.ts:104-105`: when a photo has no meaningful title and no tags,
-    `getPhotoDisplayTitle` returns `image.alt_text_suggested.trim()` **verbatim** — `[AUTO] ` and all.
-  - `getPhotoDisplayTitle` feeds public surfaces: `src/components/photo-viewer.tsx:174` (the photo
-    page heading + document `<title>` via `getPhotoDocumentTitle`) and
-    `src/components/info-bottom-sheet.tsx:157` (mobile info sheet heading).
-- Why it matters: This is a developer/debug marker reaching the **end-user-visible** photo title,
-  the browser tab title, and (through metadata) SEO. The product premise is "deliver the
-  photographer's intent accurately"; shipping "[AUTO] Photo taken with Canon EOS R5" as a public
-  heading is the opposite of that premise. It is also indexable.
-- Concrete failure scenario: Photographer enables auto alt-text (a plausible a11y/SEO win), uploads
-  untitled/untagged photos. Public photo pages now render headings and `<title>` tags literally
-  prefixed with "[AUTO] ". Google indexes them.
-- Suggested fix: Drop the `[AUTO] ` prefix from any value that can reach a public display path, OR
-  exclude `alt_text_suggested` from the `getPhotoDisplayTitle` *visible-title* fallback (keep it
-  for the `alt=""` attribute only, which is its stated purpose per the `data.ts:263` comment "SEO +
-  a11y fallback"). The prefix belongs only in the admin bulk-editor "suggested" column, never in a
-  rendered title. If the prefix is needed for admin disambiguation, strip it at the public read
-  boundary in `photo-title.ts`.
-- Realist Check: Off by default; only fires on untitled+untagged photos; admin-visible in the
-  bulk editor so a careful admin would notice. Detection is moderate (admin might see it; visitors
-  certainly do). Stays MAJOR not CRIT because it is opt-in, cosmetic, and trivially reversible —
-  but it is a genuine public-honesty/coherence defect, not a preference.
-
-### CRT-R5C1-03 — Doc claim "HDR badge gated until WI-09" rests on a feature flag that gates NOTHING (dead scaffolding) — and WI-09 does not exist
-- Severity: **MAJOR (as doc-integrity / half-finished-feature drift)** · Confidence: **High** · Classification: **confirmed**
-- Evidence:
-  - `src/lib/feature-flags.ts:10`: `export const HDR_FEATURE_ENABLED =
-    process.env.NEXT_PUBLIC_HDR_FEATURE_FLAG === 'true';` with a comment "WI-08 / WI-09: HDR AVIF
-    delivery … Defaults to false until the HDR encoder (WI-09) is implemented."
-  - `grep` across `src/` and `scripts/`: **zero** other references to `HDR_FEATURE_ENABLED` or
-    `NEXT_PUBLIC_HDR_FEATURE_FLAG`. The constant is exported and never consumed.
-  - `grep` for `avifenc` / `_hdr.avif` / `deriveHdrAvifFilename`: **zero** hits in src or scripts.
-    WI-09 (the HDR encoder shell-out described in CLAUDE.md "HDR ingest") is not implemented.
-  - `src/lib/hdr-filenames.ts` (documented "reserved for WI-09"): **zero** non-self importers —
-    dead code.
-- Why it matters: Two coupled doc-integrity problems. (1) CLAUDE.md presents `HDR_FEATURE_ENABLED`
-  and `hdr-filenames.ts` as the mechanism that will switch on HDR delivery; in reality the flag is
-  inert and flipping `NEXT_PUBLIC_HDR_FEATURE_FLAG=true` changes nothing — a future engineer wiring
-  HDR will reasonably assume the flag already guards real gating and ship a half-connected feature.
-  (2) The honesty invariant ("`is_hdr`/`transfer_function` stay admin-only until WI-09 ships") is
-  currently enforced ONLY by the privacy guard (`privacy-fields.test.ts`), NOT by the flag the docs
-  credit. The flag is decorative. The good news: because the flag gates nothing, flipping it is
-  NOT a public-honesty hazard today (so this is not CRIT).
-- Concrete failure scenario: A contributor implements WI-09, sees `HDR_FEATURE_ENABLED` "already
-  exists," wires the encoder behind it, sets the env var — and discovers the badge gating, the
-  `<picture media="dynamic-range:high">` source, and the public-field exposure were never connected
-  to it. Or worse, partially connects it and ships unfulfilled HDR badges.
-- Suggested fix: Either (a) delete `feature-flags.ts`'s `HDR_FEATURE_ENABLED` and `hdr-filenames.ts`
-  as premature scaffolding and let WI-09 introduce its own wiring, OR (b) add an explicit
-  "DEAD/RESERVED — not wired" banner to both and to the CLAUDE.md "HDR ingest" section so no one
-  treats the flag as a live gate. Update CLAUDE.md to state plainly that the admin-only honesty
-  invariant is enforced by the privacy guard, not by any flag.
-- Realist Check: No runtime impact today (dead code). Severity is for the latent trap it sets for
-  the WI-09 implementer + the doc claiming a non-existent gate. MAJOR as drift, not as a live bug.
+| ID | Severity | Confidence | File / Plan | One-line |
+|----|----------|-----------|-------------|----------|
+| CRT-1 | MAJOR | High | plan-329 item 6 (AGG-16) | Re-schedules an ALREADY-CLOSED gate gap; touch-target audit at HEAD already scans root files + `<Link>`/`<a>`. |
+| CRT-2 | MAJOR | High | `admin-backfill-runner.ts:93-98`, plan-329 item 4 | AGG-5 "single getImage needs 3 simultaneous connections" overclaims; `data.ts:100` documents the pool *serializes*. Formula OK; justification dishonest. |
+| CRT-3 | MAJOR | High | `admin-backfill-runner.ts:28-33` | Half-applied fix IN THE SAME FILE: module header docblock still states the OLD `floor((LIMIT-2)/2)=4` formula the author just changed at lines 103-123. |
+| CRT-4 | MAJOR | High | `db/index.ts:13-18` | Second stale site of the OLD pool formula in source; not scheduled in any plan (plan-330 AGG-22 covers only CLAUDE.md). |
+| CRT-5 | MAJOR | Medium | plan-330 deferred #4 (AGG-17) | Deferral premise is factually wrong: wrong-scope returns **401** (already pinned by a test), not 403. The 403 is the *cross-origin* branch. Exit criterion would contradict an existing passing test. |
+| CRT-6 | MAJOR | High | plan-330 deferred #2 (AGG-13) | Defers an ALREADY-FIXED item: the `['disabled','stub'].includes(...)` Select coercion is present at `settings-client.tsx:622`. |
+| CRT-7 | MINOR | High | plan-330 deferred #6 (DES-07) | DES-07 claimed to "ride along" with AGG-9, but AGG-9's working-tree change does NOT touch global-error.tsx (the actual heading-pattern outlier). Not closed. |
+| CRT-8 | MINOR | High | plan-329 item 2 (AGG-10) | Acceptance "existing metadata tests green" is vacuous — NO test guards the home `<title>` single-suffix behavior. Fix shipped (8fc403a2) but unpinned; trivially regressible. |
+| CRT-9 | MINOR | Medium | plan-329 Progress table | Stale status: items 2 (AGG-10, committed 8fc403a2) and 6 (AGG-16, closed) still marked TODO; misleads anyone resuming the plan. |
+| CRT-10 | MAJOR | Medium | plan-330 deferred #1 (AGG-12 Stripe) | Deferral is *operationally* sound but the rationale's "repo rule explicitly allows" is circular (the CLAUDE.md note IS the deferral artifact). The real safety net is the missing exit-criterion trigger, which has no detection mechanism. |
+| CRT-11 | LOW | High | plan-330 deferred #1 (AGG-12) | "No data loss … recoverable via Stripe dashboard" is true but there is NO operator alert when an `async_payment_succeeded` event arrives unhandled → the gap is silent until a customer complains. |
 
 ---
 
-## MINOR Findings
+## Detail
 
-### CRT-R5C1-04 — Stripe webhook is missing the `checkout.session.async_payment_succeeded` handler it documents as needed
-- Severity: **MINOR** · Confidence: **High** · Classification: **confirmed**
-- Evidence: `src/app/api/stripe/webhook/route.ts:96-99` explicitly notes async-paid flows (ACH,
-  bank transfer, OXXO, Boleto) arrive `'unpaid'` and "a future cycle should add a handler for
-  `checkout.session.async_payment_succeeded`." Only `checkout.session.completed` is handled; the
-  async-succeeded event is silently ignored (falls through to the final `received: true`).
-- Why it matters: If an operator ever enables a delayed-payment method in Stripe, the customer pays,
-  funds settle, Stripe fires `async_payment_succeeded` — and **no entitlement is ever minted**. The
-  customer paid and can't download. This is latent because USD card-only checkout (the current
-  config) never produces these events. Documented and bounded, hence MINOR.
-- Suggested fix: Add the `async_payment_succeeded` case (reuse the completed-path entitlement
-  insert), OR add an explicit Stripe-dashboard guardrail note that delayed-payment methods are
-  unsupported until that handler lands.
+### CRT-1 (MAJOR · High) — plan-329 item 6 re-schedules an already-closed gate gap
+**Evidence:** plan-329 item 6 says `touch-target-audit.test.ts` "`SCAN_ROOTS` omits root-level `app/[locale]/*.tsx`; FORBIDDEN set has no `<Link>`/`<a>` element pattern." Both are FALSE at HEAD:
+- Root files: `appLevelExtraFiles` array at `apps/web/src/__tests__/touch-target-audit.test.ts:59-65` lists `global-error.tsx`, `[locale]/error.tsx`, `not-found.tsx`, `layout.tsx`, `loading.tsx`; pushed into the scan at line 611. Attributed to AGG-R5C3-06 (CRT-R5C3-01), committed in `c1a1227a`.
+- `<Link>`/`<a>` patterns: 8 FORBIDDEN regexes at lines 387-429; normalizer tag set includes `Link|a` at line 545; positive+negative fixtures at lines 712-719 and 841-849.
 
-### CRT-R5C1-05 — `@/lib/storage` abstraction is fully unintegrated dead code (3 files, ~13 KB) with zero call sites
-- Severity: **MINOR** · Confidence: **High** · Classification: **confirmed**
-- Evidence: `src/lib/storage/{index,local,types}.ts` exist; `grep "from '@/lib/storage"` excluding
-  the dir itself and tests returns **zero** hits. CLAUDE.md:109 correctly warns it is "Not Yet
-  Integrated" — so this is honest, but it is unexercised surface area carried indefinitely.
-- Why it matters: Dead abstractions rot — they drift from the real local-FS code paths
-  (`upload-paths.ts`, `serve-upload.ts`) and create a false impression of S3/MinIO readiness for
-  anyone scanning `lib/`. Low risk, but it is unverified-by-use code in a security-sensitive area
-  (file serving / path containment).
-- Suggested fix: Either delete it until S3 work is actually scheduled, or add a top-of-file
-  `// UNUSED — not wired into the upload/serve pipeline (see CLAUDE.md)` banner to each file so a
-  reviewer doesn't mistake it for a live path.
+I ran the suite: **19/19 pass** (`touch-target-audit` + `admin-backfill-concurrency-cap`).
+**Why it matters:** A planner scheduled work a concurrent run already landed. If an implementer "implements" item 6 they will either no-op or duplicate/perturb a passing gate. This is the same plan/reality-drift class as CRT-6 and CRT-9 — three independent instances this cycle.
+**Action:** Mark plan-329 item 6 as ALREADY-DONE (cite `c1a1227a` + the line ranges above) and REMOVE it from the TODO set. If anything, the residual sub-task is widening the scan to `app/[locale]/(public)` deep page files — but that root (`publicDir`) is ALSO already in `SCAN_ROOTS` (line 51, 79-83). Nothing to do.
 
-### CRT-R5C1-06 — Deploy host path drift between docs and `deploy.sh`
-- Severity: **MINOR** · Confidence: **Medium** · Classification: **needs-manual-validation**
-- Evidence: `apps/web/deploy.sh:5` comments "Must be run from the repo root (e.g.,
-  /home/ubuntu/gallery)"; CLAUDE.md "Backfill" block hardcodes `/home/ubuntu/gallery/...` mounts;
-  AGENTS.md:18 says the deploy host is `gallery.atik.kr` / `ubuntu@atik.kr`. These are consistent
-  IF the checkout lives at `/home/ubuntu/gallery` on `atik.kr`, but the README "Remote Deploy
-  Helper" derives the path from `DEPLOY_PATH` in gitignored `.env.deploy`, which could diverge.
-- Why it matters: The backfill sidecar command in CLAUDE.md hardcodes `/home/ubuntu/gallery/...`
-  read-only mounts. If `DEPLOY_PATH` differs from `/home/ubuntu/gallery`, an operator copy-pasting
-  the documented backfill command mounts the wrong source tree (or empty dirs) and the
-  `--rm tsx` run silently no-ops or fails opaquely.
-- Suggested fix: Make the CLAUDE.md backfill block reference `$DEPLOY_PATH` (or a documented var)
-  instead of a hardcoded absolute path, and cross-link it to the `.env.deploy` `DEPLOY_PATH` field.
+### CRT-2 (MAJOR · High) — AGG-5 connection-budget premise overclaims; contradicts the codebase's own documented model
+**Evidence:** `admin-backfill-runner.ts:93-98` (new BACKFILL_RESERVED comment) and plan-329 item 4 both assert a *single* `getImage()` "fires a ~3-way `Promise.all` … so reserving only 1 connection … is not enough to render even one photo page." But `apps/web/src/lib/data.ts:99-101` states the opposite as settled fact: *"The connection pool (10) serializes execution anyway, so chunking reduces memory overhead without hurting throughput."* And the pool wrapper (`db/index.ts:82-98`) acquires+releases per query in a `finally` — a `Promise.all([q1,q2,q3])` holds 3 connections ONLY in the transient window where all three `getConnection()` calls resolve before any query returns; under contention `waitForConnections:true` (line 28) queues them. So "needs 3 simultaneous" is the *worst-case burst*, not the steady-state requirement the comment implies.
+**Why it matters:** The new formula (cap=2, reserve 5/10) is more conservative and not wrong. But it ships a justification that an adjacent comment refutes. The next person who reads both will not know which model is true, and may "optimize" the cap back up citing `data.ts`. An honesty invariant the repo prizes (see the AGG-1 fix this very cycle) is being eroded in the fix's own comment.
+**Action:** Reword the runner comment to state the real model: "worst-case a getImage burst can momentarily acquire up to ~3 pool connections; under load the pool serializes (see data.ts), but we budget for the burst so a backfill cannot push a live photo render into the wait queue." Do NOT claim a single page *requires* 3 held connections.
+
+### CRT-3 (MAJOR · High) — half-applied comment fix WITHIN admin-backfill-runner.ts
+**Evidence:** The author updated the `resolveBackfillConcurrency` docblock (`admin-backfill-runner.ts:103-123`) to the new `(LIMIT-RESERVED-1)/2 = 2` formula, but the MODULE-LEVEL header docblock at lines 23-35 STILL reads: *"the effective ceiling is `floor((POOL_CONNECTION_LIMIT - 2) / 2)` = 4 at the shipped pool size"* (line 31-32). Two contradictory formulas + two contradictory ceilings (4 vs 2) in ONE file.
+**Why it matters:** This is precisely the "fix applied in one of N parallel sites" failure the mandate asked me to hunt. A reader skimming the header learns the wrong cap (4) and the wrong arithmetic. The header is the first thing read.
+**Action:** Update `admin-backfill-runner.ts:23-35` header to the new formula/ceiling, or replace the inline arithmetic with a pointer ("see `resolveBackfillConcurrency` for the budget arithmetic"). This belongs in plan-329 item 4's scope (it touches the same function's header), NOT deferred.
+
+### CRT-4 (MAJOR · High) — stale OLD pool formula in db/index.ts, unscheduled
+**Evidence:** `apps/web/src/db/index.ts:16` — `// concurrency at floor((POOL_CONNECTION_LIMIT - 2) / 2) because each backfill`. This is a THIRD copy of the now-superseded formula. plan-330 Unit A / AGG-22 schedules the CLAUDE.md doc correction but says nothing about this source comment. plan-329 item 4's "Where" clause lists `db/index.ts POOL_CONNECTION_LIMIT` but only to read the constant, not to fix its comment.
+**Why it matters:** `POOL_CONNECTION_LIMIT` is the canonical export the runner imports; its doc-comment is the natural place a reader looks to understand the budget, and it now lies.
+**Action:** Add the `db/index.ts:13-18` comment correction to plan-329 item 4's change set (same logical fix, same cycle).
+
+### CRT-5 (MAJOR · Medium) — plan-330 AGG-17 deferral built on a misread of the code
+**Evidence:** plan-330 deferred entry #4 says: *"`withAdminAuth` wrong-scope branch returns 403 (some prior plan text said 401); no test pins the status … add a test asserting the wrong-scope branch returns 403."* The actual code (`apps/web/src/lib/api-auth.ts`):
+- Wrong/invalid token scope → **401** at lines 84-85 (token branch).
+- Cross-**origin** rejection → **403** at lines 94-95 (this is the only 403; it is NOT scope-related).
+- Not-admin (no cookie) → **401** at lines 102-103.
+
+And a test ALREADY pins the wrong-scope path at 401: `apps/web/src/__tests__/api-auth-response-headers.test.ts:103-121` ("a VERIFIED token with the WRONG scope yields a no-store 401", `expect(response.status).toBe(401)`).
+**Why it matters:** The deferral's premise ("returns 403", "no test pins the status") is factually wrong on both clauses. If someone executes the stated exit criterion (assert wrong-scope === 403) they will write a test that CONTRADICTS the existing passing one and either fail CI or be forced to "fix" correct code. The deferral also conflates the origin-403 branch with the scope-401 branch.
+**Action:** Rewrite AGG-17. The genuine residual (if any) is whether the *cross-origin 403* branch is pinned — it is not directly asserted, though `check-action-origin`/`api-auth` gates cover origin enforcement structurally. State the real branches and drop the false "403 wrong-scope" framing.
+
+### CRT-6 (MAJOR · High) — plan-330 AGG-13 defers an already-fixed item
+**Evidence:** plan-330 deferred #2 defers the semantic-mode blank-Select to plan-325 item 5, prescribing "coerce `['disabled','stub'].includes(v) ? v : 'disabled'`." That exact coercion is ALREADY at `settings-client.tsx:622`: `value={['disabled', 'stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'}`, with the amber legacy `'production'` warning still present at line 640. The CRT-R5C1-01 comment (lines 631-636) documents the no-`production`-item design.
+**Why it matters:** Deferring closed work to another (also-stale) plan inflates the open-item count and creates phantom double-ownership. plan-325 item 5, if anyone picks it up, will also find nothing to do.
+**Action:** Reclassify AGG-13 as DONE (cite `settings-client.tsx:622`). Verify plan-325 item 5 and close it too.
+
+### CRT-7 (MINOR · High) — DES-07 not actually closed by AGG-9
+**Evidence:** plan-330 deferred #6 says DES-07 (error-shell heading-level inconsistency) "closes when plan-329 item 1 touches the error shells." The working-tree AGG-9 change touches ONLY `[locale]/admin/(protected)/error.tsx` (decorative span + sr-only h1, matching `[locale]/error.tsx`). The actual heading-pattern outlier is `apps/web/src/app/global-error.tsx:76` — a VISIBLE `<h1 className="mt-4 text-3xl font-semibold">` (legible contrast, no sr-only/decorative split). AGG-9 does not touch global-error.tsx, so the inconsistency the deferral expected to absorb is NOT absorbed.
+**Why it matters:** Low — global-error.tsx's pattern is legible (not a contrast defect), so the inconsistency is cosmetic. But the deferral's stated closure mechanism is false.
+**Action:** Either correct the DES-07 deferral note ("global-error.tsx uses a deliberate legible-h1 pattern; admin+public twins use the decorative-span pattern; the three are intentionally not unified") or schedule a one-line unification. Cosmetic — REVISE the note, don't block.
+
+### CRT-8 (MINOR · High) — AGG-10 home-title fix ships with no regression test
+**Evidence:** plan-329 item 2 acceptance: "Existing metadata tests (if any) green." Grep found NO test asserting the home `<title>` single-suffix / `{ absolute }` behavior anywhere in `src/__tests__`. The fix (8fc403a2, `page.tsx:50,67,112`) is correct and wired into both return shapes, but the `title.template` double-suffix is a known recurring footgun (it shipped once as `GalleryKit | GalleryKit`). A future `metadata.title` refactor that drops `absolute` regresses silently.
+**Why it matters:** Low impact, high regression-likelihood class (template interaction is non-obvious). The cycle added regression tests for AGG-1, AGG-7 — but not this.
+**Action:** Add a lightweight fixture/source-contract test asserting the home `generateMetadata` returns `title: { absolute: … }` in both branches (mirror the existing `sanitize-for-og-global.test.ts` source-contract style — no Next runtime needed).
+
+### CRT-9 (MINOR · High) — plan-329 progress table is stale
+**Evidence:** plan-329 Progress (lines 55-62) marks item 2 (AGG-10) and item 6 (AGG-16) as TODO. AGG-10 is committed at 8fc403a2; AGG-16 is closed at c1a1227a. Item 1 (AGG-9) is in the working tree uncommitted (correctly TODO).
+**Why it matters:** Anyone resuming plan-329 will re-attempt 2 done items and skip verifying the 1 genuinely-pending one (AGG-9, which still needs a commit).
+**Action:** Update the progress table: items 2 + 6 → DONE with commit refs; item 1 → IN PROGRESS (working tree, uncommitted).
+
+### CRT-10 (MAJOR · Medium) — Stripe AGG-12 deferral rationale is circular; the real risk is the undetected trigger
+**Evidence:** plan-330 deferred #1 justifies deferring a HIGH finding by quoting the CLAUDE.md `entitlements` note that "`async_payment_succeeded` is not yet handled … until plan-316 CRT-R5C1-04 ships." But that CLAUDE.md note is itself the documentation OF this same deferral chain — citing it as "the repo's own rules explicitly allow it" is circular: the repo allows it because a prior cycle wrote that it's allowed. CLAUDE.md "Security … NOT deferrable" is invoked for AGG-3/AGG-4 (correctly scheduled), but AGG-12 is correctness/availability, not security, so the non-deferrable rule does not strictly bind it. The webhook (`api/stripe/webhook/route.ts:88-118`) handles only `checkout.session.completed` and explicitly rejects `'unpaid'` async sessions (line 105-117); the download route (`download/[imageId]/route.ts:166`) returns 404 "Token not found" forever for a settled-but-never-entitled ACH purchase.
+**Why it matters:** The deferral is *operationally* acceptable for a personal gallery (funds settle in Stripe; manual grant recovers it). But "deferring because we previously documented that we defer it" is not a real justification — it is a justification-shaped restatement. The honest framing is: "low-volume personal gallery, ACH/bank-transfer is a rare payment path, manual recovery exists, owned by plan-316."
+**Action:** Rewrite the AGG-12 deferral rationale to drop the circular "repo rule allows" framing and state the real risk-acceptance (volume + manual recovery). Keep it deferred — that judgment is fine.
+
+### CRT-11 (LOW · High) — AGG-12 has no detection mechanism for its own exit criterion
+**Evidence:** AGG-12 exit criterion: "OR an operator reports a real settled-but-undownloadable ACH purchase → escalate." There is no code path that LOGS or alerts when an `async_payment_succeeded` event actually arrives — the webhook's switch only matches `checkout.session.completed`; an unmatched event type falls through and (per Stripe handler convention) likely returns 200 with no log. So the "operator reports" trigger depends entirely on a confused customer filing a support ticket.
+**Why it matters:** The deferral's safety net (escalate when a real customer is hit) has no automated detection — it is purely reactive on a silent failure.
+**Action:** Cheap mitigation that does NOT require plan-316: add a `console.warn`/audit-log line in the webhook for any received event type NOT in the handled set (esp. `async_payment_succeeded`). One log line converts a silent gap into an operator-visible signal and makes the exit criterion real. Consider folding into plan-330 Unit B (code-comment/observability batch) since it touches the webhook.
 
 ---
 
-## What's Missing (gaps / unhandled edges / unstated assumptions)
+## What's MISSING (gap analysis)
 
-- **No capability probe separates "config says production" from "encoder can actually do production"**
-  for either ML feature. Both `semantic_search_mode` and `auto_alt_text_enabled` trust an admin
-  string with no check that the underlying model/binary exists. The repo otherwise loves
-  capability gates (10-bit AVIF libheif probe, fail-closed config reads) — these two stub features
-  are the exception. This is the through-line behind CRT-R5C1-01 and CRT-R5C1-02.
-- **No automated test asserts that `alt_text_suggested` cannot reach a public *visible title*** (only
-  that it's "public" — which it is by design for the `alt` attribute). The title-fallback path in
-  `photo-title.ts:104` is untested for the prefix-leak case.
-- **No lint/test gate prevents adding a third stub-ML "production" mode footgun.** The pattern
-  (UI select → config validator accepts → public route trusts it) is now established in two places
-  and will be copied.
-- **Embeddings backfill scalability assumption unstated:** `embeddings.ts` uses `notExists`
-  per-batch and the public route scans `SEMANTIC_SCAN_LIMIT=5000` most-recent rows doing in-process
-  cosine over base64-decoded vectors on every request. At 5000 rows × 512 floats per request this
-  is a CPU-bound public endpoint on the single-writer box — fine at small scale, but there is no
-  documented ceiling tying it to the single-instance topology. (Not scored — it is rate-limited
-  30/min/IP and gated behind the production mode that CRT-R5C1-01 says shouldn't be reachable.)
+- **No regression test for the AGG-10 home-title `absolute` fix** (CRT-8). The cycle pinned AGG-1 and AGG-7 but left the equally-footgun-prone title template unguarded.
+- **No source-comment correction scheduled** for the two stale pool-formula sites in code (CRT-3 runner header, CRT-4 db/index.ts). plan-330 only corrects CLAUDE.md.
+- **No detection for the deferred Stripe gap** (CRT-11) — the exit trigger relies on a customer complaint.
+- **No verification that plan-325 item 5 / plan-316 CRT-R5C1-04 are real, still-open items** — plan-330 defers TO them (AGG-13 → plan-325, AGG-12 → plan-316) without confirming those plans exist and are tracked. AGG-13 is already done (CRT-6), suggesting plan-325 item 5 is ALSO stale. Deferring to a stale plan is deferring to /dev/null.
+- **No `e2e`/contract test asserting the admin error shell renders exactly one accessible-name h1** — AGG-9 is verified by hand here; the touch-target audit scans error.tsx for sizing but nothing asserts the heading/aria structure. A regression to a low-contrast visible h1 would not fail any gate.
 
-## Multi-Perspective Notes
+## Ambiguity risks (plan reviews)
 
-- **Executor**: The half-finished ML features have crisp TODO trails (clip-inference.ts,
-  caption-generator.ts) — an implementer has enough to finish them. The trap is the *enabling
-  surfaces shipped ahead of the engines* (CRT-01/02): the UI/config/public-route are live while the
-  engine is a stub, inverting the safe "engine first, switch last" order.
-- **Stakeholder**: Product premise is delivery-honesty ("photographer's intent, accurately").
-  CRT-01 (random results presented as search) and CRT-02 ("[AUTO]" in public titles) both directly
-  contradict that premise — they are coherence failures, not just bugs.
-- **Skeptic**: The strongest counter-argument is "all of these are off by default and CLAUDE.md
-  documents them." True — but the assignment explicitly says be skeptical of "documented as
-  intentional." A soft amber warning that ends in "...will be semantically random" is documentation
-  of a footgun, not a guard. The codebase's own doctrine elsewhere is fail-closed; these three
-  features fail-open-with-a-note. That inconsistency is the finding.
+- plan-329 item 4: "reserve roughly half the pool" → **Interpretation A:** the formula is the contract (cap=2 at limit 10). **Interpretation B:** "roughly half" is a soft target and an implementer could pick a different RESERVED. The shipped code commits to A (RESERVED = max(3, ceil(limit/2))), which is fine, but the prose invites B.
+- plan-330 AGG-17: "wrong-scope branch returns 403" → as shown (CRT-5), an implementer cannot disambiguate which branch is meant because the premise is wrong; both a 401 path and a 403 path exist for different reasons.
 
-## Verdict
+## Multi-perspective notes
 
-**REVISE** — The security-critical core (auth, paid downloads, webhook, PAT upload, smart-collection
-compiler, privacy guard) is genuinely strong and I could not fault it after thorough verification;
-a clean bill there carries real signal. But three real product-coherence defects sit in the
-stub-ML / dead-scaffolding seams the prior 20 cycles toured least: a one-click path to serving
-random public search results (CRT-01, CRIT), an engineering prefix leaking into public titles
-(CRT-02, MAJOR), and a documented-but-inert HDR gate that will mislead the WI-09 implementer
-(CRT-03, MAJOR). None block the existing shipped product (all opt-in/dead), so this is REVISE not
-REJECT — but CRT-01 should be closed before the semantic feature is ever exposed, and CRT-02 before
-auto alt-text is recommended to any operator.
+- **Executor:** Can I implement plan-329/330 with only what's written? Partially — items 2, 6, and deferred-13 will lead me to no-op or duplicate done work (CRT-1/6/9); deferred-17 will lead me to write a contradictory test (CRT-5). The plans need a reconcile pass against HEAD before execution.
+- **Stakeholder:** Do the plans solve the stated problem (close the run-6 fan-out findings)? The CODE does (AGG-1/4/9/10 genuinely landed; gates pass). The PLAN BOOKKEEPING does not faithfully represent that — coverage accounting claims 25/25 but at least 3 of those (AGG-13, AGG-16, AGG-10-status) are mis-stated relative to HEAD.
+- **Skeptic:** Strongest argument the deferrals are unsound? Only AGG-17 is genuinely defective (wrong premise). AGG-12/14/18/24/25 are legitimately deferrable for a single-instance personal gallery; their *rationales* over-lean on circular "repo rule" framing (CRT-10) but the *decisions* are sound. None of the 7 deferrals is a smuggled security/data-loss finding — AGG-3/AGG-4 (the only security-class) are correctly SCHEDULED in plan-328 and verified DONE at HEAD (170297ed + the run-5 c3 EXIF strip). The deferral discipline's CORE rule (no security/correctness/data-loss deferral) holds; the failures are in factual accuracy, not in improperly burying a non-deferrable.
 
-## Open Questions (unscored)
+## Verdict justification
 
-- Does any production deployment currently have `semantic_search_mode` or `auto_alt_text_enabled`
-  set to a non-default? (DB-state, not verifiable from source.) If yes, CRT-01/02 are live, not latent.
-- Is `DEPLOY_PATH` on atik.kr actually `/home/ubuntu/gallery`? (CRT-06 hinges on this.)
-- Is the 5000-row in-process cosine scan acceptable at the largest expected gallery size on the
-  single-instance box, or should ANN/index be planned alongside real ONNX? (Performance, deferred.)
+**REVISE.** The implemented code for this cycle is correct and the blocking gates pass (touch-target 19/19, AGG-1 honesty chain intact end-to-end, AGG-9 split matches its sibling, AGG-10 absolute-title wired into both return shapes, security findings AGG-3/AGG-4 verified at HEAD). There is NO CRITICAL and no runtime defect.
+
+What earns REVISE rather than ACCEPT is a systemic **plan/comment-vs-reality drift**: three plan items describe gaps that are already closed (CRT-1, CRT-6, CRT-9), one deferral is built on a factual misread of the code that would actively misdirect an implementer (CRT-5), and the AGG-5 fix carries an in-file half-applied comment plus an overclaiming justification that an adjacent comment refutes (CRT-2, CRT-3, CRT-4). None blocks runtime, but collectively they will waste the next implementer's cycle and erode the very honesty invariant this cycle's AGG-1 fix was about. The fixes are all doc/plan-text edits plus one small regression test — cheap, and they convert a misleading paper trail into an accurate one.
+
+Realist check applied: CRT-1/3/4/5/6 held at MAJOR (each will concretely misdirect an executor or ships a contradictory artifact). CRT-10 held at MAJOR (circular rationale on a HIGH finding deserves the weight even though the decision is sound). CRT-7/8/9/11 are MINOR/LOW — cosmetic or low-regression-impact. No downgrades from data-loss/security/financial (none of those are mis-rated here). Escalated to ADVERSARIAL after the 2nd false deferral premise; the adversarial sweep is what surfaced CRT-3 (in-file header drift), CRT-4 (db/index.ts third copy), CRT-7 (global-error.tsx outlier), and CRT-11 (no Stripe detection).
+
+**To upgrade to ACCEPT:** reconcile plans 329/330 against HEAD (close CRT-1/6/9, rewrite CRT-5/10), fix the two stale source comments (CRT-3/4) inside plan-329 item 4's scope, and add the home-title regression test (CRT-8). The deferral *decisions* (except the AGG-17 premise) can stand.
+
+## Open questions (unscored)
+
+- Are plan-325 (item 5) and plan-316 (CRT-R5C1-04) real, tracked, open plans? plan-330 defers TO them; if they are as stale as AGG-13 turned out to be (CRT-6), the deferrals point nowhere. Could not verify within scope (those plan files were not provided).
+- AGG-5: is there ANY production evidence (queue-wait metric, slow-photo-render report) that the old cap=4 actually starved live traffic, or is the whole AGG-5 change a theoretical hardening? PERF-N1/VER-3 asserted the starvation; I could not find a measured trigger. If theoretical, the comment should say "defensive" not assert observed starvation.
+- Does any test assert the admin error shell's heading/aria STRUCTURE (one h1 = accessible name, decorative span aria-hidden)? The touch-target audit scans the file for sizing only. A heading-structure regression would pass all current gates.

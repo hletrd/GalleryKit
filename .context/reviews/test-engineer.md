@@ -1,328 +1,106 @@
-# Test Engineer Review — Run 5 Cycle 1
-Date: 2026-06-11
-Reviewer: oh-my-claudecode:test-engineer
-Baseline: 186 test files, 1799 tests, all passing (24 s)
+# Test-Engineer Review — Run-6 Cycle 1 fan-out
+
+Repo: GalleryKit (Next.js 16 / React 19 / TS6). Test surface: 193 Vitest files in `apps/web/src/__tests__/`, Playwright e2e in `apps/web/e2e/`. Reviewed at HEAD (`bb463062`) + uncommitted working tree.
+
+## Verdict on the plan obligations
+
+The plan progress tables are **STALE**. plan-329 marks all 6 items TODO and plan-330 defers AGG-18, but at HEAD almost all are already implemented (some committed, some in the working tree). The plan-328 "DONE" claims are **all genuine and well-tested** — I ran the 9 plan-targeted test files: **69 tests, 9 files, all pass** (`npx vitest run` on admin-backfill-runner-fatal-counters, admin-backfill-status-shape, admin-backfill-concurrency-cap, migration-journal-monotonicity, bulk-update-images, advisory-locks, upload-paths, api-auth-response-headers, touch-target-audit).
+
+| Plan item | Claimed | Reality at HEAD | Test obligation met? |
+|---|---|---|---|
+| 328-5 AGG-6 (getBackfillStatus shape + fatal path) | DONE | DONE | **YES** — both files genuine (see TEST-VERIFY-1) |
+| 328-6 AGG-7 (migration journal monotonicity) | DONE | DONE | **YES** — passes; weak in one respect (TEST-3) |
+| 329-1 AGG-9 (admin error H1 contrast) | TODO | **DONE (uncommitted)** | **NO test** (TEST-1, real gap) |
+| 329-2 AGG-10 (home title doubling) | TODO | **DONE (committed)** | **NO test** (TEST-2, real gap) |
+| 329-4 AGG-5 (pool-budget formula) | TODO | **DONE (working tree)** | **YES** — concurrency-cap test updated to new formula |
+| 329-5 AGG-8 (bulkUpdate TriState guard) | TODO | **DONE (committed) + tested** | **YES** — 4 malformed cases (TEST-VERIFY-2). Plan TODO is wrong. |
+| 329-6 AGG-16 (touch-target Link/anchor gate) | TODO | **DONE (committed)** | **YES** — Link/`<a>` patterns + root files scanned (TEST-VERIFY-3). Plan TODO is wrong. |
+| 330-d5 AGG-18 (advisory-lock constants + upload-paths) | DEFERRED | **DONE (committed)** | **YES** — all 5 + per-image builder pinned; non-mocked tmpdir upload-paths test. Plan deferral is wrong. |
+| 330-d4 AGG-17 (withAdminAuth wrong-scope 403) | DEFERRED | partial | **partial** (TEST-4, deferral justified but imprecise) |
 
 ---
 
-## Methodology
+## Findings table
 
-Full inventory of `apps/web/src/__tests__/` (186 files, Vitest) and `apps/web/e2e/` (5 spec files, Playwright).
-All four lint-gate scripts and their fixture tests reviewed.
-Key security-critical source modules read in full: `session.ts`, `api-auth.ts`, `download-tokens.ts`, `gps-exif-strip.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, `admin-tokens.ts`, `validation.ts`, `csv-escape.ts`, `bounded-map.ts`, `upload-paths.ts`, `password-hashing.ts`, `seo-og-url.ts`, `advisory-locks.ts`.
-Both API route files under `app/api/` (download, checkout) read in full.
+| ID | Sev | Conf | File:line | Gap | Risk |
+|---|---|---|---|---|---|
+| TEST-1 | MED | High | `app/[locale]/admin/(protected)/error.tsx:31-32` | AGG-9 admin error H1 contrast split (sr-only H1 + aria-hidden glyph) has NO regression test; `error-shell.test.ts` only covers global-error helpers | Silent revert of the H1 back to `text-muted-foreground/30` (~1.5:1) accessible name; the exact pre-fix WCAG 1.4.3 defect re-ships unnoticed |
+| TEST-2 | MED | High | `app/[locale]/(public)/page.tsx:50,67,112` | AGG-10 `title:{absolute}` fix has NO metadata test; nothing pins single-suffix home title | Layout `title.template` re-doubling (`GalleryKit \| GalleryKit`) regresses silently on any metadata refactor |
+| TEST-3 | LOW | Med | `__tests__/migration-journal-monotonicity.test.ts:63-76` | Monotonicity test checks ADJACENT pairs only; does NOT model the real `MAX(created_at)` cursor-poison (idx 8-17 all sit below idx 6's `when` yet pass the adjacent check) | A NEW migration with `when` above its predecessor but below the historical MAX(1778304060000) still gets silently skipped by drizzle; the test passes anyway |
+| TEST-4 | LOW | Med | `lib/api-auth.ts:93-98` | Cookie-path origin-mismatch **403** branch + not-admin **401** branch (line 100-106) unpinned; only the token wrong-scope **401** (line 84) is tested | 403→200 origin-check regression (CSRF hole) or 403/401 status drift survives; lint gate only enforces wrapper PRESENCE, not the reject status |
+| TEST-5 | MED | High | `lib/admin-backfill-runner.ts:640-665` | No test for a MIXED run (some rows succeed `processed>0` AND some throw `errors>0`); fatal-counters test only covers single-row `processed===0` | A regression overwriting/zeroing `processed` on a fatal, or double-counting a fatal row as processed, survives — re-opening the exact AGG-1 dishonesty class for mixed runs |
+| TEST-6 | LOW | Med | `app/actions/admin-backfill.ts:94-102` | `getBackfillStatus()` try/catch (candidate-count throw → which shape?) is unpinned; status-shape test only drives the happy path | A DB error in `getAdminBackfillCandidateCount` could surface an unhandled shape or leak; admin status UI behavior on infra error is unverified |
+| TEST-7 | LOW | Med | `app/[locale]/admin/(protected)/settings/settings-client.tsx` (AGG-11) | 8 `aria-describedby` present but no test asserts each settings hint is wired exactly once / no duplicate ids | The 8 newly-wired hints can silently lose `aria-describedby` (WCAG 1.3.1/3.3.2) on refactor; the same blind-spot class as the Badge/select touch-target incidents |
+| TEST-8 | LOW | Low | `__tests__/admin-backfill-status-shape.test.ts:27-66` | Forwarding test mocks `readAdminBackfillState` → asserts `getBackfillStatus` returns the same values: pins WIRING (catches a dropped field) but cannot catch a field-VALUE transform bug in the action | A future `getBackfillStatus` that, e.g., clamps `processed` or renames `errors` would pass if it kept the key; low because the action is currently a pure forward |
 
----
-
-## Findings
-
-### TEST-R5C1-01 — `verifySessionToken` has ZERO unit tests
-**File:** `apps/web/src/lib/session.ts`  
-**Lines:** 94–145  
-**Severity:** CRITICAL  
-**Confidence:** HIGH  
-**Classification:** Security coverage gap
-
-`session.ts:94–145` contains `verifySessionToken` — the entire session-authentication path: HMAC-SHA256 signature validation, `timingSafeEqual` comparison, token-age check (24 h max, negative-age clock-skew guard), DB session lookup, and expired-session deletion. The only test for `session.ts` is `session.test.ts`, which covers `hashSessionToken` (3 cases) and `generateSessionToken` format (1 case). `verifySessionToken` is never called in any test.
-
-**Bug scenario:** A future refactor makes `timingSafeEqual` unreachable (e.g., the `signatureBuffer.length !== expectedSignatureBuffer.length` early-return branch is expanded incorrectly), enabling constant-time bypass and session forgery. No test would catch it. Similarly: the negative-age guard (`tokenAge < 0`) that blocks backdated tokens is untested — removing it ships a bypass silently.
-
-**Suggested tests:**
-- `verifySessionToken` returns null for a token with a wrong HMAC signature.
-- `verifySessionToken` returns null for a token whose timestamp is more than 24 h old.
-- `verifySessionToken` returns null for a token with a negative age (future timestamp).
-- `verifySessionToken` returns null for a malformed token (wrong part count).
-- `verifySessionToken` returns null when the DB session row is missing.
-- `verifySessionToken` deletes expired DB sessions on lookup and returns null.
-- `verifySessionToken` returns the session object for a valid, fresh token.
-
-All these can be written with mocked `@/db` (same pattern as `admin-tokens.test.ts`).
+**Severity counts:** 0 CRITICAL · 0 HIGH · 3 MEDIUM (TEST-1, TEST-2, TEST-5) · 5 LOW (TEST-3, TEST-4, TEST-6, TEST-7, TEST-8).
 
 ---
 
-### TEST-R5C1-02 — `BoundedMap` core logic has no unit tests
-**File:** `apps/web/src/lib/bounded-map.ts`  
-**Lines:** 1–142  
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Classification:** Infrastructure coverage gap
+## Detail
 
-`BoundedMap` is the eviction/expiry primitive used by all rate-limit Maps (login, account-login, search, share, checkout, OG). Its `prune()` method implements two critical behaviours: (1) collect-then-delete expired entries, and (2) hard-cap eviction of oldest entries. Neither path has a dedicated unit test. The only references in the test suite are incidental comments in `data-view-count-flush.test.ts` and `image-queue.test.ts`.
+### TEST-VERIFY-1 — plan-328 item 5/6 (AGG-6, AGG-7): genuinely met, NOT tautologies
+- `admin-backfill-runner-fatal-counters.test.ts:167-203` drives a **real** `triggerAdminBackfill()` through the fire-and-forget runner, makes the per-row `UPDATE images SET` throw `ER_LOCK_DEADLOCK`, drains via `vi.waitFor(() => !readAdminBackfillState().running)`, then asserts `errors>0`, `lastRunHadFailures===true`, `lastError` contains `'Deadlock'`, **`processed===0`**, `encodeFailures===0`, `detectionFailures===0`, `completedRuns>0`. This exercises the real `runBackfill` catch→`errors++`→`state.lastError=` path (runner.ts:646-655) and the final-flush mirror (runner.ts:686-693). It would FAIL against the pre-AGG-1 reconstruction-by-subtraction. Strong.
+- `migration-journal-monotonicity.test.ts` passes; allowlists only idx 7, and the real journal data confirms idx 6→7 (`1778304060000`→`1746144000000`) is the sole adjacent inversion. It also source-pins the `migrate.js` throw string `'Drizzle silently skipped'` and the `expectedMigrations.filter((m) => !recordedHashes.has(m.hash))` predicate shape (line 113-119). Good.
+- i18n parity for the new `errors` ICU param confirmed: `messages/en.json:769` + `messages/ko.json:769` both carry `{processed}…{errors}…{encodeFailures}…{detectionFailures}`.
 
-**Bug scenario:** The hard-cap eviction path (`this.map.size > this.maxKeys`) has an off-by-one risk — if the excess calculation is wrong, the Map could grow unboundedly in production (memory exhaustion) or evict too aggressively (legitimate rate-limit entries deleted, allowing brute-force). No test would catch either.
+### TEST-VERIFY-2 — plan-329 item 5 (AGG-8) is DONE + tested (plan TODO is wrong)
+Source `isTriState` helper landed at `app/actions/images.ts:912-919`; `bulk-update-images.test.ts:244-271` has **4** malformed-payload cases against the real action: missing field (`delete input.topic`), non-object (`titlePrefix='oops'`), unknown mode (`{mode:'destroy'}`), set-without-string (`{mode:'set',value:42}`), each asserting `{error:'invalidInput'}` (no throw). Obligation fully met. **Do not re-schedule.**
 
-**Suggested tests (all pure, no DB):**
-- `prune()` removes entries where `isExpired` returns true.
-- `prune()` returns `true` when entries were removed, `false` otherwise.
-- `prune()` enforces the hard cap by evicting oldest (insertion-order) entries.
-- Hard cap eviction: set `maxKeys=3`, insert 5 entries, call `prune()`, assert exactly 3 remain and the 2 oldest are gone.
-- `createResetAtBoundedMap` expiry: entry with `resetAt <= now` is pruned; entry with `resetAt > now` survives.
-- `createWindowBoundedMap` expiry: entry older than `windowMs` is pruned; recent entry survives.
+### TEST-VERIFY-3 — plan-329 item 6 (AGG-16) is DONE (plan TODO is wrong)
+`touch-target-audit.test.ts`: `appLevelExtraFiles` (line 59-65) lists `global-error.tsx`, `[locale]/error.tsx`, `not-found.tsx`, `layout.tsx`, `loading.tsx`; the count loop pushes them (`files.push(...appLevelExtraFiles.filter(exists))`, line 613). FORBIDDEN has 8 `<Link>`/`<a>` patterns (line 397-428, string + cn() + arbitrary-`min-h-[<44px]`), and `normalizeMultilineButtonTags` covers `Link|a` (line 545). The admin `error.tsx` `<Link>` carries `min-h-11` so it clears the floor. Verified passing. **Do not re-schedule.**
 
----
+### TEST-1 (MED) — admin error H1 contrast split is unpinned
+The AGG-9 fix in `error.tsx:31-32` (uncommitted) splits the heading into an `aria-hidden` decorative `<span>` + `sr-only <h1 id="admin-route-error-title">`. **No test asserts this structure.** `error-shell.test.ts` exercises only `resolveErrorShellBrand`/`resolveErrorShellThemeClass` (global-error.tsx helpers), not the admin route error component. The plan's own acceptance criterion ("admin error shell has one sr-only H1 ... visible faint glyph is aria-hidden") is unverified.
 
-### TEST-R5C1-03 — `getSessionSecret` production-hardening guard not tested
-**File:** `apps/web/src/lib/session.ts`  
-**Lines:** 27–33  
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Classification:** Security coverage gap
+**Add** `__tests__/admin-error-shell-a11y.test.ts` — source-inspection lock (repo convention, cf. `error-shell.test.ts` global-error block and `wide-gamut-predicate-wiring.test.ts`):
+- read `app/[locale]/admin/(protected)/error.tsx`;
+- assert the `text-muted-foreground/30` glyph carries `aria-hidden="true"` (regex: `<span[^>]*aria-hidden="true"[^>]*text-muted-foreground\/30`);
+- assert exactly one `<h1` with `className="sr-only"` (and NOT `<h1[^>]*text-muted-foreground\/30` — the accessible name must not ride the faint fill);
+- assert `aria-labelledby="admin-route-error-title"` still points at the H1 id.
+Mirror the same three assertions for the public twin `[locale]/error.tsx` so the parity the comment claims is actually pinned.
 
-`getSessionSecret()` contains a critical production guard: when `NODE_ENV === 'production'` and `SESSION_SECRET` is absent/too short, it throws rather than falling back to the DB-stored secret (to avoid key-reuse on DB compromise). This guard is entirely untested — `session.test.ts` does not import or call `getSessionSecret`.
+### TEST-2 (MED) — home `<title>` single-suffix is unpinned
+`page.tsx:50` `const metadataTitle = { absolute: title }` applied at line 67 (og_image early return) + 112 (main). Layout sets `title.template='%s | ${seo.title}'` (`layout.tsx:26`). Nothing tests that the home page opts out of the template. A refactor dropping `absolute` re-doubles to `GalleryKit | GalleryKit` / `#tag | GalleryKit | GalleryKit`.
 
-**Bug scenario:** The guard is accidentally inverted (e.g., `!== 'production'` becomes `=== 'production'`), causing the production instance to silently accept a DB-stored secret that could be obtained by DB-read compromise. No test catches this.
+**Add** `__tests__/home-metadata-title.test.ts`: call the page's `generateMetadata` with (a) no `tag` searchParam and (b) a `tag` searchParam (mock `getSeoSettings`→`{title:'GalleryKit',…}`, `getImagesLite`/data deps). Assert `metadata.title` is `{ absolute: 'GalleryKit' }` (no-filter) and `{ absolute: '#tag | GalleryKit' }` (filtered) — NOT a bare string (which Next would template). Assert `metadata.openGraph.title` / `metadata.twitter.title` remain the plain string (those are not templated). This is the only place the template-doubling is observable without a browser.
 
-**Suggested tests (using `vi.stubEnv` / `vi.resetModules`):**
-- `getSessionSecret` in production with short `SESSION_SECRET` throws with a message directing the operator to generate a 32-char secret.
-- `getSessionSecret` in production with a valid `SESSION_SECRET` returns it without touching the DB.
-- `getSessionSecret` in development with no env var falls through to the DB path (mock `@/db`).
+### TEST-3 (LOW) — monotonicity test does not model the real cursor bug
+`migration-journal-monotonicity.test.ts:63-76` checks each entry vs its **immediate predecessor**. But the production footgun (CLAUDE.md runbook) is the `MAX(created_at)` cursor: drizzle skips any entry whose `when` < the max already-applied `when`. The real journal has idx 8-17 (`1746576000000`-`1747156800000`) ALL below idx 6 (`1778304060000`) — they pass the adjacent-pair check (each advances vs idx 7) yet are exactly the block that would be skipped by a naive MAX baseline. A NEW migration appended with `when` above its predecessor (idx 21 = `1781183604120`) is safe today, but the test gives false confidence that "monotonic vs predecessor" ⟹ "drizzle will apply it", which is FALSE for the historical block.
 
----
+**Strengthen**: add an assertion that every entry's `when` is also `>` the running `MAX(when)` of all prior entries (a stricter "globally increasing prefix-max" check), with the SAME idx-7 allowlist. This models the actual cursor. Document that idx 8-17 are protected ONLY by the per-entry-hash baselining in `migrate.js`, not by the `when` cursor — and assert `migrate.js` contains the hash-baselining (`baselineAllJournalMigrations` / per-entry hash) so that protection cannot be dropped silently.
 
-### TEST-R5C1-04 — `isValidTokenShape` never tested as a unit
-**File:** `apps/web/src/lib/download-tokens.ts`  
-**Lines:** 43–52  
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Classification:** Security coverage gap
+### TEST-4 (LOW) — withAdminAuth cookie-path reject statuses unpinned
+`api-auth.ts` has THREE reject branches: token wrong-scope→**401** (line 84, the only one tested at `api-auth-response-headers.test.ts:103-123`), cookie origin-mismatch→**403** (line 93-98), not-admin→**401** (line 100-106). The plan-330 deferral ("some prior plan text said 401") conflates these — there genuinely ARE two codes. The deferral reasoning (lint gate enforces wrapper presence) is sound for PRESENCE, but the **403 origin-mismatch return is the CSRF defense** and a regression to 200 / a missing `hasTrustedSameOrigin` guard would be silent.
 
-`isValidTokenShape` is the first security gate in the download route (`D-101-05`): it short-circuits malformed tokens before any SHA-256 hashing or DB work. The existing `stripe-download-tokens.test.ts` tests `generateDownloadToken`, `hashToken`, and `verifyTokenAgainstHash` thoroughly, but never calls `isValidTokenShape` directly. The function is only reachable indirectly through `verifyTokenAgainstHash` (which calls it internally), but the boundary cases — null, undefined, too-short prefix, wrong prefix, right length but wrong charset, `dl_` plus 42 chars, `dl_` plus 44 chars — are not exercised.
+**Add** two cases to `api-auth-response-headers.test.ts`: (1) cookie path with `hasTrustedSameOrigin`→false (mock it) returns **403** + no-store + handler NOT called; (2) same-origin true but `isAdmin`→false returns **401** + no-store + handler NOT called. Pins both the CSRF-reject status and the auth-reject status. Cheap; the wrapper is already imported in that file.
 
-**Bug scenario:** A regex change replaces `{43}` with `{43,}` (greedy), allowing arbitrarily long tokens to bypass the shape gate. The existing tests would still pass (generated tokens are exactly 46 chars), but the route would start doing unnecessary DB lookups on bloated inputs.
+### TEST-5 (MED) — mixed success+fatal backfill run untested
+`runBackfill` mirrors `processed`/`errors` continuously (runner.ts:660-661) and on final flush (686-687). The fatal-counters test covers only ONE row that throws (`processed===0`). There is NO test where, say, 3 rows succeed and 2 throw, asserting final `processed===3 && errors===2 && lastRunHadFailures===true`. This is the realistic production shape (a deadlock on some rows, success on others). A regression that resets `processed` in the catch, or that mis-attributes a thrown row to `processed`, passes the current single-row test.
 
-**Suggested tests:**
-- `isValidTokenShape(null)` → false.
-- `isValidTokenShape(undefined)` → false.
-- `isValidTokenShape('dl_' + 'a'.repeat(42))` → false (too short).
-- `isValidTokenShape('dl_' + 'a'.repeat(44))` → false (too long).
-- `isValidTokenShape('xx_' + 'a'.repeat(43))` → false (wrong prefix).
-- `isValidTokenShape('dl_' + '='.repeat(43))` → false (non-base64url chars).
-- `isValidTokenShape('dl_' + 'a'.repeat(43))` → true.
-- A freshly generated token passes `isValidTokenShape`.
+**Add** to `admin-backfill-runner-fatal-counters.test.ts` (same mock harness): SELECT returns 5 rows; `executeMock` throws on the UPDATE for ids {2,4} and returns `affectedRows:1` for {1,3,5}. After drain assert `s.processed===3`, `s.errors===2`, `s.lastRunHadFailures===true`, `s.lastError` truthy, `s.processed + s.errors === 5`. Drive the runner via `triggerAdminBackfill()` exactly as the existing test does.
+
+### TEST-6 (LOW) — getBackfillStatus infra-error path unpinned
+`getBackfillStatus` wraps `getAdminBackfillCandidateCount()` + `readAdminBackfillState()` in try/catch (admin-backfill.ts try at ~line 93). The status-shape test only mocks the happy path. If candidate-count throws (DB down), the catch's return shape is unverified — the admin status disclosure on infra error is untested.
+
+**Add** to `admin-backfill-status-shape.test.ts`: mock `getAdminBackfillCandidateCount` to reject; assert `getBackfillStatus()` returns `{ok:false, …}` with a localized `error` and does NOT throw / leak the raw DB message.
+
+### TEST-7 (LOW) — settings aria-describedby wiring unpinned (AGG-11)
+8 `aria-describedby` attributes exist in `settings-client.tsx`, but no test asserts each hint `<p>` has a stable unique id referenced exactly once. This is the identical blind-spot class that drove the Badge (R4C15) and native-select (R4C16) touch-target incidents — a string-attribute association that silently breaks on refactor with no compile error.
+
+**Add** `__tests__/settings-aria-describedby.test.ts` (source-scan, no JSDOM needed): read `settings-client.tsx`, collect every `aria-describedby={…}` value and every `id="…-hint"` (or the project's hint-id convention); assert each referenced id is defined exactly once and each hint id is referenced exactly once (bijection). Mirrors the existing source-inspection test style.
+
+### TEST-8 (LOW) — status-shape forwarding test is value-transparent
+`admin-backfill-status-shape.test.ts:27-66` mocks `readAdminBackfillState`→`{processed:2,errors:1,…}` and asserts `getBackfillStatus().processed===2`. This catches a DROPPED field (real value), but cannot catch a value-transform bug because the action is a pure forward today. Acceptable as-is; flagged so a future reader knows it does not guard against a transform regression. No action required unless `getBackfillStatus` gains computation — then add a case where input ≠ output.
 
 ---
 
-### TEST-R5C1-05 — `PASSWORD_HASH_OPTIONS` policy constants have no unit test
-**File:** `apps/web/src/lib/password-hashing.ts`  
-**Lines:** 1–18  
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Classification:** Security coverage gap
+## Final sweep — no further high-signal gaps found
 
-`password-hashing.ts` exports `PASSWORD_HASH_OPTIONS` with explicit `memoryCost: 65_536`, `timeCost: 3`, `parallelism: 4`, and `type: argon2id`. These are security-critical constants. No test file imports `password-hashing.ts` or asserts these values. The `admin-users.test.ts` mocks `argon2` entirely and does not verify that the real call site uses the shared options object.
+I cross-checked the broader suite for the anti-patterns in my mandate:
+- **No-assert / self-comparison tests**: none found in the reviewed files. The migration, backfill, bulk-update, advisory-lock, upload-paths, and touch-target tests all assert against the real SUT or real fixture data.
+- **Over-mocking**: the backfill fatal-counters test mocks heavy deps (sharp, process-image, db) but still drives the real `runBackfill` control flow — the SUT logic (counter mirroring, catch handling) is genuinely exercised, not mocked away.
+- **upload-paths non-mocked branch** (plan-330 AGG-18 concern): `upload-paths.test.ts` is a real tmpdir test exercising primary/legacy/both/neither resolution + the warn-vs-throw legacy policy. The deferral's "only mocked" claim is stale — it's now non-mocked. **Do not re-schedule.**
+- **advisory-lock constants** (plan-330 AGG-18): all 5 + `getImageProcessingLockName` pinned in `advisory-locks.test.ts`, plus distinctness + namespacing assertions. **Do not re-schedule.**
 
-**Bug scenario:** A developer changes `timeCost: 3` to `timeCost: 1` to "speed up tests", or `memoryCost` is halved for a performance reason, and no test fails. Password hashing silently weakens.
-
-**Suggested test (5 lines):**
-```ts
-import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
-it('Argon2id work factors meet minimum security policy', () => {
-    expect(PASSWORD_HASH_OPTIONS.memoryCost).toBeGreaterThanOrEqual(65_536);
-    expect(PASSWORD_HASH_OPTIONS.timeCost).toBeGreaterThanOrEqual(3);
-    expect(PASSWORD_HASH_OPTIONS.type).toBe(2); // argon2id
-});
-```
-
----
-
-### TEST-R5C1-06 — Checkout route: happy-path and price-validation logic not tested
-**File:** `apps/web/src/app/api/checkout/[imageId]/route.ts`  
-**Lines:** 47–66, 68–218  
-**Severity:** HIGH  
-**Confidence:** HIGH  
-**Classification:** Business-logic coverage gap
-
-The only unit test for the checkout route is `checkout-db-error-rollback.test.ts`, which covers exactly one path: a DB error rolling back the rate-limit charge. The following paths are completely untested:
-- `getTierPriceCents` strict integer validation (line 62–65): the `!/^\d+$/.test(raw)` guard that prevents a typo in the admin price field from charging a truncated price.
-- The `priceCents <= 0` guard (line 132–134).
-- The `!image.processed` guard (line 119–121).
-- Stripe `idempotencyKey` construction (line 178).
-- Successful session creation returning `{ url }`.
-- Rate-limit rollback on every 4xx branch.
-
-**Bug scenario:** The `getTierPriceCents` strict parse guard is accidentally removed (someone "simplifies" to `parseInt`), and a price setting of `"500abc"` silently charges $5.00 instead of rejecting with 0. No test catches it.
-
----
-
-### TEST-R5C1-07 — `resolveOriginalUploadPath` / `assertNoLegacyPublicOriginalUploads` in `upload-paths.ts` untested
-**File:** `apps/web/src/lib/upload-paths.ts`  
-**Lines:** 58–100  
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Classification:** Infrastructure coverage gap
-
-`upload-paths.ts` exports `resolveOriginalUploadPath` (tries primary then legacy path), `deleteOriginalUploadFile` (deletes from both locations), and `assertNoLegacyPublicOriginalUploads` (fails production startup if originals remain in the public web root). The test suite mocks this module everywhere it appears but never tests the exported functions themselves. `resolveOriginalUploadPath` is security-adjacent: if the fallback-to-legacy logic is wrong, paid originals may not be found, causing 404s for valid download tokens (and the token is already claimed by then).
-
-**Suggested tests (using `tmp` dirs, similar to `strip-gps-from-original.test.ts`):**
-- `resolveOriginalUploadPath` returns the primary path when the file exists there.
-- `resolveOriginalUploadPath` returns the legacy path when the file exists only there.
-- `resolveOriginalUploadPath` returns the primary path when the file exists in neither location (graceful absent).
-- `assertNoLegacyPublicOriginalUploads` does not throw when the legacy dir is absent or empty.
-- `assertNoLegacyPublicOriginalUploads` warns (does not throw) when legacy files are present and `failInProduction` is false.
-- `assertNoLegacyPublicOriginalUploads` throws in production mode with legacy files present.
-
----
-
-### TEST-R5C1-08 — `withAdminAuth` token branch: scope mismatch (wrong scope presented) not tested
-**File:** `apps/web/src/lib/api-auth.ts`  
-**Lines:** 63–88  
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Classification:** Security coverage gap
-
-`api-auth-response-headers.test.ts` tests that a valid token with the required scope returns 200 with correct headers, and that an invalid token (null from `verifyToken`) yields 401. It does NOT test the case where `verifyToken` returns a non-null token but `tokenHasScope` returns false (token exists but lacks the required scope). This is line 67: `tokenHasScope(verified.scopes, options.allowTokenScope)`. If this branch were accidentally short-circuited (e.g., `||` instead of `&&`), a token with ANY scope would grant access to scope-gated routes.
-
-**Suggested test:**
-- A token verified successfully but with scopes `['lr:read']` presented to a route requiring `lr:upload` → 401.
-
----
-
-### TEST-R5C1-09 — `advisory-locks.ts` lock-name constants not covered by contract test
-**File:** `apps/web/src/lib/advisory-locks.ts`  
-**Lines:** 1–46  
-**Severity:** MEDIUM  
-**Confidence:** MEDIUM  
-**Classification:** Contract drift risk
-
-The lock names in `advisory-locks.ts` (`LOCK_DB_RESTORE`, `LOCK_UPLOAD_PROCESSING_CONTRACT`, `LOCK_TOPIC_ROUTE_SEGMENTS`, `LOCK_ADMIN_DELETE`, `LOCK_COLOR_PIPELINE_BACKFILL`, `getImageProcessingLockName`) are referenced by multiple consumers. The only test that reads the advisory-locks source is `admin-delete-lock-source.test.ts`, which checks that the delete action uses one global lock (not a per-target lock). There is no test that pins the actual string values of these lock names.
-
-**Risk:** A rename of a constant (e.g., from `gallerykit_db_restore` to `gk_db_restore`) changes the MySQL advisory lock name in production. If the old application is running when the new one starts, the two instances will no longer serialise correctly. No test fails.
-
-**Suggested test:** A simple source-read fixture asserting the exported string constants equal their documented values, e.g.:
-```ts
-expect(LOCK_DB_RESTORE).toBe('gallerykit_db_restore');
-expect(getImageProcessingLockName(42)).toBe('gallerykit:image-processing:42');
-```
-
----
-
-### TEST-R5C1-10 — `e2e/public.spec.ts` is empty — no public-route e2e coverage
-**File:** `apps/web/e2e/public.spec.ts`  
-**Lines:** entire file  
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Classification:** E2E coverage gap
-
-`apps/web/e2e/public.spec.ts` exists but contains zero test cases (verified: `grep -n "describe\|it("` returns no output). All e2e tests are admin-workflow-gated behind `E2E_ADMIN_ENABLED=true`. There is no e2e coverage for:
-- Public gallery homepage render.
-- Photo viewer page load and metadata display.
-- Shared-group page access.
-- 404 handling on unknown routes.
-- Rate-limit response on search (semantic or text).
-
-**Risk:** A Next.js App Router configuration error, middleware routing bug, or i18n locale mismatch can break the public homepage entirely without any e2e test catching it.
-
----
-
-### TEST-R5C1-11 — `e2e/origin-guard.spec.ts`: only admin flows tested, download/checkout public paths absent
-**File:** `apps/web/e2e/origin-guard.spec.ts`  
-**Severity:** MEDIUM  
-**Confidence:** MEDIUM  
-**Classification:** E2E coverage gap
-
-The origin guard spec covers admin-route CSRF protection. The public paid-download flow (`GET /api/download/[imageId]?token=...` → interstitial → `POST` → file stream) has no e2e test. Given the R4C7 fix (moving the claim from GET to POST) was motivated by a real email-scanner scenario, an e2e regression test for this flow would be valuable.
-
----
-
-### TEST-R5C1-12 — `session.test.ts` token-age boundary conditions missing
-**File:** `apps/web/src/__tests__/session.test.ts` + `apps/web/src/lib/session.ts:121–126`  
-**Severity:** MEDIUM  
-**Confidence:** HIGH  
-**Classification:** Coverage gap on auth boundary
-
-`verifySessionToken` rejects tokens where `tokenAge > maxAge` (24 h) OR `tokenAge < 0` (future timestamp). Neither condition is tested. The `generateSessionToken` test merely checks the format of the produced token.
-
-**Bug scenario:** The `tokenAge < 0` guard is removed (someone thinks it is "impossible"), enabling pre-dated tokens whose timestamps are far in the future to be valid indefinitely until they cross the 24 h boundary. This is also covered under TEST-R5C1-01 but worth calling out explicitly.
-
----
-
-### TEST-R5C1-13 — Source-scan tests assert structure but cannot catch logic bugs in webhook `payment_intent.succeeded` handler
-**File:** `apps/web/src/__tests__/stripe-webhook-source.test.ts`  
-**Lines:** various  
-**Severity:** MEDIUM  
-**Confidence:** MEDIUM  
-**Classification:** Test-type limitation / false confidence
-
-`stripe-webhook-source.test.ts` and `cycle3-rpf-source-contracts.test.ts` through `cycle8-rpf-source-contracts.test.ts` are entirely source-scan (regex/`indexOf`) tests. They assert presence of code patterns but cannot detect:
-- Wrong ordering of `db.insert(entitlements)` vs. `generateDownloadToken()` at runtime.
-- The idempotency SELECT preceding the INSERT actually using the correct column (`sessionId`).
-- The `metadata.imageId` parse emitting a correct integer vs. NaN on a non-numeric string.
-- The email address truncation guard (255 char cap) operating on the correct field.
-
-These are high-value paths (real money, token issuance) that would benefit from behavioural unit tests with mocked Stripe and DB (same pattern as `checkout-db-error-rollback.test.ts`).
-
----
-
-### TEST-R5C1-14 — `touch-target-audit.test.ts` KNOWN_VIOLATIONS count drift risk
-**File:** `apps/web/src/__tests__/touch-target-audit.test.ts`  
-**Lines:** 99–230  
-**Severity:** LOW  
-**Confidence:** MEDIUM  
-**Classification:** Fixture drift risk
-
-The test has a stale-entry detector (lines 575–593) that fires when a `KNOWN_VIOLATIONS` entry lists more violations than actually exist (meaning the component was fixed but the count was not updated). However, the stale-detector only compares `found > allowed` as a failure and `found < allowed` as "stale warning" — it does NOT currently fail the test on stale entries, it just calls `console.warn`. This means a component fix that reduces violations does not force the developer to tighten the allowance.
-
-**Risk:** The `KNOWN_VIOLATIONS` map silently drifts above the real violation count, masking new violations for those files (since `found <= allowed` passes).
-
-**Suggested fix:** Promote the stale-entry warning to a test failure (`expect(stale).toHaveLength(0)`), requiring developers to update the count when they fix a violation.
-
----
-
-### TEST-R5C1-15 — `csp-nonce.ts` has no tests
-**File:** `apps/web/src/lib/csp-nonce.ts`  
-**Severity:** LOW  
-**Confidence:** HIGH  
-**Classification:** Coverage gap
-
-`csp-nonce.ts` is not referenced in any test file. As a utility for generating/extracting nonces used in the CSP header, incorrect behaviour (e.g., returning a predictable nonce, not encoding correctly) could weaken the CSP. Low severity because nonces are defence-in-depth and the CSP contract test (`content-security-policy.test.ts`) provides some indirect coverage.
-
----
-
-### TEST-R5C1-16 — `password-hashing.ts` `PASSWORD_HASH_OPTIONS` not verified at call sites
-**File:** `apps/web/src/__tests__/admin-users.test.ts`  
-**Lines:** 45–47, 119, 131, 147  
-**Severity:** LOW  
-**Confidence:** HIGH  
-**Classification:** Mock masking
-
-`admin-users.test.ts` fully mocks `argon2.hash` with `vi.fn()`. This means the actual options object (`PASSWORD_HASH_OPTIONS`) passed to `argon2.hash` in production is never asserted. The mock accepts any arguments and returns `'hashed-password'`. A developer could remove the `options` argument from the `argon2.hash` call entirely and all tests would still pass.
-
-**Suggested fix:** Assert that `argon2HashMock` was called with `expect.objectContaining({ type: argon2id, memoryCost: 65_536 })`.
-
----
-
-## Summary Table
-
-| ID | Severity | File/Module | Description |
-|----|----------|-------------|-------------|
-| TEST-R5C1-01 | CRITICAL | `session.ts:94–145` | `verifySessionToken` entirely untested — HMAC verify, age check, DB lookup |
-| TEST-R5C1-02 | HIGH | `bounded-map.ts` | `BoundedMap.prune()` expiry and hard-cap eviction untested |
-| TEST-R5C1-03 | HIGH | `session.ts:27–33` | Production SESSION_SECRET enforcement guard untested |
-| TEST-R5C1-04 | HIGH | `download-tokens.ts:43–52` | `isValidTokenShape` boundary cases never tested directly |
-| TEST-R5C1-05 | HIGH | `password-hashing.ts` | Argon2id work-factor constants not pinned by any test |
-| TEST-R5C1-06 | HIGH | `checkout/[imageId]/route.ts` | Happy path, price validation, per-branch rate-limit rollback untested |
-| TEST-R5C1-07 | MEDIUM | `upload-paths.ts:58–100` | `resolveOriginalUploadPath` / `assertNoLegacyPublicOriginalUploads` untested |
-| TEST-R5C1-08 | MEDIUM | `api-auth.ts:67` | Wrong-scope token path in `withAdminAuth` not tested |
-| TEST-R5C1-09 | MEDIUM | `advisory-locks.ts` | Lock-name string values not pinned |
-| TEST-R5C1-10 | MEDIUM | `e2e/public.spec.ts` | Entirely empty — no public-route e2e coverage |
-| TEST-R5C1-11 | MEDIUM | `e2e/` | Paid-download GET→POST flow has no e2e test |
-| TEST-R5C1-12 | MEDIUM | `session.ts:121–126` | Token age boundary (>24h, <0) not tested |
-| TEST-R5C1-13 | MEDIUM | Stripe webhook tests | Source-scan tests give false confidence on webhook logic |
-| TEST-R5C1-14 | LOW | `touch-target-audit.test.ts` | Stale KNOWN_VIOLATIONS entries only warn, not fail |
-| TEST-R5C1-15 | LOW | `csp-nonce.ts` | No tests |
-| TEST-R5C1-16 | LOW | `admin-users.test.ts` | Mock masks PASSWORD_HASH_OPTIONS not being passed to argon2 |
-
-## What is Well-Covered (Positive)
-
-- GPS EXIF stripping: thorough including JPEG trailer detection (SEC-R4C10-01), ExtendedXMP, WebP, AVIF, TIFF.
-- CSV escape: full Unicode bidi / zero-width / formula-injection coverage.
-- Validation layer: `containsUnicodeFormatting`, `isValidTopicAlias`, `isValidTagName` — all codepoint classes.
-- Download token crypto: `generateDownloadToken`, `hashToken`, `verifyTokenAgainstHash` — all boundary cases.
-- Admin token system: `verifyToken` (mocked DB), scope enforcement, `tokenHashesEqual` constant-time.
-- Auth rate-limit: dual-bucket (IP + account) logic, rollback, window reset.
-- Privacy field separation: symmetric guard + timeline mirror (SENSITIVE_KEYS contract).
-- Lint gates: all four scripts have fixture-style tests covering both pass and fail branches.
-- `withAdminAuth` response headers: both token and cookie branches, `has()` guard.
-- Stripe webhook source-contract: structural patterns locked at multiple cycle checkpoints.
-- Session worker: `generateSessionToken` format, `hashSessionToken` determinism.
-- Touch-target audit: multi-line normalizer, `Badge asChild`, native `select`.
+The strongest residual gaps are the two MED render-contract gaps (TEST-1 admin error H1, TEST-2 home title) — both are fixes that LANDED this cycle with NO test, and both are silent-regression-prone string/structure contracts. TEST-5 (mixed-run backfill) is the third MED: it guards the AGG-1 honesty fix against the realistic mixed-failure shape the single-row test does not cover.

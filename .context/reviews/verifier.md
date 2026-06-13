@@ -1,444 +1,121 @@
-# Verifier Report — GalleryKit R5C1
+# Verifier Report — Run-6 Cycle 1 fan-out (evidence-based)
 
-**Date:** 2026-06-11  
-**Scope:** CLAUDE.md claim vs actual code verification — no sampling; every documented claim checked against file+line evidence.
-
----
-
-## Findings
-
-### VER-R5C1-01 — Settings-hash coverage description is stale (MEDIUM)
-
-**Claim (CLAUDE.md line 257):**
-> "The settings hash (P4-E2) covers `wide_gamut_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`"
-
-**Actual code (`apps/web/src/lib/settings-hash.ts` lines 34-46):**
-```
-COLOR_IMPACTING_KEYS = [
-    'wide_gamut_jpeg_chroma',
-    'sdr_jpeg_chroma',
-    'avif_effort',
-    'force_srgb_derivatives',
-    'wide_gamut_max_source_pixels',
-    'image_quality_webp',
-    'image_quality_avif',
-    'image_quality_jpeg',
-    'image_sizes',
-]
-```
-Nine keys, not three. Six keys (`sdr_jpeg_chroma`, `wide_gamut_max_source_pixels`, `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`, `image_sizes`) are undocumented in this specific claim.
-
-**Severity:** MEDIUM  
-**Confidence:** confirmed  
-**Classification:** Documentation drift — the settings-hash.ts docblock itself (lines 7–9) also only lists the original 3 keys, so the drift exists in two places.
+**Date:** 2026-06-13
+**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
+**HEAD at verification:** `8fc403a2 fix(seo): 🐛 stop home title double-suffixing the site name`
+(NOTE: HEAD is ONE commit beyond what plan-328's progress table cites; `8fc403a2` is plan-329 Item 2 / AGG-10 — see VER-DISC-1.)
+**Method:** ran every gate + targeted vitest contracts myself; read code at HEAD; ignored `.context/reviews/*.md` working-tree edits as input.
 
 ---
 
-### VER-R5C1-02 — ETag formula in CLAUDE.md contains `settingsHash.slice(0,8)` but code uses `${settingsHash}` directly (LOW)
+## Verdict
 
-**Claim (CLAUDE.md line 257):**
-> `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash.slice(0,8)}"`
-
-**Actual code (`apps/web/src/lib/serve-upload.ts` line 201):**
-```typescript
-const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
-```
-No `.slice(0,8)` call. The result is functionally identical because `settings-hash.ts` already returns exactly 8 hex characters (`HASH_LENGTH = 8`, line 48), but the formula in CLAUDE.md is misleading — it implies the caller truncates, when the truncation happens inside the library.
-
-**Severity:** LOW  
-**Confidence:** confirmed  
-**Classification:** Minor documentation inaccuracy.
+**Status:** PASS (with documented plan-doc/reality discrepancies — see VER-DISC block)
+**Confidence:** high
+**Blockers:** 0
+**VERIFIED-FALSE discrepancies:** 4 (all are stale plan-329 PROGRESS-table "TODO" markers; the underlying CODE is implemented and correct at HEAD — i.e. the docs understate completion, not overstate it. No DONE claim was found to be false.)
 
 ---
 
-### VER-R5C1-03 — SESSION_SECRET description inconsistency: CLAUDE.md says "random-64-char-hex", validation accepts min 32 chars (LOW)
+## Gate evidence (all re-run by me)
 
-**Claim (CLAUDE.md "Environment Variables" section):**
-> `SESSION_SECRET=<random-64-char-hex>`
+| Gate | Command | Exit | Output summary |
+|------|---------|------|----------------|
+| ESLint | `npm run lint --workspace=apps/web` | **0** | clean, no error/warning |
+| Typecheck | `npm run typecheck --workspace=apps/web` | **0** | typecheck:app (next typegen + tsc tsconfig.typecheck.json) + typecheck:scripts (7 JS files) both clean |
+| API-auth | `npm run lint:api-auth --workspace=apps/web` | **0** | 2 admin routes OK |
+| Action-origin | `npm run lint:action-origin --workspace=apps/web` | **0** | 44 actions checked; all mutating return early on `requireSameOriginAdmin`; 8 read-only SKIP (exempt) |
+| Public-route rate-limit | `npm run lint:public-route-rate-limit --workspace=apps/web` | **0** | 8 public routes OK |
+| Full vitest | `npm test --workspace=apps/web` | 1* | 2025 passed / 1 failed (`client-server-only-boundary.test.ts` TIMEOUT only) |
+| Same test, isolated | `npx vitest run src/__tests__/client-server-only-boundary.test.ts` | **0** | 2 passed in 2.20s |
 
-**Actual validation (`apps/web/src/lib/session.ts` lines 20–32):**
-```typescript
-if (envSecret && envSecret.length >= 32) { ... }
-// Production: throws if < 32 chars
-'SESSION_SECRET env var is required in production (min 32 chars).'
-```
-The minimum enforced is 32 characters, not 64. `openssl rand -hex 32` correctly produces 64 hex chars, so the example command is fine — but "64-char-hex" is not enforced and the description could mislead users who supply a 32–63 char secret that passes validation. The `.env.local.example` comment says `generate-with: openssl rand -hex 32` which is consistent with 64 chars; the inconsistency is only in the CLAUDE.md body text.
-
-**Severity:** LOW  
-**Confidence:** confirmed  
-**Classification:** Documentation imprecision.
+\* **The single full-suite failure is an environmental flake, NOT a real failure** — see VER-FLAKE-1. The orchestrator's "lint exit 0 + typecheck exit 0" measurement is CONFIRMED.
 
 ---
 
-### VER-R5C1-04 — i18n key parity: en.json / ko.json are in sync (PASS)
+## Claims × verdicts
 
-**Claim (implied by i18n documentation):** Both language files should have matching key sets.
-
-**Actual:** Python flatten check — EN keys: 829, KO keys: 829, missing in KO: 0, missing in EN: 0.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed  
-**Classification:** Verified correct.
-
----
-
-### VER-R5C1-05 — IMAGE_PIPELINE_VERSION = 7 (PASS)
-
-**Claim (CLAUDE.md line 92):** `IMAGE_PIPELINE_VERSION = 7`
-
-**Actual (`apps/web/src/lib/gallery-config-shared.ts` line 21):** `export const IMAGE_PIPELINE_VERSION = 7;`
-
-sw.js stamp: `SW_VERSION = '46aa87f3-p7'` — consistent.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
+| ID | Source claim | Verdict | Conf | Evidence (file:line) |
+|----|--------------|---------|------|----------------------|
+| VER-1 | p328 Item 1 (AGG-2): lint gate resolved; mount fetch has cancelled-guard, no setState-in-effect; dead import dropped | **VERIFIED-TRUE** | high | `settings-client.tsx:91-105` inline async IIFE + `let cancelled` guard before `setBackfillStatus`; `photo-title.ts:2` imports only `stripStubPrefix`; `npm run lint` exit 0 |
+| VER-2 | p328 Item 2 (AGG-1): runner mirrors real `processed`+`errors` into state, sets `lastError` in fatal catch, UI/getBackfillStatus render real counters (not subtraction) | **VERIFIED-TRUE** | high | runner `admin-backfill-runner.ts:154,163,207-208,221-222,558-559,657-658,688-689`; fatal catch sets `state.lastError` `:652`; `getBackfillStatus` exposes `processed`/`errors` `admin-backfill.ts:109-110`; UI reads `backfillStatus.processed` `settings-client.tsx:286,295`; subtraction reconstruction grep = NONE |
+| VER-3 | p328 Item 4 (AGG-4): both `sanitizeForOg` use the GLOBAL strip | **VERIFIED-TRUE** | high | OG route `og/photo/[id]/route.tsx:63` `stripUnicodeFormatting(value) ?? ''` + C0 strip; `p/[id]/page.tsx:43` `stripUnicodeFormatting(value) ?? ''`; helper is `/g` (`validation.ts:92` `UNICODE_FORMAT_CHARS_GLOBAL`, used at `:99`) |
+| VER-4 | p328 Items 5/6: backfill-status-shape + migration-journal-monotonicity tests exist and pass | **VERIFIED-TRUE** | high | files present: `admin-backfill-runner-fatal-counters.test.ts`, `admin-backfill-status-shape.test.ts`, `migration-journal-monotonicity.test.ts`; ran all 3 → 8 passed |
+| VER-5 | Working tree: admin `error.tsx` AGG-9 a11y split correct; touch-target/a11y green | **VERIFIED-TRUE** | high | `error.tsx:29` decorative `<span aria-hidden ...muted-foreground/30 block>` + `:30` `<h1 ...sr-only>`; `aria-labelledby` still points at H1 `:21`; matches public twin `[locale]/error.tsx:18-19`; touch-target-audit 11 passed |
+| VER-6 | Working tree: `resolveBackfillConcurrency` new formula + updated test pass | **VERIFIED-TRUE** | high | runner `:134` `cap=max(1,floor((limit-reserved-1)/2))`, `reserved=max(3,ceil(poolLimit/2))` `:100-101`; header no longer says "1 free is sufficient" `:91-122`; `admin-backfill-concurrency-cap.test.ts` pins cap=2@limit10 `:45`; 8 passed |
+| VER-7 | p329 Item 2 (AGG-10) marked TODO — is it still unimplemented? | **VERIFIED-FALSE (already DONE)** | high | `page.tsx:50` `const metadataTitle = { absolute: title } as const;` used in both returns `:67,:112`; OG titles kept plain `:117,:128`; landed in HEAD commit `8fc403a2` |
+| VER-8 | p329 Item 3 (AGG-11) marked TODO — still unimplemented? | **VERIFIED-FALSE (already DONE)** | high | 8 `aria-describedby` in `settings-client.tsx` (`:368,386,402,418,532,564,592,625`); each target id defined exactly once (no dupes) |
+| VER-9 | p329 Item 5 (AGG-8) marked TODO — still unimplemented? | **VERIFIED-FALSE (already DONE)** | high | `images.ts:907-913` `isTriState` shape guard; `:914-916` returns `t('invalidInput')` on malformed payload BEFORE any `.mode` deref; `bulk-update-images.test.ts` green |
+| VER-10 | p329 Item 6 (AGG-16) marked TODO — still unimplemented? | **VERIFIED-FALSE (already DONE)** | high | `touch-target-audit.test.ts:59-65` `appLevelExtraFiles` (global-error/error/not-found/layout/loading); `<Link>`/`<a>` FORBIDDEN patterns `:397-428`; synthetic `<Link className="h-8">` negative fixtures `:711-718` asserted to match `:719-722`; 11 passed |
+| VER-11 | p328 Item 3 (AGG-3) DONE — EXIF Unicode source strip (cleanMetadataString + applyAltSuggested) | **VERIFIED-TRUE** | medium-high | both halves present at HEAD (import + use of the strip helper in `process-image.ts cleanMetadataString` and the `images.ts applyAltSuggested` copy); existing suite green. No fresh dedicated fixture re-run beyond the suite. |
+| VER-DISC-1 | plan-329 PROGRESS table: all 6 items "TODO" | **VERIFIED-FALSE (table stale)** | high | AGG-8/9/10/11/16 all implemented at HEAD; only the progress markers are stale, the work is real |
+| VER-FLAKE-1 | full `npm test` shows 1 failing test | **environmental flake, not a defect** | high | `client-server-only-boundary.test.ts:120` timed out @15s under full-suite parallel load; isolated run passes in 2.20s; touches no changed file |
 
 ---
 
-### VER-R5C1-06 — Rate-limit buckets: per-IP + per-account(acct:<sha256-prefix>), 5 attempts / 15-min (PASS)
+## Evidence sections
 
-**Claim (CLAUDE.md "Authentication & Sessions"):**
-> per-IP (5 attempts / 15-min window) and per-account (`acct:<sha256-prefix>` key, same 5/15-min limits)
+### AGG-2 (p328 Item 1) — lint gate + mount fetch + dead import — VERIFIED-TRUE
+- The mount effect inlines the fetch in its own async IIFE with a `cancelled` flag and gates `setBackfillStatus` behind both the `await` and `!cancelled` (`settings-client.tsx:91-105`). The `refreshBackfillStatus` `useCallback` (`:82-90`) is NOT what the effect calls — it is invoked only in event-handler context (`handleBackfill`, `:141-143`), where direct setState is allowed. (Minor nuance vs. plan prose, which said the effect calls `refreshBackfillStatus` with a guard — the actual implementation is an independent inline fetcher. The eslint-satisfying outcome and on-mount behavior are identical → descriptive drift, not a defect; see VER-NUANCE-1.)
+- `photo-title.ts:2` = `import { stripStubPrefix } from '@/lib/caption-constants';` — `ALT_TEXT_STUB_PREFIX_RE` is gone.
+- `npm run lint` exit **0**.
 
-**Actual (`apps/web/src/lib/rate-limit.ts`):**
-- `LOGIN_WINDOW_MS = 15 * 60 * 1000` (line 62)
-- `LOGIN_MAX_ATTEMPTS = 5` (line 63)
-- `ACCOUNT_RATE_LIMIT_PREFIX = 'acct:'` (line 111)
-- Key: `acct:` + `sha256(normalizedUsername).slice(0, ACCOUNT_RATE_LIMIT_HASH_LENGTH)` where `ACCOUNT_RATE_LIMIT_HASH_LENGTH = 45 - 5 = 40` chars (lines 110–112, 148–152)
+### AGG-1 (p328 Item 2) — backfill honesty — VERIFIED-TRUE (end-to-end)
+1. `AdminBackfillState` has `processed` (`:154`) and `errors` (`:163`); init 0 in `getState()` (`:207-208`); defensive `??=` backfill (`:221-222`); `_resetAdminBackfillStateForTesting` lists both (`:248-249`); reset to 0 at run start (`:558-559`).
+2. Continuous-mirror block writes `state.processed = processed; state.errors = errors;` (`:657-658`) and the final flush (`:688-689`).
+3. Fatal catch (`:642-654`) increments `errors++` AND sets `state.lastError = err.message` (`:652`) — fixing the exact gap (plan claim 3). The encode-failed branch sets `lastError` too (`:634-635`).
+4. `hadFailures = encodeFailures>0 || detectionFailures>0 || errors>0` (`:697`). `readAdminBackfillState()` returns `processed`/`errors` (`:269-270`). `getBackfillStatus()` exposes them (`admin-backfill.ts:109-110`) on the extended `BackfillStatusResult` (`:83-84`).
+5. UI renders `backfillStatus.processed` directly in both clean (`settings-client.tsx:295`) and with-failures (`:286`) lines; `errors` is in the with-failures ICU call (`:287`); `lastError` rendered (`:308-311`). The old `max(0, lastQueuedCount − encodeFailures − …)` reconstruction is GONE (grep = none).
+6. i18n parity: `backfillLastRunWithFailures` carries `{errors}` in BOTH `messages/en.json:769` and `messages/ko.json:769`.
 
-CLAUDE.md says "sha256-prefix" which is accurate (it is a sha256 digest prefix). All limits confirmed.
+### AGG-3 (p328 Item 3) — EXIF Unicode source strip — VERIFIED-TRUE
+Both halves present at HEAD (plan marked DONE "verified at HEAD" — confirmed): `process-image.ts cleanMetadataString` global-strips Unicode format chars after the NUL strip (via the `@/lib/validation` strip helper); `images.ts applyAltSuggested` runs the copied string through the same strip before `tx.update()`. Severity MED/security; evidence static + suite-backed (suite green) → VERIFIED-TRUE at medium-high confidence.
 
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
+### AGG-4 (p328 Item 4) — sanitizeForOg global — VERIFIED-TRUE
+Both call sites switched to `stripUnicodeFormatting(...) ?? ''`. The helper builds `new RegExp(UNICODE_FORMAT_CHARS.source, 'g')` (`validation.ts:92`) — a genuinely global twin derived from the canonical source (no drift), so it replace-alls. OG route preserves the additional `OG_C0_CONTROL_CHARS` strip (`route.tsx:63`). Cross-reference comments updated in both files.
 
----
+### AGG-9 (p329 Item 1, working tree) — admin error H1 contrast — VERIFIED-TRUE
+Diff replaces the single faint `<h1 ...muted-foreground/30>` with `<span aria-hidden="true" ...muted-foreground/30 block>` + `<h1 ...sr-only>`, structurally identical to the public twin. `aria-labelledby="admin-route-error-title"` resolves to the sr-only H1. The pre-existing false-parity comment was corrected to describe the real split. (NOTE: plan-329 progress marks this TODO, but the working tree implements it correctly.)
 
-### VER-R5C1-07 — Advisory lock names match documented set (PASS)
+### AGG-5 / concurrency (p329 Item 4, working tree) — VERIFIED-TRUE
+New formula `cap = max(1, floor((limit − reserved − 1)/2))`, `reserved = max(3, ceil(poolLimit/2))`. At limit 10 → reserved 5 → cap 2 (down from 4). Clamp-DOWN warning retained (`:585-590`). Test pins: cap=2@limit10 (`:45`), pass-through ≤cap (`:51-52`), floor≥1 on 0/neg/NaN (`:56-58`), reserved-headroom invariant `limit − (1+2·cap) ≥ reserved` (`:67-74`), small-pool floor to 1 (`:78-82`), scale-up at limit 20 → cap 4 (`:87-88`), default-limit cap 2 (`:91-92`). 8 passed.
 
-**Claim (CLAUDE.md "Race Condition Protections" / "Advisory-lock scope note"):**
-Lists: `gallerykit_db_restore`, `gallerykit_upload_processing_contract`, `gallerykit_topic_route_segments`, `gallerykit_admin_delete`, `gallerykit_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`
-
-**Actual (`apps/web/src/lib/advisory-locks.ts`):**
-All six are exported as named constants. Confirmed identical.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-08 — ETag formula in settings-hash.ts docblock also only lists 3 keys (MEDIUM, same issue as VER-R5C1-01)
-
-**File:** `apps/web/src/lib/settings-hash.ts` lines 7–9 (module docblock):
-```
- *   - `wide_gamut_jpeg_chroma` (4:4:4 / 4:2:0 chroma subsampling)
- *   - `avif_effort` (encoder effort 0-9)
- *   - `force_srgb_derivatives` (gamut-collapse override)
-```
-The in-file docblock is the primary documentation for this module; it predates the later additions of 6 more keys and was never updated. Same drift as VER-R5C1-01, but in the source file itself.
-
-**Severity:** MEDIUM  
-**Confidence:** confirmed  
-**Classification:** Source-code documentation drift.
+### AGG-10 / AGG-11 / AGG-8 / AGG-16 (p329 Items 2,3,5,6) — VERIFIED-FALSE-as-TODO (i.e. DONE)
+All four implemented at HEAD despite the plan-329 progress table marking them TODO:
+- **AGG-10**: `metadataTitle = { absolute: title }` opts the home page out of the layout `%s | ${seo.title}` template; both branches compute the suffix once (`title = #tag | seo.title` filtered, `= seo.title` no-filter). OG/Twitter titles kept as the plain string. Committed as `8fc403a2`.
+- **AGG-11**: 8 hint ids wired via `aria-describedby`; each id defined exactly once.
+- **AGG-8**: `isTriState` discriminated-shape guard (`{mode:'leave'|'clear'}` or `{mode:'set', value:string}`) placed after the `ids`/tag validation and before any `.mode` deref; malformed → `invalidInput`.
+- **AGG-16**: root `app/[locale]` files added via `appLevelExtraFiles`; `<Link>`/`<a>` patterns + multi-line normalization in FORBIDDEN; 7 synthetic anchor fixtures asserted to trip the regex.
 
 ---
 
-### VER-R5C1-09 — Path traversal prevention claims (PASS)
+## Acceptance Criteria (per-plan-item)
 
-**Claim:** `SAFE_SEGMENT` regex + `ALLOWED_UPLOAD_DIRS` whitelist + `resolvedPath.startsWith()` containment + `lstat()` symlink rejection
-
-**Actual (`apps/web/src/lib/serve-upload.ts`):**
-- `ALLOWED_UPLOAD_DIRS = new Set(['jpeg', 'webp', 'avif'])` (line 15)
-- `SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/` (line 16)
-- `resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)` (line 172)
-- `stats.isSymbolicLink()` check at line 167
-
-All four mechanisms confirmed.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-10 — Backfill column set matches CLAUDE.md (PASS)
-
-**Claim (CLAUDE.md):** `pipeline_version`, `icc_profile_name`, `color_primaries`, `transfer_function`, `matrix_coefficients`, `is_hdr`, `has_gain_map`, `color_pipeline_decision`, `was_downscaled`, `avif_10bit`
-
-**Actual (both `scripts/backfill-color-pipeline.ts` lines 313–322 and `admin-backfill-runner.ts` lines 224–249):** All 10 columns are SET in both code paths. Test `backfill-color-pipeline.test.ts` (AGG-02) asserts the exact column set at line 180–189.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
+| Plan item | Acceptance criterion | Status | Evidence |
+|-----------|----------------------|--------|----------|
+| p328-1 (AGG-2) | lint exit 0; typecheck green; fetch-on-mount + no setState-after-unmount | VERIFIED | lint 0, typecheck 0, cancelled-guard `:91-105` |
+| p328-2 (AGG-1) | fatal-only run → `errors>0`, `processed`=real, `lastError` populated; 11 backfill tests green; i18n parity | VERIFIED | fatal-counters + status-shape tests green; en/ko `{errors}` parity |
+| p328-3 (AGG-3) | caption stub AND copied title contain no bidi/zero-width | VERIFIED (suite-backed) | both source strips present; suite green |
+| p328-4 (AGG-4) | both sanitizeForOg strip ALL bidi+ZWSP | VERIFIED | global helper both sites |
+| p328-5 (AGG-6) | getBackfillStatus shape + non-zero failure path test | VERIFIED | status-shape + fatal-counters tests present & green |
+| p328-6 (AGG-7) | journal monotonicity + post-condition assertion test | VERIFIED | migration-journal-monotonicity.test.ts green |
+| p329-1 (AGG-9) | one sr-only H1 + aria-hidden glyph; a11y/touch green | VERIFIED | working-tree diff + touch-target green |
+| p329-2 (AGG-10) | home `<title>` single suffix both branches | VERIFIED (DONE, doc says TODO) | `{absolute}` both returns |
+| p329-3 (AGG-11) | every hinted field has aria-describedby; no dup ids | VERIFIED (DONE, doc says TODO) | 8 wired, 8 unique ids |
+| p329-4 (AGG-5) | new formula cap=2@limit10; floor≥1; header no false claim | VERIFIED | runner + test |
+| p329-5 (AGG-8) | malformed TriState → invalidInput, no throw; existing tests green | VERIFIED (DONE, doc says TODO) | isTriState guard + bulk-update test green |
+| p329-6 (AGG-16) | root files + anchor patterns scanned; synthetic fail; suite green | VERIFIED (DONE, doc says TODO) | appLevelExtraFiles + Link/a patterns + fixtures |
 
 ---
 
-### VER-R5C1-11 — SW template HTML offline fallback: 24 h TTL, 50-entry cap, admin render header (PASS)
+## Gaps / discrepancies (findings)
 
-**Claims:**
-- 24 h TTL on HTML offline cache
-- 50-entry cap
-- `x-gk-admin-render: 1` header from proxy.ts
-
-**Actual:**
-- `HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000` (sw.template.js line 32)
-- `MAX_HTML_ENTRIES = 50` (sw.template.js line 33)
-- `response.headers.set('x-gk-admin-render', '1')` in proxy.ts line 129
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
+- **VER-DISC-1 (plan hygiene, not a code defect)** — Risk: medium — plan-329's PROGRESS table lists all 6 items as TODO, but AGG-8, AGG-9, AGG-10, AGG-11, AGG-16 are implemented and test-backed at HEAD. The plan doc was never updated post-implementation. The discrepancy is doc-understates-reality (safe direction), but it WILL mislead the next cycle into re-doing closed work or mis-judging coverage. Suggestion: update the plan-329 progress table (and any plan-330 coverage reference) to reflect HEAD, citing commit `8fc403a2` for AGG-10 and "working-tree" for AGG-9 + concurrency.
+- **VER-FLAKE-1 (test infra)** — Risk: low — `client-server-only-boundary.test.ts:120` (a recursive `src/` import-boundary scan) intermittently times out at the 15 000 ms default under full-suite parallel load (full run took 133 s wall / 416 s cumulative import). Passes in 2.20 s in isolation. Not tied to any changed file. Suggestion: raise that test's per-test `testTimeout` (e.g. 60 000 ms) so a slow CI host doesn't flag a false failure at cycle close.
+- **VER-NUANCE-1 (descriptive, not a defect)** — Risk: none — plan-328 Item 1's prose says the mount effect calls `refreshBackfillStatus()` behind a cancelled-guard; the actual code inlines a separate fetcher in the effect and reserves `refreshBackfillStatus` for event-handler use. Behavior and lint outcome are identical. No action required beyond awareness.
 
 ---
-
-### VER-R5C1-12 — DB connection pool: 10 connections, queue limit 20, keepalive (PASS)
-
-**Claim:** "Connection pool: 10 connections, queue limit 20, keepalive enabled."
-
-**Actual (`apps/web/src/db/index.ts`):**
-- `connectionLimit: 10` (line 19)
-- `queueLimit: 20` (line 20)
-- `enableKeepAlive: true` (line 23)
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-13 — Session purge "hourly background job" (PASS)
-
-**Claim:** "Expired sessions purged automatically (hourly background job)"
-
-**Actual (`apps/web/src/lib/image-queue.ts` line 656–661):**
-```typescript
-state.gcInterval = setInterval(() => { ... }, 60 * 60 * 1000); // every hour
-```
-The interval calls `purgeExpiredSessions()`. Confirmed.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-14 — Cache-Control: `public, max-age=3600, must-revalidate`, NOT immutable (PASS)
-
-**Claim:** "derivatives use `Cache-Control: public, max-age=3600, must-revalidate` — deliberately NOT `immutable`"
-
-**Actual (`apps/web/next.config.ts` line 66):**
-```typescript
-{ key: 'Cache-Control', value: 'public, max-age=3600, must-revalidate' },
-```
-No `immutable`. Nginx config also confirmed at separate locations.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-15 — CLAUDE.md nginx body cap claims match actual nginx config (PASS)
-
-**Claim:** "2 MiB default, 64 KiB for login, 250 MiB for `/admin/db` restore, 216 MiB for admin dashboard uploads"
-
-**Actual (`apps/web/nginx/default.conf`):**
-- Global: `client_max_body_size 2M` (line 31)
-- Login: `client_max_body_size 64K` (line 58)
-- DB restore: `client_max_body_size 250M` (line 75)
-- Admin uploads: `client_max_body_size 216M` (line 92)
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-16 — blur-data-url: 4 KB cap, MIME contract, wiring tests exist (PASS)
-
-**Claims:** `isSafeBlurDataUrl` / `assertBlurDataUrl`, 4 KB cap, tests at `process-image-blur-wiring.test.ts` and `images-action-blur-wiring.test.ts`
-
-**Actual:**
-- `MAX_BLUR_DATA_URL_LENGTH = 4096` (`apps/web/src/lib/blur-data-url.ts` line 45)
-- Both test files exist and are not stubs
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-17 — GPS stripping: Sharp `withMetadata()` warning is accurate (PASS)
-
-**Claim:** "Never use Sharp `withMetadata()` for stripping — in Sharp 0.33+ it KEEPS input EXIF"
-
-**Actual (`apps/web/src/lib/process-image.ts` lines 1455–1472):** Code contains the warning comment and uses `keepIccProfile()` instead. No `withMetadata()` calls in the GPS-strip path.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-18 — avif_effort default 6 (PASS)
-
-**Claim (CLAUDE.md Admin Tunables table):** `avif_effort` default `6`
-
-**Actual (`apps/web/src/lib/gallery-config-shared.ts` line 128):**
-```typescript
-avif_effort: '6',
-```
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-19 — tag_names GROUP_CONCAT pattern (PASS)
-
-**Claim (CLAUDE.md "Performance Optimizations"):** Uses `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` via `tagNamesAgg` constant
-
-**Actual (`apps/web/src/lib/data.ts` line 601):**
-```typescript
-const tagNamesAgg = sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`;
-```
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-20 — `_PrivacySensitiveKeys` compile-time guard and `SENSITIVE_KEYS` fixture parity (PASS)
-
-**Claim:** Compile-time guard enforces admin-only fields; fixture test at `privacy-fields.test.ts` locks the contract.
-
-**Actual:**
-- `_PrivacySensitiveKeys` type guard at `data.ts` line 417–419
-- `_SensitiveKeysInPublic` type produces TS error if any sensitive key leaks into publicSelectFields
-- `privacy-fields.test.ts` `SENSITIVE_KEYS` fixture contains 16 keys and tests both directions (admin has them, public doesn't)
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-21 — HMAC-SHA256 session tokens, timingSafeEqual (PASS)
-
-**Claim:** "Session tokens: HMAC-SHA256 signed, verified with `timingSafeEqual`"
-
-**Actual (`apps/web/src/lib/session.ts`):**
-- `createHmac('sha256', secret)` at line 87
-- `timingSafeEqual` at line 117
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-22 — OG image backslash rejection (SEC-R4C20-01) (PASS)
-
-**Claim (git log):** `fix(seo): reject backslash in OG image URL same-origin gate (SEC-R4C20-01)`
-
-**Actual (`apps/web/src/lib/seo-og-url.ts` lines 10–18):** Comment confirms backslash rejection in relative branch. Code present and documented.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-23 — Migration post-condition assertion throws on silently-skipped migrations (PASS)
-
-**Claim:** `throw new Error(\`Drizzle silently skipped N migration(s): tag1, tag2, …\`)`
-
-**Actual (`apps/web/scripts/migrate.js` line 707):**
-```javascript
-`[Migration] Drizzle silently skipped ${missing.length} migration(s): ${tags}. `
-```
-Post-condition assertion confirmed.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-24 — check-action-origin.ts scans for requireSameOriginAdmin and @action-origin-exempt (PASS)
-
-**Claim (CLAUDE.md "Lint Gates"):** Scans for `requireSameOriginAdmin()`, accepts `@action-origin-exempt: <reason>`, rejects aliased exports.
-
-**Actual (`apps/web/scripts/check-action-origin.ts`):**
-- `@action-origin-exempt` check at line 104
-- `requireSameOriginAdmin` detection at lines 112, 306
-- Aliased export rejection at line 320
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-25 — admin-backfill-runner-detection-failure.test.ts: no pipeline_version bump on detection failure (PASS)
-
-**Claim:** "never strand stale color metadata at the current version"
-
-**Actual (`apps/web/src/__tests__/admin-backfill-runner-detection-failure.test.ts` lines 193–196):**
-```typescript
-// CONTRACT: no UPDATE on the detection-failure path may set pipeline_version.
-expect(text).not.toContain('pipeline_version');
-```
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-26 — data-tag-names-sql.test.ts and other claimed test files exist (PASS)
-
-Files verified to exist:
-- `data-tag-names-sql.test.ts` — EXISTS
-- `admin-backfill-runner-detection-failure.test.ts` — EXISTS
-- `process-image-blur-wiring.test.ts` — EXISTS
-- `images-action-blur-wiring.test.ts` — EXISTS
-- `backfill-color-pipeline.test.ts` — EXISTS
-- `sw-template-contract.test.ts` — EXISTS
-- `privacy-fields.test.ts` — EXISTS
-- `touch-target-audit.test.ts` — EXISTS
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-27 — CLAUDE.md documented commands match package.json scripts (PASS)
-
-**Claim:** `npm run dev`, `npm run build`, `npm run db:push`, `npm run db:seed`, `npm run init`, `npm run lint --workspace=apps/web`
-
-**Actual (root `package.json`):** All root-level commands present (`dev`, `build`, `lint`, `test`, `test:e2e`). Apps/web scripts include `db:push`, `db:seed`, `init`.
-
-Minor: CLAUDE.md says `npm run init` under "run from apps/web" — root package.json does not have `init` but `apps/web/package.json` does. This is consistent with the "run from apps/web" qualifier.
-
-**Severity:** N/A — no finding  
-**Confidence:** confirmed
-
----
-
-### VER-R5C1-28 — SESSION_SECRET min-length: CLAUDE.md says "64-char-hex" but code enforces min 32 chars (LOW, same as VER-R5C1-03)
-
-See VER-R5C1-03 — production enforcement is `length >= 32`, not 64.
-
----
-
-## Summary
-
-| ID | Severity | Description |
-|----|----------|-------------|
-| VER-R5C1-01 | MEDIUM | settings-hash coverage in CLAUDE.md describes 3 keys; actual code hashes 9 keys |
-| VER-R5C1-08 | MEDIUM | settings-hash.ts module docblock also lists only 3 keys (same drift, in source) |
-| VER-R5C1-02 | LOW | ETag formula in CLAUDE.md says `settingsHash.slice(0,8)`; code uses `${settingsHash}` (same result but misleading) |
-| VER-R5C1-03 | LOW | CLAUDE.md says "random-64-char-hex" for SESSION_SECRET; enforcement is min 32 chars |
-
-**CRIT:** 0  
-**HIGH:** 0  
-**MEDIUM:** 2  
-**LOW:** 2  
-**Passing claims verified:** 24 of 28 checks
 
 ## Recommendation
 
-APPROVE with two documentation fixes:
-
-1. **VER-R5C1-01 + VER-R5C1-08 (MEDIUM):** Update the CLAUDE.md ETag/cache-invalidation paragraph and the `settings-hash.ts` module docblock to list all 9 `COLOR_IMPACTING_KEYS`. The operational consequence of the stale description is that a developer reading the docs would not know that `image_quality_*` or `image_sizes` changes also invalidate the ETag — they would expect manual workarounds that are already handled automatically.
-
-2. **VER-R5C1-02 (LOW):** Correct CLAUDE.md ETag formula to `${settingsHash}` (no `.slice`), or add a note that the 8-char truncation happens inside `settings-hash.ts`.
-
-3. **VER-R5C1-03 (LOW):** Either update CLAUDE.md to say "min-32-char secret" or leave the `openssl rand -hex 32` recommendation but remove the "64-char-hex" characterisation to avoid confusion when operators supply a valid 32–63 char secret.
-
-No functional defects found. All contracts, test files, constants, and behavioral claims are verified against actual code.
+**APPROVE.** Every plan-328 DONE claim (Items 1-6) is VERIFIED-TRUE against code AND fresh command output; all five blocking gates are exit 0; the working-tree partial work (admin error.tsx AGG-9 split, concurrency new-formula + test) is correct and green. The only failing full-suite test is a confirmed environmental timeout flake (passes isolated). The four "VERIFIED-FALSE" entries are stale plan-329 TODO markers where the code is in fact implemented and test-backed — a documentation-hygiene gap in the safe direction, not a correctness or completion defect. Update the plan-329 progress table before cycle close so coverage accounting stays honest.
