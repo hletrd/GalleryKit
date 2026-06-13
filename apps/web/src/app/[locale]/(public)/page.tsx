@@ -6,7 +6,6 @@ import { safeJsonLd } from '@/lib/safe-json-ld';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizeUrl } from '@/lib/locale-path';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { absoluteImageUrl } from '@/lib/image-url';
 import { filterExistingTagSlugs, parseRequestedTagSlugs } from '@/lib/tag-slugs';
 import { getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
@@ -87,21 +86,29 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     };
   }
 
-  const [images, config] = await Promise.all([
-    getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0),
-    getGalleryConfig(),
-  ]);
+  // AGG-R7-09: the OG image now uses the always-present base JPEG, so the
+  // gallery config (only needed previously for findNearestImageSize) is no
+  // longer fetched in this metadata path.
+  const images = await getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0);
   const latestImage = images[0];
-  // Use configured image sizes for OG image URL (avoids 404s if admin changes image_sizes)
-  const ogImageSize = findNearestImageSize(config.imageSizes, 1536);
   const isLatestTitleFilename = latestImage?.title
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
     : false;
 
-  // Use custom OG image if configured, otherwise use latest photo
+  // AGG-R7-09 (run-7 c1): point the home OG <meta og:image> at the BASE JPEG,
+  // not a `_${size}.jpg` sized derivative. The previous nearest-configured-size
+  // approach did NOT guarantee that derivative is on disk for a freshly-
+  // uploaded or legacy `latestImage` mid-backfill (or right after an
+  // `image_sizes` reconfigure), so a sized URL could 404 the social card until
+  // backfill catches up. The encoder atomic-rename contract
+  // guarantees the base filename always exists for a processed photo; a
+  // base-resolution card is fully valid and never 404s. (Unlike the per-photo
+  // OG ROUTE, which Satori-renders bytes server-side and so iterates sizes via
+  // pickFirstAvailablePhotoBuffer, this path only emits a URL string and cannot
+  // probe the filesystem cheaply — so prefer the always-present base.)
   const ogImages = latestImage
     ? [{
-        url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg.replace(/\.jpg$/i, `_${ogImageSize}.jpg`)}`, seo.url),
+        url: absoluteImageUrl(`/uploads/jpeg/${latestImage.filename_jpeg}`, seo.url),
         width: latestImage.width,
         height: latestImage.height,
         alt: latestImage.title && !isLatestTitleFilename ? latestImage.title : t('latestPhoto'),
