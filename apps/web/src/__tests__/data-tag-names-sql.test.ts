@@ -118,6 +118,33 @@ describe('getImagesLite tag_names SQL shape', () => {
         expect(body).not.toMatch(/\bblur_data_url\b/);
     });
 
+    /**
+     * AGG-R8c3-05 (PERF-1): the home OG metadata path must NOT run the heavy
+     * masonry-listing query. getLatestImageForOg selects only id + title for
+     * the OG card, with no tag JOIN / GROUP_CONCAT / GROUP BY — the optional
+     * tag filter rides buildImageConditions as an IN(subquery), keeping the
+     * outer query a single LIMIT 1 scan over the homepage composite index.
+     * Lock that shape so a refactor can't silently re-attach the tag
+     * aggregation that this accessor exists to avoid.
+     */
+    it('getLatestImageForOg is a minimal id+title query with NO tag JOIN / GROUP_CONCAT', () => {
+        const source = readSource();
+        const body = extractFunctionBody(source, 'getLatestImageForOg');
+        // Selects exactly id + title for the OG card.
+        expect(body).toMatch(/id:\s*images\.id/);
+        expect(body).toMatch(/title:\s*images\.title/);
+        // Reuses the shared condition builder (processed filter + tag subquery).
+        expect(body).toContain('buildImageConditions(');
+        // FORBIDDEN: the heavy masonry-listing apparatus the OG path discards.
+        expect(body).not.toContain('tagNamesAgg');
+        expect(body).not.toContain('GROUP_CONCAT');
+        expect(body).not.toContain('.leftJoin(imageTags');
+        expect(body).not.toContain('.leftJoin(tags');
+        expect(body).not.toContain('.groupBy(');
+        // Single-row.
+        expect(body).toMatch(/\.limit\(1\)/);
+    });
+
     it('uses LEFT JOIN + GROUP BY for getAdminImagesLite', () => {
         const source = readSource();
         const body = extractFunctionBody(source, 'getAdminImagesLite');

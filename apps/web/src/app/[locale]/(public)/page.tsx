@@ -1,4 +1,4 @@
-import { getImagesLite, getImagesLitePage, getTagsCached, getTopicsCached, getSeoSettings } from '@/lib/data';
+import { getLatestImageForOgCached, getImagesLitePage, getTagsCached, getTopicsCached, getSeoSettings } from '@/lib/data';
 import { HomeClient } from '@/components/home-client';
 import { OnThisDayWidget } from '@/components/on-this-day-widget';
 import { Metadata } from 'next';
@@ -86,11 +86,11 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
     };
   }
 
-  // AGG-R7-09: the OG image now uses the always-present base JPEG, so the
-  // gallery config (only needed previously for findNearestImageSize) is no
-  // longer fetched in this metadata path.
-  const images = await getImagesLite(undefined, tagSlugs.length > 0 ? tagSlugs : undefined, 1, 0);
-  const latestImage = images[0];
+  // AGG-R8c3-05 (PERF-1): the OG card only needs the latest image's id + title.
+  // Use the minimal cache()-wrapped accessor (no tag JOIN / GROUP_CONCAT /
+  // GROUP BY / filesort) instead of the full masonry-listing getImagesLite,
+  // which discarded all that work. The page body still uses getImagesLitePage.
+  const latestImage = await getLatestImageForOgCached(tagSlugs.length > 0 ? tagSlugs : undefined);
   const isLatestTitleFilename = latestImage?.title
     ? /\.[a-z0-9]{3,4}$/i.test(latestImage.title)
     : false;

@@ -854,6 +854,39 @@ export async function getImagesLitePage(
 }
 
 /**
+ * AGG-R8c3-05 (PERF-1): minimal accessor for the HOME page OG card metadata.
+ *
+ * `generateMetadata` only needs the latest processed image's `id` (to build the
+ * `/api/og/photo/${id}` card URL) and `title` (for the OG `alt`). The previous
+ * code called `getImagesLite(undefined, tagSlugs, 1, 0)`, which runs the full
+ * masonry-listing query: `LEFT JOIN imageTags + tags` + `GROUP_CONCAT(...)` +
+ * `GROUP BY images.id` + filesort — heavy work the OG path discards. This
+ * accessor selects ONLY `id, title` with no tag JOIN and no aggregation; the
+ * optional tag filter rides `buildImageConditions` as an `IN (subquery)` so the
+ * outer query stays a single `LIMIT 1` scan over the homepage composite index
+ * `(processed, capture_date, created_at)`. Wrapped in `cache()` for SSR dedup.
+ *
+ * NOT a substitute for `getImagesLite` (which legitimately returns tag_names for
+ * the gallery aria-labels and is locked by `data-tag-names-sql.test.ts`); this
+ * is purpose-built for the OG metadata path only.
+ */
+export async function getLatestImageForOg(tagSlugs?: string[]) {
+    const conditions = buildImageConditions(undefined, tagSlugs, false);
+    if (conditions === null) return null;
+
+    const baseQuery = db.select({ id: images.id, title: images.title })
+        .from(images)
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id));
+
+    const query = conditions.length > 0
+        ? baseQuery.where(and(...conditions))
+        : baseQuery;
+
+    const rows = await query.limit(1);
+    return rows[0] ?? null;
+}
+
+/**
  * Full image listing with tag names via GROUP_CONCAT.
  * Use when tag_names need to be displayed (e.g., admin dashboard).
  */
@@ -1560,6 +1593,8 @@ export async function getMapImages() {
 }
 
 export const getImageCached = cache(getImage);
+// AGG-R8c3-05: SSR-deduplicated minimal latest-image lookup for the home OG card.
+export const getLatestImageForOgCached = cache(getLatestImageForOg);
 export const getTopicBySlugCached = cache(getTopicBySlug);
 export const getTopicsCached = cache(getTopics);
 export const getTagsCached = cache(_getTags);

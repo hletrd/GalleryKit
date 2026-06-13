@@ -20,14 +20,16 @@ const {
     getTranslationsMock,
     getSeoSettingsMock,
     getTagsCachedMock,
-    getImagesLiteMock,
+    getLatestImageForOgCachedMock,
     getGalleryConfigMock,
 } = vi.hoisted(() => ({
     getLocaleMock: vi.fn(),
     getTranslationsMock: vi.fn(),
     getSeoSettingsMock: vi.fn(),
     getTagsCachedMock: vi.fn(),
-    getImagesLiteMock: vi.fn(),
+    // AGG-R8c3-05: the home OG metadata path now uses the minimal
+    // getLatestImageForOgCached accessor (id + title only), not getImagesLite.
+    getLatestImageForOgCachedMock: vi.fn(),
     getGalleryConfigMock: vi.fn(),
 }));
 
@@ -37,7 +39,7 @@ vi.mock('next-intl/server', () => ({
 }));
 
 vi.mock('@/lib/data', () => ({
-    getImagesLite: getImagesLiteMock,
+    getLatestImageForOgCached: getLatestImageForOgCachedMock,
     getImagesLitePage: vi.fn(),
     getTagsCached: getTagsCachedMock,
     getTopicsCached: vi.fn(),
@@ -71,7 +73,7 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
         getLocaleMock.mockResolvedValue('en');
         getTranslationsMock.mockResolvedValue(((key: string) => key) as unknown as never);
         getTagsCachedMock.mockResolvedValue([]);
-        getImagesLiteMock.mockResolvedValue([]);
+        getLatestImageForOgCachedMock.mockResolvedValue(null);
         getGalleryConfigMock.mockResolvedValue({ imageSizes: [640, 1536, 2048] });
     });
 
@@ -83,9 +85,7 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
 
     it('returns title:{absolute} on the latest-photo branch (no-filter)', async () => {
         getSeoSettingsMock.mockResolvedValue({ ...SEO_BASE, og_image_url: undefined });
-        getImagesLiteMock.mockResolvedValue([
-            { id: 42, filename_jpeg: 'abc.jpg', width: 1200, height: 800, title: 'Sunset' },
-        ]);
+        getLatestImageForOgCachedMock.mockResolvedValue({ id: 42, title: 'Sunset' });
         const meta = await generateMetadata({ searchParams: Promise.resolve({}) });
         // The contract is the {absolute} wrapper, not the inner string shape.
         expect(meta.title).toHaveProperty('absolute');
@@ -94,9 +94,11 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
 
     it('latest-photo og:image is the per-photo OG route (1200x630), NOT the oversized base JPEG (AGG-R8-02)', async () => {
         getSeoSettingsMock.mockResolvedValue({ ...SEO_BASE, og_image_url: undefined });
-        getImagesLiteMock.mockResolvedValue([
-            { id: 42, filename_jpeg: 'abc.jpg', width: 7680, height: 5120, title: 'Sunset' },
-        ]);
+        // AGG-R8c3-05: the accessor returns only id + title; width/height of the
+        // SOURCE photo are irrelevant to the OG card (the card is a fixed
+        // 1200x630 Satori render), which is exactly why the heavy listing query
+        // was dropped.
+        getLatestImageForOgCachedMock.mockResolvedValue({ id: 42, title: 'Sunset' });
         const meta = await generateMetadata({ searchParams: Promise.resolve({}) });
         const ogImages = (meta.openGraph as { images?: Array<{ url: string; width?: number; height?: number }> })?.images;
         expect(ogImages).toBeTruthy();
