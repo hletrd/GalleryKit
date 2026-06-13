@@ -49,9 +49,19 @@ const adminDir = path.resolve(srcRoot, 'app', '[locale]', 'admin');
 // pages are mobile-priority by definition — they're the surfaces a
 // client or prospective client touches first.
 const publicDir = path.resolve(srcRoot, 'app', '[locale]', '(public)');
-const appLevelErrorFiles = [
+// AGG-R5C3-06 (CRT-R5C3-01): `[locale]` ROOT-level route files
+// (not-found.tsx, error.tsx, layout.tsx, loading.tsx) live directly under
+// `app/[locale]/` — NOT inside a scanned SCAN_ROOTS directory — so they were
+// previously unguarded. The cycle-2 anchor-based touch-target fixes landed in
+// not-found.tsx / error.tsx (and the skip link in layout.tsx), and any of them
+// could silently regress. List them explicitly so the scan covers them without
+// double-walking the admin/(public) subdirectories that SCAN_ROOTS already walks.
+const appLevelExtraFiles = [
     path.resolve(srcRoot, 'app', 'global-error.tsx'),
     path.resolve(srcRoot, 'app', '[locale]', 'error.tsx'),
+    path.resolve(srcRoot, 'app', '[locale]', 'not-found.tsx'),
+    path.resolve(srcRoot, 'app', '[locale]', 'layout.tsx'),
+    path.resolve(srcRoot, 'app', '[locale]', 'loading.tsx'),
 ];
 
 /**
@@ -374,6 +384,49 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
         description: 'native <select className={cn("...min-h-[<44px]...")}> composite arbitrary value below the 44 px floor',
     },
+    // AGG-R5C3-06 (CRT-R5C3-01): anchor-based touch targets. The cycle-2
+    // fixes added `min-h-11` links in g/[key]/page.tsx, not-found.tsx, and
+    // error.tsx, but no pattern guarded `<Link>`/`<a>` — so a regression to
+    // h-8/h-9/h-10 or a sub-44 arbitrary min-h would ship unseen (the same
+    // failure class that drove Badge/select into FORBIDDEN). The ≥44 override
+    // lookahead (h-1[12]/min-h-1[12]/size-1[12]) lets a co-present 44 px utility
+    // win, so the three fixed `min-h-11` links pass. The lookahead ALSO requires
+    // a sizing className present, so sr-only skip links (no h-/min-h token) and
+    // plain text links never trip.
+    {
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+        description: '<Link className="...h-8/h-9/h-10..."> renders below the 44 px floor',
+    },
+    {
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+        description: '<Link className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
+    },
+    {
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: '<Link className="...min-h-[<44px]..."> arbitrary value below the 44 px floor',
+    },
+    {
+        pattern: /<Link\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: '<Link className={cn("...min-h-[<44px]...")}> composite arbitrary value below the 44 px floor',
+    },
+    // HTML <a> anchors (lowercase). Same shapes; gated on a className sizing
+    // token so semantic/sr-only anchors do not false-positive.
+    {
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+        description: 'HTML <a className="...h-8/h-9/h-10..."> renders below the 44 px floor',
+    },
+    {
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+        description: 'HTML <a className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
+    },
+    {
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: 'HTML <a className="...min-h-[<44px]..."> arbitrary value below the 44 px floor',
+    },
+    {
+        pattern: /<a\b(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
+        description: 'HTML <a className={cn("...min-h-[<44px]...")}> composite arbitrary value below the 44 px floor',
+    },
 ];
 
 function listFilesRecursive(dir: string, predicate: (f: string) => boolean): string[] {
@@ -483,7 +536,13 @@ export function normalizeMultilineButtonTags(source: string): string {
     // (the tag-filter chips shipped exactly this shape unseen).
     // Run-4 cycle 16 DES-R4C16-04 / TEST-R4C16-04: native `select` added
     // (lowercase only — `<SelectTrigger` does not match `<select\b`).
-    const re = /<(Button|button|Badge|select)\b/g;
+    // AGG-R5C3-06 (CRT-R5C3-01): `Link` (next/link) and lowercase `a` added —
+    // anchor-based touch targets (the cycle-2 g/[key], not-found, error links)
+    // were invisible to the per-line regex when Prettier wrapped them across
+    // multiple lines. `<a\b` matches the HTML anchor but NOT `<area`/`<address`
+    // (\b after `a` requires a non-word boundary, and we additionally guard the
+    // FORBIDDEN <a> patterns on a className sizing token).
+    const re = /<(Button|button|Badge|select|Link|a)\b/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(source)) !== null) {
         const tagStart = m.index;
@@ -549,7 +608,7 @@ describe('touch-target audit (44 px floor)', () => {
         for (const root of SCAN_ROOTS) {
             files.push(...listFilesRecursive(root, (f) => /\.(tsx|jsx)$/.test(f)));
         }
-        files.push(...appLevelErrorFiles.filter((file) => fs.existsSync(file)));
+        files.push(...appLevelExtraFiles.filter((file) => fs.existsSync(file)));
         const violationsByFile: Map<string, FoundIssue[]> = new Map();
         for (const f of files) {
             const rel = relPathFromSrc(f);
@@ -650,6 +709,14 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'native <select className="h-9">', snippet: `<select className="h-9 w-full" value={v}>x</select>` },
             { name: 'native <select className={cn("h-10", ...)}>', snippet: `<select className={cn("h-10", "w-full")} value={v}>x</select>` },
             { name: 'native <select className="min-h-[40px]">', snippet: `<select className="min-h-[40px] w-full" value={v}>x</select>` },
+            // AGG-R5C3-06 (CRT-R5C3-01): anchor-based touch targets.
+            { name: '<Link className="h-8">', snippet: `<Link href="/x" className="h-8 px-2">x</Link>` },
+            { name: '<Link className="h-10">', snippet: `<Link href="/x" className="flex h-10 items-center">x</Link>` },
+            { name: '<Link className="min-h-[36px]">', snippet: `<Link href="/x" className="min-h-[36px] px-2">x</Link>` },
+            { name: '<Link className={cn("h-9", ...)}>', snippet: `<Link href="/x" className={cn("h-9", "px-2")}>x</Link>` },
+            { name: 'HTML <a className="h-8">', snippet: `<a href="/x" className="h-8 px-2">x</a>` },
+            { name: 'HTML <a className="min-h-[40px]">', snippet: `<a href="/x" className="min-h-[40px] px-2">x</a>` },
+            { name: 'HTML <a className={cn("h-10", ...)}>', snippet: `<a href="/x" className={cn("h-10", "px-2")}>x</a>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
@@ -771,6 +838,15 @@ describe('touch-target audit (44 px floor)', () => {
             { name: 'HTML <button className="min-h-[44px]">', snippet: `<button className="min-h-[44px]" type="button">x</button>` },
             { name: 'HTML <button className="min-h-[120px]"> (3-digit)', snippet: `<button className="min-h-[120px]" type="button">x</button>` },
             { name: '<Button className="min-h-[40px] min-h-11"> (override wins)', snippet: `<Button className="min-h-[40px] min-h-11">x</Button>` },
+            // AGG-R5C3-06 (CRT-R5C3-01): the cycle-2 fixed links (min-h-11),
+            // sr-only skip links (no sizing token), and plain text links must
+            // NOT trip.
+            { name: '<Link className="min-h-11"> (cycle-2 fixed shape)', snippet: `<Link href="/x" className="flex items-center gap-1 min-h-11">x</Link>` },
+            { name: '<Link className="inline-flex min-h-11"> (not-found fix)', snippet: `<Link href="/x" className="inline-flex items-center min-h-11 text-primary">x</Link>` },
+            { name: 'sr-only skip <a> (no sizing token)', snippet: `<a href="#main-content" className="sr-only focus:not-sr-only focus:px-4 focus:py-2">Skip</a>` },
+            { name: 'plain text <Link> (no sizing)', snippet: `<Link href="/x" className="text-sm text-muted-foreground hover:text-primary">x</Link>` },
+            { name: 'HTML <a className="min-h-[44px]">', snippet: `<a href="/x" className="min-h-[44px] px-2">x</a>` },
+            { name: '<a className="h-10 min-h-11"> (override wins)', snippet: `<a href="/x" className="h-10 min-h-11">x</a>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
