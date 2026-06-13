@@ -1049,19 +1049,42 @@ describe('touch-target audit (44 px floor)', () => {
     // links keep their min-h-11 tap area, so a future drop is caught here.
     it('public inline recovery <Link>s keep their min-h-11 tap area (AGG-C5-03)', () => {
         const recoveryLinkFiles = [
-            { rel: 'components/topic-empty-state.tsx', anchor: "home.clearFilter" },
-            { rel: 'components/home-client.tsx', anchor: "home.clearFilter" },
+            { rel: 'components/topic-empty-state.tsx', anchor: 'home.clearFilter' },
+            { rel: 'components/home-client.tsx', anchor: 'home.clearFilter' },
             { rel: 'app/[locale]/(public)/timeline/page.tsx', anchor: 'yearInReview' },
         ];
+        const hasMinH44 = (s: string) => /min-h-11\b/.test(s) || /min-h-\[(?:4[4-9]|[5-9]\d|\d{3,})px\]/.test(s);
         for (const { rel, anchor } of recoveryLinkFiles) {
             const abs = path.resolve(srcRoot, rel);
             const src = fs.readFileSync(abs, 'utf8');
-            // The recovery <Link> is the one rendering the anchor string; assert
-            // a min-h-11 (or min-h-[≥44px]) tap-area utility is present in the file.
-            expect(src.includes(anchor), `${rel} should still render the ${anchor} recovery link`).toBe(true);
+            // Scope the assertion to the SPECIFIC recovery <Link>, not the whole
+            // file — a file with multiple unrelated min-h-11 occurrences (e.g.
+            // home-client.tsx also has a P3 badge + back-to-top button) must not
+            // vacuously pass when the recovery link alone loses its tap area
+            // (architect Rec 2). An anchor key can ALSO appear outside a <Link>
+            // (e.g. timeline uses yearInReview in its SEO <title> at the top of
+            // the file), so we scan EVERY anchor occurrence and require that the
+            // one rendered inside a <Link> opening tag carries the ≥44 px floor.
+            let foundLinkWithAnchor = false;
+            let linkWithAnchorHasMinH44 = false;
+            let fromIdx = src.indexOf(anchor);
+            while (fromIdx !== -1) {
+                const linkOpen = src.lastIndexOf('<Link', fromIdx);
+                // The anchor is inside THIS <Link>'s opening-tag window only if no
+                // `</Link>` sits between the opening tag and the anchor.
+                if (linkOpen !== -1 && !src.slice(linkOpen, fromIdx).includes('</Link>')) {
+                    foundLinkWithAnchor = true;
+                    if (hasMinH44(src.slice(linkOpen, fromIdx))) {
+                        linkWithAnchorHasMinH44 = true;
+                        break;
+                    }
+                }
+                fromIdx = src.indexOf(anchor, fromIdx + anchor.length);
+            }
+            expect(foundLinkWithAnchor, `${rel}: a <Link> rendering ${anchor} must exist`).toBe(true);
             expect(
-                /min-h-11\b/.test(src) || /min-h-\[(?:4[4-9]|[5-9]\d|\d{3,})px\]/.test(src),
-                `${rel}: the inline recovery <Link> must carry min-h-11 (or min-h-[≥44px]) for a 44 px tap target (AGG-C5-03)`,
+                linkWithAnchorHasMinH44,
+                `${rel}: the inline recovery <Link> rendering ${anchor} must carry min-h-11 (or min-h-[≥44px]) for a 44 px tap target (AGG-C5-03)`,
             ).toBe(true);
         }
     });

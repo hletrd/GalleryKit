@@ -79,6 +79,13 @@
 - **Exit criterion:** close by recounting the real value (zero the budget, read the audit output, restore) and tightening the entry to 1 with a measurement-dated comment and the `batchAddButton:328` rationale — ideally in plan-339 Item 2's commit since it already touches this file. Otherwise re-open the next time touch-target-audit work is scheduled.
 - **STATUS: CLOSED (cycle 5, this run).** plan-339 Item 6 was TAKEN — empirically re-measured (budget→0, audit output), real count confirmed 1 (`batchAddButton` DialogTrigger `<Button size="sm">` ~:328); the other 5 now carry `h-11`. Entry tightened 6→1 with a measurement-dated rationale enumerating all six. The regression-detection slack is closed. No longer deferred.
 
+## Deferred 11 — Rec 3 (architect verification): sidecar cleanup lacks the runner's best-effort `.catch()`
+
+- **Severity/Confidence (original, preserved):** LOW / (informational) — architect verification Rec 3. **PRE-EXISTING — NOT introduced this cycle.**
+- **Where:** `apps/web/scripts/backfill-color-pipeline.ts` `cleanupDeletedMidReencodeVariants` (the `Promise.all([deleteImageVariants×3])`) vs `apps/web/src/lib/admin-backfill-runner.ts:~435-439` whose sibling cleanup wraps each unlink in a best-effort `.catch()`.
+- **Reason for deferral:** the sidecar's cleanup has NO `.catch()` swallow, so a stray `deleteImageVariants` rejection (beyond the ENOENT it already tolerates) could reject the `flushBatch` `Promise.all` and abort a prod backfill flush. BUT this is PRE-EXISTING behavior (the inner closure had no `.catch()` before this cycle's extraction either — the extraction preserved it verbatim), `deleteImageVariants` is already ENOENT-tolerant (the common delete-race case), and the sidecar is an operator-run `--rm` script (a flush abort is visible and re-runnable, not a silent prod failure). Not a correctness/security/data-loss regression introduced this cycle. The architect explicitly flagged it as "informational, optional ... raise only if you want true contract parity with the runner."
+- **Exit criterion:** re-open if true sidecar↔runner contract parity is desired (e.g. as part of the WI-09 `applyColorPipelineResult()` consolidation in Deferred 2) — at that point give the sidecar cleanup the same per-unlink `.catch()` the runner uses so a stray non-ENOENT unlink error can't abort the batch flush. No action while the sidecar remains a separate operator-run path with ENOENT-tolerant unlinks.
+
 ## Record-only OBSERVATION (NOT a counted finding) — AGENTS.md `.context/plans/` gitignore note imprecision
 
 - **Severity/Confidence:** LOW / Low (document-specialist OBSERVATION, explicitly NOT counted as a net-new mismatch).

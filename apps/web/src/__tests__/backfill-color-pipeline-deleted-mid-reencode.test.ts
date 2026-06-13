@@ -43,6 +43,8 @@ vi.mock('@/lib/process-image', async (importOriginal) => {
     return { ...actual, deleteImageVariants: deleteImageVariantsMock };
 });
 
+import * as fs from 'fs';
+import * as path from 'path';
 import {
     collectDeletedMidReencodeFiles,
     cleanupDeletedMidReencodeVariants,
@@ -117,5 +119,31 @@ describe('sidecar backfill delete-mid-reencode cleanup (cleanupDeletedMidReencod
         for (const call of deleteImageVariantsMock.mock.calls) {
             expect(call[2]).toEqual([]);
         }
+    });
+});
+
+describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, architect Rec 1)', () => {
+    // The helper unit tests above pin the partition + cleanup in isolation. This
+    // source-shape pin (same idiom as image-queue-delete-race-cleanup-wiring) pins
+    // that the in-`main` flushBatch closure actually INVOKES them and adjusts the
+    // counter, so a main() refactor that drops the partition/cleanup/tally is
+    // caught — flushBatch is a closure and cannot be driven directly from a test.
+    const scriptSrc = fs.readFileSync(
+        path.resolve(__dirname, '..', '..', 'scripts', 'backfill-color-pipeline.ts'),
+        'utf8',
+    );
+
+    it('flushBatch calls collectDeletedMidReencodeFiles to partition the UPDATE results', () => {
+        expect(scriptSrc).toMatch(/collectDeletedMidReencodeFiles\(\s*updateResults\s*\)/);
+    });
+
+    it('flushBatch maps the deleted-row files through cleanupDeletedMidReencodeVariants', () => {
+        expect(scriptSrc).toMatch(/\.map\(\s*cleanupDeletedMidReencodeVariants\s*\)/);
+    });
+
+    it('flushBatch adjusts the processed/deletedMidReencode tally for deleted rows', () => {
+        // The deleted-mid-reencode rows are NOT successes — both counters move.
+        expect(scriptSrc).toMatch(/deletedMidReencode\s*\+=\s*deletedMidReencodeFiles\.length/);
+        expect(scriptSrc).toMatch(/processed\s*-=\s*deletedMidReencodeFiles\.length/);
     });
 });
