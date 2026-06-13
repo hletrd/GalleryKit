@@ -1479,6 +1479,45 @@ export function extractExifForDb(exifData: ExifDataRaw) {
 }
 
 /**
+ * AGG-C7-05 (run-9 c4): decide whether a WebP buffer is LOSSLESS by reading
+ * the actual RIFF chunk structure, not a whole-buffer substring scan.
+ *
+ * The Tier-2 GPS re-encode fallback (below) must pick `lossless: true` vs
+ * `quality: 95`. A naive `buf.includes('VP8L')` would misclassify a LOSSY VP8
+ * file whose metadata (ICC name, XMP, EXIF) coincidentally contains the bytes
+ * "VP8L" as lossless, bloating the stored original on that rare path. WebP
+ * lossy uses a `VP8 ` (trailing space) pixel chunk; lossless uses `VP8L`;
+ * extended (`VP8X`) containers carry the real pixel chunk as a later sub-chunk.
+ * Walk the sub-chunks (same field order as the lossless scrubber: [FourCC][LE
+ * size]) and return true only when the genuine pixel-data chunk is `VP8L`.
+ * Default FALSE (the safe lossy choice) on any malformation/ambiguity.
+ *
+ * Exported as a test seam (mirrors the other internal helpers exported from
+ * this module); see `__tests__/process-image-webp-lossless-detect.test.ts`.
+ */
+export function isLosslessWebpByChunk(buf: Buffer): boolean {
+    if (buf.length < 16
+        || buf.toString('ascii', 0, 4) !== 'RIFF'
+        || buf.toString('ascii', 8, 12) !== 'WEBP') {
+        return false;
+    }
+    let offset = 12;
+    while (offset + 8 <= buf.length) {
+        const tag = buf.toString('ascii', offset, offset + 4);
+        const size = buf.readUInt32LE(offset + 4);
+        if (tag === 'VP8L') return true;   // genuine lossless pixel chunk
+        if (tag === 'VP8 ') return false;  // genuine lossy pixel chunk
+        // VP8X / ICCP / ANIM / ANMF / EXIF / XMP etc. — keep walking to the
+        // real pixel chunk. (An animated lossless file uses VP8L inside ANMF;
+        // a non-anim extended file has a top-level VP8 /VP8L after VP8X.)
+        const next = offset + 8 + size + (size % 2); // chunks are even-padded
+        if (next <= offset) return false; // overflow / zero-progress guard
+        offset = next;
+    }
+    return false;
+}
+
+/**
  * PP-BUG-3 / R4C8 COR-R4C8-01: strip GPS metadata from the on-disk
  * original file.
  *
@@ -1563,7 +1602,10 @@ export async function stripGpsFromOriginal(filePath: string): Promise<void> {
             await pipeline.jpeg({ quality: 95, chromaSubsampling: '4:4:4' }).toFile(tmpPath);
         } else if (ext === '.webp') {
             console.warn('stripGpsFromOriginal: lossless WebP scrub failed; re-encoding at q95', { filePath });
-            const isLosslessWebp = input.includes(Buffer.from('VP8L', 'ascii'));
+            // AGG-C7-05: read the real VP8/VP8L pixel-chunk FourCC rather than
+            // a whole-buffer 'VP8L' substring scan (which a lossy VP8 whose
+            // metadata happens to contain those bytes would trip).
+            const isLosslessWebp = isLosslessWebpByChunk(input);
             await pipeline.webp(isLosslessWebp ? { lossless: true } : { quality: 95 }).toFile(tmpPath);
         } else if (ext === '.tif' || ext === '.tiff') {
             console.warn('stripGpsFromOriginal: lossless TIFF scrub failed; re-encoding (lzw)', { filePath });
