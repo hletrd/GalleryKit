@@ -77,6 +77,7 @@
 - **Where:** `apps/web/src/__tests__/strip-gps-from-original.test.ts:104-114` (AVIF) — dispatcher-level test, no direct `stripGpsFromIsobmffBuffer` pure-scrubber test.
 - **Reason for deferral:** CONDITIONAL — this is scheduled as OPTIONAL plan-341 Item 6 (bundle with the WebP test). If the implementer takes it there, this entry is satisfied. If cycle budget does not allow, it is deferred here: the AVIF path is NOT currently known-broken, and its decoded-pixel proxy assertion has more teeth than WebP's (the q90 fallback IS lossy, so a silent break is more likely to surface). NOT a correctness/security/data-loss finding (no known bug on the AVIF path — unlike WebP, which IS scheduled).
 - **Exit criterion:** re-open (or take in plan-341 Item 6) the next time `gps-exif-strip.ts` ISOBMFF path or `strip-gps-from-original.test.ts` is touched; add a direct `stripGpsFromIsobmffBuffer` pure-scrubber test asserting file-byte identity outside the EXIF/XMP item, for symmetry with the new WebP + existing JPEG pure-scrubber tests.
+- **RESOLVED (cycle 6):** TAKEN in plan-341 Item 6 — two direct `stripGpsFromIsobmffBuffer` pure-scrubber tests added (lossless in-place strip asserting file-length identity + GPS-gone; GPS-free `stripped:false`+input-ref). No longer deferred.
 
 ---
 

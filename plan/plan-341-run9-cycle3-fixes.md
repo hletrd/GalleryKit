@@ -86,7 +86,7 @@
 - **Where:** `apps/web/src/__tests__/strip-gps-from-original.test.ts:104-114` (AVIF) shares the WebP test's dispatcher-level shape, but is LESS vacuous (the AVIF Tier-2 fallback re-encodes at q90 = lossy, so a silent ISOBMFF-lossless break is more likely to perturb the decoded-pixel assertion than WebP's). Still weaker than a direct pure-scrubber test.
 - **Change:** when implementing Item 2, OPTIONALLY add a parallel direct `stripGpsFromIsobmffBuffer(input)` pure-scrubber test (assert non-null + `stripped:true` + file-byte identity outside the EXIF/XMP item, plus a GPS-free `stripped:false` case), for symmetry with the new WebP and existing JPEG pure-scrubber tests.
 - **Disposition:** SCHEDULE-cheap if bundled with Item 2; otherwise DEFER to plan-342 (AVIF path not currently known-broken; the decoded-pixel proxy has more teeth than WebP's). Implementer's choice based on remaining cycle budget.
-- **Status:** PENDING (optional)
+- **Status:** DONE (commit pending push). TAKEN (not deferred). Added 2 direct `stripGpsFromIsobmffBuffer` pure-scrubber tests: lossless in-place strip (asserts file LENGTH unchanged — strictly stronger than the dispatcher's decoded-pixel proxy, since a re-encode would change the length — plus GPS-gone), and GPS-free `stripped:false` + input-ref. Verified the AVIF fixture carries GPS in an ISOBMFF Exif item and the scrub is byte-in-place. typecheck clean; gps-strip suite 26/26. plan-342 Deferred-9 is thereby satisfied.
 
 ---
 

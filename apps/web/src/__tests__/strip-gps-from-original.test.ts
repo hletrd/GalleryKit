@@ -253,6 +253,37 @@ describe('gps-exif-strip pure scrubbers', () => {
         expect(stripGpsFromWebpBuffer(Buffer.from('not a webp file at all'))).toBeNull();
     });
 
+    // AGG-C6-T1: direct ISOBMFF pure-scrubber test, for symmetry with the WebP
+    // and JPEG pure-scrubber tests above. The dispatcher-level AVIF test (further
+    // up) is less vacuous than WebP's was (the AVIF re-encode fallback is lossy
+    // q90, so it would perturb decoded pixels) — but a DIRECT test that asserts
+    // the file LENGTH is unchanged is strictly stronger: it proves the in-place
+    // byte-zeroing scrub ran, not a re-encode (which would change the length).
+    it('stripGpsFromIsobmffBuffer losslessly removes GPS (in-place, file length unchanged)', async () => {
+        const file = await makeFixture('pure-gps.avif', 'avif', true);
+        const input = await fs.readFile(file);
+        expect(await gpsInFile(file)).not.toBeNull();
+
+        const result = stripGpsFromIsobmffBuffer(input);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(true);
+        // In-place GPS zeroing preserves the file length (a re-encode would not).
+        expect(result!.buffer.length).toBe(input.length);
+        // GPS is actually gone from the scrubbed bytes.
+        const scrubbedPath = path.join(tmpDir, 'scrubbed.avif');
+        await fs.writeFile(scrubbedPath, result!.buffer);
+        expect(await gpsInFile(scrubbedPath)).toBeNull();
+    });
+
+    it('stripGpsFromIsobmffBuffer reports stripped=false and returns the input reference for GPS-free AVIF', async () => {
+        const file = await makeFixture('pure-nogps.avif', 'avif', false);
+        const input = await fs.readFile(file);
+        const result = stripGpsFromIsobmffBuffer(input);
+        expect(result).not.toBeNull();
+        expect(result!.stripped).toBe(false);
+        expect(result!.buffer).toBe(input);
+    });
+
     it('stripGpsFromJpegBuffer drops GPS-bearing XMP APP1 segments', async () => {
         const file = await makeFixture('xmp.jpg', 'jpeg', false);
         const original = await fs.readFile(file);
