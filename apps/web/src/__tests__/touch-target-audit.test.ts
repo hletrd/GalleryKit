@@ -1136,4 +1136,39 @@ describe('touch-target audit (44 px floor)', () => {
             ).toBe(true);
         }
     });
+
+    // AGG-C7-01 (run-9 c4 DES-C7-1): the admin-header brand/logo <Link> (the
+    // sole escape-to-dashboard affordance in the admin header) shipped ~24 px
+    // tall — the admin-side twin of the public nav brand link that was fixed
+    // in `bc7e2584`. Same bare-link gap: it carried no h-/min-h-/size- token,
+    // and the audit's <Link> patterns only fire on an EXPLICIT sub-44 token.
+    // Pin it the same pragmatic way (the durable layout-aware heuristic stays
+    // deferred per plan-344 Deferred-1). The anchor key here is the brand
+    // link's translation key `nav.admin`, which sits inside the <Link> body.
+    it('admin-header brand <Link> keeps its min-h-11 tap area (AGG-C7-01)', () => {
+        const rel = 'components/admin-header.tsx';
+        const anchor = 'nav.admin';
+        const hasMinH44 = (s: string) => /min-h-11\b/.test(s) || /min-h-\[(?:4[4-9]|[5-9]\d|\d{3,})px\]/.test(s);
+        const abs = path.resolve(srcRoot, rel);
+        const src = fs.readFileSync(abs, 'utf8');
+        let foundLinkWithAnchor = false;
+        let linkWithAnchorHasMinH44 = false;
+        let fromIdx = src.indexOf(anchor);
+        while (fromIdx !== -1) {
+            const linkOpen = src.lastIndexOf('<Link', fromIdx);
+            if (linkOpen !== -1 && !src.slice(linkOpen, fromIdx).includes('</Link>')) {
+                foundLinkWithAnchor = true;
+                if (hasMinH44(src.slice(linkOpen, fromIdx))) {
+                    linkWithAnchorHasMinH44 = true;
+                    break;
+                }
+            }
+            fromIdx = src.indexOf(anchor, fromIdx + anchor.length);
+        }
+        expect(foundLinkWithAnchor, `${rel}: a <Link> rendering ${anchor} must exist`).toBe(true);
+        expect(
+            linkWithAnchorHasMinH44,
+            `${rel}: the admin-header brand <Link> must carry min-h-11 (or min-h-[≥44px]) for a 44 px tap target (AGG-C7-01)`,
+        ).toBe(true);
+    });
 });
