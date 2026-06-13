@@ -547,7 +547,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 <button
                     ref={closeButtonRef}
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                    className="pointer-events-auto absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(false);
@@ -567,7 +567,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {/* Fullscreen toggle — top right, second from right */}
                 <button
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                    className="pointer-events-auto absolute top-4 right-16 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(false);
@@ -591,7 +591,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {totalCount != null && totalCount > 1 && (
                 <button
                     {...controlVisibilityProps}
-                    className="pointer-events-auto absolute top-4 right-[7.5rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                    className="pointer-events-auto absolute top-4 right-[7.5rem] z-10 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={(e) => {
                         e.stopPropagation();
                         setIsSlideshowActive(prev => !prev);
@@ -614,7 +614,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {prevId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                        className="pointer-events-auto absolute left-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);
@@ -624,7 +624,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         aria-keyshortcuts="ArrowLeft"
                         title={`${t('aria.previousImage')} (←)`}
                     >
-                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
+                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
                             <ChevronLeft className="h-6 w-6" />
                         </span>
                     </button>
@@ -634,7 +634,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                 {nextId !== null && (
                     <button
                         {...controlVisibilityProps}
-                        className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400"
+                        className="pointer-events-auto absolute right-0 top-0 h-full w-16 flex items-center justify-center text-white hover:bg-black/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         onClick={(e) => {
                             e.stopPropagation();
                             setIsSlideshowActive(false);
@@ -644,7 +644,7 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
                         aria-keyshortcuts="ArrowRight"
                         title={`${t('aria.nextImage')} (→)`}
                     >
-                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
+                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
                             <ChevronRight className="h-6 w-6" />
                         </span>
                     </button>
