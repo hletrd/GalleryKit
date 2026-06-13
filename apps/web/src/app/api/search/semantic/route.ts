@@ -187,6 +187,16 @@ export async function POST(request: NextRequest): Promise<Response> {
     // so the counter is consumed on every request that passes cheap validation,
     // preventing free config probing. Pattern 2: rollback on all subsequent
     // early-return paths before expensive work begins.
+    //
+    // AGG-R5C3-10 (BUG-R5C3-05): when TRUST_PROXY is unset, getClientIp returns
+    // 'unknown' for EVERY client, so all anonymous callers collapse into ONE
+    // shared 30/min bucket (rate-limit.ts emits a one-time [SECURITY] warning to
+    // this effect). Unlike the checkout idempotency key — which can be safely
+    // omitted on unknown IPs because its only cost is losing double-click dedup —
+    // this rate limit is a SECURITY control and MUST stay applied even to the
+    // shared 'unknown' bucket: a fail-open semantic endpoint would be a free DoS
+    // amplifier. Operators behind a reverse proxy MUST set TRUST_PROXY=true so
+    // per-client buckets are restored.
     const ip = getClientIp(request.headers);
     const now = Date.now();
     const overLimit = preIncrementSemanticAttempt(ip, now);
