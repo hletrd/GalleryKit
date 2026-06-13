@@ -24,15 +24,20 @@
  *   we ship 1 because the in-app runner shares Sharp + libheif worker
  *   capacity with the live image-processing queue. Operators on a host
  *   with spare CPU can raise this; the env var is read at runner start.
- *   AGG-R5C3-05: the requested value is ALSO clamped to a connection-budget
- *   cap so a background re-encode cannot pin the whole shared DB pool. Each
- *   worker can hold up to 2 of the 10 pool connections at once (per-image
- *   claim + transient db.execute) and the whole-run advisory lock pins 1
- *   more, so the effective ceiling is floor((POOL_CONNECTION_LIMIT - 2) / 2)
- *   = 4 at the shipped pool size. Requests above the cap are clamped DOWN
- *   (see resolveBackfillConcurrency) and a warning is logged. A pool-exhausted
- *   claim acquire is treated as a `locked` skip (row retried next run), never
- *   a tight error spin.
+ *   AGG-R5C3-05 + AGG-5 (run-6 c1): the requested value is ALSO clamped to a
+ *   connection-budget cap so a background re-encode cannot pin the shared DB
+ *   pool and starve live traffic. Each worker can hold up to 2 pool
+ *   connections at once (per-image claim + transient db.execute) and the
+ *   whole-run advisory lock pins 1 more; we additionally RESERVE roughly half
+ *   the pool for live request traffic. The effective ceiling is therefore
+ *   `cap = max(1, floor((POOL_CONNECTION_LIMIT - RESERVED - 1) / 2))` with
+ *   `RESERVED = max(3, ceil(POOL_CONNECTION_LIMIT / 2))` → cap = 2 at the
+ *   shipped pool size of 10 (a backfill then pins at most 1 + 2×2 = 5,
+ *   leaving ≥ 5 free so live photo/gallery renders don't queue behind
+ *   encode-duration connection holds). See `resolveBackfillConcurrency` below
+ *   for the authoritative arithmetic. Requests above the cap are clamped DOWN
+ *   and a warning is logged. A pool-exhausted claim acquire is treated as a
+ *   `locked` skip (row retried next run), never a tight error spin.
  * - The runner is INVISIBLE to the existing PQueue image-processing queue
  *   (which only claims `processed = false` rows). Re-encoding processed
  *   images is structured as a parallel, dedicated path here so we don't
@@ -89,21 +94,37 @@ export type AdminBackfillStatus =
     | { status: 'error'; reason: string };
 
 /**
- * AGG-R5C3-05: cap the backfill's effective concurrency against the shared DB
- * pool budget.
+ * Number of pool connections held back for live request traffic while a
+ * backfill runs. AGG-5 (run-6 c1): a SINGLE live `getImage()` fires a ~3-way
+ * `Promise.all` (image row + prev + next + tag aggregation), so reserving only 1
+ * connection — as the original AGG-R5C3-05 arithmetic did — is not enough to
+ * render even one photo page concurrently with a backfill. Reserve roughly half
+ * the pool (at least one full getImage fan-out) so live gallery/photo pages keep
+ * headroom and don't queue behind encode-duration connection holds.
+ */
+export const BACKFILL_RESERVED_LIVE_CONNECTIONS = (poolLimit: number): number =>
+    Math.max(3, Math.ceil(poolLimit / 2));
+
+/**
+ * AGG-R5C3-05 + AGG-5 (run-6 c1): cap the backfill's effective concurrency
+ * against the shared DB pool budget, reserving headroom for live traffic.
  *
- * Connection budget arithmetic (POOL_CONNECTION_LIMIT = 10):
+ * Connection budget arithmetic:
  *   - the whole-run advisory lock pins 1 connection for the run's lifetime;
  *   - each in-flight backfill worker can hold up to 2 connections at once —
  *     the per-image processing claim connection (held across encode → detect →
  *     UPDATE) plus the transient `db.execute` UPDATE connection;
- *   - therefore N workers need `1 + 2N` connections worst-case. Leaving at
- *     least 1 connection free for live traffic requires `1 + 2N <= LIMIT - 1`,
- *     i.e. N <= (LIMIT - 2) / 2.
+ *   - we reserve RESERVED (≈ half the pool, ≥ one full live getImage fan-out)
+ *     for live request traffic;
+ *   - so N workers + the lock must fit in `LIMIT − RESERVED`:
+ *     `1 + 2N <= LIMIT − RESERVED`  ⇒  `N <= (LIMIT − RESERVED − 1) / 2`.
  *
- * At LIMIT = 10 the cap is floor(8/2) = 4. Operators who raise
- * ADMIN_BACKFILL_CONCURRENCY above the cap are silently clamped DOWN to it so a
- * background maintenance op can never pin the whole pool and 500 live requests.
+ * At LIMIT = 10, RESERVED = max(3, 5) = 5, so the cap is floor((10−5−1)/2) =
+ * floor(4/2) = 2 — a backfill pins at most 1 (lock) + 2×2 = 5 connections,
+ * leaving ≥ 5 for live traffic (≥ one full getImage fan-out plus slack).
+ * Operators who raise ADMIN_BACKFILL_CONCURRENCY above the cap are silently
+ * clamped DOWN to it so a background maintenance op can never pin the pool and
+ * 500 live requests. The cap never drops below 1.
  */
 export function resolveBackfillConcurrency(
     requested: number,
@@ -114,7 +135,8 @@ export function resolveBackfillConcurrency(
     // the shipped pool size so the cap arithmetic never yields NaN — a NaN
     // concurrency would silently freeze PQueue and run zero tasks.
     const limit = Number.isFinite(poolLimit) ? poolLimit : 10;
-    const cap = Math.max(1, Math.floor((limit - 2) / 2));
+    const reserved = BACKFILL_RESERVED_LIVE_CONNECTIONS(limit);
+    const cap = Math.max(1, Math.floor((limit - reserved - 1) / 2));
     const req = Math.max(1, Math.floor(requested) || 1);
     return Math.min(req, cap);
 }
