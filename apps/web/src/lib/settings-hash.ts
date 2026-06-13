@@ -1,12 +1,15 @@
 /**
  * Color-impacting admin settings hash (P4-E2 / R4-L3 / FA-L1).
  *
- * Computes a stable 8-character SHA-256 prefix over the settings that
- * change the encoded bytes of the served derivatives:
+ * Computes a stable 8-character SHA-256 prefix over the 9 settings that
+ * change the encoded bytes of the served derivatives (see
+ * `COLOR_IMPACTING_KEYS` below — the authoritative list; AGG-R7-08
+ * corrected this docstring from a stale 3-key summary):
  *
- *   - `wide_gamut_jpeg_chroma` (4:4:4 / 4:2:0 chroma subsampling)
- *   - `avif_effort` (encoder effort 0-9)
- *   - `force_srgb_derivatives` (gamut-collapse override)
+ *   - color: `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`,
+ *     `force_srgb_derivatives`, `wide_gamut_max_source_pixels`
+ *   - quality: `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg`
+ *   - size: `image_sizes`
  *
  * The hash is folded into the ETag formula in `serve-upload.ts` so a
  * change to any of those settings forces a `must-revalidate` 304 →
