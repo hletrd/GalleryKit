@@ -394,14 +394,26 @@ export function UploadDropzone({
                 )}
 
                 {/* Dropzone */}
+                {/* AGG-R7-07 (run-7 c1, WCAG 4.1.2): the disabled state is
+                    enforced for real — useDropzone({ disabled }) already drops
+                    the root onClick/onKeyDown and the tabIndex when disabled
+                    (verified: tabIndex=undefined, handlers removed) and the
+                    inner <input> is disabled. The cursor was the one dishonest
+                    cue: an unconditional base `cursor-pointer` raced the
+                    disabled-branch `cursor-not-allowed` (equal Tailwind
+                    specificity → source-order-independent winner). Cursor is
+                    now conditional so the not-allowed affordance is reliable;
+                    aria-disabled + an explicit tabIndex={-1} fallback keep the
+                    semantics honest regardless of getRootProps internals. */}
                 <div
                     {...getRootProps()}
                     role="button"
                     aria-label={t('upload.dropzoneLabel')}
                     aria-disabled={uploading || !hasTopics}
-                    className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer transition-colors
+                    {...((uploading || !hasTopics) ? { tabIndex: -1 } : {})}
+                    className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center transition-colors
                         ${isDragActive ? 'border-primary bg-primary/10' : 'border-muted'}
-                        ${uploading || !hasTopics ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/50 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'}
+                        ${uploading || !hasTopics ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-primary/50 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'}
                     `}
                 >
                     <input {...getInputProps()} disabled={uploading || !hasTopics} />
