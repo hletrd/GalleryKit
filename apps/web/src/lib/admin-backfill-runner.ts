@@ -408,6 +408,24 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         return { ok: false, reason: 'missing-original' };
     }
 
+    // AGG-R8-09 (run-8 c2): re-validate the stored source width BEFORE the
+    // re-encode (mirrors the upload path's process-image.ts dimension guard). A
+    // legacy/corrupt row with width <= 0 would otherwise reach
+    // processImageFormats and surface as an OPAQUE Sharp `.resize({width:0})`
+    // throw counted as a generic `encode-failed`. We still classify it as
+    // `encode-failed` (so it is idempotent — NO version bump — and stays a
+    // candidate for a future run after the row is repaired), but log it
+    // distinctly so an operator can tell a bad-metadata row apart from a real
+    // encode failure. width is NOT NULL in schema; this is a defensive guard
+    // against pre-validation legacy data, not an expected path.
+    if (!Number.isFinite(row.width) || row.width <= 0) {
+        console.error(
+            `[admin-backfill] id=${row.id} skipped: invalid stored source width (${row.width}). ` +
+            `Row needs metadata repair before it can be re-encoded; left at its current pipeline_version for a later run.`,
+        );
+        return { ok: false, reason: 'encode-failed' };
+    }
+
     // ── LOCK-CRITICAL (AGG-R5C3-17) ──────────────────────────────────────────
     // TRC-R5C2-01: claim the per-image processing lock for the FULL re-encode +
     // detection + UPDATE window. If the live queue worker (or a concurrent

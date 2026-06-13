@@ -29,6 +29,11 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
     const observerRef = useRef<IntersectionObserver | null>(null);
     const loadingRef = useRef(false);
     const queryVersionRef = useRef(0);
+    // AGG-R8-07 (run-8 c2): guard setState after unmount. queryVersionRef only
+    // short-circuits a stale QUERY (key change), not an in-flight loadMore that
+    // resolves after the component unmounts (e.g. fast route change). Symmetric
+    // with the settings-client backfill unmount guard.
+    const mountedRef = useRef(true);
     const maintenanceCooldownRef = useRef<number>(0);
     const MAINTENANCE_COOLDOWN_MS = 5000;
     const [statusMessage, setStatusMessage] = useState('');
@@ -43,7 +48,7 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
             const page = smartCollectionSlug
                 ? await loadMoreSmartCollectionImages(smartCollectionSlug, cursor ?? offset, limit)
                 : await loadMoreImages(topicSlug, tagSlugs, cursor ?? offset, limit);
-            if (version !== queryVersionRef.current) return;
+            if (version !== queryVersionRef.current || !mountedRef.current) return;
             if (page.status === 'ok') {
                 setHasMore(page.hasMore);
                 if (page.images.length > 0) {
@@ -80,7 +85,7 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
             console.error('Failed to load more images:', error);
             toast.error(t('home.loadMoreFailed'));
         } finally {
-            if (version === queryVersionRef.current) {
+            if (version === queryVersionRef.current && mountedRef.current) {
                 loadingRef.current = false;
                 setLoading(false);
             }
@@ -122,6 +127,15 @@ export function LoadMore({ topicSlug, smartCollectionSlug, tagSlugs, initialOffs
     }, []);
 
     useEffect(() => () => observerRef.current?.disconnect(), []);
+
+    // AGG-R8-07: flip the mounted flag on unmount so an in-flight loadMore that
+    // resolves afterwards skips its setState block.
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
 
     return (
         <>

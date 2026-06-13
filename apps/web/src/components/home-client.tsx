@@ -268,6 +268,19 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
 
                     const isAboveFold = index < Math.min(columnCount, itemCount);
 
+                    // AGG-R8-08 (run-8 c2): guard the width/height denominators.
+                    // image.width/height are NOT NULL from validated Sharp
+                    // metadata so a 0 is near-impossible, but an unguarded
+                    // `/ image.width` emits "auto Infinitypx" (and "0 / 0"
+                    // aspect-ratio) — invalid CSS that browsers silently drop,
+                    // losing the CLS reservation for that card. Fall back to a
+                    // 1:1 square reservation when either dimension is non-positive.
+                    const hasValidDims = image.width > 0 && image.height > 0;
+                    const cardAspectRatio = hasValidDims ? `${image.width} / ${image.height}` : '1 / 1';
+                    const cardIntrinsicHeight = hasValidDims
+                        ? Math.round(estimatedCardWidth * image.height / image.width)
+                        : Math.round(estimatedCardWidth);
+
                     return (
                         <div
                             key={image.id}
@@ -275,9 +288,9 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                                 "masonry-card break-inside-avoid relative group overflow-hidden rounded-xl bg-muted/20 [mask-image:radial-gradient(white,black)] focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 mb-4 w-full"
                             )}
                             style={{
-                                aspectRatio: `${image.width} / ${image.height}`,
+                                aspectRatio: cardAspectRatio,
                                 backgroundColor: 'hsl(var(--muted))',
-                                containIntrinsicSize: `auto ${Math.round(estimatedCardWidth * image.height / image.width)}px`,
+                                containIntrinsicSize: `auto ${cardIntrinsicHeight}px`,
                             }}
                         >
                             <Link
