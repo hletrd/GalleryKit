@@ -30,6 +30,16 @@
 ### Item 6 — AGG-R5C2-13 / DES-R5C2-01 (MED, High, confirmed): shared-group back-link touch target
 - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:140,172` — add `min-h-11` to both "View Gallery" links (inline-flex already centers). Check `touch-target-audit.test.ts` SCAN_ROOTS: `app/[locale]/(public)` is NOT scanned (only components/ + admin) — note this gap in the test file comment or extend scanning if cheap.
 
+> **[CORRECTION cycle-3 — CRT-R5C3-01 / AGG-R5C3-06]** The claim above that
+> `app/[locale]/(public)` is NOT in SCAN_ROOTS is FACTUALLY WRONG — `publicDir`
+> was added to SCAN_ROOTS in run-4 cycle 16 (R27-UX-LOW-1). The real coverage
+> gaps were (a) the FORBIDDEN set anchored only on Button/button/Badge/select, so
+> `<Link>`/`<a>` touch targets (these very "View Gallery" links) were unguarded,
+> and (b) `[locale]` ROOT-level files (not-found/error/layout/loading.tsx) sat
+> outside any scan root. Both gaps were closed in run-5 cycle-3 plan-325 item 8
+> (Link/anchor FORBIDDEN patterns + root-file scan + fixtures). History preserved,
+> not rewritten.
+
 ## C. Test hardening
 
 ### Item 7 — AGG-R5C2-14 / TEST-R5C2-03+16 (MED, confirmed/likely): session-verify isolation

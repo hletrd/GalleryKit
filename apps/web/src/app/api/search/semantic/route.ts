@@ -77,7 +77,15 @@ const NO_STORE_HEADERS = {
  *  `Number([])`, and `Number(['5'])` all coerce to finite numbers (1, 0, 5), so a
  *  bare `Number(raw)` would silently accept booleans / empty arrays / single-element
  *  arrays as a topK. Anything defined that is not already a `number` falls back to
- *  the default; `undefined` (omitted) also falls back. */
+ *  the default; `undefined` (omitted) also falls back.
+ *
+ *  AGG-R5C3-15 (COR-R5C3-06) — CALLER CONTRACT: `raw` MUST be a parsed-JSON
+ *  number. A numeric STRING like `"5"` is `typeof 'string'` and therefore returns
+ *  the DEFAULT by design (not 5). This route's only caller passes
+ *  `bodyObj.topK` from `JSON.parse(...)`, so a JSON number arrives as a number.
+ *  Any future query-string caller MUST pre-coerce (`Number(searchParams.get(...))`)
+ *  before calling this — do NOT loosen the typeof guard to accept numeric strings,
+ *  or the explicit non-number rejection above is defeated. */
 export function clampSemanticTopK(raw: unknown): number {
     if (raw !== undefined && typeof raw !== 'number') return SEMANTIC_TOP_K_DEFAULT;
     const topKRaw = raw !== undefined ? raw : SEMANTIC_TOP_K_DEFAULT;

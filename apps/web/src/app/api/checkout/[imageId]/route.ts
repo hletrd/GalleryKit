@@ -177,6 +177,13 @@ export async function POST(
         // callers so each request creates a fresh Stripe session. Stripe-side
         // deduplication is lost only for misconfigured-proxy deployments —
         // the correct trade-off versus silently colliding distinct buyers.
+        // AGG-R5C3-23 (CRT-R5C3-02): omitting the key ALSO forfeits the
+        // single-buyer double-click dedup on unknown-IP deployments — a buyer
+        // who double-clicks Buy gets TWO pending Stripe sessions instead of one.
+        // This is self-healing (unpaid sessions expire ~24 h) and never
+        // double-charges (each session is paid independently or not at all), so
+        // it is an acceptable degradation versus the cross-buyer collision that
+        // a shared 'unknown' key would cause.
         // Operators should set TRUST_PROXY=true behind a reverse proxy so
         // per-IP deterministic keys work correctly.
         const stripeOptions: { idempotencyKey?: string } = {};
