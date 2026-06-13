@@ -89,6 +89,29 @@ vi.mock('@/lib/color-detection', () => ({
     })),
 }));
 
+// reprocessOne opens `sharp(originalPath).metadata()` BEFORE detectColorSignals.
+// The temp paths here do not exist on disk, so real Sharp would throw and push
+// every row down the detection-FAILED branch — masking the version-bump UPDATE
+// path both the fatal-only and mixed tests actually intend to exercise. Mock
+// Sharp so .metadata() resolves; the (mocked) detectColorSignals then yields
+// truthy signals → the version-bump `UPDATE images SET pipeline_version` path.
+// The default export must ALSO carry the static methods process-image.ts calls
+// at import time (concurrency/cache/versions), since the process-image mock
+// below uses importOriginal() and loads the real module.
+vi.mock('sharp', () => {
+    const instance = { metadata: vi.fn(async () => ({ width: 100, height: 100, format: 'jpeg', space: 'srgb' })) };
+    const sharpFn = vi.fn(() => instance) as unknown as {
+        (...args: unknown[]): typeof instance;
+        concurrency: ReturnType<typeof vi.fn>;
+        cache: ReturnType<typeof vi.fn>;
+        versions: { heif?: string };
+    };
+    sharpFn.concurrency = vi.fn();
+    sharpFn.cache = vi.fn();
+    sharpFn.versions = { heif: '1.0.0' };
+    return { default: sharpFn };
+});
+
 vi.mock('@/lib/upload-paths', () => ({
     resolveOriginalUploadPath: vi.fn(async (n: string) => n),
 }));
@@ -199,6 +222,92 @@ describe('AGG-1: fatal per-row UPDATE error is counted, surfaced, and never infl
         expect(s.encodeFailures).toBe(0);
         expect(s.detectionFailures).toBe(0);
         // completedRuns still increments — a run that finished is "complete".
+        expect(s.completedRuns).toBeGreaterThan(0);
+    });
+});
+
+describe('AGG-R8-10 (run-8 c2): a MIXED run reports processed>0 AND errors>0 simultaneously', () => {
+    // The fatal-only test above proves errors are surfaced when EVERY row throws.
+    // This pins the realistic production shape: some rows re-encode cleanly while
+    // others hit a fatal per-row UPDATE. A regression that mis-attributed a fatal
+    // row to `processed` (or dropped a success when any error occurred) would pass
+    // the fatal-only test but fail here.
+    beforeEach(() => {
+        _resetAdminBackfillStateForTesting();
+        queryMock.mockReset();
+        releaseMock.mockReset();
+        executeMock.mockReset();
+        processImageFormatsMock.mockClear();
+
+        queryMock.mockImplementation(async (sqlText: string) => {
+            if (typeof sqlText === 'string' && sqlText.includes('GET_LOCK')) return [[{ acquired: 1 }]];
+            if (typeof sqlText === 'string' && sqlText.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
+            return [[]];
+        });
+
+        // Two candidate rows; the per-row UPDATE succeeds for the first and
+        // THROWS for the second. The runner issues a COUNT(*) query AND a
+        // separate id-fetch SELECT; distinguish them so COUNT returns 2 and the
+        // fetch returns the two rows exactly once (a re-poll returns empty so
+        // the run terminates after the single batch).
+        let fetchCount = 0;
+        let updateCount = 0;
+        const mkRow = (id: number) => ({
+            id,
+            filename_original: `original-${id}.jpg`,
+            filename_avif: `a${id}.avif`,
+            filename_webp: `a${id}.webp`,
+            filename_jpeg: `a${id}.jpg`,
+            icc_profile_name: null,
+            color_primaries: null,
+            width: 100,
+        });
+        executeMock.mockImplementation(async (arg: unknown) => {
+            const text = staticSqlText(arg);
+            if (text.includes('COUNT(*)')) {
+                return [[{ cnt: 2 }]];
+            }
+            if (text.includes('SELECT')) {
+                fetchCount++;
+                if (fetchCount > 1) return [[]];
+                return [[mkRow(1), mkRow(2)]];
+            }
+            if (text.includes('UPDATE images SET')) {
+                updateCount++;
+                // First successful version-bump, second fatal — one of each.
+                if (updateCount >= 2) {
+                    throw new Error('ER_LOCK_DEADLOCK: Deadlock found when trying to get lock');
+                }
+                return [{ affectedRows: 1 }];
+            }
+            return [{ affectedRows: 0 }];
+        });
+    });
+
+    it('processed===1 and errors===1 coexist; lastRunHadFailures and lastError set', async () => {
+        const result = await triggerAdminBackfill();
+        expect(result.status).toBe('queued');
+        await vi.waitFor(
+            () => {
+                if (readAdminBackfillState().running) {
+                    throw new Error('backfill runner still draining');
+                }
+            },
+            { timeout: 20_000, interval: 25 },
+        );
+
+        const s = readAdminBackfillState();
+        // Exactly one row re-encoded, exactly one threw — both counters reflect
+        // reality at the same time (the partition the fatal-only test cannot
+        // exercise).
+        expect(s.processed).toBe(1);
+        expect(s.errors).toBe(1);
+        expect(s.lastRunHadFailures).toBe(true);
+        expect(String(s.lastError)).toContain('Deadlock');
+        // Both rows reached the encode step (the fatal was at the UPDATE).
+        expect(processImageFormatsMock).toHaveBeenCalledTimes(2);
+        expect(s.encodeFailures).toBe(0);
+        expect(s.detectionFailures).toBe(0);
         expect(s.completedRuns).toBeGreaterThan(0);
     });
 });

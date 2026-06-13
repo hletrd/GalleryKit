@@ -81,3 +81,70 @@ describe('reconcileLegacySchema mirrors the full Drizzle schema (COR-R4C1-13)', 
         },
     );
 });
+
+/**
+ * AGG-R8-10 / TRC-1 (run-8 c2): index-coverage tripwire.
+ *
+ * The column tripwire above catches a NEW COLUMN that lands in a drizzle SQL
+ * migration without a reconcileLegacySchema mirror. But the silent-skip class
+ * the migration runbook warns about is broader: on an existing-DB upgrade the
+ * migrate.js path baselines the new migration's hash FIRST, so drizzle's MySQL
+ * migrator short-circuits the apply and reconcileLegacySchema becomes the SOLE
+ * applier of the new SQL. An INDEX-ONLY migration (e.g. 0021's analytics
+ * indexes) whose author forgets the reconcile mirror would therefore be
+ * silently dropped on every existing deployment — green deploy, passing column
+ * tests, missing index. This asserts every `CREATE INDEX <name>` declared in
+ * the drizzle SQL is named somewhere in migrate.js (inline `INDEX <name>` in a
+ * CREATE TABLE body OR a standalone `ensureIndex(..., '<name>', ...)`). It is a
+ * SOURCE tripwire (name presence, not structural equivalence) — the
+ * authoritative end-to-end check remains a fresh-DB init + information_schema
+ * diff — but it catches the real failure class.
+ */
+describe('reconcileLegacySchema mirrors every drizzle SQL index (AGG-R8-10 / TRC-1)', () => {
+    const drizzleDir = path.resolve(__dirname, '..', '..', 'drizzle');
+
+    function collectDeclaredIndexNames(): string[] {
+        const names = new Set<string>();
+        const files = fs
+            .readdirSync(drizzleDir, { withFileTypes: true })
+            .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+            .map((e) => path.join(drizzleDir, e.name));
+        // Matches `CREATE [UNIQUE] INDEX [IF NOT EXISTS] `name`|name ON ...`.
+        const re = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?\s+ON/gi;
+        for (const file of files) {
+            const sqlText = fs.readFileSync(file, 'utf8');
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(sqlText)) !== null) {
+                names.add(m[1]);
+            }
+        }
+        return [...names];
+    }
+
+    const indexNames = collectDeclaredIndexNames();
+
+    it('finds the known drizzle indexes (scanner sanity)', () => {
+        // The journal carries a non-trivial set of CREATE INDEX statements; if
+        // this is empty the scanner regex / dir path is broken and the coverage
+        // assertion below would pass vacuously.
+        expect(indexNames.length).toBeGreaterThanOrEqual(10);
+        // Spot-check a couple of well-known ones.
+        expect(indexNames).toContain('idx_image_tags_tag_id');
+        expect(indexNames).toContain('idx_image_views_bot_viewed_country');
+    });
+
+    it.each(indexNames.map((n) => [n] as const))(
+        'migrate.js reconcile mirrors index %s',
+        (indexName) => {
+            // Present either as a standalone ensureIndex('<name>', …) call or as
+            // an inline `INDEX <name> (...)` inside a CREATE TABLE body — both
+            // embed the index name as a literal token in migrate.js.
+            expect(
+                MIGRATE_SRC.includes(indexName),
+                `Index \`${indexName}\` is declared in a drizzle/*.sql migration but is NOT mirrored in scripts/migrate.js reconcileLegacySchema. ` +
+                `An existing-DB upgrade baselines the migration hash first, so reconcile is the sole applier — this index would be silently dropped. ` +
+                `Add an ensureIndex(...) call (or inline INDEX in the CREATE TABLE) per CLAUDE.md "Adding a new migration" step 3.`,
+            ).toBe(true);
+        },
+    );
+});
