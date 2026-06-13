@@ -49,7 +49,14 @@ vi.mock('@/lib/gallery-config', () => ({
 }));
 
 // Pull in the real client-safe helpers the page uses (locale-path, image-url,
-// tag-slugs, photo-title, gallery-config-shared) — they are pure and need no mock.
+// tag-slugs, photo-title, gallery-config-shared) — they are pure and need no
+// mock. The page module is imported STATICALLY (mirroring
+// photo-og-metadata.test.ts) — the vi.mock calls above are hoisted by
+// vi.hoisted, so a top-level import resolves them, and paying the module's
+// (heavy) transitive import cost once at load avoids the cold dynamic-import
+// cost landing inside the first `it`'s timeout (which flaked under full-suite
+// load).
+import { generateMetadata } from '@/app/[locale]/(public)/page';
 
 const SEO_BASE = {
     title: 'GalleryKit',
@@ -57,11 +64,6 @@ const SEO_BASE = {
     url: 'https://example.com',
     locale: 'en',
 };
-
-async function importGenerateMetadata() {
-    const mod = await import('@/app/[locale]/(public)/page');
-    return mod.generateMetadata as (args: { searchParams: Promise<{ tags?: string }> }) => Promise<{ title: unknown }>;
-}
 
 describe('home generateMetadata — title.absolute (AGG-10)', () => {
     beforeEach(() => {
@@ -75,7 +77,6 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
 
     it('returns title:{absolute} on the configured-OG-image branch (no-filter)', async () => {
         getSeoSettingsMock.mockResolvedValue({ ...SEO_BASE, og_image_url: 'https://example.com/og.png' });
-        const generateMetadata = await importGenerateMetadata();
         const meta = await generateMetadata({ searchParams: Promise.resolve({}) });
         expect(meta.title).toEqual({ absolute: 'GalleryKit' });
     });
@@ -85,7 +86,6 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
         getImagesLiteMock.mockResolvedValue([
             { filename_jpeg: 'abc.jpg', width: 1200, height: 800, title: 'Sunset' },
         ]);
-        const generateMetadata = await importGenerateMetadata();
         const meta = await generateMetadata({ searchParams: Promise.resolve({}) });
         // The contract is the {absolute} wrapper, not the inner string shape.
         expect(meta.title).toHaveProperty('absolute');
@@ -95,7 +95,6 @@ describe('home generateMetadata — title.absolute (AGG-10)', () => {
     it('returns title:{absolute} (never a bare templated string) on the filtered branch', async () => {
         getSeoSettingsMock.mockResolvedValue({ ...SEO_BASE, og_image_url: 'https://example.com/og.png' });
         getTagsCachedMock.mockResolvedValue([{ slug: 'sunset', name: 'sunset' }]);
-        const generateMetadata = await importGenerateMetadata();
         const meta = await generateMetadata({ searchParams: Promise.resolve({ tags: 'sunset' }) });
         expect(meta.title).toHaveProperty('absolute');
         // The filtered title bakes the site name itself; absolute prevents a
