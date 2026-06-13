@@ -1,185 +1,47 @@
-# Verification Report — Cycle 6 (run-9 c3)
-
-**11 claims verified, 0 critical failures. One test-isolation quirk (non-blocking). One CLAUDE.md count discrepancy (non-blocking doc note).**
-
-HEAD: `4c3d5924` — working tree clean. Full suite: **218 test files, 2080 tests, 0 failures**.
-Typecheck: **0 errors** (`typecheck:app` + `typecheck:scripts` both exit 0).
-
----
+# Verification Report — Cycle 7 (run-9 cycle-3 fixes + key invariants)
 
 ## Verdict
+**Status**: PASS
+**Confidence**: high
+**Blockers**: 0
 
-**Status: PASS** · **Confidence: high** · **Blockers: 0**
+HEAD `d0920957` (clean tree, confirmed `git rev-parse HEAD`). All four prior-cycle fix commits present in history (`b6c4f915`, `1a483f9b`, `26f68430`, `23f62c66`). Every prior-cycle fix is **genuinely closed in code** with **non-vacuous tests**; every audited invariant holds at HEAD; CLAUDE.md doc claims match the code. A clean verification is the result — no FAIL, no finding.
 
-All 6 cycle-5 acceptance criteria verified with fresh evidence. Three broader CLAUDE.md behavior claims confirmed. One CLAUDE.md documentation count discrepancy found (cosmetic only — code correct).
+## Evidence (fresh, post-implementation)
 
----
+| Check | Result | Command/Source | Output |
+|-------|--------|----------------|--------|
+| Unit tests (GPS-strip + touch-target + privacy) | PASS | `npx vitest run strip-gps-from-original touch-target-audit privacy-fields` (from apps/web) | **3 files, 48 tests passed, exit 0** |
+| API-auth lint gate | PASS | `npm run lint:api-auth` | both `api/admin/**` routes `OK` (withAdminAuth wrapped) |
+| Action-origin lint gate | PASS | `npm run lint:action-origin` | `All mutating server actions enforce same-origin provenance.` |
+| Committed Link/a regex behavior | PASS | Node, ran the exact committed patterns | `max-h-10`/`max-h-9` no-flag; `h-8`/`h-9`/`h-10` flag; co-present `min-h-11` suppresses — 7/7 correct |
+| Admin route auth coverage | PASS | `grep -L withAdminAuth` over `api/admin/**/route.ts` | empty (all 2 wrapped) |
 
-## Gate Evidence
+## Verification Table
 
-| Check | Result | Command | Output |
-|-------|--------|---------|--------|
-| Full vitest | pass | `npm test --workspace=apps/web` | 2080 passed, 0 failed, 218 files, 269.82s |
-| Typecheck (app+scripts) | pass | `npm run typecheck` from `apps/web/` | 0 errors — "Types generated successfully"; 7 JS scripts checked |
-| Cycle-5 specific tests | pass | `npx vitest run` from `apps/web/` | image-queue (2/2), i18n-key-parity (2/2), touch-target-audit (13/13), backfill-deleted-mid-reencode (7/7) |
-| Select regex correctness | pass | `node -e` inline execution | 6/6 cases correct — `max-h-10` no-flag, `h-8/h-9/h-10/cn("h-8")` flag |
-| Queue source pin | pass | `node -e` inline regex on `image-queue.ts` | 3-arg `[]` form present for all 3 dirs; 2-arg form absent |
-| Backfill column parity | pass | `sed` extraction of both UPDATE blocks | Identical 10-column sets in sidecar and in-app runner |
-
-**Test isolation note:** `backfill-color-pipeline-deleted-mid-reencode.test.ts` fails `ERR_MODULE_NOT_FOUND` when run via `npx vitest run <path>` from the repo root — the `@/` alias is only active when vitest resolves `apps/web/vitest.config.ts`. Running from `apps/web/` (as `npm test --workspace` does) gives 7/7. This is pre-existing CWD-sensitivity documented in `vitest.config.ts`; not a code defect.
-
----
-
-## Acceptance Criteria — Cycle-5 Commits
-
-### Claim 1 — `fad9c279` sidecar backfill `collectDeletedMidReencodeFiles` + `cleanupDeletedMidReencodeVariants` tests — PASS (non-vacuous)
-
-**Exports confirmed** at `apps/web/scripts/backfill-color-pipeline.ts:116,127,142`:
-- `type BatchFilenames` (`:116`)
-- `async function cleanupDeletedMidReencodeVariants` (`:127`)
-- `function collectDeletedMidReencodeFiles` (`:142`)
-
-**Partition test non-vacuity:** input `[{affectedRows:1,files:a}, {affectedRows:0,files:b}, {affectedRows:1,files:c}]` → asserts `result.toEqual([b])` and `result.toHaveLength(1)`. Dropping the `=== 0` filter makes result `[a,b,c]`, length 3 — both `.toEqual([b])` and `.toHaveLength(1)` flip RED.
-
-**Cleanup test non-vacuity:** asserts `deleteImageVariantsMock` called 3 times with `(UPLOAD_DIR_WEBP, 'deleted-row.webp', [])` etc., and that `call[2]` is `[]` for every call. Omitting the 3rd arg makes `call[2]` `undefined`, failing `.toEqual([])`.
-
-**Vitest (from `apps/web/`):** 7/7 passed.
-
----
-
-### Claim 2 — `07a838d6` touch-target `<select>` patterns with `(?<!max-)` lookbehind — PASS
-
-**All 4 select patterns** in `touch-target-audit.test.ts` lines 415–428 now carry `(?<!max-)` before `(?:h-8|h-9|h-10)`.
-
-**Verified by running committed regex in Node against 6 test strings:**
-
-| Input | Expected | Result |
-|-------|----------|--------|
-| `<select className="max-h-10 overflow-auto">` | no flag | no flag |
-| `<select className="h-8 px-2">` | flag | flag |
-| `<select className="h-9 rounded">` | flag | flag |
-| `<select className="h-10">` | flag | flag |
-| `<select className={cn("h-8", cls)}>` | flag | flag |
-| `<select className="max-w-10">` | no flag | no flag |
-
-All 6 correct. `max-w-10` does not flag because there are no `w-` patterns in the select ruleset (by design — only height constrains tap area on a `<select>`).
-
----
-
-### Claim 3 — `e7d19f4b` three public `<Link>` elements get `min-h-11` in flex context — PASS
-
-All three files confirmed at HEAD:
-
-| File | Class at the relevant Link | Flex context |
-|------|---------------------------|--------------|
-| `apps/web/src/components/topic-empty-state.tsx:18` | `inline-flex items-center min-h-11 px-2 underline hover:text-primary` | parent: `flex flex-col items-center justify-center h-64` |
-| `apps/web/src/components/home-client.tsx:434` | `inline-flex items-center min-h-11 px-2 text-sm underline hover:text-primary` | parent: `flex flex-col items-center gap-2` |
-| `apps/web/src/app/[locale]/(public)/timeline/page.tsx:154` | `inline-flex items-center min-h-11 px-2 text-sm text-muted-foreground hover:text-primary transition-colors underline underline-offset-4` | parent: flex layout |
-
-All three use `inline-flex items-center` — `min-h-11` (44 px) is an effective height floor in this context.
-
-Touch-target audit positive-assertion block (`touch-target-audit.test.ts` — "public inline recovery `<Link>`s keep their min-h-11 tap area") passed as part of the 13/13 touch-target run.
-
----
-
-### Claim 4 — `a062e81b` `i18n-key-parity.test.ts` asserts KEYS only, flattens correctly, passes at HEAD — PASS
-
-**Test structure confirmed by reading source:**
-- `flattenKeys()` recurses into objects, pushes leaf (non-object scalar) keys with dot-joined path prefix — correct namespace flattening.
-- Asserts `missingInKo.toEqual([])` and `missingInEn.toEqual([])` plus sorted `koKeys.toEqual(enKeys)`. VALUES are never compared (DOC-R5C3-07 explicitly noted in the comment).
-- Dropping a ko key makes `missingInKo` non-empty → first `expect(missingInKo, …).toEqual([])` fails RED with the exact key name in the message.
-
-**Vitest:** 2/2 passed (`en and ko have IDENTICAL leaf-key sets` + `neither locale has duplicate leaf keys`).
-
----
-
-### Claim 5 — `56bddff5` `image-queue-delete-race-cleanup-wiring.test.ts` pins `image-queue.ts` passes `[]` — PASS
-
-**Source confirmed at `apps/web/src/lib/image-queue.ts:384–386`:**
-```
-deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp, []),
-deleteImageVariants(UPLOAD_DIR_AVIF, job.filenameAvif, []),
-deleteImageVariants(UPLOAD_DIR_JPEG, job.filenameJpeg, []),
-```
-
-**Node inline regex confirms:**
-- 3-arg `[]` form: present for WEBP, AVIF, JPEG.
-- 2-arg (default-sizes) form: absent — `deleteImageVariants\(\s*UPLOAD_DIR_(?:WEBP|AVIF|JPEG)\s*,\s*[^,()]+\)` matches null.
-
-**Vitest:** 2/2 passed (`passes the [] (full dir-scan) sizes arg` + `does NOT use the 2-arg default-sizes form`).
-
----
-
-### Claim 6 — `2637e5f2` `image-manager.tsx` touch-target budget tightened 6→1 — PASS
-
-**Budget entry at `touch-target-audit.test.ts:183`:** `'components/image-manager.tsx': 1`.
-
-**Node inline execution of 9 core FORBIDDEN patterns** (Button/button h-8/h-9/h-10 literal and cn() forms) against `components/image-manager.tsx` source → **0 matches**. The remaining 1 violation is the documented `size="sm"` spinner (decorative, admin keyboard-primary surface, exempt with comment).
-
-**Full touch-target audit:** 13/13 passed at HEAD.
-
----
-
-## Broader Stated-Behavior Claims
-
-### Claim A — `IMAGE_PIPELINE_VERSION = 7` consistent across `process-image.ts`, `gallery-config-shared.ts`, `sw.js` stamp — CONFIRMED
-
-- `apps/web/src/lib/gallery-config-shared.ts:21`: `export const IMAGE_PIPELINE_VERSION = 7;`
-- `apps/web/src/lib/process-image.ts:303`: re-exports from `gallery-config-shared` (single source of truth).
-- `apps/web/public/sw.js:26`: `const SW_VERSION = 'ee0f38bd-p7';` — ends with `-p7`.
-- `apps/web/scripts/build-sw.ts:46`: `return \`${getCommitOrTimestamp()}-p${IMAGE_PIPELINE_VERSION}\`` — stamp construction confirmed.
-- `apps/web/public/sw.template.js:2`: `const SW_VERSION = '__SW_VERSION__';` — placeholder intact, build-time replaced correctly.
-
-All consistent. SW stamp uses a different SHA (`ee0f38bd`) than HEAD (`4c3d5924`) because `sw.js` is committed separately (built at `prebuild`), expected behavior.
-
----
-
-### Claim B — Backfill 10-column UPDATE equivalence between sidecar and in-app runner — CONFIRMED
-
-Both UPDATE blocks extracted with `sed`, columns identical:
-
-| Column | Sidecar (`scripts/backfill-color-pipeline.ts:371–380`) | In-app (`src/lib/admin-backfill-runner.ts:559–568`) |
-|--------|------|------|
-| `pipeline_version` | present | present |
-| `icc_profile_name` | present | present |
-| `color_primaries` | present | present |
-| `transfer_function` | present | present |
-| `matrix_coefficients` | present | present |
-| `is_hdr` | present | present |
-| `has_gain_map` | present | present |
-| `color_pipeline_decision` | present | present |
-| `was_downscaled` | present | present |
-| `avif_10bit` | present | present |
-
-10 columns, identical set, both paths.
-
----
-
-### Claim C — `blur-data-url` MIME contract enforced at producer + writer + reader — CONFIRMED
-
-- **Producer** (`apps/web/src/lib/process-image.ts:17,883`): imports `assertBlurDataUrl` and wraps the Sharp-generated candidate: `blurDataUrl = assertBlurDataUrl(candidate)`.
-- **Writer** (`apps/web/src/app/actions/images.ts:28,347`): imports `assertBlurDataUrl` and applies at write time: `blur_data_url: assertBlurDataUrl(data.blurDataUrl)`.
-- **Reader** (`apps/web/src/components/photo-viewer.tsx:192,200`): reads `image.blur_data_url` from DB — the DB value was already validated at writer time.
-- **Contract** (`apps/web/src/lib/blur-data-url.ts:34–36`): only `data:image/jpeg;base64,`, `data:image/png;base64,`, `data:image/webp;base64,` prefixes accepted; capped at 4096 chars.
-
-All three enforcement sites present.
-
----
+| Item | PASS/FAIL | Evidence (file:line) |
+|------|-----------|----------------------|
+| **1. WebP RIFF field-order fix** (`b6c4f915`) | **PASS** | `gps-exif-strip.ts:566` `chunkTag = buf.toString('ascii', offset, offset+4)`; `:567` `chunkSize = buf.readUInt32LE(offset+4)` — FourCC first, size LE second, matches the WebP RIFF container spec. XMP retag writes the tag field, not the size: `:584` `buf.write('JUNK', offset, 4, 'ascii')` (the `offset`, not `offset+4`). The exact line the old bug tripped — `:570 if (dataEnd > buf.length) return null` — is now reached only on genuinely truncated chunks. |
+| **1b. WebP pure-scrubber test non-vacuous** | **PASS** | `strip-gps-from-original.test.ts:211-239` calls `stripGpsFromWebpBuffer` **directly**, asserts `result.stripped===true` (`:221`), VP8/VP8L pixel-chunk **byte-identical** via `pixelsAfter.equals(pixelsBefore)` (`:230`), and GPS entries `length===0` (`:238`). On the OLD buggy `[size][tag]` read, the FourCC (VP8X≈1.48 GB) is misread as chunkSize → `dataEnd>buf.length` → `return null` at first chunk → `:220 expect(result).not.toBeNull()` goes **RED**. Proven non-vacuous. Precondition `gpsInFile(file)` asserted non-null (`:215`). |
+| **2. s/[key] back-nav link min-h-11** (`1a483f9b`) | **PASS** | `s/[key]/page.tsx:105` `className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 min-h-11"` |
+| **2b. year/[year] back-nav link min-h-11** (`1a483f9b`) | **PASS** | `year/[year]/page.tsx:109` `className="…inline-flex items-center gap-1 min-h-11"` |
+| **3. Link/a max- lookbehind** (`26f68430`) | **PASS** | `touch-target-audit.test.ts:440,444,458,462` all four `<Link>`/`<a>` h-8/h-9/h-10 patterns carry `\b(?<!max-)(?:h-8|h-9|h-10)\b`. **Empirically run in Node**: `<Link className="max-h-10">`→not flagged; `<Link className="h-8">`→flagged; `<a className="max-h-9">`→not flagged; `<a className="h-9">`→flagged; `<Link className="h-8 min-h-11">`→not flagged (lookahead suppresses). 7/7 correct. |
+| **3b. ISOBMFF pure-scrubber test non-vacuous** (`23f62c66`) | **PASS** | `strip-gps-from-original.test.ts:262-276` calls `stripGpsFromIsobmffBuffer` directly, asserts `stripped===true`, **`result.buffer.length === input.length`** (`:271` — strictly stronger than a decoded-pixel compare: proves in-place byte-zeroing ran, since a re-encode would change the length), and `gpsInFile(scrubbedPath)===null` (`:275`). Precondition GPS-present asserted (`:265`). Companion GPS-free test asserts `stripped===false` + same input reference (`:278-285`). |
+| **4. CLAUDE.md cycle-3 doc edits match code** | **PASS** | AGG-C6-05 asked that the AGG-C6-04 doc touch cover BOTH `<select>` AND the new `<Link>`/`<a>` lookbehinds. `CLAUDE.md:516` dedicated "`max-` ceiling exemption (all interactive tag classes)" section states the lookbehind is on `<Button>`/`<button>` (`40a65aef`), native `<select>` (`07a838d6`), **AND `<Link>`/`<a>` (added AGG-C6-04)**, with `<Link className="max-h-10">` named as a correctly-treated ceiling. Matches the 4 committed regex patterns exactly. |
+| **INV-1: publicSelectFields omits all PII** | **PASS** | `data.ts:355` `publicSelectFields` derived by destructuring-omit (`:326-351`) of latitude, longitude, filename_original, user_filename, original_format, original_file_size, processed, color_pipeline_decision, is_hdr, has_gain_map, was_downscaled, transfer_function, matrix_coefficients, bit_depth, uploaded_by, processing_error, failed_at, color_space, icc_profile_name, pipeline_version. `_PrivacySensitiveKeys` union (`:416`) lists exactly those 20 keys; `_SensitiveKeysInPublic = Extract<keyof publicSelectFields, _PrivacySensitiveKeys>` compile-time guard makes any leak a type error. privacy-fields.test.ts green (part of the 48). |
+| **INV-2: admin routes wrap withAdminAuth** | **PASS** | `grep -L withAdminAuth` over `api/admin/**/route.ts` → empty. `lint:api-auth` gate green: both `db/download/route.ts` + `lr/upload/route.ts` `OK`. |
+| **INV-2b: mutating actions return early on requireSameOriginAdmin** | **PASS** | `lint:action-origin` gate green: `All mutating server actions enforce same-origin provenance.` (every action in `app/actions/**` + `admin/db-actions.ts` inspected, all `OK`). |
+| **INV-3: IMAGE_PIPELINE_VERSION value vs CLAUDE.md** | **PASS** | `gallery-config-shared.ts:21` `export const IMAGE_PIPELINE_VERSION = 7` (re-exported `process-image.ts:303`). `CLAUDE.md:139` "`pipeline_version` … (current: 7)" — matches. SW stamp `sw.js:26` `SW_VERSION = 'ee0f38bd-p7'` carries the `-p7` suffix per `build-sw.ts` contract. |
+| **INV-4: migrate.js post-condition intact** | **PASS** | `migrate.js:698-719` `runMigrations` runs drizzle `migrate()` then `missing = expectedMigrations.filter(m => !recordedHashes.has(m.hash))` and `throw new Error('Drizzle silently skipped N migration(s): …')` if any journal hash is absent from `__drizzle_migrations`. `getRecordedHashes` (`:615-617`) reads the live hash set; `getAllJournalMigrations` hashes each SQL file (`:157` `sha256(migrationSql)`). The full hash-presence assertion is present and loud. |
 
 ## Gaps
+None. Every acceptance criterion is VERIFIED with fresh, independent evidence. No PARTIAL, no MISSING.
 
-- **CLAUDE.md `COLOR_IMPACTING_KEYS` count says "9", code has 10** — Risk: low — `settings-hash.ts:37–48` contains 10 entries (5 color + 3 quality + `image_sizes` + `image_quality_*`). CLAUDE.md says "9 keys" and lists them as "5 color keys … 3 quality keys … and `image_sizes`" which is 5+3+1 = 9. Actual array has 10 entries. Counting `grep "'" | wc -l` on the array gives 10. CLAUDE.md undercounts by 1. The code is correct; documentation is stale. No code defect.
-
-- **Backfill delete-race test requires `apps/web/` CWD** — Risk: low — The `npm test --workspace=apps/web` invocation (used by CI) resolves correctly. Direct `npx vitest run <path>` from repo root fails with `ERR_MODULE_NOT_FOUND` for `@/lib/upload-paths`. Pre-existing, documented in `vitest.config.ts`.
-
----
+## Findings (FAIL / mismatch / vacuous-test)
+None. This is a clean verification pass on a near-converged codebase. Specifically ruled out:
+- The WebP and ISOBMFF pure-scrubber tests are **not** vacuous — both call the scrubber directly and assert the lossless byte-level contract (VP8 chunk byte-identity / file-length invariance) that the old dispatcher-level decoded-pixel comparison could not catch; the WebP test provably goes RED against the pre-`b6c4f915` field-order bug.
+- The Link/a `max-` lookbehind is **not** latent-broken — the committed regex was executed in Node and behaves exactly as the commit message claims (ceiling no-flag, floor flag).
+- The AGG-C6-05 doc concern is **closed** — CLAUDE.md:516 documents all three tag classes' lookbehinds including the new `<Link>`/`<a>`, so docs are complete, not merely "not wrong."
 
 ## Recommendation
-
-APPROVE — all 6 cycle-5 acceptance criteria verified with fresh independent evidence (218/218 test files, 2080/2080 tests, 0 type errors). The three broader CLAUDE.md behavior claims hold exactly in code. The one documentation discrepancy (`COLOR_IMPACTING_KEYS` count "9" vs actual 10) is cosmetic — the code is correct and CLAUDE.md was not updated when `image_sizes` was added.
-
----
-
-**CLAIMS VERIFIED: 11/11 (6 cycle-5 + 3 broader + 2 sub-claims)**
-**BLOCKERS: 0**
-**DOC DRIFT: 1 (CLAUDE.md COLOR_IMPACTING_KEYS "9" should be "10")**
+**APPROVE** — All 4 prior-cycle fixes (`b6c4f915`, `1a483f9b`, `26f68430`, `23f62c66`) are genuinely closed in code with non-vacuous tests; all 4 audited invariants (PII omission + compile guard, admin-route auth, IMAGE_PIPELINE_VERSION=7 vs docs, migrate.js skip-detection) hold at HEAD; 48/48 unit tests + all 3 security lint gates green on fresh runs.

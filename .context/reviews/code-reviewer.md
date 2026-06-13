@@ -1,71 +1,69 @@
-# Code Reviewer — Deep Review (Cycle 6 / review-plan-fix)
+# Code Review — Cycle 7 (code-quality angle)
 
-**Summary: 0 NEW actionable findings.** The repo is genuinely converged at HEAD `4c3d5924` (working tree CLEAN, verified). Every cycle-5 fix (AGG-C5-01..03, AGG-C5-T1/T2, AGG-C5-02) landed correctly, is present in code, and is pinned by non-vacuous tests. No regression of any prior-closed finding. No new logic, error-handling, SOLID, maintainability, or type-safety defect surfaced from my angle.
+**Reviewer:** code-reviewer agent
+**HEAD:** d0920957 (clean tree, in sync with origin/master)
+**Scope:** Whole-repo code-quality pass (logic correctness, SOLID, maintainability, error handling, edge cases, dead code, duplication). Recent change surface (4c3d5924..d0920957) reviewed first, then broad sweep.
 
-**Date:** 2026-06-13
-**Repo:** /Users/hletrd/flash-shared/gallery (GalleryKit — Next.js 16 / React 19 / TS6)
-**Angle:** code quality, logic correctness, SOLID, maintainability.
-**Scope reviewed:** full repo from this angle; line-by-line on the recently-touched high-yield surface.
+## Summary
 
----
+This is a near-converged, exceptionally well-reviewed codebase. I verified all four prior-cycle CLOSED items are in place at HEAD (WebP RIFF tag/size order in `gps-exif-strip.ts:566-567`; public back-nav `min-h-11` tap targets in `s/[key]/page.tsx:105` and `year/[year]/page.tsx:109`; the `(?<!max-)` lookbehind across the touch-target FORBIDDEN patterns; direct GPS pure-scrubber tests). None are re-reported.
 
-## Verdict
+I read broadly across the high-value surface: the full GPS strip module (all 4 containers), color-detection + ICC chromaticity/extractor + gain-map detection, the process-image encoder, admin-backfill-runner, the data-access layer + privacy guards, serve-upload, sql-restore-scan, download-tokens, session, auth, sharing, the smart-collections SQL compiler, image-queue claim logic, validation/csv-escape/base56, bounded-map, og-sanitize/safe-json-ld, request-origin, and the recently-changed page + test files.
 
-**COMMENT** — No CRITICAL / HIGH / MEDIUM / LOW actionable findings. Reporting honest convergence.
-
-| Severity | Count |
-|---|---|
-| CRITICAL | 0 |
-| HIGH | 0 |
-| MEDIUM | 0 |
-| LOW | 0 |
+**Result: one (1) genuine, LOW-severity quality finding.** Everything else I stress-tested is correct, well-guarded, and well-documented. The error handling, async/await discipline, resource cleanup (file unlinks, lock releases in `finally`), TOCTOU protections, and privacy/CSRF/SQL-injection defenses are all sound. I did NOT manufacture marginal findings to fill space — the codebase genuinely has very little left to fix from a code-quality angle.
 
 ---
 
-## Cycle-5 fixes RE-VERIFIED CLOSED at HEAD (not trusted on the aggregate's word)
+## Findings (by severity)
 
-| Prior finding | Status at `4c3d5924` | Evidence (read line-by-line) |
-|---|---|---|
-| **AGG-C5-01** sidecar `flushBatch` orphan-cleanup test gap | **CLOSED, PROVEN NON-VACUOUS** | `scripts/backfill-color-pipeline.ts:127-146` extracts `cleanupDeletedMidReencodeVariants` + `collectDeletedMidReencodeFiles` as module-level exports; `flushBatch:397-406` wires them. `backfill-color-pipeline-deleted-mid-reencode.test.ts` (149 LOC) pins the partition (only `affectedRows===0` selected), the `[]` dir-scan arg on all 3 formats, AND a source-shape pin that `flushBatch` invokes both + adjusts the `processed -= … / deletedMidReencode += …` tally. Ran it: **16 tests pass.** Comment documents proven-RED on filter-drop / sizes-change. |
-| **AGG-C5-02** touch-target `<select>` `max-` false-positive | **CLOSED** | `touch-target-audit.test.ts:415,419` (+ 2 more) carry `(?<!max-)` before `(?:h-8|h-9|h-10)` on all four native-`<select>` FORBIDDEN patterns, mirroring the `40a65aef` Button fix; negative self-check fixture at `:988` (`<select className="max-h-10">` must NOT flag). |
-| **AGG-C5-03** three public inline `<Link>` < 44 px | **CLOSED** | `topic-empty-state.tsx:18`, `home-client.tsx:434`, `timeline/page.tsx:154` all now carry `inline-flex items-center min-h-11 px-2`. Verbatim-read. |
-| **AGG-C5-T1** en/ko leaf-key parity gate | **CLOSED** | `i18n-key-parity.test.ts` flattens both message trees and asserts SET equality (keys only, respecting DOC-R5C3-07's en-ICU/ko-fixed value asymmetry) + duplicate-key sanity. Correct design. |
-| **AGG-C5-T2** upload-queue `[]`-sizes wiring pin | **CLOSED** | `image-queue-delete-race-cleanup-wiring.test.ts` present; `image-queue.ts:383-387` passes `[]` on all 3 `deleteImageVariants` calls. |
+### [LOW] CR7-LOW-1 — Unanchored `VP8L` substring search can misclassify a lossy WebP as lossless in the GPS re-encode fallback
 
----
-
-## What I stress-tested and found CLEAN (no action)
-
-- **Backfill correctness (both paths byte-equivalent on the contract).** Sidecar `flushBatch` (`backfill-color-pipeline.ts:358-411`) and in-app runner `reprocessOne` (`admin-backfill-runner.ts:442-615`) both: (a) version-bump UPDATE on detection success, (b) derivative-only UPDATE (no version bump) on detection-failure → row stays a candidate for retry, (c) `affectedRows===0` → deleted-mid-reencode cleanup with `[]` dir-scan, post-commit (sidecar) so a unlink error can't roll back sibling rows. The `processed` counter math in the sidecar is correct: rows are counted `processed++` at enqueue (incl. derivative-only), then `processed -= deletedMidReencodeFiles.length` in flush partitions BOTH update kinds (both were counted). No double-count, no leak.
-- **`deleteImageVariants` `[]` dir-scan contract is real** (`process-image.ts:486`): `sizes=[]` → `fs.opendir` scan matching `${name}_*${ext}`. UUID filenames make prefix-collision false-deletion impossible (no UUID is a prefix of another followed by `_`).
-- **Tag filtering + GROUP_CONCAT interaction is correct** (`data.ts:563-590`, `605`, `728-755`). `buildTagFilterCondition` filters via `inArray(images.id, <subquery with own GROUP BY/HAVING>)`, so the outer LEFT JOIN + `GROUP_CONCAT(DISTINCT tags.name)` still aggregates ALL tags per matching image, not just the filtered subset. `tag_names` aria-labels stay correct under filtering. Locked by `data-tag-names-sql.test.ts`.
-- **`admin-backfill-runner` concurrency cap arithmetic** (`resolveBackfillConcurrency:129-142`): NaN-guarded pool limit, `cap = max(1, floor((LIMIT-RESERVED-1)/2))` = 2 at pool=10. Clamps DOWN with a warning. Pool-exhausted claim → `locked` skip (no tight error spin). Sound.
-- **`getBackfillStatus`** (`admin-backfill.ts:103-130`) omits `deletedMidReencode` from the surfaced result — intentional (the runner documents it as neither success nor failure, doesn't need operator attention). Benign, not a defect.
-- **Image-queue lifecycle** (`image-queue.ts`): per-image claim lock + `WHERE processed=false` conditional UPDATE + delete-race cleanup; `failed_at` uses `toMySqlDateTime` (the R4C2 fix for the trailing-`Z` ER 1292); FIFO eviction on bounded maps; quiesce uses pause→clear→onIdle (the COR-R4C12-01 deadlock fix). Fire-and-forget caption/embedding hooks both carry `.catch()` / internal try-catch. Clean.
-- **NCLX ISOBMFF walker** (`color-detection.ts:217-283`): depth ≤ 5, scan ≤ 1 MB, `size < headerSize` / `pos+size > buffer.length` rejection, `dataSize >= 11` guard before all `readUInt16BE(dataStart+4/+6/+8)`, `meta` FullBox +4 skip, `pos = boxEnd` termination. NCLX-precedence applies only DEFINED values (the COR-1 fix avoids clobbering ICC with H.273 code-2 "Unspecified"). Bulletproof.
-- **Histogram** (`histogram.tsx`): AbortController + `aborted` flag on the img-load effect; `markFailed` URL fall-through (AVIF→sized JPEG→base); `canvasDims` in the redraw deps (the COR-R4C8-04 buffer-clear fix); `useImperativeHandle` for cycleMode. No stale-closure or leak.
-- **Home-client pagination** (`home-client.tsx`): cursor-based load-more (`getClientImageListCursor`) means no offset-under-insertion duplicate-key risk; `key={image.id}`; prop-driven `setAllImages(images)` reset on filter change with LoadMore's own `queryVersionRef` discarding stale responses. Sound.
-- **Blur consumer** (`photo-viewer.tsx:192-200`): gates through `isSafeBlurDataUrl` at read time; producer + write-time also assert (symmetric defense). Clean.
-- **Public pages** (`(public)/page.tsx`, `p/[id]/page.tsx`, `timeline/page.tsx`): all `revalidate = 0`; numeric id validated `/^\d+$/` before parseInt; JSON-LD via `safeJsonLd` + CSP nonce; timeline month bucketing guards `Number.isFinite(m) && 1..12`. Clean.
-
----
-
-## Gate evidence (run live this cycle)
-
-- `npm run typecheck` (app + scripts) → **exit 0** (clean isolated run at HEAD `4c3d5924`; an earlier `code 2` was a spurious `tsc` build-cache collision from running 3 concurrent typechecks, NOT a real type error — re-ran in isolation, green).
-- Targeted tests `backfill-color-pipeline-deleted-mid-reencode` + `admin-backfill-concurrency-cap` + `admin-backfill-runner-deleted-mid-reencode` → **16/16 pass.**
-- `check:js-scripts` → 7 files checked, clean.
+- **File:** `apps/web/src/lib/process-image.ts:1566`
+- **Confidence:** High (the code is unambiguous; impact is bounded)
+- **Code:**
+  ```ts
+  const isLosslessWebp = input.includes(Buffer.from('VP8L', 'ascii'));
+  await pipeline.webp(isLosslessWebp ? { lossless: true } : { quality: 95 }).toFile(tmpPath);
+  ```
+- **Why it's a problem:** This is the tier-2 (re-encode) fallback inside `stripGpsFromOriginal`, reached only when the tier-1 lossless WebP scrubber (`stripGpsFromWebpBuffer`) returns a structural anomaly (`null`). The lossless-vs-lossy decision is made by an **unanchored** substring search over the ENTIRE file buffer. The 4-byte sequence `VP8L` (0x56 0x50 0x38 0x4C) can legitimately appear inside lossy-VP8 compressed pixel bytes, or inside an EXIF/XMP/ICC payload, on a WebP that is actually lossy. When it does, a lossy source is re-encoded with `{ lossless: true }`, producing a much larger output file for no benefit. The canonical detection is to read the chunk FourCC at file offset 12: `VP8 ` = lossy simple, `VP8L` = lossless simple, `VP8X` = extended (then inspect the extended header / the first frame chunk).
+- **Failure scenario:** Admin has `strip_gps_on_upload=true`. A photographer uploads a lossy `.webp` whose compressed stream happens to contain the bytes `VP8L`, AND that file trips the tier-1 scrubber's structural-anomaly path (e.g. an unusual chunk layout). The fallback re-encodes it as lossless, bloating the stored original (the paid-download deliverable) several-fold. Privacy is NOT compromised (GPS is still stripped); this is purely a file-size/quality regression on a rare path.
+- **Severity rationale:** LOW because (a) it only affects the rare tier-2 path (tier-1 handles the vast majority of real WebPs losslessly with no re-encode), (b) it never leaks GPS, and (c) the worst outcome is a larger-than-necessary file, not data loss or corruption.
+- **Suggested fix:** Replace the buffer-wide search with a FourCC check at the RIFF chunk boundary:
+  ```ts
+  // Lossless WebP advertises 'VP8L' as the FIRST chunk FourCC at offset 12;
+  // 'VP8X' (extended) sets bit 1 of the flags byte at offset 20 for lossless.
+  const isLosslessWebp =
+      input.length >= 16 &&
+      (input.toString('ascii', 12, 16) === 'VP8L' ||
+       (input.toString('ascii', 12, 16) === 'VP8X' && input.length >= 21 && (input[20] & 0x02) !== 0));
+  ```
+  (Or accept the current behavior as-is — it is privacy-safe — and add a one-line comment acknowledging the heuristic is an over-approximation that can over-select lossless on the rare fallback path.)
 
 ---
 
-## Non-findings considered and dismissed (skeptical pass)
+## Verified clean (stress-tested, no issue found)
 
-- **Committed `sw.js` stamp `ee0f38bd-p7` ≠ HEAD `4c3d5924`** — the `prebuild` hook (`build-sw.ts`) regenerates the stamp at build, so the deployed artifact is correct; the committed file being a stamp behind is a documented build-artifact pattern, not a runtime defect. (Already in the aggregate's VERIFIED-CLEAN.) Not counted.
-- **Sidecar counts detection-failure rows as `processed`** while the in-app runner separates `detectionFailures` — this is an intentional reporting difference (the sidecar's final log only reports processed/skipped/errors/deletedMidReencode and doesn't claim a detection-failure breakdown). Both persist the same columns; the divergence is cosmetic, documented, and re-affirmed CONVERGING (AGG-C5-R1). Not a defect.
-- **Color-pipeline writer duplication B↔C (~120 LOC)** — re-confirmed CONVERGING not drifting; WI-09 consolidation deferral remains justified (maintainability investment, not correctness). No new divergence. Record-only (matches AGG-C5-R1).
+The following were specifically probed for the bug classes in scope and found solid:
 
----
+- **`gps-exif-strip.ts` (all containers).** JPEG walker handles fill bytes, post-EOI trailer rejection (SEC-R4C10-01), ExtendedXMP chunk reconstruction across boundaries, and bounded TIFF IFD chains with cycle detection (`visited` set). ISOBMFF Exif item bounds at line 533 (`start + 4 + (length - 4)` = `start + length`) combined with the `tiffStart` advance is safe — `stripGpsFromTiffRegion`'s `tiffEnd - tiffStart < 8` guard catches any underflow. WebP `JUNK` retag preserves chunk byte-length, so the outer RIFF size stays valid; odd-size padding handled at line 589. iloc version 0-2 parsing, construction_method!=0 rejection, and 64/4096 entry caps all correct.
+- **`icc-chromaticity.ts`.** All offsets bounds-checked (`offset + size > icc.length`), `chad` matrix inversion guards `Math.abs(det) < 1e-12`, `xyzToXy` guards zero-sum, `tagCount` capped at 100. No NaN escapes (every `readS15Fixed16`/`readXyzTag` is `Number.isFinite`-gated).
+- **`color-detection.ts`.** NCLX per-field application (the AGG-R8-06 fix) correctly avoids clobbering ICC-derived values with code-2 "Unspecified". File handle closed in `finally`. Depth/scan-byte bounds on the ISOBMFF walker.
+- **`icc-extractor.ts`.** `desc` and `mluc` parsing bounds-checked against both `iccLen` and `dataOffset+dataSize`; tagCount capped at 100; try/catch around the whole walk.
+- **`gain-map-detection.ts`.** `tmap`/`urim` URI gating correct; iref bounds checks; entry-count caps (1024); top-level try/catch returns false on any throw.
+- **`admin-backfill-runner.ts`.** The result-partition `handled = processed + skippedMissingOriginal + skippedLocked + encodeFailures + detectionFailures + deletedMidReencode + errors` is exhaustive against `ReprocessResult`. Lock released in `finally`; `running` flag reset in `finally`; per-image claim acquire+try adjacency is correct (no leak window); pool-exhaustion treated as `locked` skip (no tight error spin); detection-failure path correctly does NOT bump `pipeline_version` (resume contract). `resolveBackfillConcurrency` guards non-finite pool limit.
+- **`process-image.ts`.** Original unlinked on every throw path after write (lines 813/830/846/935). Partial sized-variant cleanup in `catch`, downscaled intermediate cleanup in `finally`. 10-bit AVIF probe is a Promise-singleton (no race). `decimalToRational`/`normalizeExposureTime` handle all type variants. `convertDMSToDD` range-validates. `WIDE_GAMUT_MAX_SOURCE_PIXELS` division guarded by the `basePixels > cap` branch (basePixels>0 there).
+- **`data.ts`.** Privacy guards (`_SensitiveKeysInPublic`, `publicMapSelectFields`) are compile-time-enforced; the `PrivacySensitiveKeys` union is complete. View-count flush has retry caps, buffer-cap eviction, and FIFO retry-map pruning. `tag_concat` parse skips malformed entries (no `\0` → `continue`).
+- **`serve-upload.ts`.** TOCTOU-safe (streams from realpath'd path), symlink rejection, dir/extension allowlist, settings-hash SWR cache that never blocks past cold start and never produces an unhandled rejection.
+- **`sql-restore-scan.ts`.** Conditional-comment inner extraction before stripping, literal masking (single/double/backtick/hex/binary), comprehensive dangerous-statement deny-list.
+- **`download-tokens.ts` / `session.ts` / `auth.ts`.** Constant-time comparisons with length pre-check; HMAC verified BEFORE shape checks (no timing oracle); dummy-hash timing equalization; pre-increment TOCTOU rate-limit fix; session-fixation prevention via transactional insert-then-delete; `unstable_rethrow` for Next control-flow signals; rate-limit NOT rolled back on infra errors (correct anti-abuse posture).
+- **`sharing.ts`.** Symmetric in-memory + DB rate-limit rollbacks on every early-return/error path; conditional `WHERE share_key IS NULL` / `= oldShareKey` prevents recreation races; `safeInsertId` guards BigInt precision; transaction wraps group create with link-count assertion.
+- **`smart-collections.ts`.** Fully parameterized Drizzle compiler; column allowlist; LIKE-wildcard escaping (`[%_\\]`); depth cap; scalar-value enforcement at validation time; tag-operator narrowing (eq/contains) at write time.
+- **`image-queue.ts`.** Per-image advisory-lock claim before the conditional UPDATE; lock released in `finally`; `retried`/`claimRetryScheduled` flags prevent double enqueued-set deletion; escalating claim-retry with cap; delete-during-processing cleanup uses `[]` sizes for full variant scan; fire-and-forget caption/embedding hooks both have `.catch`.
+- **`validation.ts` / `csv-escape.ts` / `base56.ts`.** `UNICODE_FORMAT_CHARS` derived (not copied) into global twin; CSV strips C0/C1 + bidi + zero-width before the formula-prefix guard (`^\s*[=+\-@]`); `safeInsertId` overflow throw; base56 rejection-sampling with 1000-attempt RNG-failure guard; `countCodePoints` used for all length checks (no surrogate-pair miscount).
+- **`request-origin.ts` / `og-sanitize.ts` / `safe-json-ld.ts`.** Fail-closed origin check; default-port normalization; right-most proxy hop; `safeJsonLd` escapes `<` (covers `</script>`) + U+2028/2029.
+- **Recently-changed pages.** `year/[year]/page.tsx` and `s/[key]/page.tsx` both validate inputs, rate-limit the enumeration-sensitive share lookup in exactly one render context (no double-increment), and use base-JPEG fallbacks for legacy/mid-backfill rows.
 
-## Conclusion
+## Notes for the aggregator
 
-Honest convergence holds and is the correct outcome. The prior cycle's two MED items (sidecar test gap + bare inline links) are closed with proven-RED / verbatim-confirmed fixes; the four LOW items are closed; no prior-closed finding regressed; and a fresh full-angle sweep of the recently-touched backfill/queue/data/color/histogram/page surface plus their cross-file interactions produced no new logic, error-handling, SOLID, maintainability, or type-safety defect worth a code change. **0 new actionable findings.**
+- This cycle's deltas (gps-exif-strip WebP fix, two a11y tap-target fixes, the touch-target regex `max-` lookbehind, and the new direct GPS scrubber tests) are all correct and complete at HEAD.
+- The single finding (CR7-LOW-1) is pre-existing, not introduced by this cycle's changes, and is privacy-safe. It is genuinely LOW and could reasonably be deferred or closed with a comment rather than a code change.

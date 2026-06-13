@@ -1,70 +1,118 @@
-# Test-Engineer Deep Review — GalleryKit — Cycle 6
+# Test-Engineer Review — Cycle 7 (run-9 follow-on)
 
-**Date:** 2026-06-13
-**HEAD:** `4c3d5924` (working tree CLEAN at start)
-**Suite baseline (measured live this cycle):** `npx vitest run` → **218 files / 2080 tests, all passing** (exit 0, ~268 s cold). The documented libheif cold-flake did NOT reproduce.
-**Specialist angle:** test coverage gaps (esp. on the freshly-found WebP GPS-strip bug + recently-landed fixes), vacuous/tautological tests, flaky tests, tests that pass for the wrong reason.
+HEAD `d0920957` (clean tree). Angle: test coverage gaps, vacuous/tautological tests, flaky tests, missing negative tests, test-isolation problems, security-invariant pins. Focus on RECENTLY-CHANGED production code.
 
-> **AUTHORSHIP NOTE:** The test-engineer subagent ran twice this cycle (initial fan-out + one retry per PROMPT-1's retry rule) and performed the investigation below, but its final `Write` to this file did not land in either attempt (the prior content of this file was the STALE cycle-5 review at HEAD `1dde9b1e` reporting the now-CLOSED TE-1/TE-5). The orchestrator captured the agent's investigation from its returned messages + independently re-verified every claim against current source, then persisted this file. Recorded under AGENT FAILURES in `_aggregate.md`.
+## Verdict
 
----
-
-## Cycle-5 gaps — CONFIRMED CLOSED (do not re-report)
-
-- **AGG-C5-01** sidecar `flushBatch` orphan-cleanup — CLOSED (`fad9c279`). New file `backfill-color-pipeline-deleted-mid-reencode.test.ts` (149 LOC) drives the `affectedRows===0` branch via the extracted `cleanupDeletedMidReencodeVariants`/`collectDeletedMidReencodeFiles` seams; the critic independently proved it RED on guard-removal then restored.
-- **AGG-C5-T1** en/ko leaf-key parity — CLOSED (`a062e81b`). New `i18n-key-parity.test.ts` flattens both message objects to leaf-key sets and asserts SET equality (KEYS only, per DOC-R5C3-07 — values legitimately differ en-ICU/ko-fixed). Verified would-catch a dropped ko key.
-- **AGG-C5-T2** queue `[]`-dir-scan cleanup pin — CLOSED (`56bddff5`). New `image-queue-delete-race-cleanup-wiring.test.ts` source-shape-pins that `image-queue.ts:384-386` passes `[]` (3-arg form present, 2-arg form absent).
-- **AGG-C4-09** image-manager touch-target budget 6→1 — CLOSED (`2637e5f2`). Real scanner count re-measured = 1 at HEAD.
+**Coverage on the recently-changed surfaces is strong and the new tests are genuinely non-vacuous.** I verified the two new GPS pure-scrubber tests would go RED on a regression (proof below), confirmed the touch-target and OG-query pins are real, and ran the GPS suite green (26/26). I found **one real, valuable coverage gap** (WebP XMP-chunk branch on just-fixed privacy-critical code) plus one record-only isolation item that has NOT regressed. No vacuous or flaky tests introduced this cycle.
 
 ---
 
-## FINDINGS
+## Confirmations (prior-cycle items — verified CLOSED / non-vacuous)
 
-### TE-C6-1 (MED · High confidence · CONFIRMED) — The WebP GPS-strip test is VACUOUS for the lossless contract; it passes through the re-encode fallback whether or not the lossless path works. This is what let DBG-C6-01 (the RIFF field-order bug) land undetected.
+### CONFIRM-1 — New WebP pure-scrubber test is NON-VACUOUS (TE-C6-1 / AGG-C6-02 stays FIXED). Confidence: High.
+`strip-gps-from-original.test.ts:211-239` (`stripGpsFromWebpBuffer losslessly removes GPS … VP8 pixel chunk byte-identical`) asserts:
+- `result!.stripped === true` (line 221) — RED on the field-order regression (scrubber returned `null` before reaching any EXIF compare, see commit `b6c4f915`).
+- VP8 compressed-pixel-chunk byte-identity via the local `webpPixelChunk()` walker (lines 228-230) — this is the LOSSLESS-contract assertion the old dispatcher test could not make (it compared decoded pixels, which a q95→q95 re-encode of an already-q95 decode leaves identical). Mechanism verified: a re-encode fallback would change the compressed VP8 bytes; an in-place RIFF scrub does not.
+- GPS entries → 0 via exif-reader on the scrubbed buffer (lines 233-238).
+Reverting the tag/size field-order fix in `gps-exif-strip.ts:566-567` flips this test RED (commit `b6c4f915` documents 2 failed | 22 passed). **Genuinely non-vacuous.**
 
-**Source under test:** `apps/web/src/lib/gps-exif-strip.ts:554-591` (`stripGpsFromWebpBuffer`). DBG-C6-01 found a real bug here: lines 564-565 read `chunkSize = readUInt32LE(offset)` and `chunkTag = toString(offset+4, offset+8)`, but the WebP RIFF spec (verified against developers.google.com/speed/webp/docs/riff_container) puts the FourCC tag at bytes 0-3 and the size at bytes 4-7 — they are **swapped**. The function returns `null` on the first chunk of EVERY real WebP (the FourCC `VP8X`=0x58385056 ≈1.48 GB is misread as `chunkSize`, so `dataEnd > buf.length` is immediately true). The lossless WebP scrub path is dead code; every `.webp` original with `strip_gps_on_upload=true` falls through to the Tier-2 lossy Sharp re-encode (`process-image.ts:1564-1567`).
+### CONFIRM-2 — New ISOBMFF pure-scrubber test is NON-VACUOUS (TE-C6-2 stays FIXED). Confidence: High.
+`strip-gps-from-original.test.ts:262-276` (`stripGpsFromIsobmffBuffer losslessly removes GPS … file length unchanged`) asserts:
+- `result!.stripped === true` (line 269) — RED if the walker regresses to `null`.
+- `result!.buffer.length === input.length` (line 271) — the in-place `buf.fill(0, …)` scrub (`gps-exif-strip.ts:539`, 533) preserves length, whereas the tier-2 AVIF fallback (`process-image.ts:1573`, q90 re-encode) would change it. This proves the byte-zeroing path ran, not a re-encode — strictly stronger than the dispatcher-level pixel check.
+- GPS gone via exif-reader on the round-tripped file (line 275). **Genuinely non-vacuous.**
 
-**The test that should have caught it:** `apps/web/src/__tests__/strip-gps-from-original.test.ts:116-126` — `it('removes GPS from a WebP original via the RIFF scrub (pixels byte-identical)')`. WHY IT'S VACUOUS:
-1. It calls the top-level dispatcher `stripGpsFromOriginal(file)`, never `stripGpsFromWebpBuffer` directly.
-2. The fixture is made lossy: `makeFixture(..., 'webp')` → `pipeline.webp({ quality: 95 })` (line 71). A lossy VP8 file has no `VP8L` marker, so the Tier-2 fallback re-encodes at `{ quality: 95 }` (lossy again, `process-image.ts:1566-1567`).
-3. The assertion compares **decoded raw pixels** (`sharp(file).raw().toBuffer()`), NOT file bytes. A q95→q95 WebP re-encode of an already-q95 decode typically yields the identical decode, so `pixelsAfter.equals(pixelsBefore)` PASSES through the fallback.
-4. `gpsInFile()` returns null after the fallback too (the re-encode drops all metadata).
+### CONFIRM-3 — Touch-target back-nav pins are real and scoped. Confidence: High.
+- `touch-target-audit.test.ts:1102-1126` (AGG-C6-03) anchor-scans `s/[key]/page.tsx` for `viewGallery` and `year/[year]/page.tsx` for `backToTimeline`, requiring `min-h-11` on the enclosing `<Link>`. Production matches: `s/[key]/page.tsx:105` and `year/[year]/page.tsx:109` both carry `min-h-11`. Commit `1a483f9b` documents proven RED-on-revert (14/14).
+- AGG-C5-03 (commit `e7d19f4b`) pins `home-client.tsx`, `topic-empty-state.tsx`, `timeline/page.tsx` inline recovery `<Link>`s — all three production files carry `inline-flex items-center min-h-11 px-2`. Pinned.
+- The `(?<!max-)` lookbehind fix (`touch-target-audit.test.ts:440,444,458,462`, commit `26f68430`) for `<Link>`/`<a>` has 4 negative self-check fixtures (max-h-10 / max-h-9 must NOT flag). Non-vacuous.
 
-So the test passes whether the lossless path ran OR the re-encode fallback ran. Its name ("via the RIFF scrub") asserts a path it does not actually exercise; "byte-identical" refers to decoded pixels, not the file bytes the lossless contract is about (file bytes definitely change under re-encode). There is a dedicated `describe('gps-exif-strip pure scrubbers')` block (line 175) that tests `stripGpsFromJpegBuffer` directly — but it has NO `stripGpsFromWebpBuffer` entry, so the bug has no direct unit coverage either.
+### CONFIRM-4 — OG-query perf change is pinned. Confidence: High.
+`getLatestImageForOg` (added commit `e9040d17`) is pinned by `data-tag-names-sql.test.ts:130` (`getLatestImageForOg is a minimal id+title query with NO tag JOIN / GROUP_CONCAT`). The `tagNamesAgg` masonry-listing contract remains separately pinned by the same file. Good.
 
-**Regression that slips through:** exactly DBG-C6-01 — the lossless WebP path is fully broken and the suite is green. More generally, any future regression to the WebP lossless path is invisible.
+### CONFIRM-5 — NCLX code-2 isHdr side-effect is pinned. Confidence: High.
+`color-detection.test.ts` (`nclx code-2 transfer + PQ-named ICC → isHdr true`, added commit `22387f32`) asserts `transferFunction==='pq'` and `isHdr===true` — pins that an Unspecified (code 2) NCLX transfer does not erase the ICC-name-derived PQ→HDR. The broader code-2 → 'unknown' mapping has dense coverage (`color-detection.test.ts:40-55`). color-detection coverage is thorough.
 
-**Test to add (closes the gap + would have caught DBG-C6-01):** add to the `'gps-exif-strip pure scrubbers'` block a direct test:
+---
+
+## Findings
+
+### TE-C7-1 — WebP XMP-chunk (JUNK-retag) GPS branch has ZERO test coverage. Severity: Medium. Confidence: High.
+
+**Production (untested branch):** `apps/web/src/lib/gps-exif-strip.ts:579-588` — the `chunkTag === 'XMP '` branch of `stripGpsFromWebpBuffer`, which retags a GPS-bearing XMP RIFF chunk's FourCC to `JUNK` (`buf.write('JUNK', offset, 4, 'ascii')`) and zeroes its payload (`buf.fill(0, dataStart, dataEnd)`).
+
+**Test (absent):** `apps/web/src/__tests__/strip-gps-from-original.test.ts` — all 9 `stripGpsFromWebpBuffer` references (lines 211, 219, 241, 244, 250, 253, 483) exercise ONLY the `EXIF` chunk path (TIFF GPS IFD) or non-WebP/garbage rejection. The thorough XMP coverage in this file (standard XMP APP1, ExtendedXMP, split-token reconstruction) is **JPEG-only** (`stripGpsFromJpegBuffer`). No test ever feeds a WebP carrying GPS in an `XMP ` RIFF chunk.
+
+**Why this is a real (not theoretical) gap:** WebP files carrying GPS in an XMP chunk rather than (or in addition to) EXIF are a real upload shape — iOS / Lightroom / Photoshop WebP exports routinely place XMP location data, and some pipelines write XMP-only. I verified the branch is reachable and currently CORRECT via a throwaway vitest probe (now deleted): hand-assembling a WebP with a GPS-bearing `XMP ` chunk and calling `stripGpsFromWebpBuffer` returned `{stripped:true}`, retagged the FourCC to `JUNK`, and removed the `GPSLatitude` token. So the branch works today — it is simply unpinned.
+
+**The regression that would slip through:** this branch is the *exact same class of code* that was just found broken in the EXIF path — AGG-C6-01 (commit `b6c4f915`) was a RIFF tag/size field-order inversion (`offset` vs `offset+4`). The JUNK retag writes to `offset` (the tag field) and the payload zero spans `dataStart..dataEnd`. If a future edit mis-targets the write offset (e.g. writes `JUNK` at the size field — mirroring the original EXIF-path bug) or zeroes the wrong span, GPS-bearing XMP would survive in the ORIGINAL streamed by the paid-download route while the function still reports `stripped:true` — a silent privacy leak with no test to catch it. The EXIF path now carries a byte-identity guard precisely because this failure mode was demonstrated; the symmetric XMP path is unguarded.
+
+**Proposed test (non-vacuous) — add to the `gps-exif-strip pure scrubbers` describe (reuses the existing local `webpPixelChunk()` helper at line 198):**
 ```ts
-it('stripGpsFromWebpBuffer losslessly removes GPS (pixel chunk byte-identical)', async () => {
-  // build a real WebP carrying GPS EXIF, call stripGpsFromWebpBuffer(input)
-  const result = stripGpsFromWebpBuffer(inputWithGps);
-  expect(result).not.toBeNull();
-  expect(result!.stripped).toBe(true);
-  // assert the VP8/VP8L pixel chunk bytes are byte-identical (lossless) — only the EXIF/XMP chunk changed
-  // and assert a GPS-free WebP returns { stripped: false } with the input reference
+it('stripGpsFromWebpBuffer drops a GPS-bearing XMP RIFF chunk (JUNK retag, VP8 pixels byte-identical)', async () => {
+    const file = await makeFixture('xmp-gps.webp', 'webp', false); // GPS-free base
+    const webp = await fs.readFile(file);
+    const xml = Buffer.from('<x:xmpmeta><rdf:Description exif:GPSLatitude="37,33N"/></x:xmpmeta>\0', 'latin1');
+    const chunk = Buffer.alloc(8 + xml.length + (xml.length % 2));
+    chunk.write('XMP ', 0, 4, 'ascii');
+    chunk.writeUInt32LE(xml.length, 4);
+    xml.copy(chunk, 8);
+    const withXmp = Buffer.concat([webp.subarray(0, 12), chunk, webp.subarray(12)]);
+    withXmp.writeUInt32LE(withXmp.length - 8, 4); // fix RIFF size
+
+    const pixelsBefore = webpPixelChunk(withXmp);
+    const result = stripGpsFromWebpBuffer(withXmp);
+    expect(result).not.toBeNull();
+    expect(result!.stripped).toBe(true);                                                  // RED if branch no-ops
+    expect(result!.buffer.includes(Buffer.from('GPSLatitude', 'latin1'))).toBe(false);    // GPS actually gone
+    expect(result!.buffer.includes(Buffer.from('XMP ', 'ascii'))).toBe(false);            // FourCC retagged away
+    const pixelsAfter = webpPixelChunk(result!.buffer);
+    expect(pixelsAfter!.equals(pixelsBefore!)).toBe(true);                                 // lossless: VP8 untouched
+});
+
+it('stripGpsFromWebpBuffer leaves a GPS-free XMP WebP chunk byte-identical (stripped=false)', async () => {
+    const file = await makeFixture('xmp-clean.webp', 'webp', false);
+    const webp = await fs.readFile(file);
+    const xml = Buffer.from('<x:xmpmeta><rdf:Description xmp:Rating="5"/></x:xmpmeta>\0', 'latin1');
+    const chunk = Buffer.alloc(8 + xml.length + (xml.length % 2));
+    chunk.write('XMP ', 0, 4, 'ascii'); chunk.writeUInt32LE(xml.length, 4); xml.copy(chunk, 8);
+    const withXmp = Buffer.concat([webp.subarray(0, 12), chunk, webp.subarray(12)]);
+    withXmp.writeUInt32LE(withXmp.length - 8, 4);
+    const result = stripGpsFromWebpBuffer(withXmp);
+    expect(result).not.toBeNull();
+    expect(result!.stripped).toBe(false);                                                 // no GPS marker → no rewrite
+    expect(result!.buffer.includes(Buffer.from('XMP ', 'ascii'))).toBe(true);             // clean XMP preserved
 });
 ```
-Plus a `stripGpsFromWebpBuffer` non-WebP-bytes → `null` case, mirroring the JPEG pure-scrubber tests at lines 176-189. Prove non-vacuous by confirming it goes RED against the current buggy source and GREEN after the field-order fix.
-
-### TE-C6-2 (LOW · Medium confidence · likely) — The AVIF/ISOBMFF GPS-strip test shares the same dispatcher-level shape, but is LESS vacuous than WebP.
-
-`strip-gps-from-original.test.ts:104-114` (AVIF) has the same structure (calls `stripGpsFromOriginal`, compares decoded pixels). It is less vacuous than the WebP case because the AVIF Tier-2 fallback re-encodes at q90 (`process-image.ts:1573`), which IS lossy and WOULD perturb decoded pixels — so if the ISOBMFF lossless path silently broke, the pixel-equality assertion would more plausibly fail. Still, a direct `stripGpsFromIsobmffBuffer` lossless-contract test (asserting file-byte identity outside the EXIF/XMP item, like the JPEG pure-scrubber tests) would be stronger than relying on the decoded-pixel proxy. Recommendation: when fixing TE-C6-1, add a parallel direct `stripGpsFromIsobmffBuffer` pure-scrubber test for symmetry. LOW because the AVIF path is not currently known-broken and the proxy assertion has more teeth than WebP's.
+The first asserts the LOSSLESS contract (VP8 byte-identity — RED on a wrong-offset zero that clobbers pixels) AND that GPS is removed. The second pins the negative branch (clean XMP not destroyed). The JPEG path already has both polarities (`:287`, `:382`); WebP has neither. Note: `makeFixture('…','webp', false)` uses Sharp, which does not emit an XMP chunk, so the GPS-bearing XMP chunk is hand-assembled — the fixture is deterministic and offline.
 
 ---
 
-## Re-verified non-vacuous (spot-checked this cycle)
+## Record-only (verified, NOT re-escalated)
 
-- `i18n-key-parity.test.ts` — imports the real `messages/{en,ko}.json`, `flattenKeys()` recurses to leaf scalars with dot-joined paths, asserts `missingInKo`/`missingInEn` both `[]`. KEYS-only (honors DOC-R5C3-07). Would catch a real dropped key. NON-VACUOUS.
-- `image-queue-delete-race-cleanup-wiring.test.ts` — source-shape pin: matches the 3-arg `deleteImageVariants(dir, fn, [])` form and `not.toMatch` the 2-arg form. Consistent with the established blur-wiring call-site pin pattern. NON-VACUOUS for its (intentionally narrow) source-shape scope.
-- `backfill-color-pipeline-deleted-mid-reencode.test.ts` — drives `affectedRows:0`, asserts cleanup for all 3 formats with `[]` sizes + the `deletedMidReencode` tally. Critic proved RED-on-guard-removal. NON-VACUOUS.
-
-## Flaky-test posture (re-confirmed, no NEW flake)
-
-The four real-encode AVIF/WebP tests in `strip-gps-from-original.test.ts` + the documented `backfill-color-pipeline` / `process-image-color-roundtrip` libheif cold-flake remain the only real-Sharp/real-libheif surface. None reproduced this cycle. The cold-flake isolation (separate `public/uploads` per test) remains prior-deferred (AGG-C4-T2 / AGG-R8c3-09) — UNCHANGED, not re-escalated.
+### REC-1 — Real-encode tests share `public/uploads` output, no per-test mkdtemp output isolation (AGG-C4-T2). Status: NOT regressed, NOT reproduced as a new failure.
+`process-image-color-roundtrip.test.ts:31-44` mkdtemps the *input* dir but writes derivatives into the shared `UPLOAD_DIR_AVIF`/`WEBP`/`JPEG` (= `public/uploads/`) keyed by per-test `id`, with `afterEach` `fs.unlink` cleanup. The other real-encode suites (`force-srgb-derivatives`, `image-queue*`, `process-image-orientation`, the 6 `admin-backfill-runner-*`, the 3 `backfill-*`) follow the same shared-output / unique-id pattern. Collision-safety rests on `id` uniqueness across files rather than output-dir isolation, and the libheif cold-probe flake on the AVIF tests is unchanged. This is the documented record-only item from cycle 4; **it has not regressed** (GPS suite + spot checks ran clean). No action proposed this cycle.
 
 ---
 
-## NET-NEW TEST FINDINGS THIS CYCLE: 2 (TE-C6-1 MED, TE-C6-2 LOW)
+## Items checked and found SOLID (no gap)
 
-TE-C6-1 is the highest-value item: it is the missing test that would have caught DBG-C6-01 and is the reason a real lossless-contract bug shipped green. Schedule alongside the DBG-C6-01 source fix (the bug fix and its proven-RED test should land together).
+- **gps-exif-strip.ts JPEG path** — exhaustive: APP1 EXIF GPS IFD, standard XMP, ExtendedXMP overflow, split-token reconstruction, post-EOI trailer (MPF/Motion Photo) re-encode bail, padding tolerance, forensic byte-residue. `strip-gps-from-original.test.ts:287-502`. No gap.
+- **gps-exif-strip.ts TIFF path** — `stripGpsFromTiffBuffer` covered with a real EXIF TIFF block (`:461-477`) + garbage rejection (`:479-484`). No gap.
+- **stripGpsFromOriginal dispatcher** — JPEG / AVIF / WebP / TIFF / PNG tiers + Tier-2 fallback + best-effort no-throw all covered (`:78-172`). No gap.
+- **Privacy field omission guard** — `privacy-fields.test.ts:83` (`admin-only keys form exactly the SENSITIVE_KEYS contract (symmetric privacy guard)`) is bidirectional: a new admin-only column drifting into `publicSelectFields` fails. `SENSITIVE_KEYS` includes all 11 documented admin-only color/HDR/PII columns. Strong.
+- **color-detection NCLX** — dense per-code coverage (codes 2/4/5/7/8/14/15/16/17/18, isHdr polarity, ICC-name interaction). No gap on the recent fixes.
+- **data.ts tagNamesAgg + getLatestImageForOg** — both SQL shapes pinned by `data-tag-names-sql.test.ts`. No gap.
+- **Touch-target audit** — `(?<!max-)` lookbehind now consistent across Button/button/select/Link/a with negative self-checks; recent bare-link additions positively pinned. No gap.
+
+---
+
+## Summary table
+
+| id | severity | confidence | one-line | production:line | test:line |
+|----|----------|-----------|----------|-----------------|-----------|
+| TE-C7-1 | Medium | High | WebP XMP-chunk JUNK-retag GPS branch has no test (symmetric to the just-fixed EXIF-path field-order bug class) | gps-exif-strip.ts:579-588 | strip-gps-from-original.test.ts (absent; WebP XMP coverage is JPEG-only) |
+| REC-1 (record-only) | Low | High | real-encode suites share public/uploads, no mkdtemp output isolation — unchanged, not regressed | process-image-color-roundtrip.test.ts:31-44 | (n/a) |
+
+One actionable Medium gap on recently-fixed privacy-critical code. Everything else on the changed surface is well-pinned and the new tests are provably non-vacuous.
