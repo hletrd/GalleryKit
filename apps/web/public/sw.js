@@ -18,12 +18,12 @@
  *  - /admin/* and /api/admin/*: always bypass to network.
  *  - 401/403 and non-OK responses: never cached.
  *
- * 61607572-p7 is replaced at build time by scripts/build-sw.ts.
+ * ee0f38bd-p7 is replaced at build time by scripts/build-sw.ts.
  *
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '61607572-p7';
+const SW_VERSION = 'ee0f38bd-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -31,6 +31,11 @@ const META_CACHE = 'gk-meta-' + SW_VERSION;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024; // 50 MB
 const HTML_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 h
 const MAX_HTML_ENTRIES = 50; // cap HTML cache to avoid unbounded growth
+// AGG-R8-05 (run-8 c2): worst-case bound for the synchronous HEAD ETag probe
+// on the cached-image display path. Fast networks complete well under this and
+// keep the documented freshness behavior; a slow/hung probe aborts and we serve
+// the stale cache entry immediately, letting the background revalidate heal it.
+const HEAD_REVALIDATE_TIMEOUT_MS = 300;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -204,12 +209,25 @@ async function staleWhileRevalidateImage(request) {
     // the body fetch (no GET is in flight yet); only the LRU recency
     // timestamp is touched. A 200 with a differing ETag means the cache is
     // stale, so we dispatch the revalidate and serve the network response.
+    //
+    // AGG-R8-05 (run-8 c2): BOUND the synchronous HEAD probe. The freshness
+    // intent above is deliberate (serve fresh colors immediately after an admin
+    // color-setting change), but the probe sits on the DISPLAY path — a warm
+    // masonry paint waits one HEAD RTT per cached tile, and a slow/hung network
+    // would stall each tile until the default fetch timeout before falling
+    // through to stale-serve. AbortSignal.timeout caps that worst case: on a
+    // fast network the probe still completes and freshness is preserved; on a
+    // slow/aborted probe we serve stale immediately and let the background
+    // revalidate self-heal (the same one-paint window the same-ETag branch
+    // already accepts). We do NOT remove the synchronous HEAD — that would
+    // regress the documented freshness behavior.
     const cachedEtag = cached.headers.get('ETag');
     if (cachedEtag) {
       try {
         const head = await fetch(request.url, {
           method: 'HEAD',
           headers: { 'If-None-Match': cachedEtag },
+          signal: AbortSignal.timeout(HEAD_REVALIDATE_TIMEOUT_MS),
         });
         if (head.status === 304) {
           // Server confirms cache is fresh — serve cached, no body fetch.
