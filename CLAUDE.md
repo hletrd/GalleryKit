@@ -216,7 +216,7 @@ Connection pool: 10 connections, queue limit 20, keepalive enabled.
 6. Single Sharp instance with `clone()` (avoids triple buffer decode)
 7. Conditional UPDATE marks as processed; if image was deleted mid-processing, orphaned files are cleaned up
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
-9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at producer (`lib/process-image.ts` blur builder), write time (`uploadImages` in `apps/web/src/app/actions/images.ts`), and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4 KB. The producer-side wrap (cycle 4 RPF loop AGG4-L01) closes the symmetric defense — a future MIME drift in the producer is caught at the source rather than masked by the consumer-side validation. Locked by fixture tests `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`
+9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at producer (`lib/process-image.ts` blur builder), write time (`uploadImages` in `apps/web/src/app/actions/images.ts`), and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4096 chars (~3 KB decoded; `MAX_BLUR_DATA_URL_LENGTH` in `blur-data-url.ts`). The producer-side wrap (cycle 4 RPF loop AGG4-L01) closes the symmetric defense — a future MIME drift in the producer is caught at the source rather than masked by the consumer-side validation. Locked by fixture tests `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`
 
 ## Color & HDR Pipeline (photographer-intent surface)
 
@@ -226,7 +226,7 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 
 `detectColorSignals(filepath, sharpInstance, metadata)` in `lib/color-detection.ts` resolves color primaries in priority order:
 
-1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709 (labelled 'srgb' — practical SDR approximation; 13=sRGB IEC61966-2-1 is the canonical code; full mapping in color-detection.ts NCLX_TRANSFER_MAP)`, `14/15=BT.2020→gamma22`, `16=PQ`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `9=BT.2020-NCL`.
+1. **NCLX `colr` box** (HEIF / AVIF) — ITU-T H.273 codes via the bounded ISOBMFF walker (max box depth 5, max scan 1 MB). Maps: primaries `1=BT.709`, `9=BT.2020`, `11=DCI-P3`, `12=Display P3`; transfer `1=BT.709 (labelled 'srgb' — practical SDR approximation; 13=sRGB IEC61966-2-1 is the canonical code; full mapping in color-detection.ts NCLX_TRANSFER_MAP)`, `14/15=BT.2020→gamma24 (BT.1886)`, `16=PQ`, `18=HLG`; matrix `0=identity`, `1=BT.709`, `9=BT.2020-NCL`.
 2. **ICC chromaticity** (`lib/icc-chromaticity.ts`, P4-A2) — parses `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` from the ICC tag table, converts XYZ→xy chromaticity, matches against the sRGB / Display P3 / Adobe RGB / ProPhoto / Rec.2020 presets within ΔE ≤ 0.005 (high-confidence) or ≤ 0.015 (medium). Catches custom monitor profiles (Eizo CG2700X, BenQ SW-series, X-Rite calibrations) whose name doesn't match the allowlist.
 3. **ICC name allowlist** — `resolveColorPipelineDecision` / `resolveAvifIccProfile` string-match against the description for "Display P3", "DCI-P3", "Adobe RGB", "ProPhoto", "Rec.2020" / "BT.2020", "sRGB". Both resolvers accept an optional `signals` parameter so NCLX-only sources (no ICC) still resolve correctly.
 
@@ -257,13 +257,13 @@ The product premise: photos arrive AFTER the photographer's editing. The encoder
 
 **Serving precedence (R4C6 ARCH-R4C6-06):** derivatives live in `public/uploads/`, and Next resolves requests in order: `headers()` config → filesystem (pages + `public/`) → route handlers. For existing files the production serving path is therefore Next's static server (`W/"{size-hex}-{mtime-hex}"` ETag), not `serve-upload.ts`. The `app/uploads/[...path]` route (and therefore the serve-upload pipeline below) executes only for locale-prefixed `/{locale}/uploads/...` URLs and for files missing from `public/`. All layers now share one cache policy: `public, max-age=3600, must-revalidate` (set for the static path via `next.config.ts headers()`).
 
-On the paths it serves, `serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash.slice(0,8)}"`. The settings hash (P4-E2) covers `wide_gamut_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives` so flipping any color-impacting admin setting invalidates cached variants on that path automatically. On the static path, invalidation rides the mtime+size ETag: a backfill re-encode rewrites the file, changing both. Pipeline version bumps invalidate all variants for all images on the serve-upload path and (via re-encode mtime changes) on the static path after backfill.
+On the paths it serves, `serve-upload.ts` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` (the hash is already 8 chars — `HASH_LENGTH` in `settings-hash.ts` — so there is no `.slice(0,8)` at the ETag site). The settings hash (P4-E2) covers all **5** `COLOR_IMPACTING_KEYS` — `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels` — so flipping any color-impacting admin setting invalidates cached variants on that path automatically. On the static path, invalidation rides the mtime+size ETag: a backfill re-encode rewrites the file, changing both. Pipeline version bumps invalidate all variants for all images on the serve-upload path and (via re-encode mtime changes) on the static path after backfill.
 
 ### Audit surface (UI)
 
 - **`<ColorDetailsSection>`** — accordion in photo viewer + mobile bottom sheet. Default-open for non-trivial color (`isNonTrivialColor` = wide-gamut OR HDR OR non-`srgb` decision). Renders ICC name, primaries, transfer function, decision (admin), source bit depth, delivered bit depth, delivered formats chips, HDR badge, gain map row (admin), copy-to-clipboard button.
 - **`<LightboxColorPip>`** (`components/lightbox-color-pip.tsx`) — slide-up panel in lightbox showing the same color metadata + a compact lazy-mounted `<Histogram>`. Closed-state pip uses `min-h-11` for a 44 px touch target.
-- **`<WideGamutHint>`** — shown to sRGB-display visitors viewing a wide-gamut photo. Uses `useDisplayCapability` (NOT raw matchMedia) so Firefox 124+ doesn't false-positive the hint.
+- **`<WideGamutHint>`** — shown to sRGB-display visitors viewing a wide-gamut photo. Uses `useDisplayCapability` (NOT raw matchMedia) so Firefox ≤ 109 (no `color-gamut` MQ) doesn't false-positive the hint; FF 110+ uses the MQ path.
 - **`<Histogram>`** — 256-px-canvas worker-driven RGB / luminance histogram with grid + clip blink (≥ 0.5% bins above white / below black). Priority chain: AVIF (if wide-gamut + P3 display + canvas-P3 supported) → sized JPEG → fallback base JPEG. URLs that fail an `<img>` load are short-circuited so legacy photos missing a `_640.jpg` derivative cleanly fall through to the base filename (always exists per encoder atomic-rename contract).
 - **`force_show_color_chips`** admin opt-in unhides the `gamut-p3-badge` / `hdr-badge` on non-matching displays via `:root[data-force-show-color-chips="true"]` — useful for photographer demos on sRGB laptops.
 
@@ -347,7 +347,7 @@ docker run --rm \
 
 ## Performance Optimizations
 
-- **React `cache()`** wraps `getImage`, `getTopicBySlug`, `getTopicsWithAliases` for SSR deduplication
+- **React `cache()`** wraps 9 data-access functions for SSR deduplication — every `data.ts` export ending in `Cached` (`getImageCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached`) plus `getSeoSettings`
 - **`Promise.all`** parallelizes independent DB queries in `getImage()` (tags + prev + next)
 - **Public route freshness**: public photo, topic, shared, and home pages currently set `revalidate = 0` so asynchronous image processing and metadata updates are visible immediately; admin pages remain dynamic. Reintroduce ISR only with an explicit invalidation/freshness plan
 - **Masonry grid**: `useMemo` for reorder, `requestAnimationFrame` debounced resize
@@ -360,7 +360,7 @@ docker run --rm \
 - `public/sw.template.js` is the SHIPPED service worker source; `scripts/build-sw.ts` stamps `__SW_VERSION__` (git short-SHA + `-p{IMAGE_PIPELINE_VERSION}`) into `public/sw.js` via the `prebuild` hook. After editing the template, regenerate and commit `sw.js`.
 - `lib/sw-cache.ts` is the unit-tested REFERENCE implementation of the LRU logic; `__tests__/sw-template-contract.test.ts` pins the template against drift (R4C6 TEST-R4C6-11).
 - **Image derivatives**: stale-while-revalidate with an ETag HEAD probe, 50 MB LRU cap.
-- **HTML offline fallback (deliberate `no-store` exemption, R4C6 COR-R4C6-05)**: every public page sets `revalidate = 0` (dynamic rendering; Next.js emits no-cache response headers for dynamically rendered routes), so a Cache-Control-honoring SW could never populate an offline cache. `networkFirstHtml` therefore caches 200 GET HTML explicitly as an OFFLINE-ONLY fallback (entries served exclusively when the network is unreachable; 24 h TTL; 50-entry cap), excluding admin routes and any page rendered WITH an admin session. Admin-rendered pages are identified by the `x-gk-admin-render: 1` response header set in `proxy.ts` — the SW cannot read the request `Cookie` header (Fetch-spec forbidden header), so the server makes the personalization decision and the SW honors it.
+- **HTML offline fallback (deliberate Cache-Control (`no-cache`) exemption, R4C6 COR-R4C6-05)**: every public page sets `revalidate = 0` (dynamic rendering; Next.js emits no-cache response headers for dynamically rendered routes), so a Cache-Control-honoring SW could never populate an offline cache. `networkFirstHtml` therefore caches 200 GET HTML explicitly as an OFFLINE-ONLY fallback (entries served exclusively when the network is unreachable; 24 h TTL; 50-entry cap), excluding admin routes and any page rendered WITH an admin session. Admin-rendered pages are identified by the `x-gk-admin-render: 1` response header set in `proxy.ts` — the SW cannot read the request `Cookie` header (Fetch-spec forbidden header), so the server makes the personalization decision and the SW honors it.
 
 ## Migration & Schema-Drift Runbook
 
@@ -467,6 +467,8 @@ The repository has a formal test surface:
 - `npm run lint --workspace=apps/web` — ESLint
 - `npm run typecheck --workspace=apps/web` — blocking type gate: `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts` (JS script checker). Production builds embed the app config, but test-file type errors only surface through this command — run it before committing test changes.
 
+**i18n plural convention (DOC-R5C3-07):** the i18n key-parity check requires the SAME key set in `en.json` and `ko.json`, but the VALUE shape may differ by language. English count strings use ICU plural syntax (`{count, plural, one {# photo} other {# photos}}`); Korean uses a single fixed form (`{count}장`) with no `plural` block — Korean has no grammatical plural, so an ICU `plural` wrapper would be redundant noise. This asymmetry is intentional and expected; do NOT "fix" the ko side to add a `plural` block to match en.
+
 ## Lint Gates (security-critical)
 
 Four lint scripts enforce architectural invariants; all are blocking in CI.
@@ -514,7 +516,7 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
 
 1. Configure `.env.local` with production MySQL credentials
 2. Generate a unique runtime `SESSION_SECRET`: `openssl rand -hex 32`
-3. Copy `site-config.example.json` to `site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing
+3. Copy `apps/web/src/site-config.example.json` to `apps/web/src/site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing
 4. Run `docker compose -f apps/web/docker-compose.yml up -d --build`
 5. Initialize DB: container runs committed migrations automatically
 6. Access the app through your reverse proxy; the documented host-network compose file binds the app to localhost and enables `TRUST_PROXY=true`
