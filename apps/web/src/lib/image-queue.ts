@@ -370,12 +370,20 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
 
             if (updateResult.affectedRows === 0) {
-                // Image was deleted during processing
+                // Image was deleted during processing.
+                // AGG-C4-04 (run-9 c1 CRT-2): pass `[]` (empty sizes) so
+                // deleteImageVariants does a FULL directory scan and removes
+                // every `{name}_{size}{ext}` variant — including derivatives at
+                // NON-default configured sizes (image_sizes is admin-tunable up
+                // to 8 sizes). The 2-arg form defaulted to DEFAULT_OUTPUT_SIZES
+                // and would have orphaned non-default-size variants on this
+                // delete-during-processing race. Matches the backfill runner's
+                // cleanupDeletedMidReencodeVariants and the sidecar (AGG-C4-02).
                 console.debug(`[Queue] Image ${job.id} was deleted during processing, cleaning up`);
                 await Promise.all([
-                    deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp),
-                    deleteImageVariants(UPLOAD_DIR_AVIF, job.filenameAvif),
-                    deleteImageVariants(UPLOAD_DIR_JPEG, job.filenameJpeg),
+                    deleteImageVariants(UPLOAD_DIR_WEBP, job.filenameWebp, []),
+                    deleteImageVariants(UPLOAD_DIR_AVIF, job.filenameAvif, []),
+                    deleteImageVariants(UPLOAD_DIR_JPEG, job.filenameJpeg, []),
                 ]);
                 return;
             }
