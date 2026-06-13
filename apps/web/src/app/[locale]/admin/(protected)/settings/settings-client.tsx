@@ -599,7 +599,12 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             </p>
                         </div>
                         <Select
-                            value={settings.semantic_search_mode || 'disabled'}
+                            // AGG-R5C3-13 (COR-R5C3-04): coerce the controlled value to a
+                            // valid SelectItem. A stale legacy 'production' DB row has no
+                            // matching item, so binding it raw renders a BLANK trigger. Show
+                            // it as Disabled (which is how the resolver heals it); the amber
+                            // legacy warning below still reads the RAW map to flag the stale row.
+                            value={['disabled', 'stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'}
                             onValueChange={(value) => handleChange('semantic_search_mode', value)}
                         >
                             <SelectTrigger id="semantic-search-mode" className="w-[200px]" aria-describedby="semantic-search-mode-help">
