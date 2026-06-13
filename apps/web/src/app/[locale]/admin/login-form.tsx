@@ -95,7 +95,7 @@ export function LoginForm() {
                             </div>
                         </div>
                         {state?.error && (
-                            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert" aria-live="assertive">
+                            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive-text" role="alert" aria-live="assertive">
                                 {state.error}
                             </p>
                         )}

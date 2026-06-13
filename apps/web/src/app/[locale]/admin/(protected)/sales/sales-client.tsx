@@ -87,7 +87,7 @@ function computeStatus(row: EntitlementRow): SalesStatus {
  *  (WCAG 1.4.1). Triple-encodes status as text + color + icon. */
 function StatusBadge({ status, t }: { status: SalesStatus; t: SalesTranslations }) {
     const cfg: Record<SalesStatus, { label: string; cls: string; Icon: typeof Check }> = {
-        refunded: { label: t.statusRefunded, cls: 'text-destructive', Icon: RotateCcw },
+        refunded: { label: t.statusRefunded, cls: 'text-destructive-text', Icon: RotateCcw },
         downloaded: { label: t.statusDownloaded, cls: 'text-green-600 dark:text-green-400', Icon: Check },
         expired: { label: t.statusExpired, cls: 'text-muted-foreground', Icon: XCircle },
         pending: { label: t.statusPending, cls: 'text-amber-600 dark:text-amber-400', Icon: Clock },
@@ -188,7 +188,7 @@ export function SalesClient({ rows: initialRows, t }: Props) {
                   failure to assistive tech via role="alert" (a live region).
                   The previous static <div> rendered silently to screen readers.
                 */
-                <div role="alert" className="text-destructive text-sm">{t.errorLoad}</div>
+                <div role="alert" className="text-destructive-text text-sm">{t.errorLoad}</div>
             )}
 
             {rows.length === 0 ? (

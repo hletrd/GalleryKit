@@ -119,7 +119,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                 <label htmlFor="create-confirm-password" className="text-sm font-medium">{t('password.confirm')}</label>
                                 <Input id="create-confirm-password" ref={confirmPasswordRef} name="confirmPassword" type="password" placeholder={t('password.confirm')} required minLength={12} maxLength={1024} autoComplete="new-password" aria-invalid={!!confirmError} aria-describedby={confirmError ? "create-confirm-password-error" : undefined} onChange={() => setConfirmError(null)} />
                                 {confirmError && (
-                                    <p id="create-confirm-password-error" className="text-sm text-destructive" role="alert">
+                                    <p id="create-confirm-password-error" className="text-sm text-destructive-text" role="alert">
                                         {confirmError}
                                     </p>
                                 )}
@@ -157,7 +157,7 @@ export function AdminUserManager({ users }: AdminUserManagerProps) {
                                             variant="ghost"
                                             size="icon"
                                             onClick={() => setDeleteTarget({ id: user.id, username: user.username })}
-                                            className="text-destructive hover:text-destructive/90"
+                                            className="text-destructive-text hover:text-destructive-text/90"
                                             aria-label={t('aria.deleteUser', { username: user.username })}
                                         >
                                             <Trash2 className="h-4 w-4" />

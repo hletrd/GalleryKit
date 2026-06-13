@@ -133,7 +133,7 @@ export function TokensClient() {
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-11 w-11 shrink-0 text-destructive hover:text-destructive"
+                                className="h-11 w-11 shrink-0 text-destructive-text hover:text-destructive-text"
                                 onClick={() => setConfirmRevokeId(token.id)}
                                 aria-label={t('lrToken.revokeAria', { label: token.label })}
                                 disabled={isPending}

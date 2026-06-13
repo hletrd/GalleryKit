@@ -453,7 +453,7 @@ export function UploadDropzone({
                     <div className={`space-y-4 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
                         <div className="flex items-center justify-between">
                             <h3 className="font-medium text-sm">{t('upload.filesSelected', { count: files.length })}</h3>
-                            <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive">{t('upload.clearAll')}</Button>
+                            <Button variant="ghost" size="sm" onClick={() => { filesRef.current = []; setFiles([]); }} className="min-h-11 px-3 text-destructive-text">{t('upload.clearAll')}</Button>
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -521,7 +521,7 @@ export function UploadDropzone({
                                                 />
                                             </div>
                                             {fileError && (
-                                                <p className="text-xs text-destructive" role="alert">
+                                                <p className="text-xs text-destructive-text" role="alert">
                                                     {t('upload.fileError', { file: file.name, error: fileError })}
                                                 </p>
                                             )}

@@ -71,7 +71,7 @@ export function DashboardClient({ images, failedImages: initialFailed, topics, t
             {/* R10-H2: Failed images section */}
             {failedImages.length > 0 && (
                 <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-4 space-y-3">
-                    <h2 className="text-lg font-semibold text-destructive">
+                    <h2 className="text-lg font-semibold text-destructive-text">
                         {t('dashboard.failedImages', { count: failedImages.length })}
                     </h2>
                     <div className="space-y-2">

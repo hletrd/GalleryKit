@@ -326,7 +326,7 @@ export function BulkEditDialog({
                            dynamically when Apply is blocked; screen-reader users
                            previously got silence. Precedent: C4-RPF-09 (sales
                            load-error region). */
-                        <p role="alert" className="text-sm text-destructive">{validationError}</p>
+                        <p role="alert" className="text-sm text-destructive-text">{validationError}</p>
                     )}
                 </div>
 

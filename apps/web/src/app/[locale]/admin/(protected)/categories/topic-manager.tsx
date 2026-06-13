@@ -251,7 +251,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                 <Button variant="ghost" size="icon" onClick={() => setEditingTopic(topic)} aria-label={t('aria.editItem')}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteSlug(topic.slug)} aria-label={t('aria.deleteItem')}>
+                                <Button variant="ghost" size="icon" className="text-destructive-text" onClick={() => setDeleteSlug(topic.slug)} aria-label={t('aria.deleteItem')}>
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TableCell>
@@ -330,7 +330,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                             <button
                                               type="button"
                                               onClick={() => setDeleteAliasInfo({ topicSlug: editingTopic.slug, alias })}
-                                              className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full text-muted-foreground hover:text-destructive focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                                              className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full text-muted-foreground hover:text-destructive-text focus:ring-2 focus:ring-ring focus:ring-offset-2"
                                               aria-label={t('categories.deleteAliasButton', { alias })}
                                             >
                                                 <X className="h-3 w-3" />

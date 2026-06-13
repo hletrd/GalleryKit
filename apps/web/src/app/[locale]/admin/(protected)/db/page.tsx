@@ -153,13 +153,13 @@ export default function DbPage() {
                 {/* Restore Card */}
                 <Card className="border-destructive/50">
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-destructive">
+                        <CardTitle className="flex items-center gap-2 text-destructive-text">
                             <Upload className="h-5 w-5" />
                             {t('restoreTitle')}
                         </CardTitle>
                         <CardDescription>
                             {t('restoreDesc')}
-                            <span className="font-bold text-destructive block mt-1">{t('restoreWarning')}</span>
+                            <span className="font-bold text-destructive-text block mt-1">{t('restoreWarning')}</span>
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">

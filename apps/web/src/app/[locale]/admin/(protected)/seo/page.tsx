@@ -12,7 +12,7 @@ export default async function SeoPage() {
 
     if (!result.success) {
         return (
-            <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+            <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive-text">
                 {t('loadFailed')}
             </div>
         );

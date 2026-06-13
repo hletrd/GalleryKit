@@ -99,7 +99,7 @@ export function PasswordForm() {
                     aria-describedby={confirmError ? 'confirmPassword-error' : undefined}
                 />
                 {confirmError && (
-                    <p id="confirmPassword-error" className="text-sm text-destructive">
+                    <p id="confirmPassword-error" className="text-sm text-destructive-text">
                         {confirmError}
                     </p>
                 )}

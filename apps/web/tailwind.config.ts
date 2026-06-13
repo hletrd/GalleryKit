@@ -49,7 +49,12 @@ const config: Config = {
                 },
                 destructive: {
                     DEFAULT: 'hsl(var(--destructive))',
-                    foreground: 'hsl(var(--destructive-foreground))'
+                    foreground: 'hsl(var(--destructive-foreground))',
+                    // AGG-R8c3-04: text-destructive-text — foreground twin of the
+                    // destructive background token, contrast-safe on --card in
+                    // light AND dark/oled (the DEFAULT is too dark for text on
+                    // the near-black dark card, ≈1.99:1).
+                    text: 'hsl(var(--destructive-text))'
                 },
                 border: 'hsl(var(--border))',
                 input: 'hsl(var(--input))',

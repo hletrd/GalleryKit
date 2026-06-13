@@ -109,7 +109,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                                 <Button variant="ghost" size="icon" onClick={() => setEditingTag(tag)} aria-label={t('aria.editItem')}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => setDeleteId(tag.id)} aria-label={t('aria.deleteItem')}>
+                                <Button variant="ghost" size="icon" className="text-destructive-text" onClick={() => setDeleteId(tag.id)} aria-label={t('aria.deleteItem')}>
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TableCell>

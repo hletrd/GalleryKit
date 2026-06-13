@@ -35,6 +35,12 @@
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 72.2% 50.6%;
     --destructive-foreground: 0 0% 98%;
+    /* AGG-R8c3-04 (DES-1): --destructive is tuned as a button BACKGROUND
+       (white foreground on it passes); it is too dark to reuse as TEXT on
+       --card in dark/oled (≈1.99:1). --destructive-text is the foreground twin:
+       on white card, red-700 (#b91c1c) = ~5.9:1 AA. In .dark/.oled it lightens
+       to red-400 (#f87171) which clears AA on the near-black card (≈7:1). */
+    --destructive-text: 0 73.7% 41.8%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
@@ -58,6 +64,9 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
+    /* AGG-R8c3-04: lighter red for TEXT on the near-black dark card.
+       red-400 (#f87171) on --card (240 10% 3.9%) ≈ 7:1 AA. */
+    --destructive-text: 0 90.6% 70.8%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
@@ -84,6 +93,8 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
+    /* AGG-R8c3-04: red-400 (#f87171) on OLED card (#0a0a0a) ≈ 7:1 AA. */
+    --destructive-text: 0 90.6% 70.8%;
     --border: 240 3.7% 10%;
     --input: 240 3.7% 10%;
     --ring: 240 4.9% 83.9%;
@@ -115,6 +126,8 @@
       --accent: oklch(95.5% 0.005 264);
       --ring: oklch(20.5% 0.01 264);
       --destructive: oklch(58% 0.21 27);
+      /* AGG-R8c3-04: perceptual twin of red-700 text fallback (~5.9:1 on white). */
+      --destructive-text: oklch(50.5% 0.19 27);
     }
     .dark {
       --primary: oklch(98% 0 0);
@@ -122,6 +135,8 @@
       --accent: oklch(20% 0.005 264);
       --ring: oklch(83% 0.01 264);
       --destructive: oklch(40% 0.16 27);
+      /* AGG-R8c3-04: perceptual twin of red-400 text fallback (~7:1 on dark card). */
+      --destructive-text: oklch(71% 0.17 22);
     }
     .oled {
       --primary: oklch(98% 0 0);
@@ -129,6 +144,7 @@
       --accent: oklch(15% 0.005 264);
       --ring: oklch(83% 0.01 264);
       --destructive: oklch(40% 0.16 27);
+      --destructive-text: oklch(71% 0.17 22);
     }
   }
 }
