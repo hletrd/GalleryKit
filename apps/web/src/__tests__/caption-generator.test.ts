@@ -1,14 +1,11 @@
 /**
  * Tests for caption-generator.ts (US-P52 stub implementation).
  *
- * caption-generator imports 'server-only' — mock it so vitest does not
- * reject the import outside of a Next.js server context.
+ * caption-generator imports 'server-only'; vitest.config.ts aliases that
+ * specifier to a no-op stub globally, so no per-file mock is needed here.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-// Mock server-only so the module can be imported in vitest.
-vi.mock('server-only', () => ({}));
 
 import { generateCaption } from '@/lib/caption-generator';
 import { ALT_TEXT_STUB_PREFIX } from '@/lib/caption-constants';
@@ -62,9 +59,15 @@ describe('generateCaption — stub behavior', () => {
         expect(result!.length).toBeLessThanOrEqual(140);
     });
 
-    it('prefix used in output === ALT_TEXT_STUB_PREFIX from caption-constants', () => {
-        // ARCH-R5C2-02: the re-exported constant from caption-generator must
-        // be the same value as the one in caption-constants.
-        expect(ALT_TEXT_STUB_PREFIX).toBe(ALT_TEXT_STUB_PREFIX);
+    it('emitted caption is prefixed by the canonical caption-constants prefix', async () => {
+        // ARCH-R5C2-02 (AGG-R5C3-02): behavioral cross-module pin. The prefix
+        // baked into generateCaptionStub's output MUST be the canonical
+        // ALT_TEXT_STUB_PREFIX imported from caption-constants. A hardcoded
+        // '[WRONG] ' drift in the generator would make indexOf !== 0 and fail
+        // here — the previous self-comparison assertion always passed and
+        // enforced nothing.
+        const result = await generateCaption(BASE_INPUT, true);
+        expect(result).not.toBeNull();
+        expect(result!.indexOf(ALT_TEXT_STUB_PREFIX)).toBe(0);
     });
 });
