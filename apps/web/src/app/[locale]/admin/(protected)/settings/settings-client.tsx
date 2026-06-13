@@ -75,6 +75,16 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
     // read them, so a run where every row encode-failed looked identical to a
     // clean run. Fetch the status on mount and after each trigger settles.
     const [backfillStatus, setBackfillStatus] = useState<BackfillStatusResult | null>(null);
+    // AGG-R7-02 (run-7 c1): the post-trigger status polls below are scheduled
+    // via setTimeout; hold their ids here so the unmount effect can clearTimeout
+    // them. Without this, leaving Settings within ~10s of a backfill trigger
+    // fired setBackfillStatus on an unmounted tree (the AGG-15 timer-cleanup
+    // half that was prescribed but never implemented alongside the mount fix).
+    const backfillPollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+    // AGG-R7-02: mounted flag so a refresh whose getBackfillStatus() promise is
+    // mid-flight when the admin navigates away does not setState on a dead tree
+    // (clearTimeout stops un-fired timers; this catches an already-fired one).
+    const backfillMountedRef = useRef(true);
     // Imperative refresh used after a trigger settles (event-handler context, so
     // a direct setState is fine here). The mount fetch lives in the effect below
     // with its own mounted-guard so the setState is gated behind the await
@@ -83,7 +93,7 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
         if (!hasExistingImages) return;
         try {
             const s = await getBackfillStatus();
-            if (s.ok) setBackfillStatus(s);
+            if (backfillMountedRef.current && s.ok) setBackfillStatus(s);
         } catch {
             // Non-fatal — the summary line just stays absent.
         }
@@ -103,6 +113,22 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
             cancelled = true;
         };
     }, [hasExistingImages]);
+
+    // AGG-R7-02 (run-7 c1): dedicated unmount cleanup for the post-trigger
+    // status polls. Kept independent of the hasExistingImages-gated mount
+    // effect above so the timers are ALWAYS cleared on unmount regardless of
+    // that guard — a late setTimeout must never setBackfillStatus on a dead
+    // tree. Empty deps → registers once, runs the cleanup only on unmount.
+    useEffect(() => {
+        const timers = backfillPollTimers;
+        const mounted = backfillMountedRef;
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+            timers.current.forEach(clearTimeout);
+            timers.current = [];
+        };
+    }, []);
 
     const handleChange = (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
@@ -137,10 +163,13 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                     }
                     // AGG-R5C3-04: the run is fire-and-forget; poll the status a
                     // few times so the last-run summary reflects the new run's
-                    // outcome without a manual page reload.
+                    // outcome without a manual page reload. AGG-R7-02: track the
+                    // timer ids so the unmount effect can clear them.
                     void refreshBackfillStatus();
-                    setTimeout(() => void refreshBackfillStatus(), 3000);
-                    setTimeout(() => void refreshBackfillStatus(), 10000);
+                    backfillPollTimers.current.push(
+                        setTimeout(() => void refreshBackfillStatus(), 3000),
+                        setTimeout(() => void refreshBackfillStatus(), 10000),
+                    );
                 } else if (result.status === 'already_running') {
                     toast.info(t('settings.backfillAlreadyRunning'));
                 } else if (result.status === 'unavailable') {
