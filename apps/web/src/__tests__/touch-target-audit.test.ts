@@ -329,6 +329,31 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<button\b[^>]*\bclassName=["'][^"']*\b(?:h-10|w-10|size-10)\b/,
         description: 'HTML <button className="...h-10/w-10/size-10..."> renders 40 px on one axis — below 44 px floor',
     },
+    // AGG-R8c3-06 (run-8 c3 DES-2): sub-44 Tailwind SCALE tokens
+    // (min-h-6/min-w-6/size-6/h-7/…) evaded EVERY pattern above — those only
+    // matched the h-8/h-9/h-10/size-10 literals and the min-h-[NNpx] arbitrary
+    // values, never the scale shorthands. The topic-manager alias-remove
+    // <button> shipped 24 px (min-h-6 min-w-6) through exactly this gap.
+    // Tailwind's spacing scale 1-10 = 4-40 px, all below the 44 px (min-h-11)
+    // floor; the usual ≥44 override lookahead (h-11/min-h-11/size-11) wins when
+    // a compliant utility is co-present. Covers min-h / min-w / size / h / w on
+    // both <Button> and <button>, in string-literal and cn() composite forms.
+    {
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: '<Button className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below 44 px floor',
+    },
+    {
+        pattern: /<Button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: '<Button className={cn("...{min-h|min-w|size|h|w}-1..10...")}> composite scale token renders ≤40 px — below 44 px floor',
+    },
+    {
+        pattern: /<button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: 'HTML <button className="...{min-h|min-w|size|h|w}-1..10..."> scale token renders ≤40 px — below 44 px floor',
+    },
+    {
+        pattern: /<button\b(?![^>]*\b(?:h-1[12]|w-1[12]|min-h-1[12]|min-w-1[12]|size-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:min-h|min-w|size|h|w)-(?:[1-9]|10)\b/,
+        description: 'HTML <button className={cn("...{min-h|min-w|size|h|w}-1..10...")}> composite scale token renders ≤40 px — below 44 px floor',
+    },
     // Run-4 cycle 15 DES-R4C15-03 / TEST-R4C15-02: arbitrary-value
     // sub-44 min-heights (`min-h-[32px]`, `min-h-[40px]`, …) evaded every
     // pattern above — the tag-filter chips shipped at 32 px through this
