@@ -15,7 +15,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 ## Deploy
 
 - **`npm run deploy` from repo root** is per-iteration policy. Runs after every commit pushed to `master`. Reads gitignored `.env.deploy`. No staging.
-- The deploy host is `gallery.atik.kr` (`ubuntu@atik.kr` over SSH key `~/.ssh/atik.pem`).
+- The deploy host and SSH credentials are config-driven via the gitignored root `.env.deploy` (copy from `.env.deploy.example`); the helper derives the SSH deploy command from it. Do NOT hardcode hostnames or key paths here — keep them in `.env.deploy` (see `CLAUDE.md` "Remote Deploy Helper").
 - **Never `npm install` inside the running `gallerykit-web` container** — it clobbers prod-deps and crashes the site. For one-off scripts use a `--rm` sidecar from `web-web:latest` with read-only source mounts (see `CLAUDE.md` "Backfill" section).
 
 ## Schema
@@ -33,7 +33,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 - `npm run lint:public-route-rate-limit --workspace=apps/web` — every PUBLIC API route exporting a mutating handler (POST/PUT/PATCH/DELETE) must call a rate-limit pre-increment helper (or carry an explicit `@public-no-rate-limit-required: <reason>` comment); GET handlers are not scanned
 - `npm run typecheck --workspace=apps/web` — `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts`; test-file type errors only surface here, not through the build
 - `npm run build --workspace=apps/web` — Next.js + tsc
-- `npm test --workspace=apps/web` — Vitest 1300+ unit tests including the touch-target audit (≥ 44 px) and the `_PrivacySensitiveKeys` symmetric privacy guard
+- `npm test --workspace=apps/web` — Vitest 2000+ unit tests including the touch-target audit (≥ 44 px) and the `_PrivacySensitiveKeys` symmetric privacy guard
 
 ## Plans, reviews, conventions
 

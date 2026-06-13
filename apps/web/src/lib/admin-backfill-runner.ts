@@ -168,7 +168,16 @@ interface AdminBackfillState {
     errors: number;
     /** Monotonic counter incremented when the runner finishes successfully. */
     completedRuns: number;
-    /** Last error message if a run failed, else null. */
+    /**
+     * Last error message if a run failed, else null.
+     *
+     * AGG-19 (plan-330 Unit B): this is a single SCALAR, so at concurrency > 1
+     * it is last-writer-wins across workers — whichever worker failed last wins
+     * the message. The failure COUNTS (`errors`, `encodeFailures`,
+     * `detectionFailures`) stay correct because each worker increments its own
+     * tally; only this one human-readable message reflects the most recent
+     * failure. Do NOT treat `lastError` as a per-row failure log.
+     */
     lastError: string | null;
     /**
      * AGG-R5C3-04: true when the LAST completed run recorded any encode or

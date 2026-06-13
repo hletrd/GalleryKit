@@ -5,13 +5,14 @@
  * literals across multiple files. Centralizing them reduces the risk of
  * accidental name collisions and improves auditability.
  *
- * IMPORTANT (C8R-RPL-06 / AGG8R-05): MySQL advisory lock names are scoped
- * to the MySQL SERVER, not to an individual database. Two GalleryKit instances
- * pointed at the same MySQL server share the same lock namespace and will
- * serialize each other's restores, upload-contract changes, topic renames,
- * admin-user deletes, and image-processing claims across tenants. Run one
- * GalleryKit per MySQL server — or prefix advisory-lock names with a
- * per-instance identifier if multi-tenant co-location is required.
+ * IMPORTANT (C8R-RPL-06 / AGG8R-05; backfill added AGG-R8-12): MySQL advisory
+ * lock names are scoped to the MySQL SERVER, not to an individual database. Two
+ * GalleryKit instances pointed at the same MySQL server share the same lock
+ * namespace and will serialize each other's restores, upload-contract changes,
+ * topic renames, admin-user deletes, color-pipeline backfill runs
+ * (`LOCK_COLOR_PIPELINE_BACKFILL`, defined below) and image-processing claims
+ * across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock
+ * names with a per-instance identifier if multi-tenant co-location is required.
  */
 
 /** Lock serializes database restore operations (one restore at a time). */

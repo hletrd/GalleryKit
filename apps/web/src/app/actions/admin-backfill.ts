@@ -37,6 +37,14 @@ export async function triggerBackfill(): Promise<TriggerBackfillResult> {
     const originError = await requireSameOriginAdmin();
     if (originError) return { ok: false, status: 'error', error: originError };
 
+    // AGG-20 (plan-330 Unit B): the candidate count `triggerAdminBackfill`
+    // returns (`affectedRows`) is a count-then-handoff snapshot — a benign
+    // TOCTOU. If a DB restore (or a concurrent run) lands between the count and
+    // the runner's first loop iteration, the UI may briefly report "queued N"
+    // while the runner actually no-ops on some/all of those rows. It self-heals
+    // on the next status poll (which reads the runner's REAL processed/errors
+    // counters, not this snapshot). Not a correctness defect: the number is an
+    // upper-bound estimate for the toast, never the authoritative result.
     const result = await triggerAdminBackfill();
     switch (result.status) {
         case 'queued': {

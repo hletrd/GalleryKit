@@ -97,6 +97,6 @@ Notes on splits:
 
 | Unit / Entry | Commit | Status |
 |---|---|---|
-| Unit A (docs) | — | TODO |
-| Unit B (code comments) | — | TODO |
+| Unit A (docs: AGG-14 doc-half, AGG-21/22/23) | 10d77324 (run-7) | DONE — verified by document-specialist run-8 c2: COLOR_IMPACTING_KEYS=9, fresh-`sharp()` wording, IMAGE_PIPELINE_VERSION location, backfill env vars all correct in CLAUDE.md |
+| Unit B (code comments: AGG-19, AGG-20) | (run-8 c2) | DONE — AGG-19 last-writer-wins note on `AdminBackfillState.lastError`; AGG-20 count-then-handoff TOCTOU note on `triggerBackfill` |
 | Deferred 1-7 | n/a (recorded) | RECORDED |
