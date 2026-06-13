@@ -214,6 +214,17 @@ export default async function PhotoPage({ params, searchParams }: {
             value: image.height,
             unitCode: 'E37',
         },
+        // AGG-C4-07 (run-9 c1 TRC-1): `name`/`description`/`keywords` and the
+        // breadcrumb `topic_label` below are intentionally NOT wrapped in
+        // sanitizeForOg, while the EXIF PropertyValues ARE. This asymmetry is
+        // deliberate: (1) every value rendered here is JSON-serialized and
+        // emitted via `safeJsonLd`, which escapes `</script>` and JSON-escapes
+        // control chars in string values, and (2) title/description/topic.label
+        // are write-time validator-gated (`containsUnicodeFormatting` rejects
+        // bidi + zero-width chars on the admin string surfaces). EXIF strings
+        // (camera/lens/exposure) come straight from the file's metadata and are
+        // NOT validator-gated, so they get the extra sanitizeForOg pass. Do NOT
+        // "fix" this by wrapping the already-gated fields.
         name: displayTitle,
         description: image.description,
         keywords: keywords.join(', '),

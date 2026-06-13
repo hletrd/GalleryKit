@@ -61,8 +61,11 @@ describe('AGG-4: sanitizeForOg strips ALL Unicode formatting chars', () => {
         // AGG-R8c3-02 (run-8 c3): the JSON-LD page also consumes the SHARED
         // sanitizer now (its old local copy stripped only Unicode-format chars,
         // not C0 controls, while claiming to "match" the OG route — false once
-        // AGG-R8-13 added C0-stripping to the shared helper). Assert it imports
-        // sanitizeForOg from og-sanitize so the JSON-LD path is C0-strip-locked.
+        // AGG-R8-13 added C0-stripping to the shared helper). This assertion
+        // pins only the IMPORT (the JSON-LD path now uses og-sanitize, not a
+        // weaker local copy); the C0-strip BEHAVIOR itself is pinned by
+        // og-sanitize.test.ts (AGG-C4-07 comment-precision: this file does not
+        // exercise C0 stripping — it forbids the divergent local copy).
         ['src/app/[locale]/(public)/p/[id]/page.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],
         // The home/site OG route also consumes the shared helper (AGG-R8-13).
         ['src/app/api/og/route.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],

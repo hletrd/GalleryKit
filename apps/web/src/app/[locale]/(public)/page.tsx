@@ -103,9 +103,13 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   // and Twitter/X reject images > 5 MB (the card then renders image-less);
   // LinkedIn similar. The per-photo route preserves the no-404 guarantee a
   // different way: it iterates configured sizes server-side via
-  // pickFirstAvailablePhotoBuffer and falls back to the site OG card when no
-  // derivative is on disk yet (mid-backfill / legacy / post-reconfigure), so a
-  // freshly-uploaded `latestImage` is still safe. This makes the home card a
+  // pickFirstAvailablePhotoBuffer and, when no SIZED derivative is on disk yet
+  // (mid-backfill / legacy / post-reconfigure — note there is NO base-JPEG last
+  // resort, only the sized `_NNN.jpg` derivatives are tried), 302-redirects to
+  // the admin-configured `og_image_url`, or to the site homepage HTML if that
+  // setting is empty (AGG-C4-07 — NOT a freshly-generated "site OG card"). The
+  // common case is safe because the encoder writes sized derivatives on upload.
+  // This makes the home card a
   // properly-sized photo card consistent with all 4 sibling OG paths
   // (p/[id], [topic], c/[slug], per-photo route) instead of the sole base-JPEG
   // outlier.
