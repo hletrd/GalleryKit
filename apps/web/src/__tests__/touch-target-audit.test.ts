@@ -542,7 +542,14 @@ export function normalizeMultilineButtonTags(source: string): string {
     // multiple lines. `<a\b` matches the HTML anchor but NOT `<area`/`<address`
     // (\b after `a` requires a non-word boundary, and we additionally guard the
     // FORBIDDEN <a> patterns on a className sizing token).
-    const re = /<(Button|button|Badge|select|Link|a)\b/g;
+    // AGG-R8-03 (run-8 c2): `input` added so a multi-line raw
+    // `<input type="checkbox" … />` collapses to one logical line. Raw
+    // checkboxes/radios are NOT styled through the shadcn primitive, so the
+    // image-manager select-all + per-row boxes shipped a 32 px tap area unseen
+    // by every prior cycle (the FORBIDDEN set only knew Button/button/Badge/
+    // select/Link/a). The windowed checkbox scan in scanSource consumes the
+    // collapsed `<input>` line.
+    const re = /<(Button|button|Badge|select|Link|a|input)\b/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(source)) !== null) {
         const tagStart = m.index;
@@ -586,6 +593,47 @@ export function scanSource(relPath: string, source: string): FoundIssue[] {
                     snippet: line.trim().slice(0, 240),
                 });
             }
+        }
+    }
+    issues.push(...scanRawCheckboxes(relPath, lines));
+    return issues;
+}
+
+// AGG-R8-03 (run-8 c2): raw `<input type="checkbox">` / `type="radio"` floor.
+// These are NOT the shadcn primitive (components/ui/checkbox.tsx) and carry no
+// built-in 44 px floor — the repo pattern is to wrap the small visible box in a
+// `min-h-11 min-w-11` <label> that provides the tap area. A raw checkbox is a
+// violation UNLESS a ≥44 px sizing class is present on its own collapsed tag OR
+// on the wrapping element within a small preceding window (the <label> a few
+// lines up). This closes the structural blind spot that let the 32 px
+// image-manager boxes ship every prior cycle.
+const CHECKBOX_44_OK = /\b(?:min-h-1[12]|h-1[12]|min-w-1[12]|w-1[12]|size-1[12])\b/;
+function scanRawCheckboxes(relPath: string, lines: string[]): FoundIssue[] {
+    const issues: FoundIssue[] = [];
+    // Lines back-scanned for the wrapping label's sizing class. The collapsed
+    // <label> opening tag is one logical line; a generous window tolerates an
+    // <span className="sr-only"> between the label and the input.
+    const WINDOW = 4;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!/<input\b[^>]*\btype=["'](?:checkbox|radio)["']/.test(line)) continue;
+        // The input's own tag clears the floor (e.g. a 44 px checkbox).
+        if (CHECKBOX_44_OK.test(line)) continue;
+        // Otherwise the wrapping element must supply it within the window.
+        let wrapperOk = false;
+        for (let j = Math.max(0, i - WINDOW); j < i; j++) {
+            if (/<label\b/.test(lines[j]) && CHECKBOX_44_OK.test(lines[j])) {
+                wrapperOk = true;
+                break;
+            }
+        }
+        if (!wrapperOk) {
+            issues.push({
+                file: relPath,
+                line: i + 1,
+                pattern: 'raw <input type="checkbox|radio"> without a ≥44 px tap area (self or wrapping <label>) — below the 44 px floor',
+                snippet: line.trim().slice(0, 240),
+            });
         }
     }
     return issues;
@@ -786,6 +834,37 @@ describe('touch-target audit (44 px floor)', () => {
         // (the primitive floors at min-h-11 via data-[size]:min-h-11).
         const selectTrigger = '<SelectTrigger id="avif-effort" className="w-[200px]"><SelectValue /></SelectTrigger>';
         expect(scanSource('fixture/select-trigger-ok.tsx', selectTrigger)).toEqual([]);
+    });
+
+    it('scanSource catches a raw <input type="checkbox"> with a sub-44 wrapper and accepts a min-h-11 label (AGG-R8-03)', () => {
+        // Pre-fix image-manager shape: a 20 px checkbox inside a 32 px label.
+        const violating = [
+            '<label className="inline-flex min-h-8 min-w-8 items-center justify-center">',
+            '    <span className="sr-only">Select all</span>',
+            '    <input',
+            '        type="checkbox"',
+            '        className="h-5 w-5 rounded border-gray-300"',
+            '        checked={all}',
+            '        onChange={toggleAll}',
+            '    />',
+            '</label>',
+        ].join('\n');
+        const issues = scanSource('fixture/checkbox-violation.tsx', violating);
+        expect(issues.length, `Expected a raw-checkbox violation, got: ${JSON.stringify(issues)}`).toBeGreaterThan(0);
+        expect(issues.some((i) => i.pattern.includes('raw <input type="checkbox'))).toBe(true);
+
+        // The landed fix: the wrapping label provides the 44 px tap area.
+        const compliant = violating.replace('min-h-8 min-w-8', 'min-h-11 min-w-11');
+        expect(scanSource('fixture/checkbox-ok.tsx', compliant), 'min-h-11 label should clear the floor').toEqual([]);
+
+        // A radio with the same shape is also caught.
+        const radio = violating.replace('type="checkbox"', 'type="radio"');
+        expect(scanSource('fixture/radio-violation.tsx', radio).length).toBeGreaterThan(0);
+
+        // shadcn Checkbox primitive (components/ui/checkbox.tsx) is a styled
+        // <button role="checkbox">, NOT a raw <input>, so it never enters this
+        // scan — a bare <Checkbox /> usage must not false-positive.
+        expect(scanSource('fixture/shadcn-checkbox.tsx', '<Checkbox id="x" checked={v} />')).toEqual([]);
     });
 
     it('scanSource accepts multi-line <Button size="icon"> with h-11 override', () => {

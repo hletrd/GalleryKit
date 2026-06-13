@@ -415,7 +415,7 @@ export function ImageManager({
                     <TableHeader>
                         <TableRow>
                             <TableHead className="w-[56px]">
-                                <label className="inline-flex min-h-8 min-w-8 items-center justify-center">
+                                <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
                                     <span className="sr-only">{t('aria.selectAll')}</span>
                                     <input
                                     ref={selectAllRef}
@@ -441,7 +441,7 @@ export function ImageManager({
                         {images.map((image) => (
                             <TableRow key={image.id} data-state={selectedIds.has(image.id) ? "selected" : undefined}>
                                 <TableCell>
-                                    <label className="inline-flex min-h-8 min-w-8 items-center justify-center">
+                                    <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
                                         <span className="sr-only">{t('aria.selectImage', { title: image.title || image.id })}</span>
                                         <input
                                         type="checkbox"
