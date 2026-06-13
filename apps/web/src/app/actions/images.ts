@@ -1082,7 +1082,9 @@ export async function retryFailedImage(id: number) {
     if (!(await isAdmin())) return { error: t('unauthorized') };
 
     if (!Number.isInteger(id) || id <= 0) {
-        return { error: 'Invalid image ID' };
+        // AGG-R8c3-16(b): localized to match every sibling (deleteImage etc.);
+        // was a lone hardcoded English string.
+        return { error: t('invalidImageId') };
     }
 
     // Fetch the image row (admin-only fields needed for re-enqueue)
