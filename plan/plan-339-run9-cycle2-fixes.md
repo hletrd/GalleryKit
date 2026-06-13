@@ -73,7 +73,7 @@
 ## Progress
 
 - [x] Item 1 — AGG-C5-01 sidecar `flushBatch` orphan-cleanup test — DONE: extracted two module-level exports from the `main()` closure — `collectDeletedMidReencodeFiles(results)` (the `affectedRows===0` partition) + `cleanupDeletedMidReencodeVariants(files)` (the `[]` dir-scan unlink) — and rewired `flushBatch` to use them. New `backfill-color-pipeline-deleted-mid-reencode.test.ts` (4 tests) pins the partition (only `affectedRows===0` rows selected) + the cleanup (webp/avif/jpeg all unlinked with `[]` sizes). PROVEN NON-VACUOUS: breaking the filter (select-all) + the `[]` arg → 3/4 RED, restored → 4/4 GREEN. typecheck app+scripts green; sidecar test group 11/11.
-- [ ] Item 2 — AGG-C5-02 `<select>` `(?<!max-)` lookbehind + negative self-check fixtures.
+- [x] Item 2 — AGG-C5-02 `<select>` `(?<!max-)` lookbehind + negative self-check fixtures — DONE: added `(?<!max-)` before the `(?:h-8|h-9|h-10)` group in both native-`<select>` `h-8/h-9/h-10` patterns (`:414,418`), mirroring the Button fix; `min-h-[<44px]` patterns left as true floors. Added 4 `<select> max-` negative fixtures to the does-not-flag block (`max-h-10`, `max-h-8`, `cn("max-h-10")`, `max-h-screen`). The existing positive block (real `<select> h-10`/`min-h-[40px]`) still flags, proving no over-neuter. PROVEN NON-VACUOUS: reverting the lookbehind → `max-h-10` fixture RED, restored → 12/12 green.
 - [ ] Item 3 — AGG-C5-03 three public inline `<Link>` recovery actions → `inline-flex items-center min-h-11 px-2`.
 - [ ] Item 4 — AGG-C5-T1 en/ko leaf-key SET-equality test.
 - [ ] Item 5 — AGG-C5-T2 upload-queue `[]`-sizes cleanup source-shape pin.

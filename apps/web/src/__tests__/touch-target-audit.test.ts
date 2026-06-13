@@ -405,12 +405,17 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
     // data-[size]:min-h-11) and every pattern above — the upload topic
     // picker shipped 40 px through exactly this gap. Same ≥44 override
     // lookahead as the c15 patterns (a co-present h-11/min-h-11 wins).
+    // AGG-C5-02 (run-9 c2 CRT-1): `(?<!max-)` before the bare `h-8/h-9/h-10`
+    // group so `max-h-10` (a CEILING, never the tap target) is NOT flagged —
+    // the same false-positive the c1 fix (40a65aef) closed for <Button>/<button>,
+    // which had been left open on these <select> patterns. min-h-[<44px] is a
+    // true floor and keeps no lookbehind (mirrors the Button min-h branches).
     {
-        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?:h-8|h-9|h-10)\b/,
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=["'][^"']*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: 'native <select className="...h-8/h-9/h-10..."> renders below the 44 px floor',
     },
     {
-        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?:h-8|h-9|h-10)\b/,
+        pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\b(?<!max-)(?:h-8|h-9|h-10)\b/,
         description: 'native <select className={cn("...h-8/h-9/h-10...")}> composite renders below the 44 px floor',
     },
     {
@@ -977,6 +982,14 @@ describe('touch-target audit (44 px floor)', () => {
             { name: '<Button className={cn("max-h-10", ...)}> (cn ceiling)', snippet: `<Button className={cn("max-h-10", "px-4")}>x</Button>` },
             { name: 'HTML <button className="max-h-9"> (ceiling)', snippet: `<button className="max-h-9" type="button">x</button>` },
             { name: 'HTML <button className={cn("max-w-10", ...)}> (cn ceiling)', snippet: `<button className={cn("max-w-10", "px-4")} type="button">x</button>` },
+            // AGG-C5-02 (run-9 c2 CRT-1): the same `max-` ceiling false positive
+            // existed on the native <select> patterns (the c1 fix only reached
+            // <Button>/<button>). A `<select className="max-h-10">` must NOT flag
+            // (max-height is a ceiling). These pin the <select> half of the fix.
+            { name: 'native <select className="max-h-10"> (ceiling, not a floor)', snippet: `<select className="max-h-10 w-full" value={v}>x</select>` },
+            { name: 'native <select className="max-h-8"> (ceiling)', snippet: `<select className="max-h-8 w-full" value={v}>x</select>` },
+            { name: 'native <select className={cn("max-h-10", ...)}> (cn ceiling)', snippet: `<select className={cn("max-h-10", "w-full")} value={v}>x</select>` },
+            { name: 'native <select className="max-h-screen"> (named ceiling)', snippet: `<select className="max-h-screen w-full" value={v}>x</select>` },
         ];
         for (const { name, snippet } of fixtures) {
             const matched = FORBIDDEN.some((rule) => rule.pattern.test(snippet));
