@@ -6,7 +6,12 @@ import dynamic from 'next/dynamic';
 import { TagInfo, formatShutterSpeed } from '@/lib/image-types';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { safeJsonLd } from '@/lib/safe-json-ld';
-import { stripUnicodeFormatting } from '@/lib/validation';
+// AGG-R8c3-02 (run-8 c3): use the SHARED sanitizer (Unicode-format strip + C0
+// control strip), not a local copy. The previous local sanitizeForOg here only
+// stripped Unicode formatting (no C0 control strip) yet claimed to "match" the
+// OG image route — false once AGG-R8-13 upgraded the OG route version to also
+// strip C0. Importing the one og-sanitize keeps the JSON-LD path in lockstep.
+import { sanitizeForOg } from '@/lib/og-sanitize';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import siteConfig from "@/site-config.json";
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -26,22 +31,6 @@ function toIsoTimestamp(value: string | Date | null | undefined) {
     return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-/**
- * Strip Unicode bidi/invisible formatting characters from a display string
- * before embedding it into structured data. Defense-in-depth: these are already
- * rejected at admin write time, but a cheap strip here closes any future gap
- * (e.g., data imported from a raw DB restore that bypasses validation).
- * Matches the `sanitizeForOg` in the OG image route.
- *
- * AGG-4 (run-6 c1): use `stripUnicodeFormatting` (GLOBAL-flag twin), not a bare
- * replace against the non-global UNICODE_FORMAT_CHARS regex. The non-global
- * regex strips only the FIRST bidi/zero-width char, so a value with two or more
- * leaked the rest into the JSON-LD structured data (camera/lens/exposure
- * PropertyValues).
- */
-function sanitizeForOg(value: string): string {
-    return stripUnicodeFormatting(value) ?? '';
-}
 
 
 // Photo metadata and processed-file availability can change after background

@@ -12,13 +12,16 @@
  *
  * The fix routes both through `stripUnicodeFormatting` (the global-flag twin).
  * AGG-R8-13 (run-8 c2): the OG ROUTE's local `sanitizeForOg` was extracted to
- * the shared `@/lib/og-sanitize` (so the home/site OG route shares one strip);
- * the route now imports `sanitizeForOg` from there instead of referencing
- * `stripUnicodeFormatting` directly. The page keeps its local helper. This
- * fixture-style guard pins the contract:
+ * the shared `@/lib/og-sanitize` (so the home/site OG route shares one strip).
+ * AGG-R8c3-02 (run-8 c3): the JSON-LD photo PAGE's local copy — which only
+ * stripped Unicode-format chars, NOT C0 controls, while its docstring falsely
+ * claimed to "match" the OG route — was also migrated to the shared helper, so
+ * all three consuming files (both OG image routes + the JSON-LD page) now share
+ * ONE sanitizer (Unicode-format + C0 strip). This fixture-style guard pins the
+ * contract:
  *   1. behaviorally — the underlying global strip removes MULTIPLE occurrences;
- *   2. structurally — every consuming file uses the global strip (directly OR
- *      via the shared og-sanitize import), and NONE reintroduces the non-global
+ *   2. structurally — every consuming file imports the shared `sanitizeForOg`
+ *      from `@/lib/og-sanitize`, and NONE reintroduces the non-global
  *      `.replace(UNICODE_FORMAT_CHARS` call form (only comments may mention it);
  *   3. the shared module itself uses the global `stripUnicodeFormatting`.
  */
@@ -55,9 +58,15 @@ describe('AGG-4: sanitizeForOg strips ALL Unicode formatting chars', () => {
         // The OG route now consumes the shared helper; assert it imports
         // sanitizeForOg from og-sanitize (the global strip lives there).
         ['src/app/api/og/photo/[id]/route.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],
-        // The page keeps its own local helper using stripUnicodeFormatting.
-        ['src/app/[locale]/(public)/p/[id]/page.tsx', /stripUnicodeFormatting/],
-    ] as const)('%s routes sanitizeForOg through the global strip', (rel, mustMatch) => {
+        // AGG-R8c3-02 (run-8 c3): the JSON-LD page also consumes the SHARED
+        // sanitizer now (its old local copy stripped only Unicode-format chars,
+        // not C0 controls, while claiming to "match" the OG route — false once
+        // AGG-R8-13 added C0-stripping to the shared helper). Assert it imports
+        // sanitizeForOg from og-sanitize so the JSON-LD path is C0-strip-locked.
+        ['src/app/[locale]/(public)/p/[id]/page.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],
+        // The home/site OG route also consumes the shared helper (AGG-R8-13).
+        ['src/app/api/og/route.tsx', /from\s+['"]@\/lib\/og-sanitize['"]/],
+    ] as const)('%s routes sanitizeForOg through the shared global strip', (rel, mustMatch) => {
         const src = readFileSync(join(process.cwd(), rel), 'utf8');
         expect(src).toMatch(mustMatch);
         // It must NOT call the non-global form (comments referencing the old
