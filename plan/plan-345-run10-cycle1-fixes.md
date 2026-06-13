@@ -53,7 +53,7 @@ The test must be deterministic-enough to not flake: a 200k sample makes the corr
 - [x] Gates green (full vitest + typecheck)
 - [x] Commit + push (GPG-signed, conventional + gitmoji)
 
-**Implemented:** commit `__ITEM1_SHA__` — added a deterministic 500k-sample char-frequency distribution test to `base56.test.ts`. Empirically validated thresholds (500k samples, run 5×): correct rejection-sampled code ratio 1.0378-1.0601, naive `%56` ratio ~1.30; the 1.20 threshold sits safely between (non-flaky on correct code). RED-on-revert proven by mutating away the `while (randomValue >= 224)` loop. No production code change.
+**Implemented:** commit `71ab0f41` — added a deterministic 500k-sample char-frequency distribution test to `base56.test.ts`. Empirically validated thresholds (500k samples, run 5×): correct rejection-sampled code ratio 1.0378-1.0601, naive `%56` ratio ~1.30; the 1.20 threshold sits safely between (non-flaky on correct code). RED-on-revert proven by mutating away the `while (randomValue >= 224)` loop. No production code change.
 
 ---
 
