@@ -5,7 +5,7 @@ import { getImageCached, getSeoSettings } from '@/lib/data';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { pickFirstAvailablePhotoBuffer } from '@/lib/og-photo-fetch';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
-import { stripUnicodeFormatting } from '@/lib/validation';
+import { sanitizeForOg } from '@/lib/og-sanitize';
 import { preIncrementOgAttempt, rollbackOgAttempt, getClientIp } from '@/lib/rate-limit';
 import siteConfig from '@/site-config.json';
 
@@ -16,26 +16,9 @@ export const runtime = 'nodejs';
 const OG_SUCCESS_CACHE_CONTROL = 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400';
 const OG_ERROR_CACHE_CONTROL = 'no-store, no-cache, must-revalidate';
 
-/**
- * Strip Unicode bidi/invisible formatting characters from a display string
- * before embedding it into an OG image. Defense-in-depth: these are already
- * rejected at admin write time, but a cheap strip here closes any future gap.
- *
- * R17-L4: also strips C0 control characters (XML-forbidden in document
- * content; equally inappropriate inside an OG image string — Satori
- * renders them as missing glyphs or drops them, depending on font).
- * Mirrors the same defense in `lib/atom-feed.ts` (R17-L1).
- *
- * AGG-4 (run-6 c1): use `stripUnicodeFormatting` (the GLOBAL-flag twin) rather
- * than a bare replace against the non-global UNICODE_FORMAT_CHARS regex. That
- * regex has no `/g` flag, so a single replace strips only the FIRST bidi/
- * zero-width char — a value with two or more leaked the rest into the public OG
- * card and JSON-LD. stripUnicodeFormatting replace-alls.
- */
-const OG_C0_CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
-function sanitizeForOg(value: string): string {
-    return (stripUnicodeFormatting(value) ?? '').replace(OG_C0_CONTROL_CHARS, '');
-}
+// sanitizeForOg now lives in @/lib/og-sanitize (AGG-R8-13) so this route and
+// the home/site OG route share one Unicode-format + C0-control strip. See that
+// module for the AGG-4 / R17-L4 rationale.
 
 /**
  * Post-process Satori PNG output through Sharp to embed sRGB ICC.

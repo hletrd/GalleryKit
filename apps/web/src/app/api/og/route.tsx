@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import { createHash } from 'crypto';
 import { isValidSlug, isValidTagName } from '@/lib/validation';
+import { sanitizeForOg } from '@/lib/og-sanitize';
 import siteConfig from '@/site-config.json';
 import { getSeoSettings, getTopicBySlug } from '@/lib/data';
 import { getClientIp, preIncrementOgAttempt } from '@/lib/rate-limit';
@@ -73,13 +74,18 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const topicLabel = clampDisplayText(topicRecord.label, MAX_TOPIC_LABEL_LENGTH);
-    const siteTitle = seo.title || siteConfig.title;
+    // AGG-R8-13 / SEC-1 (run-8 c2): sanitize Unicode bidi/zero-width + C0
+    // control chars out of every rendered string, matching the per-photo OG
+    // route via the shared @/lib/og-sanitize. Defense-in-depth symmetry — these
+    // values are admin-controlled and validator-rejected at write time, but the
+    // home card should not be the one OG surface that renders them raw.
+    const topicLabel = sanitizeForOg(clampDisplayText(topicRecord.label, MAX_TOPIC_LABEL_LENGTH));
+    const siteTitle = sanitizeForOg(seo.title || siteConfig.title);
     // C2-AGG-03 / plan-257: clamp each tag name for display to prevent
     // layout distortion in the OG image when a tag hits the 100-char
     // isValidTagName ceiling. 30 chars is comfortable for the pill layout.
     const MAX_OG_TAG_DISPLAY_LENGTH = 30;
-    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)).map(t => clampDisplayText(t, MAX_OG_TAG_DISPLAY_LENGTH)) : [];
+    const tagList = tags ? tags.split(',').filter(Boolean).slice(0, 20).map(t => t.trim()).filter(t => isValidTagName(t)).map(t => sanitizeForOg(clampDisplayText(t, MAX_OG_TAG_DISPLAY_LENGTH))) : [];
 
     // AGG8F-01 / plan-233: ETag covers the inputs that drive the
     // rendered image. If a crawler revisits with `If-None-Match`,
