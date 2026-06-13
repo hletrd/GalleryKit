@@ -15,8 +15,16 @@ export default function Error({
     return (
         <main className="flex min-h-[60vh] items-center justify-center px-4" role="main">
             <section className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border bg-card p-6 text-center shadow-sm" aria-labelledby="route-error-title">
-                <span aria-hidden="true" className="text-7xl font-bold text-muted-foreground/30 block">{t('error.title')}</span>
-                <h1 id="route-error-title" className="sr-only">{t('error.title')}</h1>
+                {/* AGG-R7-03 (run-7 c1): a single VISIBLE readable <h1> at a
+                    prominent, WCAG-1.4.3-passing size. The prior AGG-9 split
+                    fixed the accessibility tree (sr-only h1) but left sighted
+                    users with only a ~1.5:1 faint title (/30) and no real
+                    heading. The title text ('Error') is the same string the
+                    old faint glyph showed, so a separate decorative duplicate
+                    would just repeat it — we render one legible heading instead
+                    (not-found.tsx can keep its decorative '404' numeral because
+                    that glyph differs from its 'Page not found' heading). */}
+                <h1 id="route-error-title" className="text-3xl font-semibold tracking-tight">{t('error.title')}</h1>
                 <p className="text-lg text-muted-foreground">
                     {t('error.description')}
                 </p>
