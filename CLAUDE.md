@@ -418,14 +418,18 @@ Compare against `apps/web/drizzle/meta/_journal.json` entries × `SHA256` of eac
 
 The deploy host has 124 G total. Repeated deploys accumulate Docker images + builder cache that can fill the disk; once disk hits 100 % the next `git pull` on the deploy host fails with `unable to write loose object file: No space left on device`.
 
-When that happens, free disk before retrying:
+**`apps/web/deploy.sh` now auto-prunes after every deploy** so the host stays clean without manual intervention. Immediately after `docker compose up -d --build` it runs `docker container prune -f`, `docker image prune -af`, `docker builder prune -af`, and `docker volume prune -f`, then prints `df -h /`. The prune runs AFTER the stack is back up, so the live `gallerykit-web` container + its just-built image are in-use and survive it.
+
+**In-use data is never deleted — guaranteed by the persistence model, not by luck:** GalleryKit persistence is BIND MOUNTS (`./data` → originals + DB backups, `./public` → derivatives, `./src/site-config.json`), which are host directories `docker volume prune` cannot touch; and MySQL runs on the host (`network_mode: host`, 127.0.0.1), so there is no DB Docker volume. The automatic volume prune deliberately omits `-a` (anonymous/dangling volumes only, never named volumes). When changing the deploy prune logic, preserve all three guarantees: prune-after-`up`, bind-mounted data, and no `-a` on the automatic `volume prune`.
+
+If the host is ALREADY wedged at 100 % (so a deploy can't even `git pull`), free disk manually first, then re-deploy:
 
 ```bash
 ssh ubuntu@atik.kr
 docker container prune -f
 docker image prune -af          # only removes images not referenced by a running container
 docker builder prune -af        # frees BuildKit cache (often 10-20 G)
-docker volume prune -af         # removes ONLY unused volumes — running container's are safe
+docker volume prune -af         # safe here: gallery data is bind-mounted, not a Docker volume
 df -h /
 ```
 
