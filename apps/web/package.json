@@ -26,6 +26,7 @@
     "typecheck:scripts": "npm run check:js-scripts && tsc -p tsconfig.scripts.json --noEmit"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",
     "@radix-ui/react-dialog": "^1.1.15",
