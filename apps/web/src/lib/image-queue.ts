@@ -19,7 +19,8 @@ import { isValidFilename } from '@/lib/validation';
 import { getImageProcessingLockName } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
-import { embeddingToBuffer, CLIP_MODEL_VERSION } from '@/lib/clip-embeddings';
+import { embeddingToBuffer, CLIP_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from '@/lib/clip-embeddings';
+import { embedImageReal } from '@/lib/clip-model';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
 
 /**
@@ -439,22 +440,30 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                 }
                 if (semanticMode === 'disabled') return;
                 try {
-                    const embedding = embedImageStub(job.id);
+                    let embedding: Float32Array;
+                    let modelVersion: string;
+                    if (semanticMode === 'production') {
+                        embedding = await embedImageReal(originalPath);
+                        modelVersion = PRODUCTION_MODEL_VERSION;
+                    } else {
+                        embedding = embedImageStub(job.id);
+                        modelVersion = CLIP_MODEL_VERSION;
+                    }
                     const buf = embeddingToBuffer(embedding);
                     const base64 = buf.toString('base64');
                     await db.insert(imageEmbeddings)
                         .values({
                             imageId: job.id,
                             embedding: base64,
-                            modelVersion: CLIP_MODEL_VERSION,
+                            modelVersion,
                         })
                         .onDuplicateKeyUpdate({
                             set: {
                                 embedding: base64,
-                                modelVersion: CLIP_MODEL_VERSION,
+                                modelVersion,
                             },
                         });
-                    console.debug(`[Queue] Embedding stored for image ${job.id}`);
+                    console.debug(`[Queue] Embedding stored for image ${job.id} (model=${modelVersion})`);
                 } catch (embedErr) {
                     console.warn(`[Queue] Failed to store embedding for image ${job.id}:`, embedErr);
                 }
