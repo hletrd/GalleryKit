@@ -14,23 +14,18 @@
  * semantic-enabled, body shape, query length) and rolled back on any
  * early-return path before expensive embedding work begins.
  *
- * Serving gate (CRT-R5C2-01 / BUG-R5C2-02): this endpoint SERVES requests when
- * `semantic_search_mode === 'stub'` — the deliberate admin opt-in demo posture.
- * Stub mode returns ranked results computed from `embedTextStub`, whose scores
- * are NOT semantically meaningful (cosine similarity between a query and an
- * image embedding is essentially random). The visitor-facing search toggle
- * carries an explicit "experimental — results may not match" disclaimer
- * (`search.semanticExperimentalHint`) so neither admin nor visitor is deceived.
+ * Serving gate: this endpoint SERVES requests in two modes:
+ *   - 'stub'       — demo/experimental posture. Embeds via `embedTextStub` (sync,
+ *                    random output). Scans only rows with model_version = CLIP_MODEL_VERSION.
+ *                    The visitor-facing search toggle carries an explicit "experimental"
+ *                    disclaimer (`search.semanticExperimentalHint`).
+ *   - 'production' — real CLIP encoder (jina-clip-v2, async). Scans only rows with
+ *                    model_version = PRODUCTION_MODEL_VERSION so stub rows never
+ *                    pollute production results and vice-versa. Uses
+ *                    PRODUCTION_COSINE_THRESHOLD (0.25) instead of COSINE_THRESHOLD (0.18).
  *
  * Every other mode returns 503:
  *   - 'disabled' (the default) → 503.
- *   - any stale/invalid stored value, INCLUDING the legacy 'production' string,
- *     → 503. 'production' is no longer storable (the validator rejects it, see
- *     gallery-config-shared.ts) and `getGalleryConfig` heals such rows to
- *     'disabled'; the explicit `!== 'stub'` gate below is defense-in-depth for
- *     any value that reaches this route. 'production' is reserved for a future
- *     real CLIP encoder (WI-P51 / ONNX); when that ships the gate is re-opened
- *     for it, NOT for the stub.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -51,8 +46,12 @@ import {
     SEMANTIC_TOP_K_MAX,
     SEMANTIC_SCAN_LIMIT,
     EMBEDDING_BYTES,
+    CLIP_MODEL_VERSION,
+    PRODUCTION_MODEL_VERSION,
+    PRODUCTION_COSINE_THRESHOLD,
 } from '@/lib/clip-embeddings';
 import { embedTextStub } from '@/lib/clip-inference';
+import { embedTextReal } from '@/lib/clip-model';
 import { getGalleryConfig } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { countCodePoints } from '@/lib/utils';
@@ -215,11 +214,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
     }
 
-    // Check semantic search mode — only 'stub' serves public requests currently.
-    // The config resolver can only ever return 'disabled' | 'stub' (a legacy
-    // 'production' DB row fails validation and heals to 'disabled'), so the
-    // gate below rejects everything except 'stub'. The stub encoder returns
-    // random results and must never masquerade as real semantic ranking.
+    // Check semantic search mode — 'stub' and 'production' serve public requests;
+    // 'disabled' and any other value return 503. 'production' uses the real CLIP
+    // encoder (embedTextReal) and scans only rows matching PRODUCTION_MODEL_VERSION.
     let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
     try {
         const config = await getGalleryConfig();
@@ -227,29 +224,34 @@ export async function POST(request: NextRequest): Promise<Response> {
     } catch {
         // fail closed — config unavailable means disabled
     }
-    if (semanticMode !== 'stub') {
+    if (semanticMode !== 'stub' && semanticMode !== 'production') {
         rollbackSemanticAttempt(ip);
         return NextResponse.json(
             { error: 'Semantic search is not fully configured' },
             { status: 503, headers: NO_STORE_HEADERS },
         );
     }
+    const isProd = semanticMode === 'production';
+    const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : CLIP_MODEL_VERSION;
+    const activeThreshold = isProd ? PRODUCTION_COSINE_THRESHOLD : COSINE_THRESHOLD;
 
-    // Embed query
+    // Embed query — production uses the real CLIP encoder (async); stub uses the sync stub.
     let queryEmbedding: Float32Array;
     try {
-        queryEmbedding = embedTextStub(query);
+        queryEmbedding = isProd ? await embedTextReal(query) : embedTextStub(query);
     } catch {
         rollbackSemanticAttempt(ip);
-        return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
+        return NextResponse.json({ error: 'Server error' }, { status: 503, headers: NO_STORE_HEADERS });
     }
 
-    // Scan up to SEMANTIC_SCAN_LIMIT most-recent embeddings (HARD cap)
+    // Scan up to SEMANTIC_SCAN_LIMIT most-recent embeddings for the active model (HARD cap).
+    // The model_version filter ensures stub rows never appear in production results and vice-versa.
     let rows: { imageId: number; embedding: string | null }[];
     try {
         rows = await db
             .select({ imageId: imageEmbeddings.imageId, embedding: imageEmbeddings.embedding })
             .from(imageEmbeddings)
+            .where(eq(imageEmbeddings.modelVersion, activeModelVersion))
             .orderBy(desc(imageEmbeddings.updatedAt))
             .limit(SEMANTIC_SCAN_LIMIT);
     } catch {
@@ -273,7 +275,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         })
         .filter((m): m is { imageId: number; score: number } => m !== null);
 
-    const results = topK(scored, topKParam, COSINE_THRESHOLD);
+    const results = topK(scored, topKParam, activeThreshold);
 
     // Enrich results with basic image metadata so the client can render
     // meaningful result cards (thumbnails, titles, topics) instead of

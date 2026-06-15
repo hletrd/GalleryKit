@@ -6,6 +6,7 @@ const {
     isRestoreMaintenanceActiveMock,
     getGalleryConfigMock,
     embedTextStubMock,
+    embedTextRealMock,
     getClientIpMock,
     preIncrementSemanticAttemptMock,
     rollbackSemanticAttemptMock,
@@ -15,6 +16,7 @@ const {
     isRestoreMaintenanceActiveMock: vi.fn(),
     getGalleryConfigMock: vi.fn(),
     embedTextStubMock: vi.fn(),
+    embedTextRealMock: vi.fn(),
     getClientIpMock: vi.fn(),
     preIncrementSemanticAttemptMock: vi.fn(),
     rollbackSemanticAttemptMock: vi.fn(),
@@ -46,6 +48,10 @@ vi.mock('@/lib/clip-inference', () => ({
     embedTextStub: embedTextStubMock,
 }));
 
+vi.mock('@/lib/clip-model', () => ({
+    embedTextReal: embedTextRealMock,
+}));
+
 vi.mock('@/lib/rate-limit', async () => {
     const actual = await vi.importActual<typeof import('@/lib/rate-limit')>('@/lib/rate-limit');
     return {
@@ -60,7 +66,7 @@ vi.mock('@/db', () => ({
     db: {
         select: dbSelectMock,
     },
-    imageEmbeddings: { imageId: 'imageEmbeddings.imageId', embedding: 'imageEmbeddings.embedding', updatedAt: 'imageEmbeddings.updatedAt' },
+    imageEmbeddings: { imageId: 'imageEmbeddings.imageId', embedding: 'imageEmbeddings.embedding', modelVersion: 'imageEmbeddings.modelVersion', updatedAt: 'imageEmbeddings.updatedAt' },
     images: { id: 'images.id', title: 'images.title', description: 'images.description', filename_jpeg: 'images.filename_jpeg', width: 'images.width', height: 'images.height', topic: 'images.topic', processed: 'images.processed', camera_model: 'images.camera_model', lens_model: 'images.lens_model', capture_date: 'images.capture_date', created_at: 'images.created_at' },
     topics: { slug: 'topics.slug', label: 'topics.label' },
 }));
@@ -84,12 +90,16 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         getClientIpMock.mockReturnValue('203.0.113.50');
         preIncrementSemanticAttemptMock.mockReturnValue(false);
         embedTextStubMock.mockReturnValue(new Float32Array(512).fill(0.1));
+        embedTextRealMock.mockResolvedValue(new Float32Array(512).fill(0.1));
 
-        // Default DB mock: empty embeddings, empty image enrichment
+        // Default DB mock: empty embeddings, empty image enrichment.
+        // The imageEmbeddings scan now has a .where() before .orderBy().
         const emptyChain = {
             from: vi.fn().mockReturnValue({
-                orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockResolvedValue([]),
+                where: vi.fn().mockReturnValue({
+                    orderBy: vi.fn().mockReturnValue({
+                        limit: vi.fn().mockResolvedValue([]),
+                    }),
                 }),
                 leftJoin: vi.fn().mockReturnValue({
                     where: vi.fn().mockReturnValue({
@@ -177,18 +187,19 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         expect(rollbackSemanticAttemptMock).toHaveBeenCalled();
     });
 
-    it('CRT-R5C1-01: returns 503 for stale stored "production" value (fail-closed)', async () => {
-        // Simulate a stale DB value from before the validator was tightened.
+    it('CRT-R5C1-01 (updated): production mode serves real results via embedTextReal', async () => {
+        // 'production' is now a live serving mode (Task 7). The real encoder is called;
+        // the stub encoder must NOT be called.
         getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
 
         const response = await POST(mockRequest({ query: 'mountain landscape' }));
 
-        expect(response.status).toBe(503);
-        await expect(response.json()).resolves.toEqual({ error: 'Semantic search is not fully configured' });
-        // Must NOT have called the stub encoder — no ranking output produced.
+        expect(response.status).toBe(200);
+        // Real encoder called; stub encoder must not be called.
+        expect(embedTextRealMock).toHaveBeenCalledOnce();
         expect(embedTextStubMock).not.toHaveBeenCalled();
-        // Rate limit rolled back.
-        expect(rollbackSemanticAttemptMock).toHaveBeenCalled();
+        // Rate limit was NOT rolled back (request served successfully).
+        expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
     });
 
     it('returns 429 when rate limit is exceeded', async () => {
@@ -227,10 +238,12 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
             from: (table: Record<string, unknown>) => {
                 const isEmbeddingQuery = 'embedding' in table;
                 if (isEmbeddingQuery) {
-                    // db.select(...).from(imageEmbeddings).orderBy(...).limit(...)
+                    // db.select(...).from(imageEmbeddings).where(...).orderBy(...).limit(...)
                     return {
-                        orderBy: vi.fn().mockReturnValue({
-                            limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                        where: vi.fn().mockReturnValue({
+                            orderBy: vi.fn().mockReturnValue({
+                                limit: vi.fn().mockResolvedValue(mockEmbeddingRows),
+                            }),
                         }),
                     };
                 }
@@ -268,8 +281,10 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
     it('returns 500 and rolls back rate limit when embedding scan fails', async () => {
         dbSelectMock.mockReturnValue({
             from: vi.fn().mockReturnValue({
-                orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockRejectedValue(new Error('DB timeout')),
+                where: vi.fn().mockReturnValue({
+                    orderBy: vi.fn().mockReturnValue({
+                        limit: vi.fn().mockRejectedValue(new Error('DB timeout')),
+                    }),
                 }),
             }),
         });
