@@ -79,3 +79,28 @@ export function topK(matches: ScoredMatch[], k: number, threshold: number): Scor
         .sort((a, b) => b.score - a.score)
         .slice(0, k);
 }
+
+// Real production encoder identity (set in this cycle). Stays <= 32 chars for the
+// model_version varchar(32). Bump this string whenever the model OR dim changes.
+export const PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8';
+
+// Production relevance threshold — calibrated empirically in the threshold task (Task 14).
+// This is the starting value; Task 14 replaces it with the calibrated number.
+export const PRODUCTION_COSINE_THRESHOLD = 0.25;
+
+/** L2-normalize a vector to unit length. A zero vector is returned unchanged (no NaN). */
+export function normalizeEmbedding(v: Float32Array): Float32Array {
+    let norm = 0;
+    for (let i = 0; i < v.length; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm);
+    if (norm === 0) return v;
+    const out = new Float32Array(v.length);
+    for (let i = 0; i < v.length; i++) out[i] = v[i] / norm;
+    return out;
+}
+
+/** Matryoshka: take the first EMBEDDING_DIM components, then re-normalize. */
+export function truncateAndNormalize(v: Float32Array): Float32Array {
+    const head = v.length > EMBEDDING_DIM ? v.subarray(0, EMBEDDING_DIM) : v;
+    return normalizeEmbedding(Float32Array.from(head));
+}
