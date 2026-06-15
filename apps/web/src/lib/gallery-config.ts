@@ -61,13 +61,11 @@ export interface GalleryConfig {
     // US-P52: Auto alt-text (ONNX stub, opt-in)
     autoAltTextEnabled: boolean;
 
-    // US-P51: CLIP semantic search mode. ARCH-R5C2-03: narrowed to the only
-    // values the resolver can return. 'production' is no longer storable (the
-    // validator in gallery-config-shared.ts rejects it) and a stale legacy
-    // 'production' DB row fails isValidSettingValue and heals to 'disabled'
-    // below, so it can never surface here. The literal is reserved for a future
-    // real CLIP encoder (WI-P51 / ONNX); re-add it to this union when that ships.
-    semanticSearchMode: 'disabled' | 'stub';
+    // US-P51: CLIP semantic search mode. Task 6: widened to include 'production'
+    // now that the validator (gallery-config-shared.ts) accepts it and the
+    // resolver no longer heals it away. 'production' is type-valid here but
+    // behavior branches (real CLIP encoder calls) are added in Tasks 7 & 8.
+    semanticSearchMode: 'disabled' | 'stub' | 'production';
 
     // US-P54: license tier prices in cents (0 = not for sale)
     licensePrices: Record<string, number>;
@@ -129,11 +127,12 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             })(),
             semanticSearchMode: (() => {
                 const raw = getSetting(map, 'semantic_search_mode');
-                // ARCH-R5C2-03: a stale 'production' (or any other invalid value)
-                // fails validation here and heals to the default ('disabled').
-                if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub';
-                // `raw` passed isValidSettingValue, so it is 'disabled' | 'stub'.
-                return raw as 'disabled' | 'stub';
+                // Task 5 opened 'production' as a valid stored value; Task 6 widens
+                // the type to reflect it. An invalid/unknown raw value falls back to
+                // the default ('disabled'). A valid 'disabled' | 'stub' | 'production'
+                // passes through unchanged.
+                if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
+                return raw as 'disabled' | 'stub' | 'production';
             })(),
             licensePrices: {
                 editorial: validatedNumber(map, 'license_price_editorial_cents'),
@@ -187,7 +186,7 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             stripGpsOnUpload: DEFAULTS.strip_gps_on_upload === 'true',
             slideshowIntervalSeconds: parseSlideshowInterval(DEFAULTS.slideshow_interval_seconds),
             autoAltTextEnabled: DEFAULTS.auto_alt_text_enabled === 'true',
-            semanticSearchMode: DEFAULTS.semantic_search_mode as 'disabled' | 'stub',
+            semanticSearchMode: DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production',
             licensePrices: {
                 editorial: Number(DEFAULTS.license_price_editorial_cents),
                 commercial: Number(DEFAULTS.license_price_commercial_cents),

@@ -430,7 +430,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             //   stub rows, so no schema migration is needed for that future encoder
             //   to tell stub vectors apart from production ones.
             void (async () => {
-                let semanticMode: 'disabled' | 'stub' = 'disabled';
+                let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
                 try {
                     const cfg = await getGalleryConfig();
                     semanticMode = cfg.semanticSearchMode;

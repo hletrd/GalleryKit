@@ -220,7 +220,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     // 'production' DB row fails validation and heals to 'disabled'), so the
     // gate below rejects everything except 'stub'. The stub encoder returns
     // random results and must never masquerade as real semantic ranking.
-    let semanticMode: 'disabled' | 'stub' = 'disabled';
+    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
     try {
         const config = await getGalleryConfig();
         semanticMode = config.semanticSearchMode;
