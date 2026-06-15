@@ -125,12 +125,22 @@ export async function embedImageReal(imagePath: string): Promise<Float32Array> {
     const { model } = await getModelBundle();
 
     // Decode, resize to 512×512 (fill, no aspect preservation — matches CLIP convention),
-    // drop alpha channel, return raw HWC uint8 bytes.
-    const { data: rawData } = await sharp(imagePath)
+    // and return raw HWC uint8 bytes.
+    //   - autoOrient: bake EXIF Orientation pre-decode so a rotated portrait is
+    //     embedded the way it is actually displayed (matches process-image.ts).
+    //   - toColourspace('srgb'): force 3-channel sRGB so grayscale / CMYK sources
+    //     don't yield a 1- or 4-channel buffer that breaks the CHW indexing below.
+    //   - removeAlpha: drop any alpha channel so RGBA sources collapse to RGB.
+    const { data: rawData, info } = await sharp(imagePath, { autoOrient: true })
         .resize(CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE, { fit: 'fill' })
+        .toColourspace('srgb')
         .removeAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });
+
+    if (info.channels !== 3) {
+        throw new Error(`clip-model: expected 3-channel RGB, got ${info.channels}`);
+    }
 
     const pixelCount = CLIP_IMAGE_SIZE * CLIP_IMAGE_SIZE;
 

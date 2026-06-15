@@ -25,6 +25,10 @@ describe('clip-model module contract', () => {
     expect(src).toContain('CLIP_MODELS_ROOT');
   });
 
+  it('forces 3-channel sRGB image preprocessing (defends the CHW channel invariant)', () => {
+    expect(src).toMatch(/toColourspace|info\.channels/);
+  });
+
   it('pins a real HF revision (defined in clip-model-id.ts)', () => {
     expect(idSrc).toMatch(/JINA_CLIP_REVISION\s*=\s*['"][0-9a-f]{7,40}['"]/);
   });
