@@ -431,19 +431,21 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                                             performSearch(query, checked);
                                         }
                                     }}
-                                    aria-describedby="semantic-search-hint"
+                                    aria-describedby={semanticSearchMode === 'stub' ? 'semantic-search-hint' : undefined}
                                     aria-label={t('search.semanticToggle')}
                                     // 44px touch-target floor: Switch has an implicit min-h,
                                     // wrapper div provides at least 44px tap area via padding.
                                 />
                             </div>
-                            {/* CRT-R5C2-01: honesty disclaimer. The semantic toggle is only
-                                shown when mode === 'stub' (the public demo posture), and the
-                                stub encoder's scores are essentially random — tell the visitor
-                                so the ranking is not mistaken for real relevance. */}
-                            <p id="semantic-search-hint" className="text-xs text-muted-foreground">
-                                {t('search.semanticExperimentalHint')}
-                            </p>
+                            {/* CRT-R5C2-01: honesty disclaimer. Shown only in stub mode —
+                                stub encoder scores are essentially random so we tell the visitor
+                                the results may not match. In production mode the results are real,
+                                so the disclaimer is omitted. */}
+                            {semanticSearchMode === 'stub' && (
+                                <p id="semantic-search-hint" className="text-xs text-muted-foreground">
+                                    {t('search.semanticExperimentalHint')}
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>
