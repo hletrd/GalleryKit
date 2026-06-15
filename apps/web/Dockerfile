@@ -83,6 +83,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV UPLOAD_ORIGINAL_ROOT="/app/data/uploads/original"
+# CLIP model weights root — weights are NOT baked into the image.
+# They are seeded once on the deploy host into ./data/models/clip (the ./data
+# bind mount persists across deploys) and loaded at runtime by the CLIP encoder.
+# See "CLIP semantic search" ops note in CLAUDE.md for the seed procedure.
+ENV CLIP_MODELS_ROOT="/app/data/models/clip"
 
 # Copy necessary files from apps/web (public is mounted at runtime)
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
@@ -96,8 +101,10 @@ COPY --chown=node:node apps/web/scripts/entrypoint.sh /usr/local/bin/
 # Standalone output already bundles runtime deps — this is only for the migration script.
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 
-# Create persistence directories and cache
-RUN mkdir -p apps/web/public/uploads /app/data/uploads/original apps/web/.next/cache && chown -R node:node apps/web/public/uploads /app/data apps/web/.next
+# Create persistence directories and cache.
+# /app/data/models/clip is created here so the path exists even before the
+# ./data bind mount is populated; the actual weights are seeded on the host.
+RUN mkdir -p apps/web/public/uploads /app/data/uploads/original /app/data/models/clip apps/web/.next/cache && chown -R node:node apps/web/public/uploads /app/data apps/web/.next
 
 # Make entrypoint executable
 RUN chmod +x /usr/local/bin/entrypoint.sh

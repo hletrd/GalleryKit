@@ -441,6 +441,46 @@ The runtime container's `/app/node_modules` is a curated prod-deps tree from the
 
 For one-off scripts that need source files / dev-only deps (tsx, vitest, etc.), use a **sidecar `--rm` container** off the just-built `web-web:latest` image with read-only source mounts (see "Backfill" section under "Color & HDR Pipeline" for the canonical pattern). This leaves the production container untouched.
 
+### CLIP semantic search — seeding model weights on the deploy host
+
+The CLIP model weights are **NOT baked into the Docker image** (they are tens-of-hundreds of MB and live on the host volume). The image only guarantees the mount point exists (`/app/data/models/clip`, created by `mkdir -p` in the runner stage and surfaced via `CLIP_MODELS_ROOT`). The runtime encoder reads weights from that path at first inference.
+
+**One-time seed procedure (run before enabling semantic search in production):**
+
+```bash
+# On the deploy host, seed weights into the bind-mount directory.
+# The ./data/models directory is part of the ./data bind mount declared in
+# docker-compose.yml, so it persists across every deploy and is never touched
+# by docker image prune / builder prune (bind mounts are not managed volumes).
+docker run --rm \
+  --name gk-clip-seed \
+  --network host \
+  -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
+  -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v /home/ubuntu/gallery/apps/web/data:/app/data \
+  --env-file /home/ubuntu/gallery/apps/web/.env.local \
+  -e CLIP_MODELS_ROOT=/app/data/models/clip \
+  --user root -w /app/apps/web web-web:latest \
+  sh -c "npx --yes tsx@4.21.0 scripts/download-clip-models.ts"
+```
+
+**After seeding, run a `--production` backfill** to generate CLIP embeddings for all existing photos:
+
+```bash
+docker run --rm \
+  --name gk-clip-backfill \
+  --network host \
+  -v /home/ubuntu/gallery/apps/web/src:/app/apps/web/src:ro \
+  -v /home/ubuntu/gallery/apps/web/scripts:/app/apps/web/scripts:ro \
+  -v /home/ubuntu/gallery/apps/web/data:/app/data \
+  --env-file /home/ubuntu/gallery/apps/web/.env.local \
+  -e CLIP_MODELS_ROOT=/app/data/models/clip \
+  --user root -w /app/apps/web web-web:latest \
+  sh -c "npx --yes tsx@4.21.0 scripts/backfill-embeddings.ts --production"
+```
+
+**Why the binary is already present without extra Dockerfile steps:** `onnxruntime-node` (the CPU inference engine used by `@huggingface/transformers`) bundles its native `.node` binding for all platforms — including `linux/arm64` and `linux/x64` — **directly inside the npm package tarball** (`bin/napi-v3/linux/{arm64,x64}/onnxruntime_binding.node`). Its `postinstall` script only downloads CUDA `.so` files, which are not needed for CPU inference. Since `onnxruntime-node` is a non-dev, non-optional transitive production dependency (via `@huggingface/transformers → onnxruntime-node`), it is installed by `npm ci --omit=dev` in the `prod-deps` stage without any `--include=optional` or explicit extra install step. No Dockerfile change is required to make the CPU binding available at runtime.
+
 ### Production photographer-perspective audit history
 
 The `.context/reviews/` directory contains the running history of "as photographers" comprehensive reviews:
