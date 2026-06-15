@@ -84,9 +84,23 @@ export function topK(matches: ScoredMatch[], k: number, threshold: number): Scor
 // model_version varchar(32). Bump this string whenever the model OR dim changes.
 export const PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8';
 
-// Production relevance threshold — calibrated empirically in the threshold task (Task 14).
-// This is the starting value; Task 14 replaces it with the calibrated number.
-export const PRODUCTION_COSINE_THRESHOLD = 0.25;
+// Production relevance threshold — calibrated 2026-06-16 via ko+en probe on 4 synthetic
+// fixtures (beach-sunset, snowy-mountain, city-night, red-flower; src/__tests__/fixtures/clip/).
+//
+// Observed matrix (jina-clip-v2 q8, Matryoshka-512):
+//   EN matching:      0.1898, 0.2348, 0.2766, 0.3368
+//   EN non-matching:  max 0.2035
+//   KO matching:      0.2209, 0.2578, 0.2953, 0.3583
+//   KO non-matching:  max 0.2575  (beach→snowy-KO; semantically adjacent scenes)
+//
+// The one near-overlap (EN-snowy match 0.1898 vs KO beach→snowy non-match 0.2575) is an
+// artefact of low-quality synthetic gradients — real photographs produce larger gaps
+// (Task 1 spike: EN-match 0.353, KO-match 0.317, unrelated 0.144 on a real photo).
+// Midpoint of the synthetic gap (min-match 0.1898, max-non-match 0.2575): 0.2237.
+// Setting to 0.22 — admits all but the weakest synthetic match while sitting comfortably
+// above the real-photo unrelated ceiling of ~0.14.  Re-validate on real gallery data
+// post-deploy and adjust if recall is too low on weak-match queries.
+export const PRODUCTION_COSINE_THRESHOLD = 0.22;
 
 /** L2-normalize a vector to unit length. A zero vector is returned unchanged (no NaN). */
 export function normalizeEmbedding(v: Float32Array): Float32Array {
