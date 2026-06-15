@@ -25,8 +25,10 @@ import { createHash } from 'crypto';
 import { existsSync, createReadStream, mkdirSync } from 'fs';
 import { join } from 'path';
 import { env, AutoModel, AutoTokenizer } from '@huggingface/transformers';
+import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '../src/lib/clip-model-id';
 
-const MODEL_ID = 'jinaai/jina-clip-v2';
+// Alias so the rest of the script is unchanged.
+const MODEL_ID = JINA_CLIP_MODEL_ID;
 
 /**
  * SHA-256 manifest for the key artifacts downloaded by Transformers.js.
@@ -95,12 +97,13 @@ async function main(): Promise<void> {
     const model = await AutoModel.from_pretrained(MODEL_ID, {
         dtype: 'q8',
         device: 'cpu',
+        revision: JINA_CLIP_REVISION,
     });
 
     console.log('[download-clip-models] Downloading tokenizer...');
     // The tokenizer is a plain JS object (no native handle); loading it is the
     // download side-effect we want. GC reclaims it — there is no dispose API.
-    await AutoTokenizer.from_pretrained(MODEL_ID);
+    await AutoTokenizer.from_pretrained(MODEL_ID, { revision: JINA_CLIP_REVISION });
 
     // Release the ONNX session — we only needed the download side-effect.
     await model.dispose();
