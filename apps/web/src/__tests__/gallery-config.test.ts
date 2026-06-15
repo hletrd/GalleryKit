@@ -88,13 +88,13 @@ describe('getGalleryConfig resolver (TEST-R5C2-09)', () => {
         expect(config.imageQualityJpeg).toBe(72);
     });
 
-    it('heals a stale legacy "production" semantic_search_mode to "disabled" (ARCH-R5C2-03)', async () => {
+    it('accepts stored "production" semantic_search_mode (CRT-R5C1-01 lifted — real encoder shipped)', async () => {
         mockSettingsRows([{ key: 'semantic_search_mode', value: 'production' }]);
         const config = await getGalleryConfig();
 
-        // 'production' is no longer storable; the resolver must fall back to the
-        // default rather than surface the invalid value.
-        expect(config.semanticSearchMode).toBe('disabled');
+        // 'production' is now a valid storable value; the resolver must pass it
+        // through rather than heal to the default.
+        expect(config.semanticSearchMode).toBe('production');
     });
 
     it('falls back to default for an invalid stored value (out-of-range number)', async () => {

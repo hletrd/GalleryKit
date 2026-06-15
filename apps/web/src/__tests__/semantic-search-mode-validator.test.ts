@@ -1,14 +1,14 @@
 /**
- * CRT-R5C1-01: gallery-config-shared validator must reject 'production' for
- * semantic_search_mode until a real ONNX encoder ships.
+ * US-P51: real ONNX encoder shipped — 'production' is now a valid storable
+ * value for semantic_search_mode (CRT-R5C1-01 lifted).
  *
- * 'disabled' and 'stub' are the only storable values.
+ * Valid values: 'disabled', 'stub', 'production'.
  */
 
 import { describe, it, expect } from 'vitest';
 import { isValidSettingValue } from '@/lib/gallery-config-shared';
 
-describe('semantic_search_mode validator (CRT-R5C1-01)', () => {
+describe('semantic_search_mode validator', () => {
     it('accepts "disabled"', () => {
         expect(isValidSettingValue('semantic_search_mode', 'disabled')).toBe(true);
     });
@@ -17,8 +17,8 @@ describe('semantic_search_mode validator (CRT-R5C1-01)', () => {
         expect(isValidSettingValue('semantic_search_mode', 'stub')).toBe(true);
     });
 
-    it('rejects "production" (CRT-R5C1-01: stub-only encoder, no real ONNX module present)', () => {
-        expect(isValidSettingValue('semantic_search_mode', 'production')).toBe(false);
+    it('accepts "production" (CRT-R5C1-01 lifted: real ONNX encoder now present)', () => {
+        expect(isValidSettingValue('semantic_search_mode', 'production')).toBe(true);
     });
 
     it('rejects arbitrary strings', () => {
