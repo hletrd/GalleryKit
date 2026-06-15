@@ -410,7 +410,9 @@
     "maintenance": "유지 관리 중에는 검색을 잠시 사용할 수 없습니다.",
     "invalid": "검색하려면 두 글자 이상 입력하세요.",
     "semanticToggle": "시맨틱 검색",
-    "semanticExperimentalHint": "실험적 기능 — 검색 결과가 질의와 일치하지 않을 수 있습니다."
+    "semanticExperimentalHint": "실험적 기능 — 검색 결과가 질의와 일치하지 않을 수 있습니다.",
+    "similarPhotos": "비슷한 사진",
+    "similarEmpty": "비슷한 사진을 찾지 못했습니다."
   },
   "notFound": {
     "description": "페이지를 찾을 수 없습니다.",

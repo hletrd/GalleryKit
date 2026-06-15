@@ -26,6 +26,7 @@ import InfoBottomSheet from '@/components/info-bottom-sheet';
 import { Histogram } from '@/components/histogram';
 import ColorDetailsSection from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
+import SimilarPhotos from '@/components/similar-photos';
 import { ImageDetail, TagInfo, hasExifData, hasAnyCameraExifData, nu, formatShutterSpeed } from '@/lib/image-types';
 import { formatStoredExifDate, formatStoredExifTime } from '@/lib/exif-datetime';
 import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
@@ -852,7 +853,8 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             <CardContent>
                                 <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} forceSrgbDerivatives={forceSrgbDerivatives} />
                                 <WideGamutHint colorPrimaries={image.color_primaries} t={t} persistDismissal={isSharedView} />
-                                <h3 className="font-semibold mb-3 flex items-center gap-2"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
+                                <SimilarPhotos imageId={image.id} imageSizes={imageSizes} />
+                                <h3 className="font-semibold mb-3 flex items-center gap-2 mt-4"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
                                     {hasExifData(image.camera_model) && (
                                         <div>

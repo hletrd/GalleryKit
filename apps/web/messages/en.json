@@ -410,7 +410,9 @@
     "maintenance": "Search is temporarily unavailable during maintenance.",
     "invalid": "Type at least 2 characters to search.",
     "semanticToggle": "Semantic search",
-    "semanticExperimentalHint": "Experimental — results may not match your query."
+    "semanticExperimentalHint": "Experimental — results may not match your query.",
+    "similarPhotos": "Similar photos",
+    "similarEmpty": "No similar photos found."
   },
   "notFound": {
     "description": "Page not found.",
