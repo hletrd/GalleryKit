@@ -135,4 +135,17 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
             expect(sourceMatch).toBeLessThan(deliveredMatch);
         });
     });
+
+    describe('HDR badge honesty gate (AGG-M3, run-6 cycle-2)', () => {
+        it('gates the rendered HDR badge on `isAdmin && isHdr`, not isHdr alone', () => {
+            // AGG-M3: the WI-09 honesty invariant ("the public never sees an
+            // HDR badge whose bytes don't fulfill it") must be enforced by an
+            // explicit isAdmin gate at the render point, not the indirect
+            // transfer_function-nullness coincidence (transfer_function is
+            // admin-stripped from publicSelectFields, so isHdr was
+            // coincidentally false for the public). Lock that the rendered
+            // `hdr-badge` span is preceded by an `isAdmin && isHdr` condition.
+            expect(SOURCE).toMatch(/isAdmin\s*&&\s*isHdr\s*&&[\s\S]{0,160}hdr-badge/);
+        });
+    });
 });

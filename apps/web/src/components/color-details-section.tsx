@@ -508,7 +508,19 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                             </p>
                         </div>
                     )}
-                    {isHdr && (
+                    {/* AGG-M3 (run-6 cycle-2): gate the HDR badge on
+                        `isAdmin && isHdr` EXPLICITLY. The WI-09 honesty
+                        invariant ("the public never sees an HDR badge whose
+                        bytes don't fulfill it") was previously enforced only
+                        indirectly — `isHdr` is derived from `transfer_function`,
+                        which is stripped from `publicSelectFields`, so for
+                        public viewers it arrived null and the badge happened
+                        not to render. That coincidence breaks silently the
+                        moment any future feature surfaces `transfer_function`
+                        publicly. Gating on `isAdmin` makes the invariant a
+                        contract at the render point. Locked by
+                        color-details-hdr-badge-admin.test.ts. */}
+                    {isAdmin && isHdr && (
                         <div className="col-span-2">
                             <span
                                 className="hdr-badge px-3 py-1.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white shadow-sm rounded"

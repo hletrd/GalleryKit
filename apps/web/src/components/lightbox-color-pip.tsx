@@ -133,7 +133,10 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                 aria-label={`${t('aria.toggleColorPip')}: ${[
                     primaries || t('viewer.colorUnknown'),
                     transfer,
-                    isHdr ? t('viewer.hdrBadge') : null,
+                    // AGG-M3 (run-6 cycle-2): gate the HDR badge mention on
+                    // isAdmin explicitly (the WI-09 honesty invariant), not on
+                    // the indirect transfer_function-nullness coincidence.
+                    (isAdmin && isHdr) ? t('viewer.hdrBadge') : null,
                 ].filter(Boolean).join(' · ')}`}
                 title={`${t('aria.toggleColorPip')} (C)`}
             >
@@ -143,7 +146,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                     <span aria-hidden="true">{t('viewer.colorUnknown')}</span>
                 )}
                 {transfer && <span className="opacity-80" aria-hidden="true">· {transfer}</span>}
-                {isHdr && (
+                {isAdmin && isHdr && (
                     <span
                         className="hdr-badge ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm"
                         aria-hidden="true"

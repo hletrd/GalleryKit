@@ -103,6 +103,15 @@ describe('LightboxColorPip — HDR gating + single-render (C5-A2)', () => {
                 !/\/\/[^\n]*is_hdr/.test(PIP_BODY);
             expect(hasIsHdrGate).toBe(false);
         });
+
+        it('gates the rendered HDR badge on `isAdmin && isHdr` (AGG-M3 honesty invariant)', () => {
+            // AGG-M3 (run-6 cycle-2): the WI-09 honesty invariant ("the public
+            // never sees an HDR badge whose bytes don't fulfill it") must be an
+            // explicit isAdmin gate at the render point, not an indirect
+            // transfer_function-nullness coincidence. Lock that the rendered
+            // `hdr-badge` span is preceded by an `isAdmin && isHdr` condition.
+            expect(PIP_BODY).toMatch(/isAdmin\s*&&\s*isHdr\s*&&[\s\S]{0,120}hdr-badge/);
+        });
     });
 
     describe('HDR badge renders exactly once (C5-A1 single-render lock)', () => {
