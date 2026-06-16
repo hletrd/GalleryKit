@@ -19,7 +19,7 @@ import { isValidFilename } from '@/lib/validation';
 import { getImageProcessingLockName } from '@/lib/advisory-locks';
 import { generateCaption } from '@/lib/caption-generator';
 import { embedImageStub } from '@/lib/clip-inference';
-import { embeddingToBuffer, CLIP_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from '@/lib/clip-embeddings';
+import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION } from '@/lib/clip-embeddings';
 import { embedImageReal } from '@/lib/clip-model';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
 
@@ -422,9 +422,9 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
             //   essentially random. This is intentional, consistent with the
             //   plan-319 honesty posture (stub-serving stays; we make it honest).
             //
-            //   Provenance: every row records `modelVersion: CLIP_MODEL_VERSION`
-            //   (currently 'stub-sha256-v1', see lib/clip-embeddings.ts). A future
-            //   REAL CLIP encoder MUST NOT trust or serve rows whose `modelVersion`
+            //   Provenance: every row records `modelVersion: STUB_MODEL_VERSION`
+            //   (currently 'stub-sha256-v1', see lib/clip-embeddings.ts). The REAL
+            //   CLIP encoder MUST NOT trust or serve rows whose `modelVersion`
             //   is a stub identifier — gate reads/writes on the model version and
             //   re-embed (or ignore) stub rows rather than overwriting blindly.
             //   The `model_version` column on image_embeddings already distinguishes
@@ -447,7 +447,7 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                         modelVersion = PRODUCTION_MODEL_VERSION;
                     } else {
                         embedding = embedImageStub(job.id);
-                        modelVersion = CLIP_MODEL_VERSION;
+                        modelVersion = STUB_MODEL_VERSION;
                     }
                     // AGG-C10-01: store the RAW 2048-byte little-endian float32 buffer
                     // directly into the MEDIUMBLOB. mysql2 inserts Buffer bytes verbatim.

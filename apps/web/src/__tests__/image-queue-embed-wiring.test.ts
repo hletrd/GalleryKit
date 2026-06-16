@@ -12,6 +12,12 @@ describe('upload embedding hook wiring', () => {
   });
   it('keeps the stub path for stub mode', () => {
     expect(src).toContain('embedImageStub');
-    expect(src).toContain('CLIP_MODEL_VERSION');
+    expect(src).toContain('STUB_MODEL_VERSION');
+  });
+  it('stores the raw embedding buffer, not base64 (AGG-C10-01)', () => {
+    // The write must NOT base64-encode the buffer (the read path round-trips raw bytes).
+    expect(src).not.toMatch(/embedding:\s*base64/);
+    expect(src).not.toContain("buf.toString('base64')");
+    expect(src).toContain('embeddingToBuffer');
   });
 });

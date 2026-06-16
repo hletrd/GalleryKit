@@ -14,7 +14,7 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { embedImageStub } from '@/lib/clip-inference';
-import { embeddingToBuffer, CLIP_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
+import { embeddingToBuffer, STUB_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 
 const BACKFILL_CONCURRENCY = 2;
@@ -85,18 +85,21 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                 await Promise.all(chunk.map(async ({ id }) => {
                     try {
                         const embedding = embedImageStub(id);
+                        // AGG-C10-01: store the RAW buffer (not base64) so the read path
+                        // (decodeEmbeddingColumn) round-trips it. The Drizzle `text()`
+                        // column is a MEDIUMBLOB approximation, so cast through `unknown`.
                         const buf = embeddingToBuffer(embedding);
-                        const base64 = buf.toString('base64');
+                        const embeddingValue = buf as unknown as string;
                         await db.insert(imageEmbeddings)
                             .values({
                                 imageId: id,
-                                embedding: base64,
-                                modelVersion: CLIP_MODEL_VERSION,
+                                embedding: embeddingValue,
+                                modelVersion: STUB_MODEL_VERSION,
                             })
                             .onDuplicateKeyUpdate({
                                 set: {
-                                    embedding: base64,
-                                    modelVersion: CLIP_MODEL_VERSION,
+                                    embedding: embeddingValue,
+                                    modelVersion: STUB_MODEL_VERSION,
                                 },
                             });
                         processed++;

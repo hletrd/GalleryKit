@@ -7,7 +7,11 @@
 
 export const EMBEDDING_DIM = 512;
 export const EMBEDDING_BYTES = EMBEDDING_DIM * 4; // 512 × 4-byte float32
-export const CLIP_MODEL_VERSION = 'stub-sha256-v1';
+// AGG-C10-09: renamed from the misleading `CLIP_MODEL_VERSION` — this is the STUB
+// encoder identity (deterministic, NOT semantically meaningful). The real encoder
+// identity is PRODUCTION_MODEL_VERSION below. The model_version column partitions
+// stub vs production rows so they are never co-ranked.
+export const STUB_MODEL_VERSION = 'stub-sha256-v1';
 export const COSINE_THRESHOLD = 0.18;
 export const SEMANTIC_TOP_K_DEFAULT = 20;
 export const SEMANTIC_TOP_K_MAX = 50;

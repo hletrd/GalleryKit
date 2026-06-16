@@ -16,7 +16,7 @@
  *
  * Serving gate: this endpoint SERVES requests in two modes:
  *   - 'stub'       — demo/experimental posture. Embeds via `embedTextStub` (sync,
- *                    random output). Scans only rows with model_version = CLIP_MODEL_VERSION.
+ *                    random output). Scans only rows with model_version = STUB_MODEL_VERSION.
  *                    The visitor-facing search toggle carries an explicit "experimental"
  *                    disclaimer (`search.semanticExperimentalHint`).
  *   - 'production' — real CLIP encoder (jina-clip-v2, async). Scans only rows with
@@ -45,7 +45,7 @@ import {
     SEMANTIC_TOP_K_DEFAULT,
     SEMANTIC_TOP_K_MAX,
     SEMANTIC_SCAN_LIMIT,
-    CLIP_MODEL_VERSION,
+    STUB_MODEL_VERSION,
     PRODUCTION_MODEL_VERSION,
     PRODUCTION_COSINE_THRESHOLD,
 } from '@/lib/clip-embeddings';
@@ -231,7 +231,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         );
     }
     const isProd = semanticMode === 'production';
-    const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : CLIP_MODEL_VERSION;
+    const activeModelVersion = isProd ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
     const activeThreshold = isProd ? PRODUCTION_COSINE_THRESHOLD : COSINE_THRESHOLD;
 
     // Embed query — production uses the real CLIP encoder (async); stub uses the sync stub.

@@ -27,7 +27,7 @@
  * it into image_embeddings (PK is image_id, so the upsert replaces any existing
  * row in place).
  *
- *   - default (stub):  embedImageStub(id)        → modelVersion = CLIP_MODEL_VERSION
+ *   - default (stub):  embedImageStub(id)        → modelVersion = STUB_MODEL_VERSION
  *   - --production:    embedImageReal(<original>) → modelVersion = PRODUCTION_MODEL_VERSION
  *
  * Re-embed on model_version mismatch
@@ -64,7 +64,7 @@ import { db, images, imageEmbeddings, adminSettings } from '../src/db';
 import { eq, and, notExists, gt, asc } from 'drizzle-orm';
 import { embedImageStub } from '../src/lib/clip-inference';
 import { embedImageReal } from '../src/lib/clip-model';
-import { embeddingToBuffer, CLIP_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '../src/lib/clip-embeddings';
+import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '../src/lib/clip-embeddings';
 import { resolveOriginalUploadPath } from '../src/lib/upload-paths';
 
 const BATCH_SIZE = 50;
@@ -74,7 +74,7 @@ const PRODUCTION_FLAG = process.argv.includes('--production');
 
 // Target model_version drives BOTH the upsert version AND the re-embed selection:
 // images missing an embedding row AT THIS version are (re-)embedded.
-const TARGET_MODEL_VERSION = PRODUCTION_FLAG ? PRODUCTION_MODEL_VERSION : CLIP_MODEL_VERSION;
+const TARGET_MODEL_VERSION = PRODUCTION_FLAG ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
 
 async function checkSemanticModeEnabled(): Promise<boolean> {
     const rows = await db.select({ value: adminSettings.value })
