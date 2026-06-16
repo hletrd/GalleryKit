@@ -1,187 +1,73 @@
-# Debugger Review — Cycle 3
+# Debugger Review — Run 6 / Cycle 4
 
-**HEAD:** b1e9e0da
+**HEAD:** f8147868
 **Date:** 2026-06-16
-**Scope:** Full-repo latent-bug / failure-mode sweep — stream & FD lifecycle, async
-cleanup races, swallowed errors, migrate.js idempotency, date/time math, ISOBMFF
-walkers, number parsing, concurrency caps, NULL-aggregation traps. Verified against
-current HEAD; closed prior-cycle items (serve-upload FD leak, map LIMIT,
-blur-data-url, backfill summary, SW LRU) were re-checked and confirmed fixed, not
-re-reported.
+**Angle:** latent bug surface, failure modes, regressions, off-by-one, null/undefined hazards, type coercion, async/await mistakes, unhandled rejections, resource leaks, error-path correctness.
+
+## Verdict
+
+**No new latent bugs survive scrutiny. 0 Crit / 0 High / 0 Med / 0 Low.** Honest convergence.
+
+The prior-cycle (cycle-3) source changes in `b1e9e0da..f8147868` are all verified correct. The core failure surface (queue, Sharp pipeline, SW, GPS strip, parsers, backfill, analytics) is mature and well-hardened by ~58 prior closed findings. Typecheck is green; the 25 tests covering the cycle-3-touched files pass.
+
+I did NOT re-report the cycle-3 closed items or the deferred AGG-C3-09 (their reasoning is sound — see below).
 
 ---
 
-## Files Examined (read in full or in the load-bearing region)
+## Cycle-3 change scrutiny (b1e9e0da..f8147868) — highest regression risk
 
-`lib/image-queue.ts`, `lib/process-image.ts` (stream save + atomic-rename +
-parseExifDateTime + processImageFormats cleanup), `lib/process-topic-image.ts`,
-`lib/serve-upload.ts`, `lib/color-detection.ts` (ISOBMFF nclx walker),
-`lib/icc-chromaticity.ts`, `lib/gain-map-detection.ts` (ISOBMFF iinf/iref walker),
-`lib/gps-exif-strip.ts` (TIFF IFD walk + GPS zeroing), `lib/admin-backfill-runner.ts`
-(concurrency math + run loop + lock lifecycle), `lib/data.ts` (view-count flush
-buffer + all GROUP_CONCAT / MAX aggregations), `lib/auth-rate-limit.ts`,
-`lib/view-retention.ts`, `lib/upload-tracker.ts`, `lib/mysql-datetime.ts`,
-`lib/photo-title.ts`, `lib/validation.ts` (tag-name comma rejection),
-`lib/og-photo-fetch.ts`, `lib/smart-collections.ts`, `lib/admin-tokens.ts`,
-`scripts/migrate.js` (journal hash post-condition + reconcileLegacySchema +
-fresh/partial-baseline paths), `app/actions/images.ts` (upload tracker settlement),
-`app/actions/auth.ts` (login rate-limit flow), `app/api/download/[imageId]/route.ts`,
-`app/[locale]/admin/db-actions.ts` (mysqldump stream), `app/api/og/photo/[id]/route.tsx`,
-`app/api/stripe/webhook/route.ts`, `app/api/checkout/[imageId]/route.ts`.
+All five source-affecting commits were diffed and traced end-to-end. All clean.
 
-Plus targeted greps across all of `lib/` + `app/` for: `createReadStream`/
-`createWriteStream`/`pipeline`, `.catch(()=>{})` / empty catch, `JSON.parse`,
-`setTimeout`/`setInterval` without unref, `affectedRows`/`rows[0]`/array-index,
-`tag_names` consumers.
+### a3b8c557 — switch.tsx geometry rewrite — CORRECT
+- `apps/web/src/components/ui/switch.tsx:32-52`. The thumb (`size-5`=20px) now lives inside the **visible** track (`<span>` `h-6 w-11 px-0.5`), NOT the 44px Root. Inner track width = 44 − 2×2 = 40px; thumb 20px; remaining travel 20px. `translate-x-full` resolves to 100% of the **thumb's own** width (Tailwind `translate-x-full` = `translateX(100%)`, % of the transformed element) = 20px = exactly the remaining travel. Checked-state thumb lands flush right, unchecked flush left. The "half-on" defect is genuinely fixed.
+- The visible track color tracks Root's data-state via `group-data-[state=checked]:bg-primary` (Root carries `group`; Radix sets `data-state` on Root). Correct.
+- NIT (not a finding): the header comment at `switch.tsx:14` says travel is `translate-x-[calc(100%-2px)]`, but the implemented value is `translate-x-full` (line 49). The implemented value is the correct one; only the prose is stale. Cosmetic.
 
----
+### a033056d — backfill detectionFailures counter + exit code — CORRECT, no off-by-one / double-count
+- `apps/web/scripts/backfill-color-pipeline.ts:339,439,481`. `detectionFailures++` fires ONLY in the `else if (result.derivativeOnly)` branch (mutually exclusive with the `result.signals` success branch), and only inside `outcome === 'processed'`. The `errors++` branch is the terminal `else` (mutually exclusive with `processed`). A row cannot increment both `detectionFailures` and `errors`. No double-count.
+- Exit code `process.exit(errors > 0 || detectionFailures > 0 ? 1 : 0)` is correct — an all-detection-failure run now exits non-zero, closing AGG-C3-04. The WARN summary line is gated on `detectionFailures > 0`. Resume contract intact (`processed++` still counts these so the batch flush + cursor advance is unaffected; `pipeline_version` is deliberately NOT bumped so they remain retry candidates).
+- Benign edge (NOT a finding): a `derivativeOnly` row deleted mid-reencode decrements `processed` (`:414`) but NOT `detectionFailures`, so a run that ONLY had detection-failures-on-now-deleted-rows could exit 1 with `processed=0`. The row is already gone (retry moot) and exiting non-zero on "color metadata not advanced" is the conservative/correct signal anyway. Cosmetic over-report on a deleted row; no incorrect behavior.
 
-## CRITICAL Findings
+### 06a3c5e7 — process-topic-image.ts TOPIC_RESOURCES_ROOT override — CORRECT
+- `apps/web/src/lib/process-topic-image.ts:11-26`. `process.env.TOPIC_RESOURCES_ROOT?.trim()` + truthy guard: undefined → optional-chain short-circuits; empty/whitespace → `''` falsy → falls through to the cwd-derived monorepo/simple path logic (unchanged). Mirrors the verified `upload-paths.ts:13,28` pattern exactly. No path-join bug, no undefined-env fallback hazard. The test (`process-topic-image.test.ts:41-42`) sets it to `mkdtempSync(os.tmpdir())` via a hoisted block so module-eval reads it. Verified isolated.
 
-None.
+### 0ef29a10 — color-detection re-export removal + import repoint — CORRECT, no runtime breakage
+- `apps/web/src/lib/color-detection.ts:43-50` removed `export { WIDE_GAMUT_PRIMARIES, isWideGamutPrimary } from '@/lib/color-primaries'`. `apps/web/src/app/actions/images.ts:29` now imports `isWideGamutPrimary` directly from `@/lib/color-primaries` (the client-safe leaf). Same symbol, same source module, just one fewer hop. `wide-gamut-primaries.test.ts` repointed too. Typecheck green confirms no other importer relied on the removed re-export. No runtime breakage.
 
-## HIGH Findings
-
-None confirmed at HIGH for this cycle. The prior-cycle DBG-H1 (upload-tracker
-quota over-claim) is re-assessed DOWN to LOW — see DBG-L1.
+### f603cd3f — serve-upload.ts comment change — COMMENT-ONLY, verified no logic change
+- `apps/web/src/lib/serve-upload.ts:195-208`. The diff touches only the comment block (de-enumerates the COLOR_IMPACTING_KEYS list, points at the constant). The ETag-construction logic below is byte-identical. Verified via `git diff` — zero executable lines changed.
 
 ---
 
-## LOW / NEEDS-VALIDATION Findings
+## Core failure-surface inventory (error paths / async / leaks) — all clean
 
-### DBG-L1 — Upload-tracker quota settlement is not in a `finally` (defense-in-depth gap; prior DBG-H1, downgraded)
-**Confidence:** Medium | **Status:** Likely (very-low trigger probability)
-**File:** `apps/web/src/app/actions/images.ts:251-253` (pre-claim) →
-`:490` / `:512` (settlement) vs `:538-540` (`finally` only releases the contract lock)
-
-**Mechanics:** At lines 251-253 the in-memory upload tracker is pre-incremented by
-the whole batch (`tracker.bytes += totalSize; tracker.count += files.length`).
-`settleUploadTrackerClaim` reconciles claimed-vs-actual at line 490 (all-failed
-path) and line 512 (success path) — **both inside the outer `try`**. The outer
-`finally` (538-540) releases only `uploadContractLock`, NOT the tracker claim.
-
-**Trigger:** an exception that propagates OUT of the per-file loop but is NOT caught
-by the inner per-file `try/catch` (lines 271-481). The realistic per-file faults
-(Sharp decode, DB insert, GPS strip, disk write) are all caught inside the loop and
-`continue`. The only remaining throw surface between pre-claim and settlement is
-framework-level: an unexpected throw in the loop's structural code, OOM, or a
-Next.js internal error in `revalidateLocalizedPaths` ordering. The post-loop region
-(488-512) is synchronous up to the settlement, so it cannot throw on an `await`.
-
-**Observable failure (if hit):** the `${userId}:${ip}` tracker entry stays
-over-counted by the full batch (count + bytes) until the window's
-`resetUploadTrackerWindowIfExpired` fires on a later upload. The admin loses upload
-quota for the remainder of the window on a degraded server. No data loss, no
-security impact.
-
-**Why downgraded from prior HIGH:** the per-file inner try/catch makes the trigger
-path nearly unreachable in practice. It is a defense-in-depth gap, not a routinely
-reachable bug.
-
-**Fix (minimal):** wrap the two settlement calls in the outer `finally`, or
-pre-increment per-file. Idiomatic form: hoist a `let settled = false;` and in the
-`finally` do `if (!settled) settleUploadTrackerClaim(...)` with the
-already-computed `successCount` / `uploadedBytes` (both are in outer scope). The
-existing `Math.max(0, …)` in `settleUploadTrackerClaim` already makes a
-double-settle safe to guard against.
+- **image-queue.ts** (`enqueueImageProcessing`): claim acquired before processing; `finally` (`:544-557`) always releases the lock connection (`.catch`-guarded) and prunes the retry maps; the `retried` / `claimRetryScheduled` guards correctly avoid clearing `enqueued`/`claimRetryCounts` when a retry/claim-retry is in flight (no premature delete that would let a duplicate enqueue slip through). Fire-and-forget caption (`:395-410`) and embedding (`:434-478`) hooks are `void`'d / `.then().catch()`'d — no unhandled rejection. The `failed_at` MySQL-datetime fix (`toMySqlDateTime`, `:529`) is present (prevents the swallowed ER 1292 that emptied the failed-images panel). Bootstrap ECONNREFUSED handling + cursor-based pagination + permanently-failed exclusion all sound. No leaked pool connections on any path.
+- **process-image.ts** (`processImageFormats`): the `try/catch/finally` (`:1263-1317`) unlinks every partial sized variant written THIS invocation across all 3 formats on any throw, and the `finally` cleans the WI-15 downscale intermediate. `writtenSizedPaths` tracks paths post-rename so cleanup never deletes a pre-existing prior-run file. AVIF 10-bit→8-bit per-image fallback (`:1165-1188`) uses `base.clone()` with explicit `bitdepth: 8` (the documented COR-R4C8-06 reset). Sharp instances are fresh-per-format (no cross-format state contamination). `metadata()` read at `:1019` guards `height > 0`. No resource leak, no unhandled Sharp rejection.
+- **sw.js**: LRU `recordAndEvict` (`:95-126`) head-walks insertion-order (= recency via delete-then-set), guards the running total on the `deleted` boolean (browser quota-evicted entries don't corrupt the total). `touchMeta` (`:156-170`) repositions on 304 so a freshly-revalidated tile isn't evicted as stale. HEAD probe bounded by `AbortSignal.timeout(300)` with a `catch`→stale-serve fallthrough (`:235-256`). `networkFirstHtml` caches `networkResponse.clone().body` and returns the original — no double stream-consumption. `x-gk-admin-render` gate excludes admin-rendered HTML. No latent bug.
+- **gps-exif-strip.ts**: every walker is bounds-checked and returns `null` on any structural anomaly (`stripGpsFromTiffRegion:104-110,117-119`, type-size table rejects unknown TIFF types), so a truncated/malformed box triggers the caller's re-encode fallback rather than reading OOB. Mature.
+- **public.ts analytics** (`recordPhotoView`/`recordTopicView`/`recordSharedGroupView`, `:355-405`) + **data.ts view-count flush** (`:107-118`): all fire-and-forget `db.insert/update` carry explicit `.catch()` ("swallow errors so analytics never blocks render"); the flush path has retry-count-bounded re-buffering. No unhandled rejection.
+- **env-var coercion**: `Number(process.env.QUEUE_CONCURRENCY) || 1` (`image-queue.ts:168`), `Math.max(1, Number(process.env.BACKFILL_CONCURRENCY) || 2)` (`backfill:329`) — garbage env → `NaN` → `|| fallback` → safe. No NaN escape.
 
 ---
 
-## Verified-SAFE (initially suspicious, confirmed NOT bugs)
+## Re-verified, NOT re-reported
 
-These are documented to prevent re-flagging in future cycles.
+- **Deferred AGG-C3-09** (upload-tracker quota settled inside outer `try`, not `finally`; `images.ts` outer `finally` releases only the contract lock): reasoning still sound. The settlement path is reachable only by a throw escaping the per-file inner try/catch (which catches every realistic per-file fault and `continue`s) — framework-level failure only, effect is admin-self-impact quota over-count until window expiry. Correctly deferred; not re-raising.
+- **Cycle-3 CLOSED items** (switch half-on, backfill exit code, settings-hash docstring, ETag de-enumeration, re-export layering trap, histogram contrast, topic-image tmpdir isolation, Stripe cross-ref): all verified fixed at HEAD. Not re-planning.
 
-- **`tag_names.split(',')`** in `lib/photo-title.ts:72` and
-  `components/image-manager.tsx:487/489`: `tagNamesAgg` (data.ts:605) is
-  `GROUP_CONCAT(DISTINCT tags.name …)` with the DEFAULT comma separator, so a tag
-  *name* containing a comma would shatter into false tags. **`isValidTagName`
-  (validation.ts:124) explicitly rejects `,`** (`!trimmed.includes(',')`) precisely
-  to keep this split safe — a deliberate validation⇄aggregation coupling. Not a bug.
-  (The slug+name combined concat in `getImageByShareKey`, data.ts:1137, uses
-  `CHAR(0)`/`CHAR(1)` delimiters and is independently safe.)
+## Non-findings investigated
 
-- **`getLoginRateLimitEntry` mutating `entry.count = 0` in place** (auth-rate-limit.ts:24):
-  the window-reset mutates the cached object reference, but the only caller that reads
-  `.count` (auth.ts login flow) immediately increments and `.set()`s it (auth.ts
-  105/128-130). No read-only path leaves a spuriously-zeroed entry in the map.
+- Two `apps/web/public/resources/{uuid}.webp` orphans (timestamped ~3h before this run) exist on disk. They are **gitignored** (`.gitignore:51` `/public/resources/*`, only `.gitkeep` tracked) so `git status` is clean — no repo pollution. The only test exercising the real topic-image pipeline (`process-topic-image.test.ts`) is now isolated to `os.tmpdir()` via `TOPIC_RESOURCES_ROOT`; `topics-actions.test.ts` fully mocks `process-topic-image`. The orphans are out-of-band leftovers (a prior dev/test run in this sandbox), not produced by the current committed test suite. Not a regression, not a finding.
 
-- **Backfill `state.running` in-process flag window** (admin-backfill-runner.ts:821 vs
-  628): `triggerAdminBackfill` returns before the fire-and-forget `runBackfill` sets
-  `state.running = true`, so there is a window where the flag is stale. The MySQL
-  advisory lock (`acquireBackfillLock`, line 828) is the true mutex — a concurrent
-  trigger fails lock acquisition and returns `already_running`. The flag is advisory
-  belt-and-braces only. Not a bug.
+## Gates run this review
+- `npm run typecheck --workspace=apps/web` → PASS (typecheck:app + typecheck:scripts both clean).
+- `vitest run` over `process-topic-image.test.ts`, `backfill-color-pipeline.test.ts`, `wide-gamut-primaries.test.ts`, `admin-backfill-runner-detection-failure.test.ts` → 25/25 PASS.
 
-- **View-count flush partial-failure backoff** (data.ts:152-153): `if (succeeded > 0)
-  consecutiveFlushFailures = 0` resets backoff even when some groups failed and were
-  re-buffered. The per-group `VIEW_COUNT_MAX_RETRIES` cap (line 117) drops a
-  persistent failer after 3 tries, so there is no infinite re-buffer loop. Matches
-  the documented best-effort-analytics posture. Not a bug.
-
-- **Stream lifecycle** in `download/[imageId]/route.ts`, `serve-upload.ts`,
-  `process-image.ts`, `process-topic-image.ts`, `db-actions.ts`: every
-  `createReadStream`/`createWriteStream`/`pipeline` closes on error (catch +
-  `destroy()` / `unlink`), on abort (serve-upload AGG-H5 signal listener), and on
-  success (autoClose / `pipeline` resolution). The download route's open→stat→claim
-  ordering (R4C4/R4C5) closes the handle on every post-open path. No FD leaks found.
-
-- **ISOBMFF walkers** (`color-detection.ts parseCicpFromHeif`,
-  `gain-map-detection.ts hasGainMap`): both bound depth (≤5), scan bytes (≤1 MB),
-  validate `size < headerSize || pos + size > buffer.length` before recursing, advance
-  `pos` by ≥8 every iteration (no infinite loop on a 0-data box), cap entry counts at
-  1024, and wrap the top-level walk in try/catch. 64-bit `size` via
-  `Number(readBigUInt64BE)` is bounds-checked after conversion so a >2^53 size is
-  rejected, not silently truncated into a valid offset. A crafted/truncated file
-  returns null/false, never hangs.
-
-- **ICC chromaticity math** (`icc-chromaticity.ts`): `xyzToXy` guards `|X+Y+Z| < 1e-9`
-  (no divide-by-zero), `invert3x3` guards `|det| < 1e-12`, `readS15Fixed16` /
-  `readXyzTag` / `readChadMatrix` bounds-check + `Number.isFinite`. Tag-table walk
-  capped at 100 tags / 4 KB. No NaN escape, no OOB read.
-
-- **Concurrency cap math** (`admin-backfill-runner.ts:129-142`
-  `resolveBackfillConcurrency`): `Number.isFinite(poolLimit) ? poolLimit : 10`
-  handles undefined pool; `Math.max(1, …)` floors the cap at 1;
-  `Math.max(1, Math.floor(requested) || 1)` neutralizes NaN/0/negative requested
-  (`Math.floor(NaN)→NaN`, `NaN||1→1`; `Math.max(1, -5)→1`). The prior-cycle NaN/zero
-  concern is fully closed.
-
-- **migrate.js** journal post-condition (lines 698-719) throws loud on any
-  silently-skipped migration; `getAllJournalMigrations` rejects an empty journal
-  (147-149) and a missing `.sql` file (readFileSync throws); fresh-DB
-  (`!hasGalleryTables`) and partial-baseline paths both route through
-  `reconcileLegacySchema` + per-entry hash baseline (idempotent). No empty-journal or
-  partial-baseline edge slips through.
-
-- **Date/time:** `mysql-datetime.ts toMySqlDateTime` and `process-image.ts
-  parseExifDateTime` consistently use SERVER-LOCAL getters (PP-BUG-1 /
-  COR-R4C2-01) matching mysql2's `Date` serialization and `NOW()`. The string branch
-  of `parseExifDateTime` emits raw matched components without a `new Date()`
-  round-trip — the most TZ-robust path. The documented assumption (Node TZ == MySQL
-  session TZ, typically UTC in Docker) is an accepted design constraint, not a fresh
-  regression. `view-retention.ts resolveRetentionMs` guards negative/non-finite
-  retention from putting the cutoff in the future.
-
-- **JSON.parse** sites (`smart-collections.ts:310`, `admin-tokens.ts:120`,
-  `search/semantic/route.ts:167`) are all try/catch-guarded into typed errors or `[]`.
-
-- **NULL-returning aggregations** (`data.ts`): `getLatestImageUpdatedAt`
-  (`row?.latest ?? null`), `last_image_updated_at` (typed `Date | null`), count
-  aggregations (COUNT → 0 for empty groups), and all `rows[0]?.…` accesses use
-  optional chaining. The prior tagNamesAgg-style NULL-deref bug class is
-  systematically closed.
-
----
-
-## Top-findings summary
-
-The latent-bug surface is in very good shape after ~58 prior closures. This cycle
-surfaced **no new CRITICAL/HIGH** confirmed bugs. The single actionable item is
-**DBG-L1** (LOW): the upload-tracker quota settlement in `images.ts` lives inside the
-`try`, not the `finally` — a narrow defense-in-depth gap that only over-claims a
-photographer's in-window upload quota on a framework-level throw that escapes the
-per-file try/catch. Recommend moving settlement to `finally` behind a `settled`
-guard. Everything else examined (stream/FD lifecycle, ISOBMFF walkers, chromaticity
-math, concurrency caps, migrate.js post-conditions, date/time handling, NULL
-aggregations) is correctly hardened, and several initially-suspicious patterns were
-confirmed safe and recorded above to prevent churn.
+## References
+- `apps/web/src/components/ui/switch.tsx:32-52` — switch geometry fix (verified correct; comment/code prose nit only)
+- `apps/web/scripts/backfill-color-pipeline.ts:339,439,481` — detectionFailures counter + exit code (verified no double-count, exit code correct)
+- `apps/web/src/lib/process-topic-image.ts:11-26` — TOPIC_RESOURCES_ROOT override (verified guard + fallback correct)
+- `apps/web/src/lib/color-detection.ts:43-50` / `apps/web/src/app/actions/images.ts:29` — re-export removal + import repoint (verified no breakage)
+- `apps/web/src/lib/serve-upload.ts:195-208` — comment-only change (verified no logic delta)
+- `apps/web/src/lib/image-queue.ts:544-557` — claim release in finally + retry guards (verified leak-free)
+- `apps/web/src/lib/process-image.ts:1263-1317` — partial-file cleanup catch/finally (verified correct)

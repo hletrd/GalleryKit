@@ -1,8 +1,10 @@
-# Verifier — Deep Review (cycle 3 / HEAD b1e9e0da)
+# Verifier — Deep Review (run 6 / cycle 4 / HEAD f8147868)
 
-Role: evidence-based correctness verification of the repo's most load-bearing
-behavioral CLAIMS (from CLAUDE.md + code comments) against the actual code and
-tests at HEAD `b1e9e0da8466b10113ac5a6065d570382f92c292`.
+**HEAD:** `f814786881d91ddf4245397429d8b580c788317e`
+**Date:** 2026-06-16
+**Role:** evidence-based correctness verification of the repo's most load-bearing
+behavioral CLAIMS (CLAUDE.md + prior-cycle fix commits) against the actual code
+and tests at HEAD. Honest convergence is valid — no findings manufactured.
 
 ## Verdict
 
@@ -10,182 +12,164 @@ tests at HEAD `b1e9e0da8466b10113ac5a6065d570382f92c292`.
 **Confidence**: high
 **Blockers**: 0
 
-All 10 high-value claims are VERIFIED against current code. No CONTRADICTED
-claims. One claim (Stripe async gap) is verified WITH AN IMPORTANT NUANCE that
-strengthens, not weakens, the documented posture — see CLAIM 10.
+All 10 load-bearing behavioral claims VERIFIED against current code. 0 CONTRADICTED,
+0 INCONCLUSIVE. One benign comment-drift NIT in `switch.tsx` (does not affect
+behavior; geometry is correct). The Stripe async gap is VERIFIED-with-nuance
+exactly as the prior cycle found (gap real, operationally closed by card-only pin).
 
-## Fresh Evidence (test runs at HEAD b1e9e0da)
+### Cycle context
+HEAD f8147868 is the cycle-3 wrap commit; all 8 cycle-3 scheduled fixes landed
+(switch geometry `a3b8c557`, sidecar exit code `a033056d`, histogram contrast
+`60c54346`, settings-hash/ETag docstrings `f603cd3f`, Stripe cross-ref `22d02262`,
+color-detection re-export drop `0ef29a10`, topic-image tmpdir isolation `06a3c5e7`).
+Working tree CLEAN. The two fixes the prompt calls out (`a3b8c557`, `a033056d`)
+are the primary new verification targets this cycle.
 
-| Batch | Command | Result |
-|-------|---------|--------|
-| privacy/csv/blur/touch | `npx vitest run --no-file-parallelism privacy-fields csv-escape blur-data-url touch-target-audit` | **4 files, 63 tests passed** |
-| rate-limit/semantic/backfill/blur-wiring | `npx vitest run --no-file-parallelism auth-rate-limit auth-rate-limit-ordering semantic-route-production semantic-search-mode-validator backfill-color-pipeline admin-backfill-runner-detection-failure process-image-blur-wiring images-action-blur-wiring` | **8 files, 42 tests passed** |
-| **TOTAL** | 12 claim-relevant test files | **105 tests passed, 0 failed** |
+## Fresh Evidence (test runs at HEAD f8147868)
 
-(stderr noise in the backfill batch — `[verify-avif] no NCLX colr box`,
-`[admin-backfill] detection failed` — are intentional fixture diagnostics, not
-failures; both files report all tests green.)
+| Batch | Command (cwd apps/web) | Result |
+|-------|------------------------|--------|
+| Batch 1 (UI/backfill/CLIP/privacy/CSV/blur) | `npx vitest run --no-file-parallelism touch-target-audit backfill-color-pipeline admin-backfill-runner-detection-failure semantic-route-production semantic-search-mode-validator privacy-fields csv-escape blur-data-url process-image-blur-wiring images-action-blur-wiring` | **11 files, 89 tests passed** |
+| Batch 2 (rate-limit/locks/migrate/stripe/SQL) | `npx vitest run --no-file-parallelism auth-rate-limit advisory-locks migrate-reconcile-coverage migrate checkout-route stripe data-tag-names-sql` | **9 files, 137 tests passed** |
+| Typecheck gate (compile-time privacy guards) | `npx tsc --noEmit -p tsconfig.typecheck.json` | **exit 0 (clean)** |
+| **TOTAL** | 20 claim-relevant test files + full typecheck | **226 tests passed, 0 failed; typecheck clean** |
 
-Note: the full suite + `npm run typecheck` were NOT run in this pass (sandbox
-killed the broad vitest invocation with exit 144; ran targeted serial batches
-instead). The compile-time guards (CLAIM 1) are verified by code inspection of
-the type assertions, which live inside `tsconfig.typecheck.json`'s scope; a
-clean `typecheck` is the gating CI mechanism for them.
+The `tsc -p tsconfig.typecheck.json` clean exit is the gating mechanism for the
+three compile-time guards (`_privacyGuard`, `_mapPrivacyGuard`, `_largePayloadGuard`)
+— they are real type-level assertions, so a leak would fail this command, not a
+runtime test. (stderr fixture diagnostics in the backfill batch — `[admin-backfill]
+detection failed`, `[verify-avif] no NCLX colr box` — are intentional, not failures.)
 
 ---
 
 ## Claim-by-Claim Verification
 
-### CLAIM 1 — `_PrivacySensitiveKeys` / `_SensitiveKeysInPublic` compile-time guards actually fail compilation on leak
-**Verdict: VERIFIED (High)**
+| # | Claim | Verdict | Evidence (file:line + test) |
+|---|-------|---------|------------------------------|
+| 1 | Switch thumb travels edge-to-edge (fix `a3b8c557`) — geometry actually correct | **VERIFIED** | `ui/switch.tsx:26,36,41-49` + `touch-target-audit` green |
+| 2 | Sidecar backfill exits non-zero on all-detection-failure (fix `a033056d`) | **VERIFIED** | `backfill-color-pipeline.ts:439,464,470,485` + `admin-backfill-runner-detection-failure` green |
+| 3 | CLIP `semantic_search_mode` heals `production`→`disabled` unless env override | **VERIFIED** | `gallery-config.ts:129-147` + semantic tests green |
+| 4 | `publicSelectFields` omits all `_PrivacySensitiveKeys`; compile-time guard holds | **VERIFIED** | `data.ts:416-421,431-433,449-451` + `tsc` exit 0 + `privacy-fields` green |
+| 5 | Advisory locks serialize as documented | **VERIFIED** | `advisory-locks.ts:19,22,25,34,41,44` + `advisory-locks` green |
+| 6 | Migration post-condition fails loud on skipped journal hashes | **VERIFIED** | `migrate.js:698-718` over full journal (`:750/:760`) + `migrate*` green |
+| 7 | Blur-data-url contract enforced at producer + write + read | **VERIFIED** | `process-image.ts:895`, `images.ts:352`, `photo-viewer.tsx:196` + blur tests green |
+| 8 | CSV escape strips formula + bidi + zero-width + C0/C1 | **VERIFIED** | `csv-escape.ts:44,54,55,60-62` + `validation.ts:58` + `csv-escape` green |
+| 9 | Stripe webhook does NOT grant on async_payment_succeeded; checkout pins card-only | **VERIFIED (nuance)** | webhook `:88,105`; checkout `:207` card-only + `checkout-route`/`stripe` green |
+| 10 | Touch-target audit catches multi-line tags, Badge, select | **VERIFIED** | `touch-target-audit.test.ts:396-441,561-600` + green |
 
-Evidence — `apps/web/src/lib/data.ts`:
-- L416 canonical union: `PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at' | 'color_space' | 'icc_profile_name' | 'pipeline_version'`
-- L418-420: the guard is a real type-level computation, not a comment:
-  ```ts
-  type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
-  const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: ...'] = true;
-  ```
-  If any sensitive key is present in `publicSelectFields`, `Extract` yields a
-  non-`never` union, the conditional resolves to the `[key, 'ERROR...']` tuple
-  type, and `= true` fails to assign → **tsc compile error**. This is a genuine
-  fail-compilation guard.
-- L429-432 mirrors it for `publicMapSelectFields` with `Exclude<…,'latitude'|'longitude'>` (map is allowed exactly GPS, nothing else).
-- L447-450 `_largePayloadGuard` blocks `blur_data_url` from the listing select by the same mechanism.
+### CLAIM 1 — Switch thumb edge-to-edge (fix `a3b8c557`) — VERIFIED (High)
 
-Runtime backstop confirmed by test: `__tests__/privacy-fields.test.ts:58-59`
-`for (const key of SENSITIVE_KEYS) expect(publicSelectFieldKeys).not.toContain(key)`
-and L83 "admin-only keys form exactly the SENSITIVE_KEYS contract (symmetric
-guard)". The 63-test green batch includes this file. **Belt (compile) + braces
-(runtime fixture) both present.**
+The prompt's explicit demand: confirm geometry is *actually* correct, not "looks
+fixed." Box-model math at HEAD (`ui/switch.tsx`):
+- Root (hit area): `min-h-11 min-w-11` = 44px → touch-target floor preserved (audit green, `:143` declares 0 violations).
+- Visible track (`:36`): `h-6 w-11` (24×44px) with `px-0.5` (2px each side) → **content box = 40px wide**.
+- Thumb (`:48`): `size-5` = 20px; `translate-x-0` unchecked → `data-[state=checked]:translate-x-full` checked (`:49`).
+- Tailwind `translate-x-full` = `translateX(100%)` relative to the **element's own width** (20px). Unchecked thumb occupies [0,20] (flush left padding edge); checked occupies [20,40] (flush right padding edge). **Travel is exactly edge-to-edge — no residual gap, no half-on state.** The cycle-3 defect (20px thumb + fixed 20px travel inside a 44px track → never reached either edge) is genuinely resolved.
+- Inner track color keys off Root via `group-data-[state=checked]:bg-primary` (`:38`) — Root carries `group` (`:26`); Radix sets `data-state` on Root. Correct.
 
-### CLAIM 2 — CLIP disabled-by-design healing logic
-**Verdict: VERIFIED (High)** — and the HARD GUARD is satisfied: NOT proposing activation; verifying the disable is correct.
+**NIT (cosmetic, non-blocking):** the file comment (`:14`) and commit message
+describe the travel as `translate-x-[calc(100%-2px)]`, but the actual code is
+`translate-x-full` (`:49`). The CODE value is the mathematically correct one
+(`calc(100%-2px)` would *under*-travel by 2px); the comment is stale aspirational
+text. Behavior is correct; only the comment drifted. Not a defect — recorded for
+honesty.
 
-Evidence — `apps/web/src/lib/gallery-config.ts` `_getGalleryConfig` L129-147:
-```ts
-const raw = getSetting(map, 'semantic_search_mode');
-if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode  // 'disabled'
-const value = raw as 'disabled' | 'stub' | 'production';
-if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
-    return 'disabled';
-}
-return value;
-```
-- Default is `'disabled'` (invalid/unknown → disabled, L132).
-- Stored `'production'` HEALS to `'disabled'` UNLESS `SEMANTIC_SEARCH_ALLOW_PRODUCTION === 'true'` (L143-145). Exactly as claimed.
-- DB-read failure path L188-200 also returns `DEFAULTS.semantic_search_mode` ('disabled') — fail-safe.
+### CLAIM 2 — Sidecar exits non-zero on all-detection-failure (fix `a033056d`) — VERIFIED (High)
 
-Tests green: `semantic-route-production.test.ts` + `semantic-search-mode-validator.test.ts` both pass in the 42-test batch. The healing is correct; activation is NOT proposed.
+`backfill-color-pipeline.ts`:
+- `:439` `detectionFailures++` in the `result.derivativeOnly` branch (encode succeeded, color detection threw, `pipeline_version` deliberately NOT bumped so the row stays a backfill candidate).
+- `:453` progress line includes `detectionFailures=`; `:464` Done summary includes it; `:470` emits a loud `console.warn` WARNING when `> 0`.
+- `:485` `process.exit(errors > 0 || detectionFailures > 0 ? 1 : 0)` — a run where every row's detection failed (no `pipeline_version` advanced) now returns exit 1, so a CI/cron wrapper keying on exit code no longer sees false green. The resume contract is unchanged (still no version bump on detection failure — correct for the common transient case). `reprocessRow`'s return shape is untouched, so `backfill-color-pipeline.test.ts` (column-set lock) still passes. Both the column-set test and `admin-backfill-runner-detection-failure.test.ts` are green.
 
-### CLAIM 3 — admin-backfill-runner and sidecar script persist the SAME DB column set
-**Verdict: VERIFIED (High)**
+### CLAIM 3 — CLIP heal (HARD GUARD honored) — VERIFIED (High)
 
-Success-path UPDATE column set is identical (10 columns) in both paths:
+`gallery-config.ts:129-147`: invalid/unknown → `DEFAULTS.semantic_search_mode`
+('disabled', `:132`); a stored `'production'` returns `'disabled'` UNLESS
+`process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] === 'true'` (`:143-145`). Exactly
+the documented heal. I am verifying the disable is correct — **NOT** proposing
+activation. `semantic-route-production` + `semantic-search-mode-validator` green.
 
-`apps/web/src/lib/admin-backfill-runner.ts:559-568`:
-`pipeline_version, icc_profile_name, color_primaries, transfer_function, matrix_coefficients, is_hdr, has_gain_map, color_pipeline_decision, was_downscaled, avif_10bit`
+### CLAIM 4 — Privacy compile-time guards hold — VERIFIED (High)
 
-`apps/web/scripts/backfill-color-pipeline.ts:371+` — same 10 columns (confirmed via the column-object build at L212-220).
+`data.ts`: canonical `PrivacySensitiveKeys` union (`:416`, 21 keys incl.
+latitude/longitude/filename_original/user_filename + all color/HDR audit columns).
+Three real type-level assertions:
+- `_privacyGuard` (`:420-421`): `Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys> extends never ? true : [..., 'ERROR...']` assigned `= true` — a leak yields a non-`never` Extract, the conditional resolves to the error tuple, `= true` fails to assign → **tsc error**.
+- `_mapPrivacyGuard` (`:431-433`): same mechanism over `Exclude<…,'latitude'|'longitude'>` (map allowed exactly GPS, nothing else).
+- `_largePayloadGuard` (`:449-451`): blocks `blur_data_url` from the listing select.
+`tsc -p tsconfig.typecheck.json` exits 0 → all three hold. Runtime backstop
+`privacy-fields.test.ts` green (asserts GPS/filename keys absent from
+`publicSelectFieldKeys`). Belt + braces both present.
 
-Detection-failure semantics ALSO match (the CLAUDE.md "no version bump on
-detection failure" claim):
-- runner L594-599: on detection failure, UPDATE persists ONLY `was_downscaled, avif_10bit` and does NOT bump `pipeline_version` (L580-593 comment explicitly aligns the in-app runner with the operator script's correct semantics).
-- sidecar L94-105 + L225-232 `derivativeOnly: { was_downscaled, avif_10bit }` — same shape.
+### CLAIM 5 — Advisory locks serialize as documented — VERIFIED (High)
 
-Tests green: `backfill-color-pipeline.test.ts` (column-set lock) and
-`admin-backfill-runner-detection-failure.test.ts` (AGG-01: "issues an UPDATE
-without pipeline_version so the row is re-picked next run") both pass — the
-latter's stderr confirms the failure path fires and the run completes with
-`detectionFailures=1` and no version bump.
+`advisory-locks.ts` exports exactly the names CLAUDE.md documents:
+`gallerykit_db_restore` (`:19`), `gallerykit_upload_processing_contract` (`:22`),
+`gallerykit_topic_route_segments` (`:25`), `gallerykit_admin_delete` (`:34`),
+`gallerykit:image-processing:${jobId}` (`:41`), `gallerykit_color_pipeline_backfill`
+(`:44`). The sidecar acquires/releases `LOCK_COLOR_PIPELINE_BACKFILL` on a dedicated
+connection (`backfill-color-pipeline.ts:475` RELEASE_LOCK). `advisory-locks.test.ts`
+green (lock-name pins). Note (already deferred AGG-C3-19): the per-image
+processing-claim *race* has only name-pins, no runtime two-worker harness — coverage
+gap, not a defect; the invariant is sound.
 
-### CLAIM 4 — migrate.js post-condition: every journal hash MUST be in __drizzle_migrations, otherwise throw; covers all entries
-**Verdict: VERIFIED (High)**
+### CLAIM 6 — Migration post-condition fails loud — VERIFIED (High)
 
-Evidence — `apps/web/scripts/migrate.js`:
-- L750 `const journalMigrations = getAllJournalMigrations(migrationsFolder);` — reads the FULL journal (one record per entry, `folderMillis = entry.when`, `hash = SHA256(file)` per `getAllJournalMigrations` at L144).
-- L760 `await runMigrations(connection, migrationsFolder, journalMigrations);` — passes the FULL journal as `expectedMigrations`.
-- L698-718 `runMigrations`: after `migrate()`, computes `const missing = expectedMigrations.filter((m) => !recordedHashes.has(m.hash));` and `if (missing.length > 0) throw new Error('[Migration] Drizzle silently skipped N migration(s): tags…')`.
+`migrate.js`: `runMigrations` (`:698`) calls drizzle `migrate()` then computes
+`missing = expectedMigrations.filter((m) => !recordedHashes.has(m.hash))` (`:710`)
+and `throw` if `missing.length > 0` (`:711-718`). `expectedMigrations` is the FULL
+`journalMigrations = getAllJournalMigrations(...)` (`:750`, passed at `:760`) — one
+record per journal entry with `hash = SHA256(file)`. Covers all entries, fails the
+deploy loud on any silently-skipped (non-monotonic-`when`) migration.
+`migrate-reconcile-coverage` + `migrate` tests green.
 
-The post-condition covers ALL journal entries (the array passed is the complete
-`getAllJournalMigrations` result, not a subset). The reconcile pre-step
-(L682-695) uses `migrations.every((m) => haveHashes.has(m.hash))` to decide
-whether to baseline. Both the "did drizzle skip" assertion and the
-hash-completeness reconcile are wired and complete. Matches CLAUDE.md exactly.
+### CLAIM 7 — Blur-data-url 3-point contract — VERIFIED (High)
 
-### CLAIM 5 — blur-data-url contract enforced at producer + write + read (3 points)
-**Verdict: VERIFIED (High)**
+Producer `process-image.ts:895` `assertBlurDataUrl(candidate)` (import `:17`);
+write `images.ts:352` `blur_data_url: assertBlurDataUrl(data.blurDataUrl)` (import
+`:28`); read `photo-viewer.tsx:196` `if (!isSafeBlurDataUrl(value)) return undefined`
+(import `:35`). Contract `blur-data-url.ts`: `ALLOWED_PREFIXES` (`:33`,
+`data:image/{jpeg,png,webp};base64,`), `MAX_BLUR_DATA_URL_LENGTH = 4096` (`:45`),
+`isSafeBlurDataUrl` checks type+length+prefix (`:47-50`). `blur-data-url`,
+`process-image-blur-wiring`, `images-action-blur-wiring` all green.
 
-- **Producer**: `apps/web/src/lib/process-image.ts:895` `blurDataUrl = assertBlurDataUrl(candidate);` (import L17). The cycle-4 producer-side wrap.
-- **Write**: `apps/web/src/app/actions/images.ts:352` `blur_data_url: assertBlurDataUrl(data.blurDataUrl),` (import L28) — sanitized at DB-write time in `uploadImages`.
-- **Read**: `apps/web/src/components/photo-viewer.tsx:196` `if (!isSafeBlurDataUrl(value)) return undefined;` (import L35) — gates the `backgroundImage: url(...)` render.
+### CLAIM 8 — CSV escape strips formula + bidi + zero-width + C0/C1 — VERIFIED (High)
 
-Contract itself (`apps/web/src/lib/blur-data-url.ts`): `ALLOWED_PREFIXES` =
-`data:image/{jpeg,png,webp};base64,` (L33-37); `MAX_BLUR_DATA_URL_LENGTH = 4096`
-(L45); `isSafeBlurDataUrl` checks type+length+prefix (L47-51). All three points
-present.
+`csv-escape.ts`: C0/C1 strip preserving CR/LF (`:44`); `UNICODE_FORMAT_CHARS_G`
+strip (`:54`) — derived from `validation.ts:58`
+`/[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/`
+covering bidi overrides U+202A-202E, isolates U+2066-2069, ZWSP/ZWNJ/ZWJ/LRM/RLM
+U+200B-200F, WJ U+2060, BOM U+FEFF, MVS U+180E, interlinear U+FFF9-FFFB; CRLF
+collapse (`:55`); formula prefix `/^\s*[=+\-@]/` leading-whitespace-tolerant
+(`:60-62`); quote-wrap (`:63`). The `_G` variant is built via `.source` so it does
+not pollute the `.test()`-only constant's lastIndex. `csv-escape` green.
 
-Tests green: `process-image-blur-wiring.test.ts`, `images-action-blur-wiring.test.ts`, `blur-data-url.test.ts` all pass.
+### CLAIM 9 — Stripe async gap unhandled; checkout card-only — VERIFIED with NUANCE (High)
 
-### CLAIM 6 — CSV escape strips bidi + zero-width + formula + C0/C1
-**Verdict: VERIFIED (High)**
+Webhook `stripe/webhook/route.ts`: handles only `checkout.session.completed`
+(`:88`); gates `if (session.payment_status !== 'paid')` and returns `{received:true}`
+without minting an entitlement (`:105-117`). `async_payment_succeeded` appears ONLY
+in comments (`:99` "a future cycle should add a handler") — no handler. So a delayed
+method that later fires `async_payment_succeeded` is genuinely dropped → matches
+CLAUDE.md "complete checkout but never receive an entitlement row."
+**Nuance (operationally closed):** `checkout/[imageId]/route.ts:207` hard-pins
+`payment_method_types: ['card']` (`:196-206` comment: card-only makes
+completed+unpaid unreachable). Card is immediate-capture, so the mishandled path
+is unreachable in production as configured. `checkout-route` + `stripe` tests green
+(card-only pin asserted). The "money-taken-no-goods" risk is NOT live; the only
+trigger (adding an async method) is forbidden by code + test.
 
-Evidence — `apps/web/src/lib/csv-escape.ts` `escapeCsvField`:
-1. **C0/C1 strip** L44: `value.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')` (preserves CR/LF for the collapse pass).
-2. **Bidi + zero-width strip** L54: `value.replace(UNICODE_FORMAT_CHARS_G, '')` where (validation.ts:58) `UNICODE_FORMAT_CHARS = /[᠎​-‏‪-‮⁠⁦-⁩﻿￹-￻]/`. Covers: bidi overrides U+202A-202E, isolates U+2066-2069, ZWSP/ZWNJ/ZWJ/LRM/RLM U+200B-200F, WJ U+2060, BOM U+FEFF, MVS U+180E, interlinear U+FFF9-FFFB. The `_G` variant (L7) adds the global flag without polluting the shared `.test()` regex's lastIndex.
-3. **CRLF collapse** L55: `value.replace(/[\r\n]+/g, ' ')`.
-4. **Formula prefix** L60-62: `if (/^\s*[=+\-@]/.test(value)) value = "'" + value;` — leading-whitespace-tolerant so a CRLF-collapsed space cannot bypass the guard. Tab is pre-stripped by the C0/C1 pass (documented dead-code removal C8R-RPL-05).
-5. **Quote wrap** L63: `'"' + value.replace(/"/g, '""') + '"'`.
+### CLAIM 10 — Touch-target audit catches multi-line / Badge / select — VERIFIED (High)
 
-Each documented class is stripped/guarded. Test green: `csv-escape.test.ts`.
-
-### CLAIM 7 — Touch-target 44px audit catches multi-line Button/Badge/select
-**Verdict: VERIFIED (High)**
-
-Evidence — `apps/web/src/__tests__/touch-target-audit.test.ts`:
-- **Multi-line normalization**: `normalizeMultilineButtonTags` (L612) + `findJsxTagEnd` (L561-610) walk char-by-char tracking string/template/brace depth and skipping `//` and `/* */` comments, returning the tag's true closing `>` only at `braceDepth === 0 && prev !== '='`. The `prev !== '='` check (L600) is exactly the documented `=>`-arrow rejection so a `() => ...` event handler inside the tag doesn't prematurely close it.
-- **Badge coverage** L396-401: FORBIDDEN entries match `<Badge … asChild … className="…min-h-[<44px]…">` (string-literal) and the `cn()` composite form, with a negative lookahead for `h-1[12]/min-h-1[12]/size-1[12]` overrides.
-- **Native select coverage** L415-441: literal `h-8/h-9/h-10`, `cn()` composite, scale-token catch-all `{min-h|h}-(1..10)`, and arbitrary `min-h-[<44px]` forms — with `(?<!max-)` to avoid matching `max-h-…`.
-- KNOWN_VIOLATIONS deltas documented (L186 multi-line count raise, L193 native-select absorption).
-
-Test green: `touch-target-audit.test.ts` passes (part of the 63-test batch).
-
-### CLAIM 8 — Rate limiting: per-IP AND per-account buckets, both enforced with eviction
-**Verdict: VERIFIED (High)**
-
-Evidence — `apps/web/src/lib/auth-rate-limit.ts`:
-- **Per-IP** map: `loginRateLimit` (imported from `@/lib/rate-limit`), windowed via `getLoginRateLimitEntry` (L21-29) which zeroes count after `LOGIN_WINDOW_MS`.
-- **Per-account** map: `accountLoginRateLimit = createWindowBoundedMap<string>(LOGIN_RATE_LIMIT_MAX_KEYS, LOGIN_WINDOW_MS)` (L19) — same cap + window, keyed by `acct:<sha256-prefix>`. `getAccountLoginRateLimitEntry` (L31-39) applies the same windowing.
-- **Eviction**: both maps are `createWindowBoundedMap` instances (bounded capacity with oldest-entry eviction via `.prune()`); `pruneAccountLoginRateLimit` (L92-94) exposes the prune. DB-backed buckets `'login'` and `'login_account'` are the cross-restart source of truth (L47, L56, L88); the in-memory maps are the fast-path fallback.
-- Rollback (decrement-not-delete) for both: `rollbackLoginRateLimit` (L66-74) and `rollbackAccountLoginRateLimit` (L81-89), preventing concurrent-rollback count loss (C1-07).
-
-Both buckets exist, both are windowed, both are bounded with eviction. Tests
-green: `auth-rate-limit.test.ts` + `auth-rate-limit-ordering.test.ts`.
-
-### CLAIM 9 — publicSelectFields derived from adminSelectFields by omitting PII; GPS/filename_original/user_filename absent
-**Verdict: VERIFIED (High)**
-
-Evidence — `apps/web/src/lib/data.ts`:
-- `adminSelectFields` (L208-278) is the FULL set including `latitude` (L236), `longitude` (L237), `filename_original` (L210), `user_filename` (L221).
-- `publicSelectFields` is DERIVED by destructuring-omit from `adminSelectFields` (L325-357): the destructure explicitly pulls out `latitude, longitude, filename_original, user_filename, original_format, original_file_size, processed, color_pipeline_decision, is_hdr, has_gain_map, was_downscaled, transfer_function, matrix_coefficients, bit_depth, uploaded_by, processing_error, failed_at, color_space, icc_profile_name, pipeline_version` and spreads `...publicSelectFieldCore` into `publicSelectFields`. It is a SEPARATE object reference (L355-357), so adding a field to admin does NOT auto-leak to public — confirmed by the L318-324 comment + the L416-420 compile guard (CLAIM 1).
-- `publicMapSelectFields` (L366-393) re-derives, retaining ONLY latitude/longitude vs public, guarded by `_mapPrivacyGuard` (L431).
-
-Runtime confirmation: `publicSelectFieldKeys` (L399-401, frozen sorted keys);
-`privacy-fields.test.ts:58-59` asserts none of `['latitude','longitude','filename_original','user_filename']`
-appear in `publicSelectFieldKeys`. Test green.
-
-### CLAIM 10 — Stripe async_payment_succeeded gap is unhandled (as CLAUDE.md admits)
-**Verdict: VERIFIED with NUANCE (High)** — gap is real at the webhook layer; operationally closed at the checkout layer.
-
-Evidence:
-- **Webhook DOES NOT handle async settlement**: `apps/web/src/app/api/stripe/webhook/route.ts:88` handles only `checkout.session.completed`; L105-118 gates `if (session.payment_status !== 'paid') { … return {received:true} }`. An async method that fires `completed` with `payment_status: 'unpaid'` is REJECTED (no entitlement minted). There is NO `checkout.session.async_payment_succeeded` case — confirmed by grep: the string appears only in COMMENTS (webhook route.ts:99 "a future cycle should add a handler"; checkout route.ts:198/201/206). So the later settlement event is genuinely dropped → matches CLAUDE.md "complete checkout but never receive an entitlement row."
-- **NUANCE — checkout route closes the gap operationally**: `apps/web/src/app/api/checkout/[imageId]/route.ts:207` hard-pins `payment_method_types: ['card']` with an explicit L196-206 comment ("Forcing card-only makes completed+unpaid unreachable, closing the gap operationally. DO NOT add async methods here before the async_payment_succeeded handler ships."). Card is immediate-capture, so the `completed+unpaid` path the webhook would mishandle is **unreachable in production** as currently configured.
-
-This means the "money-taken-no-goods" risk is NOT live: the only way to trigger
-it is to add an async method to `payment_method_types`, which the code forbids.
-CLAUDE.md's admission is accurate (the handler is absent); the production
-exposure is mitigated. Test pin: `checkout-route.test.ts:206` pins the card-only
-config so a future regression that re-introduces async methods fails CI.
+`touch-target-audit.test.ts`: `FORBIDDEN` includes `<Badge asChild>` sub-44
+string-literal + `cn()` composite (`:396-401`); native `<select>` literal h-8/h-9/h-10
+(`:415-420`), scale-token catch-all `{min-h|h}-(1..10)` (`:428-433`), arbitrary
+`min-h-[<44px]` (`:436-441`), all with `(?<!max-)` negative-lookbehind and ≥44
+override lookaheads. Multi-line normalization via `findJsxTagEnd` (`:561-610`)
+tracks string/template/brace depth, skips `//` `/* */` comments, and closes only at
+`braceDepth === 0 && prev !== '='` (`:600`) — the documented `=>`-arrow rejection so
+an inline event handler does not prematurely close the tag. Audit green; correctly
+declares `ui/switch.tsx: 0` after the cycle-3 fix.
 
 ---
 
@@ -193,23 +177,37 @@ config so a future regression that re-introduces async methods fails CI.
 
 | # | Criterion | Status | Evidence |
 |---|-----------|--------|----------|
-| 1 | Privacy compile guard fails on leak | VERIFIED | data.ts:416-420 type assertion + privacy-fields.test.ts |
-| 2 | CLIP heals production→disabled unless env opt-in | VERIFIED | gallery-config.ts:143-145; semantic tests green |
-| 3 | Backfill paths persist identical column set | VERIFIED | admin-backfill-runner.ts:559-568 == backfill-color-pipeline.ts:371+ |
-| 4 | migrate.js throws on skipped journal entries, full coverage | VERIFIED | migrate.js:709-718 over full journalMigrations (L750/L760) |
-| 5 | blur-data-url enforced at 3 points | VERIFIED | process-image.ts:895, images.ts:352, photo-viewer.tsx:196 |
-| 6 | CSV strips bidi+zero-width+formula+C0/C1 | VERIFIED | csv-escape.ts:44/54/55/60-62 + validation.ts:58 |
-| 7 | Touch-target audit catches Button/Badge/select multi-line | VERIFIED | touch-target-audit.test.ts findJsxTagEnd:600, FORBIDDEN:396-441 |
-| 8 | Rate limit per-IP + per-account both bounded | VERIFIED | auth-rate-limit.ts:19/21-39/92-94 |
-| 9 | publicSelectFields omits GPS/filenames, derived | VERIFIED | data.ts:325-357; privacy-fields.test.ts:58-59 |
-| 10 | Stripe async gap unhandled | VERIFIED (nuance) | webhook:88/105; checkout:207 card-only mitigation |
+| 1 | Switch thumb edge-to-edge, audit still green | VERIFIED | switch.tsx box-model math + touch-target green |
+| 2 | Sidecar exit non-zero on all-detection-failure | VERIFIED | backfill-color-pipeline.ts:485 + detection-failure test green |
+| 3 | CLIP heals production→disabled unless env opt-in | VERIFIED | gallery-config.ts:143-145; semantic tests green |
+| 4 | Privacy compile guard fails on leak | VERIFIED | data.ts:416-451 + tsc exit 0 + privacy-fields green |
+| 5 | Advisory locks named/scoped as documented | VERIFIED | advisory-locks.ts:19-44 + advisory-locks green |
+| 6 | migrate.js throws on skipped journal entries, full coverage | VERIFIED | migrate.js:710-718 over full journalMigrations |
+| 7 | blur-data-url enforced at 3 points | VERIFIED | process-image.ts:895, images.ts:352, photo-viewer.tsx:196 |
+| 8 | CSV strips formula+bidi+zero-width+C0/C1 | VERIFIED | csv-escape.ts:44/54/55/60-62 + validation.ts:58 |
+| 9 | Stripe async gap unhandled; card-only pin | VERIFIED (nuance) | webhook:105; checkout:207 |
+| 10 | Touch-target audit catches Button/Badge/select multi-line | VERIFIED | touch-target-audit.test.ts:396-441,561-600 |
 
 ## Gaps
-- None blocking. The only "gap" (CLAIM 10) is an explicitly documented,
-  test-pinned, operationally-closed deferral, not a defect.
+
+- **None blocking.** One cosmetic NIT: `switch.tsx:14` comment + commit message
+  cite `translate-x-[calc(100%-2px)]` but the code uses `translate-x-full` (the
+  correct value). Comment drift only; behavior is correct. Risk: low. Suggestion:
+  align the comment with the code (`translate-x-full`) on the next touch of the file
+  — do NOT change the code to match the comment (that would under-travel by 2px).
+- The Stripe async gap (CLAIM 9) is an explicitly documented, test-pinned,
+  operationally-closed deferral (re-opens before async payment methods are enabled),
+  not a defect.
 
 ## Recommendation
+
 **APPROVE** — all 10 load-bearing behavioral claims hold against current code at
-HEAD b1e9e0da, with 105 fresh claim-relevant tests passing and concrete
-file+line evidence for each. No contradictions found. The Stripe deferral is
-honestly documented and operationally mitigated by the card-only checkout pin.
+HEAD f8147868, with 226 fresh claim-relevant tests passing, a clean
+`tsconfig.typecheck.json` typecheck (the gating mechanism for the compile-time
+privacy guards), and concrete file:line evidence for each. 0 contradictions, 0
+inconclusive. The two prior-cycle fixes the prompt called out (switch geometry
+`a3b8c557`, sidecar exit code `a033056d`) are independently verified correct at the
+code level — the switch fix is genuinely edge-to-edge (box-model math, not just
+"looks fixed"), and the sidecar now exits 1 on an all-detection-failure run. The
+HARD GUARD is honored: CLIP semantic search remains disabled-by-design and its heal
+logic is verified correct; no activation proposed. Honest convergence confirmed.

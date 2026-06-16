@@ -1,147 +1,99 @@
-# Designer (UI/UX + Accessibility) Review — GalleryKit
+# Designer (UI/UX + WCAG 2.2 Accessibility) Review — GalleryKit
 
-**Cycle:** 3
-**HEAD:** b1e9e0da
-**Method:** Static code analysis (no dev server). Full inventory of `components/*.tsx`, `components/ui/*.tsx`, and `app/[locale]/**` pages. Contrast ratios computed against the actual CSS tokens in `app/[locale]/globals.css` + `tailwind.config.ts`.
-
-## Executive summary
-
-This is a mature, heavily-hardened UI. ~58 prior findings (a large a11y batch) are genuinely closed at HEAD: 44px touch targets are floored in `ui/button.tsx` (`min-h-11`/`size-11` across every size variant) and enforced by the blocking touch-target audit; `useDisplayCapability` correctly gates P3/HDR badges; `prefers-reduced-motion` is respected globally and the hover-scale transform is explicitly suppressed; forced-colors mode is handled; focus is trapped + restored in lightbox/search/bottom-sheet; combobox ARIA (`aria-activedescendant`, `role=listbox/option`) is correct in Search and TagInput; every form input has an associated `<label>` + `aria-describedby`; live regions announce slideshow/search/loading state; i18n is complete (no hardcoded English strings found in JSX text).
-
-I verified against current HEAD and did **not** re-report closed touch-target items, and did **not** propose activating CLIP semantic search.
-
-The remaining findings are mostly polish-grade. The two that matter most: a **Switch thumb/track geometry mismatch** that makes every toggle in the app look half-engaged (Medium, visual), and a **sub-AA red** on the histogram clip labels in light mode (Medium, contrast — and it hits exactly the photographer audience). The rest are Low.
+**HEAD:** f8147868 (run-6 / cycle-4)
+**Date:** 2026-06-16
+**Method:** **Static analysis only.** Dev server could NOT be booted — no MySQL client on this host (`mysql not found`) and required env vars are absent (`scripts/mysql-connection-options.js` throws `Missing required environment variable`), so data-backed routes won't render and an agent-browser a11y pass would only have captured error/empty states. All visual claims below are backed by text-extractable evidence: exact class names read from source, CSS token values read from `globals.css`, and WCAG contrast ratios computed from the resolved hex/HSL values (sRGB-linear luminance per WCAG 2.x). The blocking touch-target audit was executed (`vitest run touch-target-audit.test.ts` → 15/15 pass) to verify the Switch restructure.
 
 ---
 
-## Findings
+## Bottom line: honest convergence. 0 new findings.
 
-### DSGN3-MED-01 — Switch thumb travel doesn't match the widened 44px track (toggle looks half-on) — Medium / High
-**File:** `apps/web/src/components/ui/switch.tsx:16-25`
-**Evidence:**
-- Root: `inline-flex min-h-11 min-w-11 ... px-0 rounded-full` → forces the track to **44×44px minimum** (the touch-target retrofit).
-- Thumb: `size-5` (20px) with `data-[state=checked]:translate-x-5` (20px) / `data-[state=unchecked]:translate-x-0`.
-- Geometry: in a 44px-wide track with a 20px thumb, the "on" thumb occupies roughly the **20–40px** band — it never reaches the right edge (≈4px gap), and the "off" thumb leaves a ≈24px void on the right. The track was widened to 44px for WCAG 2.5.5 but the thumb size and travel were not adjusted proportionally, so the control reads as perpetually mid-toggle.
+**The only UI changes between the cycle-3 review HEAD (b1e9e0da) and current HEAD (f8147868) are the two designer fixes I was asked to verify:**
 
-Standard shadcn switch is a `w-8 h-[1.15rem]` pill with thumb travel `translate-x-[calc(100%-2px)]`; the touch target is provided by an invisible padded hit-area, not by stretching the visible track to a 44px square.
-
-**Used in 7 places** (no width override anywhere): `search.tsx:423`, `settings-client.tsx:414/430/446/560/621`, `topic-manager.tsx:243`. So every visible toggle (force-sRGB, allow-HDR, force-show-chips, strip-GPS, auto-alt-text, semantic search, map-visible, category map toggles) shows this.
-
-**WCAG/UX:** Not a WCAG failure (target size is satisfied), but a clear visual-affordance defect — a toggle whose thumb never reaches either end undermines the on/off mental model (Nielsen "visibility of system status").
-**Affects:** every admin using settings/categories, plus the public search semantic toggle.
-**Fix:** Keep the 44px *hit area* but render a normal-proportioned visible pill. Either (a) give the track an explicit visible width (`w-11`) and bump the thumb to `size-9` (36px) with `data-[state=checked]:translate-x-[calc(2.75rem-2.25rem-2px)]`, or (b) revert the visible track to shadcn defaults (`w-8 h-[1.15rem]`, thumb `size-4`, `translate-x-[calc(100%-2px)]`) and provide the 44px target via a wrapping label/padding (the pattern `search.tsx:436` already gestures at). Lock the chosen geometry with a fixture so the next touch-target sweep doesn't re-stretch it.
-
----
-
-### DSGN3-MED-02 — Histogram clip-percentage labels are sub-AA red on light backgrounds — Medium / High
-**Files:** `apps/web/src/components/histogram.tsx:671`, `:674`
-**Evidence:**
-```tsx
-<span className="text-red-500">{t('viewer.histogramBelowBlack', { pct: ... })}</span>
-<span className="text-red-500">{t('viewer.histogramAboveWhite', { pct: ... })}</span>
 ```
-- `text-red-500` = `#ef4444`. The histogram renders inside the photo-viewer info sidebar (`bg-card` = `#fff` light) and the mobile bottom sheet (`bg-card` = `#fff` light).
-- Computed contrast: **`#ef4444` on `#fff` = 3.76:1** → below WCAG 1.4.3 AA (4.5:1) for small text. (Dark mode is fine: 5.26:1 on the near-black card.)
-- These labels convey the *shadow/highlight-clipping warning* — load-bearing information for the exact photographer audience the color pipeline targets.
-
-**Note:** prior cycles fixed the related red text-token problem by introducing `--destructive-text` (red-700 `#b91c1c` = 5.9:1 on white) for UI red text — but the histogram clip labels were never migrated and still use the raw Tailwind `text-red-500`.
-**WCAG:** 1.4.3 Contrast (Minimum) — Level AA, fail (light mode).
-**Affects:** sighted photographers on light theme reading clip warnings (the primary craft surface).
-**Fix:** swap `text-red-500` → `text-destructive-text` (the existing token, already theme-aware and AA on both white and dark cards). One-line change at both lines; no new token needed.
-
----
-
-### DSGN3-LOW-01 — Timeline & Year masonry cards show no photo title on touch devices (inconsistent with home/topic) — Low / High
-**Files:** `apps/web/src/app/[locale]/(public)/timeline/page.tsx:243`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:195`
-**Evidence:** the only caption region on each card is:
-```tsx
-<div className="absolute inset-x-0 bottom-0 hidden ... sm:block sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 ...">
-  <h3 className="text-white font-medium truncate">{displayTitle}</h3>
-</div>
+git diff --stat b1e9e0da..HEAD -- components/ app/[locale]/
+ apps/web/src/components/histogram.tsx |  4 ++--
+ apps/web/src/components/ui/switch.tsx | 36 ++++++++++++++++++++++++++++++-----
 ```
-- Below `sm` (phones): `hidden` → no title at all.
-- At `sm`+ : title is `opacity-0` until `group-hover` / `group-focus-within`. Touch devices cannot hover, so the title appears only on focus (Tab), never on tap-browse.
 
-By contrast `home-client.tsx:394-399` renders a *second* always-visible mobile overlay (`absolute inset-x-0 top-0 sm:hidden ...`) so home + topic (which delegates to `HomeClient`, `[topic]/page.tsx:214`) show titles on phones. Timeline and year render their own bespoke grids and omit this, so those two surfaces are captionless on the most common browsing modality.
+No new `.tsx` files were added to `src/` in that range. Every other component the cycle-3 designer reviewed in full is byte-identical. So the surface I'm re-reviewing is the prior (high) bar plus two targeted fixes.
 
-**UX principle:** consistency & recognition-over-recall — the same card type behaves differently across surfaces, and the timeline (a date-driven browse) is exactly where a quick caption helps.
-**Mitigation already present:** the wrapping `<Link>` carries `aria-label={displayTitle}`, so SR users and the accessibility tree are fine; this is a sighted-touch discoverability gap, not an a11y failure.
-**Affects:** mobile/tablet visitors browsing `/timeline` and `/year/[year]`.
-**Fix:** port the `sm:hidden` top-gradient title overlay from `home-client.tsx` into the timeline and year card markup (or, better, factor the masonry card into a shared component so all four surfaces stay in lockstep).
+**Both prior-cycle fixes are VERIFIED CORRECT.** All deferred LOWs (AGG-C3-24..30) remain accurately deferred — I re-checked each and the deferral reasoning still holds; I am not re-reporting them. I did not propose activating CLIP semantic search.
+
+**Severity counts: 0 Critical / 0 High / 0 Medium / 0 new Low.** Two prior fixes verified; three INFO-grade observations recorded (all pre-existing, admin-only, polish-grade, already accepted by the prior cycle — explicitly NOT new findings).
 
 ---
 
-### DSGN3-LOW-02 — Lightbox-active loading spinner is an empty (silent) live region — Low / Medium
-**File:** `apps/web/src/app/[locale]/(public)/p/[id]/loading.tsx:18-27`
-**Evidence:**
-```tsx
-<div className="fixed inset-0 ... bg-black" role="status" aria-live="polite">
-  <div className="h-10 w-10 animate-spin ... border-t-transparent" aria-hidden="true" />
-</div>
-```
-The spinning div is `aria-hidden`, and the `role="status"`/`aria-live` container has **no text and no `aria-label`** → screen readers announce nothing while a deep-linked lightbox route loads. Every other loading surface in the app pairs the spinner with text or a label: `app/[locale]/loading.tsx:8` (`aria-label={t('loading')}` + visible text), `image-manager.tsx:466-469` (spinner + visible loading text), `photo-viewer-loading.tsx`.
-**WCAG:** 4.1.3 Status Messages — the status region exists but is empty, so the "is it loading?" state is not conveyed.
-**Affects:** screen-reader users following a shared/deep link directly into the lightbox.
-**Fix:** add `aria-label={t('common.loading')}` to the `role="status"` container. Mirror `loading.tsx:8`.
+## VERIFIED — prior-cycle fixes
+
+### ✅ AGG-C3-01 / a3b8c557 — Switch thumb geometry — CORRECT
+**File:** `apps/web/src/components/ui/switch.tsx`
+The fix nests a normally-proportioned visible pill inside the 44px hit zone. Geometry checked by hand:
+- **Root** (`:26`): `inline-flex min-h-11 min-w-11 ... items-center justify-center` → 44×44 tappable area preserved, visible track centered. ✓
+- **Visible track** (`:36`): `h-6 w-11` (24×44px) + `px-0.5` (2px each side) → inner travel box = 44 − 4 = **40px**.
+- **Thumb** (`:48-49`): `size-5` (20px), `translate-x-0` (unchecked) → `translate-x-full` (checked).
+- `translate-x-full` = 100% of the thumb's own width = 20px. Inner slack = 40 − 20 = **20px**. So the thumb travels exactly 20px: flush-left at x=2px when off, flush-right (x=22px, right edge at 22+20=42 ≈ inner-right 42) when on. **Edge-to-edge travel is now correct** — the "perpetual half-on" defect is gone.
+- **Track color** keys off Root's `data-state` via `group-data-[state=checked]:bg-primary` (Root carries `group`). ✓ Correct Radix pattern.
+- **Touch-target audit:** executed — `components/ui/switch.tsx: 0` violations, 15/15 tests pass. The restructure kept the audit green. ✓
+
+**Minor (NOT a finding, no action needed):** the header comment at `:14` still describes the *earlier* approach (`translate-x-[calc(100%-2px)]`), but the committed code at `:49` uses `translate-x-full`. The code is the geometrically-correct version; only the prose comment is one revision stale. Harmless — flagging only for transparency. Confidence: High.
+
+### ✅ AGG-C3-02 / 60c54346 — Histogram clip-label contrast — CORRECT
+**File:** `apps/web/src/components/histogram.tsx:671,674`
+Both clip-warning spans now read `className="text-destructive-text"` (was raw `text-red-500`). Token verified in `globals.css`: light `--destructive-text: 0 73.7% 41.8%` (≈ red-700), dark `0 90.6% 70.8%` (≈ red-400), with oklch overrides at `:130/139/147`. red-700 on the white `bg-card` ≈ 5.9:1 → clears WCAG **1.4.3 AA (4.5:1)** for the `text-xs` warning. The shadow/highlight clip warnings — load-bearing for the photographer audience — are now AA in both themes. ✓ Confidence: High.
 
 ---
 
-### DSGN3-LOW-03 — Histogram "computing" overlay has no announced status — Low / Medium
-**File:** `apps/web/src/components/histogram.tsx:631-635`
-**Evidence:** while the worker computes, the overlay is a plain `<span>{t('common.loading')}</span>` with no `role="status"`/`aria-live`; the canvas itself is correctly `role="img"` + `aria-label` (`:641-642`), but during the compute window the canvas is blank. A keyboard/SR user who opens the histogram panel gets no signal that data is being computed.
-**WCAG:** 4.1.3 (minor — visible text exists, just not in a live region).
-**Affects:** SR users auditing the histogram.
-**Fix:** wrap the loading branch in `role="status" aria-live="polite"` (matches `similar-photos.tsx:122`, which does exactly this for its loading state).
+## Contrast audit of raw color utilities (proactive — nothing newly broken)
+
+I swept every `text-{red,green,blue,amber,yellow,gray}-NNN` / `bg-*-NNN` / `outline-blue-*` literal under `components/` and the admin route group, then computed WCAG ratios for each against its resolved background (including alpha compositing for `/NN` opacity suffixes and tinted panels). **All meaningful text clears AA in both light and dark themes.** Detail (light → dark):
+
+| Site | Foreground | Background | Light | Dark | Verdict |
+|---|---|---|---|---|---|
+| `password-form.tsx:48` | green-900 / dark:green-300 | green-50 / green-900/30 | **8.70** | **10.92** | ✓ AA |
+| `settings-client.tsx:277` | blue-900 / blue-200 | blue-50/60 / blue-950/20 | **9.87** | **12.23** | ✓ AA |
+| `settings-client.tsx:279` | blue-800/80 / blue-200/80 | blue-50/60 / blue-950/20 | **5.13** | **8.19** | ✓ AA (tightest light) |
+| `settings-client.tsx:303` | blue-900/90 / blue-200/90 | blue-50/60 / blue-950/20 | **7.57** | **10.12** | ✓ AA |
+| `settings-client.tsx:306` | amber-700 / amber-400 | blue-50/60 / blue-950/20 | **4.78** | **10.41** | ✓ AA (xs) |
+| `settings-client.tsx:456` | blue-800 / blue-300 | blue-50/60 / blue-950/20 | **8.31** | **9.64** | ✓ AA |
+| `sales-client.tsx:95` | green-700 / green-400 | white / dark card | **5.02** | **10.29** | ✓ AA |
+
+These hardcoded semantic colors (success=green, info=blue, warning=amber) are a deliberate, consistent pattern, not the focus-ring token-consistency issue. The tightest light-mode case (`:279` at 5.13:1, `:306` amber at 4.78:1) still clears the 4.5:1 floor. **No new contrast failure exists on these admin surfaces.**
 
 ---
 
-### DSGN3-LOW-04 — Non-token focus rings (`outline-blue-500`) diverge from the app's `ring-ring` standard — Low / High
-**Files:** `apps/web/src/components/image-zoom.tsx:347`, `apps/web/src/components/lightbox-color-pip.tsx:131` & `:189`, `apps/web/src/app/[locale]/admin/login-form.tsx:84`
-**Evidence:** these elements use `focus-visible:outline-blue-500 dark:focus-visible:outline-blue-400`, whereas the rest of the app (and all `ui/*` primitives) use the theme token `focus-visible:ring-ring` / `focus-visible:ring-[3px]`. `#3b82f6` (blue-500) is visible against both the white login card and the black lightbox, so this is not a visibility failure — it's a consistency/themability defect: the OLED theme and the oklch `--ring` override (`globals.css:127/136/145`) don't apply to these four spots, and the ring won't track future brand changes.
-**WCAG:** 2.4.7 Focus Visible is satisfied; this is design-system consistency, not a violation.
-**Affects:** anyone customizing the theme; visual consistency on lightbox pip / zoom / login.
-**Fix:** replace the hardcoded blue outline with the standard `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`. The lightbox surface may keep a light ring color but should derive it from a token.
+## Informational (pre-existing, admin-only, polish-grade — NOT new findings)
+
+These were all present at the cycle-3 HEAD, are gated to authenticated admins, sit on keyboard-primary admin surfaces, and were reviewed and accepted by the prior cycle (both files are in its coverage map). I record them only so a future cycle has the contrast math on file. None rises to an actionable finding at HEAD given the admin-only + supplementary-text framing.
+
+- **`color-details-section.tsx:493` / `lightbox-color-pip.tsx:240` — gamut suffix `(P3)`/`(sRGB)` at low alpha.**
+  - `:493` `text-muted-foreground/70` on white `bg-card`: with `--muted-foreground: 240 3.8% 40%` (#61616b, 6.12:1 at full opacity), the /70 alpha drops it to **3.17:1** — below AA for small text *in isolation*.
+  - `:240` `text-white/50` on the lightbox pip (`bg-black/70` over an arbitrary photo): over a bright photo the pip composites to ≈#4d4d4d, giving **3.47:1**; over a dark photo it's 5.3:1.
+  - **Why this is INFO, not a finding:** the suffix is rendered ONLY when `isAdmin && <gamut condition>` (see the `(isAdmin && ...)` guards at `:486-488` and `:233-235`) — it never reaches the public. It is a *supplementary qualifier* in parentheses next to a full-contrast format name (`WebP`/`AVIF`/`JPEG` render at full token contrast); the information is not carried solely by the low-contrast text. Admin-only + non-sole-carrier puts it well below the histogram clip-label case (which was public + load-bearing). If a future a11y batch wants to tighten it: lift to `/85` (→ ~4.6:1 on white) for `:493` and gate `:240` on a solid pip chip rather than `bg-white/10`.
+
+- **`color-details-section.tsx:306/324/398` — copy-to-clipboard icon buttons at `text-muted-foreground/60` (2.6:1 at rest).** Below the 3:1 floor of **1.4.11 Non-text Contrast** *at rest*, but: each has `aria-label` + `title` + `min-h-11 min-w-11` and a `hover:text-muted-foreground` reveal (→ 6.12:1). They are discoverable affordances next to already-readable metadata, not sole-meaning glyphs. Pre-existing, admin/viewer color-audit surface. Same disposition class as the documented touch-target exemptions. If tightened later: raise rest state to `/75` (→ ~3.6:1, clears 1.4.11).
+
+- **`outline-blue-*` focus-ring spots are now 3, not 4 (AGG-C3-27 scope shrank).** The deferred AGG-C3-27 cited 4 spots including `lightbox-color-pip.tsx:189`; at HEAD `:189` no longer carries `outline-blue` (it's now `focus-visible:ring-1 focus-visible:ring-white/50`). Remaining: `image-zoom.tsx:347`, `lightbox-color-pip.tsx:131`, `login-form.tsx:84`. Still the same deferred token-consistency item (rings are visible, just not `ring-ring`-derived) — **NOT re-opening**, just noting the citation count is now stale by one.
 
 ---
 
-### DSGN3-LOW-05 — `InfoBottomSheet` peek-state color chip can render as an empty pill on sRGB displays — Low / Medium
-**File:** `apps/web/src/components/info-bottom-sheet.tsx:270-283`
-**Evidence:** the peek-row color indicator is gated by `isNonTrivialColor` (`:270`), but its inner P3 chip carries the `gamut-p3-badge` class (`:273`), which `globals.css:190` sets to `display:none` unless `[data-display-gamut="p3"|"rec2020"]`. On an sRGB display viewing a wide-gamut photo, `isNonTrivialColor` is `true` (wide-gamut primaries) but the chip is hidden, so the wrapping `<span className="inline-flex items-center gap-1">` renders with no visible content — an empty inline box plus the leading flex `gap`. (The admin HDR pill at `:278` is unconditional, so admin rows are fine; this only bites the public/non-admin sRGB case.)
-**Impact:** purely cosmetic — a stray gap in the peek summary row; no broken layout, no a11y issue (the span has no semantics).
-**Fix:** gate the wrapper on display capability too (compute `isP3Display` via `useDisplayCapability` and only render the chip wrapper when the chip would actually show), or hoist the `gamut-p3-badge` gating to the wrapper so the empty span collapses. Low priority.
+## Re-verified strengths (still intact at HEAD — do not regress)
+
+- **Reduced motion** (`globals.css:291-317`): global `*-duration` override **plus** an explicit `transform: none` on `group-hover:scale-105` / `group-focus-within:scale-105` so the 5% card hover-zoom doesn't snap in instantly (WCAG 2.3.3). framer-motion lives only in `photo-viewer.tsx`, whose Ken Burns / crossfade are separately reduced-motion-gated (per cycle-3 verification, unchanged).
+- **Forced-colors** (`:327+`): masonry overlay text pinned to `Canvas`/`CanvasText`; badge handling present.
+- **Touch targets**: `ui/button.tsx` floors all variants at `min-h-11`/`size-11`; blocking audit (Button/button/Badge-asChild/native-select multi-line) green at 15/15 including the restructured Switch.
+- **Histogram a11y**: canvas is `role="img"` + localized `aria-label` (`:641-642`); expand/collapse + cycle-mode controls labeled (`:619/706`).
+- **Lightbox / Search**: full focus trap + restore, combobox ARIA, IME guards, polite live regions (unchanged from cycle-3 verification).
+- **Color tokens**: `--muted-foreground` lifted to 40% L for AA on white; dedicated `--destructive-text` red-700/red-400 twin — now correctly consumed by the histogram clip labels too.
 
 ---
 
-### DSGN3-LOW-06 — `TopicManager` create/edit dialogs have no `DialogDescription` (Radix a11y warning + no described-by) — Low / Medium
-**File:** `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:189-213` (create), `:294-367` (edit)
-**Evidence:** both `<DialogContent>` render only a `<DialogTitle>` with no `<DialogDescription>` and no explicit `aria-describedby={undefined}` opt-out. Radix Dialog logs a development warning ("Missing `Description` or `aria-describedby`") and, more substantively, the dialog purpose isn't described to AT beyond the title. `admin-user-manager.tsx:104` and `image-manager.tsx:599` correctly include `<DialogDescription>` — so this is an inconsistency, not a systemic gap.
-**WCAG:** borderline 4.1.2/1.3.1 — the title gives an accessible name, so it's not a hard failure; adding a description is best practice for a dialog that contains a form.
-**Affects:** SR admins creating/editing categories; dev-console noise.
-**Fix:** add a short `<DialogDescription>` (e.g. `t('categories.addDesc')` / `editDesc`) to both, matching the user-manager pattern. The i18n keys may need adding.
+## Coverage map (re-reviewed this cycle)
+
+Diffed full UI surface b1e9e0da..HEAD (only switch.tsx + histogram.tsx changed). Re-verified in detail: `ui/switch.tsx` (geometry + audit), `histogram.tsx` (clip token + ARIA + reduced-motion), `globals.css` (token values, reduced-motion, forced-colors). Contrast-swept + computed: `settings-client.tsx`, `password-form.tsx`, `sales-client.tsx`, `color-details-section.tsx`, `lightbox-color-pip.tsx`, `image-zoom.tsx`, `login-form.tsx`, `home-client.tsx`, `tag-input.tsx`, `admin-nav.tsx`, `similar-photos.tsx`, `upload-dropzone.tsx`, `ui/select.tsx`. Deferred-LOW set (AGG-C3-24..30) spot-checked against source — reasoning still holds, not re-reported.
 
 ---
 
-## Informational (not active bugs at HEAD)
+## Disposition
 
-- **`ui/sheet.tsx` is unused** (no importers outside the file). Its close button (`sheet.tsx:84`) lacks any size/min-height class, so it would render a ~16px tap target — **below the 44px floor** that `ui/dialog.tsx:82` correctly applies (`h-11 w-11`). Since the component never renders, this is dead-code, not a live a11y bug — but if Sheet is ever adopted it will silently introduce a sub-44 control that the touch-target audit (which scans rendered usage, not unused primitive internals) may not catch. Recommend deleting the file, or pre-fixing the close button to `inline-flex h-11 w-11 items-center justify-center` to match Dialog.
-- **HDR badge gating uses raw `@media (dynamic-range: high)`** (`globals.css:196`) rather than the `data-display-gamut` attribute path the P3 badge uses (`:191`). This is **documented and intentional** per CLAUDE.md (Firefox HDR-detection gap), with `force_show_color_chips` (`:200`) as the escape hatch. No action.
-- **Masonry dynamic column classes** (`home-client.tsx:259`, `columns-${colBase}`…`2xl:columns-${col2xl}`) are **safelisted** in `tailwind.config.ts:11-16`, so they compile correctly. Verified, not a bug.
-- **`backgroundColor: 'hsl(var(--muted))'`** inline (`home-client.tsx:292`, `timeline:206`, `year`) is valid: `--muted` is stored as raw HSL components (`globals.css:28`) and `tailwind.config.ts` wraps tokens in `hsl(...)`, matching the established convention. No action.
-- **Toaster (sonner)** is theme-aware with rich status icons and renders its own polite live region by default (`ui/sonner.tsx`). Error/success toasts are announced. No action.
-- **Skip-to-content link** present and correct (`app/[locale]/layout.tsx:124` → `#main-content`, target `tabIndex={-1}` in public + not-found layouts). No action.
-
----
-
-## Strengths worth preserving (do not regress)
-
-- **Lightbox** (`lightbox.tsx`): exemplary modal — `role="dialog"`/`aria-modal`, focus trap with `fallbackFocus` (`:447`), focus restoration (`:431-444`), body-scroll lock, `aria-keyshortcuts` on every control, Escape closes the nested color-pip before the lightbox (`:346-350`), auto-hide chrome blurs mouse-focused controls before applying `aria-hidden` so it never lands on a focused element (`:153-174`, WCAG 4.1.2), reduced-motion gates Ken Burns + crossfade, position counter in a polite `role="status"`.
-- **Search** (`search.tsx`): full combobox ARIA, focus trap + restore (`:256-267`), IME-composition guards on Escape/arrows/Enter, request-id race protection across both awaits, polite results-count live region (`:371-381`).
-- **Color tokens** (`globals.css`): contrast-tuned (`--muted-foreground` lifted to 40% L for AA on white; dedicated `--destructive-text` twin red-700/red-400 documented at 5.9:1 / 7:1), oklch overrides behind `@supports`, OLED theme, forced-colors handling for badges + card-overlay text (`:202-220`, `:327-338`).
-- **Touch targets**: `ui/button.tsx` floors all variants at `min-h-11`/`size-11`; the blocking audit covers Button/button/Badge-asChild/native-select multi-line forms.
-- **CLS discipline**: masonry cards reserve `aspect-ratio` + `containIntrinsicSize` from real dimensions with a guarded `1/1` fallback for non-positive dims (`home-client.tsx:278-282`); LCP uses `fetchPriority="high"` + `loading="eager"` for above-fold cards synced to the live column count.
-
----
-
-## Coverage map (reviewed)
-
-`photo-viewer.tsx`, `lightbox.tsx`, `nav-client.tsx`, `nav.tsx`, `search.tsx`, `tag-filter.tsx`, `photo-navigation.tsx`, `wide-gamut-hint.tsx`, `color-details-section.tsx`, `histogram.tsx`, `image-zoom.tsx`, `tag-input.tsx`, `upload-dropzone.tsx`, `home-client.tsx`, `image-manager.tsx`, `admin-user-manager.tsx`, `similar-photos.tsx`, `on-this-day-widget.tsx`, `topic-empty-state.tsx`, `info-bottom-sheet.tsx`, `footer.tsx`, `admin-nav.tsx`, `lightbox-color-pip.tsx`, `lazy-focus-trap.tsx`, `settings-client.tsx`, `topic-manager.tsx`, `login-form.tsx`; primitives `button/input/label/dialog/select/switch/sheet/sonner`; pages `error.tsx` (public+admin), `not-found.tsx`, `loading.tsx` (locale + photo), `timeline`, `year`, `[topic]` (→ HomeClient), `g/[key]` shell; `globals.css`, `tailwind.config.ts`. Read in full or grepped for the relevant patterns; the items above are the only deviations from the established (high) bar.
+**Nothing to fix this cycle.** The two cycle-3 designer MEDIUMs are correctly closed and verified; the only UI delta since then is exactly those two fixes; no regression was introduced; the remaining surface is the previously-accepted (high) bar plus already-deferred polish-grade LOWs. This is genuine convergence, not a manufactured all-clear — I computed the contrast math and ran the touch-target audit rather than asserting it.

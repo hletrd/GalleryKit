@@ -1,105 +1,81 @@
-# Code-Quality Review — GalleryKit (Cycle 3, run-6)
+# Code Reviewer — Run 6 / Cycle 4 (HEAD f8147868, 2026-06-16)
 
-**Reviewer:** code-reviewer agent
-**HEAD:** b1e9e0da
-**Date:** 2026-06-16
-**Focus:** logic correctness, SOLID, maintainability, error handling, invariant/state-consistency, edge cases, data-flow. Recently-touched files prioritized.
-**Method:** Read the prior-cycle file (HEAD 8ccc8806, 9 commits behind). Built a focus-area inventory, deep-read every recently-touched file at CURRENT HEAD (admin-backfill-runner.ts, sw.template.js/sw.js/sw-cache.ts, serve-upload.ts, color-detection.ts, process-image.ts key regions, migrate.js post-condition path, backfill-color-pipeline.ts, public page.tsx, admin error.tsx, OG photo route, db-actions.ts restore path, embeddings.ts). Fanned out two parallel `Explore` sweeps over the server-action and lib breadth, then **independently verified every candidate against live source** before recording.
+**Angle:** code quality, logic bugs, SOLID, maintainability, error handling, edge cases.
+**Verdict:** **Honest convergence — 0 new Critical / 0 High / 0 Medium / 0 actionable Low.** One cosmetic comment-vs-code drift (NIT) introduced by this cycle's own Switch fix, noted for completeness. Everything else verified clean at HEAD.
 
----
-
-## Executive summary
-
-The codebase remains exceptionally hardened after ~58 closed findings across prior cycles. The 9 commits since cycle 2 (OG SSRF pin, GPS zero-offset anomaly, embeddings mode-awareness, view-retention sweep, SW head-walk LRU, serve-upload fd release, WebP-ICC 1 KB read, Stripe card-only, map LIMIT) are all well-formed and **all verified present + correct** at this HEAD.
-
-Static hygiene is excellent: zero `as any`, zero `@ts-ignore`/`@ts-expect-error`, zero truly-empty `catch {}` in product code across the focus files.
-
-**Both Explore-sweep candidates dissolved on direct verification** (documented under "Verified non-issues") — exactly the pattern from cycle 2. The one candidate raised at "High" confidence (db-actions.ts:352 missing `.catch()`) is a NON-issue because the `release()` method is internally guarded and cannot reject.
-
-Prior-cycle findings re-checked at this HEAD:
-- **CR-01** (embeddings dead+mode-inconsistent) — **FIXED** (commit c00e034b; `backfillClipEmbeddings` is now mode-aware, embeddings.ts:55-90).
-- **CR-02** (GPS zero-IFD0-offset lenient) — **FIXED** (commit d17e5cc2).
-- **CR-03** (lint gate skips non-async exports) — still open as a documented-acceptable Low (framework rejects the shape; not reachable). Not re-litigated.
-
-Genuine NEW findings this cycle are few and low-impact. **Nothing rises to Critical or (confirmed) High at HIGH confidence.**
-
-### Counts by severity (HIGH-confidence only gate the verdict)
-- **Critical:** 0
-- **High:** 0
-- **Medium:** 0
-- **Low:** 2 (CR3-01, CR3-02)
-- **Nits:** 1 (CR3-03)
+This is cycle 4 of a system that closed ~58 findings across runs 4–6. I read the two authoritative ledgers first (`_aggregate.md` cycle-3, `plan-353-run6-cycle3-deferred.md`), confirmed all 8 cycle-3 fixes landed correctly, then examined the highest-regression-risk recently-touched files from my angle and validated behavior directly from source (not comments/tests). I also fanned out two read-only Explore agents over the CLIP surface and the actions/lib surface; **I personally verified every candidate they surfaced against the actual code and schema, and the entire "critical/high" batch they returned was false positives** (details + debunk below, since silently dropping them would lose the audit trail).
 
 ---
 
-## Low
+## Cycle-3 fixes — all 8 verified correctly applied at HEAD
 
-### CR3-01 — `backfill-color-pipeline.ts` sidecar exits 0 ("success") on an all-detection-failure run
-**File:** `apps/web/scripts/backfill-color-pipeline.ts:413-462` (esp. 416-417, 462)
-**Confidence:** Medium (fact), Low (impact)
+| Finding | Commit | Verified |
+|---|---|---|
+| AGG-C3-01 Switch geometry | a3b8c557 | `min-h-11/min-w-11` hit area preserved on Root; visible track is a nested `h-6 w-11` pill; thumb `size-5` + `translate-x-full` → full-width travel. Geometry correct (see NIT-1 for a stale comment). |
+| AGG-C3-02 Histogram contrast | 60c54346 | Both clip-warning spans now `text-destructive-text` (histogram.tsx:671,674). AA-compliant. |
+| AGG-C3-03 TMPDIR isolation | 06a3c5e7 | `TOPIC_RESOURCES_ROOT` env override added (process-topic-image.ts:16-21), mirrors upload-paths pattern; production unset → unchanged. |
+| AGG-C3-04 Backfill exit code | a033056d | `detectionFailures` tracked separately, surfaced in summary + WARN line, `process.exit(errors>0 || detectionFailures>0 ? 1 : 0)` (backfill-color-pipeline.ts:342,464-485). Correct. |
+| AGG-C3-05 settings-hash docstring | f603cd3f | Docstring now `max-age=3600, must-revalidate` (settings-hash.ts:20-24). |
+| AGG-C3-06 serve-upload ETag comment | f603cd3f | Inline 9-key list removed; points at `COLOR_IMPACTING_KEYS` (serve-upload.ts:197-202). |
+| AGG-C3-07 Stripe cross-ref label | 22d02262 | CLAUDE.md cross-ref updated. |
+| AGG-C3-18 color-detection re-export | 0ef29a10 | Re-export removed; `actions/images.ts:29` + `wide-gamut-primaries.test.ts` repointed to `@/lib/color-primaries` leaf. No remaining importer reaches the predicate via the fs/sharp module. |
 
-`reprocessRow` returns `{ outcome: 'processed' }` for BOTH the success branch (line 209) and the detection-failure-after-encode branch (line 230). In `main`, `processed++` is incremented for both (line 417), and the only thing distinguishing them downstream is which batch array the item lands in (`updateBatch` vs `derivativeBatch`). The detection-failure rows are NOT counted in `errors`, so the final `process.exit(errors > 0 ? 1 : 0)` (line 462) returns **0 (success)** even on a run where EVERY row's color detection threw and NO `pipeline_version` was bumped.
-
-**Why it's a problem:** An operator running the sidecar in a CI/cron wrapper that keys on exit code sees "success" while the gallery's color metadata silently failed to refresh on every row. The rows correctly remain backfill candidates (the documented resume contract is intact — `was_downscaled`/`avif_10bit` persist, version stays behind), so it is not a data-integrity bug; it is an **observability/exit-signal gap**. The in-app runner (admin-backfill-runner.ts) handles this better: it tallies `detectionFailures` separately and sets `lastRunHadFailures` (line 791), surfacing the distinction to the admin UI. The sidecar's stdout DOES log `derivative-only` counts per batch (line 410), but the exit code and the final summary line (line 452) do not reflect detection failures as a non-clean outcome.
-
-**Failure scenario:** A libheif/Sharp regression makes `detectColorSignals` throw on every original. Operator runs the documented `--rm` sidecar in a deploy hook; it re-encodes all derivatives, logs `processed=N`, exits 0. The deploy hook reports green. Color audit columns are now stale for the entire gallery and only a human noticing the per-batch `(N derivative-only)` log lines would catch it.
-
-**Fix:** Either (a) track a `detectionFailures` counter in `main` (incremented when `result.derivativeOnly` is set) and fold it into the exit-code decision / final summary (`exit(errors > 0 || detectionFailures > 0 ? 1 : 0)` or at least a distinct non-zero code), or (b) add `detectionFailures` to the closing summary line so the signal is at least visible. Align with the in-app runner's `lastRunHadFailures` semantics.
-
----
-
-### CR3-02 — Doc/comment drift: serve-upload.ts ETag comment + CLAUDE.md both now say "9" but the inline list re-enumerates the keys (the very anti-pattern the comment warns against)
-**File:** `apps/web/src/lib/serve-upload.ts:197-208`
-**Confidence:** High (fact), Low (impact — comment only)
-
-The comment block at 197-208 says *"do NOT re-enumerate them here; it drifts. AGG-D1"* — and then proceeds to **re-enumerate all 9 keys inline** (`wide_gamut_jpeg_chroma, sdr_jpeg_chroma, avif_effort, force_srgb_derivatives, wide_gamut_max_source_pixels, image_quality_webp/avif/jpeg, image_sizes`). The count ("9-entry") and the list currently match `settings-hash.ts:37-49`, so there is no live inconsistency today, but the comment simultaneously forbids and performs the enumeration. The next person who adds a 10th `COLOR_IMPACTING_KEY` will update `settings-hash.ts` and the test, but this prose list is easy to miss — re-introducing exactly the stale-"5" drift that AGG-R7-08 just corrected.
-
-**Why it's Low:** It is a comment, not code; the ETag is computed from `getColorSettingsHash(config)` which reads the authoritative array. No runtime impact.
-
-**Fix:** Replace the inline enumeration with a pointer only: *"the authoritative list is `COLOR_IMPACTING_KEYS` in settings-hash.ts (currently 9 entries) — see there; do not duplicate."* Same treatment the comment already prescribes.
+No regressions introduced by these fixes (each verified by reading the resulting source).
 
 ---
 
-## Nits
+## Recently-touched core files — examined from my angle, all clean
 
-### CR3-03 — `db-actions.ts` inner-finally `await uploadContractLock?.release()` lacks a `.catch()` unlike its three sibling RELEASE_LOCK calls
-**File:** `apps/web/src/app/[locale]/admin/db-actions.ts:352`
-**Confidence:** High (fact), Nit (NOT a defect — see verification)
-
-Raised by the server-action sweep at "High" confidence; **downgraded to a Nit after verifying the callee.** Line 352 (`await uploadContractLock?.release()`) is the only lock-release in the function without an attached `.catch()` (siblings at 304, 323, 349 all have one). However, `acquireUploadProcessingContractLock`'s returned `release()` (`upload-processing-contract-lock.ts:47-56`) wraps its `RELEASE_LOCK` query in `try { … } catch (err) { console.debug(…) } finally { conn.release(); }` — **it can never reject.** So the missing `.catch()` here is harmless; the `await` resolves regardless of DB state. Purely a stylistic asymmetry. Optional: add `.catch(() => {})` for visual consistency with the siblings, or leave it (the callee already owns its failure handling).
-
----
-
-## Verified non-issues (candidates checked directly against live code)
-
-Recording so cycle 4 does not re-flag:
-
-1. **db-actions.ts:352 "missing `.catch()` = unhandled rejection"** — NON-ISSUE. `release()` (upload-processing-contract-lock.ts:47-56) is internally try/catch/finally-guarded and never rejects. The Explore agent's "High" was overstated.
-2. **process-image.ts WI-15 "downscale loses aspect / fan-out uses `baseWidth` not `processingBaseWidth`"** — FALSE (re-confirmed at this HEAD). Line 1084 uses `processingBaseWidth` for the upscale guard; lines 1123/1126 read `processingInputPath`. The downscaled intermediate is correctly threaded. Temp cleanup is in `finally` (1312-1316).
-3. **10-bit→8-bit AVIF retry "re-encodes at bitdepth 10 again"** — FALSE. `base.clone()` + explicit `bitdepth: 8` (1176-1184) with the documented R4C8 COR-R4C8-06 rationale (clone copies the options snapshot; setters never reset). Correct.
-4. **embeddings.ts `preIncrementBackfillAttempt` "TOCTOU re-fetch on line 41"** — NON-ISSUE (agent self-refuted). Single-threaded JS; the re-`get` after increment is harmless.
-5. **admin error.tsx "unused `error` prop, no logging"** — NON-ISSUE. The public twin (`app/[locale]/error.tsx`) destructures `reset` only too; neither logs client-side. Next.js logs error-boundary errors server-side and `error.digest` is the correlation handle. Intentional matched pattern.
-6. **migrate.js "post-condition can be bypassed"** — FALSE. `runMigrations` (716-718) throws on ANY missing journal hash after `migrate()`; fresh-DB (662-680) and legacy (682-696) paths both `reconcileLegacySchema` + `baselineAllJournalMigrations`. `getAllJournalMigrations` fails loud on a missing `.sql` file. Matches the CLAUDE.md runbook exactly.
-7. **admin-backfill-runner.ts `resolveBackfillConcurrency` "NaN/zero/negative cap"** — FALSE. `Number.isFinite` guard (137) handles the test-mock undefined-pool case; cap is `Math.max(1, …)`. Verified across pool sizes 1-50: always ≥ 1, never NaN. At shipped pool 10 → cap 2.
-8. **admin-backfill-runner.ts batch result "drizzle tuple not unwrapped"** — FALSE. Lines 376 & 409 unwrap `[rows, fields]` defensively, identical to the sidecar script.
-9. **color-detection.ts NCLX "code-2 Unspecified clobbers ICC values"** — FALSE (this is the FIX, not a bug). Per-field `if (nclx* !== undefined)` guards (384-386) keep ICC-derived values when NCLX leaves a field unspecified. Documented AGG-R8-06 / AGG-R8c3-01 with a test lock.
-10. **OG photo route `buildFallbackResponse` homepage redirect uses `new URL(req.url).origin` (untrusted host)** — NOT A BUG. That origin is used only as a 302 `Location` pointing the crawler back to the same site it came from; it is not a server-side fetch base (the fetch base IS pinned to `siteConfig.url`, line 113). Reflecting the request host into a self-redirect is benign.
-11. **sw-cache.ts vs sw.template.js drift** — NONE. Both implement delete-then-set recency + head-walk eviction + `if (deleted)` guard. The reference module (sw-cache.ts) additionally maintains the `evicted` byte tally (the template doesn't need a return value). `sw.js` differs from `sw.template.js` only by the `__SW_VERSION__` → `dd26e742-p7` stamp (expected, build-generated).
-12. **view-retention sweep arming** — CORRECT. Armed once via `!state.gcInterval` guard (image-queue.ts:712, the AGG-M12 / d979c4ca pattern), `unref()`'d, plus a one-shot bootstrap purge (702). `resolveRetentionMs` rejects non-finite/non-positive days (fail-safe to default).
-13. **All binary parsers (gps-exif-strip, icc-chromaticity, icc-extractor, gain-map-detection, color-detection ISOBMFF walker)** — bounds-checked before every read, depth/scan-capped, tagCount-clamped, NaN-guarded, consistent `null`-on-anomaly fail-safe. Re-confirmed clean by the lib sweep + spot reads.
+- **serve-upload.ts** (abort handling AGG-H5, SWR hash cache): correct. `signal.aborted` early-bail destroys fd (269-272); abort listener `{once:true}` is idempotent and request-scoped (no leak on normal completion). SWR inflight body never rejects → no unhandled rejection (58-73). Cold-start path waits exactly once.
+- **process-image.ts** `_verifyWebpIccChunk` (2784d244, 1KB partial read): correct — `fs.open` + 1KB read + `finally handle?.close().catch()`. fd released on all paths. `verifyWebpIccInBuffer(head.subarray(0, bytesRead))` correctly bounds the slice to actual bytes read.
+- **process-image.ts** metadata decode at :1019 (AGG-C3-10, deferred): deferral reasoning holds — `baseHeight` is consumed only by the wide-gamut `basePixels > cap` gate (1022), which is itself `if (isWideGamutSource && …)`, so for sRGB sources the decode result is genuinely discarded. Perf-only, correctly deferred.
+- **gps-exif-strip.ts** zero-offset fix (d17e5cc2): `if (ifdAbs <= tiffStart + 7) return null;` is the correct fail-safe (valid TIFF IFD0 offset ≥ 8 → null routes to tier-2 metadata-free re-encode). Consistent with module doctrine.
+- **histogram.tsx** clip-label block (647-678): `total === 0` guards division; per-channel worst-case max in RGB mode is correct. Contrast fix in place.
+- **image-queue.ts** CLIP embedding hook (434-478): genuinely fire-and-forget (`void (async()=>{})()`), disabled-by-default early return (442), all errors caught internally (475). Write contract (raw Buffer → MEDIUMBLOB, `onDuplicateKeyUpdate` on PK `imageId`) is consistent across all 3 write sites.
 
 ---
 
-## Coverage
+## NIT-1 — Switch.tsx top docblock describes a `translate-x` value the code does not use (cosmetic, this-cycle drift)
 
-**Deep-read in full or load-bearing regions:** admin-backfill-runner.ts (entire), sw-cache.ts (entire), serve-upload.ts (entire), color-detection.ts (entire), process-image.ts (WI-15 downscale 1000-1042, fan-out + 10-bit AVIF 1060-1189, cleanup 1305-1320, GPS-strip dispatcher 1573-1650), migrate.js (1-120 + post-condition path 640-774), backfill-color-pipeline.ts (entire), public page.tsx (entire), admin + public error.tsx, OG photo route (entire), db-actions.ts restore window (280-361), upload-processing-contract-lock.ts (entire), embeddings.ts backfill action, image-queue.ts GC arming (695-729), data.ts getLatestImageForOg/getImages/select-fields.
+- **File:** `apps/web/src/components/ui/switch.tsx:13-14` vs `:49`
+- **Issue:** The top comment block (added by the AGG-C3-01 fix, commit a3b8c557) says the thumb "travels the full visible track width via `translate-x-[calc(100%-2px)]` (width-relative, unlike the old fixed 20 px travel)." The actual implementation at line 49 uses `data-[state=checked]:translate-x-full`, and the *inline* comment at lines 41-44 correctly documents `translate-x-full` (40px inner − 20px thumb = 20px = 100% of thumb width). So the code and the geometry are right; only the top docblock cites a `calc(100%-2px)` form that was evidently considered but not shipped.
+- **Why it matters (barely):** Pure comment-vs-code drift — exactly the stale-doc class this loop polices (cf. AGG-C3-05/06 fixed last cycle). Zero runtime impact. A future maintainer reading the top block could be briefly misled about the travel mechanism before reaching the accurate inline comment.
+- **Fix:** Change the top-block phrase `translate-x-[calc(100%-2px)]` → `translate-x-full`, or drop the parenthetical (the inline comment at 41-44 already explains the mechanism precisely).
+- **Confidence:** High (fact — both lines read directly). **Impact: cosmetic.** Genuinely optional; I would not gate the cycle on it.
 
-**Breadth (Explore sweeps, every candidate verified):** all 15 server actions + db-actions.ts; data.ts, gps-exif-strip.ts, icc-chromaticity.ts, icc-extractor.ts, gain-map-detection.ts, validation.ts, auth-rate-limit.ts, rate-limit.ts, image-queue.ts, gallery-config.ts, gallery-config-shared.ts, view-retention.ts, bounded-map.ts.
+---
 
-### Top findings
-1. **CR3-01** (Low) — sidecar backfill exits 0 on an all-detection-failure run; exit code + summary don't reflect detection failures the way the in-app runner's `lastRunHadFailures` does. Observability gap, not data loss.
-2. **CR3-02** (Low) — serve-upload.ts ETag comment forbids re-enumerating `COLOR_IMPACTING_KEYS` then re-enumerates all 9; replace with a pointer to prevent the stale-count drift AGG-R7-08 just fixed.
-3. **CR3-03** (Nit, NON-defect) — db-actions.ts:352 lacks a `.catch()` unlike siblings, but the callee's `release()` cannot reject. Cosmetic.
+## Explore-agent candidates I investigated and REJECTED (audit trail)
 
-## Recommendation
-**COMMENT** — no CRITICAL/HIGH issues at any confidence. Two Low observability/maintainability items (CR3-01, CR3-02) and one cosmetic Nit (CR3-03). The codebase is in excellent shape; the 9 inter-cycle commits are correct and the two prior-cycle Low findings (CR-01, CR-02) are confirmed closed.
+I fanned out two Explore agents. Their conclusions on the well-reviewed shared/data/sharing/atom/download/collections surface ("clean") I corroborate. Their **CLIP "critical/high" batch was wrong**; recording the debunk so it is not re-litigated next cycle:
+
+- **"Rate-limit inverted logic" (embeddings.ts:33-42) — NOT A BUG.** First call: no entry → set count:1 → returns `1 > 1` = false (ALLOWED). Second call in-window: `count++`→2 → returns `2 > 1` = true (BLOCKED). That is precisely the documented "once per hour per admin" contract. The agent misread it.
+- **"Model-version upsert overwrites old row / PK is (imageId)" (backfill-clip-embeddings.ts:124) — NOT A BUG.** Schema confirms `imageEmbeddings.imageId` is the sole PK (`schema.ts:274`, `int("image_id").primaryKey()`, `onDelete:'cascade'`). One embedding row per image is the intended model; `model_version` records which encoder produced it; the read path filters by the active mode's version. Overwriting on mode switch is correct by design. The agent invented a `(imageId, modelVersion)` composite PK that does not exist.
+- **"Dimension check should be `===` not `<`" (clip-model.ts:119,179) — NOT A BUG.** jina-clip-v2 emits native **1024** dims; `truncateAndNormalize` takes the first 512 (Matryoshka). `data.length > EMBEDDING_DIM` is the EXPECTED case; `===` would break the entire feature. `embeddingToBuffer` already hard-asserts exactly 512 downstream (clip-embeddings.ts:63).
+- **"Float maps outside [-1,1]" (clip-inference.ts:41) — NOT A BUG.** `(u32 / 2³¹) − 1` over input `[0, 2³²−1]` yields `[−1, +0.99999999953]`, never >1. It is a deterministic STUB (explicitly non-semantic) and is re-normalized by `truncateAndNormalize` anyway.
+- **"Silent skip / undifferentiated error counting" (embeddings.ts:116,140) — observability nit at most, not actionable.** The action is dark-by-default and has **no UI caller** (the sidecar script is canonical, per the in-source NOTE at embeddings.ts:70-73). Counting a missing-original as `skipped` is reasonable. No data-loss path.
+
+Grounded-but-minor items from the second agent, assessed and NOT raised as findings:
+- **`getOnThisDayImages(month, day)` "no range validation" (data-timeline.ts:95).** Only caller derives month/day from `new Date()` (on-this-day-widget.tsx). MySQL `MONTH()=13` → 0 rows, no crash, parameterized (no injection). Robustness nit on an internally-bounded input; not worth a finding in a system at this maturity.
+- **`getYearInReviewImages` JS `getMonth()` vs SQL `YEAR()/MONTH()` TZ seam (data-timeline.ts:241).** mysql2 has no `dateStrings`/`timezone` override, so DATETIME returns a JS `Date`; `getMonth()` reads it in the Node-process TZ while the SQL filter uses the MySQL session TZ. In the **documented single-container deployment both are UTC and agree**, so this is a theoretical seam that only manifests under TZ misconfiguration. Same class as the deferred timezone concerns; not a live bug at the documented topology. Informational only.
+- **`refundEntitlement` convergence-error masking (sales.ts:241-258).** When Stripe returns `charge_already_refunded` and the local convergence UPDATE then throws, the admin sees the original "refund failed" rather than "refunded on Stripe, local sync failed." The failure IS logged server-side (244-246). Defensible product choice (don't show a confusing success on a partial state); an observability refinement, not a correctness defect. Not raised.
+
+---
+
+## What I verified clean (no findings)
+
+Switch fix geometry · histogram contrast + clip math · backfill exit-code + detection-failure resume contract + delete-mid-reencode partition helpers · serve-upload abort/SWR · 1KB WebP ICC read · GPS zero-offset fail-safe · CLIP write/read round-trip across image-queue + embeddings action + sidecar (raw-Buffer MEDIUMBLOB contract, PK upsert) · CLIP stub determinism + Matryoshka truncation · color-detection re-export removal (no dangling importer) · data-timeline privacy guards · atom-feed/download-tokens/download-interstitial/collections/smart-collections/sharing/analytics-data (corroborated clean).
+
+**HARD GUARD honored:** I reviewed CLIP code for correctness only; I did NOT propose activating semantic search (stays `disabled` by design). The disabled-mode early returns are correct in all 3 write paths.
+
+---
+
+## Summary by severity
+
+- **Critical: 0**
+- **High: 0**
+- **Medium: 0**
+- **Low (actionable): 0**
+- **Nit (cosmetic, optional): 1** — NIT-1 Switch.tsx top-comment cites `translate-x-[calc(100%-2px)]` while code uses `translate-x-full` (this-cycle doc drift; geometry is correct).
+
+Honest convergence. The codebase remains in genuinely strong shape from a code-quality/logic/SOLID standpoint, and the cycle-3 fixes introduced no regressions.
