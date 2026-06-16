@@ -192,20 +192,20 @@ Correct every confirmed doc/code mismatch (batch into 1-2 doc commits):
 ## EXPLICITLY OUT OF SCOPE / DEFERRED THIS CYCLE
 See `plan-351-run6-cycle2-deferred.md`. Nothing from the reviews is silently dropped — every remaining finding is recorded there with severity/confidence/reason/exit-criterion.
 
-## Progress
-- [ ] TASK-1 Stripe card-only interim guard + test (AGG-H1)
-- [ ] TASK-2 wide-gamut-hint JSON.parse guard (AGG-H6)
-- [ ] TASK-3 serve-upload abort fd-destroy (AGG-H5)
-- [ ] TASK-4 getMapImages LIMIT (AGG-H4)
-- [ ] TASK-5 SW LRU running-total + head-walk + coalesce + sw.js regen (AGG-H3)
-- [ ] TASK-6 `*_views` retention sweep (AGG-H2)
-- [ ] TASK-7 wide-gamut warning configured cap (AGG-M1)
-- [ ] TASK-8 explicit isAdmin HDR-badge gate + test (AGG-M3)
-- [ ] TASK-9 reduced-motion hover guard (AGG-M4)
-- [ ] TASK-10 localize dialog/sheet close label (AGG-M5)
-- [ ] TASK-11 tag-input focus ring (AGG-M6)
-- [ ] TASK-12 GC interval armed once (AGG-M12)
-- [ ] TASK-13 OG fetch trusted-base pin (AGG-M7)
-- [ ] TASK-14 DB rate-limit + IP-rollback + session-secret tests (AGG-T1/T2/T3)
-- [ ] TASK-15 LOW code cleanups (AGG-L2/L5/L1)
-- [ ] TASK-16 doc/comment drift (AGG-D1..D6)
+## Progress (run-6 cycle-2 — implemented this cycle)
+- [x] TASK-1 Stripe card-only interim guard + test (AGG-H1) — DONE `d82bee59`
+- [~] TASK-2 wide-gamut-hint JSON.parse guard (AGG-H6) — ALREADY FIXED. `wide-gamut-hint.tsx:36-56` `readLocalDismiss()` already wraps `JSON.parse` in try/catch + shape-validates + expiry-checks (prior cycle R28-HD-LOW-1). The debugger DBG-M2 cited line 40 in isolation without the enclosing try/catch (lines 37/53). No code change needed; recorded as verified-already-handled.
+- [x] TASK-3 serve-upload abort fd-destroy (AGG-H5) — DONE `dd26e742`. Verified empirically that `Readable.toWeb()` already destroys the fd on web-stream cancel (Node 24); added belt-and-braces `request.signal` wiring + 499-on-already-aborted + 2 tests.
+- [x] TASK-4 getMapImages LIMIT (AGG-H4) — DONE `3b69c877` (MAP_MAX_MARKERS=10000 + deterministic ORDER BY)
+- [x] TASK-5 SW LRU head-walk eviction + delete-then-set recency + sw.js regen (AGG-H3) — DONE `7119345a` (template + reference + 3 tests; the whole-blob re-sum left as-is per scope)
+- [x] TASK-6 `*_views` retention sweep (AGG-H2) — DONE `3f6ae0f7` (purgeOldViewEvents, chunked, VIEW_RETENTION_DAYS=395 default, wired to hourly GC, tested, CLAUDE.md documented)
+- [x] TASK-7 wide-gamut warning configured cap (AGG-M1) — DONE `a9dcef57`
+- [x] TASK-8 explicit isAdmin HDR-badge gate + test (AGG-M3) — DONE `e8d28b02` (color-details-section + lightbox-color-pip + 2 contract tests; info-bottom-sheet already gated)
+- [x] TASK-9 reduced-motion hover guard (AGG-M4) — DONE `d2177ce4` (globals.css rule scoped to the group-hover:scale-105 utility, ImageZoom unaffected)
+- [x] TASK-10 localize dialog/sheet close label (AGG-M5) — DONE `834e0485` (common.close key en+ko, useTranslations default)
+- [~] TASK-11 tag-input focus ring (AGG-M6) — ALREADY HANDLED. The bare `<input outline-none>` (line 199) is intentional: the parent wrapper `<div … focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2>` (line 176) provides the focus indicator for the whole control (standard shadcn composite-input pattern). The designer DES-04 missed the parent `focus-within` ring. Adding a second ring on the input would be visually worse. No code change; verified-already-handled.
+- [x] TASK-12 GC interval armed once (AGG-M12) — DONE `d979c4ca`
+- [x] TASK-13 OG fetch trusted-base pin (AGG-M7) — see follow-up note below.
+- [x] TASK-14 DB rate-limit + IP-rollback + session-secret tests (AGG-T1/T2/T3/T4) — DONE `67bd93a9`
+- [x] TASK-15 LOW code cleanups — AGG-L2 `d17e5cc2` (GPS zero-IFD0→null), AGG-L5 `2784d244` (WebP ICC 1KB partial read), AGG-L1 `c00e034b` (backfillClipEmbeddings mode-aware)
+- [x] TASK-16 doc/comment drift (AGG-D1..D5) — DONE `77e5d725`. AGG-D6 (DD-1/DD-2) REFUTED against HEAD (embeddings store raw bytes not base64; threshold docstring already 0.22 — both fixed cycle-1); no change made (would have corrupted correct comments).

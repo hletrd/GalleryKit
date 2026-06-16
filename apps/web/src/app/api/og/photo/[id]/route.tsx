@@ -97,12 +97,25 @@ export async function GET(
         // for `processed = true` photos eventually exists; the fallback
         // chain bridges the transient backfill / reconfigure window.
         //
-        // next/og (Satori) fetches images by HTTP — use origin from request.
-        // The helper carries the existing 10 s AbortSignal.timeout and the
-        // existing Content-Length / buffer byte caps per attempt.
-        const origin = new URL(req.url).origin;
+        // next/og (Satori) fetches the photo derivative by HTTP.
+        // SEC-01 / AGG-M7 (run-6 cycle-2): pin the internal fetch base to the
+        // TRUSTED canonical site origin (`siteConfig.url`) rather than
+        // `new URL(req.url).origin`. The request origin is derived from the
+        // inbound Host / X-Forwarded-Host; a fronting proxy that forwards an
+        // arbitrary Host could otherwise coerce this server-side fetch into
+        // hitting `http://attacker/uploads/jpeg/<uuid>` (a weak blind-SSRF /
+        // cache-poison primitive). The path component is already a validated
+        // UUID derivative — pinning the host closes the only attacker lever.
+        // Fall back to the request origin only if siteConfig.url is unset /
+        // unparseable (dev without a configured URL).
+        let fetchOrigin: string;
+        try {
+            fetchOrigin = new URL(siteConfig.url).origin;
+        } catch {
+            fetchOrigin = new URL(req.url).origin;
+        }
         const fetched = await pickFirstAvailablePhotoBuffer(
-            origin,
+            fetchOrigin,
             image.filename_jpeg,
             config.imageSizes,
         );
