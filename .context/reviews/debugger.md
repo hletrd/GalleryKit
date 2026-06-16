@@ -1,75 +1,137 @@
-# Cycle-9 Debugger Review
+# Debugger Review — Latent-Bug & Failure-Mode Hunt
 
-**HEAD:** `0ce84b1b` (working tree CLEAN of source changes — only `.context/reviews/*.md` are dirty, from concurrent reviewer agents; verified no source perturbation via `git status`). Prior debugger review ran at `9c40d261`.
+**Date:** 2026-06-16
+**Scope:** CLIP semantic-search surface (fresh-scrutiny target, added this session) + broad latent-bug sweep (async/floating-promise, error-swallowing, null/undefined, off-by-one, resource leaks, crash-vs-degrade).
+**Method:** Read every priority CLIP file end-to-end; validated math (zero-vector, float mapping, chunk loop) by execution; verified schema/migration, config resolution, thread-safety of the ONNX session, and the queue race-protection invariants. Confirmed `@huggingface/transformers` is declared (`^3.8.1`) but NOT installed in `node_modules` and `semantic_search_mode` defaults to `disabled` — CLIP is dark, as intended. I did NOT activate it.
 
-**NEW confirmed latent bugs: 0. NEW latent risks: 0.**
-
-I did NOT trust the cycle-8 summary. I confirmed the only two commits since the prior debugger HEAD (`71ab0f41`, `aa8a6f8a`) are **test-only + doc-only** (`git show` verified — no production `.ts`/`.js` delta), and that every binary parser and lifecycle FSM the prompt names is **byte-identical** to the prior cycle's full read (`git diff --stat 9c40d261 0ce84b1b` on all 11 named files is empty). Rather than re-paste the cycle-8 parser walkthrough verbatim, I spent this cycle widening to ~15 bug-prone surfaces the prior cycles enumerated *less* deeply — date/time, numeric-parse NaN propagation, pagination cursor decode, the upload-tracker FSM, the DB-backed rate-limit decrement transaction, X-Forwarded-For client-IP selection, token verification, and the newest production fixes. All converged.
-
----
-
-## Verification of the only deltas since the prior debugger review
-
-| Commit | Change | Verdict |
-|---|---|---|
-| `71ab0f41` | `base56.test.ts` +43 lines: 500k-sample char-frequency distribution test (max/min ratio < 1.20) for `generateBase56` rejection sampling (AGG-C8-01) | **TEST-ONLY, CORRECT.** Asserts every char appears + ratio bound; commit message documents RED-on-revert (1.3124 > 1.2 when the `while (randomValue >= 224)` loop is removed). No production code touched. Threshold 1.20 sits between correct ~1.04-1.06 and naive ~1.30 → non-flaky. |
-| `aa8a6f8a` | `CLAUDE.md:505` adds `app/[locale]/(public)/` to the documented touch-target `SCAN_ROOTS` (AGG-C8-02) | **DOC-ONLY.** Safe-direction; out of my lane. |
-
-`git diff --stat 9c40d261 0ce84b1b` over `gps-exif-strip.ts`, `color-detection.ts`, `icc-extractor.ts`, `icc-chromaticity.ts`, `gain-map-detection.ts`, `image-queue.ts`, `bounded-map.ts`, `auth-rate-limit.ts`, `sw-cache.ts`, `migrate.js`, `process-image.ts` → **empty**. The cycle-8 full bounds/fail-closed verification of these surfaces (debugger.md prior revision) therefore still holds at this HEAD without re-derivation; I re-confirmed it is not stale by diff, not by trust.
+**Headline:** The CLIP surface is well-engineered. **Zero confirmed crash/correctness bugs.** The much-feared failure modes (rejected-init-promise cached forever, zero-vector NaN, concurrent-session corruption, embedding-hook breaking the queue race protections) are all handled correctly. Findings below are doc-drift (trivial) and genuine but dark-gated operational latent risks.
 
 ---
 
-## Surfaces traced THIS cycle (widened beyond the converged parser/FSM core; all clean)
+## CONFIRMED BUGS
 
-### Numeric-parse / NaN-propagation surface (`Number()` / `parseInt` without obvious guards)
-- **`exif-datetime.ts:33-58` `parseStoredExifDateTime`** — `EXIF_DATETIME_PATTERN` (`\d{4}-\d{2}-…`) guarantees each capture group is parseable digits, so the six `Number()` calls (39-44) **cannot** produce NaN. `isValidExifDateTimeParts` (3-31) range-checks each field AND round-trips through `Date.UTC` + `getUTC*` equality, correctly rejecting Feb-30 / month-13 / overflow normalization. Render path forces `timeZone: 'UTC'` (67,77) so stored local-component values round-trip consistently. **Clean.**
-- **`og-photo-fetch.ts:57`** — `parseInt(contentLength, 10) > OG_PHOTO_MAX_BYTES`: a NaN (non-numeric `Content-Length`) yields `NaN > N === false`, which safely falls through to the post-buffer `photoBuffer.length > MAX` reject (59). No bypass. Timeout/throw → `null` (caller tries next size). **Clean.**
-- **`gallery-config-shared.ts:233-311`** — `normalizeConfiguredImageSizes` / `parseImageSizes` / `parseSlideshowInterval` all gate with `Number.isInteger` (rejects NaN, fractions) + explicit `>0`/`≤10000` / window bounds + `MAX_IMAGE_SIZE_COUNT`. Empty-segment guard at 237. **Clean.**
-- **`image-types.ts:118-132` `formatShutterSpeed`** — `Number.isFinite` guard (121) returns the raw string on NaN; `Math.round(1/val)` divisor is non-zero because `val < 1 && val > 0` (122) excludes `val ≥ 1`; negative `val` falls through to the harmless `${value}s` display branch. No div-by-zero, no NaN escape. **Clean.**
-- **`data.ts:1350-1382` `getImagesForSmartCollection`** — the documented `Number(...) → NaN → 0` cursor-coercion bug (R4C5 COR-R4C5-01) is closed: the `Number(offsetOrCursor)` offset path (1374) runs **only** when `normalizedCursor` is null; the keyset path takes the cursor branch and never coerces. `normalizedPageSize = min(max(pageSize,1), LIMIT_PLUS_ONE)` bounded. **Clean.**
-
-### Date/time handling
-- **`feed-conditional.ts:15-42` `isFeedNotModified`** — `Date.parse(malformed)` → NaN → `Number.isFinite` guard (26) returns false (visitor gets body, fail-safe); `new Date(invalid).getTime()` → NaN → guarded (34) (the try/catch is belt-and-braces; `new Date()` doesn't throw). Second-precision floor compare (39-41) per RFC 7232. **Clean.**
-- **`mysql-datetime.ts:19-23` `toMySqlDateTime`** — server-local-component literal, `pad2` covers all fields. Traced its only caller: `image-queue.ts:512` writes `failed_at` (audit column). **Verified NO cross-contamination** with the UTC `parseStoredExifDateTime` read path — `failed_at` is never read through the EXIF formatter; the two date conventions live on disjoint columns. **Clean.**
-- **`analytics-data.ts:13-19` `windowStart`** — `setDate(getDate() - days)` correctly underflows across month/year boundaries in JS; `'all'` → null → unbounded `WHERE bot=false`. `Number(r.viewCount)` over a SQL `COUNT()` is always a finite integer. **Clean.**
-
-### Lifecycle / concurrency FSMs (newly traced this cycle)
-- **`upload-tracker-state.ts:24-79`** — `pruneUploadTracker` collect-then-delete for both expiry (2× window grace, intentionally more lenient than the 1× window-reset to protect in-flight large batches) and hard-cap (`UPLOAD_TRACKER_MAX_KEYS=2000`, FIFO by insertion order). `hasActiveUploadClaims` prunes then resets-if-expired before reading `count/bytes`. Bounded, terminates, no leak. (The hard-cap evicts by insertion order, not `windowStart`-LRU, so a long-idle-but-recently-touched key could outlive an older active one — same best-effort FIFO design as every other bounded map in the repo; **not a defect**.)
-- **`rate-limit.ts` (whole file)** — all five in-memory buckets (`og`/`share`/`checkout`/`semantic`/`search`) use the identical pre-increment-then-read pattern: `resetAt <= now` re-arms a fresh window, else `count++`, then `(get()?.count ?? 0) > MAX`. Rollback helpers decrement-or-delete (never go negative). DB-backed path: `getRateLimitBucketStart` floors to window boundary (integer-sec math, safe); `incrementRateLimit` is `INSERT … ON DUPLICATE KEY UPDATE count = count+1` (atomic upsert); **`decrementRateLimit` wraps `GREATEST(count-1,0)` + the zero-row DELETE in a single transaction** (469-490) so a concurrent increment between UPDATE and DELETE is not lost — correct. `purgeOldBuckets` deletes `bucketStart < cutoffSec`. No unbounded growth, no lost-update, no negative counter.
-- **`rate-limit.ts:161-204` `getClientIp`** — X-Forwarded-For parsing: filters to `validParts` (drops un-parseable tokens uniformly), then `clientIndex = validParts.length - hopCount - 1`; returns the slot only when `clientIndex >= 0` (no untrusted slot ⇒ falls through to X-Real-IP ⇒ `'unknown'`). The reverse-proxy-appended real-peer IP is always a valid IP, so it is always counted in the suffix — the index math is consistent regardless of attacker-injected garbage tokens. Anything beyond the operator-configured `TRUSTED_PROXY_HOPS` suffix being attacker-controllable is the **documented, SEC-reviewed trusted-hop contract**, not a bug. `'unknown'`-bucket lockout warning gated + once-only. **Clean.**
-
-### Token / auth verification
-- **`admin-tokens.ts:64-166`** — `tokenHashesEqual` pre-checks type + length + hex-charset before `timingSafeEqual` (try/catch → false). `verifyToken` short-circuits on `isWellFormedToken`, looks up by `presentedHash` (plaintext never reaches a query param → no plaintext in slow-query logs), re-confirms with the constant-time compare (belt-and-braces over the exact DB equality), enforces `expires_at.getTime() <= Date.now()`, fails closed on a missing table (try/catch → null), best-effort `last_used_at` touch is fire-and-forget with `.catch`. `parseScopes` JSON.parse in try/catch → `[]`. No timing leak, no fail-open, no unhandled rejection. **Clean.**
-
-### Newest production fixes (post-date the prior cycle's deep read; re-verified)
-- **`actions/images.ts:900-916` `isTriState` guard (commit `652add51`)** — narrows `mode ∈ {leave,clear,set}` and requires a string `value` for `'set'` BEFORE any `.mode` read on `topic`/`titlePrefix`/`description`/`licenseTier`; malformed Server-Action payload → clean `invalidInput` instead of an unhandled TypeError → framework 500. Four malformed-payload regression tests. **Correct.**
-- **`serve-upload.ts:50-269`** — re-verified end-to-end: TOCTOU closed (stream from realpath-resolved path, not the validated path); ETag math `W/"v{PIPELINE}-{mtimeMs.toFixed(0)}-{size}-{hash}"` overflow-free; the un-awaited `servingHashInflight` IIFE provably **cannot reject** (both branches return a value) so no orphan unhandled rejection even on a DB-down cold start (falls to FALLBACK_HASH); stale-while-revalidate never blocks once warm; `fileStream.destroy()` in the catch closes the FD on any post-open throw. **Clean.**
+**None.** No reproducible crash, data-corruption, or logic defect found on the CLIP surface or in the recently-touched non-CLIP files (`admin-backfill-runner.ts`, `error.tsx`, `page.tsx`, `sw.js`).
 
 ---
 
-## Below-the-bar / record-only (UNCHANGED, do NOT re-escalate)
+## Race-protection invariants — VERIFIED INTACT
 
-- **DBG8-NC-01 / DBG-C6-NC-01** — `gain-map-detection.ts:87` `if (p > limit) return ''` is unreachable dead code (`while (p < limit …)` guarantees `p <= limit` on exit). Harmless. (Source byte-identical to prior read.)
-- **DBG8-NC-02** — `isLosslessWebpByChunk` (`process-image.ts:1498-1518`) does not descend into `ANMF`; an *animated lossless* WebP reaching the doubly-rare Tier-2 GPS re-encode would re-encode lossy. Explicit SAFE default; **GPS is stripped either way** → zero privacy/correctness impact. (Source byte-identical to prior read.)
+The task flagged that the US-P51 embedding hook must not break the queue's race protections. Traced `image-queue.ts` line by line:
+
+- The embedding hook (`void (async () => {...})()`, lines 433-470) fires **after** `processed=true` is committed (lines 369-371) and **after** the delete-during-processing cleanup branch (lines 373-390). An embedding failure (line 467-468 `catch`) only `console.warn`s — it never throws into the queue task, never marks the image unprocessed, never blocks the `PQueue`, never leaves orphaned files.
+- The per-image advisory lock (`gallerykit:image-processing:{jobId}`) is released in the queue task's `finally` (line 537) — the detached embedding IIFE runs **outside** that lock window but only touches the `image_embeddings` table (its own PK = image_id), never the derivative files or the `processed` flag, so there is no double-encode / interleaved-write hazard.
+- The conditional `UPDATE … WHERE processed = false` and orphaned-file cleanup are untouched by the hook. ✔
+
+This is the correct design. The hook is genuinely fire-and-forget and cannot wedge the pipeline.
 
 ---
 
-## Conclusion
+## Lazy-singleton model loader — VERIFIED CORRECT
 
-**Zero new genuine findings.** No new latent bug, no latent risk, no regression, no fail-open, no unbounded growth, no resource leak at `0ce84b1b`. The only source-affecting deltas since the prior debugger review are a test addition and a doc line, both verified correct/safe. The named binary parsers (`gps-exif-strip` ×4 + TIFF core, `color-detection` NCLX, `icc-extractor`, `icc-chromaticity`, `gain-map-detection`) and lifecycle FSMs (`image-queue` claim/cleanup/retry/bootstrap/quiesce, view-count flush, histogram worker, `sw-cache` LRU, bounded-map/auth-rate-limit eviction, `migrate.js` reconcile/baseline/post-condition) are byte-identical to the prior cycle's full verification (confirmed by `git diff --stat`, not trusted), so their proven bounds-correctness + fail-closed behavior carries forward. This cycle additionally cleared ~15 secondary surfaces (date/time, NaN-parse, pagination cursor, upload-tracker, DB-backed rate-limit transaction, client-IP selection, token verification, newest fixes) with no defect. The failure-mode / boundary-arithmetic surface I own is **converged**.
+`clip-model.ts` `getModelBundle()` (lines 54-81):
 
-## References (traced this cycle, all correct)
-- `apps/web/src/lib/exif-datetime.ts:1-79` — regex-gated EXIF datetime parse, no NaN, UTC round-trip validation
-- `apps/web/src/lib/og-photo-fetch.ts:44-86` — `NaN > MAX === false` safe fall-through + post-buffer cap
-- `apps/web/src/lib/gallery-config-shared.ts:233-311` — `Number.isInteger`/`isFinite`-gated size + interval parsing
-- `apps/web/src/lib/image-types.ts:118-132` — `formatShutterSpeed`, no div-by-zero / NaN escape
-- `apps/web/src/lib/data.ts:1350-1382` — smart-collection cursor pagination, NaN→0 path is offset-only
-- `apps/web/src/lib/feed-conditional.ts:15-42` — If-Modified-Since, fail-safe to body on malformed/NaN
-- `apps/web/src/lib/mysql-datetime.ts:19-23` + `image-queue.ts:512` — local-component DATETIME, no EXIF-read cross-contamination
-- `apps/web/src/lib/analytics-data.ts:13-86` — window math + COUNT() always-finite
-- `apps/web/src/lib/upload-tracker-state.ts:24-79` — bounded FIFO eviction, 2× prune grace, no leak
-- `apps/web/src/lib/rate-limit.ts:124-500` — IP selection, 5 in-memory buckets, transactional DB decrement, no lost-update/negative/unbounded-growth
-- `apps/web/src/lib/admin-tokens.ts:64-166` — constant-time token verify, fail-closed, no timing leak
-- `apps/web/src/app/actions/images.ts:900-916` — `isTriState` shape guard (652add51), no 500 on malformed payload
-- `apps/web/src/lib/serve-upload.ts:50-269` — TOCTOU-safe stream + ETag + non-rejecting inflight hash
-- `git diff --stat 9c40d261 0ce84b1b` on the 11 named parser/FSM files → empty (prior full verification not stale)
+- **Concurrent first-call de-dup:** `loadPromise` is assigned **synchronously** (line 57) before the first `await`, so N concurrent first-callers all return the same in-flight promise — the ~874 MB weights load **once**, not N times. ✔
+- **Rejected-promise NOT cached forever:** the `.catch()` (lines 74-78) sets `loadPromise = null` then re-throws, so a transient load failure does **not** permanently poison the feature — the next call retries. ✔ (This is the exact failure mode the task asked about; it is handled.)
+- **Disposal:** the runtime loader deliberately keeps the session alive (it is a process-lifetime singleton); the downloader script calls `model.dispose()` (download-clip-models.ts:109) because it only needs the download side-effect. Correct asymmetry.
+- **Concurrent `session.run()`:** the shared singleton is hit concurrently by the fire-and-forget hook, backfill (`BATCH_CONCURRENCY=2`), and the semantic route. onnxruntime's `InferenceSession.run()` is documented thread-safe (weights shared, concurrent run safe), and transformers.js allocates fresh input tensors per call (we pass our own `Tensor`), so there is no shared-mutable-input hazard. **Not a bug.**
+
+**Side note (latent, see LR-3):** the retry-on-rejection is correct for transient faults, but if the model volume is permanently absent in `production` mode, every processed image's fire-and-forget hook re-attempts the full `from_pretrained` load and fails again — an unbounded reload storm. Dark today; flagged below.
+
+---
+
+## Embedding math — VERIFIED ROBUST (no NaN/Inf)
+
+`clip-embeddings.ts`, validated by execution:
+
+- `normalizeEmbedding` zero-vector guard (line 110 `if (norm === 0) return v`) returns the zero vector unchanged — **no divide-by-zero**. ✔
+- `cosineSimilarity` denominator guard (line 33 `if (denom === 0) return 0`) returns 0 for a zero/degenerate vector — **no NaN**. A degenerate embedding scores 0 and is filtered below the 0.22 threshold. ✔
+- `truncateAndNormalize` Matryoshka head (line 118) + re-normalize is correct for the 1024→512 reduction.
+- `clip-inference.ts` `deterministicEmbedding`: the `(uint32 >>> 0) / 2147483648 - 1` mapping yields `[-1, 0.99999999]` (verified) — bounded, no Inf. The chunk loop runs exactly 64 iterations (512/8), `offset` 0→504, no off-by-one, `remaining` lands on 0 cleanly. ✔
+
+---
+
+## Route error handling — VERIFIED (no stack-trace leak)
+
+Both routes (`semantic/route.ts`, `similar/[id]/route.ts`):
+
+- Model-missing in `production` mode: `embedTextReal` throws → caught (semantic:242-245) → returns **503** `{error:'Server error'}` (generic, no stack trace) and rolls back the rate-limit counter. ✔
+- `similar/[id]`: id parsed with `parseInt` + `Number.isFinite(id) || id <= 0` guard (line 76); missing embedding → **404**; corrupt embedding (`buf.length !== EMBEDDING_BYTES`) → **404**; empty result → `{results:[]}`. All early-return paths roll back the rate-limit (Pattern 2). ✔
+- Self-exclusion in similar (`row.imageId !== id`, line 154) is correct. ✔
+- The rate-limit-before-config-read ordering (semantic:207-233) prevents free config-probing; the `'unknown'`-IP shared-bucket fail-closed posture is the intended security behavior.
+- Body-size / content-type / chunked-encoding gates in semantic route are thorough; `clampSemanticTopK` correctly rejects non-number `raw` (booleans/arrays) before coercion.
+
+---
+
+## Components — VERIFIED (stale-request & error states handled)
+
+- `search.tsx`: `requestIdRef` monotonic-id guard re-checked after **both** awaits (the `await fetch` at 159 AND the `await resp.json()` at 175) — a slow stale response cannot clobber a fresher one. The 300 ms debounce is cleared on unmount (line 228-230). Status mapping (429→rateLimited, 503→maintenance, else→error) is complete. ✔
+- `similar-photos.tsx`: `fetchedRef` guards against double-fetch on toggle; any non-200 (503/404/429) or network error sets `results='error'` and the component returns `null` (line 84) — non-production deployments show no broken UI. ✔
+  - **Minor note (LR-4):** neither component aborts the in-flight `fetch` on unmount (no `AbortController`). The `requestIdRef` guard in `search.tsx` prevents stale-state commits but the request still completes in the background. `similar-photos.tsx` has no unmount guard at all — a `setResults`/`setLoading` after unmount would log a benign React warning (no crash, harmless in React 19). Low value; documented for completeness.
+
+---
+
+## LATENT RISKS (real, but dark-gated — not live bugs today)
+
+### LR-1 — Loader has NO checksum verification (downloader does) · Medium confidence
+**File:** `clip-model.ts:63-71` vs `download-clip-models.ts:73-130`
+**Failure mode:** `download-clip-models.ts` verifies `onnx/model_quantized.onnx` + `tokenizer.json` against a SHA-256 manifest, and its idempotency path (line 73-85) correctly RE-downloads when an existing file's hash mismatches — so an *interrupted download* is caught on the next script run. **But the runtime loader `getModelBundle()` performs no checksum at all.** If a partial/truncated ONNX survives on the volume (download script never re-run after an interrupted first run, or a disk-full event truncates the file after a clean download), the loader loads whatever bytes are present. Best case: opaque ONNX parse error → caught → infinite retry → feature stays dark. Worst case: a structurally-valid-but-wrong file loads and silently produces garbage embeddings that pollute `image_embeddings` at `PRODUCTION_MODEL_VERSION`.
+**Trigger:** seed the volume, `kill -9` the download mid-write, then start the app in `production` mode without re-running the verified downloader.
+**Expected vs observed:** expected = loader refuses an unverified/corrupt model; observed = loader trusts on-disk bytes unconditionally.
+**Fix (when CLIP goes live):** have `getModelBundle()` verify the ONNX SHA-256 against the shared `JINA_CLIP_REVISION` manifest before `from_pretrained`, or gate startup on a `download-clip-models.ts --verify-only` pass. Today the gap is inert because the feature is `disabled`.
+
+### LR-2 — Unbounded detached embedding tasks under production batch upload · Medium confidence
+**File:** `image-queue.ts:433-470`
+**Failure mode:** the embedding hook is fire-and-forget and runs OUTSIDE `PQueue` concurrency control. In `production` mode each completed Sharp job spawns a detached `embedImageReal` (CPU-heavy ONNX inference, hundreds of ms). A 100-photo batch at `QUEUE_CONCURRENCY=1` processes Sharp jobs serially, but the detached embedding tasks accumulate and run concurrently with each other AND the next Sharp job. onnxruntime's session is thread-safe (verified — no corruption), so this is a **CPU-oversubscription / latency** risk, not a data-corruption one. Each hook also issues a redundant `getGalleryConfig()` DB read (line 436) per image.
+**Trigger:** flip `semantic_search_mode='production'`, upload 100+ photos in one batch on a CPU-constrained host.
+**Expected vs observed:** expected = embedding work bounded by a concurrency cap or threaded through the queue; observed = N detached tasks contend for libvips/CPU with live encoding.
+**Fix (when live):** route embedding through a small bounded `PQueue` (concurrency 1-2), or await it inside the queue task with its own timeout, and read `semanticSearchMode` once from the already-fetched config rather than re-querying. Dark today.
+
+### LR-3 — Model-reload storm when production volume is absent · Low confidence
+**File:** `clip-model.ts:74-78` + `image-queue.ts:445-446`
+**Failure mode:** the (correct) reject-and-null retry behavior means that if the model volume is permanently missing in `production` mode, every processed image's detached hook re-attempts the full `from_pretrained` load, each failing after the I/O/parse attempt. Combined with LR-2's unbounded fan-out, a batch upload becomes a repeated failed-load storm (log spam + wasted I/O). Bounded only by the number of images processed; no backoff.
+**Fix (when live):** add a short negative-cache TTL (e.g. cache the rejection for 30-60 s) so repeated callers fast-fail without re-attempting the load, while still eventually retrying. Dark today.
+
+### LR-4 — Components don't abort in-flight fetches on unmount · Low confidence
+**Files:** `search.tsx:138-214`, `similar-photos.tsx:55-81`
+**Failure mode:** no `AbortController`. `search.tsx` is protected against stale-state commits by `requestIdRef`, so the only cost is a wasted in-flight request after close. `similar-photos.tsx` has no unmount guard at all — a `setResults` after unmount yields a benign React dev warning (harmless under React 19, no crash). Low value.
+**Fix (optional):** thread an `AbortController` and `signal` into the fetch; abort in the effect cleanup / before re-fetch.
+
+---
+
+## DOC-DRIFT (cosmetic — no runtime impact)
+
+### DD-1 — Stale threshold values in route docstrings
+- `semantic/route.ts:10` says "above COSINE_THRESHOLD (0.18)" and line 25 says "PRODUCTION_COSINE_THRESHOLD (0.25)".
+- `similar/[id]/route.ts:18` references the 0.18-style threshold.
+- **Actual constants** (clip-embeddings.ts): `COSINE_THRESHOLD = 0.18` (stub) is right, but `PRODUCTION_COSINE_THRESHOLD = 0.22` (line 103), NOT 0.25. The docstring `(0.25)` is wrong.
+- Impact: none at runtime (code reads the constants); misleads a future reader. Fix: update the comment to `0.22`.
+
+### DD-2 — Stale schema comment ("MEDIUMBLOB / 2048 bytes")
+- `schema.ts:259` and `:266` describe the `embedding` column as raw "MEDIUMBLOB (2048 bytes = 512 × 4-byte little-endian float32)" and say "the lib layer wraps Buffer reads/writes."
+- **Actual behavior:** the column IS `mediumblob` (migration 0012, verified), but the application stores **base64 TEXT** (`buf.toString('base64')` in image-queue.ts:453 / backfill:160) and decodes via `Buffer.from(row.embedding, 'base64')` (routes). The on-disk content is ~2732 ASCII chars, not 2048 raw bytes, and the lib does base64 ↔ Float32Array, not raw Buffer ↔ Float32Array. The comment describes a binary-blob design the code does not use.
+- Impact: none at runtime (base64 fits comfortably in a 16 MB MEDIUMBLOB; round-trips correctly). Misleading for maintainers and for column sizing. Fix: correct the comment to "base64-encoded TEXT stored in a MEDIUMBLOB column."
+
+---
+
+## Other surfaces checked — clean
+- `admin-backfill-runner.ts`: heavily hardened across prior cycles. Lock acquire/release symmetric, `finally`-based release, pool-budget concurrency clamp guards NaN (line 137), deleted-mid-reencode cleanup, fire-and-forget runner wrapped in try/finally with belt-and-braces `.catch`. No new issue. The `state.running` vs advisory-lock TOCTOU in `triggerAdminBackfill` is intentional belt-and-braces (the lock is the real serializer).
+- Empty-catch sweep across `src` (excluding tests): **zero** silent `catch {}` in production code (only a comment match in image-queue.ts). Catch blocks consistently log.
+- `error.tsx` (admin): correct, accessible, 44 px touch targets.
+
+---
+
+## Re-confirmed prior known-harmless items (NOT re-reported as new)
+- `gain-map-detection.ts:87` unreachable guard — already recorded harmless dead code.
+- `isLosslessWebpByChunk` ANMF branch — already recorded.
+
+---
+
+## Aggregator summary (severity · confidence)
+
+- **[INFO · High]** CLIP surface: 0 confirmed bugs. Queue race-protection invariants intact; lazy-singleton de-dups concurrent loads and does NOT cache rejection forever; concurrent ONNX `session.run()` is thread-safe; zero-vector cosine returns 0 (no NaN); routes leak no stack traces; components guard stale responses.
+- **[LOW (latent) · Medium]** LR-1: runtime loader `clip-model.ts:63` performs NO model checksum (downloader does) — a corrupt/partial on-disk ONNX would load unverified → opaque error or silent garbage embeddings. Dark-gated.
+- **[LOW (latent) · Medium]** LR-2: production embedding hook (`image-queue.ts:433`) is unbounded fire-and-forget — CPU oversubscription on large batch uploads + redundant per-image config DB read. Dark-gated.
+- **[LOW (latent) · Low]** LR-3: model-reload storm (`clip-model.ts:74`) when production volume is permanently absent — no negative-cache backoff. Dark-gated.
+- **[LOW (latent) · Low]** LR-4: `search.tsx` / `similar-photos.tsx` don't `AbortController`-cancel in-flight fetches on unmount — benign (stale-commit already guarded in search.tsx; React-19-harmless warning in similar-photos.tsx).
+- **[TRIVIAL · High]** DD-1: route docstrings state `PRODUCTION_COSINE_THRESHOLD (0.25)`; actual is `0.22`. Comment-only.
+- **[TRIVIAL · High]** DD-2: `schema.ts:259/266` comment claims raw binary "2048 bytes" storage; code stores base64 TEXT in the mediumblob. Comment-only.
