@@ -234,4 +234,46 @@ describe('getSessionSecret', () => {
         expect(secret).toBe('db-stored-secret-value-32chars!!');
         expect(mockDbFindFirst).toHaveBeenCalled();
     });
+
+    // AGG-T3 (run-6 cycle-2): the INSERT IGNORE + re-fetch branch (empty table
+    // → generate → insert → re-fetch) was never exercised — test (4) always
+    // returned an existing row on the first findFirst, short-circuiting before
+    // the insert. A refactor that dropped the db.insert call would cause an
+    // infinite re-fetch / throw in dev/test with no test to catch it. Lock the
+    // generate-and-persist path: first findFirst null, second returns the
+    // persisted value.
+    it('(5) dev/test, empty table → generates, INSERT IGNOREs, and returns the re-fetched secret', async () => {
+        vi.stubEnv('NODE_ENV', 'test');
+        vi.stubEnv('SESSION_SECRET', '');
+        mockDbInsert.mockResolvedValue(undefined);
+        // First findFirst (initial lookup) → null; second findFirst (re-fetch
+        // after INSERT IGNORE) → the persisted row (possibly from a concurrent
+        // writer).
+        mockDbFindFirst
+            .mockResolvedValueOnce(undefined)
+            .mockResolvedValueOnce({ key: 'session_secret', value: 'freshly-generated-secret-64hex-xx' });
+
+        const { getSessionSecret } = await import('@/lib/session');
+        const secret = await getSessionSecret();
+
+        // The INSERT IGNORE must have run exactly once...
+        expect(mockDbInsert).toHaveBeenCalledTimes(1);
+        // ...and the returned secret is the RE-FETCHED value, not the locally
+        // generated one (so a concurrent insert's value wins deterministically).
+        expect(secret).toBe('freshly-generated-secret-64hex-xx');
+        // Two findFirst calls: initial lookup + post-insert re-fetch.
+        expect(mockDbFindFirst).toHaveBeenCalledTimes(2);
+    });
+
+    it('(6) dev/test, empty table + re-fetch still null → throws (persistence failure)', async () => {
+        vi.stubEnv('NODE_ENV', 'test');
+        vi.stubEnv('SESSION_SECRET', '');
+        mockDbInsert.mockResolvedValue(undefined);
+        // Both findFirst calls return null — the persistence post-condition must
+        // fail loud rather than return an empty secret.
+        mockDbFindFirst.mockResolvedValue(undefined);
+
+        const { getSessionSecret } = await import('@/lib/session');
+        await expect(getSessionSecret()).rejects.toThrow(/persistence failed/i);
+    });
 });

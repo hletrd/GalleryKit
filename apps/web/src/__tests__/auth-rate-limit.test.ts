@@ -26,6 +26,7 @@ import {
     passwordChangeRateLimit,
     recordFailedLoginAttempt,
     rollbackAccountLoginRateLimit,
+    rollbackLoginRateLimit,
 } from '@/lib/auth-rate-limit';
 
 describe('auth-rate-limit helpers', () => {
@@ -146,5 +147,42 @@ describe('auth-rate-limit helpers', () => {
             lastAttempt: 654_321,
         });
         expect(decrementRateLimit).toHaveBeenCalledWith('acct:ghi', 'login_account', 15 * 60 * 1000, 123_000);
+    });
+
+    // AGG-T2 (run-6 cycle-2): the IP-scoped rollback was previously untested
+    // (only the account-scoped sibling above). Lock both branches of the
+    // count=1→delete / count>1→decrement transition so a silent removal of the
+    // delete (which would leak the IP bucket and tighten the effective window)
+    // is caught.
+    it('rolls back IP login counter in memory (count>1 → decrement, keep entry) and the DB bucket', async () => {
+        decrementRateLimit.mockResolvedValue(undefined);
+        loginRateLimit.set('203.0.113.7', {
+            count: 2,
+            lastAttempt: 654_321,
+        });
+
+        await rollbackLoginRateLimit('203.0.113.7', 123_000);
+
+        expect(loginRateLimit.get('203.0.113.7')).toEqual({
+            count: 1,
+            lastAttempt: 654_321,
+        });
+        expect(decrementRateLimit).toHaveBeenCalledWith('203.0.113.7', 'login', 15 * 60 * 1000, 123_000);
+    });
+
+    it('rolls back IP login counter to empty (count=1 → DELETE clears the IP bucket)', async () => {
+        decrementRateLimit.mockResolvedValue(undefined);
+        loginRateLimit.set('203.0.113.8', {
+            count: 1,
+            lastAttempt: 654_321,
+        });
+
+        await rollbackLoginRateLimit('203.0.113.8', 123_000);
+
+        // count=1 → the in-memory entry must be DELETED, not left at 0. A
+        // regression that replaced this with `entry.count--` would leave a
+        // permanent count:0 entry, tightening the window for returning users.
+        expect(loginRateLimit.has('203.0.113.8')).toBe(false);
+        expect(decrementRateLimit).toHaveBeenCalledWith('203.0.113.8', 'login', 15 * 60 * 1000, 123_000);
     });
 });
