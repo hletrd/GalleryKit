@@ -1,6 +1,6 @@
 /**
  * C3-A1 / C3-COL-LOW-1 / C3-ARCH-MED-2: lock the canonical wide-gamut
- * primaries set in lib/color-detection.ts so the upload pipeline
+ * primaries set in lib/color-primaries.ts so the upload pipeline
  * (process-image.ts, actions/images.ts) and the viewer surface
  * (photo-viewer.tsx, histogram.tsx, wide-gamut-hint.tsx, info-bottom-sheet.tsx)
  * agree on the membership.
@@ -8,9 +8,14 @@
  * Adding a new wide-gamut primary in only ONE call site silently breaks
  * histogram / preview / chroma decisions on the others — this test fails
  * if the canonical set drifts away from the documented membership.
+ *
+ * AGG-C3-18 (architect A6): import from the client-safe leaf
+ * lib/color-primaries directly — the previous import via the
+ * lib/color-detection re-export pulled the heavy fs/sharp detection module
+ * into a test that only needs the predicate. That re-export was removed.
  */
 import { describe, it, expect } from 'vitest';
-import { WIDE_GAMUT_PRIMARIES, isWideGamutPrimary } from '@/lib/color-detection';
+import { WIDE_GAMUT_PRIMARIES, isWideGamutPrimary } from '@/lib/color-primaries';
 
 describe('WIDE_GAMUT_PRIMARIES — canonical wide-gamut primaries set', () => {
     it('contains exactly the 5 documented members', () => {

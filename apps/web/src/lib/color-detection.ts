@@ -40,12 +40,14 @@ export interface ColorSignals {
     hasGainMap: boolean;
 }
 
-// C3-A1 / C3-COL-LOW-1 / C3-ARCH-MED-2: canonical wide-gamut primaries set
-// is defined in lib/color-primaries.ts (client-safe — no fs/sharp imports)
-// and re-exported here for callers that already import this module's heavier
-// detection helpers. Client components must import from lib/color-primaries
-// directly to avoid pulling fs/promises into the client bundle.
-export { WIDE_GAMUT_PRIMARIES, isWideGamutPrimary } from '@/lib/color-primaries';
+// C3-A1 / C3-COL-LOW-1 / C3-ARCH-MED-2: the canonical wide-gamut primaries set
+// (WIDE_GAMUT_PRIMARIES / isWideGamutPrimary) lives in lib/color-primaries.ts
+// (client-safe — no fs/sharp imports). AGG-C3-18 (architect A6): the
+// convenience re-export that used to sit here was REMOVED — it let server
+// code (actions/images.ts) and a unit test reach the client-safe predicate
+// through this fs/sharp-heavy module, a layering trap that risked pulling
+// fs/promises into the client bundle. All callers (server and client) must
+// import from lib/color-primaries directly.
 
 export function normalizeName(name: string | null | undefined): string {
     return (name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');

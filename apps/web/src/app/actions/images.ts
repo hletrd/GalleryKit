@@ -26,7 +26,7 @@ import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { assertBlurDataUrl } from '@/lib/blur-data-url';
-import { isWideGamutPrimary } from '@/lib/color-detection';
+import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { headers } from 'next/headers';
 import { LICENSE_TIERS } from '@/lib/bulk-edit-types';
 import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
