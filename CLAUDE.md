@@ -118,7 +118,7 @@ git values must be treated as compromised and must not be reused.
 - `adminUsers` / `sessions` - Multi-user authentication
 - `sharedGroups` / `sharedGroupImages` - Public sharing
 - `image_views` / `topic_views` / `shared_group_views` - Analytics events (US-P44)
-- `image_embeddings` - CLIP embeddings (US-P51, stub)
+- `image_embeddings` - CLIP embeddings (US-P51). Real jina-clip-v2 encoder shipped but deployed DARK (`semantic_search_mode` defaults to `disabled`; stub mode uses non-meaningful deterministic vectors). MEDIUMBLOB stores the raw 2048-byte float32 vector (read via `decodeEmbeddingColumn`, AGG-C10-01)
 - `entitlements` - Stripe paid-download entitlements (US-P54). **Warning:** `checkout.session.async_payment_succeeded` is not yet handled — delayed payment methods (bank transfer / ACH) complete checkout but never receive an entitlement row; only card / immediate-payment methods are fully supported until plan-316 CRT-R5C1-04 ships.
 - `admin_tokens` - Lightroom Classic publish-plugin PATs (US-P53)
 - `smart_collections` - Admin-defined dynamic galleries (US-P42)
@@ -476,8 +476,16 @@ docker run --rm \
   --env-file /home/ubuntu/gallery/apps/web/.env.local \
   -e CLIP_MODELS_ROOT=/app/data/models/clip \
   --user root -w /app/apps/web web-web:latest \
-  sh -c "npx --yes tsx@4.21.0 scripts/backfill-embeddings.ts --production"
+  sh -c "npx --yes tsx@4.21.0 scripts/backfill-clip-embeddings.ts --production"
 ```
+
+**Activating production (operator-only, deliberate):** the resolver heals a stored
+`semantic_search_mode='production'` to `'disabled'` UNLESS the app environment sets
+`SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (AGG-C10-02). The admin Settings UI intentionally
+offers only Disabled/Stub — there is no one-click production toggle. To go live: seed the
+weights (above), run the `--production` backfill (above), set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`
+in `.env.local`, and set the DB row `admin_settings.semantic_search_mode='production'`. Without
+the env flag the routes 503 regardless of the DB value.
 
 **Why the binary is already present without extra Dockerfile steps:** `onnxruntime-node` (the CPU inference engine used by `@huggingface/transformers`) bundles its native `.node` binding for all platforms — including `linux/arm64` and `linux/x64` — **directly inside the npm package tarball** (`bin/napi-v3/linux/{arm64,x64}/onnxruntime_binding.node`). Its `postinstall` script only downloads CUDA `.so` files, which are not needed for CPU inference. Since `onnxruntime-node` is a non-dev, non-optional transitive production dependency (via `@huggingface/transformers → onnxruntime-node`), it is installed by `npm ci --omit=dev` in the `prod-deps` stage without any `--include=optional` or explicit extra install step. No Dockerfile change is required to make the CPU binding available at runtime.
 

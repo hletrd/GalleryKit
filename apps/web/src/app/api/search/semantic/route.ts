@@ -22,7 +22,7 @@
  *   - 'production' — real CLIP encoder (jina-clip-v2, async). Scans only rows with
  *                    model_version = PRODUCTION_MODEL_VERSION so stub rows never
  *                    pollute production results and vice-versa. Uses
- *                    PRODUCTION_COSINE_THRESHOLD (0.25) instead of COSINE_THRESHOLD (0.18).
+ *                    PRODUCTION_COSINE_THRESHOLD (0.22) instead of COSINE_THRESHOLD (0.18).
  *
  * Every other mode returns 503:
  *   - 'disabled' (the default) → 503.
@@ -185,10 +185,10 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, headers: NO_STORE_HEADERS });
     }
 
-    // CRT-R5C1-01: Capability gate — only 'stub' mode is the current encoder.
-    // Any non-'stub' value (incl. a legacy 'production' string that healed to
-    // 'disabled' in getGalleryConfig, or any stale DB value) yields a 503
-    // (defense in depth — see the file docstring).
+    // Capability gate (AGG-C10-09): SERVES both 'stub' and 'production' modes;
+    // 'disabled' (the default, and what a stored 'production' heals to without the
+    // operator env opt-in — see gallery-config.ts AGG-C10-02) yields a 503. The
+    // server re-reads the resolved mode authoritatively below and fails closed.
     // COR-R5C1-04: rate-limit pre-increment is placed BEFORE the config read
     // so the counter is consumed on every request that passes cheap validation,
     // preventing free config probing. Pattern 2: rollback on all subsequent
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Enrich results with basic image metadata so the client can render
     // meaningful result cards (thumbnails, titles, topics) instead of
     // bare imageId+score pairs.
-    let enrichedResults: Array<{ imageId: number; score: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null }> = [];
+    let enrichedResults: Array<{ imageId: number; score: number; title: string | null; description: string | null; filename_jpeg: string; width: number; height: number; topic: string; topic_label: string | null; camera_model: string | null; lens_model: string | null; capture_date: string | null }> = [];
     if (results.length > 0) {
         const resultIds = results.map(r => r.imageId);
         const scoreMap = new Map(results.map(r => [r.imageId, r.score]));
@@ -291,6 +291,12 @@ export async function POST(request: NextRequest): Promise<Response> {
                 topic: images.topic,
                 topic_label: topics.label,
                 camera_model: images.camera_model,
+                // AGG-C10-11a: include lens_model + capture_date so semantic result
+                // cards render the same subtitle as keyword-search cards. Both are
+                // public (already returned by keyword search) and NOT in
+                // _PrivacySensitiveKeys (no GPS/PII).
+                lens_model: images.lens_model,
+                capture_date: images.capture_date,
             })
             .from(images)
             .leftJoin(topics, eq(images.topic, topics.slug))
@@ -311,6 +317,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                     topic: row.topic,
                     topic_label: row.topic_label,
                     camera_model: row.camera_model,
+                    lens_model: row.lens_model,
+                    capture_date: row.capture_date,
                 }))
                 .sort((a, b) => b.score - a.score);
         } catch {

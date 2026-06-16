@@ -1,19 +1,16 @@
 /**
- * CLIP inference stubs for US-P51 (CLIP semantic search).
+ * CLIP inference STUBS for US-P51 (CLIP semantic search) — stub mode only.
  *
- * STUB IMPLEMENTATION: Real ONNX inference is deferred because:
- *   1. onnxruntime-node adds ~750 MB of native binaries + CLIP ViT-B/32 weights.
- *   2. Zero-dep stub exercises every code path (schema, hook, search route, UI)
- *      end-to-end without the heavyweight dependency.
+ * The REAL encoder shipped in lib/clip-model.ts (jinaai/jina-clip-v2, int8 ONNX
+ * via @huggingface/transformers, 1024→512 Matryoshka). These stub functions are
+ * still used by the 'stub' semantic_search_mode: they produce deterministic,
+ * hash-based 512-dim vectors that are NOT semantically meaningful — they exercise
+ * the schema / hook / search route / UI end-to-end without loading the real model.
+ * Stub rows are tagged STUB_MODEL_VERSION so they are never co-ranked with
+ * production rows.
  *
- * TODO(US-P51): Replace stubs with real ONNX inference once:
- *   - `onnxruntime-node` is added as a dependency
- *   - CLIP ViT-B/32 ONNX weights are downloaded to data/models/clip/
- *   - scripts/download-clip-models.ts downloads the model files
- *
- * Both functions are pure and deterministic: the same input always produces
- * the same 512-dim Float32Array. This is intentional for stub mode so that
- * backfill is idempotent and tests are reproducible.
+ * Both functions are pure and deterministic: the same input always produces the
+ * same 512-dim Float32Array, so backfill is idempotent and tests are reproducible.
  */
 
 import { createHash } from 'crypto';
@@ -55,9 +52,9 @@ function deterministicEmbedding(seed: string): Float32Array {
 /**
  * STUB: Generate a deterministic 512-dim embedding for an image by image ID.
  *
- * Real ONNX inference (CLIP ViT-B/32 image encoder) replaces this in a future cycle.
- * The stub uses the image ID string as the SHA-256 seed so embeddings are stable
- * across restarts and backfill runs are idempotent.
+ * The real image encoder lives in lib/clip-model.ts (jina-clip-v2); this stub is
+ * used only in 'stub' mode. It uses the image ID string as the SHA-256 seed so
+ * embeddings are stable across restarts and backfill runs are idempotent.
  */
 export function embedImageStub(imageId: number): Float32Array {
     return deterministicEmbedding(`image:${imageId}`);
@@ -66,8 +63,8 @@ export function embedImageStub(imageId: number): Float32Array {
 /**
  * STUB: Generate a deterministic 512-dim embedding for a text query.
  *
- * Real ONNX inference (CLIP ViT-B/32 text encoder) replaces this in a future cycle.
- * The stub uses the normalized query string as the SHA-256 seed.
+ * The real text encoder lives in lib/clip-model.ts (jina-clip-v2); this stub is
+ * used only in 'stub' mode. It uses the normalized query string as the SHA-256 seed.
  * NOTE: stub embeddings are NOT semantically meaningful — cosine similarity
  * between a query and an image embedding is essentially random.
  */
