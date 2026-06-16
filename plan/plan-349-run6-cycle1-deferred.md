@@ -54,6 +54,14 @@ Every cycle-1 review finding is either scheduled in **plan-348** or recorded her
 
 ---
 
+## DEFERRED — scoped-down sub-items from plan-348 implementation (recorded, not dropped)
+
+### DEF-9 — Embed-hook write-side model_version executed test still source-grep (test-engineer F2)
+- **Severity/confidence:** MEDIUM / High. **Why deferred this cycle:** the queue embed hook (`image-queue.ts`) is a detached `void (async…)()` inside a PQueue worker; behaviorally executing it requires mocking the queue + db + getGalleryConfig + the encoder in one harness. The wiring test was strengthened to assert the write is RAW (not base64) and references both STUB/PRODUCTION model versions (`image-queue-embed-wiring.test.ts`), but it remains a source-contract test, not an executed write. The read-side isolation IS behaviorally tested (`similar-route.test.ts`). **Exit:** add an executed stub-mode hook test (mock db.insert, assert the persisted `model_version === STUB_MODEL_VERSION`) — stub-mode only, no dark-flag flip.
+
+### DEF-10 — cosineSimilarity scan-loop NOT switched to the dotProduct fast path (perf M3)
+- **Severity/confidence:** MEDIUM / High (production-relevant only). **Why deferred:** the `dotProduct` unit-vector fast path landed as a tested primitive (`ec50158b`), but it must NOT replace `cosineSimilarity` in the route scan loops because STUB embeddings are NOT L2-normalized (`deterministicEmbedding` returns raw [-1,1] values) — only the real production encoder normalizes. Swapping unconditionally would corrupt stub-mode ranking. The optimization is only meaningful for the production brute-force scan, which is itself deferred (DEF-1/DEF-2, production-only/dark). **Exit:** bundle with the production scan optimization (DEF-2) — gate the dotProduct fast path on production mode (where all stored vectors are unit-length) once that work is picked up.
+
 ## Deferral integrity statement
 No CRITICAL or HIGH finding on the SHIPPED (dark) surface is deferred:
 - AGG-C10-01 (CRITICAL) — SCHEDULED (plan-348 TASK-1). It is latent only because the feature is dark, but the FIX requires no activation, so it is fixed this cycle.

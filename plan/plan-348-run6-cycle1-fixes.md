@@ -133,12 +133,18 @@ DEPLOY_MODE=per-cycle. After all tasks committed+pushed AND every gate green, ru
 - AGG-C10-11(d) (request-scoped config in detached hooks) — record-only.
 - AGG-C10-R1..R5 (postcss transitive, route dedup, model-reload backoff, prior carried items, test-isolation flake).
 
-## Progress
-- [x] TASK-1 embedding read raw-bytes + Buffer-aware read — DONE (`b1c4eed5`)
-- [x] TASK-2 re-darken config + honest UI/i18n — DONE (`f0f6e9b9`)
-- [x] TASK-3 externalize transformers + lazy import — DONE (`d3df1739`)
-- [x] TASK-4 gate SimilarPhotos toggle + a11y/CLS — DONE (`56e90df8`)
-- [x] TASK-5 verify-before-load downloader — DONE (`a9c2c8a4`)
-- [x] TASK-6 round-trip + hash-mismatch + write-side model_version tests — DONE (`b1c4eed5`, `a9c2c8a4`, `1de10ddf`)
-- [x] TASK-7 doc/comment drift + STUB_MODEL_VERSION rename — DONE (`8c79c79f`, `61825c47`, `1de10ddf`)
-- [x] TASK-8 cheap polish (enrich cols, comment, cosine fast-path) — DONE (`b6f6cdeb`)
+## Progress (all DONE — run-6 cycle-1)
+- [x] TASK-1 embedding read raw-bytes + decodeEmbeddingColumn + round-trip lock — DONE (`ec50158b`)
+- [x] TASK-2 re-darken config (env-gated heal) + honest UI/i18n + config tests — DONE (`8c329b35`)
+- [x] TASK-3 externalize @huggingface/transformers + lazy import — DONE (`67f02b8a`)
+- [x] TASK-4 gate SimilarPhotos on production + loading live region (a11y/CLS) — DONE (`ac592e93`)
+- [x] TASK-5 delete-poisoned-on-mismatch downloader hardening — DONE (`20a18536`)
+- [x] TASK-6 round-trip test (`ec50158b`) + hash-mismatch test (`20a18536`) + raw-write wiring assertion (`7bad8477`). Write-side model_version executed-test staged → still source-grep (recorded under DEF / test-engineer F2 in plan-349).
+- [x] TASK-7 doc/comment drift (`46c5864e`) + STUB_MODEL_VERSION rename + 3rd raw-bytes write site (`7bad8477`)
+- [x] TASK-8 enrich cols + similar-photos comment (`46c5864e`/`ac592e93`); dotProduct fast-path PRIMITIVE landed + unit-tested (`ec50158b`), but the SCAN-LOOP swap was NOT applied — stub embeddings are not L2-normalized, so dotProduct≠cosine for stub rows; swapping would break stub ranking. Scan-loop optimization recorded as production-only deferred (plan-349 DEF-2 area).
+
+**Gates:** ESLint, typecheck (app+scripts), lint:api-auth, lint:action-origin,
+lint:public-route-rate-limit all green; full vitest `--no-file-parallelism` =
+230 passed / 1 skipped files, 2145 passed / 2 skipped tests, 0 failures.
+**Note:** TASK-1 fix extended to a 3rd write site (admin embed action, `actions/embeddings.ts`)
+found during TASK-7 — it had the same base64 bug.
