@@ -668,10 +668,10 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
                         return (
                             <div className="flex gap-2 text-xs">
                                 {showBelow && (
-                                    <span className="text-red-500">{t('viewer.histogramBelowBlack', { pct: belowBlack.toFixed(1) })}</span>
+                                    <span className="text-destructive-text">{t('viewer.histogramBelowBlack', { pct: belowBlack.toFixed(1) })}</span>
                                 )}
                                 {showAbove && (
-                                    <span className="text-red-500">{t('viewer.histogramAboveWhite', { pct: aboveWhite.toFixed(1) })}</span>
+                                    <span className="text-destructive-text">{t('viewer.histogramAboveWhite', { pct: aboveWhite.toFixed(1) })}</span>
                                 )}
                             </div>
                         );
