@@ -61,10 +61,11 @@ export interface GalleryConfig {
     // US-P52: Auto alt-text (ONNX stub, opt-in)
     autoAltTextEnabled: boolean;
 
-    // US-P51: CLIP semantic search mode. Task 6: widened to include 'production'
-    // now that the validator (gallery-config-shared.ts) accepts it and the
-    // resolver no longer heals it away. 'production' is type-valid here but
-    // behavior branches (real CLIP encoder calls) are added in Tasks 7 & 8.
+    // US-P51: CLIP semantic search mode. 'production' is a real served mode in the
+    // code, but AGG-C10-02: a stored 'production' HEALS to 'disabled' in the resolver
+    // unless SEMANTIC_SEARCH_ALLOW_PRODUCTION=true is set (operator-only, off by
+    // default). The admin Settings UI offers only Disabled/Stub by design, so the
+    // resolved value an unprivileged deploy ever sees is 'disabled' | 'stub'.
     semanticSearchMode: 'disabled' | 'stub' | 'production';
 
     // US-P54: license tier prices in cents (0 = not for sale)
@@ -127,12 +128,22 @@ async function _getGalleryConfig(): Promise<GalleryConfig> {
             })(),
             semanticSearchMode: (() => {
                 const raw = getSetting(map, 'semantic_search_mode');
-                // Task 5 opened 'production' as a valid stored value; Task 6 widens
-                // the type to reflect it. An invalid/unknown raw value falls back to
-                // the default ('disabled'). A valid 'disabled' | 'stub' | 'production'
-                // passes through unchanged.
+                // An invalid/unknown raw value falls back to the default ('disabled').
                 if (!isValidSettingValue('semantic_search_mode', raw)) return DEFAULTS.semantic_search_mode as 'disabled' | 'stub' | 'production';
-                return raw as 'disabled' | 'stub' | 'production';
+                const value = raw as 'disabled' | 'stub' | 'production';
+                // AGG-C10-02 (run-6 cycle-1): the CLIP feature is deployed DARK by
+                // explicit user choice. 'production' is a real, served mode in the code,
+                // but it must NOT be activatable through the ordinary admin Settings UI
+                // (which intentionally offers only Disabled/Stub). So a stored
+                // 'production' value HEALS to 'disabled' unless an operator has set the
+                // explicit env opt-in SEMANTIC_SEARCH_ALLOW_PRODUCTION=true. This keeps
+                // the admin UI's documented invariant ("production is treated as
+                // Disabled") TRUE for every normal deploy, while preserving a deliberate,
+                // non-UI operator activation path (env flag + DB row + weights + backfill).
+                if (value === 'production' && process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] !== 'true') {
+                    return 'disabled';
+                }
+                return value;
             })(),
             licensePrices: {
                 editorial: validatedNumber(map, 'license_price_editorial_cents'),

@@ -7,9 +7,10 @@
  * These tests pin that resolution contract:
  *
  *   - a valid DB override wins over the default (representative keys),
- *   - an invalid stored value falls back to the default — including the legacy
- *     'production' semantic_search_mode string, which must HEAL to 'disabled'
- *     (ARCH-R5C2-03 / CRT-R5C2-01: 'production' is no longer storable),
+ *   - an invalid stored value falls back to the default,
+ *   - AGG-C10-02: a stored 'production' semantic_search_mode is type-valid but the
+ *     resolver HEALS it to 'disabled' by default (dark feature), and passes it
+ *     through ONLY when SEMANTIC_SEARCH_ALLOW_PRODUCTION=true (operator opt-in),
  *   - numeric coercion: a string DB value resolves to a number,
  *   - boolean coercion: 'true' / 'false' strings resolve to booleans,
  *   - unknown keys present in the table are ignored (never widen the config).
@@ -88,13 +89,34 @@ describe('getGalleryConfig resolver (TEST-R5C2-09)', () => {
         expect(config.imageQualityJpeg).toBe(72);
     });
 
-    it('accepts stored "production" semantic_search_mode (CRT-R5C1-01 lifted — real encoder shipped)', async () => {
-        mockSettingsRows([{ key: 'semantic_search_mode', value: 'production' }]);
-        const config = await getGalleryConfig();
+    it('HEALS a stored "production" semantic_search_mode to "disabled" by default (AGG-C10-02)', async () => {
+        // The CLIP feature is deployed DARK: 'production' is a type-valid stored value
+        // (the real encoder exists), but without the operator env opt-in the resolver
+        // heals it to 'disabled' so the dark feature is never activatable via the admin
+        // UI. This keeps the Settings UI's documented invariant TRUE for normal deploys.
+        const prev = process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+        delete process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+        try {
+            mockSettingsRows([{ key: 'semantic_search_mode', value: 'production' }]);
+            const config = await getGalleryConfig();
+            expect(config.semanticSearchMode).toBe('disabled');
+        } finally {
+            if (prev === undefined) delete process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+            else process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] = prev;
+        }
+    });
 
-        // 'production' is now a valid storable value; the resolver must pass it
-        // through rather than heal to the default.
-        expect(config.semanticSearchMode).toBe('production');
+    it('passes "production" through ONLY when SEMANTIC_SEARCH_ALLOW_PRODUCTION=true (operator opt-in)', async () => {
+        const prev = process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+        process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] = 'true';
+        try {
+            mockSettingsRows([{ key: 'semantic_search_mode', value: 'production' }]);
+            const config = await getGalleryConfig();
+            expect(config.semanticSearchMode).toBe('production');
+        } finally {
+            if (prev === undefined) delete process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
+            else process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'] = prev;
+        }
     });
 
     it('falls back to default for an invalid stored value (out-of-range number)', async () => {

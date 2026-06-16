@@ -648,10 +648,10 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                         </div>
                         <Select
                             // AGG-R5C3-13 (COR-R5C3-04): coerce the controlled value to a
-                            // valid SelectItem. A stale legacy 'production' DB row has no
-                            // matching item, so binding it raw renders a BLANK trigger. Show
-                            // it as Disabled (which is how the resolver heals it); the amber
-                            // legacy warning below still reads the RAW map to flag the stale row.
+                            // valid SelectItem. A 'production' DB row has no matching item,
+                            // so binding it raw renders a BLANK trigger. Show it as Disabled
+                            // (the resolver heals 'production' to 'disabled' by default —
+                            // AGG-C10-02); the amber warning below still reads the RAW map.
                             value={['disabled', 'stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'}
                             onValueChange={(value) => handleChange('semantic_search_mode', value)}
                         >
@@ -661,15 +661,18 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             <SelectContent>
                                 <SelectItem value="disabled">{t('settings.semanticSearchModeDisabled')}</SelectItem>
                                 <SelectItem value="stub">{t('settings.semanticSearchModeStub')}</SelectItem>
-                                {/* CRT-R5C1-01: no 'production' item — the validator rejects
-                                    that value and the resolver heals it to 'disabled'. A real
-                                    ONNX encoder (WI-P51) will re-introduce a selectable mode. */}
+                                {/* AGG-C10-02: no 'production' item BY DESIGN. The real ONNX
+                                    encoder exists but the feature is deployed DARK; production
+                                    is activatable only by an operator (SEMANTIC_SEARCH_ALLOW_
+                                    PRODUCTION=true env + DB row + weights + backfill), never via
+                                    this UI. The resolver heals a stored 'production' to
+                                    'disabled' unless that env flag is set. */}
                             </SelectContent>
                         </Select>
                     </div>
-                    {/* BUG-R5C2-03 / CRT-R5C2-05: a stale legacy 'production' DB row is no
-                        longer storable and is treated as Disabled by the resolver. Tell the
-                        admin truthfully instead of implying production search is running. */}
+                    {/* AGG-C10-02 / BUG-R5C2-03: a stored 'production' value is treated as
+                        Disabled by the resolver on any normal deploy. Tell the admin truthfully
+                        instead of implying production search is running. */}
                     {settings.semantic_search_mode === 'production' && (
                         <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
                             {t('settings.semanticSearchProductionWarning')}

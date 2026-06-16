@@ -164,9 +164,12 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
     // US-P52
     auto_alt_text_enabled: (v) => v === 'true' || v === 'false',
 
-    // US-P51: real ONNX encoder shipped — 'production' is now storable.
-    // The route + hook gate reads/writes on the active model_version so stub rows
-    // are never served as production.
+    // US-P51: 'production' is a type-VALID stored value (the real ONNX encoder exists),
+    // but AGG-C10-02: the resolver in gallery-config.ts HEALS a stored 'production' to
+    // 'disabled' unless SEMANTIC_SEARCH_ALLOW_PRODUCTION=true (operator-only, off by
+    // default), so the dark feature is never activatable through the admin UI. The
+    // route + hook gate reads/writes on the active model_version so stub rows are never
+    // served as production.
     semantic_search_mode: (v) => v === 'disabled' || v === 'stub' || v === 'production',
 
     // US-P54: license tier prices must be non-negative integers (cents)
