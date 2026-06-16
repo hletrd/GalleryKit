@@ -248,14 +248,26 @@ export function verifyWebpIccInBuffer(buffer: Buffer): WebpIccVerificationResult
 }
 
 async function _verifyWebpIccChunk(filePath: string): Promise<void> {
+    // AGG-L5 (run-6 cycle-2): read only the first 1 KB instead of the whole
+    // file. The verifier only inspects buffer[0..1024] for the ICCP chunk, but
+    // the old fs.readFile(filePath) loaded the ENTIRE WebP into memory first —
+    // wide-gamut WebPs can be tens of MB, and under peak fan-out
+    // (QUEUE_CONCURRENCY × 3 formats in parallel) that transiently allocated
+    // concurrency×3×filesize of throwaway buffer. A 1 KB partial read removes
+    // that waste.
+    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
     try {
-        const buffer = await fs.readFile(filePath);
-        const { ok, message } = verifyWebpIccInBuffer(buffer.subarray(0, 1024));
+        handle = await fs.open(filePath, 'r');
+        const head = Buffer.alloc(1024);
+        const { bytesRead } = await handle.read(head, 0, 1024, 0);
+        const { ok, message } = verifyWebpIccInBuffer(head.subarray(0, bytesRead));
         if (!ok) {
             console.warn(`[verify-webp] ${message} in ${path.basename(filePath)}`);
         }
     } catch (e) {
         console.warn(`[verify-webp] failed to read ${path.basename(filePath)}:`, e);
+    } finally {
+        await handle?.close().catch(() => { /* best-effort fd release */ });
     }
 }
 
