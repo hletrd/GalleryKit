@@ -297,6 +297,23 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* AGG-M4 / DES-01 (run-6 cycle-2): the *-duration override above only
+   * removes the ANIMATION of the photo-card hover zoom — the 5% scale-up
+   * (group-hover:scale-105) still snaps in instantly, which is itself a
+   * spatial change a vestibular-sensitive user shouldn't get. Suppress the
+   * hover-scale TRANSFORM entirely so reduced-motion visitors get no scale
+   * at all. We target the compiled `group-hover:scale-*` utility precisely
+   * (not a broad `.group:hover img`) so the photo-viewer's ImageZoom — which
+   * lives inside its own `.group` wrapper and drives transform via an inline
+   * ref, NOT this utility — keeps working. Covers every public photo card
+   * (home masonry, year/timeline, on-this-day, shared-group) since they all
+   * use group-hover:scale-* on the card image. WCAG 2.3.3 Animation from
+   * Interactions. */
+  .group:hover .group-hover\:scale-105,
+  .group:focus-within .group-focus-within\:scale-105 {
+    transform: none !important;
+  }
 }
 
 /* CM-LOW-5: Windows High Contrast Mode legibility for the photo card text
