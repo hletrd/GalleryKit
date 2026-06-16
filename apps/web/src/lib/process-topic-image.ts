@@ -9,6 +9,14 @@ import { isValidFilename } from '@/lib/validation';
 import { MAX_INPUT_PIXELS_TOPIC } from '@/lib/process-image';
 import { MAX_UPLOAD_FILE_BYTES } from '@/lib/upload-limits';
 const RESOURCES_ROOT = (() => {
+    // ORCH-C3-TMPDIR (AGG-C3-03): honor an explicit override so tests (and any
+    // sandboxed run) can redirect topic-image scratch + output to an OS temp
+    // dir instead of the repo-tracked public/resources/ tree. Mirrors the
+    // UPLOAD_ROOT / UPLOAD_ORIGINAL_ROOT override pattern in lib/upload-paths.ts.
+    // Production leaves this unset, so the cwd-derived behavior is unchanged.
+    const envRoot = process.env.TOPIC_RESOURCES_ROOT?.trim();
+    if (envRoot) return envRoot;
+
     const monorepoPath = path.join(process.cwd(), 'apps/web/public/resources');
     const simplePath = path.join(process.cwd(), 'public/resources');
     if (process.cwd().endsWith('apps/web')) {

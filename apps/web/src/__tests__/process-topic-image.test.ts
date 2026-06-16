@@ -6,16 +6,42 @@
  * @/lib/process-image + @/lib/upload-limits; real sharp pipeline used
  * for valid-image tests so the webp output contract is exercised.
  *
- * cleanOrphanedTopicTempFiles: real-filesystem tests. RESOURCES_DIR
- * resolves to <cwd>/public/resources when run from apps/web (Vitest cwd).
- * Real tmp-* files are placed there and verified removed after the call.
+ * cleanOrphanedTopicTempFiles: real-filesystem tests.
+ *
+ * ORCH-C3-TMPDIR (AGG-C3-03): RESOURCES_DIR in process-topic-image.ts is
+ * computed at module-eval time from TOPIC_RESOURCES_ROOT (env) or cwd. This
+ * suite sets TOPIC_RESOURCES_ROOT to a fresh os.tmpdir() mkdtemp directory
+ * via vi.hoisted() — which runs BEFORE the static import below — so the real
+ * Sharp pipeline writes its <uuid>.webp + tmp-* scratch into an isolated temp
+ * dir rather than leaking binary artifacts into the repo-tracked
+ * public/resources/ tree on every `npm test` / gate run. afterAll removes the
+ * whole temp dir (rm -rf), so a crash-interrupted run cannot strand orphans in
+ * the working tree.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
-import os from 'os';
 import sharp from 'sharp';
+
+// ORCH-C3-TMPDIR: create the isolated temp dir and point the module at it via
+// env BEFORE the static import of @/lib/process-topic-image runs. vi.hoisted()
+// is lifted above imports, and the module reads TOPIC_RESOURCES_ROOT at
+// module-eval time, so this guarantees RESOURCES_DIR === topicResourcesDir.
+// NOTE: the hoisted callback runs before the static ESM imports above are
+// initialized, so it must require() Node built-ins inline rather than rely on
+// the top-level fsSync/path/os bindings (those are still in the TDZ here).
+const { topicResourcesDir } = vi.hoisted(() => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodeFs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodePath = require('path') as typeof import('path');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodeOs = require('os') as typeof import('os');
+    const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'gk-topic-res-'));
+    process.env.TOPIC_RESOURCES_ROOT = dir;
+    return { topicResourcesDir: dir };
+});
 
 // Mock @/lib/validation so isValidFilename stays simple and predictable.
 vi.mock('@/lib/validation', () => ({
@@ -33,12 +59,21 @@ vi.mock('@/lib/upload-limits', () => ({
     MAX_UPLOAD_FILE_BYTES: 200 * 1024 * 1024,
 }));
 
-// Import AFTER mocks.
+// Import AFTER mocks and AFTER the hoisted env setup.
 import {
     processTopicImage,
     deleteTopicImage,
     cleanOrphanedTopicTempFiles,
 } from '@/lib/process-topic-image';
+
+// ---------------------------------------------------------------------------
+// Suite-wide isolated-temp-dir lifecycle.
+// ---------------------------------------------------------------------------
+afterAll(async () => {
+    // rm -rf the whole isolated dir — guaranteed cleanup of every <uuid>.webp,
+    // tmp-*, and keep-* file the suite produced, even on partial failure.
+    await fs.rm(topicResourcesDir, { recursive: true, force: true }).catch(() => {});
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,20 +97,6 @@ async function makeTinyJpegFile(name = 'test.jpg', sizePx = 4): Promise<File> {
 // ---------------------------------------------------------------------------
 
 describe('processTopicImage', () => {
-    // AGG-R5C3-01: the two success-path tests below call the REAL Sharp
-    // pipeline, which writes a <uuid>.webp into RESOURCES_DIR
-    // (= <cwd>/public/resources under Vitest). Register every returned
-    // filename here and unlink in afterAll so the test suite stops leaking
-    // binary artifacts into the repo tree on every `npm test` / gate run.
-    const resourcesDir = path.join(process.cwd(), 'public', 'resources');
-    const writtenFiles: string[] = [];
-
-    afterAll(async () => {
-        await Promise.all(
-            writtenFiles.map((f) => fs.unlink(f).catch(() => {})),
-        );
-    });
-
     it('rejects files that are too large', async () => {
         const buf = new Uint8Array(201 * 1024 * 1024); // 201 MB — over limit
         const file = new File([buf], 'large.jpg', { type: 'image/jpeg' });
@@ -102,11 +123,12 @@ describe('processTopicImage', () => {
     it('returns a <uuid>.webp filename for a valid JPEG', async () => {
         const file = await makeTinyJpegFile();
         const filename = await processTopicImage(file);
-        writtenFiles.push(path.join(resourcesDir, filename));
         // Must be UUID.webp
         expect(filename).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/,
         );
+        // The output landed in the isolated temp dir, not the repo tree.
+        await expect(fs.access(path.join(topicResourcesDir, filename))).resolves.toBeUndefined();
     });
 
     it('returns a <uuid>.webp filename for a valid PNG', async () => {
@@ -117,8 +139,8 @@ describe('processTopicImage', () => {
             .toBuffer();
         const file = new File([new Uint8Array(buf)], 'test.png', { type: 'image/png' });
         const filename = await processTopicImage(file);
-        writtenFiles.push(path.join(resourcesDir, filename));
         expect(filename).toMatch(/\.webp$/);
+        await expect(fs.access(path.join(topicResourcesDir, filename))).resolves.toBeUndefined();
     });
 });
 
@@ -142,35 +164,24 @@ describe('deleteTopicImage', () => {
 // ---------------------------------------------------------------------------
 // cleanOrphanedTopicTempFiles: real-filesystem tests.
 //
-// RESOURCES_DIR in process-topic-image.ts resolves to
-// `<cwd>/public/resources` when cwd ends with `apps/web` (Vitest runs from
-// there). We write real tmp-* files into that directory, call the function,
-// and verify they are gone. This avoids vi.spyOn on Node built-in fs/promises
-// whose properties are non-configurable and cannot be redefined.
+// RESOURCES_DIR resolves to the isolated temp dir (topicResourcesDir) for this
+// suite via TOPIC_RESOURCES_ROOT. We write real tmp-* files into that directory,
+// call the function, and verify they are gone. This avoids vi.spyOn on Node
+// built-in fs/promises whose properties are non-configurable.
 // ---------------------------------------------------------------------------
 
 describe('cleanOrphanedTopicTempFiles', () => {
-    // The function uses RESOURCES_DIR = cwd/public/resources when run from apps/web.
-    const resourcesDir = path.join(process.cwd(), 'public', 'resources');
-    const createdFiles: string[] = [];
-
     beforeAll(async () => {
         // Ensure the directory exists (processTopicImage also creates it).
-        await fs.mkdir(resourcesDir, { recursive: true });
-    });
-
-    afterAll(async () => {
-        // Best-effort cleanup of any files we created.
-        await Promise.all(createdFiles.map((f) => fs.unlink(f).catch(() => {})));
+        await fs.mkdir(topicResourcesDir, { recursive: true });
     });
 
     it('removes stale tmp-* files and leaves non-tmp files intact', async () => {
-        // Write a stale temp file and a regular .webp file into RESOURCES_DIR.
-        const tmpFile = path.join(resourcesDir, `tmp-test-${Date.now()}`);
-        const keepFile = path.join(resourcesDir, `keep-${Date.now()}.webp`);
+        // Write a stale temp file and a regular .webp file into the isolated dir.
+        const tmpFile = path.join(topicResourcesDir, `tmp-test-${Date.now()}`);
+        const keepFile = path.join(topicResourcesDir, `keep-${Date.now()}.webp`);
         await fs.writeFile(tmpFile, 'stale');
         await fs.writeFile(keepFile, 'keep');
-        createdFiles.push(keepFile); // register for afterAll cleanup
 
         await cleanOrphanedTopicTempFiles();
 
@@ -182,9 +193,8 @@ describe('cleanOrphanedTopicTempFiles', () => {
 
     it('is a no-op when there are no tmp-* files (no throw, no side effects)', async () => {
         // Write only a regular file.
-        const keepFile = path.join(resourcesDir, `keep-noop-${Date.now()}.webp`);
+        const keepFile = path.join(topicResourcesDir, `keep-noop-${Date.now()}.webp`);
         await fs.writeFile(keepFile, 'keep');
-        createdFiles.push(keepFile);
 
         // Should complete without throwing.
         await expect(cleanOrphanedTopicTempFiles()).resolves.toBeUndefined();
@@ -194,21 +204,9 @@ describe('cleanOrphanedTopicTempFiles', () => {
     });
 
     it('does not throw when the resources directory does not exist yet', async () => {
-        // Use a path that definitely does not exist.
-        const nonexistentDir = path.join(os.tmpdir(), `gk-no-resources-${Date.now()}`);
-        // processTopicImage.ts computes RESOURCES_DIR at module evaluation time.
-        // We can't change that path, so instead we verify the contract by
-        // confirming the function catches readdir ENOENT and resolves cleanly.
-        // Since RESOURCES_DIR already exists in this context, we test the
-        // guard with a fresh temporary directory that does NOT exist.
-        //
-        // The guard is: catch block in cleanOrphanedTopicTempFiles swallows all errors.
-        // We verify this by ensuring the function never throws even when the
-        // underlying readdir would fail — which is already covered by the source
-        // contract (the catch block has no re-throw). Pin it via a direct call:
+        // The guard is: catch block in cleanOrphanedTopicTempFiles swallows all
+        // errors. RESOURCES_DIR exists in this context, so we pin the contract
+        // by confirming the function always resolves cleanly.
         await expect(cleanOrphanedTopicTempFiles()).resolves.toBeUndefined();
-        // Confirm nonexistentDir was never created (we're not testing that path
-        // directly — just confirming the function always resolves).
-        await expect(fs.access(nonexistentDir)).rejects.toThrow();
     });
 });
