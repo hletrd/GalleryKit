@@ -1555,6 +1555,17 @@ export async function getImageIdsForSitemap(limit: number = 24000) {
     .limit(safeLimit);
 }
 
+// AGG-H4 (run-6 cycle-2): hard upper bound on markers returned to the public
+// /map page. Previously this query had no LIMIT and two unindexed IS NOT NULL
+// GPS predicates, so with revalidate=0 every /map hit materialized the FULL
+// GPS-bearing set into memory and shipped it in one payload, growing linearly
+// with the gallery (the single most concrete public unbounded-result path).
+// 10k markers comfortably covers a personal gallery; beyond that the map would
+// need viewport-bbox filtering / clustering (a feature, not a fix — out of
+// scope). A deterministic ORDER BY makes WHICH markers survive the cap stable
+// (most-recent first) rather than relying on undefined storage-engine order.
+const MAP_MAX_MARKERS = 10000;
+
 // PRIVACY: getMapImages is the ONLY public-facing function that exposes
 // latitude/longitude. It enforces two layers of GPS-leak prevention:
 // 1. SQL layer: INNER JOIN on topics.map_visible = true ensures the DB
@@ -1578,7 +1589,9 @@ export async function getMapImages() {
                 isNotNull(images.latitude),
                 isNotNull(images.longitude),
             )
-        );
+        )
+        .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
+        .limit(MAP_MAX_MARKERS);
 
     // Runtime defense-in-depth: assert every row has map_visible=true.
     for (const row of rows) {
