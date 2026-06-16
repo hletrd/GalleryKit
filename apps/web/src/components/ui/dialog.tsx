@@ -3,6 +3,7 @@
 import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 
@@ -50,12 +51,19 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
-  closeLabel = "Close",
+  closeLabel,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
   closeLabel?: string
 }) {
+  // AGG-M5 (run-6 cycle-2): default the close-button sr-only label from i18n
+  // (common.close) instead of a hardcoded English "Close", so Korean
+  // screen-reader users hear the localized label. Every call site renders
+  // inside NextIntlClientProvider (the locale layout), so useTranslations is
+  // safe here. An explicit closeLabel prop still overrides.
+  const t = useTranslations("common")
+  const resolvedCloseLabel = closeLabel ?? t("close")
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -74,7 +82,7 @@ function DialogContent({
             className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-2 right-2 inline-flex h-11 w-11 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <XIcon />
-            <span className="sr-only">{closeLabel}</span>
+            <span className="sr-only">{resolvedCloseLabel}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>

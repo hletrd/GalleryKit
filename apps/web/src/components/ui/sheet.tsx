@@ -3,6 +3,7 @@
 import * as React from "react"
 import * as SheetPrimitive from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 
@@ -48,12 +49,18 @@ function SheetContent({
   className,
   children,
   side = "right",
-  closeLabel = "Close",
+  closeLabel,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   closeLabel?: string
 }) {
+  // AGG-M5 (run-6 cycle-2): default the close-button sr-only label from i18n
+  // (common.close) instead of a hardcoded English "Close". Sheets render
+  // inside NextIntlClientProvider (the locale layout), so useTranslations is
+  // safe. An explicit closeLabel prop still overrides.
+  const t = useTranslations("common")
+  const resolvedCloseLabel = closeLabel ?? t("close")
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -76,7 +83,7 @@ function SheetContent({
         {children}
         <SheetPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none">
           <XIcon className="size-4" />
-          <span className="sr-only">{closeLabel}</span>
+          <span className="sr-only">{resolvedCloseLabel}</span>
         </SheetPrimitive.Close>
       </SheetPrimitive.Content>
     </SheetPortal>

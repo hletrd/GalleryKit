@@ -661,7 +661,8 @@
     "photo": "Photo",
     "loading": "Loading…",
     "imageUnavailable": "Image unavailable",
-    "skipToContent": "Skip to content"
+    "skipToContent": "Skip to content",
+    "close": "Close"
   },
   "photo": {
     "notFoundTitle": "Photo Not Found",
