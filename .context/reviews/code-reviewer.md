@@ -1,84 +1,76 @@
-# Code Reviewer — Run 6 / Cycle 5
+# Code Reviewer — Deep Review (Run-6 Cycle-6)
 
-## Headline
+- **HEAD:** `4eb83aab`
+- **Agent:** code-reviewer (oh-my-claudecode:code-reviewer)
+- **Date:** 2026-06-17
+- **Angle:** code quality, logic bugs, SOLID, maintainability, error handling, invariant violations, data-flow / state-consistency.
 
-**0 new actionable findings.** HEAD-verified at `2f603716` (working tree clean). All five cycle-4 findings (AGG-C4-01..05) are CLOSED at HEAD; no new logic / SOLID / maintainability / error-handling / data-flow defect survives verification. Honest convergence — reporting zero, as instructed, because zero is the true state.
+## Verdict
 
----
+**0 actionable findings.** An honest 0/0, consistent with the documented convergence (11 → 45 → 14 → 5 → 1 across cycles 1-5, with the single cycle-5 LOW already fixed at HEAD). No fabricated marginal findings. The repo's correctness/quality posture on the surfaces I examined is genuinely sound.
 
-## Scope & Method
+| Severity | Count |
+|---|---|
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 0 |
 
-Angle: code quality, logic bugs, SOLID, maintainability, error handling, invalid assumptions, data-flow / state-consistency.
+## What HEAD actually is
 
-1. Read repo rules (root `CLAUDE.md`, `.context/reviews/_aggregate.md` cycle-4 merged findings) before any judgement, to avoid re-reporting closed/deferred items.
-2. Verified the cycle-4 baseline→HEAD delta (`f8147868..2f603716`): the only source/script changes are the four cycle-4 fix commits (`6ab40644`, `9a262e3f`, `1fd350be`, `24159f36`) plus their tests. Confirmed each fix is genuinely landed (read `switch.tsx`, the backfill `computeBackfillExitCode` + `countDeletedMidReencodeDetectionFailures` walkback).
-3. Built a file inventory by size + recent-change frequency (last 40 commits) and read every high-value / recently-touched / boundary-bug-prone file in full — not a subset:
-   - **Largest / most complex:** `lib/image-queue.ts` (786), `lib/admin-backfill-runner.ts` (871), `app/actions/images.ts` (1157, the god-action), `lib/data.ts` (buffered view-count flush + cursor/pagination + smart-collection query sections), `lib/gps-exif-strip.ts` (605, byte surgery).
-   - **Recently changed:** `lib/serve-upload.ts`, `lib/clip-embeddings.ts`, `lib/view-retention.ts`, `lib/clip-model.ts`, `lib/gallery-config.ts`, `scripts/backfill-color-pipeline.ts` (cycle-4 diff), `app/actions/embeddings.ts`, `app/api/search/similar/[id]/route.ts`.
-   - **Highest-risk routes / surfaces:** `app/api/download/[imageId]/route.ts`, `app/api/stripe/webhook/route.ts`, `app/actions/public.ts`, `lib/auth-rate-limit.ts`, `lib/bounded-map.ts`, `lib/admin-tokens.ts`, `lib/analytics.ts`.
-4. Ran 2 read-only `Explore` fan-out sweeps (async/promise/error-handling bug classes; numeric/boundary/state-consistency bug classes) + 5 independent corroborating `grep` sweeps. Did NOT assume tests/comments correct — validated behavior from code.
+`4eb83aab` touches only `src/__tests__/client-server-only-boundary.test.ts` (+191 lines) and `plan/plan-356-run6-cycle5-fixes.md`. **No production source changed** since cycle-4's fixes. The working tree at session start carried only `.context/reviews/*.md` doc edits — i.e. HEAD source == reviewed source. I verified this with `git diff-tree --no-commit-id --name-only -r HEAD`.
 
----
+## Files examined in full (not sampled)
 
-## Confirmed analyses (candidates examined, all resolve to "not a bug" or "already handled at HEAD")
+Inventory: 234 non-test source files under `apps/web/src`. I prioritized the highest-churn files (by 14-day commit frequency) — where regressions are most probable — then ran codebase-wide pattern sweeps to cover the long tail.
 
-- **Cycle-4 closures re-verified, NOT re-reported:**
-  - `switch.tsx:14` header comment now correctly cites `translate-x-full` (the geometry triple `w-11`/`px-0.5`/`size-5`/`translate-x-full` is consistent; `switch-geometry-contract.test.ts` pins it).
-  - `backfill-color-pipeline.ts`: `detectionFailures` walkback for deleted-mid-reencode rows present (`:453`), exit code via pure `computeBackfillExitCode` helper (`:530`), tested.
-  - image-queue bootstrap flake fix + switch geometry test + detection-failure decrement all landed.
+Read end-to-end and analyzed for logic/state/error-handling defects:
 
-- **`lib/image-queue.ts`** — claim/retry/bootstrap state machine is leak-free. Lock acquire/release symmetric (`finally` release with `.catch`), `enqueued`/`retryCounts`/`claimRetryCounts`/`lastErrors`/`permanentlyFailedIds` all pruned on every exit path (`finally` at `:544-556`), FIFO eviction caps bounded, `failed_at` written via `toMySqlDateTime` (no trailing-Z ER 1292). `scheduleBootstrapContinuation` re-arm guard correct. Fire-and-forget caption/embedding hooks correctly `void`-ed + `.catch`-ed. No stuck-flag, no counter drift.
+- `lib/admin-backfill-runner.ts` (872 L) — in-app backfill runner, concurrency cap, per-image claim, delete-mid-reencode cleanup, observability counters.
+- `scripts/backfill-color-pipeline.ts` (537 L) — sidecar backfill, batched UPDATE, exit-code matrix, delete-race partitioning.
+- `lib/image-queue.ts` (787 L) — PQueue worker, claim lock, retry/permanent-fail Maps, bootstrap continuation, restore quiesce, embedding/caption hooks.
+- `lib/serve-upload.ts` (309 L) — static-file serving, ETag/settings-hash, SWR hash cache, fd-leak guards, 304 negotiation.
+- `app/api/search/semantic/route.ts` (334 L) — public semantic endpoint, rate-limit Pattern-2, body/content-type guards, model-version isolation.
+- `app/api/checkout/[imageId]/route.ts` (244 L) — Stripe Checkout creation, price parse, idempotency-key under unknown-IP.
+- `app/api/stripe/webhook/route.ts` (454 L) — signature verify, payment_status gate, email shape/length, FK-deleted-image handling, dup-key-loser disambiguation.
+- `app/api/download/[imageId]/route.ts` (463 L) — single-use token claim ordering, open-before-claim fd contract, RFC 6266 disposition.
+- `app/api/admin/lr/upload/route.ts` (485 L) — PAT upload parity with browser path: GPS strip, HDR gate, tracker settle, color-signal insert.
+- `lib/data.ts` (privacy region L204-420 + view-count buffering L17-200) — admin/public/map select-field derivation, compile-time `_PrivacySensitiveKeys` guard, debounced view-count flush + backoff.
+- `lib/process-image.ts` (color resolvers L661-797) — `resolveColorPipelineDecision` / `resolveAvifIccProfile` precedence.
+- `lib/photo-title.ts` (full) — display-title / alt-text derivation.
+- `lib/clip-embeddings.ts` (L62-182) — buffer↔Float32 round-trip, `decodeEmbeddingColumn` shape handling, topK.
+- `lib/smart-collections.ts` (parse/validate L274-363), `lib/admin-tokens.ts` (parseScopes L117-148), `components/wide-gamut-hint.tsx` (L36-54) — all JSON.parse sites.
+- `lib/validation.ts` (`safeInsertId` / `hasMySQLErrorCode` L155-188).
+- `app/actions/admin-backfill.ts` (full) — same-origin gate + status surface.
+- `src/__tests__/client-server-only-boundary.test.ts` (L1-90) — the HEAD change.
 
-- **`lib/admin-backfill-runner.ts`** — `running` flag reset in `finally`; `lastError` documented last-writer-wins at concurrency>1 (counts stay per-worker-correct); `resolveBackfillConcurrency` NaN-guards the pool limit (`Number.isFinite ? : 10`) so a test-mock `undefined` can't freeze PQueue; deleted-mid-reencode classified before detection-failed (mutually exclusive); `reprocessOne` claim acquired adjacent to its protected `try`/`finally` (no leak window). The discriminated `ReprocessResult` partitions every early-return into exactly one tally.
+## Codebase-wide sweeps (clean)
 
-- **`app/actions/images.ts`** — per-file try/catch wraps every iteration; upload-tracker pre-increment placed AFTER all validation (no manual rollback needed), `settleUploadTrackerClaim` symmetric on all-fail (`:490`) and success (`:512`) paths; `uploadContractLock.release()` in outer `finally`. `safeInsertId` guards BigInt precision; code-point-safe length checks throughout. `bulkUpdateImages` validates TriState shape before reading `.mode` (no framework-500 on malformed payload). Delete paths use `[]` sizes for full variant scan. (The outer-finally tracker-release nuance is the pre-existing deferred AGG-C3-09, framework-only trigger — not re-reported.)
+- **`parseInt`/`parseFloat` missing radix** — none. All radix-10.
+- **`JSON.parse` without try/catch or shape validation** — none. All 4 runtime sites (smart-collections, admin-tokens, wide-gamut-hint, semantic route) guard parse + validate the parsed shape.
+- **Empty catch blocks** — none (the single grep hit is a comment in `image-queue.ts`).
+- **`.catch(() => {})`** — all on legitimate best-effort cleanup (fs.unlink, advisory-lock release, `exitFullscreen`); none swallow a load-bearing error.
+- **Sequential `await db.*` inside `for…of` loops** (N+1) — none in `lib/` or `app/actions/`.
+- **action-origin coverage** — every mutating server action calls `requireSameOriginAdmin()` or carries `@action-origin-exempt`; only `auth.ts`/`public.ts` are (correctly) excluded.
 
-- **`lib/data.ts`** — buffered shared-group view-count flush is correct: timer nulled on entry (COR-R4C11-01), atomic Map swap, re-buffer retry cap (`VIEW_COUNT_MAX_RETRIES`), FIFO eviction of both `viewCountBuffer` and `viewCountRetryCount`, exponential backoff. Cursor normalization (`normalizeImageListCursor` + `buildCursorCondition`) keyset logic sound. `normalizePaginatedRows` applies exactly ONE `+1` lookahead and `hasMore = rows.length > pageSize`; `getImagesForSmartCollection` passes ONE `+1` (the R4C5 double-+1 bug is genuinely fixed and `loadMoreSmartCollectionImages` correctly passes `safeLimit`, not `+1`). `COUNT(*) OVER()` post-GROUP-BY counts distinct images; empty-result `rows[0]?.total_count ?? 0` correct.
+## Candidates investigated and ruled out (evidence)
 
-- **`lib/gps-exif-strip.ts`** — every byte offset bounds-checked via `inBounds`; IFD chain depth/entry-count capped + visited-set cycle guard; GPS-IFD zeroing math correct; HEIF Exif TIFF region end `start+4+(length-4)=start+length` with the `headerOffset <= length-8` guard leaving ≥4 bytes; iloc extent parsing version-aware; WebP chunk padding correct; all structural anomalies return `null` → re-encode fallback. The single most boundary-bug-prone file in the repo is exemplary.
+1. **Sidecar backfill double-count of `processed` vs `detectionFailures` on delete-mid-reencode** (`backfill-color-pipeline.ts:444,455`). RULED OUT. A detection-failure row increments BOTH `processed` (L466) and `detectionFailures` (L480). On delete, `processed -=` (L444) subtracts ALL deleted rows and `detectionFailures -=` (L455, via `countDeletedMidReencodeDetectionFailures` on the derivative slice only) subtracts the detection-failure∩deleted overlap. Both counters are walked back exactly once for each affected row — arithmetically correct. Unit-pinned by `backfill-color-pipeline-deleted-mid-reencode.test.ts` (verified passing).
 
-- **`app/api/download/[imageId]/route.ts`** — FileHandle leak prevented on every post-open path (claim-fail, already-used, stream-setup-fail close it; success autoCloses); validation front-loaded before the atomic single-use claim; path traversal containment + realpath check; RFC 6266/5987 Content-Disposition encoding. GET interstitial is write/fs-free (auto-HEAD safe).
+2. **`server-only` on `@/db` / data layer** — NOT proposed (HARD GUARD #1). The HEAD boundary test's design is the correct alternative: it follows VALUE imports only (type-only imports are erased), uses the TS AST not a regex, and treats `mysql2` in the closure as the server-only-equivalent signal. This is precisely why `server-only` would break the tsx backfill sidecar.
 
-- **`app/api/stripe/webhook/route.ts`** — exhaustively hardened: `payment_status === 'paid'` gate, oversized-email reject before truncation, deleted-image FK both pre-checked and caught (ER_NO_REFERENCED_ROW_2 → 200 not 500), dup-key-loser disambiguation via `affectedRows===1 && insertId>0`, SELECT-first idempotency. No dead-token hazard.
+3. **CLIP/semantic dimension drift** (`clip-embeddings.ts`) — RULED OUT. `EMBEDDING_DIM=512`/`EMBEDDING_BYTES=2048` consistent across write (`image-queue.ts:453`), `embeddingToBuffer`, `bufferToEmbedding`, and `decodeEmbeddingColumn` (which handles raw-buffer + base64-in-buffer + base64-string with explicit length checks). Stub and production isolated by `model_version` filter in the route. Feature is `disabled` by default BY DESIGN (HARD GUARD #2) — not activated.
 
-- **`app/actions/public.ts` / `lib/analytics.ts`** — rate-limit TOCTOU correct (pre-increment in-memory → DB increment → combined check → symmetric rollback), pinned `bucketStart`, cursor coercion fails closed to `invalid`, referrer TLD+1 strips all trailing dots, private-IP/onion → `direct`. Fire-and-forget view inserts `.catch`-ed.
+4. **`getBackfillStatus` omits `deletedMidReencode`** (`admin-backfill.ts:72-100`) — RULED OUT as a defect. Deliberate: `deletedMidReencode` is neither success nor failure and intentionally does NOT flip the with-failures banner (documented at `admin-backfill-runner.ts:787-790`). Surfacing it would be noise.
 
-- **`lib/gallery-config.ts`** — `semanticSearchMode` heal logic intact (`production`→`disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`); every setting NaN/invalid-guarded with default fallback; whole resolver `try/catch` falls back to defaults on DB unavailability. (HARD GUARD honored — CLIP-disabled-by-design NOT flagged.)
+5. **`getConcisePhotoAltText` corrupts a literal `#` in a real title** (`photo-title.ts:119-121`: `.replace(/^#+/,'').replace(/\s+#/g, ', ')`). A title like `"Race #3"` becomes `"Race, 3"` in alt text. NOTED, not reported: pre-existing, cosmetic, alt-text-only, vanishingly rare (admin-authored titles with internal `#`), and outside this cycle's regression surface. Not worth a code change given convergence posture; flagging only for completeness.
 
-- **`lib/clip-model.ts` / `clip-embeddings.ts` / `embeddings.ts` / similar route** — HWC→CHW pixel indexing math correct; `decodeEmbeddingColumn` handles raw-Buffer + legacy-base64 + string; cosine/dot/topK pure & correct; lazy model singleton nulls promise on failure for retry; mode-aware backfill; similar route gates on `production` (does not activate the dark feature) and rolls back rate-limit on every early-return.
+6. **Color-resolver ICC-first vs NCLX-first asymmetry** (`process-image.ts` vs `color-detection.ts`) — RULED OUT. Documented at L677-694 as an intentional design (delivery decision follows editing-intent ICC working-space; audit `color_primaries` follows container NCLX). Not a contradiction.
 
-## Independent grep corroboration (all clean)
-- No `parseInt` without radix in source. No `<= …​.length` loop bounds in source.
-- All `if (fn())`-without-await heuristic hits are genuinely SYNC `boolean` functions (`checkShareRateLimit`, `checkUserCreateRateLimit`, `preIncrementBackfillAttempt`, `String.trim()`).
-- All 50 empty-catch / `.catch(()=>undefined)` sites are best-effort cleanup (lock release, fd close, fire-and-forget) — none swallow a result a caller depends on.
-- `Number(x) || 1` cases are concurrency defaults where 0 is invalid anyway (correct, not a 0-is-valid bug).
-- 25 `Promise.all` sites are independent reads / idempotent file deletes / verifications — none corrupt a shared invariant on partial rejection.
+## Test confirmation
 
-## Explore fan-out results
-- **Numeric/boundary/state-consistency sweep:** "NO GENUINE FINDINGS" (verified `Number.isFinite`/`isNaN` guards, FIFO eviction keys, try/finally flag resets, sentinel comparisons).
-- **Async/promise/error-handling sweep:** no genuine floating-promise / partial-mutation / finally-mask / sync-async-misuse defect surfaced beyond the best-effort-cleanup paths already accounted for above.
+Ran the HEAD-relevant tests: `client-server-only-boundary.test.ts` + `admin-backfill-concurrency-cap.test.ts` + `backfill-color-pipeline-deleted-mid-reencode.test.ts` → **3 files, 29 tests, all passing** (1.12 s). The cycle-5 boundary-test addition works as claimed.
 
----
+## Conclusion
 
-## Findings
-
-### CRITICAL: 0
-### HIGH: 0
-### MEDIUM: 0
-### LOW: 0
-
-No issue rises to the bar of "real, HEAD-verified, genuinely worth a code change."
-
-### Open Questions (low-confidence) — none
-
-### Positive Observations
-- The cycle-4 fixes are correct AND complete (helper extraction for the exit code is exactly the right testability move; the `detectionFailures` walkback comment precisely explains the derivative-slice provenance).
-- Fix-lineage comments are load-bearing and accurate across the surfaces I validated — they materially speed re-review and encode the failure mode each guard defends.
-- The two backfill paths (sidecar script + in-app runner) maintain a genuinely consistent counter-partition + resume contract; the asymmetry that produced AGG-C4-04 is now symmetric.
-- Boundary-critical byte surgery (`gps-exif-strip.ts`) and the paid-download FileHandle lifecycle are model examples of fail-safe, leak-free defensive coding.
-
----
-
-## Recommendation
-
-**APPROVE** — no CRITICAL/HIGH/MEDIUM/LOW code-quality findings at any confidence. The system is at genuine convergence from the code-quality / logic / SOLID / data-flow angle. Per the honesty requirement, ZERO new findings is the correct, desirable outcome for this cycle.
+Every hot-path and security/correctness-critical surface I examined carries explicit, well-reasoned invariants, layered defenses, and locking test coverage — the product of 5 prior convergence cycles. I found no real regression, latent bug, SOLID violation, or state-consistency defect at HEAD `4eb83aab`. **0/0 is the correct, honest result.**

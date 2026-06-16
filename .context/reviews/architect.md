@@ -1,69 +1,79 @@
-# Architect Review — GalleryKit
+# Architect Review — Cycle 6
 
-**Run 6 / Cycle 5 · HEAD `2f603716` · branch master · working tree CLEAN · Date 2026-06-16**
-**Scope:** Architectural/design-risk review of `apps/web/src` — App Router client/server boundary, data-access layering, the `@/lib/storage` dead abstraction, the `gallery-config-shared → gallery-config → image-queue` coupling chain, single-writer topology assumptions, migration runbook. READ-ONLY; every claim verified from imports/code at HEAD, not docs.
-
-> Note: the architect agent is READ-ONLY (Write/Edit blocked). This file was persisted by the orchestrator on the agent's behalf; the finding below was independently HEAD-verified by the orchestrator before persisting.
+**HEAD** `4eb83aab` · **agent** architect · **date** 2026-06-17
 
 ## Summary
 
-One real, low-severity finding: the client→server-only regression test does NOT cover the data/persistence layer it implicitly claims to protect — the most probable accidental leak (`'use client'` → `@/lib/data`) would pass it green and might not cleanly fail `next build`. Everything else is sound: the boundary is clean at HEAD across all 48 `'use client'` files, the storage abstraction stays fully dead, the config coupling chain is correctly layered with no cycle, single-writer process-local state is unchanged, and the four deferred structural items remain correctly bound by documented topology.
+Zero architectural findings. The codebase is architecturally converged. The cycle-5 fix (AGG-C5-01 / ARCH-C5-01) that landed in HEAD is sound and correctly closes the data-layer coverage hole it targeted, without regressing the tsx-backfill constraint. Every architectural boundary in my brief was verified clean against HEAD with both static analysis and executed tests. An honest 0-architecture-finding result is the correct outcome this cycle.
 
-## Analysis — verified CLEAN (no findings)
+## Analysis — what I verified, and the evidence
 
-- **Client/server boundary at HEAD — clean.** Zero `'use client'` files value-import any server-only module. `@/lib/gallery-config` (DB resolver): 0 client importers. `@/lib/data`: 0 client value-importers (`home-client.tsx:13`, `load-more.tsx:6` are `import type` only; erased at compile). `@/db`: 0 client importers. Every value-importer of the server-only data/image/serve modules is a Server Component, server action, API route, or test. (The prior cycle's "62" was a closure count; the direct `'use client'`-directive count at HEAD is 48.)
-- **Config coupling chain — correctly layered, no cycle.** `gallery-config-shared.ts` is a zero-import client-safe leaf; `gallery-config.ts:1-23` is SERVER-ONLY, imports `@/db`, and re-exports shared symbols one-directionally; `image-queue.ts` consumes the resolver at runtime (`:12,:320,:437`) and the shared *type* via `import type` (`:10`). `shared → resolver → consumer`, no back-edge.
-- **`@/lib/storage` — fully dead, not half-wired.** Zero production importers; only a doc-comment example (`storage/index.ts:15`) and one test reference it. `serve-upload.ts` reads the filesystem via `@/lib/upload-paths`, never `getStorage()`.
-- **Single-writer / process-local state — no new shared assumption.** `restore-maintenance.ts` has zero static imports and only module-level state; no recently-touched module promoted process-local state to implied-shared.
-- **Migration runbook — unchanged, robust** (reconcile + per-entry baseline + loud post-condition intact).
-- **Cycle-4 fixes** (`6ab40644`, `9a262e3f`, `1fd350be`) are test-only / counter-accounting; zero new coupling, mutable state, or boundary crossings.
-- **HARD GUARD honored:** no CLIP-activation proposal.
+### 1. Client → server-only boundary (the cycle-5 fix) — VERIFIED SOUND, non-vacuous, GREEN
 
-## Root Cause (of the one finding)
+The fix at `apps/web/src/__tests__/client-server-only-boundary.test.ts` is a rigorous, well-reasoned guard:
 
-The boundary regression test detects leaks by a single mechanism — scanning a client module's transitive `@/lib`/`@/db` closure for `import 'server-only'`. That sentinel exists on only two leaf modules (`caption-generator.ts:19`, `clip-model.ts:17`), reachable solely via `image-queue.ts` (never client). The data/persistence layer (`@/db`, `@/lib/data`, `@/lib/gallery-config`, `@/lib/process-image`, `@/lib/serve-upload`, `@/lib/color-detection`) carries no marker and is not transitively reachable to one — so the guard's coverage silently excludes the layer a careless refactor is most likely to leak.
+- **Closure walk uses the TypeScript AST, not regex** (`extractAliasedImports`, lines 138–185). It correctly follows VALUE imports and DROPS type-only imports in both the statement form (`import type {…}`) and the inline form (`import { type X }`) — verified by the executed classifier pins at lines 341–364.
+- **`mysql2` / `mysql2/promise` is treated as a server-only-equivalent signal** (`hasServerOnlyDriverImport`, lines 200–202), with a correctly anchored regex (positive/negative cases pinned at lines 321–333). This is the load-bearing widening: it closes the `'use client' → @/lib/data → @/db → mysql2` vector that the bare `import 'server-only'` sentinel missed, because `@/db/index.ts` and the data layer carry no `server-only` marker.
+- **Non-vacuity is proven**, not assumed: the test at lines 309–319 asserts `@/db/index.ts` is recognized as server-only-equivalent via its `mysql2/promise` import (`apps/web/src/db/index.ts:2`). I independently confirmed `apps/web/src/lib/data.ts:2` imports `db` from `@/db` as a VALUE — so a future client→data leak has a real chain the walk would traverse and flag RED.
+- **The HARD GUARD is respected**: `@/db/index.ts` does NOT carry `import 'server-only'` (verified: only `caption-generator.ts` and `clip-model.ts` carry it). The file docstring documents precisely why — the production backfill sidecar `scripts/backfill-color-pipeline.ts` imports `@/db` under tsx, where `server-only`'s `default` export throws. The cycle-5 approach is the settled correct fix and is not regressed.
 
-## Findings
+**Executed result:** all 5 boundary tests pass. Full architectural trio (boundary + privacy-fields + data-tag-names-sql) → 22 passed. `npm run typecheck` → GREEN.
 
-### ARCH-C5-01 — Client→server-only regression test misses the data/persistence layer (LOW, High)
+I checked two potential escape hatches in the walk and found neither is a real gap at HEAD:
+- **Relative imports** (`./`, `../`) that the `@/`-only `isAliased` filter would skip: the client-reachable `@/lib` leaf modules use ZERO relative cross-module imports — every dependency is `@/`-aliased, so the walk is complete for these closures.
+- **`'use client'` → `@/app/actions` imports**: these are the correct React Server Actions network boundary. `apps/web/src/app/actions.ts` is a pure barrel re-export and each underlying module carries its own `'use server'` directive, so the bundler replaces these with network-reference stubs — NOT bundled server code. The walk's scoping to `@/lib`/`@/db` is intentional and correct.
 
-A future edit adds `import { getImageCached } from '@/lib/data'` to a `'use client'` component (the most likely accidental server leak — `data.ts` is the primary data module). Outcome: (1) `client-server-only-boundary.test.ts` stays GREEN (`data.ts`'s closure — `@/db`, `base56`, `gallery-config-shared`, `restore-maintenance`, `validation`, `utils`, `site-config` — contains no `server-only` sentinel; `@/db/index.ts` itself is unmarked); (2) the clean `next build` failure the test's docstring promises does not fire from `server-only` — the only backstop is the bundler choking on `mysql2`/Node built-ins via `@/db`, which is not a guaranteed build failure and may degrade to a cryptic runtime error or leak server code into the client bundle. The project deliberately built this guard to make the boundary "structurally defended" (AGG-C3-18), yet it does not fire for the highest-probability regression vector.
+> CROSS-AGENT NOTE: the debugger agent independently found a **test-only false-negative** in this same classifier (DBG-C6-01): the AST walk iterates `sf.statements` only and handles `ImportDeclaration`/`ExportDeclaration` — it does NOT traverse dynamic `import('@/lib/data')` (`CallExpression`) or `import db = require('@/db')` (`ImportEqualsDeclaration`), two value-import forms the old regex captured. The trigger surface is empty at HEAD (grep confirms no `'use client'` module uses those forms against `@/lib`/`@/db`), so it is correctly LOW. It does not change my "boundary clean at HEAD" verdict, but the guard's *future* coverage should be hardened. This is a guard-strengthening test fix, not an architecture change. See debugger.md / aggregate DBG-C6-01.
 
-**Fix (1 line, zero behavioral risk):** add `import 'server-only';` at the top of `apps/web/src/db/index.ts`. Every data/persistence module funnels through `@/db`, so this single marker (a) yields a clean named `next build` failure for any client→data import and (b) brings the entire data layer into the existing test's coverage with no test edit. The `server-only` package is already aliased to a vitest stub (`vitest.config.ts:13`), so server-module unit tests that transitively import `@/db` remain unaffected. Optionally also mark `serve-upload.ts` (it does not reach `@/db`).
+### 2. Storage abstraction (`@/lib/storage`) — VERIFIED FULLY DEAD, local-only
 
-**Files:** `apps/web/src/__tests__/client-server-only-boundary.test.ts:2-14,93-95,122-146`; `apps/web/src/lib/data.ts:1-10`; `apps/web/src/db/index.ts:1`; markers at `apps/web/src/lib/caption-generator.ts:19`, `apps/web/src/lib/clip-model.ts:17`.
+- **Zero production callers**: grep for `getStorage|getStorageSync|switchStorageBackend|getStorageBackend` across `src/` (excluding the module + tests) returns nothing.
+- **No S3/MinIO/network backend**: `local.ts`'s `getUrl` returns a local path; the only `Presigned*` hits are the `PresignedUrlOptions` interface name. No `s3`/`minio`/`aws`/HTTP client code.
+- **Not exposed via any admin surface**: `switchStorageBackend` has no server action, API route, or admin UI caller.
 
-## Trade-offs
+Matches the CLAUDE.md contract verbatim ("local filesystem storage only … Do not document or expose S3/MinIO switching"). Clean.
 
-| Option | Pros | Cons |
-|---|---|---|
-| A — mark `@/db/index.ts` `server-only` (recommended) | 1 line, one chokepoint; covers whole data layer; clean named build failure; no test edit; vitest stub already present | Relies on `@/db` staying the universal data chokepoint (it is; new data modules already import it) |
-| B — mark each data module individually | Explicit per-module intent | N edits; forgetting one on the next module re-creates the gap |
-| C — make the test flag `@/db`/`fs`/`mysql2`/`sharp` by name | No lib edits | Brittle name-matching; duplicates what `server-only` does natively; loses build-time guarantee |
-| D — do nothing | Zero churn | Leaves a known false-confidence hole in the loop's named boundary pin |
+### 3. Config coupling chain — VERIFIED ACYCLIC, clean layering
+
+```
+gallery-config-shared.ts   (validation + constants; imports NOTHING — pure client-safe leaf)
+        ↑ value+type
+gallery-config.ts          (resolution; imports @/db + gallery-config-shared)   [server]
+        ↑ value (getGalleryConfig)
+image-queue.ts             (imports getGalleryConfig as VALUE, JpegChromaSubsampling as TYPE)
+```
+
+- **No cycle**: `gallery-config-shared.ts` does NOT import `gallery-config.ts`. It imports no `@/db`, no `mysql2`, no `server-only`, no node builtins.
+- **Direction correct**: shared leaf ← resolution ← consumer.
+- **Client safety**: 10 `'use client'` components import `gallery-config-shared` and ALL pull only pure VALUE constants/functions; NONE import the resolution layer `@/lib/gallery-config`. Exactly the split the boundary test protects.
+
+### 4. Single-writer / process-local state — VERIFIED, matches documented topology
+
+- **Restore flag** (`restore-maintenance.ts`): `Symbol.for`-keyed `globalThis` boolean + `gallerykit_db_restore` advisory lock for real serialization.
+- **Upload quota tracker** (`upload-tracker-state.ts`): `Symbol.for`-keyed `globalThis` Map, hard-bounded (2000 keys, 1-hour window, prune-and-evict).
+- **Image queue retry maps** (`image-queue.ts`): per-process Maps; per-image processing claim backed by the `gallerykit:image-processing:{jobId}` advisory lock.
+
+No NEW shared-state assumption silently violates single-writer. The `globalThis`-Symbol pattern is per-process (correct for single-instance Docker) and HMR-reload-safe.
+
+### 5. Layering: actions / data / lib / API routes — VERIFIED, no inversion or god-module
+
+- **No lib → processing inversion**: `data.ts` does not import `image-queue`, `process-image`, or any `@/app/` module.
+- **One benign directional quirk (NOT a finding)**: `api-auth.ts:1` imports `isAdmin` from `@/app/actions/auth` — a colocation convention, not a true inversion: server-only-consumed, acyclic, pre-existing. Below the threshold for a code change.
+- **No god-module forming**: `data.ts` and `process-image.ts` are large but cohesive and stable across cycles.
+
+## Recommendations
+
+None architectural. Do not fabricate refactors. The HARD GUARDS are respected and should remain in place:
+- Keep `@/db/index.ts` free of `import 'server-only'` (tsx-backfill constraint — proven in cycle 5).
+- Keep the `mysql2`-in-closure detection in the boundary test; it is the non-vacuous half of the guard.
+- Leave `@/lib/storage` dead until a real end-to-end wiring plan exists.
+- Hardening the boundary test's dynamic-import / import-equals coverage (DBG-C6-01) is a guard-strengthening test fix, not an architecture change.
 
 ## References
 
-- `apps/web/src/__tests__/client-server-only-boundary.test.ts:2-14` — docstring claims to guard the client→server-only boundary broadly
-- `apps/web/src/__tests__/client-server-only-boundary.test.ts:93-95` — `hasServerOnlyImport()`: sole detection is the `import 'server-only'` sentinel
-- `apps/web/src/__tests__/client-server-only-boundary.test.ts:122-146` — transitive closure walk (well-built; memoized `:39-60`; 60s timeout `:177`)
-- `apps/web/src/lib/data.ts:1-10` — primary data module; no marker; marker-free closure
-- `apps/web/src/db/index.ts:1` — persistence chokepoint; no marker (recommended single edit site) — VERIFIED at HEAD: file begins `import { drizzle } from "drizzle-orm/mysql2";`, no `server-only`
-- `apps/web/src/lib/caption-generator.ts:19`, `apps/web/src/lib/clip-model.ts:17` — only two `server-only` markers; reachable only via `image-queue.ts` (VERIFIED: grep over `apps/web/src/lib` + `apps/web/src/db` finds exactly these two)
-- `apps/web/vitest.config.ts:13` → `apps/web/src/__tests__/stubs/server-only.ts:1-11` — `server-only` stub makes marking `@/db` test-safe
-- `apps/web/src/lib/gallery-config.ts:1-23` — SERVER-ONLY header + one-directional re-export (no cycle)
-- `apps/web/src/lib/gallery-config-shared.ts:5` — documented client-safe zero-DB leaf
-- `apps/web/src/lib/image-queue.ts:10,12,320,437` — consumes resolver (runtime) + shared type (`import type`)
-- `apps/web/src/lib/storage/index.ts:15` — only non-test storage reference is a doc-comment; `serve-upload.ts` never calls `getStorage()` (dead abstraction confirmed)
-- `apps/web/src/lib/serve-upload.ts:1-12` — filesystem serving via `@/lib/upload-paths`; version constant from client-safe `gallery-config-shared`
-- `apps/web/src/lib/restore-maintenance.ts` — zero static imports; process-local state (single-writer, AGG-C3-15 unchanged)
-- `apps/web/src/components/home-client.tsx:13`, `apps/web/src/components/load-more.tsx:4-6` — `@/lib/data` / `@/app/actions/public` referenced as `import type` only
-
-## Severity count
-
-- **LOW:** 1 (ARCH-C5-01)
-- **MEDIUM:** 0
-- **HIGH:** 0
-- **CRITICAL:** 0
-
-One worth-a-code-change finding (LOW, 1-line fix). The architecture is otherwise at honest convergence — no new layering violation, client→server leak, abstraction misuse, or scaling-assumption break. The four deferred structural items (AGG-C3-14/15/16/17) remain correctly deferred under their existing exit criteria.
+- `apps/web/src/__tests__/client-server-only-boundary.test.ts` — the cycle-5 fix; AST value-import walk + `mysql2` server-only-equivalent detection; 5 tests GREEN at HEAD.
+- `apps/web/src/db/index.ts:2` — `import mysql from "mysql2/promise"`; the chokepoint; correctly NOT marked `server-only`.
+- `apps/web/src/lib/data.ts:2` — `import { db, … } from '@/db'`; the value chain that makes the guard non-vacuous.
+- `apps/web/src/lib/gallery-config-shared.ts` / `gallery-config.ts:12,26` / `image-queue.ts:10,12` — acyclic config chain.
+- `apps/web/src/lib/storage/index.ts` — dead abstraction; zero production callers.
+- `apps/web/src/lib/api-auth.ts:1` — the one benign lib→action directional read; NOT a finding.

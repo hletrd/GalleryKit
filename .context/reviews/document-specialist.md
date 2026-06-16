@@ -1,112 +1,81 @@
-# Document-Specialist Review — Doc-vs-Code Correctness (Run 6 / Cycle 5)
+# Document-Specialist Review — Run-6 Cycle-6
 
-**HEAD:** 2f603716 (branch master, working tree clean)
-**Date:** 2026-06-16
-**Prior cycle baseline:** f8147868 (Cycle 4 — 0 open mismatches, ~40 claims verified)
-**Scope:** CLAUDE.md load-bearing factual claims vs the ACTUAL code at HEAD. Authoritative source = the code itself. Precise file:line verification.
-
----
-
-## HEADLINE: ZERO open doc/code mismatches at HEAD 2f603716. All cycle-4 fixes verified landed; full section-by-section re-pass of CLAUDE.md against current code — every checkable claim accurate. Honest convergence holds.
-
-The f8147868 → 2f603716 delta is small and entirely in already-documented territory: 4 code/test files (backfill-color-pipeline.ts, image-queue-bootstrap.test.ts, switch.tsx, + 2 new test files) plus review docs and plans. I re-verified independently at the CURRENT HEAD (line numbers shift after the cycle-4 +52-line backfill change) rather than trusting the prior snapshot. **Every audited claim (~45 distinct facts) matches the code exactly.**
+- **HEAD:** `4eb83aab`
+- **Agent:** document-specialist
+- **Date:** 2026-06-17
+- **Angle:** Documentation/code mismatches — verify the load-bearing factual claims in the repo-root `CLAUDE.md` contract against actual code at HEAD. Code is treated as authoritative.
 
 ---
 
-## CYCLE-4 FIXES (delta f8147868→2f603716) — VERIFIED LANDED
+## Verdict: 0 actionable mismatches / 1 harmless INFO
 
-- **AGG-C4-05 (switch.tsx:14 comment drift, commit 24159f36):** header comment now cites `translate-x-full` (switch.tsx:14), code uses `data-[state=checked]:translate-x-full` (switch.tsx:50). Comment now matches code. **CLOSED.**
-- **AGG-C4-02 (switch geometry regression test, commit 9a262e3f):** `switch-geometry-contract.test.ts` present; track `w-11 px-0.5` (switch.tsx:37), thumb `size-5` (switch.tsx:49), travel `translate-x-full` (switch.tsx:50) — the documented load-bearing triple. **CLOSED.**
-- **AGG-C4-03 (sidecar exit-code helper, commit 1fd350be):** `computeBackfillExitCode({errors, detectionFailures})` extracted at backfill-color-pipeline.ts:174. **CLOSED.**
-- **AGG-C4-04 (detectionFailures walk-back, commit 1fd350be):** `countDeletedMidReencodeDetectionFailures` at :162; `detectionFailures -= ...` at :455. **CLOSED.**
-- **AGG-C4-01 (image-queue bootstrap flake, commit 6ab40644):** bootstrap test updated. **CLOSED.**
+The CLAUDE.md contract is accurate at HEAD `4eb83aab`. This is the CORRECT, converged outcome — the system has trended 11 → 45 → 14 → 5 → 1 across cycles 1-5, and cycle 6 finds **zero developer-misleading doc-vs-code mismatches**. I did not fabricate nitpicks. The single INFO below is a 4-line internal line-number offset of exactly the class the doc itself elsewhere labels "informational only."
 
----
+### Methodological note (important for future cycles)
 
-## FULL SECTION-BY-SECTION VERIFICATION — every load-bearing claim accurate at HEAD
-
-### Versions & constants
-| Claim (CLAUDE.md) | Code | Verdict |
-|---|---|---|
-| `IMAGE_PIPELINE_VERSION = 7`, defined in `gallery-config-shared.ts:21`, re-exported in process-image.ts | gallery-config-shared.ts:21 = `7`; process-image.ts:315 re-exports; :313 comment confirms | ✅ |
-| `pipeline_version` current: 7 (line 140) | matches constant | ✅ |
-| Default image sizes `[640,1536,2048,4096,5120,7680]` (line 219) | gallery-config-shared.ts:90 `DEFAULT_IMAGE_SIZE_VALUES` | ✅ |
-| `avif_effort` default 6 | gallery-config-shared.ts:128 `'6'` | ✅ |
-| `wide_gamut_max_source_pixels` 50M | :134 `'50000000'` | ✅ |
-| `image_quality_webp/avif/jpeg` 90/85/90 | :97/:98/:99 | ✅ |
-| `force_srgb_derivatives`/`allow_hdr_ingest`/`force_show_color_chips` false | :116/:119/:122 | ✅ |
-| `wide_gamut_jpeg_chroma` `4:4:4`, `sdr_jpeg_chroma` `4:2:0` | :125/:131 | ✅ |
-
-### COLOR_IMPACTING_KEYS — the "9 keys" claim
-- `settings-hash.ts:41-52` = exactly **9** entries (5 color + 3 quality + `image_sizes`). Docstring (:4) says "the 9 settings". `HASH_LENGTH = 8` (:55). CLAUDE.md lines 264 & 285-289 all say 9. ✅
-
-### Advisory locks (all 6 names exact)
-- advisory-locks.ts: `gallerykit_db_restore`(:19), `gallerykit_upload_processing_contract`(:22), `gallerykit_topic_route_segments`(:25), `gallerykit_admin_delete`(:34), `gallerykit:image-processing:${jobId}`(:41), `gallerykit_color_pipeline_backfill`(:44). All documented names present. ✅
-
-### Cache-Control trio + ETag
-- All three layers emit `public, max-age=3600, must-revalidate`, no `immutable` on derivatives: next.config.ts:71, nginx/default.conf:157, serve-upload.ts:230 & :252. Deliberate non-immutable comments at next.config.ts:64-65, serve-upload.ts:193. ✅
-- ETag: `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"` (serve-upload.ts:215) — char-for-char match to CLAUDE.md line 264. ✅
-
-### Recent-commit accuracy (the items called out for drift risk)
-- **OG/JSON-LD "strip ALL bidi, not just the first" (commit 170297ed):** og-sanitize.ts uses `stripUnicodeFormatting` (global-flag twin, :29) + `OG_C0_CONTROL_CHARS = /[...]/g` (:25); docstring :18-20 documents the global-vs-first-only fix. Imported by all 3 consumers — og/route.tsx, og/photo/[id]/route.tsx, (public)/p/[id]/page.tsx. Matches CLAUDE.md line 182. ✅
-- **Backfill "report real processed + surface fatal errors" (commit 13ae79ca):** admin-backfill-runner.ts surfaces `processed`(:159), `lastError`(:181), `lastRunHadFailures`(:190) in status. Matches commit + CLAUDE.md line 195. ✅
-- **Race-guard lineage labels:** sidecar comments cite `AGG-C4-02 (run-9 c1)`(:380) / `AGG-C5-01 (run-9 c2)`(:119); in-app runner cites `AGG-R8c3-03 (run-8 c3)`(:421). CLAUDE.md line 295 ("in-app runner … Run-8 Cycle-3 AGG-R8c3-03; the sidecar flushBatch in Run-9 Cycle-1 AGG-C4-02") matches the code comments. ✅
-
-### Color & HDR pipeline
-- `COLOR_PIPELINE_DECISIONS` enum matches the decision-matrix rows (verified prior cycle; enum file unchanged in delta).
-- NCLX transfer map: `gamma24` for codes 14/15 (color-detection.ts:197-198), `gamma26` for code 17 (:200), `gamma22`/`gamma18` present; transferFunction union (:25) = `srgb|gamma22|gamma18|gamma24|gamma26|pq|hlg|linear|unknown` — exactly the set CLAUDE.md line 135 lists. Matrix enum includes `bt2020-cl`/`identity` (:27). Matches CLAUDE.md lines 135 & 233. ✅
-
-### Concurrency cap math (admin-backfill-runner.ts)
-- `BACKFILL_RESERVED_LIVE_CONNECTIONS = max(3, ceil(poolLimit/2))` (:105-106); `cap = max(1, floor((limit-reserved-1)/2))` (:139) = 2 at pool 10. Matches CLAUDE.md line 298 verbatim. ✅
-
-### Checkout card-only pin
-- `payment_method_types: ['card']` (api/checkout/[imageId]/route.ts:207). Matches CLAUDE.md line 122. ✅
-
-### View-event retention
-- `DEFAULT_VIEW_RETENTION_MS = 395 * 24 * 60 * 60 * 1000` (view-retention.ts:29); negative/non-finite fallback (:43). Matches CLAUDE.md line 120 (395 days / 13 months). ✅
-
-### Service Worker / PWA
-- sw.js:26 `SW_VERSION = 'dd26e742-p7'`; build-sw.ts:46 produces `${getCommitOrTimestamp()}-p${IMAGE_PIPELINE_VERSION}`; template placeholder `__SW_VERSION__` at sw.template.js:26. Format matches CLAUDE.md line 371 (committed SHA differs from older commit-message stamps — re-stamped per build, expected). ✅
-
-### React cache() count
-- data.ts has exactly **10** `= cache(` call sites: the 9 `*Cached` fns + `getSeoSettings`(:1662), including `getLatestImageForOgCached`(:1610). Matches CLAUDE.md line 361 ("wraps 10"). ✅
-
-### Touch-target SCAN_ROOTS
-- touch-target-audit.test.ts: `componentsDir`(:43) + `adminDir = app/[locale]/admin/`(:44) + `publicDir = app/[locale]/(public)/`(:51). Exactly the three roots CLAUDE.md line 561 claims. ✅
-
-### Key Files & Patterns table — path existence
-- 39/40 cited paths exist exactly as written. The one nominal "miss" is INFO-only, below.
-
-### i18n key-parity (DOC-R5C3-07)
-- Programmatic flat-key diff: **en = 840, ko = 840**, `only in en: []`, `only in ko: []`. en has **5** ICU `plural` blocks, ko has **0** — exactly the documented intentional asymmetry. Do NOT add a `plural` block to ko. ✅
-
-### CLIP semantic search (HARD GUARD honored)
-- Reviewed docs (CLAUDE.md lines 121, 448-494) for accuracy only — `semantic_search_mode` defaults disabled, resolver heals `production`→`disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. Did NOT propose activation. ✅
+The `CLAUDE.md` delivered in the agent **system-reminder context was a STALE snapshot** (it said "all **5** COLOR_IMPACTING_KEYS" and "wraps **9** data-access functions"). The **on-disk `CLAUDE.md` at HEAD is newer and CORRECT** — it says "all **9**" (line 264, with the AGG-R7-08 correction note) and "wraps **10**" (line 361, including `getLatestImageForOgCached`). I verified strictly against the on-disk HEAD file, not the injected context. The orchestrator brief anticipated exactly this ("the doc at HEAD already says 9 … Confirm, don't fix back to 5") — confirmed.
 
 ---
 
-## INFO (not a mismatch — recorded for transparency, NO fix proposed)
+## Facts re-verified at HEAD (all PASS)
 
-### DOC-C5-INFO-01 — `p/[id]/page.tsx` shorthand vs the actual `(public)/p/[id]/page.tsx` location
-- **Where:** CLAUDE.md line 182 references the JSON-LD photo page as `p/[id]/page.tsx` (relative shorthand, no full path); the Repository Structure tree (lines 28-30) shows `p/[id]/`, `g/[key]/`, `s/[key]/` as direct children of `[locale]/`.
-- **Actual code:** `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx` — the public pages live inside a `(public)` route group.
-- **Why this is NOT a mismatch:** (a) `p/[id]/page.tsx` is a correct path SUFFIX and the file unambiguously exists; the `sanitizeForOg` import confirms it is the documented third consumer. (b) Route groups `(public)` are URL-transparent (no effect on routes), and the Repository Structure block is explicitly an illustrative tree, not a precise path map. (c) The same `(public)` segment is already shown WITH the group elsewhere in CLAUDE.md (line 262, the serve-upload twin), so the doc is internally consistent in treating it as optional shorthand. The prior cycle implicitly accepted this. **Confidence: High (fact) / cosmetic (impact). No action.**
+| # | CLAUDE.md claim | Code (file:line) | Result |
+|---|---|---|---|
+| 1 | `IMAGE_PIPELINE_VERSION = 7` | `gallery-config-shared.ts:21` → `= 7`; re-exported `process-image.ts:315` | ✓ |
+| 2 | 6 default image sizes `[640, 1536, 2048, 4096, 5120, 7680]` | `gallery-config-shared.ts:90` `DEFAULT_IMAGE_SIZE_VALUES` | ✓ exact |
+| 3 | `COLOR_IMPACTING_KEYS` = **9 keys** | `settings-hash.ts:41-53` (5 color + 3 quality + `image_sizes`) | ✓ doc=9, code=9 |
+| 4 | Admin tunable `force_srgb_derivatives` default `false` | `gallery-config-shared.ts:116` | ✓ |
+| 5 | `allow_hdr_ingest` default `false` | `:119` | ✓ |
+| 6 | `force_show_color_chips` default `false` | `:122` | ✓ |
+| 7 | `wide_gamut_jpeg_chroma` default `'4:4:4'` | `:125` | ✓ |
+| 8 | `avif_effort` default `6` | `:128` | ✓ |
+| 9 | `sdr_jpeg_chroma` default `'4:2:0'` | `:131` | ✓ |
+| 10 | `wide_gamut_max_source_pixels` default `50_000_000` | `:134` (`'50000000'`) | ✓ |
+| 11 | `image_quality_webp=90`, `avif=85`, `jpeg=90` | `gallery-config-shared.ts:97-99` | ✓ exact |
+| 12 | `strip_gps_on_upload` default `false` | `:101` | ✓ |
+| 13 | 6 advisory-lock names (`gallerykit_db_restore`, `_upload_processing_contract`, `_topic_route_segments`, `_admin_delete`, `_color_pipeline_backfill`, `:image-processing:{jobId}`) | grep of `apps/web/src/**/*.ts` returns exactly these 6 stems | ✓ all present |
+| 14 | Cache-Control `public, max-age=3600, must-revalidate`, NOT `immutable` — across 3 files | `serve-upload.ts:230,252`; `next.config.ts:71`; `nginx/default.conf:157` | ✓ all 3 agree, none immutable |
+| 15 | serve-upload ETag `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` | `serve-upload.ts:215` `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"` | ✓ exact |
+| 16 | Two route handlers delegate to `serveUploadFile` (AGG-D2): `app/uploads/[...path]/route.ts` + `app/[locale]/(public)/uploads/[...path]/route.ts` | both files exist and import serve-upload | ✓ exact |
+| 17 | i18n: `en.json` and `ko.json` SAME key set; ko has no `plural` blocks (DOC-R5C3-07) | en 840 leaf keys = ko 840; 0 keys differ | ✓ parity, asymmetry intentional, NOT flagged |
+| 18 | Next.js 16.2 | `package.json` `next: ^16.2.3` | ✓ |
+| 19 | React 19 | `react: ^19.2.5` | ✓ |
+| 20 | TypeScript 6 | `typescript: ^6` | ✓ |
+| 21 | Node 24+ | `engines.node: ">=24"` (root + apps/web) | ✓ |
+| 22 | Argon2id memoryCost=65536, timeCost=3, parallelism=4 | `password-hashing.ts:11-14` | ✓ exact |
+| 23 | Login rate-limit 5 attempts / 15-min window (per-IP + per-account) | `rate-limit.ts:62-63` `LOGIN_WINDOW_MS=15min`, `LOGIN_MAX_ATTEMPTS=5`; per-account `accountLoginRateLimit` (`auth-rate-limit.ts:19`, key `login_account`) | ✓ |
+| 24 | Upload caps: 200 MiB/file, 2 GiB total, 100 files/window | `upload-limits.ts:1-3` (`200*1024*1024`, `2*1024^3`, `100`) | ✓ exact |
+| 25 | SW image-derivative LRU cap 50 MB | `sw-cache.ts:19` `MAX_IMAGE_CACHE_BYTES = 50*1024*1024` | ✓ |
+| 26 | Queue concurrency default 1, `QUEUE_CONCURRENCY` override | `image-queue.ts:168` `Number(process.env.QUEUE_CONCURRENCY) || 1` | ✓ |
+| 27 | React `cache()` wraps **10** data-access fns; enumerates 9 `*Cached` + `getSeoSettings` | `data.ts`: 10 `= cache(` sites; the 9 `*Cached` exports match the doc list incl. `getLatestImageForOgCached` | ✓ doc=10, code=10 |
+| 28 | 4 lint gates (`lint`, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`) | `apps/web/package.json:14,22,23,24` | ✓ |
+| 29 | `tagNamesAgg` = `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` | `data.ts:605`, reused at :734/:783/:833/:899 | ✓ exact |
+| 30 | `_PrivacySensitiveKeys` / `_SensitiveKeysInPublic` compile-time guard; `publicSelectFields` derived from `adminSelectFields` | `data.ts:208,256-257,312,318` | ✓ |
+| 31 | `COLOR_PIPELINE_DECISIONS` enum + `isP3Pipeline` client-safe | `color-pipeline-decisions.ts:22,32` | ✓ |
+| 32 | Migration journal has non-monotonic `when` (some 2026, some 2025) | `_journal.json`: 22 entries, non-monotonic confirmed, years {2025, 2026} | ✓ exact |
+| 33 | `migrate.js` post-condition: "Drizzle silently skipped N migration(s)"; `getAllJournalMigrations`/`reconcileLegacySchema`/`baselineAllJournalMigrations` | `migrate.js:144,247,642,713` | ✓ |
+| 34 | SW version stamp = git short-SHA + `-p{IMAGE_PIPELINE_VERSION}` | `build-sw.ts:46` `${getCommitOrTimestamp()}-p${IMAGE_PIPELINE_VERSION}` | ✓ |
+| 35 | Historical commit SHAs (`94c43393`, `2b6cfdb5`, `689822d4`, `aca754c`) | `git cat-file -e` — all EXIST | ✓ |
+
+**Recent-commit descriptions:** CLAUDE.md does NOT embed a live "Recent commits" list (only references specific historical SHAs, all verified above). No staleness surface here. The git-log header in the session snapshot differs from any embedded list because there is none to drift.
 
 ---
 
-## SUMMARY
+## INFO-1 (non-actionable): `settings-hash.ts` line-range citation is 4 lines stale
 
-- **Open doc/code mismatches: 0.**
-- **Cycle-4 doc/code fixes (AGG-C4-01..05): all 5 verified landed at HEAD 2f603716.**
-- **~45 distinct load-bearing CLAUDE.md claims re-verified against current code** (pipeline version, image sizes, all 11 admin tunable defaults, 9 COLOR_IMPACTING_KEYS, 6 advisory locks, cache-control trio, ETag format, NCLX gamma map, concurrency-cap arithmetic, checkout card-only pin, view-retention default, SW stamp, cache() count, touch-target scan roots, 39/40 Key-Files paths) — every one accurate.
-- **i18n: en = 840, ko = 840 keys, zero asymmetry; en 5 plural blocks, ko 0** — DOC-R5C3-07 convention intact.
-- **1 INFO note (DOC-C5-INFO-01):** `p/[id]/page.tsx` shorthand resolves correctly; not a false claim; no fix.
-- **HARD GUARD honored:** CLIP docs reviewed for accuracy only; activation NOT proposed.
+- **Location:** `CLAUDE.md` line 264 — "covers all **9** `COLOR_IMPACTING_KEYS` (`settings-hash.ts:37-49`)".
+- **Actual:** the `const COLOR_IMPACTING_KEYS = [ … ] as const;` array spans **lines 41-53** (`settings-hash.ts:41` declaration, `:53` close). The cited `37-49` points at the import block + start of the docstring's tail, not the array.
+- **Why NOT actionable:** the symbol name `COLOR_IMPACTING_KEYS` is unambiguous and a developer opening the file lands on it instantly regardless of the 4-line offset. The count (9) and the key breakdown in the prose are CORRECT. The repo's own convention treats embedded line numbers as drift-prone and informational (cf. the migrator note at line ~380: "file/line drifts across drizzle-orm versions; informational only"). This does not mislead.
+- **Optional cosmetic fix (only if a maintainer is already editing that paragraph):** change `settings-hash.ts:37-49` → `settings-hash.ts:41-53`. Not worth a standalone commit.
+- **Confidence:** High (verified by direct line grep).
 
-**Verdict: honest convergence on the documentation surface holds at HEAD 2f603716. Nothing to plan this cycle from doc/code mismatch.**
+---
 
-### i18n key counts
-- en.json: **840** keys | ko.json: **840** keys | asymmetry: **0** | en plural blocks: **5** | ko plural blocks: **0**
+## Hard guards — respected
+- Did NOT propose `import 'server-only'` on `@/db` (cycle-5 proved it breaks tsx backfill).
+- Did NOT propose activating CLIP/semantic search.
+- Did NOT re-report the `p/[id]/page.tsx` Repository-Structure shorthand (re-checked: still illustrative, INFO-only, no fix).
+- Did NOT "fix" the COLOR_IMPACTING_KEYS count back to 5, nor add an ICU `plural` block to ko.json.
 
-### Mismatch count by severity
-- CRITICAL: 0 | HIGH: 0 | MEDIUM: 0 | LOW: 0 | INFO (non-actionable): 1
+## Bottom line
+The CLAUDE.md contract faithfully describes the code at HEAD `4eb83aab`. 35 load-bearing facts re-verified, all PASS. One harmless 4-line internal line-number drift (INFO-1), no fix required. **0 actionable doc-vs-code mismatches.**

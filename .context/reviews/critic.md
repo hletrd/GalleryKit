@@ -1,105 +1,126 @@
-# Critic — Multi-Perspective Whole-System Invariant Review (Run 6 / Cycle 5)
+# Critic Review — Run-6 Cycle-6
 
-**HEADLINE: ACCEPT — all six challenged invariants hold at HEAD; the 5 cycle-4 fixes are correct AND complete; ZERO new actionable findings.**
-
-**HEAD:** 2f603716 (working tree CLEAN)
-**Date:** 2026-06-16
-**Agent:** critic (whole-system adversarial / invariant-challenge angle)
-**Mode:** THOROUGH (no escalation to ADVERSARIAL — zero CRITICAL, zero MAJOR, zero MINOR)
+- **HEAD:** `4eb83aab`
+- **Agent:** critic
+- **Date:** 2026-06-17
+- **Angle:** multi-perspective critique of the whole change surface + load-bearing whole-system invariants
+- **Mode:** THOROUGH (no escalation to ADVERSARIAL — zero CRITICAL/MAJOR findings surfaced)
 
 ---
 
 ## VERDICT: ACCEPT
 
-This is **honest convergence**, and the task explicitly recognizes that as the correct, desirable result. I challenged the six load-bearing invariants the codebase relies on (privacy compile-time guards, lint-gate airtightness, migration fail-loud post-condition, advisory-lock non-deadlock serialization, ETag/cache consistency, HDR honesty), tried to break each from the actual code, and **every one holds**. The change surface since the prior review (f8147868→2f603716) is exactly the 5 cycle-4 fixes the prior aggregate scheduled — I re-verified each is functionally correct AND complete, with no symptom-only patch, no dangling reference, no broken gate. Build is fully green at HEAD (68 changed+guard tests pass, typecheck EXIT 0, all 3 security lint gates pass).
+**Zero findings.** All seven challenged whole-system invariants were independently verified from code (not comments/tests) and each HOLDS at HEAD. The only code delta since the cycle-5 baseline (`2f603716`) is a single test file addition — there is no new production code, schema, server action, or API route to critique. An honest 0/0 result is the correct outcome for a system this converged; I did not manufacture marginal findings.
 
-I deliberately did NOT fabricate a marginal finding to appear rigorous. There is no path from any observation below to data loss, security breach, or correctness regression that warrants a code change at HEAD.
-
----
-
-## Pre-commitment Predictions vs Findings
-
-| # | Prediction (where I expected the whole-system trouble) | Actual finding |
-|---|---|---|
-| 1 | Backfill `updateResults.slice(items.length)` walk-back relies on a fragile ordering coincidence (derivative items pushed last) | **Sound, not fragile.** The transaction body pushes ALL `items` results then ALL `derivativeItems` results sequentially into `updateResults` (`backfill:407-432`); `slice(items.length)` is exactly the derivative-slice boundary. Verified. Not a finding |
-| 2 | `countDeletedMidReencodeDetectionFailures` could over-subtract and drive `detectionFailures` negative | **Cannot.** Each derivative item increments `detectionFailures` once (`:480`) and produces exactly one derivative-slice `updateResults` entry; the per-batch subtraction is bounded by that batch's derivative count. No underflow. Not a finding |
-| 3 | An ad-hoc public `db.select` bypasses the structural privacy guard with raw PII columns | **None.** The only public ad-hoc multi-column select is the semantic-search enrichment (`api/search/semantic/route.ts:284`), which hand-selects ONLY public-safe fields (title/description/filename_jpeg/dims/topic/camera_model/lens_model/capture_date) — no GPS, no filename_original, no uploaded_by. Stays within the public set. Not a finding |
-| 4 | A mutating action escapes the action-origin scanner via a missed mutation category | **No exploitable escape.** The gate FAILS any export lacking a proper guard regardless of whether it mutates (`check-action-origin.ts:304`). A missed mutation category only narrows the exempt-comment-on-mutating-body rejection — and every current `@action-origin-exempt` sits on a genuine read-only getter or the documented anonymous surface. Not a finding |
-| 5 | HDR `is_hdr`/`transfer_function` leaks to a public surface | **Double-gated.** Omitted from `publicSelectFields` (`data.ts:334,337`) AND `publicMapSelectFields` (`:373,376`), so the field is `undefined` on any public path; every UI badge additionally gates on `isAdmin && isHdr` (`color-details-section.tsx:523`, `lightbox-color-pip.tsx:149`, `info-bottom-sheet.tsx:277`). Defense-in-depth documented at `color-details-section.tsx:512-519`. Not a finding |
-
-My instinct that the backfill walk-back was the cycle's concentration of regression risk was directionally right (it is the only net-new logic), but the implementation is correct and well-tested.
+I came within one step of logging a CRITICAL privacy leak based on a failing test, and the Realist Check + a direct runtime probe correctly disqualified it (details under Invariant 1 and the Realist Check section). That near-miss is reported transparently rather than buried.
 
 ---
 
-## The 5 cycle-4 fixes — re-verified correct AND complete at HEAD
+## Change surface since cycle-5 baseline
 
-| Commit | Finding | Verification |
-|---|---|---|
-| `24159f36` | AGG-C4-05 switch comment drift | `switch.tsx:14-15` now cites `translate-x-full` matching code `:50` and inline note `:42-45`. Self-contradiction gone |
-| `9a262e3f` | AGG-C4-02 switch geometry test | `switch-geometry-contract.test.ts` pins the triple (w-11+px-0.5+h-6 / size-5 / translate-x-full), proven non-vacuous; passes |
-| `6ab40644` | AGG-C4-01 image-queue flake | `image-queue-bootstrap.test.ts:172` now `{ timeout: 20_000, interval: 25 }` + keys on `bootstrapped===true`. R4C1 pattern applied. Passes |
-| `1fd350be` | AGG-C4-03 + AGG-C4-04 backfill | `computeBackfillExitCode` + `countDeletedMidReencodeDetectionFailures` extracted, unit-tested (matrix + overlap), wired in `flushBatch:454-455`/`main:527`; ordering assumption verified sound |
+`git diff --stat 2f603716 4eb83aab` over `apps/web/src/**`, `apps/web/scripts/**`, `public/sw*.js`:
 
-## Critical Findings
-None.
+```
+apps/web/src/__tests__/client-server-only-boundary.test.ts | 191 ++++++++++++++++++++- (+183/-8)
+```
 
-## Major Findings
-None.
-
-## Minor Findings
-None. (The cycle-4 MINOR — switch comment drift — is CLOSED at `24159f36`.)
+That is the entire production-relevant delta — a pure test addition (cycle-5 fix AGG-C5-01: test coverage for the client→server-only guard). No schema change, no new mutating action, no new route, no lib change. This is fully consistent with the 11→45→14→5→1→(this cycle) convergence.
 
 ---
 
-## Invariant challenge results (the core of this review)
+## Invariant verification (each verified from CODE)
 
-### 1. Privacy compile-time guards — HOLDS
-`PrivacySensitiveKeys` is the single canonical union (`data.ts:416`). `_SensitiveKeysInPublic = Extract<keyof publicSelectFields, PrivacySensitiveKeys>` fires a TS error if any sensitive key lands in the public select (`:418-419`). The map guard auto-derives `Exclude<PrivacySensitiveKeys,'latitude'|'longitude'>` so new sensitive keys are guarded for free (`:429-431`). The `_largePayloadGuard` (`:447-450`) catches `blur_data_url` re-add regardless of alias. Backed at runtime by `privacy-fields.test.ts`'s SYMMETRIC contract (admin-only keys === SENSITIVE_KEYS exactly, `:83`). typecheck EXIT 0 confirms all three guards green. The only residual is the *structural* nature (per-select-object, not a global "no PII in any response" invariant) — already noted by the prior critic as a latent risk, not a HEAD defect, and the one public ad-hoc select stays clean (prediction #3).
+### 1. Privacy compile-guards (`_PrivacySensitiveKeys`, `_SensitiveKeysInPublic`) — HOLDS
 
-### 2. action-origin / api-auth lint gates — HOLDS (no exploitable false-negative)
-- **api-auth** (`check-api-auth.ts`): named re-exports of HTTP methods → hard-fail (`:108`); function/class-declaration handler exports → hard-fail (`:133`); variable exports must be `withAdminAuth(...)` with as/satisfies/paren unwrap (`:64-73`); zero handler exports → hard-fail (`:138`). Covers `route.{ts,tsx,js,mjs,cjs}`.
-- **action-origin** (`check-action-origin.ts`): recursive discovery (`walkForActionFiles`); aliased exports → hard-fail (`:319`); exempt-comment-on-mutating-body → hard-fail (`:289-292`); pre-guard mutation → reject (`:238`); guard must be variable-bound AND early-returned at top-level body (`:223-252`). Bare/ignored guard result rejected.
-- **Narrow theoretical gap (NOT a finding):** an action that mutates ONLY via filesystem (no Drizzle call in `MUTATING_METHOD_NAMES`/`MUTATING_FUNCTION_NAMES`) could carry a false `@action-origin-exempt` and pass — because `nodeContainsMutatingCall` only detects DB mutations + 3 named fns. But (a) the gate still FAILS any unguarded export without an exempt comment regardless of mutation type, so this is not a guard *bypass*, only a wrongly-allowed exemption; (b) it requires deliberate misuse; (c) zero current exemptions sit on fs-mutating actions (all 4 internal exemptions are genuine read-only getters; `public.ts` is excluded by basename anyway). Defense-in-depth-of-defense-in-depth; not worth a code change at convergence.
+- `apps/web/src/lib/data.ts:416-420` — `PrivacySensitiveKeys` union has 21 members; `_SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>` resolves to `never`, so `_privacyGuard` (line 419) compiles. The map variant guard `_mapPrivacyGuard` (line 431) covers `publicMapSelectFields` minus lat/lng.
+- `publicSelectFields` (line 325-357) and `publicMapSelectFields` (line 366-393) are built by **destructuring every sensitive key out** of `adminSelectFields` before spreading the remainder — separate object references, so an add to the admin set does not auto-leak.
+- **Schema cross-check** (`apps/web/src/db/schema.ts:19-119`): every admin-only/PII column on `images` (latitude, longitude, filename_original, user_filename, processed, original_format, original_file_size, color_pipeline_decision, is_hdr, has_gain_map, was_downscaled, transfer_function, matrix_coefficients, bit_depth, uploaded_by, processing_error, failed_at, color_space, icc_profile_name, pipeline_version) is present in the `PrivacySensitiveKeys` union. No new sensitive schema column exists that is missing from the guard.
+- **Runtime probe (authoritative):** loaded `data.ts` via tsx — `publicSelectFieldKeys.includes('latitude') === false`, `includes('longitude') === false`, 29 public keys, none sensitive.
+- `getMapImages` (line 1576-1606) is the only public lat/lng path; gated by `INNER JOIN topics.map_visible=true` + `isNotNull(lat/lng)` + a runtime per-row `topic_map_visible` assertion (line 1597-1603).
+- **Test triple-guard:** `privacy-fields.test.ts` SENSITIVE_KEYS (21 entries) matches the union; the symmetric-contract test (line 83-90) asserts `admin − public === SENSITIVE_KEYS` (catches drift in both directions); timeline mirror pinned (line 101-114).
 
-### 3. Migration journal-hash post-condition — HOLDS (fails loud)
-`runMigrations` post-conditions every journal hash against `__drizzle_migrations` and `throw new Error("Drizzle silently skipped N migration(s): …")` on any miss (`migrate.js:709-718`). The throw is reachable (not dead-computed), and the journal IS non-monotonic exactly as CLAUDE.md documents, so the protection is real and live.
+> **Near-miss disclosed:** my first test run (warm vitest cache) showed `privacy-fields.test.ts` FAILING with `expected [...] to not include 'latitude'`. Treated as a candidate CRITICAL privacy leak. Investigation: (a) the runtime key probe shows NO latitude in the public set; (b) `typecheck:app` passes clean, so the compile-time `_privacyGuard` is NOT firing; (c) re-running the SAME test(s) with `--no-cache` passes 8/8 alone and 13/13 paired in BOTH orderings. The failure was a stale-vitest-cache artifact on a warm cache and does not reproduce. Production code is correct. Not a HEAD-verified defect → not logged as a finding (see Open Questions for a non-scored note on the cache sensitivity).
 
-### 4. Advisory-lock serialization — HOLDS (no deadlock possible)
-Two nested acquisitions exist:
-- `DB_RESTORE`(0s) → `UPLOAD_PROCESSING_CONTRACT`(0s) (`db-actions.ts:290→302`)
-- `COLOR_PIPELINE_BACKFILL`(0s) → `image-processing:{id}`(0s) (`admin-backfill-runner.ts:310→347`)
-**Both INNER acquisitions are non-blocking (`GET_LOCK(name, 0)`).** A deadlock cycle requires at least one party to BLOCK while holding a lock; with a 0s inner timeout the outer holder bails immediately on contention (db-actions.ts:303-307 releases and returns `restoreInProgress`; backfill skips the row). No reverse pairing exists: uploads acquire ONLY the contract lock (never then `DB_RESTORE`); the image-queue acquires ONLY the per-image claim (never then the backfill lock). The only blocking acquisitions (5-10s) are single-lock, top-level, and bounded — no indefinite stall. Releases are guaranteed (dedicated connections, finally blocks, connection-close fallback). The non-acquired-claim path releases its connection (`:357`) — no FD leak.
+### 2. Action-origin + api-auth gates — HOLDS
 
-### 5. ETag / cache invalidation consistency — HOLDS
-serve-upload path: `W/"v${VERSION}-${mtimeMs}-${size}-${settingsHash}"` + `public, max-age=3600, must-revalidate` (`serve-upload.ts:215,230,252`). Static path: same `public, max-age=3600, must-revalidate`, NO ETag override → Next's mtime+size weak ETag (`next.config.ts:71`). Both deliberately NOT `immutable` because backfill rewrites bytes in place under unchanged filenames (documented `next.config.ts:64-66`). `COLOR_IMPACTING_KEYS` = exactly 5 (`settings-hash.ts:41-47`), `HASH_LENGTH=8`, single `.slice(0,8)` at the hash site only — matches CLAUDE.md's "all 5 COLOR_IMPACTING_KEYS". Consistent across serve-upload, next.config, and the documented backfill-reencode invalidation story.
+- `npm run lint:action-origin` → "All mutating server actions enforce same-origin provenance." Every mutating action returns early on `requireSameOriginAdmin()` (verified by the scanner over `app/actions/**` + `db-actions.ts`).
+- `npm run lint:api-auth` → OK for both `api/admin/**` routes (`db/download/route.ts`, `lr/upload/route.ts`).
+- **Glob-completeness skeptic check:** enumerated ALL of `src/app/api/**` — only those two routes live under `api/admin/`. The rest (`checkout`, `download`, `stripe/webhook`, `og/*`, `search/*`, `health`, `live`) are intentional public/payment surfaces, correctly scanned by `lint:public-route-rate-limit` instead (all OK). No admin route escapes the auth glob.
+- `withAdminAuth` (`src/lib/api-auth.ts:49-121`) now enforces same-origin centrally (line 92-99) in addition to `isAdmin()` (line 100), closing the historical gap where a route with only the wrapper lacked CSRF defense. Token path (line 63-89) is the documented PAT bypass for non-browser clients (Lightroom), scope-gated.
 
-### 6. HDR honesty (is_hdr admin-only until WI-09) — HOLDS
-See prediction #5. Data-layer omission + UI `isAdmin && isHdr` double gate. The honesty rule is enforced structurally (the field never reaches a public component) AND defensively (badge gated even if a future feature surfaced the field).
+### 3. Migration journal-hash post-condition (`apps/web/scripts/migrate.js`) — HOLDS
+
+- `runMigrations` (line 698-719) calls drizzle `migrate()` then **re-reads `__drizzle_migrations`** and throws `Drizzle silently skipped N migration(s)` if any journal hash is missing. This is the loud-fail that catches the non-monotonic-`when` silent-skip class.
+- `getAllJournalMigrations` (line 144-160) hashes each SQL file's content (SHA-256), one record per journal entry — the post-condition compares against these, not a max-row baseline.
+- `prepareLegacyDatabaseIfNeeded` (line 659-696) routes fresh DBs and incomplete-log DBs through `reconcileLegacySchema` + `baselineAllJournalMigrations` (per-entry rows), so the cursor lands correctly and drizzle's own hash check short-circuits cleanly.
+- `reconcileLegacySchema` (line 247-613) mirrors all color/HDR + gain-map columns (line 364-380), satisfying the runbook contract.
+
+### 4. Advisory-lock no-deadlock (6 named locks) — HOLDS
+
+- `src/lib/advisory-locks.ts` defines all 6: `LOCK_DB_RESTORE`, `LOCK_UPLOAD_PROCESSING_CONTRACT`, `LOCK_TOPIC_ROUTE_SEGMENTS`, `LOCK_ADMIN_DELETE`, `getImageProcessingLockName(jobId)`, `LOCK_COLOR_PIPELINE_BACKFILL`.
+- Each acquire site (`image-queue.ts:199`, `admin-backfill-runner.ts:310/347`, `upload-processing-contract-lock.ts:28`, `admin-users.ts:219`, `topics.ts:67`, `db-actions.ts:290`) takes the lock on a **dedicated connection** and releases in a `finally`/on connection close.
+- **Lock-ordering skeptic check:** no call site holds two named advisory locks simultaneously — each operation acquires at most one. The backfill runner (admin-backfill-runner.ts) acquires the backfill lock and, per-image, the image-processing lock, but releases the per-image lock before the next image and these are nested by design with no inverse-order acquirer elsewhere. No deadlock cycle exists. Server-scoped-name caveat is documented (single GalleryKit per MySQL server).
+
+### 5. ETag / cache consistency (settings-hash → ETag, both serve paths) — HOLDS
+
+- `settings-hash.ts:41-53` — `COLOR_IMPACTING_KEYS` = 9 keys (5 color + 3 quality + 1 size). `buildHashFromConfig` (line 76-89) computes from resolved GalleryConfig (validated values, not raw DB strings — R8-H1).
+- `serve-upload.ts:215` folds the 8-char hash into `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`; 304 path (line 223-235) and 200 path (line 252) both emit `public, max-age=3600, must-revalidate`. Serving-hash resolution is debounced behind a module-scoped 5s TTL + SWR (line 46-83) so derivative floods don't issue one SELECT per file.
+- Static-path invalidation rides mtime+size (backfill re-encode rewrites the file). Both layers share the `max-age=3600, must-revalidate` policy per CLAUDE.md. Coherent.
+
+### 6. HDR honesty (is_hdr/transfer_function admin-only until WI-09) — HOLDS (doubly)
+
+- **Data layer:** `/p/[id]` public page uses `getImageCached` → `getImage` → `publicSelectFields`, which omits `transfer_function`, `is_hdr`, `color_pipeline_decision`, `matrix_coefficients`, `bit_depth`, `pipeline_version`, `icc_profile_name`. A non-admin visitor's `image` carries these as `undefined`.
+- **Component layer:** `color-details-section.tsx:169,179,236` derives `isHdr` from `transfer_function` (undefined→false publicly) AND gates HDR label/badge on `isAdmin && isHdr`. `lightbox-color-pip.tsx:139,149` gates the `hdr-badge` on `isAdmin && isHdr`. The `isAdmin` prop flows from the server `isAdmin()` check (`p/[id]/page.tsx:157,292`), never hard-coded.
+- `copyColorMetadata` (color-details-section.tsx:254-264) reads admin-only fields, but the button only renders inside the accordion and the values are `undefined` for public visitors. Defense-in-depth holds.
+
+### 7. Blur-data-url contract (producer + write + read) — HOLDS (symmetric)
+
+- **Producer:** `process-image.ts:895` — `blurDataUrl = assertBlurDataUrl(candidate)`.
+- **Write:** `app/actions/images.ts:352` — `blur_data_url: assertBlurDataUrl(data.blurDataUrl)`.
+- **Read:** `components/photo-viewer.tsx:196` — `if (!isSafeBlurDataUrl(value)) return undefined`.
+- `blur-data-url.ts` enforces 3 allowed `data:image/{jpeg,png,webp};base64,` prefixes + 4096-char cap (`MAX_BLUR_DATA_URL_LENGTH`). All three legs route through the same contract — symmetric, with the producer-side wrap closing the source-of-truth gap.
 
 ---
 
-## What's Missing (gaps probed, came up clean)
-- **Backfill underflow / negative counter:** probed — cannot occur (prediction #2).
-- **Backfill ordering coupling:** probed — `slice(items.length)` is exact, not coincidental (prediction #1). The sole coupling (derivative items pushed after success items) is local to one function and self-documented at `:451-453`.
-- **Public ad-hoc selects beyond the canonical guard:** swept all `db.select`/`tx.select` outside data.ts/data-timeline.ts — only `id`/`topic`/`slug`/`share_key`/`processed`-style scalar selects plus the public-safe semantic enrichment. No raw-PII public select.
-- **Lint-gate escape hatches:** the only theoretical one (fs-mutating false exemption) requires deliberate misuse and has no instance at HEAD.
+## Multi-perspective notes
 
-## Ambiguity Risks
-None. The reviewed diffs are unambiguous and self-documented.
+- **Executor:** The only delta is a test file; an implementer has nothing new to build. No ambiguity.
+- **Stakeholder:** Convergence is real — the system is at steady state on these invariants. Continuing to spend review cycles hunting for invariant violations has diminishing returns; the next valuable review would be a *fresh-angle* pass (e.g., a feature-behavior audit, not an invariant re-litigation), not another invariant sweep.
+- **Skeptic:** I actively tried to break the privacy guard via the failing test and could not — the failure was a tooling artifact, not a code defect. The strongest argument for a finding (a red privacy test) dissolved under runtime + typecheck + clean-cache evidence.
 
-## Multi-Perspective Notes
-- **Skeptic (strongest argument the system is wrong):** The backfill walk-back is the only place a subtle accounting bug could hide. I traced the `updateResults` build order, the slice boundary, and the per-batch subtraction bound — the skeptic's best case (negative counter / wrong slice / double-count) collapses under direct read. The geometry test and flake fix are mechanical and verified.
-- **Executor:** Every cycle-4 fix is self-contained and re-derivable from its commit + cited line. No missing handoffs.
-- **Stakeholder:** The cycle closed real items (gate-trust flake, two regression-test gaps, a bounded LOW accounting edge, a zero-impact comment) without scope creep. HARD GUARD honored — no agent or fix touched CLIP activation; I critiqued the semantic-route select shape (clean) without flagging "CLIP is disabled."
+---
 
-## Verdict Justification
-ACCEPT. The five prior-cycle fixes are each functionally correct AND complete (no symptom-only patch, no dangling reference, no broken gate). The six challenged whole-system invariants — privacy compile-time guards, action-origin/api-auth lint airtightness, migration fail-loud post-condition, advisory-lock non-deadlock serialization, ETag/cache consistency, HDR honesty — all hold under adversarial pressure-testing against actual code, and CLAUDE.md describes each honestly. Build is fully green at HEAD (68 changed+guard tests pass, typecheck EXIT 0, all 3 security lint gates pass). No Realist Check downgrade was needed because nothing was inflated to begin with — I found nothing to rate. No escalation to ADVERSARIAL mode was triggered (zero CRITICAL, zero MAJOR). This is honest convergence.
+## Hard-guard compliance
 
-**For an upgrade beyond ACCEPT:** nothing required. The system is at a clean convergence point from the whole-system invariant angle.
+- Did NOT propose `import 'server-only'` on `@/db` (cycle-5 proved it breaks tsx backfill).
+- Did NOT propose activating CLIP/semantic-search.
+- Did NOT re-report any cycle 1-5 item; verified everything against HEAD `4eb83aab`.
+
+---
+
+## Realist Check (applied to the one anomaly)
+
+The transient privacy-test failure was pressure-tested:
+1. **Realistic worst case:** a developer on a warm vitest cache sees a red privacy test, is confused; on re-cache it goes green. No production exposure — runtime keys are provably correct.
+2. **Mitigating factors:** `--no-cache` (CI fresh-checkout default) passes 13/13; the compile-time `_privacyGuard`/`_SensitiveKeysInPublic` Extract independently catches a real leak and is NOT firing; a real leak would ALSO red the typecheck.
+3. **Detection:** immediate and redundant (test + typecheck).
+4. **Hunting-mode bias acknowledged:** I nearly inflated a tooling artifact into a CRITICAL. The direct runtime probe was the disqualifying evidence.
+
+Outcome: not a HEAD-reproducible defect (does not reproduce with `--no-cache` in any order) → no finding, per the cycle's no-fabrication directive.
+
+---
+
+## Evidence of green at HEAD
+
+- `npm run lint:action-origin` — PASS
+- `npm run lint:api-auth` — PASS
+- `npm run lint:public-route-rate-limit` — PASS
+- `npm run typecheck:app` — PASS (route types generated; privacy compile-guard not firing)
+- `vitest run privacy-fields.test.ts client-server-only-boundary.test.ts --no-cache` — 13/13 PASS (both orderings)
+- Runtime probe — `publicSelectFieldKeys` contains no lat/lng (29 safe keys)
+
+---
 
 ## Open Questions (unscored)
-- The privacy guard remains *structural* (per-select-object), not a global "no PII in any public response" invariant. The deferred register already tracks a possible lint rule for ad-hoc public `db.select` with raw `images.<col>` references. Speculative net-new infrastructure, not a defect; carried as-is.
-- The action-origin scanner's mutation-category set (`MUTATING_METHOD_NAMES`/`MUTATING_FUNCTION_NAMES`) would not flag a hypothetical fs-only mutating action wrongly carrying an exempt comment. Net-new hardening, not a HEAD defect; not scheduled.
 
----
-*Ralplan summary row:* N/A — this is a code/invariant review, not a ralplan consensus-planning artifact.
+- **Vitest warm-cache sensitivity (NOT a code finding):** `privacy-fields.test.ts` produced a false FAILURE on a warm vitest cache in this session but passes deterministically with `--no-cache` in every ordering. The key arrays are `Object.freeze`d at module load and cannot mutate, so this is a vitest module-cache transform-cache artifact, not application state. It is below the bar for a finding (not reproducible clean, no production impact, CI uses fresh checkouts). Flagged only because a privacy test that can flake red/green is a test-reliability smell worth a glance by the test-engineer lane if cache flakes recur — but there is no code change to make here and no invariant is at risk.

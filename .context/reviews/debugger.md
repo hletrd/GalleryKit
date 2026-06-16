@@ -1,83 +1,84 @@
-# Debugger Review — Run 6 / Cycle 5 — ZERO new latent bugs; the 5 cycle-4 fix commits are all HEAD-verified correct.
+# Debugger Review — Run 6 / Cycle 6 — 1 LOW (re-confirmed): boundary-guard AST rewrite silently dropped dynamic-import + import-equals coverage the old regex had.
 
-**HEAD:** 2f603716 (branch master, working tree CLEAN)
-**Date:** 2026-06-16
-**Angle:** latent bug surface, failure modes, regressions, error/cleanup-path correctness, numeric/parsing edge cases, resource leaks, race regressions, boundary conditions.
+**HEAD:** `4eb83aab` (branch master)
+**Agent:** debugger
+**Date:** 2026-06-17
+**Angle:** latent bug surface, failure modes, regressions. Deepest scrutiny on the only source delta since cycle 5: the boundary-test AST classifier rewrite landed in `4eb83aab` itself.
 
 ## Verdict
 
-**No new latent bugs survive scrutiny. 0 Crit / 0 High / 0 Med / 0 Low.** Honest convergence.
+**1 Low / 0 Med / 0 High / 0 Crit.** The single finding (DBG-C6-01) is a **confirmed false-negative narrowing of a security boundary guard**, introduced by the very commit that set out to *widen* it. I independently re-derived it this cycle (ran both the old regex and the HEAD AST extractor on identical inputs — table below) rather than trusting the prior write-up. It is LOW (not Med/High) because it is **latent**: no `'use client'` module triggers the dropped vector today, and the affected code is a test, not production runtime. But it is a genuine regression in defensive coverage with a precise, test-only, ~10-line-region fix, and the guard's stated purpose (catch a future `'use client'` → `@/lib/data` → `@/db` → `mysql2` leak) is only *partially* served at HEAD. The prompt's mandate that "a real latent bug or regression must still be caught" is exactly this case.
 
-The entire delta since the prior review (f8147868) is the five cycle-4 fix commits (`24159f36..2f603716`), which implement AGG-C4-01..05. I diffed and traced every source-affecting one end-to-end against HEAD — all clean, no regressions introduced. The core failure surface (queue continuation lifecycle, Sharp catch/finally cleanup, GPS-strip byte walkers, ICC/ISOBMFF parsers, SW LRU, analytics `.catch()` guards, env coercion NaN-safety, bounded rate-limit maps) is unchanged since the prior deeply-reviewed cycles and remains bounds-checked and leak-free.
-
-**Note on the brief's commit references:** the prompt cites bb463062 (bidi strip), 170297ed (OG/JSON-LD bidi), 13ae79ca (backfill processed count) as "recent fix commits since f8147868." All three are **ancestors of f8147868** (`git merge-base --is-ancestor` confirms) — they were already covered in cycle-1..cycle-4 reviews. They are not part of this cycle's delta. I re-verified the bidi-strip surface anyway (see below) since it is a Trojan-Source attack surface; it is complete.
+**Delta scope (why the surface is small this cycle):** the entire delta `7e49ef36..4eb83aab` is review/plan `.md` files plus **exactly one source file** — `apps/web/src/__tests__/client-server-only-boundary.test.ts`. `git diff --name-only 7e49ef36..4eb83aab -- apps/web/src | grep -v __tests__` → **NONE**. Zero production/runtime source changed since cycle 5. The full runtime failure surface is byte-identical to the cycle-5 baseline; I re-confirmed it clean below (typecheck green, 105 targeted tests pass).
 
 ---
 
-## Cycle-4 change scrutiny (24159f36..2f603716) — highest regression risk this cycle
+## FINDING — DBG-C6-01 (LOW, High confidence, re-confirmed at HEAD)
 
-All five commits diffed and traced. The two that touch executable logic (`1fd350be`, `6ab40644`) get the deepest scrutiny.
+**The AST value-import classifier that replaced the regex in `client-server-only-boundary.test.ts` silently stopped following two import forms the old regex DID follow — dynamic `import('@/…')` and `import x = require('@/…')` — narrowing the leak-detection walk in the false-negative direction.**
 
-### 1fd350be — backfill `detectionFailures` walkback for deleted-mid-reencode rows — CORRECT, slice index verified
+- **File:** `apps/web/src/__tests__/client-server-only-boundary.test.ts:138-185` (`extractAliasedImports`), consumed by the closure walk at `:233-258` (`findServerOnlyInClosure` → `extractAliasedImportsCached`).
+- **The latent bug:** `extractAliasedImports` iterates ONLY `sf.statements` (`:144`) and handles ONLY `ts.isImportDeclaration` (`:146`) and `ts.isExportDeclaration` (`:169`). It never visits:
+  1. **Dynamic `import('@/lib/data')`** — a `CallExpression` whose `expression.kind === ts.SyntaxKind.ImportKeyword`, not a statement-level declaration.
+  2. **`import db = require('@/db')`** — a `ts.ImportEqualsDeclaration` with an external-module reference, a real value binding that pulls the module.
+- **Empirical old-vs-new divergence (reproduced this cycle by running both extractors on identical inputs):**
 
-`apps/web/scripts/backfill-color-pipeline.ts:454-455`. The fix adds, in `flushBatch`'s deleted-mid-reencode partition:
-```
-const derivativeResults = updateResults.slice(items.length);
-detectionFailures -= countDeletedMidReencodeDetectionFailures(derivativeResults);
-```
-The slice index is the load-bearing claim, and it is correct. In the transaction (`:407-432`), `items` (success rows) are pushed to `updateResults` FIRST, then `derivativeItems` (detection-failure rows) are pushed SECOND. So `updateResults.slice(items.length)` recovers EXACTLY the derivative-slice UPDATE outcomes — no off-by-one. `countDeletedMidReencodeDetectionFailures` (`:159-164`) counts `affectedRows === 0` in that slice = the detection-failure∩deleted overlap, which is exactly what must be walked back.
+  | Input | OLD regex | NEW AST (HEAD) |
+  |---|---|---|
+  | `const x = () => import('@/lib/data')` | `['@/lib/data']` | `[]` |
+  | `async f(){ await import('@/db') }` | `['@/db']` | `[]` |
+  | `import db = require('@/db')` | `['@/db']` | `[]` |
+  | `import { getImageCached } from '@/lib/data'` (value control) | `['@/lib/data']` | `['@/lib/data']` ✓ |
+  | `import type { X } from '@/lib/data'` (type-only control) | `['@/lib/data']` | `[]` (correct — the intended fix) |
 
-Counter consistency verified:
-- `detectionFailures++` fires per-row ONLY in the `else if (result.derivativeOnly)` branch (`:480`), pushing to `derivativeBatch`.
-- `processed -= deletedMidReencodeFiles.length` (`:444`) decrements by the TOTAL deleted count (success-slice + derivative-slice). Consistent: `processed++` (`:467`) fires for BOTH `signals` and `derivativeOnly` rows (both inside `outcome === 'processed'`), so both decrement on delete. No asymmetry.
-- The extracted `computeBackfillExitCode` (`:177`) is a pure 1-line predicate, exit expression unchanged (`errors>0 || detectionFailures>0 ? 1 : 0`).
+  So the swap correctly fixed a real *over-fire* (following erased type-only `@/lib/data` chains — the last row) but bundled in an *under-fire* on the two value forms above. Coverage moved in the dangerous direction (fewer modules followed = more leaks missed).
+- **Trigger condition:** a future `'use client'` component (or any module in a client's static closure) does `const { getImageCached } = await import('@/lib/data')` — a natural code-splitting pattern for a heavy server/data module — instead of a static `import`. Dynamic `import()` IS bundled into the client as a separate chunk, so it is a genuine leak vector, not hypothetical.
+- **Concrete failure:** the broad-scan test (`:265-291`) passes **GREEN** for that dynamic-import leak, because the walk never enqueues `@/lib/data`, never reaches `@/db` → its `mysql2/promise` value import at `db/index.ts:2` (the signal AGG-C5-01 added at `:309-319`). The leak then falls back to the unguaranteed `next build` failure that AGG-C5-01's own docstring says "may not even fail cleanly." This is the EXACT leak class AGG-C5-01 was created to close — closed for *static* value imports, silently re-opened for *dynamic* ones.
+- **Why LOW, not Med/High — latency re-verified at HEAD:**
+  - `import = require('@/lib|@/db')` anywhere in `src` (excl. tests): **none**.
+  - Dynamic `import('@/lib|@/db')`: **4 occurrences, all in `src/instrumentation.ts:3,5,17,18`** (the Next.js server-instrumentation `register()` entry — confirmed line 1 is `export async function register()`, NOT `'use client'`). `instrumentation.ts` is imported by no other module and is unreachable from any client closure. The broad scan is therefore correct and clean *today*; the defect is in the guard's future-proofing, which is the guard's entire reason to exist.
+- **Fix (test-only, zero runtime/production risk, ~10-line region):** in `extractAliasedImports`, additionally walk each statement's subtree (`ts.forEachChild`) to capture (a) `ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword` with a string-literal `@/lib`/`@/db` first argument, and (b) `ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)` with a string-literal `@/lib`/`@/db` expression. De-dupe (`[...new Set(specs)]`). The additions only ADD the two dropped forms and do not touch the type-only drop, so the broad scan stays at 0 violations (no new false positives) and the type-only control still drops to `[]`. Add a non-vacuous pin asserting `extractAliasedImports("const f = async () => { await import('@/lib/data'); }")` contains `@/lib/data`, so the restored coverage cannot silently regress again.
+- **Confidence:** High. Old-vs-new behavioral divergence reproduced this cycle on identical inputs; latency confirmed by exhaustive `src` grep (only `instrumentation.ts`, non-client, unreachable); the type-only over-fire fix is genuine and should be preserved — only the dynamic/import-equals coverage needs restoring.
 
-Test coverage (`backfill-color-pipeline-deleted-mid-reencode.test.ts`) is comprehensive and **non-vacuous**: `countDeletedMidReencodeDetectionFailures` matrix (2 deleted of 3 → 2; all-alive → 0; empty → 0), `computeBackfillExitCode` matrix (0/0→0, errors→1, detectionFailures→1, both→1), plus source-shape pins that `flushBatch` invokes the walkback and `main()` routes through the helper. The in-app twin (`admin-backfill-runner.ts:605-609`) does NOT have this over-count because it determines `deleted-mid-reencode` vs `detection-failed` per-row as mutually-exclusive outcomes — verified at HEAD; the sidecar asymmetry is purely an artifact of batching DB writes decoupled from the per-row encode, which this fix correctly compensates for.
+### Secondary observation on the same commit (NOT a separate finding — defensible by design)
 
-### 6ab40644 — image-queue bootstrap flake fix — CORRECT, keys on a real deterministic state field
-
-`apps/web/src/__tests__/image-queue-bootstrap.test.ts:165-176`. The bare `vi.waitFor(() => expect(limitMock).toHaveBeenCalledTimes(2))` (~1s default) now carries `{ timeout: 20_000, interval: 25 }` and additionally asserts `getProcessingQueueState().bootstrapped === true`. Verified the keyed state is REAL and deterministic, not vacuous: `bootstrapped` is set at `image-queue.ts:679` (`pending.length < BOOTSTRAP_BATCH_SIZE`); in the 2-batch test scenario the second (short) batch sets it true. The continuation lifecycle it guards is leak-free: `scheduleBootstrapContinuation` (`:592-606`) guards on `bootstrapContinuationScheduled` against double-schedule, sets it true, and resets it to false in BOTH the `.then` and `.catch` of `queue.onIdle()` — the flag never sticks. `bootstrapImageProcessingQueue` early-returns on that flag (`:610`), preventing re-entrancy. Test is now deterministic, asserts the correct end-state, no global timeout inflation.
-
-### 9a262e3f — switch geometry contract test — CORRECT, non-vacuous static scan
-
-`apps/web/src/__tests__/switch-geometry-contract.test.ts` (new, +99). Static source-scan pinning the load-bearing triple (visible-track `w-11`+`px-0.5`+`h-6`, thumb `size-5`, travel `translate-x-0`/`translate-x-full`) + a guard banning the half-on `translate-x-5`. Commit message documents it was proven RED on reverting the travel class. Mirrors the touch-target-audit / sw-template-contract idiom. Pins the cycle-3 fix against silent re-break. No runtime code touched.
-
-### 24159f36 — switch.tsx header comment fix — COMMENT-ONLY, verified no logic delta
-
-Corrects the `:13-14` docblock to cite `translate-x-full` (matching the shipped code) instead of `calc(100%-2px)`. AGG-C4-05. Zero executable lines changed. Closes the 6-agent-corroborated comment drift.
-
-### 7541c92d / 2f603716 — docs/reviews + plans — non-code.
+`hasServerOnlyDriverImport` (`:200-202`) flags **type-only** mysql2 imports (`import type { Pool } from 'mysql2'`) as server-only-equivalent — the test at `:325` asserts `true`. In isolation that looks like a false-positive risk (a type-only mysql2 import is erased and bundles nothing). But it is only ever evaluated on a module ALREADY reached via a VALUE import in the closure walk, so that module is genuinely in the client bundle regardless of how it references mysql2 — the type-only import is an incidental-but-strong "this is server code" signal. The only misfire path is a contrived module that is value-imported by a client, carries a type-only mysql2 import, AND is genuinely isomorphic — itself a smell. No client-reachable module has a mysql2 import of any kind today. Defensible; noted for provenance so a future reviewer doesn't re-flag it.
 
 ---
 
-## Re-verified failure-prone surface (unchanged since prior cycles) — all clean
+## Re-verified failure surface (unchanged runtime code — re-confirmed clean at HEAD)
 
-- **bidi / zero-width strip (Trojan-Source surface, re-audited since it's security-relevant):** every STRIPPING site (`og-sanitize.ts:29`, `validation.ts:94` `stripUnicodeFormatting`, `sanitize.ts:22`, `download-filename.ts:40`, `csv-escape.ts:54`) uses a fresh `/g` instance derived from `UNICODE_FORMAT_CHARS.source` (avoiding shared `lastIndex` state corruption), and every REJECTION/`.test()` site (`validation.ts:74,106,120`, `sanitize.ts:60,177`) uses the non-global `UNICODE_FORMAT_CHARS`. The `.source`-derived separation is deliberately documented (`validation.ts:77-82`). `sanitizeForOg` (`og-sanitize.ts:28-30`) is a single shared module — no symmetry gap between the per-photo and home OG routes. No remaining non-global `.replace(UNICODE_FORMAT_CHARS, …)` anywhere. The 170297ed fix is complete and leak-free.
-- **gps-exif-strip.ts** (`stripGpsFromTiffRegion:103-199`): every walker bounds-checks before read/fill. `inBounds(entriesStart, count*12+4)` (`:122,166`) fits entries + next-pointer; `MAX_IFD_ENTRIES=1024` / `MAX_IFD_CHAIN=8` caps; unknown TIFF type → `null` (`:128,182`); value-offset checked before fill (`:132,185`); IFD0-offset `<= tiffStart+7` → `null` (`:157`, the d17e5cc2 fix, correct fail-safe); `visited` set catches IFD cycles (`:160`). Any anomaly returns `null` → caller's metadata-free re-encode fallback. Mature.
-- **image-queue.ts** `enqueueImageProcessing`: claim before processing; `finally` releases the lock connection (`.catch`-guarded) and prunes retry maps; `failed_at` MySQL-datetime coercion present; fire-and-forget caption/embedding hooks `.then().catch()`'d. Env coercion `Number(process.env.QUEUE_CONCURRENCY) || 1` NaN-safe. No leaked connections.
-- **process-image.ts** `processImageFormats`: `try/catch/finally` unlinks every partial sized variant written THIS invocation on any throw; `finally` cleans the WI-15 downscale intermediate; `writtenSizedPaths` tracks post-rename so cleanup never deletes a prior-run file; AVIF 10→8-bit per-image fallback uses `base.clone()` with explicit `bitdepth:8`. No Sharp leak.
-- **admin-backfill-runner.ts** `reprocessRow` (`:560-614`): `deleted-mid-reencode` vs `detection-failed` are mutually-exclusive per-row outcomes (the `affectedRows===0` re-check at `:573` and `:605` returns `deleted-mid-reencode` BEFORE `detection-failed`); the per-worker counters sum to the total (`:752`); `finally` (`:610-613`) always releases the claim with `.catch(()=>undefined)`. No double-count, no leak.
-- **auth-rate-limit.ts**: both maps are `createWindowBoundedMap` with explicit max-key caps (`LOGIN_RATE_LIMIT_MAX_KEYS`, `PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS=5000`) → bounded, no unbounded growth. Rollback uses decrement-not-delete (C1-07) so concurrent rollbacks don't lose counts.
-- **sw.js / sw-cache.ts**: LRU `recordAndEvict` head-walks insertion-order, guards the running total on the `deleted` boolean; `touchMeta` repositions on 304; HEAD probe `AbortSignal.timeout(300)` with stale-serve catch; `networkFirstHtml` clones the body and returns the original (no double stream consumption). No latent bug.
-- **color-detection.ts / icc-chromaticity.ts / icc-extractor.ts / gain-map-detection.ts**: unchanged since prior cycles; bounded ISOBMFF walker (max depth 5, max scan 1 MB), capped tagCount / string lengths, ΔE thresholds. Already deeply verified; no regression in scope this cycle.
+Zero runtime source changed since cycle 5, so these are confirmations. I re-read each in full this cycle and hand-evaluated the integer/bounds arithmetic against crafted-input scenarios; all are sound:
+
+- **Backfill `detectionFailures` accounting** (`lib/admin-backfill-runner.ts`): the "walk-back / slice" shape the brief described does NOT exist at HEAD — the runner uses a discriminated `ReprocessResult`; each outcome maps 1:1 to exactly one counter and the handled-count partition (`:751-752`) sums all seven exhaustively. Detection-failure resume contract (`:580-609`, no version bump) verified by `admin-backfill-runner-detection-failure.test.ts`. `resolveBackfillConcurrency` (`:129-142`) executed across `requested` ∈ {0, −5, 0.5, NaN} and pool ∈ {10, 4, 2, NaN}: every path clamps to ≥1, never NaN (which would freeze PQueue). Non-snapshot keyset walk terminates (cursor monotonic; detection-failed rows have `id <= cursor`).
+- **GPS/ICC/ISOBMFF bounded walkers** (`gps-exif-strip.ts`, `color-detection.ts`, `icc-extractor.ts`, `icc-chromaticity.ts`, `gain-map-detection.ts`): every byte read/fill bounds-checked before access; `MAX_IFD_ENTRIES`(1024)/`MAX_IFD_CHAIN`(8)/depth-5/1 MB-scan caps; `visited` set guards IFD cycles; 64-bit box sizes guarded against `MAX_SAFE_INTEGER`; two-u32 offset+size maxes at 8.59e9 (no integer overflow); unknown TIFF types and structural anomalies → `null` → metadata-free re-encode fallback. WebP RIFF tag/size order correct (b6c4f915); odd-final-chunk `paddedSize` advance cannot OOB (traced); zero-IFD0-offset → anomaly (d17e5cc2). The ISOBMFF Exif region end `start + 4 + (length-4) === start + length` is exact, `headerOffset > length-8` rejected. The caller `stripGpsFromOriginal` (`process-image.ts:1573-1650`) is fail-safe: `null`→re-encode, `{stripped:false}`→byte-identical, `{stripped:true}`→atomic rename; unique per-call tmp path; catch unlinks tmp; HEIC-no-encoder path surfaces loudly.
+- **Sharp catch/finally** (`process-image.ts:1263-1320`): `try/catch/finally` unlinks every partial sized variant written this invocation (`writtenSizedPaths`); `finally` always unlinks the WI-15 downscaled intermediate; AVIF 10→8-bit fallback passes explicit `bitdepth:8` on `clone()` (COR-R4C8-06); atomic-rename fallback chain with `finally` tmp unlink; `_verifyWebpIccChunk` closes its fd in `finally`. No leak/orphan.
+- **SW LRU** (`lib/sw-cache.ts`): re-touch recency via delete-then-set → head-walk evicts true-oldest (executed and verified); browser-quota `cache.delete`→false path self-heals metadata (documented `:134-143`), benign — not a crash/leak.
+- **Bounded rate-limit maps** (`auth-rate-limit.ts`, `rate-limit.ts`, `bounded-map.ts`): `prune` precedes `get` in the login flow; DB bucket is source of truth; cap-eviction of an active bucket backstopped by the DB counter; rollback uses decrement-not-delete (C1-07); `GREATEST(count-1,0)`+zero-row-cleanup in a transaction. TOCTOU closed by pre-increment-before-Argon2.
+- **`parseInt` radix audit**: grep for `parseInt(` without a radix across `lib/`, `actions/`, `scripts/` → **zero hits**. That bug class does not exist here.
 
 ---
 
 ## Gates run this review
-- `npm run typecheck --workspace=apps/web` → **PASS** (exit 0; typecheck:app + typecheck:scripts both clean).
-- `vitest run` over `backfill-color-pipeline-deleted-mid-reencode.test.ts`, `switch-geometry-contract.test.ts`, `image-queue-bootstrap.test.ts` → **23/23 PASS** (3.65s).
+- `npm run typecheck --workspace=apps/web` → **exit 0** (typecheck:app + typecheck:scripts both green). No type regression.
+- `npx vitest run` (from apps/web) on gps-exif-strip, color-detection, icc-chromaticity, gain-map-detection, sw-cache, bounded-map, admin-backfill-runner-detection-failure → **105/105 PASS**.
+- Old-regex vs new-AST behavioral diff on `import =` / dynamic `import()` / `await import()` / static value / static type-only → reproduced the DBG-C6-01 narrowing (table above).
+- `grep` of `src` (excl. tests) for dynamic `import('@/lib|@/db')` and `import = require('@/lib|@/db')` → confirms latency (only non-client `instrumentation.ts`).
 
-## References (verified this cycle, NOT findings)
-- `apps/web/scripts/backfill-color-pipeline.ts:454-455` — detectionFailures walkback slice index (verified correct: items pushed before derivativeItems, so slice(items.length) = derivative slice)
-- `apps/web/scripts/backfill-color-pipeline.ts:159-164,177` — extracted pure helpers (countDeletedMidReencodeDetectionFailures, computeBackfillExitCode)
-- `apps/web/src/__tests__/image-queue-bootstrap.test.ts:165-176` — flake fix keys on real `bootstrapped` state (image-queue.ts:679)
-- `apps/web/src/lib/image-queue.ts:592-606,610` — bootstrap continuation flag lifecycle (verified leak-free, no double-schedule)
-- `apps/web/src/lib/admin-backfill-runner.ts:573,605-613` — in-app twin: mutually-exclusive deleted/detection outcomes + claim release in finally
-- `apps/web/src/lib/og-sanitize.ts:28-30` / `apps/web/src/lib/validation.ts:77-94` — bidi strip: global-flag twin, .source-derived, no shared lastIndex
-- `apps/web/src/lib/gps-exif-strip.ts:104,122,132,157,166,185` — GPS-strip byte-offset bounds (verified all checked before read/fill)
+## Hard guards respected
+- Did NOT propose `import 'server-only'` on `@/db` (cycle-5 proved it breaks tsx backfill — and DBG-C6-01's whole point is that the `mysql2`-driver heuristic is the correct substitute, which is why the dropped coverage matters).
+- Did NOT touch CLIP/semantic-search.
+- Did NOT re-report any cycle 1-5 production item; the one finding is a cycle-6 regression in the cycle-6 commit, independently re-verified against HEAD `4eb83aab`.
+
+## References (verified this cycle)
+- `apps/web/src/__tests__/client-server-only-boundary.test.ts:138-185` — `extractAliasedImports`: handles only `ImportDeclaration`/`ExportDeclaration`; misses dynamic `import()` (CallExpression) + `ImportEqualsDeclaration` (DBG-C6-01)
+- `apps/web/src/__tests__/client-server-only-boundary.test.ts:233-258` — closure walk consumes the classifier; missed forms are never enqueued
+- `apps/web/src/__tests__/client-server-only-boundary.test.ts:200-202,325` — `hasServerOnlyDriverImport` flags type-only mysql2 (defensible-by-design secondary observation)
+- `apps/web/src/db/index.ts:2` — `import mysql from "mysql2/promise"` (the VALUE-import signal AGG-C5-01 relies on; only reached via the static path the new classifier still covers)
+- `apps/web/src/instrumentation.ts:3,5,17,18` — the only dynamic `import('@/lib/...')` sites; `register()` server entry, NOT `'use client'`, unreachable from any client closure (why DBG-C6-01 is latent)
 
 ## Summary count by severity
 - **Critical: 0**
 - **High: 0**
 - **Medium: 0**
-- **Low: 0**
+- **Low: 1** (DBG-C6-01 — boundary-guard AST classifier dropped dynamic-import + import-equals coverage the old regex had; latent false-negative in a security-boundary test, test-only ~10-line fix)
