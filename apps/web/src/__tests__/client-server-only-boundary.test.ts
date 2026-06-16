@@ -12,11 +12,45 @@
  * `next build`. This source-scan walks every `'use client'` module's transitive
  * `@/lib` / `@/db` static-import closure and asserts none contains
  * `import 'server-only'`.
+ *
+ * AGG-C5-01 (run-6 c5): the `import 'server-only'` sentinel alone leaves the
+ * data/persistence layer UNCOVERED. The data layer (`@/db`, `@/lib/data`,
+ * `@/lib/gallery-config`, …) carries no `server-only` marker, so the most
+ * probable accidental leak — a future `import { getImageCached } from
+ * '@/lib/data'` added to a `'use client'` component — would pass this test
+ * GREEN (the `@/lib/data → @/db` chain contains no sentinel) and may not even
+ * fail `next build` cleanly. We therefore ALSO treat a `mysql2` / `mysql2/promise`
+ * import anywhere in the closure as a server-only-equivalent signal: that is the
+ * unambiguous server-only Node driver `@/db/index.ts` imports, it can never run
+ * in a browser bundle, and matching the specifier is far less brittle than
+ * enumerating internal `@/db`/`@/lib/data` path names (and auto-covers any future
+ * data module that imports the driver directly).
+ *
+ * The closure walk follows VALUE imports only — `import type … from '…'` AND the
+ * inline `import { type X } from '…'` form are erased by the compiler and never
+ * enter any bundle. The data layer is reached from the client today ONLY via
+ * those erased forms (`home-client.tsx` / `load-more.tsx` /
+ * `analytics-client.tsx` all `import { type … } from '@/lib/…'`), which is safe.
+ * Import classification is done with the TypeScript AST (the same compiler API
+ * the lint-gate scripts use), NOT a regex, because a regex cannot distinguish an
+ * all-inline-`type` named import from one carrying a real value binding.
+ *
+ * Why `@/db/index.ts` does NOT itself carry `import 'server-only'` (and must not
+ * be "simplified" into doing so): the real `server-only@0.0.1` export map throws
+ * from its `default` condition (`index.js`) and is a no-op only under the
+ * `react-server` condition (`empty.js`). Plain Node / tsx resolves `default`, so
+ * `import 'server-only'` THROWS under tsx. `@/db/index.ts` is imported under tsx
+ * by the documented production color-pipeline backfill sidecar
+ * (`scripts/backfill-color-pipeline.ts` → `await import('../src/db')`) and by the
+ * DB init/seed scripts; marking it `server-only` would break that operational
+ * tooling at runtime. The `mysql2`-in-closure check below closes the same gap
+ * with zero runtime risk.
  */
 
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as ts from 'typescript';
 
 const srcRoot = path.resolve(__dirname, '..');
 
@@ -78,20 +112,97 @@ function resolveAliasedModule(spec: string): string | null {
     return null;
 }
 
-/** Extract all `@/lib` and `@/db` static-import specifiers from a source. */
+/**
+ * Extract all `@/lib` and `@/db` VALUE static-import specifiers from a source,
+ * using the TypeScript AST (the same compiler API the lint-gate scripts use)
+ * rather than a regex.
+ *
+ * AGG-C5-01: type-only imports are ERASED by the TypeScript compiler and never
+ * pull the target module into any bundle, so they must NOT be followed when
+ * walking the client bundle's import closure. A regex cannot reliably tell a
+ * value import from a type-only one because BOTH the statement form
+ * (`import type { X } from '…'`) AND the inline form
+ * (`import { type X, type Y } from '…'`) erase — and the data layer is reached
+ * from the client today ONLY via these erased forms (`home-client.tsx`,
+ * `load-more.tsx`, `analytics-client.tsx` all `import { type … } from '@/lib/…'`).
+ * A VALUE import of the same module would be the real leak this walk exists to
+ * catch. We therefore parse each import/export declaration and keep the
+ * specifier only when it contributes a real runtime binding:
+ *   - side-effect import (`import '@/x'`)           → value (kept)
+ *   - default / namespace import                    → value (kept)
+ *   - named import with ≥1 non-type specifier        → value (kept)
+ *   - `import type …` (statement-level type-only)    → erased (dropped)
+ *   - named import where EVERY specifier is `type`   → erased (dropped)
+ *   - `export … from '@/x'` re-export (non-type-only)→ value (kept)
+ */
 function extractAliasedImports(source: string): string[] {
+    const sf = ts.createSourceFile('m.tsx', source, ts.ScriptTarget.Latest, /*setParentNodes*/ false, ts.ScriptKind.TSX);
     const specs: string[] = [];
-    // Matches: import ... from '@/...';  import '@/...';  export ... from '@/...';
-    const re = /\b(?:import|export)\b[^'"`;]*?['"`](@\/(?:lib|db)[^'"`]*)['"`]/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(source)) !== null) {
-        specs.push(m[1]);
+
+    const isAliased = (spec: string): boolean => spec.startsWith('@/lib') || spec.startsWith('@/db');
+
+    for (const stmt of sf.statements) {
+        // import … from '…';  AND  import '…';
+        if (ts.isImportDeclaration(stmt)) {
+            const mod = stmt.moduleSpecifier;
+            if (!ts.isStringLiteral(mod) || !isAliased(mod.text)) continue;
+            const clause = stmt.importClause;
+            // Side-effect-only import (no clause) pulls the module for its effects.
+            if (!clause) { specs.push(mod.text); continue; }
+            // `import type …` — whole statement erased.
+            if (clause.isTypeOnly) continue;
+            // `import Default, …` or `import * as ns` — value binding.
+            if (clause.name) { specs.push(mod.text); continue; }
+            const bindings = clause.namedBindings;
+            if (bindings && ts.isNamespaceImport(bindings)) { specs.push(mod.text); continue; }
+            if (bindings && ts.isNamedImports(bindings)) {
+                // Keep only if at least one specifier is NOT inline-`type`.
+                const hasValueSpecifier = bindings.elements.some((el) => !el.isTypeOnly);
+                if (hasValueSpecifier) specs.push(mod.text);
+                continue;
+            }
+            // Unknown clause shape — be conservative and follow it.
+            specs.push(mod.text);
+            continue;
+        }
+        // export … from '…';  (re-export — pulls the module unless type-only)
+        if (ts.isExportDeclaration(stmt) && stmt.moduleSpecifier) {
+            const mod = stmt.moduleSpecifier;
+            if (!ts.isStringLiteral(mod) || !isAliased(mod.text)) continue;
+            if (stmt.isTypeOnly) continue;
+            const exportClause = stmt.exportClause;
+            if (exportClause && ts.isNamedExports(exportClause)) {
+                const hasValueSpecifier = exportClause.elements.some((el) => !el.isTypeOnly);
+                if (hasValueSpecifier) specs.push(mod.text);
+                continue;
+            }
+            // `export * from '@/x'` (no clause) — value re-export.
+            specs.push(mod.text);
+            continue;
+        }
     }
     return specs;
 }
 
 function hasServerOnlyImport(source: string): boolean {
     return /\bimport\s+['"`]server-only['"`]/.test(source);
+}
+
+/**
+ * AGG-C5-01: a `mysql2` / `mysql2/promise` import is an unambiguous server-only
+ * signal (native Node DB driver — cannot run in a browser bundle). Treated as
+ * server-only-equivalent so the `@/lib/data → @/db → mysql2` leak vector that
+ * the bare `server-only` sentinel misses is caught. Matches both
+ * `import ... from 'mysql2'` / `'mysql2/promise'` and side-effect
+ * `import 'mysql2'`, but NOT longer names like `mysql2-foo` (specifier is
+ * anchored to a quote or a `/promise` suffix + closing quote).
+ */
+function hasServerOnlyDriverImport(source: string): boolean {
+    return /\b(?:import|export)\b[^'"`;]*?['"`]mysql2(?:\/promise)?['"`]/.test(source);
+}
+
+function reachesServerOnly(source: string): boolean {
+    return hasServerOnlyImport(source) || hasServerOnlyDriverImport(source);
 }
 
 function isUseClient(source: string): boolean {
@@ -131,8 +242,9 @@ function findServerOnlyInClosure(entry: string): { offender: string; chain: stri
         if (source === null) continue;
         // The entry file itself is the 'use client' module — its OWN
         // server-only presence is impossible (build would already fail), but a
-        // transitive dependency carrying server-only is the real bug.
-        if (file !== entry && hasServerOnlyImport(source)) {
+        // transitive dependency carrying server-only (or the mysql2 driver,
+        // AGG-C5-01) is the real bug.
+        if (file !== entry && reachesServerOnly(source)) {
             return { offender: relFromSrc(file), chain };
         }
         for (const spec of extractAliasedImportsCached(file, source)) {
@@ -186,5 +298,68 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
         // And caption-constants itself must stay client-safe (no server-only).
         const constants = fs.readFileSync(path.resolve(srcRoot, 'lib/caption-constants.ts'), 'utf8');
         expect(hasServerOnlyImport(constants)).toBe(false);
+    });
+
+    // AGG-C5-01: prove the widened detection is NON-VACUOUS — the persistence
+    // chokepoint `@/db/index.ts` is genuinely recognized as server-only-equivalent
+    // via its `mysql2/promise` import, so a future `'use client'` → `@/lib/data`
+    // (→ `@/db`) leak would fail the boundary test RED. Without this pin, a
+    // refactor that drops/renames the `mysql2` import (or the detection regex)
+    // would silently re-open the gap the bare `server-only` sentinel never closed.
+    it('@/db/index.ts is recognized as server-only-equivalent via its mysql2 driver import (AGG-C5-01)', () => {
+        const dbIndex = resolveAliasedModule('@/db');
+        expect(dbIndex, '@/db must resolve to an on-disk module').not.toBeNull();
+        const source = fs.readFileSync(dbIndex!, 'utf8');
+        // It must NOT carry the server-only marker (tsx scripts import it under the
+        // throwing `default` condition — see the file docstring).
+        expect(hasServerOnlyImport(source)).toBe(false);
+        // …but the driver import makes it a server-only-equivalent the walk flags.
+        expect(hasServerOnlyDriverImport(source)).toBe(true);
+        expect(reachesServerOnly(source)).toBe(true);
+    });
+
+    it('mysql2 driver-import detection is correctly anchored (AGG-C5-01)', () => {
+        // Positive: the forms that actually pull the native driver into a bundle.
+        expect(hasServerOnlyDriverImport("import mysql from 'mysql2/promise';")).toBe(true);
+        expect(hasServerOnlyDriverImport('import mysql from "mysql2";')).toBe(true);
+        expect(hasServerOnlyDriverImport("import type { Pool } from 'mysql2';")).toBe(true);
+        expect(hasServerOnlyDriverImport("import 'mysql2';")).toBe(true);
+        expect(hasServerOnlyDriverImport("export { x } from 'mysql2/promise';")).toBe(true);
+        // Negative: must not false-positive on longer package names or substrings.
+        expect(hasServerOnlyDriverImport("import x from 'mysql2-extra';")).toBe(false);
+        expect(hasServerOnlyDriverImport("import x from '@scope/mysql2';")).toBe(false);
+        expect(hasServerOnlyDriverImport("// a comment mentioning mysql2")).toBe(false);
+        expect(hasServerOnlyDriverImport("const s = 'connecting to mysql2 server';")).toBe(false);
+    });
+
+    // AGG-C5-01: the AST value-import classifier is the load-bearing half of the
+    // widened guard — if it ever started DROPPING value imports (e.g. a refactor
+    // mis-handles a clause shape), a real `'use client'` → `@/db` value leak would
+    // silently pass GREEN again. These pins prove the classifier FOLLOWS value
+    // imports and DROPS type-only ones, so the walk's coverage cannot regress
+    // unnoticed.
+    it('extractAliasedImports follows value imports and drops type-only imports (AGG-C5-01)', () => {
+        // Value imports → followed (specifier returned).
+        expect(extractAliasedImports("import { getImageCached } from '@/lib/data';")).toContain('@/lib/data');
+        expect(extractAliasedImports("import { db } from '@/db';")).toContain('@/db');
+        expect(extractAliasedImports("import defaultExport from '@/lib/data';")).toContain('@/lib/data');
+        expect(extractAliasedImports("import * as data from '@/lib/data';")).toContain('@/lib/data');
+        expect(extractAliasedImports("import '@/db';")).toContain('@/db'); // side-effect import
+        expect(extractAliasedImports("export { db } from '@/db';")).toContain('@/db'); // value re-export
+        expect(extractAliasedImports("export * from '@/lib/data';")).toContain('@/lib/data');
+        // Mixed: at least one value specifier → followed.
+        expect(extractAliasedImports("import { type Foo, getImageCached } from '@/lib/data';")).toContain('@/lib/data');
+
+        // Type-only imports → dropped (erased by the compiler; never bundled).
+        expect(extractAliasedImports("import type { Foo } from '@/lib/data';")).not.toContain('@/lib/data');
+        expect(extractAliasedImports("import { type Foo, type Bar } from '@/lib/data';")).not.toContain('@/lib/data');
+        expect(extractAliasedImports("export type { Foo } from '@/lib/data';")).not.toContain('@/lib/data');
+        // The exact erased forms used by the real client components today.
+        expect(extractAliasedImports("import type { ImageListCursorInput } from '@/lib/data';")).toEqual([]);
+        expect(
+            extractAliasedImports(
+                "import { type TopPhotoRow, type CountryRow, type TimeWindow } from '@/lib/analytics-data';",
+            ),
+        ).toEqual([]);
     });
 });

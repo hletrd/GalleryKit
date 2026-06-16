@@ -69,6 +69,12 @@ These came back from the fan-out as INFO / verified-correct and require no code 
 
 ## Status
 
-- [ ] TASK-1 — `import 'server-only';` in `apps/web/src/db/index.ts` (AGG-C5-01)
+**COMPLETE** — 1/1 task implemented, committed, pushed. Gates green.
 
-(Updated to `[x]` with commit SHA on completion.)
+- [x] TASK-1 — AGG-C5-01: widen `client-server-only-boundary.test.ts` to cover the data layer (mysql2-in-closure + AST value-import classification). `@/db/index.ts` left UNCHANGED (unsafe marker rejected). Commit SHA recorded on the test-fix commit.
+
+**Implementation notes:**
+- The fix is test-only (`apps/web/src/__tests__/client-server-only-boundary.test.ts`); `apps/web/src/db/index.ts` was NOT modified.
+- During implementation, extending the closure walk to flag `mysql2` surfaced that the ORIGINAL regex-based `extractAliasedImports` did not distinguish value vs type-only imports — it followed `import type { … } from '@/lib/data'` chains (home-client.tsx, load-more.tsx, analytics-client.tsx) as if they were value imports. With the new `mysql2` flag those chains false-positived. Root-caused and fixed by replacing the regex with a TypeScript-AST value-import classifier (same compiler API the lint-gate scripts use) that follows VALUE imports only and drops both statement-level (`import type`) and inline (`import { type X }`) type-only forms. This is strictly more correct than the prior regex and is the load-bearing half of the widened guard.
+- Added non-vacuous pins: (a) `@/db/index.ts` is recognized as server-only-equivalent via its `mysql2/promise` import AND carries no `server-only` marker; (b) `mysql2` detection anchoring (rejects `mysql2-extra`, `@scope/mysql2`, comments, strings); (c) the AST classifier follows value imports and drops the exact erased forms the real client components use today.
+- **Gates green:** `npm test --workspace=apps/web` → 233 passed / 1 skipped file, 2181 passed / 2 skipped tests, 0 failed; `npm run typecheck --workspace=apps/web` exit 0; ESLint clean; all 3 security lint gates (api-auth, action-origin, public-route-rate-limit) pass.
