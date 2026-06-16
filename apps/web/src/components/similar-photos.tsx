@@ -27,6 +27,8 @@ interface SimilarResult {
 interface SimilarPhotosProps {
     imageId: number;
     imageSizes?: number[];
+    /** Resolved semantic-search mode. The similar-photos API is production-only. */
+    semanticSearchMode?: string;
 }
 
 /**
@@ -34,16 +36,23 @@ interface SimilarPhotosProps {
  *
  * Mirrors the collapsed-by-default disclosure pattern from ColorDetailsSection
  * and LightboxColorPip: the panel is collapsed on mount and the API is fetched
- * only on first expand so non-production deployments (503) and error cases
- * produce no visible broken UI — the component returns null on any non-200
- * response or network error.
+ * only on first expand.
+ *
+ * AGG-C10-07 (run-6 cycle-1): the `/api/search/similar/[id]` endpoint serves ONLY
+ * in production mode (503 otherwise), so in every UI-reachable config (disabled /
+ * stub) the toggle would always 503, vanish, and shift the layout below it. The
+ * whole control is therefore gated on `semanticSearchMode === 'production'` and
+ * renders nothing otherwise — no dead control, no CLS. With the dark default this
+ * means the panel is correctly absent in normal deploys. The on-error null return
+ * remains as defense-in-depth for a transient 404/429 once production is active.
  *
  * Touch targets: the toggle button uses `min-h-11` (44 px), each thumbnail
- * link wraps a 48×48 image but the Link itself spans `min-h-11` — both meet
+ * link wraps a 96 px image but the Link itself spans `min-h-11` — both meet
  * WCAG 2.5.5 / Apple HIG 44 px floor enforced by the touch-target audit test.
  */
-export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZES }: SimilarPhotosProps) {
+export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZES, semanticSearchMode = 'disabled' }: SimilarPhotosProps) {
     const t = useTranslations('search');
+    const tCommon = useTranslations('common');
     const { locale } = useTranslation();
 
     const [open, setOpen] = useState(false);
@@ -80,6 +89,11 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
         }
     }
 
+    // AGG-C10-07: the similar-photos API is production-only. Render nothing in any
+    // other mode (disabled/stub) so the control is never a dead 503-ing toggle that
+    // shifts the layout. Hooks above always run, so this conditional return is safe.
+    if (semanticSearchMode !== 'production') return null;
+
     // If a previous fetch errored, don't render at all
     if (results === 'error') return null;
 
@@ -103,8 +117,10 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
             {open && (
                 <div className="mt-2">
                     {loading ? (
-                        <div className="flex items-center justify-center py-4">
-                            <span className="text-sm text-muted-foreground animate-pulse">{'…'}</span>
+                        // AGG-C10-07: announce loading to assistive tech (WCAG 4.1.3) and
+                        // give reduced-motion users a labelled state, mirroring search.tsx.
+                        <div className="flex items-center justify-center py-4" role="status" aria-live="polite">
+                            <span className="text-sm text-muted-foreground animate-pulse motion-reduce:animate-none">{tCommon('loading')}</span>
                         </div>
                     ) : Array.isArray(results) && results.length === 0 ? (
                         <p className="text-sm text-muted-foreground py-2">{t('similarEmpty')}</p>

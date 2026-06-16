@@ -298,6 +298,7 @@ export default async function PhotoPage({ params, searchParams }: {
                 licensePrices={config.licensePrices}
                 forceShowColorChips={config.forceShowColorChips}
                 forceSrgbDerivatives={config.forceSrgbDerivatives}
+                semanticSearchMode={config.semanticSearchMode}
                 checkoutStatus={checkoutStatus}
             />
             {/* Prefetch adjacent photos for instant navigation */}

@@ -160,6 +160,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     licensePrices={config.licensePrices}
                     forceShowColorChips={config.forceShowColorChips}
                     forceSrgbDerivatives={config.forceSrgbDerivatives}
+                    semanticSearchMode={config.semanticSearchMode}
                 />
             </>
         );

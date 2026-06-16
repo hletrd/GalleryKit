@@ -74,6 +74,8 @@ interface PhotoViewerProps {
     forceShowColorChips?: boolean;
     /** R8-M2: propagate force_srgb_derivatives to ColorDetailsSection so admins see the effective delivery gamut per format. */
     forceSrgbDerivatives?: boolean;
+    /** AGG-C10-07: resolved semantic-search mode; gates the production-only SimilarPhotos panel. */
+    semanticSearchMode?: string;
     /**
      * Cycle 1 RPF / plan-100 / C1RPF-PHOTO-HIGH-02: Stripe Checkout
      * post-redirect status. Surfaced as a toast on first mount so the
@@ -83,7 +85,7 @@ interface PhotoViewerProps {
     checkoutStatus?: 'success' | 'cancel' | null;
 }
 
-export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, licensePrices, checkoutStatus = null, forceShowColorChips = false, forceSrgbDerivatives = false }: PhotoViewerProps) {
+export default function PhotoViewer({ images, initialImageId, prevId, nextId, canShare = false, isAdmin = false, isSharedView = false, syncPhotoQueryBasePath, imageSizes = DEFAULT_IMAGE_SIZES, siteTitle = siteConfig.title, shareBaseUrl = siteConfig.url, untitledFallbackTitle, showDocumentHeading = true, slideshowIntervalSeconds = 5, licensePrices, checkoutStatus = null, forceShowColorChips = false, forceSrgbDerivatives = false, semanticSearchMode = 'disabled' }: PhotoViewerProps) {
     const { t, locale } = useTranslation();
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
@@ -853,7 +855,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                             <CardContent>
                                 <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} toggleRef={colorDetailsToggleRef} forceSrgbDerivatives={forceSrgbDerivatives} />
                                 <WideGamutHint colorPrimaries={image.color_primaries} t={t} persistDismissal={isSharedView} />
-                                <SimilarPhotos imageId={image.id} imageSizes={imageSizes} />
+                                <SimilarPhotos imageId={image.id} imageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
                                 <h3 className="font-semibold mb-3 flex items-center gap-2 mt-4"><Info className="h-4 w-4" /> {t('viewer.exifData')}</h3>
                                 <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-sm">
                                     {hasExifData(image.camera_model) && (
