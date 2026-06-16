@@ -148,7 +148,7 @@ export function LightboxColorPip({ image, t, open, onToggle, imageSizes = DEFAUL
                 {transfer && <span className="opacity-80" aria-hidden="true">· {transfer}</span>}
                 {isAdmin && isHdr && (
                     <span
-                        className="hdr-badge ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm"
+                        className="hdr-badge ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded shadow-sm"
                         aria-hidden="true"
                     >
                         {t('viewer.hdrBadge')}

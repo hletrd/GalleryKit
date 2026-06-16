@@ -523,7 +523,7 @@ export function ImageManager({
                                                 P3
                                             </span>
                                             {image.is_hdr && (
-                                                <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded-full shadow-sm">
+                                                <span className="inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded-full shadow-sm">
                                                     HDR
                                                 </span>
                                             )}

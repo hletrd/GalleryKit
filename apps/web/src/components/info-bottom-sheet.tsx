@@ -275,7 +275,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                                     </span>
                                 )}
                                 {isAdmin && (image.transfer_function === 'pq' || image.transfer_function === 'hlg') && (
-                                    <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white rounded shadow-sm">
+                                    <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 rounded shadow-sm">
                                         HDR
                                     </span>
                                 )}

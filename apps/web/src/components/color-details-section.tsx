@@ -523,7 +523,7 @@ export default function ColorDetailsSection({ image, isAdmin = false, t, toggleR
                     {isAdmin && isHdr && (
                         <div className="col-span-2">
                             <span
-                                className="hdr-badge px-3 py-1.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-white shadow-sm rounded"
+                                className="hdr-badge px-3 py-1.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-orange-400 text-amber-950 shadow-sm rounded"
                                 aria-label={t('viewer.hdrBadgeAriaLabel')}
                                 title={t('viewer.hdrBadgeAriaLabel')}
                                 role="img"
