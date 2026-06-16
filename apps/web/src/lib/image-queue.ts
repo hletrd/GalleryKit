@@ -695,14 +695,23 @@ export const bootstrapImageProcessingQueue = async () => {
             purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
             purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
         }
-        if (state.gcInterval) clearInterval(state.gcInterval);
-        state.gcInterval = setInterval(() => {
-            purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
-            purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
-            purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
-            pruneRetryMaps(state);
-        }, 60 * 60 * 1000); // every hour
-        state.gcInterval.unref?.();
+        // AGG-M12 (run-6 cycle-2): arm the hourly GC timer ONCE. Previously
+        // every successful bootstrap batch cleared + re-armed a fresh 1-hour
+        // countdown, so during a large multi-batch bootstrap (e.g. 10k pending
+        // images = many BOOTSTRAP_BATCH_SIZE continuation runs) the periodic
+        // purges never fired — the timer kept getting reset before reaching the
+        // hour. Guarding on !state.gcInterval keeps the cadence stable across
+        // continuation batches. (bootstrapCleanupRun above already covers the
+        // one-shot startup purge, so dropping the per-batch re-arm loses nothing.)
+        if (!state.gcInterval) {
+            state.gcInterval = setInterval(() => {
+                purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
+                purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
+                purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
+                pruneRetryMaps(state);
+            }, 60 * 60 * 1000); // every hour
+            state.gcInterval.unref?.();
+        }
     } catch (err: unknown) {
         if (isConnectionRefusedError(err)) {
             scheduleBootstrapRetry(state, 'Could not connect to database to bootstrap queue (ECONNREFUSED).');
