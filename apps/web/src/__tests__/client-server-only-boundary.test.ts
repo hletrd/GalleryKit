@@ -181,7 +181,45 @@ function extractAliasedImports(source: string): string[] {
             continue;
         }
     }
-    return specs;
+
+    // AGG-C6-02 (DBG-C6-01): the top-level statement loop above only handles
+    // `ImportDeclaration` / `ExportDeclaration`. Two additional VALUE-import
+    // forms can pull a server-only module into a client bundle and are NOT
+    // top-level import statements, so they are missed unless we descend the
+    // full AST:
+    //   1. dynamic `import('@/lib/data')` — a CallExpression with the `import`
+    //      keyword (the natural code-split for a heavy server/data module).
+    //   2. `import db = require('@/db')` — an ImportEqualsDeclaration.
+    // Both ALWAYS pull the module as a value (there is no type-only dynamic
+    // import or type-only import-equals-require), so any aliased specifier is a
+    // value edge. Walk every node, not just top-level statements.
+    const visit = (node: ts.Node): void => {
+        // dynamic `import('…')`
+        if (
+            ts.isCallExpression(node) &&
+            node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+            node.arguments.length > 0 &&
+            ts.isStringLiteral(node.arguments[0]) &&
+            isAliased(node.arguments[0].text)
+        ) {
+            specs.push(node.arguments[0].text);
+        }
+        // `import x = require('…')`
+        if (
+            ts.isImportEqualsDeclaration(node) &&
+            ts.isExternalModuleReference(node.moduleReference) &&
+            ts.isStringLiteral(node.moduleReference.expression) &&
+            isAliased(node.moduleReference.expression.text)
+        ) {
+            specs.push(node.moduleReference.expression.text);
+        }
+        ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sf, visit);
+
+    // De-dupe (a module reachable via both a static and a dynamic import edge
+    // should appear once).
+    return [...new Set(specs)];
 }
 
 function hasServerOnlyImport(source: string): boolean {
@@ -361,5 +399,34 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
                 "import { type TopPhotoRow, type CountryRow, type TimeWindow } from '@/lib/analytics-data';",
             ),
         ).toEqual([]);
+    });
+
+    it('extractAliasedImports follows dynamic import() and import-equals-require value forms (AGG-C6-02)', () => {
+        // Dynamic `import('…')` is the natural code-split for a heavy server/data
+        // module; it ALWAYS pulls the module as a value. A `'use client'` module
+        // doing `await import('@/lib/data')` would leak the @/lib/data → @/db →
+        // mysql2 chain into the client bundle, so it MUST be followed.
+        expect(extractAliasedImports("const m = await import('@/lib/data');")).toContain('@/lib/data');
+        expect(extractAliasedImports("import('@/db').then((m) => m.db);")).toContain('@/db');
+        expect(extractAliasedImports("const { db } = await import('@/db');")).toContain('@/db');
+        // Nested inside a function body (not a top-level statement) — the
+        // statement loop alone would miss this; the recursive walk catches it.
+        expect(
+            extractAliasedImports("function load() { return import('@/lib/data'); }"),
+        ).toContain('@/lib/data');
+
+        // `import x = require('…')` is a value binding — followed.
+        expect(extractAliasedImports("import db = require('@/db');")).toContain('@/db');
+        expect(extractAliasedImports("import data = require('@/lib/data');")).toContain('@/lib/data');
+
+        // Non-aliased dynamic imports are ignored (only @/lib and @/db matter).
+        expect(extractAliasedImports("const x = await import('react');")).toEqual([]);
+        expect(extractAliasedImports("import path = require('node:path');")).toEqual([]);
+
+        // De-dupe: a module reachable via BOTH a static and a dynamic edge
+        // appears exactly once.
+        expect(
+            extractAliasedImports("import { db } from '@/db';\nconst again = await import('@/db');"),
+        ).toEqual(['@/db']);
     });
 });
