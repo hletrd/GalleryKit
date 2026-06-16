@@ -13,6 +13,7 @@ import { getGalleryConfig } from '@/lib/gallery-config';
 import { drainProcessingQueueForShutdown } from '@/lib/queue-shutdown';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { purgeOldAuditLog } from '@/lib/audit';
+import { purgeOldViewEvents } from '@/lib/view-retention';
 import { cleanOrphanedTopicTempFiles } from '@/lib/process-topic-image';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { isValidFilename } from '@/lib/validation';
@@ -694,6 +695,11 @@ export const bootstrapImageProcessingQueue = async () => {
             purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
             purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
             purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
+            // AGG-H2 (run-6 cycle-2): retention sweep for the anonymous
+            // *_views analytics tables (default 395 days / VIEW_RETENTION_DAYS)
+            // so per-IP-only-limited anonymous writes can't grow them unbounded
+            // on the single MySQL writer.
+            purgeOldViewEvents().catch(err => console.debug('purgeOldViewEvents failed:', err));
         }
         // AGG-M12 (run-6 cycle-2): arm the hourly GC timer ONCE. Previously
         // every successful bootstrap batch cleared + re-armed a fresh 1-hour
@@ -708,6 +714,8 @@ export const bootstrapImageProcessingQueue = async () => {
                 purgeExpiredSessions().catch(err => console.debug('purgeExpiredSessions failed:', err));
                 purgeOldBuckets().catch(err => console.debug('purgeOldBuckets failed:', err));
                 purgeOldAuditLog().catch(err => console.debug('purgeOldAuditLog failed:', err));
+                // AGG-H2: hourly retention sweep for the *_views analytics tables.
+                purgeOldViewEvents().catch(err => console.debug('purgeOldViewEvents failed:', err));
                 pruneRetryMaps(state);
             }, 60 * 60 * 1000); // every hour
             state.gcInterval.unref?.();
