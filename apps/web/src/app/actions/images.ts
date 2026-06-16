@@ -293,9 +293,14 @@ export async function uploadImages(formData: FormData) {
                     hdrWarningCount++;
                 }
 
-                // P3-24: warn when wide-gamut source exceeds 50 MP cap
+                // P3-24: warn when wide-gamut source exceeds the configured
+                // downscale cap. AGG-M1 (run-6 cycle-2): use the admin-tunable
+                // uploadConfig.wideGamutMaxSourcePixels (already fetched above)
+                // rather than the hardcoded 50 M literal, so the upload warning
+                // matches the encoder's actual downscale threshold whenever an
+                // admin tunes wide_gamut_max_source_pixels away from the default.
                 const isWideGamutSource = isWideGamutPrimary(data.colorSignals?.colorPrimaries);
-                if (isWideGamutSource && data.width * data.height > 50_000_000) {
+                if (isWideGamutSource && data.width * data.height > uploadConfig.wideGamutMaxSourcePixels) {
                     wideGamutDownscaleWarningCount++;
                 }
 
