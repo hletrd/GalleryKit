@@ -48,6 +48,8 @@ import * as path from 'path';
 import {
     collectDeletedMidReencodeFiles,
     cleanupDeletedMidReencodeVariants,
+    countDeletedMidReencodeDetectionFailures,
+    computeBackfillExitCode,
     type BatchFilenames,
 } from '../../scripts/backfill-color-pipeline';
 import { UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
@@ -145,5 +147,61 @@ describe('sidecar flushBatch wires the delete-mid-reencode helpers (AGG-C5-01, a
         // The deleted-mid-reencode rows are NOT successes — both counters move.
         expect(scriptSrc).toMatch(/deletedMidReencode\s*\+=\s*deletedMidReencodeFiles\.length/);
         expect(scriptSrc).toMatch(/processed\s*-=\s*deletedMidReencodeFiles\.length/);
+    });
+
+    it('flushBatch decrements detectionFailures for rows that were both detection-failed AND deleted (AGG-C4-04)', () => {
+        // The exit code keys on detectionFailures; a row that incremented it but
+        // was then deleted mid-reencode must be walked back, else the sidecar
+        // exits non-zero for a row that no longer exists.
+        expect(scriptSrc).toMatch(
+            /detectionFailures\s*-=\s*countDeletedMidReencodeDetectionFailures\(/,
+        );
+    });
+
+    it('main() computes the exit code via the exported helper (AGG-C4-03)', () => {
+        expect(scriptSrc).toMatch(/process\.exit\(\s*computeBackfillExitCode\(/);
+    });
+});
+
+describe('countDeletedMidReencodeDetectionFailures (AGG-C4-04 — detection-failure∩deleted overlap)', () => {
+    it('counts only the detection-failure-slice rows whose UPDATE matched 0 (deleted mid-reencode)', () => {
+        // flushBatch passes ONLY the derivative-slice UPDATE results here, so a
+        // 0 means the detection-failed row was deleted mid-reencode and must not
+        // keep detectionFailures elevated.
+        expect(
+            countDeletedMidReencodeDetectionFailures([
+                { affectedRows: 1 }, // detection-failed row still alive — keep counted
+                { affectedRows: 0 }, // detection-failed AND deleted — walk back
+                { affectedRows: 0 }, // detection-failed AND deleted — walk back
+            ]),
+        ).toBe(2);
+    });
+
+    it('returns 0 when every detection-failure row is still alive (the common case)', () => {
+        expect(
+            countDeletedMidReencodeDetectionFailures([{ affectedRows: 1 }, { affectedRows: 1 }]),
+        ).toBe(0);
+    });
+
+    it('returns 0 for an empty derivative slice (no detection failures in the batch)', () => {
+        expect(countDeletedMidReencodeDetectionFailures([])).toBe(0);
+    });
+});
+
+describe('computeBackfillExitCode (AGG-C4-03 — sidecar exit-code matrix)', () => {
+    it('exits 0 only when there are neither errors nor detection failures', () => {
+        expect(computeBackfillExitCode({ errors: 0, detectionFailures: 0 })).toBe(0);
+    });
+
+    it('exits 1 on hard errors', () => {
+        expect(computeBackfillExitCode({ errors: 2, detectionFailures: 0 })).toBe(1);
+    });
+
+    it('exits 1 on detection failures (re-encoded but color metadata left stale)', () => {
+        expect(computeBackfillExitCode({ errors: 0, detectionFailures: 3 })).toBe(1);
+    });
+
+    it('exits 1 when both are present', () => {
+        expect(computeBackfillExitCode({ errors: 1, detectionFailures: 1 })).toBe(1);
     });
 });

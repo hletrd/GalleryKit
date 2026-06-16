@@ -145,6 +145,36 @@ export function collectDeletedMidReencodeFiles(
     return results.filter((r) => r.affectedRows === 0).map((r) => r.files);
 }
 
+/**
+ * AGG-C4-04 (run-6 cycle-4, tracer TRC-C4-01): of the detection-failure rows in
+ * a batch (the `derivativeBatch` entries — the ones that incremented
+ * `detectionFailures`), count how many were actually deleted mid-reencode
+ * (their UPDATE matched 0 rows). Those rows no longer exist, so they must NOT
+ * keep `detectionFailures` elevated — otherwise the sidecar exits non-zero for a
+ * row that is gone, needlessly retriggering an idempotent backfill from a
+ * CI/cron wrapper. `flushBatch` passes ONLY the derivative-slice UPDATE results
+ * here so the count is exactly the detection-failure∩deleted overlap. Pure +
+ * exported for unit testing (the in-`main` flushBatch is a closure).
+ */
+export function countDeletedMidReencodeDetectionFailures(
+    derivativeResults: { affectedRows: number }[],
+): number {
+    return derivativeResults.filter((r) => r.affectedRows === 0).length;
+}
+
+/**
+ * AGG-C4-03 (run-6 cycle-4, TE-C4-03): the sidecar's process exit code is the
+ * entire point of the AGG-C3-04 fix, yet `main()`'s exit-code expression was
+ * untested. Extracted as a pure helper so the matrix is unit-testable. Exits
+ * non-zero on hard errors OR on detection failures (re-encoded but color
+ * detection threw, so pipeline_version was deliberately NOT advanced and the
+ * rows remain backfill candidates) — a CI/cron wrapper keying on the exit code
+ * can then distinguish a clean run from one that left color metadata stale.
+ */
+export function computeBackfillExitCode(counts: { errors: number; detectionFailures: number }): 0 | 1 {
+    return counts.errors > 0 || counts.detectionFailures > 0 ? 1 : 0;
+}
+
 interface BackfillSettings {
     quality: ImageQualitySettings;
     sizes: number[];
@@ -412,6 +442,17 @@ async function main() {
             // processed tally and surface the count.
             deletedMidReencode += deletedMidReencodeFiles.length;
             processed -= deletedMidReencodeFiles.length;
+            // AGG-C4-04: a row counted as a detection failure (it incremented
+            // detectionFailures when reprocessRow returned derivativeOnly) may
+            // ALSO be one of the rows just found deleted mid-reencode. Those rows
+            // are gone, so they must not keep detectionFailures elevated — else
+            // the exit code is spuriously non-zero for a row that no longer
+            // exists. The derivative-slice results sit AFTER the success-row
+            // results in updateResults (derivativeItems are pushed last), so
+            // slice from items.length to recover exactly the detection-failure
+            // UPDATE outcomes and subtract their deleted overlap.
+            const derivativeResults = updateResults.slice(items.length);
+            detectionFailures -= countDeletedMidReencodeDetectionFailures(derivativeResults);
             await Promise.all(deletedMidReencodeFiles.map(cleanupDeletedMidReencodeVariants));
             console.log(`  [batch-flush] ${deletedMidReencodeFiles.length} row(s) deleted mid-reencode — orphaned derivatives cleaned up`);
         }
@@ -478,11 +519,12 @@ async function main() {
     }
     lockConn.release();
 
-    // AGG-C3-04: exit non-zero on hard errors OR on detection failures, so a
-    // wrapper can distinguish a clean run from one that left color metadata
-    // stale. Detection failures are recoverable (retried next run) but must
-    // not be reported as success.
-    process.exit(errors > 0 || detectionFailures > 0 ? 1 : 0);
+    // AGG-C3-04 / AGG-C4-03: exit non-zero on hard errors OR on detection
+    // failures, so a wrapper can distinguish a clean run from one that left
+    // color metadata stale. Detection failures are recoverable (retried next
+    // run) but must not be reported as success. Computed via the exported
+    // helper so the matrix is unit-tested.
+    process.exit(computeBackfillExitCode({ errors, detectionFailures }));
 }
 
 // Only run main() when invoked directly, not when imported by tests.
