@@ -331,6 +331,15 @@ async function main() {
     let skipped = 0;
     let processed = 0;
     let errors = 0;
+    // AGG-C3-04 (CR3-01 / tracer D3): rows whose re-encode SUCCEEDED but whose
+    // post-encode color detection THREW — persisted derivative-only WITHOUT a
+    // pipeline_version bump (so they remain backfill candidates). Counted as
+    // `processed` for the resume contract, but tracked separately so the exit
+    // code + summary can distinguish "re-encoded + detection-clean" from
+    // "re-encoded but color metadata still stale". Without this an all-detection
+    // -failure run exits 0, hiding gallery-wide stale color metadata from a
+    // CI/cron wrapper. Mirrors the in-app runner's lastRunHadFailures semantics.
+    let detectionFailures = 0;
     // AGG-C4-02: rows whose UPDATE matched 0 rows because the image was deleted
     // mid-reencode. NOT a failure (the image is gone, idempotent retry is moot)
     // and NOT counted as processed — surfaced separately.
@@ -425,6 +434,9 @@ async function main() {
                 } else if (result.derivativeOnly) {
                     // AGG2-01: detection failed but encode succeeded — persist
                     // the derivative columns without bumping pipeline_version.
+                    // AGG-C3-04: track these so the exit code/summary can flag
+                    // a run that left color metadata stale despite re-encoding.
+                    detectionFailures++;
                     derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly, files });
                 }
                 if (pendingUpdates() >= BATCH_SIZE) {
@@ -438,7 +450,7 @@ async function main() {
 
             if ((index + 1) % reportEvery === 0) {
                 console.log(
-                    `  [progress] ${index + 1}/${rows.length} processed=${processed} skipped=${skipped} errors=${errors}`,
+                    `  [progress] ${index + 1}/${rows.length} processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures}`,
                 );
             }
         });
@@ -449,7 +461,14 @@ async function main() {
     // Flush any remaining rows.
     await flushBatch();
 
-    console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors} deletedMidReencode=${deletedMidReencode}`);
+    console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures} deletedMidReencode=${deletedMidReencode}`);
+    if (detectionFailures > 0) {
+        // AGG-C3-04: re-encode succeeded but color detection failed on these
+        // rows; pipeline_version was deliberately NOT advanced so they remain
+        // backfill candidates for a later retry. Surface loudly so a CI/cron
+        // wrapper does not mistake an all-detection-failure run for success.
+        console.warn(`[backfill-color-pipeline] WARNING: ${detectionFailures} row(s) re-encoded but color detection failed (pipeline_version NOT advanced — they will be retried on the next run).`);
+    }
 
     // Release advisory lock explicitly before closing the connection.
     try {
@@ -459,7 +478,11 @@ async function main() {
     }
     lockConn.release();
 
-    process.exit(errors > 0 ? 1 : 0);
+    // AGG-C3-04: exit non-zero on hard errors OR on detection failures, so a
+    // wrapper can distinguish a clean run from one that left color metadata
+    // stale. Detection failures are recoverable (retried next run) but must
+    // not be reported as success.
+    process.exit(errors > 0 || detectionFailures > 0 ? 1 : 0);
 }
 
 // Only run main() when invoked directly, not when imported by tests.
