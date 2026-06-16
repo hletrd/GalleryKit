@@ -449,17 +449,24 @@ export const enqueueImageProcessing = (job: ImageProcessingJob) => {
                         embedding = embedImageStub(job.id);
                         modelVersion = CLIP_MODEL_VERSION;
                     }
+                    // AGG-C10-01: store the RAW 2048-byte little-endian float32 buffer
+                    // directly into the MEDIUMBLOB. mysql2 inserts Buffer bytes verbatim.
+                    // (Previously base64-encoded; the read path could not round-trip that
+                    // because mysql2 returns a Buffer for the blob and Buffer.from(buf,
+                    // 'base64') is a no-op. The Drizzle column is typed `text` as a schema
+                    // approximation — see schema.ts:264 — so the Buffer is cast through
+                    // `unknown` at the single write site.) decodeEmbeddingColumn() reads it.
                     const buf = embeddingToBuffer(embedding);
-                    const base64 = buf.toString('base64');
+                    const embeddingValue = buf as unknown as string;
                     await db.insert(imageEmbeddings)
                         .values({
                             imageId: job.id,
-                            embedding: base64,
+                            embedding: embeddingValue,
                             modelVersion,
                         })
                         .onDuplicateKeyUpdate({
                             set: {
-                                embedding: base64,
+                                embedding: embeddingValue,
                                 modelVersion,
                             },
                         });

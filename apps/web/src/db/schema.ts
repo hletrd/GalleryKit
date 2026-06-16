@@ -261,10 +261,20 @@ export const sharedGroupViews = mysqlTable("shared_group_views", {
 // creates it as MEDIUMBLOB. The application layer converts Buffer ↔ Float32Array.
 // model_version tags which encoder produced the embedding (stub: 'stub-sha256-v1').
 // No PII: only image_id and the embedding vector are stored.
+//
+// AGG-C10-01 (run-6 cycle-1): because the physical column is MEDIUMBLOB (binary
+// charset), mysql2 ALWAYS returns a Buffer for this column at RUNTIME — the `text`
+// type below is a static approximation only; the value is NOT a string. Writers
+// insert the raw `Buffer` (cast through `unknown` at the write site); readers MUST
+// use `decodeEmbeddingColumn()` (lib/clip-embeddings.ts), which handles the raw
+// Buffer and any legacy base64-string rows. Do NOT `Buffer.from(value, 'base64')`
+// a column value that is already a Buffer — the encoding arg is ignored and the
+// length check then drops every row.
 export const imageEmbeddings = mysqlTable("image_embeddings", {
     imageId: int("image_id").primaryKey().references(() => images.id, { onDelete: 'cascade' }),
     // Note: actual column is MEDIUMBLOB — see migration 0012. The `text` type here
-    // is a Drizzle approximation; the lib layer wraps Buffer reads/writes.
+    // is a Drizzle approximation; mysql2 returns a Buffer at runtime, and the lib
+    // layer (decodeEmbeddingColumn / embeddingToBuffer) wraps Buffer reads/writes.
     embedding: text("embedding").notNull(),
     modelVersion: varchar("model_version", { length: 32 }).notNull(),
     updatedAt: timestamp("updated_at")

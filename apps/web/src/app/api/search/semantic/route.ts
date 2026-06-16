@@ -39,13 +39,12 @@ import {
 } from '@/lib/rate-limit';
 import {
     cosineSimilarity,
-    bufferToEmbedding,
+    decodeEmbeddingColumn,
     topK,
     COSINE_THRESHOLD,
     SEMANTIC_TOP_K_DEFAULT,
     SEMANTIC_TOP_K_MAX,
     SEMANTIC_SCAN_LIMIT,
-    EMBEDDING_BYTES,
     CLIP_MODEL_VERSION,
     PRODUCTION_MODEL_VERSION,
     PRODUCTION_COSINE_THRESHOLD,
@@ -259,19 +258,16 @@ export async function POST(request: NextRequest): Promise<Response> {
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
     }
 
-    // Compute cosine similarity for all scanned embeddings
+    // Compute cosine similarity for all scanned embeddings.
+    // AGG-C10-01: decodeEmbeddingColumn handles the raw-Buffer (current) and legacy
+    // base64 (old rows) shapes mysql2 can return for the MEDIUMBLOB; malformed rows
+    // decode to null and are skipped (previously every row was silently dropped).
     const scored = rows
-        .filter(row => row.embedding !== null && row.embedding.length > 0)
         .map((row) => {
-            try {
-                const buf = Buffer.from(row.embedding as string, 'base64');
-                if (buf.length !== EMBEDDING_BYTES) return null;
-                const imgEmbedding = bufferToEmbedding(buf);
-                const score = cosineSimilarity(queryEmbedding, imgEmbedding);
-                return { imageId: row.imageId, score };
-            } catch {
-                return null;
-            }
+            const imgEmbedding = decodeEmbeddingColumn(row.embedding);
+            if (imgEmbedding === null) return null;
+            const score = cosineSimilarity(queryEmbedding, imgEmbedding);
+            return { imageId: row.imageId, score };
         })
         .filter((m): m is { imageId: number; score: number } => m !== null);
 

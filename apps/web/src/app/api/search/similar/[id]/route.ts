@@ -34,11 +34,10 @@ import { hasTrustedSameOrigin } from '@/lib/request-origin';
 import { getClientIp, preIncrementSemanticAttempt, rollbackSemanticAttempt } from '@/lib/rate-limit';
 import {
     cosineSimilarity,
-    bufferToEmbedding,
+    decodeEmbeddingColumn,
     topK,
     SEMANTIC_TOP_K_DEFAULT,
     SEMANTIC_SCAN_LIMIT,
-    EMBEDDING_BYTES,
     PRODUCTION_MODEL_VERSION,
     PRODUCTION_COSINE_THRESHOLD,
 } from '@/lib/clip-embeddings';
@@ -124,12 +123,13 @@ export async function GET(
             return NextResponse.json({ error: 'No embedding found for this image' }, { status: 404, headers: NO_STORE_HEADERS });
         }
 
-        const buf = Buffer.from(targetRows[0].embedding, 'base64');
-        if (buf.length !== EMBEDDING_BYTES) {
+        // AGG-C10-01: decode the raw-Buffer (current) or legacy base64 column value.
+        const decoded = decodeEmbeddingColumn(targetRows[0].embedding);
+        if (decoded === null) {
             rollbackSemanticAttempt(ip);
             return NextResponse.json({ error: 'Embedding data is corrupt' }, { status: 404, headers: NO_STORE_HEADERS });
         }
-        targetEmbedding = bufferToEmbedding(buf);
+        targetEmbedding = decoded;
     } catch {
         rollbackSemanticAttempt(ip);
         return NextResponse.json({ error: 'Server error' }, { status: 500, headers: NO_STORE_HEADERS });
@@ -151,17 +151,12 @@ export async function GET(
     }
 
     const scored = rows
-        .filter(row => row.imageId !== id && row.embedding !== null && row.embedding.length > 0)
+        .filter(row => row.imageId !== id)
         .map((row) => {
-            try {
-                const buf = Buffer.from(row.embedding as string, 'base64');
-                if (buf.length !== EMBEDDING_BYTES) return null;
-                const imgEmbedding = bufferToEmbedding(buf);
-                const score = cosineSimilarity(targetEmbedding, imgEmbedding);
-                return { imageId: row.imageId, score };
-            } catch {
-                return null;
-            }
+            const imgEmbedding = decodeEmbeddingColumn(row.embedding);
+            if (imgEmbedding === null) return null;
+            const score = cosineSimilarity(targetEmbedding, imgEmbedding);
+            return { imageId: row.imageId, score };
         })
         .filter((m): m is { imageId: number; score: number } => m !== null);
 

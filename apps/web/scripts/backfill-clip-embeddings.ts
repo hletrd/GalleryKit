@@ -156,17 +156,21 @@ async function main() {
                     } else {
                         embedding = embedImageStub(id);
                     }
+                    // AGG-C10-01: store the RAW 2048-byte float32 buffer (not base64) so
+                    // the read path (decodeEmbeddingColumn) round-trips it. The Drizzle
+                    // `text()` column is a schema approximation over a MEDIUMBLOB, so the
+                    // Buffer is cast through `unknown` at this single write site.
                     const buf = embeddingToBuffer(embedding);
-                    const base64 = buf.toString('base64');
+                    const embeddingValue = buf as unknown as string;
                     await db.insert(imageEmbeddings)
                         .values({
                             imageId: id,
-                            embedding: base64,
+                            embedding: embeddingValue,
                             modelVersion: TARGET_MODEL_VERSION,
                         })
                         .onDuplicateKeyUpdate({
                             set: {
-                                embedding: base64,
+                                embedding: embeddingValue,
                                 modelVersion: TARGET_MODEL_VERSION,
                             },
                         });

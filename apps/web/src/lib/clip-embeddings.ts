@@ -35,6 +35,23 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 }
 
 /**
+ * Dot product of two equal-length vectors. For UNIT vectors (both already
+ * L2-normalized via `truncateAndNormalize` / `normalizeEmbedding`) the dot
+ * product equals the cosine similarity, so this is a cheaper fast path for the
+ * brute-force scan where both the query and every stored vector are unit length
+ * (AGG-C10-11c: skips the two per-call norm recomputations + sqrt). Use only when
+ * the unit-length invariant holds; otherwise use `cosineSimilarity`.
+ */
+export function dotProduct(a: Float32Array, b: Float32Array): number {
+    if (a.length !== b.length) {
+        throw new Error(`dotProduct: dimension mismatch ${a.length} vs ${b.length}`);
+    }
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
+}
+
+/**
  * Serialize a 512-dim Float32Array to a Node.js Buffer (little-endian).
  * The resulting buffer is 2048 bytes (512 × 4), suitable for MEDIUMBLOB storage.
  */
@@ -62,6 +79,46 @@ export function bufferToEmbedding(buf: Buffer): Float32Array {
         arr[i] = buf.readFloatLE(i * 4);
     }
     return arr;
+}
+
+/**
+ * Decode an `image_embeddings.embedding` column value into a Float32Array, or
+ * return null if the value is not a well-formed 512-dim embedding.
+ *
+ * AGG-C10-01 (run-6 cycle-1): the column is physically MEDIUMBLOB, so mysql2
+ * ALWAYS returns a Buffer for it (binary charset 63 → `readLengthCodedBuffer`),
+ * regardless of the Drizzle `text()` type annotation. The previous read sites did
+ * `Buffer.from(row.embedding as string, 'base64')` — but `Buffer.from(buffer, enc)`
+ * IGNORES the encoding for Buffer input and copies verbatim, so a base64-stored
+ * vector came back as a ~2732-byte Buffer that failed the 2048-byte length check
+ * and was silently dropped. Every row was discarded → empty results / 404 once the
+ * (currently dark) feature is enabled.
+ *
+ * This helper is the single source of truth for the read contract. It accepts:
+ *   1. a raw 2048-byte Buffer (current write path) → decoded directly;
+ *   2. a Buffer holding base64 ASCII (legacy rows written before this fix) →
+ *      its text is base64-decoded, then length-checked;
+ *   3. a base64 string (defensive; some drivers/configs could yield a string).
+ * Anything that does not yield exactly EMBEDDING_BYTES bytes returns null.
+ */
+export function decodeEmbeddingColumn(value: unknown): Float32Array | null {
+    let buf: Buffer | null = null;
+    if (Buffer.isBuffer(value)) {
+        if (value.length === EMBEDDING_BYTES) {
+            // Case 1: raw little-endian float32 bytes.
+            buf = value;
+        } else {
+            // Case 2: legacy row — the Buffer contains base64 ASCII text.
+            const decoded = Buffer.from(value.toString('latin1'), 'base64');
+            buf = decoded.length === EMBEDDING_BYTES ? decoded : null;
+        }
+    } else if (typeof value === 'string') {
+        // Case 3: defensive — a string-typed column value holding base64.
+        const decoded = Buffer.from(value, 'base64');
+        buf = decoded.length === EMBEDDING_BYTES ? decoded : null;
+    }
+    if (buf === null) return null;
+    return bufferToEmbedding(buf);
 }
 
 export interface ScoredMatch {
