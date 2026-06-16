@@ -1,351 +1,251 @@
-# Trace Report — GalleryKit Suspicious Data/Control Flows
-**Cycle 2 | HEAD: 8ccc8806 | Date: 2026-06-16**
+# Tracer — Deep Review (cycle 3 / HEAD b1e9e0da)
+
+Evidence-driven causal tracing of six riskiest end-to-end flows. Each flow traced
+to its real code boundaries at HEAD `b1e9e0da8466b10113ac5a6065d570382f92c292`.
+File:line citations are against the working tree at that HEAD.
+
+Prior-cycle closed items deliberately NOT re-reported: CLIP embedding round-trip
+(now raw-buffer, image-queue.ts:453-461), serve-upload fd leak (AGG-H5 abort
+listener, serve-upload.ts:267-290), map-query LIMIT. CLIP semantic search is
+disabled-by-design and is NOT proposed for activation.
 
 ---
 
-## Flow 1 — Upload → Original Save → Enqueue → Queue Claim → Sharp Fan-out → Conditional UPDATE → Orphan Cleanup
+## Summary of defects found
 
-### Observation
+| # | Flow | Finding | Severity | Confidence |
+|---|------|---------|----------|------------|
+| D1 | Upload | Crash/SIGKILL between original-write and DB-insert orphans the `original/` file permanently — no sweep exists for that directory | LOW | High |
+| D2 | Docs | CLAUDE.md says settings-hash covers "5 COLOR_IMPACTING_KEYS"; code covers 9. Stale doc, not a code defect | LOW (doc) | High |
+| D3 | Backfill | `detection-failed` path is correct, BUT a permanently-undetectable row re-encodes every backfill pass (no progress guard) — wasted-work loop, not data corruption | LOW | Medium |
 
-The upload pipeline chains multiple async stages across process-local state (in-memory `PQueue`, `enqueued` Set, `permanentlyFailedIds` Set) and MySQL advisory locks. Two specific race surfaces were flagged: (a) delete-while-processing, and (b) multi-worker / restart-boundary double-processing.
-
-### Hypothesis Table
-
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Per-image advisory lock + conditional UPDATE is sufficient: the two guards are logically redundant and cover both races | High | Strong | Both guards observed in code |
-| 2 | Delete-while-processing creates a window where orphaned variant files are not cleaned | Low | Moderate | `deleteImage` does not hold the per-image lock during deletion |
-| 3 | Restart-boundary double-process: on restart, `bootstrapImageProcessingQueue` re-enqueues a row still being processed by the dying worker | Low | Moderate | Bootstrap fetches `processed=false` rows without excluding in-flight jobs |
-
-### Evidence For
-
-**H1 (dual guard is sufficient):**
-- `apps/web/src/lib/image-queue.ts` — `acquireImageProcessingClaim(jobId)` issues `GET_LOCK('gallerykit:image-processing:{jobId}', 0)` (non-blocking). A second worker for the same image gets `null` from `GET_LOCK` and enters a retry loop (up to 10 retries with 5 s * min(attempt, 5) delay) before giving up.
-- After processing, the conditional UPDATE is `WHERE processed=false`. If a second worker races past the lock (e.g., first worker crashed without releasing), the UPDATE returns `affectedRows===0`, triggering `cleanupDeletedMidReencodeVariants` with empty sizes (orphan file removal). This covers restart-boundary scenarios because the restarted worker re-acquires the lock and re-processes, while the first worker's partial files are detected by the `affectedRows===0` guard.
-- MySQL advisory locks are connection-scoped: a crashed worker's lock is released automatically on TCP disconnect.
-
-**H2 (delete-while-processing):**
-- `deleteImage` in `apps/web/src/app/actions/images.ts` removes the image ID from the in-memory `enqueued` Set BEFORE the DB transaction, then deletes the DB row. It does NOT acquire `gallerykit:image-processing:{id}` before deletion.
-- The queue worker's conditional `UPDATE WHERE processed=false` returns `affectedRows===0` if the row was deleted mid-encode. `cleanupDeletedMidReencodeVariants` is then called with the row's `filename_*` values, removing freshly-written variant files. This path is explicitly accounted for in `image-queue.ts`.
-- Handled correctly. No orphan window.
-
-**H3 (restart boundary):**
-- `bootstrapImageProcessingQueue` fetches `processed=false` rows and re-enqueues them. On restart, a row being processed by the dying worker is re-enqueued. The restarted worker attempts `GET_LOCK` — if the original TCP connection is gone, the lock is available and re-processing proceeds cleanly to the conditional UPDATE. No double-write occurs because only one worker holds the lock at a time.
-
-### Evidence Against / Gaps
-
-**H2 disconfirmed:** The `affectedRows===0` path exists and is tested. File cleanup passes `row.filename_*` values, so cleanup targets real files. Confirmed correct.
-
-**H3 disconfirmed:** The per-image lock ensures at most one active worker per image at any moment. The conditional UPDATE prevents a double-write even if two workers both proceed past a brief lock window. Handled.
-
-**Residual gap — `permanentlyFailedIds` not cleared on delete:** `deleteImage` does not remove an image's ID from the `permanentlyFailedIds` Set. A deleted image that had permanently failed leaves a dead ID in the Set until process restart. If MySQL ever reuses the same auto-increment ID (extremely unlikely in practice) a re-uploaded image with that ID would be silently skipped by the retry scheduler. Minor process-local memory accumulation, no current data integrity impact.
-
-### Rebuttal Round
-
-Best challenge to H1: The restart case assumes the MySQL advisory lock is released promptly on TCP disconnect. If the MySQL server has a slow `wait_timeout` for dead connections, a brief overlap exists where the restarted worker gets `null` from `GET_LOCK` and backs off. The retry loop (up to 10 * 5 s = 50 s) would eventually succeed or give up. Giving up means the row stays `processed=false` and is re-enqueued on next bootstrap. This is a latency issue, not a data-loss issue.
-
-H1 stands: eventual consistency is preserved; no data loss path identified.
-
-### Current Best Explanation
-
-Flow 1 is correctly guarded. Both the per-image advisory lock and the `WHERE processed=false` conditional UPDATE are in place and logically sound. Delete-while-processing is handled by the `affectedRows===0` path. Restart-boundary double-processing is prevented by the lock.
-
-### Finding
-
-**TRC-01 (LOW): `permanentlyFailedIds` not cleared on `deleteImage`**
-Deleting an image that permanently failed does not remove its ID from `permanentlyFailedIds`. On a long-running process this accumulates dead IDs, and in the pathological case of integer ID reuse a re-uploaded image with the same ID would be silently skipped by the retry scheduler.
-Files: `apps/web/src/app/actions/images.ts` (`deleteImage`), `apps/web/src/lib/image-queue.ts` (`permanentlyFailedIds` Set).
+No CRITICAL or HIGH defects found. Flows 4 (auth), 5 (SW admin-render), and 6
+(Stripe) are **clean** at HEAD — the suspected bypass/gap in each is already
+closed. Details and the disconfirming evidence for each below.
 
 ---
 
-## Flow 2 — Backfill: Re-encode → Color Re-detect → Column Write; Detection Failure Must NOT Bump pipeline_version
+## Flow 1 — Upload → temp → PQueue claim → Sharp encode → conditional UPDATE → orphan cleanup
 
-### Observation
+### Flow (actual path)
+1. `uploadImages()` (`actions/images.ts:268` loop) → `saveOriginalAndGetMetadata(file)` (`process-image.ts:800`) streams the original to `UPLOAD_DIR_ORIGINAL/{uuid}{ext}` via `createWriteStream(..., {mode:0o600})` (`process-image.ts:823`).
+2. DB `INSERT` with `processed:false, pipeline_version:IMAGE_PIPELINE_VERSION` (`images.ts:382`, values at 333-380).
+3. `enqueueImageProcessing({...})` fire-and-forget (`images.ts:441`).
+4. Queue job (`image-queue.ts:255`): `acquireImageProcessingClaim(job.id)` → `GET_LOCK('gallerykit:image-processing:{id}', 0)` non-blocking (`image-queue.ts:195-212`).
+5. Claim-check `SELECT ... WHERE id=job.id AND processed=false` (`image-queue.ts:286-291`).
+6. `fs.access(originalPath)` (`image-queue.ts:296`) → `processImageFormats(...)` parallel AVIF/WebP/JPEG.
+7. Verify all 3 outputs non-zero (`image-queue.ts:355-366`).
+8. Conditional `UPDATE ... SET processed=true ... WHERE id=job.id AND processed=false` (`image-queue.ts:370-372`).
+9. If `affectedRows===0` → deleted-mid-processing → `deleteImageVariants(..., [])` full-scan cleanup of all 3 dirs (`image-queue.ts:374-391`).
 
-Two backfill entry points exist: the sidecar CLI script (`scripts/backfill-color-pipeline.ts`) and the in-app admin runner (`lib/admin-backfill-runner.ts`). Both must uphold the invariant: transient color-detection failure after a successful re-encode must not advance `pipeline_version`, ensuring later runs retry detection.
+### Hypotheses
+- **H1: A file can be orphaned.** (original dir vs derivative dirs)
+- **H2: An image can be double-processed** across a restart boundary (two workers).
+- **H3: An image can be marked `processed=true` WITHOUT derivatives.**
 
-### Hypothesis Table
+### Evidence
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Both paths correctly bifurcate detection-failure from full-success and skip `pipeline_version` on detection failure | High | Strong | Observed in both code paths |
-| 2 | Sidecar lacks per-image lock, creating a race with `retryFailedImage` that could double-process a row | Medium | Moderate | Explicitly documented gap at sidecar source lines 37-43 |
-| 3 | Global backfill lock serializes sidecar vs in-app runner but NOT sidecar vs queue worker `retryFailedImage` | Medium | Moderate | `gallerykit_color_pipeline_backfill` lock not acquired by `retryFailedImage` |
+**H1 — CONFIRMED for the `original/` directory (D1, LOW).**
+- For-loop happy path: original written at `images.ts:280`, then INSERT at `:382`. On any *thrown* error inside the try the `catch` at `images.ts:464-470` calls `deleteOriginalUploadFile(savedOriginalFilename)` — so a normal failure cleans the original. **Evidence for safety.**
+- BUT a hard process kill (SIGKILL / OOM / container stop) between `:280` and the INSERT commit at `:382` leaves the `original/{uuid}` file on disk with **no DB row** referencing it. **Evidence for orphan.**
+- The only orphan sweep is `cleanOrphanedTmpFiles()` (`image-queue.ts:32-73`), which scans **only** `UPLOAD_DIR_WEBP/AVIF/JPEG` for `*.tmp` (`:33`). There is **no readdir/sweep of `UPLOAD_DIR_ORIGINAL`** for files lacking a DB row (`grep` for `readdir.*original` finds only the LEGACY-dir migration warning in `upload-paths.ts:85`, not a sweep). **Evidence the orphan is permanent.**
+- Derivative `.tmp` orphans (crash between link and rename inside `processImageFormats`, `process-image.ts:1598` writes `tmpPath` mode 0o600) ARE swept at bootstrap (`image-queue.ts:689`). So H1 is **scoped to the original dir only.**
+- Severity LOW because: (a) it's disk-bloat, not a correctness/serving defect — an orphaned original is never served (not under a public dir) and never referenced; (b) requires an ungraceful kill in a sub-second window; (c) the filename is a random UUID so it cannot collide with a future upload. Re-open criterion: if a periodic "originals with no matching `images.filename_original` row" reaper is wanted for long-running hosts.
 
-### Evidence For
+**H2 — REFUTED. No double-processing across restart.**
+- Two workers (restart boundary, or `retryFailedImage` re-enqueue racing the live queue) both attempt `GET_LOCK('gallerykit:image-processing:{id}',0)`. The lock is MySQL-SERVER-scoped (`advisory-locks.ts:40`, doc C8R-RPL-06). The loser gets `acquired!==1` → `null` → claim-retry path (`image-queue.ts:262-283`); it does NOT process. **Evidence against double-encode.**
+- Even if the lock were somehow bypassed, the conditional `UPDATE ... WHERE processed=false` (`image-queue.ts:372`) means only ONE worker's UPDATE matches; the loser sees `affectedRows===0` and cleans its own variants (`:374-391`). **Independent second line of evidence.**
+- The backfill runner claims the SAME per-image lock (`admin-backfill-runner.ts:343-359`, TRC-R5C2-01) so a backfill re-encode of a `processed=true` row cannot interleave-write with a `retryFailedImage` re-encode of the same id. **Cross-path evidence.**
 
-**H1 (version-bump invariant holds):**
-- `admin-backfill-runner.ts` `reprocessOne()`: on `detectColorSignals` failure, returns a derivative-only result `{ was_downscaled, avif_10bit }`. The UPDATE for this case sets ONLY `was_downscaled` and `avif_10bit` — `pipeline_version` is absent from the SET clause.
-- Sidecar `backfill-color-pipeline.ts` `reprocessRow()`: identical bifurcation. On detection failure, returns `{ outcome: 'processed', derivativeOnly: { was_downscaled, avif_10bit } }`. `flushBatch()` places these in `derivativeBatch` and issues a separate UPDATE that omits `pipeline_version`.
-- CLAUDE.md documents: invariant "locked by `__tests__/admin-backfill-runner-detection-failure.test.ts`".
+**H3 — REFUTED. `processed=true` is never set without verified derivatives.**
+- The `UPDATE ...processed=true` (`image-queue.ts:370`) is reached only AFTER the three-format `verifyFile` `Promise.all` (`:359-363`) and the `if (!webpOk||!avifOk||!jpegOk) throw` (`:364-366`). A missing/zero-byte derivative throws before the UPDATE → retry → eventual permanent-fail path (`:485-543`), leaving `processed=false`. **Direct evidence.**
 
-**H2 (sidecar missing per-image lock):**
-- Sidecar lines 37-43 explicitly document this gap. If `retryFailedImage` re-enqueues a row while the sidecar is re-encoding it, both can write DB columns. The sidecar does not use `WHERE processed=false` as a guard (it operates on rows where `pipeline_version != IMAGE_PIPELINE_VERSION`). The queue worker's conditional UPDATE uses `WHERE processed=false`. Since backfill does not change `processed`, both UPDATEs target different conditions and do not collide on the same row-level guard. Last writer wins on color columns — both are valid processing outputs.
-
-**H3 (global lock scope):**
-- `gallerykit_color_pipeline_backfill` is acquired by BOTH sidecar and in-app runner. These two serialize against each other.
-- `retryFailedImage` (in `image-queue.ts`) does NOT acquire this lock. The queue worker acquires the per-image lock (`gallerykit:image-processing:{id}`), but the sidecar does NOT check for that lock.
-- Race outcome: last writer wins on color columns; both write valid values from their respective re-encode; no stale or corrupt data.
-
-### Evidence Against / Gaps
-
-**H2 partially disconfirmed:** File-level atomicity (Sharp's rename-on-complete pattern) prevents file corruption. DB column races are bounded to two valid re-encode outputs. This is an accepted indeterminism, not a correctness failure.
-
-### Rebuttal Round
-
-Best challenge to H1: What if `detectColorSignals` throws rather than returns null — does the exception propagate past the version-bump guard?
-- In `admin-backfill-runner.ts` `reprocessOne()`: the entire function is wrapped in try/catch. A thrown exception produces `{ outcome: 'error' }`, which causes the caller to increment the error counter and write NO DB columns. `pipeline_version` is not bumped.
-- Sidecar `reprocessRow()`: same pattern.
-
-H1 stands unconditionally.
-
-### Current Best Explanation
-
-The `pipeline_version`-bump invariant is upheld by both backfill paths under all failure modes including exceptions. The sidecar's lack of per-image lock is a documented, accepted limitation that creates theoretical indeterminism when `retryFailedImage` races the sidecar, but does not produce incorrect data.
-
-### Finding
-
-**TRC-02 (INFO): Sidecar backfill + retryFailedImage race is a documented accepted limitation**
-No correctness failure. The race produces at worst one of two valid re-encode outputs. Documented in sidecar source at lines 37-43.
+### Conclusion
+H1 confirmed (D1, LOW — original-dir orphan on ungraceful kill, no reaper). H2/H3
+refuted — the advisory-lock + conditional-UPDATE pairing is sound across restart.
+**No double-process, no processed-without-derivatives.**
 
 ---
 
-## Flow 3 — ETag / Cache Invalidation: Backfill Re-encode Rewrites Bytes Under Same Filename
+## Flow 2 — Backfill (admin runner + sidecar) → advisory lock → re-encode → detection → DB write
 
-### Observation
+Traced `admin-backfill-runner.ts` line by line. Core question: does the
+"detection fails AFTER successful re-encode → `pipeline_version` NOT bumped →
+retry later" claim actually hold?
 
-CLAUDE.md claims backfill re-encodes change mtime (and usually size), causing the static-server ETag (`W/"{size-hex}-{mtime-hex}"`) to change. The `serve-upload.ts` ETag additionally embeds `pipeline_version`, mtime, size, and a settings hash. The claim is that after backfill, cached clients revalidate correctly without operator action.
+### Flow
+- `triggerAdminBackfill()` (`:816`) → `acquireBackfillLock()` non-blocking `GET_LOCK(gallerykit_color_pipeline_backfill,0)` (`:303-322`) → `runBackfill(lockConn)` fire-and-forget (`:855`).
+- `runBackfill` (`:617`): resets tallies, reads config, `resolveBackfillConcurrency` (`:663`), keyset-paginated `fetchCandidateBatch(cursor)` `WHERE processed=TRUE AND (pipeline_version IS NULL OR pipeline_version < CURRENT) AND id>cursor` (`:400-408`), each row → `reprocessOne` via PQueue.
+- `reprocessOne` (`:442`): access-check original → width guard → per-image claim → `processImageFormats` → `detectColorSignals` → conditional UPDATE.
 
-### Hypothesis Table
+### Hypotheses
+- **H1: detection-failure path bumps version** (would strand color metadata) — the historically-fixed bug.
+- **H2: detection-failure path leaves a no-progress loop.**
+- **H3: deleted-mid-reencode orphans derivatives.**
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Static-server ETag changes after backfill because the re-encoded file has a new mtime (and usually different size) | High | Strong | Sharp re-encodes produce new file bytes with updated mtime |
-| 2 | serve-upload.ts ETag changes because pipeline_version increments and/or mtime changes | High | Strong | ETag formula at line 201 directly includes IMAGE_PIPELINE_VERSION |
-| 3 | serve-upload.ts settings-hash TTL (5 s) creates a brief window where stale hash is served after admin color-settings flip | Low | Moderate | TTL explicitly designed and documented; self-corrects via mtime |
-| 4 | Static-server path (public/) bypasses serve-upload.ts entirely for existing files — serve-upload ETag is irrelevant for the common case | High | Strong | CLAUDE.md "Serving precedence" note confirmed in serve-upload.ts comment |
+### Evidence
 
-### Evidence For
+**H1 — REFUTED at HEAD. The claim holds.**
+- `signals` is `null` only when the detection `try` threw (`:551-554` sets `detectionError`, leaves `signals=null`).
+- When `signals` is truthy → the FULL UPDATE incl. `pipeline_version = CURRENT` runs (`:557-570`). **Bumps only on detection success.**
+- When `signals` is null → a DIFFERENT UPDATE runs that sets ONLY `was_downscaled`/`avif_10bit` and **does NOT touch `pipeline_version`** (`:594-599`), then returns `{ok:false, reason:'detection-failed'}` (`:609`). Since candidate selection is `pipeline_version < CURRENT` (`:404`), the row stays a candidate. **Direct evidence the resume contract holds.** Fix documented inline at `:580-593` (R-run2c1 AGG-01), locked by `__tests__/admin-backfill-runner-detection-failure.test.ts` per CLAUDE.md.
+- Sidecar parity: CLAUDE.md states `backfill-color-pipeline.ts` "already has the correct semantics (no version bump on detection failure)"; the runner now matches.
 
-**H1 (static server ETag changes):**
-- Sharp writes variant files by overwriting the output path, updating the filesystem mtime. Next.js static file ETag is `W/"{size-hex}-{mtime-hex}"`. After backfill re-encodes a file, mtime changes. Even if encoded byte count were identical (extremely unlikely for a real re-encode), mtime changes. ETag changes.
-- Production filesystem: Linux/Docker ext4 with nanosecond mtime resolution. `mtimeMs` captures millisecond precision. No coarse-mtime risk.
+**H2 — CONFIRMED as a minor inefficiency (D3, LOW).**
+- A row whose source is *permanently* undetectable (e.g. a corrupt ICC block that always throws in `detectColorSignals`) will: re-encode successfully every run, write the `was_downscaled`/`avif_10bit`-only UPDATE (`:594`), return `detection-failed`, and **remain a candidate forever** because `pipeline_version` never advances. Each subsequent backfill invocation re-encodes it again (full Sharp AVIF/WebP/JPEG fan-out) with no progress. **Evidence for a wasted-work loop.**
+- This is the deliberate trade-off of the resume contract (retry transient detection failures), so it is correct for transient failures but unbounded for permanent ones. Severity LOW: backfill is operator-initiated (not continuous), the encode is idempotent (no corruption), and a permanently-undetectable source is rare. Re-open criterion: if a `detection_attempts` counter / dead-letter is wanted to stop re-encoding chronically-failing rows. Confidence Medium — depends on whether any real source deterministically throws in detection (most detection failures are transient I/O).
 
-**H2 (serve-upload ETag changes):**
-- `serve-upload.ts` line 201: `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`. When pipeline version increments (e.g., 6 to 7), the ETag string changes for ALL files served through this path without any file modification.
+**H3 — REFUTED. Deleted-mid-reencode is handled in BOTH update branches.**
+- Success branch: `affectedRows===0` → `cleanupDeletedMidReencodeVariants(row)` (`:573-576`) full-scan `deleteImageVariants(..., [])` (`:430-440`).
+- Detection-failed branch: the `was_downscaled`-only UPDATE ALSO checks `affectedRows===0` → same cleanup (`:605-608`). **Both branches covered** — derivatives for a row deleted mid-encode are removed, no orphan. Matches the queue worker (`image-queue.ts:374-391`).
 
-**H3 (settings-hash TTL):**
-- `serve-upload.ts` line 46: `SERVING_SETTINGS_HASH_TTL_MS = 5_000`. Stale-while-revalidate: a stale hash is served immediately and the background refresh proceeds without blocking. Worst case: up to 5 s + one refresh cycle before all new requests see the updated ETag. If admin flips a setting and immediately triggers backfill, the ETag's mtime component changes anyway from re-encoding, so cache invalidation self-corrects. Documented and accepted.
+### Concurrency-cap correctness (secondary)
+- `resolveBackfillConcurrency` (`:129-142`) guards non-finite `poolLimit` (test-mock `@/db` omitting `POOL_CONNECTION_LIMIT`) by falling back to 10 (`:137`), preventing a NaN concurrency that "would silently freeze PQueue" (`:135-136`). cap = `floor((10-5-1)/2)=2` at shipped pool size. Pool-exhausted claim acquire treated as `locked` skip, not error-spin (`:485-490`). **Sound.**
 
-**H4 (static server takes precedence):**
-- CLAUDE.md: "For existing files the production serving path is therefore Next's static server... not `serve-upload.ts`." The serve-upload ETag machinery fires only for locale-prefixed URLs and for files not present in `public/`. For the common case, H1 applies.
-
-### Evidence Against / Gaps
-
-**No CDN deployed.** The nginx reverse proxy does not cache. A CDN upstream of nginx would face a `max-age=3600` stale window before revalidation. Not a current risk for the documented single-server deployment.
-
-### Rebuttal Round
-
-Best challenge: what if re-encoded file has the same byte count AND coarse mtime on an unusual filesystem? Production is ext4 (nanosecond mtime); this does not apply.
-
-H1 and H2 stand.
-
-### Current Best Explanation
-
-ETag invalidation is correct for both serving paths. The 5-second settings-hash TTL is a bounded, self-correcting trade-off.
-
-### Finding
-
-No confirmed bug. The ETag chain is architecturally sound for the documented deployment.
+### Conclusion
+The detection-failure resume claim **holds** (H1 refuted — the historical
+version-bump bug is fixed and test-locked). H3 refuted. D3 (LOW) is a no-progress
+re-encode loop for permanently-undetectable rows — wasteful, not corrupting.
 
 ---
 
-## Flow 4 — Analytics View-Count Buffering → Async Flush: Crash Loss and Exactness
+## Flow 3 — ETag generation & cache invalidation (static path vs serve-upload path)
 
-### Observation
+### Flow
+Two serving paths (R4C6 ARCH-R4C6-06, CLAUDE.md):
+- **Static path** (existing files in `public/uploads/`): Next.js static server emits `W/"{size-hex}-{mtime-hex}"`. Cache policy `public, max-age=3600, must-revalidate` via `next.config.ts headers()`.
+- **serve-upload path** (`app/uploads/[...path]` route, and `/{locale}/uploads/...`): `serve-upload.ts:215` emits `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"`.
 
-Shared-group view counts are buffered in-process (`viewCountBuffer` Map in `data.ts`) and flushed asynchronously via `setTimeout`. Separately, `recordSharedGroupView` in `public.ts` inserts into the `sharedGroupViews` event-row table via direct `db.insert`. CLAUDE.md documents view counts as "best-effort approximate analytics." Concern: (a) what is lost on crash, and (b) is any code path treating this approximate count as exact?
+### Hypothesis
+**H1: A color-setting flip fails to invalidate cached variants on one or both paths.**
 
-### Hypothesis Table
+### Evidence
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Crash loses only the in-memory buffer; no billing or audit code treats view_count as exact | High | Strong | No billing path found involving view_count |
-| 2 | The sharedGroupViews INSERT path (event rows) is durable and separate from the buffered view_count increment | High | Strong | public.ts lines 392-404 use db.insert directly |
-| 3 | No SIGTERM handler calls flushBufferedSharedGroupViewCounts before process exit — graceful shutdown silently drops the buffer | High | Strong | No SIGTERM handler found; timer uses .unref() |
+**serve-upload path — invalidates correctly. REFUTED.**
+- `settingsHash = await getServingColorSettingsHash()` (`serve-upload.ts:214`) → `getColorSettingsHash(config)` (`:63`) → `buildHashFromConfig` over all 9 keys (`settings-hash.ts:72-85`). A flip of any of the 9 `COLOR_IMPACTING_KEYS` (`settings-hash.ts:37-49`) changes the hash → changes the ETag → `must-revalidate` forces 304→200. **Direct evidence.**
+- The 5s TTL + stale-while-revalidate (`serve-upload.ts:50-83`) bounds skew to "≤5s + one refresh latency" — documented acceptable. SW also probes via HEAD `If-None-Match` (`sw.js:236-253`) and serves the network 200 when the ETag differs (R10-H3). **Consistent end-to-end.**
 
-### Evidence For
+**Static path — invalidates via mtime+size only, NOT via settings hash. Correct-by-construction.**
+- The static-server ETag is `{size}-{mtime}` only — it does NOT contain the settings hash. **Evidence the hash does not ride the static path.**
+- BUT a color-setting flip is operationally followed by a **backfill re-encode** (CLAUDE.md: "Flipping any of these requires a backfill pass"). The re-encode rewrites the derivative file in place → mtime AND size change → static ETag changes → revalidation. So invalidation on the static path "rides the mtime+size ETag" (CLAUDE.md ETag section). **Documented and correct design** — the static server cannot read admin settings, so the only honest invalidation signal is the re-encoded bytes.
+- Risk window: between the setting flip and the backfill completing, the static path serves OLD bytes with an unchanged ETag. This is **by design** — the bytes genuinely haven't changed until backfill rewrites them. A hash-only invalidation there would force a needless 200 of identical old bytes. **No correctness defect.**
 
-**H1 (what is lost):**
-- `data.ts` `viewCountBuffer`: module-scoped `Map<number, number>`. On process crash (SIGKILL, OOM) or graceful exit without flush, the buffer is lost. Maximum loss: `MAX_VIEW_COUNT_BUFFER_SIZE = 1000` entries accumulated since last flush (`BASE_FLUSH_INTERVAL_MS = 5 s`).
-- The timer is armed with `.unref()`, meaning it does not keep the Node.js event loop alive. On `docker stop` (SIGTERM → 10 s grace period → SIGKILL), the graceful shutdown may not flush the buffer unless a SIGTERM handler calls `flushBufferedSharedGroupViewCounts()`. No such handler was found in the codebase.
-- CLAUDE.md explicitly: "do not treat it as billing/audit-grade state."
-- No billing code found touching `view_count`. The `entitlements` table (Stripe paid-download) is entirely separate.
+**D2 (LOW, doc-only).** CLAUDE.md "ETag / cache invalidation" section says the
+settings hash "covers all **5** `COLOR_IMPACTING_KEYS`" and lists 5. The code
+(`settings-hash.ts:37-49`) and the serve-upload comment (`serve-upload.ts:199-202`)
+both correctly say **9** (the 5 color keys + 3 quality keys + image_sizes). The
+hash FORMULA is correct; only the CLAUDE.md prose is stale. settings-hash.ts:6-7
+even notes "AGG-R7-08 corrected this docstring from a stale 3-key summary" — the
+CLAUDE.md copy was not similarly corrected. No functional impact.
 
-**H2 (separate INSERT path is durable):**
-- `public.ts` `recordSharedGroupView` (lines 392-404): fire-and-forget `db.insert(sharedGroupViews)`. These rows are durable once committed to MySQL. They are used for analytics breakdowns (country, referrer).
-- `sharedGroups.view_count` (the denormalized counter column) is what the buffer increments. These are two parallel, independent systems.
-
-**H3 (no SIGTERM flush):**
-- Searched `image-queue.ts`, `data.ts`, and action files for `SIGTERM`, `beforeExit`, `process.on('exit'`, `flushBufferedSharedGroupViewCounts` — found only the exported function itself and its call in `flushGroupViewCounts` (internal use). No process-lifecycle hook calls the export.
-- `flushBufferedSharedGroupViewCounts` is exported (line 191 in `data.ts`) but callers outside the module are not apparent from the search.
-
-### Evidence Against / Gaps
-
-**H3 gap — SIGTERM hook may exist elsewhere:** A dedicated entrypoint or Next.js lifecycle hook might call `flushBufferedSharedGroupViewCounts` on shutdown. The search covered `src/lib/*.ts` and `src/app/actions/*.ts` but not the Next.js custom server, API routes, or `instrumentation.ts`. This is the critical unknown.
-
-### Rebuttal Round
-
-Best challenge to H3: Next.js 16 may call module-level teardown hooks or the `onTerminate` lifecycle. If such a hook exists and calls `flushBufferedSharedGroupViewCounts`, the loss window closes. Evidence for this is absent — absence of evidence is weak, but the `.unref()` timer design signals an intentional "don't block shutdown" choice, implying the buffer IS expected to be silently abandoned.
-
-H3 stands as a confirmed gap pending investigation of the instrumentation.ts or custom server file.
-
-### Current Best Explanation
-
-The `sharedGroupViews` event-row INSERT path is durable. The `view_count` buffer is approximate-by-design and documented as such. On graceful shutdown, up to 1000 pending view-count increments are lost with no log warning. No billing or quota enforcement uses this count.
-
-### Finding
-
-**TRC-03 (LOW): No SIGTERM handler calls `flushBufferedSharedGroupViewCounts` before process exit**
-On `docker stop` (SIGTERM), the view-count buffer (up to 1000 entries, 5 s accumulation) is silently discarded. The per-event `sharedGroupViews` rows are durable, but the denormalized `shared_groups.view_count` counter undercounts by up to the buffer size on every graceful restart.
-
-Discriminating probe: search `apps/web/src/instrumentation.ts` (if it exists) and any Next.js custom server file for `flushBufferedSharedGroupViewCounts` or SIGTERM handler.
+### Conclusion
+Cache invalidation is **correct on both paths** for the real operational flow
+(flip → backfill). serve-upload invalidates immediately via the 9-key hash; static
+invalidates via re-encode mtime+size. D2 is a stale CLAUDE.md count (says 5, code
+does 9), doc-only.
 
 ---
 
-## Flow 5 — Session Lifecycle: Token Mint → Cookie → Middleware Guard → isAdmin() → Expiry Purge
+## Flow 4 — Session auth: cookie → proxy.ts guard → isAdmin() → timingSafeEqual
 
-### Observation
+### Flow
+1. Middleware `isProtectedAdminRoute(pathname)` (`proxy.ts:54-74`) matches `/[locale]/admin/*` and `/admin/*` but NOT the bare login page.
+2. Cookie format pre-check: `token.length >= 100` (`proxy.ts:90`) AND `token.split(':').length===3` with no empty segments (`proxy.ts:103`), else redirect to login. **Format only — no crypto here.**
+3. Server action / page: `isAdmin()` (`auth.ts:54`) → `getCurrentUser()` (`auth.ts:33`, React-cached) → reads `COOKIE_NAME` (`auth.ts:24-25`) → `verifySessionToken(token)` (`session.ts:94`).
+4. `verifySessionToken`: split → 3 parts (`session.ts:99-100`) → HMAC-SHA256 expected sig (`:108`) → **length-equality guard then `timingSafeEqual`** (`:113-119`) → shape asserts AFTER crypto (`:121-125`) → age check ±24h (`:127-134`) → DB lookup by `sha256(token)` (`:136-139`) → expiry check + lazy delete (`:145-148`).
 
-The session lifecycle spans: `generateSessionToken()` → DB insert → cookie set → middleware format check → `verifySessionToken()` (per-request cached) → `isAdmin()` in server actions → hourly expiry purge. Concern: any window where expired or forged token is honored.
+### Hypotheses
+- **H1: Bypass — a request reaches a protected route without a valid session.**
+- **H2: TOCTOU between the middleware format check and the action crypto check.**
+- **H3: Timing oracle in `verifySessionToken`.**
 
-### Hypothesis Table
+### Evidence
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | Middleware performs format check only; cryptographic validation occurs in every server action via verifySessionToken — this is defense in depth, not a gap | High | Strong | Middleware comment explicitly states this; matcher excludes /api/* |
-| 2 | React cache() on verifySessionToken deduplicates within a request but NOT across requests — no stale-session window across requests | High | Strong | React cache() is per-render-tree by design |
-| 3 | HMAC + token-age + DB expiresAt triple guard makes forged/expired tokens impossible to honor | High | Strong | All three checks confirmed in verifySessionToken |
-| 4 | x-gk-admin-render header is set based on cookie presence, not session validity — minor distinction in SW cache behavior | Low | Weak | Documented design choice, not a security gap |
+**H1 — REFUTED. No bypass.**
+- The middleware is a CHEAP gate (format + redirect), explicitly NOT the auth boundary: "Full cryptographic validation happens in verifySessionToken() within server actions" (`proxy.ts:84-85`). Every mutating admin action independently calls `requireSameOriginAdmin()` (`action-guards.ts:37`) and pages/actions call `isAdmin()`. **Defense in depth — the middleware is not load-bearing for crypto.**
+- API routes are EXCLUDED from the middleware matcher (`proxy.ts:140`, comment :137-139), but `/api/admin/**` routes are independently gated by `withAdminAuth(...)` enforced by the `lint:api-auth` blocking gate (CLAUDE.md Lint Gates). **No matcher-gap bypass.**
+- A forged cookie of correct *format* (length≥100, 3 colon-parts) passes the middleware but fails HMAC `timingSafeEqual` (`session.ts:117`) → `verifySessionToken` null → `isAdmin()` false. **The format check cannot be leveraged into access.**
 
-### Evidence For
+**H2 — REFUTED. No exploitable TOCTOU.**
+- The middleware check and the action check read the SAME cookie value from the same request; no attacker-controlled mutable state sits between them, and the cookie cannot change mid-request. The middleware's only output is "redirect or continue" — continuing still hits the full crypto check. **No window.**
 
-**H1 (middleware as format gate only):**
-- `proxy.ts` lines 83-115: checks token length >= 100 and exactly 3 colon-separated non-empty parts. Does NOT verify HMAC or DB existence. Redirect on format failure.
-- `proxy.ts` config line 140: `matcher` excludes `/api/*` routes explicitly. All `/api/admin/*` routes rely entirely on `withAdminAuth()`. The `lint:api-auth` lint gate enforces this at CI time.
-- Every mutating server action calls `requireSameOriginAdmin()` → `isAdmin()` → `verifySessionToken()`. Cryptographic verification happens at this layer.
+**H3 — REFUTED. Timing-oracle-hardened.**
+- `timingSafeEqual` requires equal-length buffers, so the code length-guards FIRST and returns null on length mismatch (`session.ts:113-115`) — the only length-dependent early exit, leaking only the signature-hex *length* (fixed at 64 for any real token). The byte comparison is constant-time (`:117`).
+- Crucially, the `random`/`signature` shape regexes run AFTER the crypto compare (`:121-125`) with the explicit comment "so these checks cannot be used as a timing oracle" (`:121-123`). A forged token fails HMAC first. **Direct evidence the ordering is deliberate and correct.**
+- Production refuses DB-fallback session secret (`session.ts:30-36`) — signing key lives only in env, outside the user-data trust domain. **Forgery-on-DB-compromise closed.**
 
-**H2 (React cache() scope):**
-- `session.ts` line 94: `verifySessionToken = cache(...)`. React `cache()` is scoped per React render tree (per request in Next.js App Router). It does not persist across requests. A token verified valid at request N is re-verified independently at request N+1. No cross-request stale-cache window exists.
-
-**H3 (triple guard):**
-- Token-age check: `tokenAge > maxAge (24h)` from embedded timestamp. Fails without DB access — a fast path against old tokens.
-- HMAC: `timingSafeEqual(signatureBuffer, expectedSignatureBuffer)` with prior `length !== expectedSignatureBuffer.length` fast-path rejection. Forged tokens fail here.
-- DB expiresAt check: `session.expiresAt < new Date()`. Inline deletion of expired session row on detection.
-- Post-HMAC structural checks (random `/^[0-9a-f]{32}$/`, signature `/^[0-9a-f]{64}$/`) run AFTER HMAC to avoid timing oracle use.
-
-**H4 (x-gk-admin-render):**
-- `proxy.ts` line 128: sets header based on cookie PRESENCE regardless of format-check outcome. Intended: any admin-session cookie (even expired or malformed) marks the page as personalized for the SW. This is correct behavior per the design (SW cannot read Cookie headers; server makes the decision).
-
-**Expiry purge:**
-- `image-queue.ts` line 562: `db.delete(sessions).where(sql\`${sessions.expiresAt} < NOW()\`)` in hourly GC. Expired sessions are also lazily deleted on each `verifySessionToken` call.
-
-### Evidence Against / Gaps
-
-**H1 gap — API routes rely on lint gate:** If a new `/api/admin/*` route is added without `withAdminAuth()`, middleware does not cover it and the lint gate is the sole defense. The lint gate is CI-blocking, which is strong. Not a current gap.
-
-**Buffer-length equality check before timingSafeEqual:** `session.ts` lines 110-113 return `null` early if `signatureBuffer.length !== expectedSignatureBuffer.length`. This is NOT constant-time. However, the signature is always 64 hex chars (128 ASCII bytes for Buffer.from without encoding) — the length is fixed and public, so this early return is not a practical timing oracle. The comparison happens before any secret material is consumed.
-
-### Rebuttal Round
-
-Best challenge: in-memory rate-limit counters reset on process restart. An attacker timing brute-force around a process restart gets a fresh window. Counter: CLAUDE.md documents "in-memory Maps with DB backup for login." `auth-rate-limit.ts` persists rate-limit state to DB for the login route specifically. The DB-backed persistence survives restarts. This concern is mitigated.
-
-H1, H2, H3 all stand.
-
-### Current Best Explanation
-
-The session lifecycle is correctly guarded at every layer. No window for expired or forged token acceptance was found. The middleware is correctly positioned as a UX redirect gate, not a security gate — security is in `verifySessionToken` called by every action.
-
-### Finding
-
-No confirmed bug. The session lifecycle is architecturally sound.
+### Conclusion
+**Clean.** The middleware is a non-load-bearing format gate; the real boundary is
+`verifySessionToken` with correct constant-time ordering (HMAC → shape → age → DB)
+plus per-action `requireSameOriginAdmin()` + `isAdmin()` defense in depth. No
+bypass, no TOCTOU, no timing oracle.
 
 ---
 
-## Flow 6 — CLIP Embedding Write → Read Round-Trip (Raw MEDIUMBLOB via decodeEmbeddingColumn)
+## Flow 5 — Service worker networkFirstHtml: does an admin-personalized page ever get cached as offline fallback?
 
-### Observation
+### Flow
+- `proxy.ts:128-130`: `if (request.cookies.get('admin_session')) response.headers.set('x-gk-admin-render','1')`. **Set on cookie PRESENCE** (not validity), on the `intlMiddleware`-produced response.
+- `sw.js networkFirstHtml` (`:271`): caches into `HTML_CACHE` only `if (networkResponse.ok && networkResponse.headers.get('x-gk-admin-render') !== '1')` (`:279`).
+- Admin routes never reach `networkFirstHtml` anyway — `isAdminRoute(pathname)` bypasses to network at the fetch dispatcher (`sw.js:357-358`).
 
-Prior to fix AGG-C10-01, `decodeEmbeddingColumn` used `Buffer.from(row.embedding as string, 'base64')`. Because mysql2 returns MEDIUMBLOB columns as Buffer, and `Buffer.from(buffer, 'base64')` ignores the encoding for Buffer input (copies verbatim), a 2048-byte raw binary buffer became a ~2732-byte buffer that failed the length check and was silently dropped. The fix introduces a three-case decoder.
+### Hypothesis
+**H1: An admin-personalized HTML response gets stored in the shared offline HTML cache** (would serve admin content to a later anonymous / different-client visitor offline).
 
-### Hypothesis Table
+### Evidence
 
-| Rank | Hypothesis | Confidence | Evidence Strength | Why it remains plausible |
-|------|------------|------------|-------------------|--------------------------|
-| 1 | The three-case decoder in decodeEmbeddingColumn correctly handles the mysql2 Buffer return — round-trip is fixed | High | Strong | Case 1 matches the current write path exactly |
-| 2 | The write path's `buf as unknown as string` cast works at runtime because Drizzle passes Buffer to mysql2 unchanged — but is fragile to future Drizzle ORM changes | High | Strong | Type cast is a known workaround for schema mismatch |
-| 3 | Legacy rows (base64-encoded binary in MEDIUMBLOB) are correctly handled by Case 2 of the decoder | Medium | Moderate | Case 2 branch logic is correct for valid base64 ASCII content |
+**H1 — REFUTED. The exclusion is sound and conservative.**
+- The header is set whenever the `admin_session` cookie is **present** (`proxy.ts:128`), regardless of token validity/expiry. So ANY request carrying the cookie — even on a public page like `/en/p/123` — gets `x-gk-admin-render:1` → the SW refuses to cache it (`sw.js:279`). **The decision is over-inclusive in the SAFE direction.**
+- For the cache to be poisoned with admin content, a response would have to be (a) admin-personalized BUT (b) carry NO `admin_session` cookie. Admin personalization in this app requires the cookie (the page reads it via `getCurrentUser`), so (a)∧¬(b) is unreachable. **The failure mode is structurally impossible.**
+- The header reflects only the requester's own cookie back to that same client (`proxy.ts:124-127`) — discloses nothing cross-user.
+- Pinned by contract test: `sw-template-contract.test.ts:35,41` pin the exact `!== '1'` guard in the template; `:161-162` pin `headers.set('x-gk-admin-render','1')` in proxy.ts. The template (`sw.template.js:279`) and the built `sw.js:279` match. **Drift-locked.**
+- HTML cache is offline-ONLY (served only in the network-failure `catch`, `sw.js:294-310`), 24h TTL (`:303`), 50-entry cap (`:128-145`).
 
-### Evidence For
+### Secondary observation (not a defect)
+- The HTML cache stores 200 GET HTML DESPITE `Cache-Control: no-cache` from dynamic rendering (deliberate exemption, `sw.js:8-17`, R4C6 COR-R4C6-05). The image path keeps full `isSensitiveResponse` semantics (pinned `sw-template-contract.test.ts:50-55`); only the HTML path takes the narrow exemption, gated by `.ok` + `x-gk-admin-render`. Consistent with the documented design.
 
-**H1 (fix is correct):**
-- `clip-embeddings.ts` line 108 `decodeEmbeddingColumn(value: unknown)`:
-  - Case 1: `Buffer.isBuffer(value) && value.length === EMBEDDING_BYTES (2048)` → `bufferToEmbedding(value)` directly. This is the current write path's output from mysql2.
-  - Case 2: `Buffer.isBuffer(value) && value.length !== 2048` → `value.toString('latin1')` then base64-decode, length-check. For legacy rows written as base64 text (~2732 bytes in MEDIUMBLOB), this decodes correctly.
-  - Case 3: `typeof value === 'string'` → base64-decode, length-check. Defensive path.
-- mysql2 MEDIUMBLOB → Node.js Buffer: mysql2 uses binary charset 63 → `readLengthCodedBuffer`. Case 1 handles this correctly.
-
-**H2 (write path type cast):**
-- `image-queue.ts` write site: `embedding: buf as unknown as string`. The Drizzle column schema declares `embedding` as `text()` but the physical MySQL column is `MEDIUMBLOB`. Drizzle passes the Buffer to mysql2's query parameters; mysql2 sends it as binary data. The MEDIUMBLOB column stores and returns raw bytes.
-- This type cast is a workaround for the mismatch between Drizzle's schema annotation and the physical column type. If Drizzle ever normalizes `text()` parameter binding (e.g., calling `.toString()` on the value before sending), the write path would silently corrupt embeddings by converting 2048 binary bytes to a stringified representation.
-
-**H3 (legacy row handling):**
-- Case 2 assumes the Buffer contains valid base64 ASCII characters. If a legacy row was written as base64 text (`Buffer.from(embedding.toString('base64'))`), its length is approximately 2732 bytes and Case 2 fires, decoding correctly.
-- If a legacy row was written as raw binary (2048 bytes), Case 1 fires. No ambiguity.
-
-### Evidence Against / Gaps
-
-**H2 latent risk confirmed:** The `text()` schema annotation vs MEDIUMBLOB physical column is a permanent type-level inconsistency. The feature is currently dark (`semantic_search_mode` disabled by default), reducing urgency. But the `buf as unknown as string` cast should be replaced with a custom Drizzle column type before the feature is activated.
-
-**Case 2 assumption:** `value.toString('latin1')` on non-base64-safe binary would produce garbage that fails the length check after base64 decode — silently returning null. This is safe behavior (null is the contract for invalid inputs), but the boundary between "was this written as base64" and "was this written as raw binary" is implicit. The decoder is correct for the two known write paths.
-
-### Rebuttal Round
-
-Best challenge to H1: Could mysql2 ever return a string instead of a Buffer for MEDIUMBLOB? In theory, if the connection charset is changed to a multi-byte encoding, mysql2 might decode the MEDIUMBLOB as text. The connection uses binary charset 63, which mysql2 treats as Buffer. This would break if a different charset is configured. Not a current risk but a deployment concern.
-
-H1 stands for the documented deployment.
-
-### Current Best Explanation
-
-The CLIP embedding round-trip is fixed by `decodeEmbeddingColumn`. The three-case decoder correctly handles current raw-binary writes and legacy base64 writes. The latent risk is the `text()` / MEDIUMBLOB schema mismatch — a future Drizzle behavioral change could silently corrupt the write path.
-
-### Finding
-
-**TRC-04 (LOW): `image_embeddings.embedding` declared as Drizzle `text()` but physical column is MEDIUMBLOB**
-The `buf as unknown as string` write-path cast works today but is fragile to future Drizzle ORM updates. Should be replaced with a custom Drizzle column type that reflects the binary contract before the CLIP feature is activated.
-Files: `apps/web/src/db/schema.ts` (schema declaration), `apps/web/src/lib/image-queue.ts` (write site).
+### Conclusion
+**Clean.** An admin-personalized page can never be cached as an offline fallback —
+the `x-gk-admin-render` exclusion fires on cookie presence (safe over-inclusion),
+admin routes bypass entirely, and the unsafe case (admin content without the cookie)
+is structurally unreachable. Contract-test-locked against drift.
 
 ---
 
-## Summary of Confirmed Findings
+## Flow 6 — Stripe webhook → entitlement row (async_payment_succeeded gap)
 
-| ID | Severity | Flow | One-liner |
-|----|----------|------|-----------|
-| TRC-01 | LOW | Flow 1 | `permanentlyFailedIds` is not cleared when `deleteImage` is called, accumulating dead IDs in process memory until restart |
-| TRC-02 | INFO | Flow 2 | Sidecar backfill lacks per-image advisory lock — races with `retryFailedImage` are documented and accepted; not a correctness failure |
-| TRC-03 | LOW | Flow 4 | No SIGTERM handler calls `flushBufferedSharedGroupViewCounts`, so up to 1000 buffered view-count increments are silently lost on graceful process shutdown |
-| TRC-04 | LOW | Flow 6 | `image_embeddings.embedding` declared as Drizzle `text()` while the physical MySQL column is MEDIUMBLOB; the `buf as unknown as string` cast is fragile to future Drizzle ORM behavioral changes |
+### Flow
+- Checkout: `POST /api/checkout/[imageId]` (`route.ts:68`) → rate-limit → image/tier/price validation → `stripe.checkout.sessions.create` with **`payment_method_types: ['card']`** (`:207`) and `metadata{imageId,tier}` (`:223-226`).
+- Webhook: `POST /api/stripe/webhook` (`route.ts:57`) → `constructStripeEvent` signature verify (`:74`) → on `checkout.session.completed` (`:88`) → **gate `session.payment_status === 'paid'`** (`:105`) → metadata/email/tier/amount validation → idempotency SELECT by `sessionId` (`:320-324`) → INSERT entitlement + token (`:357-365`).
 
-**Flows with no confirmed bug:** Flow 3 (ETag/cache invalidation), Flow 5 (session lifecycle).
+### Hypothesis
+**H1: A bank-transfer / async-payment customer pays but never receives an entitlement** (money-taken-no-goods).
 
-**Confirmed findings: 4** (all LOW or INFO; no HIGH or CRIT data-integrity bugs found across the six flows)
+### Evidence
+
+**H1 — CONFIRMED-as-DOCUMENTED-and-OPERATIONALLY-CLOSED. Not an exploitable defect at HEAD.**
+- The webhook does NOT handle `checkout.session.async_payment_succeeded` — CLAUDE.md admits this and the route comment confirms "a future cycle should add a handler" (`webhook/route.ts:98-99`). **The handler genuinely does not exist.** This is the gap the prompt asks to confirm — confirmed.
+- WHAT a bank-transfer customer ACTUALLY experiences at HEAD: they **cannot initiate** an async payment. The checkout session is pinned to `payment_method_types: ['card']` (`checkout/route.ts:207`). SEPA/ACH/bank-transfer/OXXO/Boleto are not offered in the hosted Checkout UI, so the customer never reaches a completed+unpaid state. Inline rationale at `checkout/route.ts:196-206`: "Forcing card-only makes completed+unpaid unreachable, closing the gap operationally. DO NOT add async methods here before the async_payment_succeeded handler ships."
+- Defense in depth: even IF an async method were used (coupon-modified / SDK-created session), the webhook's `payment_status !== 'paid'` gate (`webhook/route.ts:105`) returns `{received:true}` 200 WITHOUT minting an entitlement or token, logging `console.warn` for `'unpaid'` (the documented async happy-path, not a PagerDuty `console.error`, `:106-110`). A completed+unpaid event is a no-op, not a false entitlement. **Two independent barriers: card-only at creation + paid-gate at webhook. The money-no-goods scenario requires BOTH to fail.**
+
+### Other webhook paths verified clean
+- Idempotency: SELECT-by-sessionId (`:320`) is the primary guard; `onDuplicateKeyUpdate({set:{sessionId}})` (`:365`) + `insertedFresh = affectedRows===1 && insertId>0` (`:382`) correctly disambiguates a fresh insert from a no-op dup-key loser under mysql2's FOUND_ROWS flags (R4C3/R4C5, `:366-382`). The dup-key loser returns without logging a dead plaintext token (`:419-421`). **Dead-token hazard closed.**
+- Deleted-image: a paid session for a deleted image returns 200 + manual-refund error log (no Stripe retry storm) both at the pre-check (`:273-281`) and in the FK-violation catch `ER_NO_REFERENCED_ROW_2` (`:390-398`). **Permanent condition handled without retry loop.**
+- Zero-amount (coupon to $0) rejected (`:299-305`); oversized/malformed email rejected with 200 (`:153-189`); unknown tier rejected (`:231-235`). All return 200 for permanent metadata errors (no retry storm), 500 only for transient DB errors (`:412`).
+
+### Conclusion
+The async_payment_succeeded handler gap is **real but operationally closed** by the
+card-only pin at the checkout route (`:207`) plus the webhook's `payment_status==='paid'`
+gate (`:105`). A bank-transfer customer cannot initiate the flow, so no money is taken
+without goods at HEAD. **Not an exploitable defect today.** Re-open trigger (tracked
+as plan-316 CRT-R5C1-04): if async payment methods are added to `payment_method_types`
+BEFORE the `async_payment_succeeded` handler ships — the comment at
+`checkout/route.ts:205-206` is the guardrail.
 
 ---
 
-## Top 3 Findings
+## Cross-flow uncertainty notes / next probes
 
-1. **TRC-03**: No SIGTERM handler calls `flushBufferedSharedGroupViewCounts` — on every `docker stop`, up to 1000 pending view-count increments are silently discarded. The `.unref()` timer design signals this is intentional, but the loss is undocumented at the operational level.
-
-2. **TRC-04**: `image_embeddings.embedding` column declared as Drizzle `text()` but stored as raw MEDIUMBLOB binary — the `buf as unknown as string` cast will silently corrupt embeddings if Drizzle ever normalizes `text()` parameter binding, and the feature is currently dark (not yet active in production).
-
-3. **TRC-01**: `permanentlyFailedIds` Set is never pruned when images are deleted — on long-running processes with high image churn, the Set accumulates dead IDs. In the pathological case of MySQL auto-increment integer reuse, a re-uploaded image with the same ID would be silently skipped by the processing retry scheduler.
+1. **D3 (backfill no-progress loop) confidence is Medium** — depends on whether any real-world source deterministically throws inside `detectColorSignals` (`color-detection.ts`) on every attempt. Most detection failures are transient I/O. **Next probe:** grep prod logs for repeated `[admin-backfill] id=N detection failed` on the SAME id across runs; a stable set warrants a `detection_attempts` cap.
+2. **D1 (original-dir orphan) is bounded** to ungraceful-kill windows; a normal failure is cleaned by the `images.ts:464-470` catch. **Next probe (optional):** `ls data/uploads/original/` count vs `SELECT COUNT(*) FROM images` on the deploy host to quantify accumulated orphans before deciding a reaper is worth the complexity.
+3. All HIGH-risk hypotheses (auth bypass, SW admin-content poisoning, Stripe money-no-goods, double-process, processed-without-derivatives) were **refuted with direct file:line evidence** — these flows are clean at HEAD.

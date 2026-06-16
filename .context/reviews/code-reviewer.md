@@ -1,125 +1,105 @@
-# Code-Quality Review — GalleryKit (Cycle 2, run-6)
+# Code-Quality Review — GalleryKit (Cycle 3, run-6)
 
 **Reviewer:** code-reviewer agent
-**HEAD:** 8ccc8806
+**HEAD:** b1e9e0da
 **Date:** 2026-06-16
-**Focus:** code quality, logic correctness, SOLID, maintainability, readability, error handling, naming, dead code, duplication, magic numbers, leaky abstractions.
-**Method:** Systematic directory sweep of `apps/web/src` (app/components/lib/db/actions/api) + `apps/web/scripts`, deep-read of the highest-risk files, parallel `Explore`-agent fan-out over the breadth, and **independent verification of every candidate finding against live code** before recording it.
+**Focus:** logic correctness, SOLID, maintainability, error handling, invariant/state-consistency, edge cases, data-flow. Recently-touched files prioritized.
+**Method:** Read the prior-cycle file (HEAD 8ccc8806, 9 commits behind). Built a focus-area inventory, deep-read every recently-touched file at CURRENT HEAD (admin-backfill-runner.ts, sw.template.js/sw.js/sw-cache.ts, serve-upload.ts, color-detection.ts, process-image.ts key regions, migrate.js post-condition path, backfill-color-pipeline.ts, public page.tsx, admin error.tsx, OG photo route, db-actions.ts restore path, embeddings.ts). Fanned out two parallel `Explore` sweeps over the server-action and lib breadth, then **independently verified every candidate against live source** before recording.
 
 ---
 
 ## Executive summary
 
-This is an unusually mature, heavily-reviewed codebase. The privacy enforcement (compile-time `_PrivacySensitiveKeys` guards deriving `publicSelectFields` from `adminSelectFields`), the paid-download / Stripe surfaces, the binary parsers (ICC / EXIF / ISOBMFF), the rate-limit / advisory-lock concurrency model, and the CLIP dark-feature gating are all defended to a high standard with extensive inline provenance.
+The codebase remains exceptionally hardened after ~58 closed findings across prior cycles. The 9 commits since cycle 2 (OG SSRF pin, GPS zero-offset anomaly, embeddings mode-awareness, view-retention sweep, SW head-walk LRU, serve-upload fd release, WebP-ICC 1 KB read, Stripe card-only, map LIMIT) are all well-formed and **all verified present + correct** at this HEAD.
 
-Static hygiene is excellent: **zero** `as any`, **zero** `@ts-ignore`/`@ts-expect-error`, **zero** truly-empty `catch {}` blocks in product code, only 3 `console.log` (all in the backfill runner, intentional progress logs), and no `FIXME/HACK/XXX` markers.
+Static hygiene is excellent: zero `as any`, zero `@ts-ignore`/`@ts-expect-error`, zero truly-empty `catch {}` in product code across the focus files.
 
-Crucially, the parallel sweep agents surfaced ~6 "High/Medium" candidates; **every one dissolved on direct verification** (wrong line numbers, missed an existing guard, or mischaracterized intended design). Those refutations are documented in the "Verified non-issues" section so the next cycle does not re-litigate them.
+**Both Explore-sweep candidates dissolved on direct verification** (documented under "Verified non-issues") — exactly the pattern from cycle 2. The one candidate raised at "High" confidence (db-actions.ts:352 missing `.catch()`) is a NON-issue because the `release()` method is internally guarded and cannot reject.
 
-The genuine findings are few and low-impact. Nothing rises to Critical or (confirmed) High.
+Prior-cycle findings re-checked at this HEAD:
+- **CR-01** (embeddings dead+mode-inconsistent) — **FIXED** (commit c00e034b; `backfillClipEmbeddings` is now mode-aware, embeddings.ts:55-90).
+- **CR-02** (GPS zero-IFD0-offset lenient) — **FIXED** (commit d17e5cc2).
+- **CR-03** (lint gate skips non-async exports) — still open as a documented-acceptable Low (framework rejects the shape; not reachable). Not re-litigated.
 
-### Counts by severity
+Genuine NEW findings this cycle are few and low-impact. **Nothing rises to Critical or (confirmed) High at HIGH confidence.**
+
+### Counts by severity (HIGH-confidence only gate the verdict)
 - **Critical:** 0
 - **High:** 0
 - **Medium:** 0
-- **Low:** 3 (CR-01, CR-02, CR-03)
-- **Nits:** 3 (CR-04, CR-05, CR-06)
+- **Low:** 2 (CR3-01, CR3-02)
+- **Nits:** 1 (CR3-03)
 
 ---
 
 ## Low
 
-### CR-01 — `backfillClipEmbeddings` server action is dead + mode-inconsistent (hardcodes stub)
-**File:** `apps/web/src/app/actions/embeddings.ts:45-122`
-**Confidence:** High (facts), Low (impact — the CLIP feature is deployed dark by design)
+### CR3-01 — `backfill-color-pipeline.ts` sidecar exits 0 ("success") on an all-detection-failure run
+**File:** `apps/web/scripts/backfill-color-pipeline.ts:413-462` (esp. 416-417, 462)
+**Confidence:** Medium (fact), Low (impact)
 
-`backfillClipEmbeddings()` is exported as a `'use server'` action but has **no caller anywhere in the codebase** (verified: `grep` finds only its definition and a test). Unlike the two sibling embedding paths — the queue hook in `image-queue.ts:433-477` and `scripts/backfill-clip-embeddings.ts:155-157` — both of which branch on `semanticSearchMode === 'production'` to choose `embedImageReal`/`PRODUCTION_MODEL_VERSION`, this action **unconditionally** calls `embedImageStub(id)` and writes `STUB_MODEL_VERSION` (lines 87, 97).
+`reprocessRow` returns `{ outcome: 'processed' }` for BOTH the success branch (line 209) and the detection-failure-after-encode branch (line 230). In `main`, `processed++` is incremented for both (line 417), and the only thing distinguishing them downstream is which batch array the item lands in (`updateBatch` vs `derivativeBatch`). The detection-failure rows are NOT counted in `errors`, so the final `process.exit(errors > 0 ? 1 : 0)` (line 462) returns **0 (success)** even on a run where EVERY row's color detection threw and NO `pipeline_version` was bumped.
 
-**Why it's a problem:** It is leaky/inconsistent abstraction and latent dead code. If a future cycle wires this action to an admin "Backfill embeddings" button while the deployment is in `production` mode, it would silently populate `STUB_MODEL_VERSION` rows that the production search route (`activeModelVersion = PRODUCTION_MODEL_VERSION`) ignores — i.e. the button would appear to do work but produce nothing the search path consumes. It is *safe by construction today* (no caller; partitioned model_version means no cross-contamination), but it is a divergence from the two authoritative embedding-writer implementations.
+**Why it's a problem:** An operator running the sidecar in a CI/cron wrapper that keys on exit code sees "success" while the gallery's color metadata silently failed to refresh on every row. The rows correctly remain backfill candidates (the documented resume contract is intact — `was_downscaled`/`avif_10bit` persist, version stays behind), so it is not a data-integrity bug; it is an **observability/exit-signal gap**. The in-app runner (admin-backfill-runner.ts) handles this better: it tallies `detectionFailures` separately and sets `lastRunHadFailures` (line 791), surfacing the distinction to the admin UI. The sidecar's stdout DOES log `derivative-only` counts per batch (line 410), but the exit code and the final summary line (line 452) do not reflect detection failures as a non-clean outcome.
 
-**Failure scenario:** Operator (after enabling production) wires the action to a UI control → clicks "backfill" → action reports `{status:'ok', processed: N}` → production search still returns nothing because every written row is `STUB_MODEL_VERSION`.
+**Failure scenario:** A libheif/Sharp regression makes `detectColorSignals` throw on every original. Operator runs the documented `--rm` sidecar in a deploy hook; it re-encodes all derivatives, logs `processed=N`, exits 0. The deploy hook reports green. Color audit columns are now stale for the entire gallery and only a human noticing the per-batch `(N derivative-only)` log lines would catch it.
 
-**Fix:** Either (a) delete the action until it is needed (the sidecar script already covers backfill), or (b) make it mode-aware exactly like `image-queue.ts`/the script (read `getGalleryConfig().semanticSearchMode`, pick `embedImageReal`+`PRODUCTION_MODEL_VERSION` when production). Add a comment stating no UI wires it yet.
-
----
-
-### CR-02 — Lossless GPS strip treats a zero IFD0 offset as "no GPS" instead of an anomaly
-**File:** `apps/web/src/lib/gps-exif-strip.ts:147-149` (consumed at `process-image.ts:1584-1589`)
-**Confidence:** Medium (real asymmetry), Low (not a demonstrable privacy leak)
-
-```js
-let ifdAbs = tiffStart + r.u32(tiffStart + 4);
-const visited = new Set<number>();
-for (let chain = 0; chain < MAX_IFD_CHAIN && ifdAbs !== tiffStart; chain++) { ... }
-```
-
-If the TIFF block's IFD0 offset field (`tiffStart+4`) is literally `0`, then `ifdAbs === tiffStart` and the loop body never executes. `stripGpsFromTiffRegion` returns `false` ("no GPS found"), and the caller `stripGpsFromOriginal` (line 1585: `if (!scrubbed.stripped) return;`) treats that as "leave the original byte-identical." The module's own doctrine elsewhere is that *any structural anomaly returns `null`* so the caller falls through to the tier-2 metadata-free re-encode.
-
-**Why it's borderline:** In a structurally-valid TIFF, IFD0 offset is always ≥ 8 (it must point past the 8-byte header), and GPS data is only reachable through IFD0/IFD1 via tag `0x8825`. A `0` offset means *no IFD is reachable*, so any GPS bytes present would be unreferenced orphans the strip would not need to remove anyway. Hence this is a correctness asymmetry, not a confirmed leak — but a malformed-and-hostile file gets the lenient `false` path where the conservative `null` (force re-encode → strips all metadata) would be safer and matches the rest of the module.
-
-**Fix:** Treat `ifdAbs === tiffStart` (offset 0, or offset pointing into the header) as an anomaly: `if (ifdAbs === tiffStart) return null;` before the loop. This routes the file to the re-encode fallback, consistent with the `visited`-cycle and bounds-check `return null` paths.
+**Fix:** Either (a) track a `detectionFailures` counter in `main` (incremented when `result.derivativeOnly` is set) and fold it into the exit-code decision / final summary (`exit(errors > 0 || detectionFailures > 0 ? 1 : 0)` or at least a distinct non-zero code), or (b) add `detectionFailures` to the closing summary line so the signal is at least visible. Align with the in-app runner's `lastRunHadFailures` semantics.
 
 ---
 
-### CR-03 — `check-action-origin` / `check-api-auth` lint gates silently skip non-`async` exported handlers
-**Files:** `apps/web/scripts/check-action-origin.ts:351, 367`; `apps/web/scripts/check-api-auth.ts` (function-declaration branch)
-**Confidence:** High (the skip is real), Low (not realistically exploitable)
+### CR3-02 — Doc/comment drift: serve-upload.ts ETag comment + CLAUDE.md both now say "9" but the inline list re-enumerates the keys (the very anti-pattern the comment warns against)
+**File:** `apps/web/src/lib/serve-upload.ts:197-208`
+**Confidence:** High (fact), Low (impact — comment only)
 
-In `check-action-origin.ts`, the arrow-function and function-expression branches both `if (!isAsync) continue;` (lines 351, 367) — a mutating server action exported **without** the `async` keyword (`export const deleteThing = (id) => { db.delete(...) }`) is silently skipped and never checked for `requireSameOriginAdmin()`. The gate's safety net therefore has a hole: a non-async mutating export.
+The comment block at 197-208 says *"do NOT re-enumerate them here; it drifts. AGG-D1"* — and then proceeds to **re-enumerate all 9 keys inline** (`wide_gamut_jpeg_chroma, sdr_jpeg_chroma, avif_effort, force_srgb_derivatives, wide_gamut_max_source_pixels, image_quality_webp/avif/jpeg, image_sizes`). The count ("9-entry") and the list currently match `settings-hash.ts:37-49`, so there is no live inconsistency today, but the comment simultaneously forbids and performs the enumeration. The next person who adds a 10th `COLOR_IMPACTING_KEY` will update `settings-hash.ts` and the test, but this prose list is easy to miss — re-introducing exactly the stale-"5" drift that AGG-R7-08 just corrected.
 
-**Why it's Low not High:** Next.js requires `'use server'` module exports to be async functions — a non-async export throws at build/invocation. And `requireSameOriginAdmin()` is itself `await`-ed, structurally forcing async. So a non-async mutating server action is not a reachable deployment state in practice; the lint hole cannot be hit by valid code.
+**Why it's Low:** It is a comment, not code; the ETag is computed from `getColorSettingsHash(config)` which reads the authoritative array. No runtime impact.
 
-**Fix (defense-in-depth):** Flag a non-async exported function in an action file as a failure (`must be declared async`) rather than `continue`-ing past it, so the gate's coverage is provably total instead of relying on the framework to reject the shape first.
+**Fix:** Replace the inline enumeration with a pointer only: *"the authoritative list is `COLOR_IMPACTING_KEYS` in settings-hash.ts (currently 9 entries) — see there; do not duplicate."* Same treatment the comment already prescribes.
 
 ---
 
 ## Nits
 
-### CR-04 — `migrate-aliases.ts` exits without closing the DB connection
-**File:** `apps/web/scripts/migrate-aliases.ts:24,27`
-**Confidence:** High (fact), Nit (no real impact)
+### CR3-03 — `db-actions.ts` inner-finally `await uploadContractLock?.release()` lacks a `.catch()` unlike its three sibling RELEASE_LOCK calls
+**File:** `apps/web/src/app/[locale]/admin/db-actions.ts:352`
+**Confidence:** High (fact), Nit (NOT a defect — see verification)
 
-Both `process.exit(0)` and `process.exit(1)` are reached without `await connection.end()`. This is harmless: `process.exit` terminates immediately and the OS reclaims the socket; this is a one-shot migration script (one process per run), so the "pool exhaustion across repeated runs" scenario does not apply. Add a `finally { await connection.end().catch(() => {}); }` only for tidiness / to match the other scripts' convention (e.g. `migrate.js`, `seed-e2e.ts`).
-
-### CR-05 — `admin-backfill.ts` returns the raw runner error message to the admin UI
-**File:** `apps/web/src/app/actions/admin-backfill.ts:67-68`
-**Confidence:** Medium (fact), Nit (admin-only surface)
-
-```js
-case 'error':
-    return { ok: false, status: 'error', error: result.reason };
-```
-`result.reason` originates from `triggerAdminBackfill`'s catch (`admin-backfill-runner.ts:863`, `err.message`) and can carry raw SQL/driver internals. Every other server action on this surface (e.g. `embeddings.ts:120`, the gallery-config fallback) maps to a **localized generic** message and logs the detail server-side. This is inconsistent and could surface driver text in the admin toast. It is only reachable by an authenticated admin, so the disclosure risk is low. Fix: log `result.reason` server-side and return `t('...')` like the sibling actions.
-
-### CR-06 — Duplicated FIFO-eviction + Map-prune idiom across modules
-**Files:** `lib/data.ts:178-187`, `lib/image-queue.ts:97-109`, `lib/bounded-map.ts:116-126` (and the per-run state mirroring in `admin-backfill-runner.ts`)
-**Confidence:** High (fact), Nit (maintainability)
-
-The "collect keys → break at `excess` → delete" eviction loop appears in at least three places with near-identical bodies (the comments even cross-reference each other: "matching `BoundedMap.prune()` and C8-MED-01"). `bounded-map.ts` already encapsulates this; `data.ts` (`viewCountRetryCount`) and `image-queue.ts` (`pruneRetryMaps`) reimplement it inline rather than reusing a shared helper. Not a defect — the implementations are correct — but it is copy-paste that will drift. Consider routing the two inline reimplementations through a shared bounded-map/prune utility.
+Raised by the server-action sweep at "High" confidence; **downgraded to a Nit after verifying the callee.** Line 352 (`await uploadContractLock?.release()`) is the only lock-release in the function without an attached `.catch()` (siblings at 304, 323, 349 all have one). However, `acquireUploadProcessingContractLock`'s returned `release()` (`upload-processing-contract-lock.ts:47-56`) wraps its `RELEASE_LOCK` query in `try { … } catch (err) { console.debug(…) } finally { conn.release(); }` — **it can never reject.** So the missing `.catch()` here is harmless; the `await` resolves regardless of DB state. Purely a stylistic asymmetry. Optional: add `.catch(() => {})` for visual consistency with the siblings, or leave it (the callee already owns its failure handling).
 
 ---
 
-## Verified non-issues (sweep candidates refuted against live code)
+## Verified non-issues (candidates checked directly against live code)
 
-These were raised by the parallel sweep agents and **checked directly**; recording them so cycle 3 does not re-flag:
+Recording so cycle 4 does not re-flag:
 
-1. **`gps-exif-strip.ts:521-526` "buffer over-read before bounds check"** — FALSE. The guard `if (start < 0 || length < 0 || start + length > buf.length) return null;` (line 521) runs *before* `buf.readUInt32BE(start)` (line 526), and `length < 8` is rejected at 525. The agent inverted the ordering.
-2. **`icc-chromaticity.ts:234` "integer overflow in `132 + tagCount*12`"** — FALSE. `tagCount` is clamped to `MAX_TAG_COUNT = 100` at line 230 *before* the multiplication; max product is 1200. No overflow possible.
-3. **`process-image.ts:1007-1030` "WI-15 downscale loses aspect ratio (`baseHeight` not updated)"** — FALSE. `baseHeight` feeds only the `basePixels` MP gate (line 1009). The fan-out resizes by width against the **intermediate file's actual pixels** (written with `autoOrient:true` + aspect-preserving `.resize({width})`), so Sharp derives the correct height. No aspect bug.
-4. **`actions/topics.ts` "`topicRouteSegmentExists` TOCTOU outside the lock"** — FALSE. The existence check is called **inside** `withTopicRouteMutationLock(...)` (line 137), and the INSERT additionally catches `ER_DUP_ENTRY` (line 169). Correctly serialized.
-5. **`actions/sharing.ts:120` "in-memory vs DB rate-limit drift on DB failure"** — NOT A BUG. The in-memory and DB limiters are intentionally independent (speed vs durability); on DB failure the documented fail-safe is to "rely on in-memory Map" (stricter / fail-closed). Working as designed.
-6. **`image_embeddings` / `entitlements` orphan rows on image delete** — NOT A BUG. Both carry `onDelete: 'cascade'` FKs (`schema.ts:274, 292`), so the manual delete transaction not touching those tables is correct.
-7. **`use-display-capability.ts` `useSyncExternalStore` infinite-loop (React #185)** — NOT PRESENT. `detect()` value-memoizes `_cachedSnapshot` and returns a stable reference until gamut/HDR actually flip. Correct.
-8. **`api/search/semantic` `clampSemanticTopK` coercion of booleans/arrays** — HANDLED. `if (raw !== undefined && typeof raw !== 'number') return DEFAULT` rejects non-number inputs before any `Number()` coercion (route.ts:88).
-9. **Fire-and-forget embedding write after image deletion (image-queue.ts:433)** — BENIGN. Runs only after `affectedRows>0` (post-`processed=true`); a delete landing between commit and insert makes the insert fail the cascade FK (`ER_NO_REFERENCED_ROW_2`), caught by `catch(embedErr)` → warn log only.
+1. **db-actions.ts:352 "missing `.catch()` = unhandled rejection"** — NON-ISSUE. `release()` (upload-processing-contract-lock.ts:47-56) is internally try/catch/finally-guarded and never rejects. The Explore agent's "High" was overstated.
+2. **process-image.ts WI-15 "downscale loses aspect / fan-out uses `baseWidth` not `processingBaseWidth`"** — FALSE (re-confirmed at this HEAD). Line 1084 uses `processingBaseWidth` for the upscale guard; lines 1123/1126 read `processingInputPath`. The downscaled intermediate is correctly threaded. Temp cleanup is in `finally` (1312-1316).
+3. **10-bit→8-bit AVIF retry "re-encodes at bitdepth 10 again"** — FALSE. `base.clone()` + explicit `bitdepth: 8` (1176-1184) with the documented R4C8 COR-R4C8-06 rationale (clone copies the options snapshot; setters never reset). Correct.
+4. **embeddings.ts `preIncrementBackfillAttempt` "TOCTOU re-fetch on line 41"** — NON-ISSUE (agent self-refuted). Single-threaded JS; the re-`get` after increment is harmless.
+5. **admin error.tsx "unused `error` prop, no logging"** — NON-ISSUE. The public twin (`app/[locale]/error.tsx`) destructures `reset` only too; neither logs client-side. Next.js logs error-boundary errors server-side and `error.digest` is the correlation handle. Intentional matched pattern.
+6. **migrate.js "post-condition can be bypassed"** — FALSE. `runMigrations` (716-718) throws on ANY missing journal hash after `migrate()`; fresh-DB (662-680) and legacy (682-696) paths both `reconcileLegacySchema` + `baselineAllJournalMigrations`. `getAllJournalMigrations` fails loud on a missing `.sql` file. Matches the CLAUDE.md runbook exactly.
+7. **admin-backfill-runner.ts `resolveBackfillConcurrency` "NaN/zero/negative cap"** — FALSE. `Number.isFinite` guard (137) handles the test-mock undefined-pool case; cap is `Math.max(1, …)`. Verified across pool sizes 1-50: always ≥ 1, never NaN. At shipped pool 10 → cap 2.
+8. **admin-backfill-runner.ts batch result "drizzle tuple not unwrapped"** — FALSE. Lines 376 & 409 unwrap `[rows, fields]` defensively, identical to the sidecar script.
+9. **color-detection.ts NCLX "code-2 Unspecified clobbers ICC values"** — FALSE (this is the FIX, not a bug). Per-field `if (nclx* !== undefined)` guards (384-386) keep ICC-derived values when NCLX leaves a field unspecified. Documented AGG-R8-06 / AGG-R8c3-01 with a test lock.
+10. **OG photo route `buildFallbackResponse` homepage redirect uses `new URL(req.url).origin` (untrusted host)** — NOT A BUG. That origin is used only as a 302 `Location` pointing the crawler back to the same site it came from; it is not a server-side fetch base (the fetch base IS pinned to `siteConfig.url`, line 113). Reflecting the request host into a self-redirect is benign.
+11. **sw-cache.ts vs sw.template.js drift** — NONE. Both implement delete-then-set recency + head-walk eviction + `if (deleted)` guard. The reference module (sw-cache.ts) additionally maintains the `evicted` byte tally (the template doesn't need a return value). `sw.js` differs from `sw.template.js` only by the `__SW_VERSION__` → `dd26e742-p7` stamp (expected, build-generated).
+12. **view-retention sweep arming** — CORRECT. Armed once via `!state.gcInterval` guard (image-queue.ts:712, the AGG-M12 / d979c4ca pattern), `unref()`'d, plus a one-shot bootstrap purge (702). `resolveRetentionMs` rejects non-finite/non-positive days (fail-safe to default).
+13. **All binary parsers (gps-exif-strip, icc-chromaticity, icc-extractor, gain-map-detection, color-detection ISOBMFF walker)** — bounds-checked before every read, depth/scan-capped, tagCount-clamped, NaN-guarded, consistent `null`-on-anomaly fail-safe. Re-confirmed clean by the lib sweep + spot reads.
 
 ---
 
 ## Coverage
 
-**Files examined:** ~229 source files in `apps/web/src` (app + components + lib + db) plus 26 scripts were in scope and swept. Deep-read in full or in load-bearing regions by the lead reviewer: `lib/data.ts`, `lib/validation.ts`, `lib/gallery-config.ts` + `gallery-config-shared.ts`, `lib/clip-embeddings.ts`, `lib/clip-inference.ts`, `lib/clip-model.ts`, `lib/image-queue.ts`, `lib/admin-backfill-runner.ts`, `lib/gps-exif-strip.ts`, `lib/smart-collections.ts`, `lib/use-display-capability.ts`, `lib/download-tokens.ts`, `lib/icc-chromaticity.ts`, `lib/process-image.ts` (downscale + GPS-strip regions), `actions/embeddings.ts`, `actions/admin-backfill.ts`, `actions/sharing.ts`, `actions/topics.ts`, `actions/images.ts` (delete region), `api/stripe/webhook`, `api/download/[imageId]`, `api/checkout/[imageId]`, `api/search/semantic`, plus `scripts/migrate-aliases.ts`, `scripts/check-action-origin.ts`. The remaining breadth (23 components, 23 scripts, ~57 lib/action modules) was covered by four parallel `Explore` sweeps whose every actionable candidate was then independently verified.
+**Deep-read in full or load-bearing regions:** admin-backfill-runner.ts (entire), sw-cache.ts (entire), serve-upload.ts (entire), color-detection.ts (entire), process-image.ts (WI-15 downscale 1000-1042, fan-out + 10-bit AVIF 1060-1189, cleanup 1305-1320, GPS-strip dispatcher 1573-1650), migrate.js (1-120 + post-condition path 640-774), backfill-color-pipeline.ts (entire), public page.tsx (entire), admin + public error.tsx, OG photo route (entire), db-actions.ts restore window (280-361), upload-processing-contract-lock.ts (entire), embeddings.ts backfill action, image-queue.ts GC arming (695-729), data.ts getLatestImageForOg/getImages/select-fields.
 
-### Top 3 highest-signal findings
-1. **CR-01** — `backfillClipEmbeddings` is dead + mode-inconsistent (always writes stub even in production), diverging from the two authoritative embedding writers. Wire it mode-aware or delete it.
-2. **CR-02** — Lossless GPS strip returns "no GPS" (lenient) instead of "anomaly → re-encode" (conservative) when a TIFF block has a zero IFD0 offset; tighten to `return null` to match the module's own fail-safe doctrine.
-3. **CR-03** — `check-action-origin`/`check-api-auth` lint gates `continue` past non-`async` exported handlers, leaving a (currently unreachable) coverage hole in the same-origin/auth safety net.
+**Breadth (Explore sweeps, every candidate verified):** all 15 server actions + db-actions.ts; data.ts, gps-exif-strip.ts, icc-chromaticity.ts, icc-extractor.ts, gain-map-detection.ts, validation.ts, auth-rate-limit.ts, rate-limit.ts, image-queue.ts, gallery-config.ts, gallery-config-shared.ts, view-retention.ts, bounded-map.ts.
+
+### Top findings
+1. **CR3-01** (Low) — sidecar backfill exits 0 on an all-detection-failure run; exit code + summary don't reflect detection failures the way the in-app runner's `lastRunHadFailures` does. Observability gap, not data loss.
+2. **CR3-02** (Low) — serve-upload.ts ETag comment forbids re-enumerating `COLOR_IMPACTING_KEYS` then re-enumerates all 9; replace with a pointer to prevent the stale-count drift AGG-R7-08 just fixed.
+3. **CR3-03** (Nit, NON-defect) — db-actions.ts:352 lacks a `.catch()` unlike siblings, but the callee's `release()` cannot reject. Cosmetic.
+
+## Recommendation
+**COMMENT** — no CRITICAL/HIGH issues at any confidence. Two Low observability/maintainability items (CR3-01, CR3-02) and one cosmetic Nit (CR3-03). The codebase is in excellent shape; the 9 inter-cycle commits are correct and the two prior-cycle Low findings (CR-01, CR-02) are confirmed closed.

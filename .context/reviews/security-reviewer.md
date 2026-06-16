@@ -1,123 +1,144 @@
-# Security Review Report — GalleryKit (Cycle 2)
+# Security Review Report — GalleryKit
 
-**Reviewer:** Security Reviewer (OWASP Top 10 + deep adversarial sweep)
-**HEAD:** 8ccc8806
-**Date:** 2026-06-16
-**Scope:** Full security surface — auth/session/crypto primitives, all server actions (`app/actions/**`), all API routes (`app/api/**`, incl. `api/admin/**`, download, checkout, stripe webhook, OG, search), `serve-upload.ts`, `db-actions.ts` (mysqldump/restore), `data.ts` (PII guards), `validation.ts`, `csv-escape.ts`, `gps-exif-strip.ts`, `request-origin.ts`, `rate-limit.ts`, `admin-tokens.ts`, `download-tokens.ts`, the 3 security lint gates + their AST scanners, and the dark CLIP surface (verification only — NOT activation).
-
-**Risk Level: LOW**
-
-This is an exceptionally mature, hardened codebase. Dozens of prior review cycles (R3–R28, runs 1–6, RPF cycles 1–8) have closed nearly every standard vulnerability class. Auth, session crypto, CSRF/same-origin, injection, path traversal, PII guards, rate limiting, and the paid-download/Stripe surface are all defense-in-depth hardened with compile-time guards, AST-enforced lint gates, and fixture tests. The two prior-cycle fixes called out in the brief (poisoned-weight cleanup on checksum mismatch; config re-darkening gate) are both verified PRESENT and intact (see Verified-Closed below). No Critical or High findings. The findings below are residual hardening observations and defense-in-depth symmetry notes — none are confirmed-exploitable in a default deployment.
+**Reviewer:** security-reviewer (cycle 3)
+**HEAD:** b1e9e0da
+**Scope:** OWASP Top 10, auth/authz, secrets, injection (SQL/path/command/formula), SSRF, XSS, CSRF/same-origin, file-upload safety, rate-limiting, session handling, privacy (PII), unsafe deserialization, header injection, ReDoS, decompression bombs. Complete inventory examined — not sampled.
+**Risk Level:** LOW
 
 ## Summary
+
 - Critical Issues: 0
 - High Issues: 0
-- Medium Issues: 2
-- Low Issues: 4
-- Informational / Verified-Closed: 5
+- Medium Issues: 1 (historical secret in git history — documented/known; operational)
+- Low / Informational: 3 (defense-in-depth observations, no live exploit)
 
----
+This is one of the most thoroughly hardened codebases I have reviewed. ~58 findings closed across prior cycles have left every primary attack surface with layered, test-locked defenses. I confirmed every candidate against current HEAD and verified the previously-fixed items (OG SSRF pin, Stripe card-only/paid gate, bidi stripping in OG/JSON-LD/CSV/validation) are present and correct. I found NO new injection, auth-bypass, SSRF, XSS, CSRF, or privacy-leak vulnerabilities at HEAD.
 
-## Critical Issues
-None.
-
-## High Issues
-None.
+Inventory examined in full:
+- All 11 API routes (`api/admin/db/download`, `api/admin/lr/upload`, `api/checkout/[imageId]`, `api/download/[imageId]`, `api/health`, `api/live`, `api/og`, `api/og/photo/[id]`, `api/search/semantic`, `api/search/similar/[id]`, `api/stripe/webhook`).
+- All 14 server-action files + `[locale]/admin/db-actions.ts`.
+- Auth/session/crypto libs: `api-auth.ts`, `session.ts`, `password-hashing.ts`, `admin-tokens.ts`, `download-tokens.ts`, `request-origin.ts`, `action-guards.ts`.
+- Input/output safety: `validation.ts`, `sanitize.ts`, `og-sanitize.ts`, `csv-escape.ts`, `safe-json-ld.ts`, `sql-restore-scan.ts`, `db-restore.ts`.
+- File handling: `serve-upload.ts`, `gps-exif-strip.ts`, `storage/local.ts`, `upload-paths.ts`.
+- Middleware (`proxy.ts`), rate-limit (`rate-limit.ts`), Stripe (`stripe.ts`), migrate (`migrate.js`), data-layer privacy guards (`data.ts`).
+- Two parallel fan-out audits (auth-coverage + injection-surface) corroborated 100% lint-gate coverage and zero raw-SQL concatenation.
 
 ---
 
 ## Medium Issues
 
-### SEC-01 — Per-photo OG route fetches an attacker-influenced origin (theoretical SSRF / cache-key surface)
-**Severity:** MEDIUM (downgraded from theoretical — not confirmed exploitable)
-**Category:** A10 SSRF (peripheral)
-**Confidence:** Medium · **Exploitability:** Theoretical (requires TRUST_PROXY misconfig or an unfiltered Host)
-**Location:** `apps/web/src/app/api/og/photo/[id]/route.tsx:103` → `apps/web/src/lib/og-photo-fetch.ts:50-54`
+### 1. Real SESSION_SECRET + bootstrap passwords remain recoverable in git history
+**Severity:** MEDIUM (operational; not a HEAD-source defect) · **Confidence:** Confirmed
+**Category:** A02 Cryptographic Failures / A07 Auth Failures (key management)
+**Location:** Git history — `apps/web/.env.local.example` at commit `d7c32790` (Initial commit); removed in `d068a7fb`. NOT present at HEAD.
 
-`buildOg` computes `const origin = new URL(req.url).origin` and passes it to `pickFirstAvailablePhotoBuffer(origin, image.filename_jpeg, ...)`, which issues a server-side `fetch(\`${origin}/uploads/jpeg/${sizedFilename}\`)`. `req.url`'s host is derived from the inbound request (Host / X-Forwarded-Host). In a correctly-configured deployment (reverse proxy that pins/validates Host, or no TRUST_PROXY), `origin` is always the canonical site origin, so the fetch is a same-origin self-call and the filename component is a DB-stored UUID derivative (`SAFE_SEGMENT`-shaped at write time) — no traversal, no arbitrary host. The residual concern: if a deployment fronts the app with a proxy that forwards an arbitrary `Host`/`X-Forwarded-Host` without validation, the OG generator could be coerced into fetching `http://attacker/uploads/jpeg/<uuid>.jpg`. The blast radius is limited (10 s timeout, 1 MB cap, only an `<img>` decode of the result into a Satori canvas — no body reflected to the caller, no header echo), so even in the misconfigured case it is a weak blind-SSRF/cache-poisoning primitive, not data exfiltration.
-
-**Exploit scenario:** Misconfigured proxy → attacker sends `Host: attacker.tld` → OG route fetches `http://attacker.tld/uploads/jpeg/<uuid>.jpg` and embeds the returned bytes in the cached OG card; or uses it to probe internal hosts (blind, timing-only).
-**Remediation:** Derive the internal fetch origin from a trusted source (env `SITE_URL` / `seo.url`) rather than the request Host, or hard-pin the fetch to `127.0.0.1` + the configured Host header. Already-validated `filename_jpeg` keeps the path component safe; the host is the only attacker lever.
-```ts
-// og-photo-fetch.ts — pin to a trusted base instead of request-derived origin
-const base = process.env.INTERNAL_ORIGIN ?? new URL(seo.url).origin; // not req.url
-const photoUrl = `${base}/uploads/jpeg/${sizedFilename}`;
+**Evidence:**
 ```
-**Note:** This is the single SSRF-class fetch in the codebase; the CLIP runtime sets `env.allowRemoteModels = false` (no network), and mysqldump/restore use `spawn` with array args (no shell). So the attack surface is genuinely just this one helper.
+$ git log --all -S "5e47a072d912b3cf7976d4b13bb75a7f20f7524eb5f7083b188de0a95ffbc555" -- apps/web/.env.local.example
+d068a7fb fix(security): comprehensive security and code quality hardening
+d7c32790 Initial commit
+```
+History contains a fully-formed 64-hex `SESSION_SECRET=5e47a072d912b3cf7976d4b13bb75a7f20f7524eb5f7083b188de0a95ffbc555` (the exact shape of `openssl rand -hex 32` output) plus `DB_PASSWORD=password` and `ADMIN_PASSWORD=password`. Current HEAD `.env.local.example` is clean (`<change-me>`, `<generate-with: openssl rand -hex 32>`) and `.env.deploy.example` uses `example.com`/`example.pem` placeholders.
 
-### SEC-02 — `check-api-auth` only scans `src/app/api/admin/**`; a privileged route placed elsewhere is unscanned
-**Severity:** MEDIUM (process/defense-in-depth gap, not a live vuln)
-**Category:** A01 Broken Access Control (preventive control coverage)
-**Confidence:** High · **Exploitability:** N/A (no such route exists today)
-**Location:** `apps/web/scripts/check-api-auth.ts:17` (`API_ADMIN_DIR = .../src/app/api/admin`)
+**Threat model / exploit scenario:**
+`SESSION_SECRET` is the HMAC-SHA256 signing key for admin session tokens (`session.ts` `generateSessionToken`/`verifySessionToken`). If any production deployment was ever bootstrapped from that historical example value and never rotated, an attacker who reads the public/forked git history can recover the key and **forge a valid session token for any admin userId** (`createHmac('sha256', secret).update(`${timestamp}:${random}`)`), bypassing login entirely. The 24h age check and DB-session lookup mitigate somewhat — a forged token still needs a matching `sessions` row hash — but the `hashSessionToken` design means a forged token whose hash an attacker can compute and pre-insert (if they have any DB write) would pass; more directly, knowledge of the signing secret defeats the integrity guarantee the design depends on.
 
-The `lint:api-auth` gate — which mandates `withAdminAuth(...)` on every HTTP-method export — recurses ONLY under `src/app/api/admin/`. Today every privileged route correctly lives there (`admin/db/download`, `admin/lr/upload`). But the convention is path-based: a future contributor who adds a privileged route OUTSIDE `/api/admin/` (e.g. `src/app/api/internal/purge/route.ts`) gets ZERO coverage from this gate and could ship without `withAdminAuth`. The middleware matcher also excludes `/api/*` entirely (`proxy.ts:140`), so there is no middleware backstop for a misplaced privileged API route — the only defense would be a hand-rolled `isAdmin()` the author might forget.
+**This is already documented** in CLAUDE.md: "If you ever seeded an environment from older checked-in examples, rotate both SESSION_SECRET and any bootstrap/admin credentials immediately. Historical git values must be treated as compromised." So this is a known, accepted residual — recorded here for completeness and re-confirmation against HEAD.
 
-**Exploit scenario:** A privileged action is added under a non-`admin/` API path, the author forgets the auth wrapper, and the gate stays green because it never scanned the file → unauthenticated mutation.
-**Remediation:** Broaden the scanner to flag any `route.*` under `src/app/api/**` whose handler body references privileged operations (db mutations, `getCurrentUser`, fs writes) but does not wrap `withAdminAuth`, OR add an allow-list of non-admin public routes and require every other API route to justify its auth posture (mirror the `lint:public-route-rate-limit` exempt-comment pattern). At minimum, document the "all privileged routes MUST live under /api/admin/" rule as an enforced invariant.
-
----
-
-## Low Issues
-
-### SEC-03 — `getTrustedRequestProtocol` falls back to `'http'`, weakening the Secure-cookie decision under header loss
-**Severity:** LOW
-**Category:** A02 Cryptographic Failures (cookie transport)
-**Confidence:** Medium · **Exploitability:** Low
-**Location:** `apps/web/src/lib/request-origin.ts:45-53`; consumed at `apps/web/src/app/actions/auth.ts:228-229,406`
-
-`getTrustedRequestProtocol` returns `'http'` when no trusted `X-Forwarded-Proto`, `Origin`, or `Referer` indicates HTTPS. The login/password cookie `secure` flag is `requestIsHttps || NODE_ENV === 'production'`, so in production the cookie is always Secure regardless — good. But a non-production HTTPS deployment (staging behind TLS without `NODE_ENV=production`) that drops the proto headers would mint a non-Secure session cookie. This is a narrow misconfiguration window; the `NODE_ENV === 'production'` OR-clause covers the intended prod path. **Remediation:** Document that any TLS-terminated deployment must set both `TRUST_PROXY=true` and `NODE_ENV=production`; consider failing closed to `secure: true` when `Origin`/`Referer` are HTTPS even if `NODE_ENV` is unset.
-
-### SEC-04 — `XMP_GPS_TOKEN` regex on attacker-supplied XMP is benign but unbounded-input adjacent
-**Severity:** LOW (no ReDoS — informational)
-**Category:** A03 (ReDoS class — cleared)
-**Confidence:** High · **Exploitability:** None
-**Location:** `apps/web/src/lib/gps-exif-strip.ts:63`
-
-`/GPS(?:Latitude|Longitude|Altitude|Position|Coordinates|DestLatitude|DestLongitude)/` is run against XMP packet bytes extracted from uploaded originals. The alternation is a flat literal set with no nested quantifiers or overlapping prefixes that backtrack catastrophically, so it is NOT ReDoS-prone even on a multi-MB adversarial XMP blob. Logged only to confirm the audit covered it. No change needed. (The broader upload-size bound — Sharp `limitInputPixels` + 200 MB/file cap — also bounds the input.)
-
-### SEC-05 — `LOG_PLAINTEXT_DOWNLOAD_TOKENS` writes single-use download tokens to stdout when enabled
-**Severity:** LOW (opt-in, documented)
-**Category:** A09 Logging Failures / sensitive data in logs
-**Confidence:** High · **Exploitability:** Low (operator opt-in, off by default)
-**Location:** `apps/web/src/app/api/stripe/webhook/route.ts:437-450`
-
-When `LOG_PLAINTEXT_DOWNLOAD_TOKENS=true`, the webhook prints `token=<dl_...>` (a live single-use download credential) to stdout for the manual-distribution workflow. This is intentional, off-by-default, and the surrounding comments + README document the risk and the rotation expectation. The token is single-use, 24 h TTL, and tied to a paid entitlement. **Remediation:** None required; ensure the deployment's log shipper retention/ACLs are considered before enabling this flag (already noted in CLAUDE.md / README). Flagged for completeness because it is the one deliberate sensitive-value-in-logs path.
-
-### SEC-06 — Admin DB backups stored plaintext at rest (accepted threat model)
-**Severity:** LOW (documented, by design)
-**Category:** A02 Cryptographic Failures (data at rest)
-**Confidence:** High · **Exploitability:** Low (requires host/volume access)
-**Location:** `apps/web/src/app/[locale]/admin/db-actions.ts:140-166` (mode `0o700` dir, `0o600` file)
-
-`mysqldump` output is written unencrypted to `data/backups/` (mode 0600, dir 0700, non-public, served only via the authenticated `/api/admin/db/download` route which is `withAdminAuth`-wrapped + same-origin enforced + path-contained + symlink-rejected). CLAUDE.md explicitly accepts plaintext-at-rest backups for the personal-gallery threat model. The full DB (including Argon2 hashes and Stripe customer emails) is therefore readable to anyone with host filesystem access. **Remediation:** None required under the documented model; for multi-tenant or higher-assurance deployments, encrypt backups with an operator-held key. The dir/file modes already provide owner-only defense-in-depth.
+**Remediation (operational, in priority order):**
+1. Confirm the production `SESSION_SECRET`, `DB_PASSWORD`, and `ADMIN_PASSWORD` are NOT any of the historical values. If in doubt, rotate now:
+   ```bash
+   openssl rand -hex 32   # new SESSION_SECRET → set env, restart web container (invalidates all sessions)
+   # rotate DB password + admin password independently
+   ```
+2. Production runtime already refuses the DB-stored secret fallback (`session.ts` lines 30-36 throw in `NODE_ENV=production`), so the env var is authoritative — good.
+3. Optional: purge history with `git filter-repo` if the repository is or may become public. Note this rewrites SHAs and is itself a destructive action — coordinate before doing it.
 
 ---
 
-## Informational / Verified-Closed (do NOT re-report)
+## Low / Informational
 
-- **VC-1 — Poisoned-weight cleanup on checksum mismatch (PRIOR CYCLE, INTACT):** `apps/web/scripts/clip-model-manifest.ts` `verifyAndCleanArtifacts()` computes SHA-256 per artifact against `CLIP_MODEL_MANIFEST`, and on mismatch calls `rmSync(filePath, { force: true })` then aborts (`scripts/download-clip-models.ts:93-106`). Confirmed present.
-- **VC-2 — CLIP config re-darkening gate (PRIOR CYCLE, INTACT):** `apps/web/src/lib/gallery-config.ts:129-145` heals a stored `semantic_search_mode='production'` to `'disabled'` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. The semantic + similar routes fail closed to 503 on any non-`stub`/`production` resolved mode. Runtime `env.allowRemoteModels=false` (`clip-model.ts:74`) — no network at serve time. The dark feature is genuinely non-exploitable by default; NOT activated by this review.
-- **VC-3 — Session/auth crypto is sound:** HMAC-SHA256 tokens verified with `timingSafeEqual` after length-equalization; structural shape checks placed AFTER the constant-time compare to avoid a timing oracle (`session.ts:110-125`); production refuses DB-stored secret fallback (`session.ts:30-36`); login uses a dummy Argon2 hash to equalize the user-exists/missing timing (`auth.ts:65-70,177`); session fixation closed by delete-other-sessions-in-txn on login and full rotation on password change. Argon2id params (64 MiB / t=3 / p=4) exceed OWASP minimums and are centralized in `password-hashing.ts`.
-- **VC-4 — Injection surfaces clean:** All raw `db.execute(sql\`...\`)` sites (`admin-tokens.ts`, `topics.ts`, `admin-backfill-runner.ts`, `health`) use Drizzle parameterized template interpolation — no string concatenation of untrusted input. mysqldump/restore use `spawn(cmd, [args])` (no shell), credentials via `MYSQL_PWD`/`MYSQL_*` env (not `/proc/cmdline`), HOME stripped, restore validates dump header + scans for dangerous SQL + advisory-locked. XSS sinks (`dangerouslySetInnerHTML`) are exclusively JSON-LD via `safeJsonLd()` (escapes `<`, U+2028/U+2029) with CSP nonce; OG text via `sanitizeForOg()` (strips bidi/zero-width/C0). `blur_data_url` is contract-validated (`isSafeBlurDataUrl`) producer+consumer. CSV export escapes formula-injection + strips bidi/zero-width.
-- **VC-5 — Access control / CSRF / PII / rate limiting complete:** `withAdminAuth` centrally enforces same-origin + `isAdmin()` + no-store/nosniff on every `/api/admin/**` route; PATs bypass same-origin by design (cross-origin integration) but require a valid scoped token verified constant-time. Every mutating server action returns early on `requireSameOriginAdmin()` (AST-enforced by `lint:action-origin`, which rejects aliased exports, exempt-comments-on-mutating-bodies, ignored guard results, and pre-guard mutations). All three lint gates PASS. PII guarded by compile-time `_privacyGuard`/`_mapPrivacyGuard` over derived `publicSelectFields`/`publicMapSelectFields`; semantic-search enrichment selects only public fields (`title`/`description`/`camera_model`/`lens_model`/`capture_date` — all in `publicSelectFields`). Download tokens (`dl_` + 43 b64url) and PATs (`gk_` + 43 b64url) are shape-gated before hashing, stored as SHA-256, verified constant-time, single-use claimed via atomic `UPDATE ... WHERE downloadedAt IS NULL`. Stripe webhook signature-verified, idempotent (sessionId UNIQUE + insertId disambiguation), `payment_status==='paid'` gated, zero-amount/deleted-image/oversized-email rejected. All in-memory rate-limit maps are bounded (`createResetAtBoundedMap`/`createWindowBoundedMap`) with TOCTOU-safe pre-increment-then-check and symmetric rollback. `getClientIp` only trusts proxy headers under `TRUST_PROXY=true` and parses the chain by trusted-hop count. Last-admin deletion prevented under advisory lock. IDOR on share/group/download/token routes closed by ownership scoping (`user_id` in token queries) + unguessable 256-bit/base56 keys + constant-time token verification.
+### 2. SQL-restore dangerous-keyword scanner can be bypassed by inter-token block comments
+**Severity:** LOW (defense-in-depth only) · **Confidence:** Confirmed (theoretical, not independently exploitable)
+**Category:** A03 Injection (defense-in-depth layer)
+**Location:** `apps/web/src/lib/sql-restore-scan.ts:104` (`withoutComments = withoutConditionals.replace(/\/\*.*?\*\//gs, '')`)
+
+**Analysis:** `stripSqlCommentsAndLiterals` removes `/* ... */` comments BEFORE running `DANGEROUS_SQL_PATTERNS`. MySQL also strips inter-token comments at parse time, so `DROP/**/TABLE x` is valid `DROP TABLE` to MySQL — but after this scanner deletes the `/**/`, the text becomes `DROPTABLE x`, which the `\bDROP\s+TABLE\b` pattern no longer matches. An attacker-crafted dump could thus slip a `DROP/**/TABLE`, `CREATE/**/TRIGGER`, etc. past the scanner.
+
+**Why this is LOW, not exploitable in practice:**
+- This scanner is explicitly **defense-in-depth** layered on top of `mysql --one-database` (`db-actions.ts:455`), which constrains writes to the target schema, AND the entire restore path is admin-only behind `isAdmin()` + `requireSameOriginAdmin()` + an advisory lock. An attacker who can invoke restore is already an authenticated admin who can drop tables through the normal admin surface anyway.
+- DROP TABLE on the app's OWN tables is intentionally ALLOWED (the `ALLOWED_APP_BACKUP_DROP_TABLE_PATTERN` masking at line 18-21) because a legitimate mysqldump restore drops-then-recreates. So the bypass mostly re-enables a class of statement that is partly permitted by design.
+- No ReDoS: all scan regexes use lazy/bounded quantifiers; I checked for nested repetition and found none. Chunk-boundary handling uses a 1 MB overlap tail (`appendSqlScanChunk`).
+
+**Optional hardening:** collapse inter-token comments to a single space rather than deleting them (`.replace(/\/\*.*?\*\//gs, ' ')`) so `DROP/**/TABLE` → `DROP TABLE` and the `\s+` patterns still fire. Low priority given the admin-only + `--one-database` context.
+
+### 3. `admin_tokens.verifyToken` touches `last_used_at` before scope authorization
+**Severity:** LOW (informational) · **Confidence:** Confirmed (no security impact)
+**Location:** `apps/web/src/lib/admin-tokens.ts:158`
+
+`verifyToken` issues a best-effort `UPDATE admin_tokens SET last_used_at = NOW()` once the hash matches and the token is unexpired, BEFORE the caller (`api-auth.ts:67`) checks `tokenHasScope`. A holder of a valid-but-wrong-scope token can therefore bump `last_used_at` on a 401 path. This is purely cosmetic (the timestamp is advisory) and the write is parameterized + self-catching. No action required; noted for completeness.
+
+### 4. OG per-photo internal fetch interpolates a DB filename onto the pinned origin
+**Severity:** LOW (informational — confirmed safe) · **Confidence:** Confirmed
+**Location:** `apps/web/src/lib/og-photo-fetch.ts:49-50`
+
+`tryFetchPhotoBuffer` builds `${origin}/uploads/jpeg/${sizedFilename}` where `sizedFilename` derives from `image.filename_jpeg` (a `crypto.randomUUID()`-based DB value, never user-controlled) and `origin` is now pinned to the trusted `siteConfig.url` (the SSRF fix at `api/og/photo/[id]/route.tsx:111-116`, commit `3f886f10`, verified present). The `.replace(/\.jpg$/i, `_${size}.jpg`)` with a numeric `size` cannot inject path traversal. No issue — recorded to confirm the SSRF pin holds and the filename source is non-attacker-controlled.
 
 ---
 
-## Files Examined (count: 41)
-Core: `lib/api-auth.ts`, `lib/session.ts`, `lib/password-hashing.ts`, `proxy.ts`, `lib/request-origin.ts`, `lib/action-guards.ts`, `lib/admin-tokens.ts`, `lib/download-tokens.ts`, `lib/rate-limit.ts`, `lib/validation.ts`, `lib/serve-upload.ts`, `lib/gps-exif-strip.ts`, `lib/og-photo-fetch.ts`, `lib/og-sanitize.ts`, `lib/safe-json-ld.ts`, `lib/data.ts`, `lib/analytics.ts`, `lib/gallery-config.ts`, `lib/gallery-config-shared.ts`, `lib/clip-model.ts`, `scripts/download-clip-models.ts`, `scripts/clip-model-manifest.ts`.
-Actions: `auth.ts`, `sharing.ts`, `lr-tokens.ts`, `admin-users.ts`, `sales.ts`, `settings.ts`, `embeddings.ts`, `topics.ts`, `tags.ts`, `images.ts`, `public.ts`.
-API routes: `download/[imageId]`, `checkout/[imageId]`, `stripe/webhook`, `admin/lr/upload`, `admin/db/download`, `og/photo/[id]`, `og` (head), `search/semantic`, `search/similar/[id]`, `health`.
-Admin: `[locale]/admin/db-actions.ts`. Lint scanners: `check-action-origin.ts`, `check-api-auth.ts` (+ ran all 3 gates: all PASS).
+## Confirmed-Hardened (verified present at HEAD — NOT findings)
 
-## Top 3 Findings
-1. **SEC-01 (MED)** — Per-photo OG route (`og-photo-fetch.ts:50`) fetches `${new URL(req.url).origin}/uploads/jpeg/<uuid>` — theoretical blind-SSRF/cache-poison if a fronting proxy forwards an arbitrary Host; pin the fetch base to a trusted env/`seo.url` instead of the request Host.
-2. **SEC-02 (MED)** — `lint:api-auth` scans only `src/app/api/admin/**`; a privileged route placed outside that path would ship unscanned with no middleware backstop. Broaden the gate or enforce the "privileged routes live under /api/admin/" invariant.
-3. **SEC-03 (LOW)** — `getTrustedRequestProtocol` defaults to `'http'`; a TLS staging deploy without `NODE_ENV=production` + dropped proto headers would mint a non-Secure session cookie. Fail closed to Secure when Origin/Referer are HTTPS, and document the TRUST_PROXY+NODE_ENV requirement.
+**Authentication & sessions (`session.ts`, `auth.ts`, `password-hashing.ts`):**
+- Argon2id, memoryCost 65536 / timeCost 3 / parallelism 4 (exceeds OWASP), shared `PASSWORD_HASH_OPTIONS` across login/change/seed/dummy.
+- HMAC-SHA256 session tokens verified with `timingSafeEqual`; structural shape checks run AFTER crypto (no timing oracle); 24h age bound; session hash stored (not plaintext) so DB leak ≠ usable cookies.
+- Production refuses DB-stored secret fallback (`session.ts:30-36`).
+- Login: per-IP + per-account (`acct:<sha256>`) rate-limit buckets, pre-increment before Argon2 (TOCTOU-safe), dummy-hash timing equalization, session-fixation prevention (delete-others in txn), no rollback on infra error (Pattern 1).
+- Password change: rotates ALL sessions in a txn, validation before rate-limit consumption, codepoint length checks.
+
+**Same-origin / CSRF (`request-origin.ts`, `action-guards.ts`, `api-auth.ts`):**
+- `hasTrustedSameOrigin` fails closed (requires explicit Origin/Referer match); TRUST_PROXY-gated X-Forwarded-* with right-most-hop selection.
+- `withAdminAuth` enforces origin + `isAdmin()` centrally (PAT path bypasses origin by design, gated on scope); auto-applies no-store + nosniff.
+- `requireSameOriginAdmin()` on every mutating action. **Lint gates (`lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`) verified to give 100% coverage** — fan-out audit found all 2 admin routes wrapped and all 41 server actions either guarded or explicitly `@action-origin-exempt` (read-only).
+
+**Injection (SQL/command/path/formula):**
+- All app queries use Drizzle ORM or parameterized `sql\`\`` / `?` placeholders. Independent fan-out audit found ZERO string-concatenation into SQL in production code.
+- `mysqldump`/`mysql` spawned with array args (no `shell:true`), credentials via `MYSQL_PWD` env (not `/proc/cmdline`), minimal env (HOME excluded → no `~/.my.cnf`), `--one-database` on restore.
+- Path traversal: `serve-upload.ts` + `db/download` + `download/[imageId]` all use `SAFE_SEGMENT` regex + `ALLOWED_UPLOAD_DIRS` whitelist + `lstat` symlink rejection + `realpath` containment (TOCTOU-safe, streams from resolved path). `storage/local.ts` `normalizeStorageKey` rejects `..`/leading-slash/empty segments.
+- CSV formula injection: `csv-escape.ts` strips C0/C1, bidi+zero-width (shared `UNICODE_FORMAT_CHARS`), collapses CR/LF, prefixes `=+-@` with leading-whitespace tolerance, quotes+doubles.
+- No `eval`/`Function`/`vm`/dynamic `require` with user input.
+
+**XSS / output encoding:**
+- All 8 `dangerouslySetInnerHTML` sinks feed JSON-LD via `safeJsonLd` (`<` → `<`, U+2028/2029 escaped) — verified each call site.
+- OG (Satori) text run through `sanitizeForOg` (bidi/zero-width strip + C0 strip) on BOTH routes.
+- Admin string surfaces reject `UNICODE_FORMAT_CHARS` at validation (`sanitizeAdminString`, `containsUnicodeFormatting`); EXIF-derived strings get `stripUnicodeFormatting` source defense.
+- Global headers: nosniff, X-Frame-Options SAMEORIGIN, Referrer-Policy, HSTS preload, locked-down Permissions-Policy, nonce CSP in prod.
+
+**SSRF:** OG per-photo internal fetch pinned to `siteConfig.url` (not request Host) — the recently-fixed item, confirmed present. 10s timeout + 1 MB cap per fetch.
+
+**Stripe / paid downloads:** webhook signature mandatory (`constructStripeEvent` throws without `STRIPE_WEBHOOK_SECRET`); `payment_status === 'paid'` gate; `payment_method_types: ['card']` (async-payment gap closed operationally); idempotency via `sessionId` UNIQUE + SELECT + dup-key disambiguation; tier allowlist; deleted-image → 200+manual-refund (no Stripe retry storm). Download tokens: `dl_<43 base64url>`, SHA-256 hashed, single-use atomic claim, constant-time verify, interstitial GET (claim moved to POST so mail scanners don't burn tokens).
+
+**File-upload safety:** UUID filenames (no user-controlled names on disk), Sharp `limitInputPixels` (decompression bomb), RAW rejection, HDR-ingest gate honored on both browser + LR-PAT paths, per-file 200 MB + cumulative byte/count window caps, disk-space pre-check, restore-maintenance guards, upload-processing contract advisory lock.
+
+**Privacy:** `publicSelectFields` derived from `adminSelectFields` by omission with compile-time `_SensitiveKeysInPublic`/`_PrivacySensitiveKeys` + `_mapPrivacyGuard` + large-payload guard. GPS scrubbed from on-disk original (the paid-download streams) via bounds-checked byte-level `gps-exif-strip.ts` (every walker returns null on anomaly → re-encode fallback; never `withMetadata()`).
+
+**Rate limiting:** every public mutating/expensive surface covered (login, search, load-more, OG×2, checkout, semantic×2, share-key, analytics views); `getClientIp` TRUST_PROXY-gated with hop-count + `normalizeIp` validation; bounded Maps with eviction; documented rollback patterns.
+
+**Migration drift:** `migrate.js` reads full journal, SHA-256 per-entry hashes, post-condition assertion throws on silent skips (`migrate.js:713`), idempotent `reconcileLegacySchema` + `baselineAllJournalMigrations`.
+
+**ReDoS / deserialization:** SQL scanner regexes use lazy/bounded quantifiers (no nested repetition); semantic route caps body 8 KB + rejects chunked + validates Content-Type prefix + JSON shape; restore validates 256-byte header + 250 MB cap + dangerous-SQL scan.
+
+---
 
 ## Security Checklist
-- [x] No hardcoded secrets (no SESSION_SECRET/DB_PASSWORD/STRIPE/MYSQL_PWD leaked to client responses or logs)
-- [x] All inputs validated (slug/filename/tag/title/description/email/token-shape; code-point-aware length caps; Unicode bidi/zero-width stripped/rejected)
-- [x] Injection prevention verified (Drizzle parameterization; spawn array-args no-shell; safeJsonLd; CSV formula escaping; path containment + realpath + symlink rejection)
-- [x] Authentication/authorization verified (Argon2id, constant-time HMAC sessions, withAdminAuth, requireSameOriginAdmin AST-enforced, last-admin lock)
-- [x] Dependencies audited (CLIP weights SHA-256-pinned + clean-on-mismatch; runtime allowRemoteModels=false; no other external fetch)
+
+- [x] No hardcoded secrets at HEAD (current `.env.local.example` / `.env.deploy.example` use placeholders; no live `sk_`/`whsec_`/`AKIA`/PEM keys in source)
+- [~] Secrets in git history — historical SESSION_SECRET/passwords recoverable (Medium #1, documented/operational)
+- [x] All inputs validated (codepoint-aware length, Unicode-format rejection, slug/filename regex, JSON shape + size)
+- [x] Injection prevention verified (parameterized SQL, array-arg spawn, path containment + symlink rejection, CSV formula escaping)
+- [x] Authentication/authorization verified (Argon2id, HMAC + timingSafeEqual, middleware guard, withAdminAuth + requireSameOriginAdmin, lint gates 100% coverage, last-admin guard, advisory locks)
+- [x] SSRF prevented (OG fetch pinned to trusted origin)
+- [x] XSS prevented (JSON-LD escaped, OG sanitized, security headers + CSP)
+- [x] CSRF prevented (fail-closed same-origin on every mutating action + admin API route)
+- [x] Privacy enforced (compile-time public/admin field guards, GPS byte-strip on originals)
+- [x] Dependencies — Stripe SDK justified; (dependency CVE audit not run in this read-only pass — recommend `npm audit` in CI)
+- [x] CLIP semantic search remains dark-by-default (disabled → no-op); hard guard respected — NOT proposing activation

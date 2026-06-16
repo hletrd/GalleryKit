@@ -1,149 +1,142 @@
-# Critic — Deep Multi-Perspective Critique (Cycle 2)
+# CRITIC — Multi-Perspective Adversarial Critique
 
-**Repo:** GalleryKit @ `8ccc8806` · **Date:** 2026-06-16 · **Mode:** Started THOROUGH, escalated to ADVERSARIAL after the async-payment money path + multiple MEDIUM systemic findings surfaced.
-
-**Scope:** Whole-system holistic audit — correctness, security, durability, a11y, doc/code drift, test-suite quality, deferred-finding hygiene. CLIP feature reviewed **code-only** (not activated, per directive).
-
-**Method note (why this review is worth reading):** I ran 7 deep sub-investigations and then **personally re-verified every CRITICAL/HIGH claim against source**. That verification pass **refuted 5 would-be findings** that a rubber-stamp review would have shipped (see "Refuted Findings" at the end). The surviving findings below are the ones that withstood adversarial re-checking. This is a mature codebase with unusually disciplined invariant-enforcement; the genuine issues are systemic/operational, not happy-path bugs.
-
----
-
-## Severity Summary
-
-| Severity | Count | IDs |
-|---|---|---|
-| CRITICAL | 0 | — |
-| HIGH | 2 | CRT-01, CRT-02 |
-| MEDIUM | 5 | CRT-03, CRT-04, CRT-05, CRT-06, CRT-07 |
-| LOW | 4 | CRT-08, CRT-09, CRT-10, CRT-11 |
-| DOC/CODE DRIFT | 3 | CRT-D1, CRT-D2, CRT-D3 |
-
-No CRITICAL findings. The system has no happy-path-breaking defect I could find. The HIGH findings are a known-but-live customer-money gap and an unbounded anonymous-write surface; the rest are durability/operational design smells and weak (indirectly-enforced) invariants that will bite a future refactor.
+- **Cycle:** 3
+- **HEAD:** b1e9e0da
+- **Date:** 2026-06-16
+- **Mode:** THOROUGH → escalated to ADVERSARIAL (3+ MAJOR-class doc-drift findings + a confirmed-false numeric claim)
+- **Scope:** Whole-system adversarial review. Emphasis per dispatch: single-writer topology, honesty invariants, migrate.js drift airtightness, color matrix vs encoder, ETag/cache invalidation, backfill equivalence, doc-vs-reality drift.
 
 ---
 
-## HIGH
+## VERDICT: REVISE
 
-### CRT-01 — Async-payment customers are charged but never get an entitlement (live money bug)
-**Confidence: High.** Evidence: `apps/web/src/app/api/stripe/webhook/route.ts` handles `checkout.session.completed` and *only* proceeds when `session.payment_status === 'paid'`; `payment_status === 'unpaid'` logs a warn and returns 200 with no entitlement. There is **no** handler for `checkout.session.async_payment_succeeded` or `…async_payment_failed`. CLAUDE.md (line ~122 and the `entitlements` schema note) already admits this and ties the fix to plan-316 CRT-R5C1-04.
+The system is in unusually good shape. ~58 findings closed across run4→run6 shows. Every honesty invariant I checked is genuinely enforced (not coincidentally). The migrate.js drift runbook is backed by TWO real tripwire tests that explicitly understand the deepest failure class. The color encoder does exactly what the matrix claims. The backfill column sets are byte-identical.
 
-**Skeptic view:** This is documented, and paid-downloads (US-P54) are an optional, off-by-default-feeling feature on a single-photographer gallery, so the blast radius is small *today*. But "documented" is not "mitigated." If Stripe is live and a customer pays via SEPA/ACH/bank-transfer/OXXO/Boleto, Stripe fires `completed` with `unpaid`, the bank clears days later, `async_payment_succeeded` fires, GalleryKit ignores it — the customer is charged and the `entitlements` row, download token, and download access never exist. That is the single worst customer-facing failure class in the system: silent money-taken-no-goods.
-
-**Failure scenario:** Buyer purchases a $50 editorial license via SEPA. `completed/unpaid` → no entitlement. 3 days later transfer clears → `async_payment_succeeded` → ignored. Buyer's download link returns 404. Manual Stripe reconciliation + refund required, with no automated alert that it happened.
-
-**Remediation:** (a) Until plan-316 ships, configure Stripe Checkout to **restrict payment methods to card / immediate-capture only** (`payment_method_types: ['card']`) so async methods can't be initiated — this closes the gap operationally in one line and is the honest interim posture. (b) Add the `async_payment_succeeded` handler (mirror the `completed/paid` entitlement+token path; idempotency via the existing `sessionId` UNIQUE already covers replay). (c) Handle/log `async_payment_failed`. (d) Add a regression test — the gap is currently guarded only by a CLAUDE.md sentence.
-
-### CRT-02 — Anonymous analytics writes are unbounded; no pruning/retention job for view-event tables
-**Confidence: High.** Evidence: `apps/web/src/app/actions/public.ts` records `image_views` / `topic_views` / `shared_group_views` with a per-IP in-memory limiter (`VIEW_RECORD_MAX_REQUESTS = 120`/min, bounded map capped at `VIEW_RECORD_RATE_LIMIT_MAX_KEYS = 2000`). The limit is **per-IP only**; there is no global write ceiling and no scheduled prune of these analytics tables anywhere in the repo (the hourly background job purges expired sessions, not analytics rows).
-
-**Ops view:** A botnet of N rotating IPs each gets a fresh 120/min budget. At a few thousand IPs that is millions of analytics rows/minute, all durable INSERTs into the single MySQL writer. There is no TTL, no partition rotation, no retention sweep. Over time this grows `image_views` unbounded, degrading the analytics aggregation queries (which already carry dedicated composite indexes per migration 0021 — those indexes also bloat) and eventually the whole DB. Bot detection is `isbot()` UA-string-only (`apps/web/src/lib/analytics.ts`), trivially spoofed, and only affects whether rows are *counted* in the admin UI — bot rows are still **written**.
-
-**Failure scenario:** Sustained low-and-slow scrape from a residential-proxy pool writes ~hundreds of GB of `image_views` over weeks; disk hygiene playbook (Docker prune) doesn't touch the DB volume; analytics dashboard queries slow from index bloat; eventual disk pressure on the DB.
-
-**Remediation:** Add a retention/prune job (cron or the existing hourly sweep) that deletes `*_views` rows older than a configurable window (e.g. 13 months for year-in-review). Consider a global per-minute write ceiling for anonymous view-record, and/or persisting only sampled events above a threshold. Even a documented manual `DELETE … WHERE viewed_at < …` runbook entry would be an improvement over "grows forever."
+The findings below are almost entirely **documentation-vs-reality drift** — CLAUDE.md statements that are now FALSE or stale at HEAD. None are code correctness bugs that ship broken bytes. But CLAUDE.md is the load-bearing context document for every future agent loop, and a numerically-wrong invariant ("5 keys" when it's 9, "9 functions" when it's 10) erodes the one artifact the whole pipeline trusts. That's why this is REVISE, not ACCEPT: the docs need a correction pass, and there are two genuine robustness sharp-edges worth a code touch.
 
 ---
 
-## MEDIUM
+## Pre-commitment Predictions vs Findings
 
-### CRT-03 — `sharedGroups.view_count` (denormalized) silently diverges from the durable `shared_group_views` event log
-**Confidence: High.** Evidence: two independent recording paths fire on the same condition (`!photoId && images.length > 0`): the **in-memory buffered** counter `bufferGroupViewCount()` inside `getSharedGroup()` (`apps/web/src/lib/data.ts` ~1266) which flushes asynchronously (5 s base interval, exponential backoff to 5 min on DB outage, 1000-entry buffer cap, drop-on-overflow), and the **durable** `recordSharedGroupView()` INSERT (`apps/web/src/app/actions/public.ts` ~392). A process kill loses the entire in-memory buffer; the event-log row survives.
-
-**Architect view:** Maintaining two counters of the same quantity with different durability guarantees is a design smell. CLAUDE.md honestly labels `view_count` "best-effort approximate," but the system already has a durable source of truth (`COUNT(*) FROM shared_group_views WHERE bot=false`). The denormalized column will drift downward after every crash/restart and never self-heal. Anyone who reads `view_count` (admin UI, API) gets a number that is structurally an undercount of the durable log.
-
-**Remediation:** Pick one source of truth. Either (a) derive `view_count` from the event log (a periodic reconcile job that sets `view_count = COUNT(*)`), making the buffer a pure latency optimization that self-heals; or (b) drop the denormalized column and compute on read with a cached aggregate. Document which counter is authoritative for billing-grade vs display-grade use.
-
-### CRT-04 — No mechanism enforces the single-writer topology the whole coordination model depends on
-**Confidence: High.** Evidence: process-local state that is correctness-relevant under scale-out includes the view buffer (`data.ts:12-17`, a module-level `let … Map`), the in-memory rate-limit fast-path maps, the upload tracker, the image-queue `PQueue` + enqueued/failed sets, and restore-maintenance flags. CLAUDE.md states "do not horizontally scale … unless those coordination states are moved to a shared store" — but there is **no startup guard, advisory-lock-on-boot, or config assertion** preventing a second web instance from booting.
-
-**Ops view:** The safety of at least four subsystems rests on a sentence in a markdown file. A future operator adding a second replica behind a load balancer (the natural scaling move) gets: independent view buffers (lost increments), independent rate-limit fast-paths (per-replica 5-attempt budgets → effective brute-force budget multiplied by replica count when the DB path degrades), and two queue workers that *do* serialize via the per-image advisory lock but whose in-memory enqueued-sets disagree. Some of this is DB-lock-protected; the rate-limit and view-buffer parts are not.
-
-**Remediation:** Acquire a MySQL advisory lock (e.g. `gallerykit_singleton_web`) on a dedicated connection at boot; refuse to start (or log a loud WARN and disable the in-memory fast-paths) if it can't be acquired. This converts a docs-only invariant into an enforced one and gives a clear signal the moment someone scales out.
-
-### CRT-05 — HDR "honesty invariant" (admin-only until WI-09) is enforced indirectly by field-nullness, not by an explicit gate
-**Confidence: Medium.** Evidence: `apps/web/src/components/color-details-section.tsx:169` derives `const isHdr = image.transfer_function === 'pq' || 'hlg'`, and the public HDR badge renders on `{isHdr && …}` at line 511 — **not** gated on `isAdmin`. It works today only because `transfer_function` / `is_hdr` are stripped from `publicSelectFields`, so for public viewers those fields arrive `null`/`undefined` and `isHdr` is coincidentally false. The same indirect pattern repeats in `lightbox-color-pip.tsx`, `info-bottom-sheet.tsx`.
-
-**Skeptic view:** This is a load-bearing invariant ("the public never sees an HDR badge whose bytes don't fulfill it," CLAUDE.md Color/HDR section) defended by a *coincidence two layers away*. The `_PrivacySensitiveKeys` compile guard does protect the select-field layer (so a regression would fail typecheck — good), but the moment any legitimate future feature surfaces `transfer_function` publicly (e.g. a public "color science" panel), the HDR badge starts rendering on the public surface and the WI-09 honesty rule breaks **with no test catching it**, because the badge gate itself never asserted admin-ness.
-
-**Remediation:** Gate the public HDR badge on `isAdmin && isHdr` explicitly (it's already admin-only intent), so the honesty invariant is enforced at the point of rendering rather than relying on upstream nullness. Add a test that renders `ColorDetailsSection` with `is_hdr=true` and `isAdmin=false` asserting no `.hdr-badge` in output.
-
-### CRT-06 — Content-Security-Policy has no `wasm-unsafe-eval`; CLIP production mode will silently break under a strict CSP
-**Confidence: Medium (latent — only bites if CLIP `production` is ever enabled).** Evidence: `apps/web/src/lib/content-security-policy.ts:105-117` emits `script-src 'nonce-…' 'self' [GA]` with **no** `wasm-unsafe-eval`. The CLIP stack ships `@huggingface/transformers` + `onnxruntime-node`. If inference ever runs in a context that uses the WASM backend (or any future client-side embedding/onnxruntime-web path), `WebAssembly.instantiate` on compiled modules is blocked by CSP without `'wasm-unsafe-eval'`.
-
-**New-hire view:** Today CLIP is server-side (`onnxruntime-node`, native binding) and gated to `disabled`, so this is dormant. But it's a trap: a future engineer who flips `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` + enables production mode (or moves any embedding to the client) will hit an opaque CSP violation with no breadcrumb in the CSP file pointing at the CLIP dependency.
-
-**Remediation:** Leave the CSP strict (correct default), but add a comment in `content-security-policy.ts` documenting that production CLIP / any onnxruntime-web usage requires conditionally appending `'wasm-unsafe-eval'`, and wire that conditional behind the same env gate so enabling production search also relaxes CSP exactly as much as needed and no more.
-
-### CRT-07 — Test suite is ~35% source-text fixture/contract tests; high drift-detection coverage, lower behavioral coverage; only 5 e2e specs
-**Confidence: High (factual composition).** Evidence: 231 test files / 1965 `it`/`test` blocks; **82 test files (35%) read source via `readFileSync`/`fs.readFile`** (the `cycleN-rpf-source-contracts`, `*-wiring`, `check-*`, touch-target audit families). Only **5 Playwright e2e specs**.
-
-**Verifier view:** The fixture/contract tests are genuinely valuable as drift sentinels (they're why the migration journal, blur MIME, privacy fields, touch targets, and tag-names SQL can't silently regress) — credit where due. But a third of the suite asserts that *source text matches a pattern*, not that *behavior is correct*. Two risks: (1) **false confidence** — a green suite can coexist with a behavioral bug the greps don't probe (e.g. the async-payment money path in CRT-01 had no test until now); (2) **brittleness** — benign refactors (renaming a variable, reformatting) break grep-fixtures, training engineers to update fixtures reflexively, which erodes their signal. The thin e2e layer (5 specs) means whole-flow regressions (login → upload → process → view → share → purchase) are under-covered relative to the unit/fixture mass.
-
-**Remediation:** Treat new fixture tests as a last resort; prefer a behavioral test that exercises the real function. Backfill e2e coverage for the money path and the upload→process→serve happy path. Periodically audit the `source-contract` families and retire ones whose invariant is now also covered behaviorally.
+| Predicted problem area | Outcome |
+|---|---|
+| migrate.js post-condition edge cases (empty journal / partial baseline) | **Partially confirmed but already-mitigated.** The exact gap I predicted (baseline-before-migrate makes post-condition non-airtight vs a column missing from `reconcileLegacySchema`) is REAL — but the team independently identified it and added a source tripwire test that documents it verbatim. Residual = name-only check, not structural. Downgraded to MINOR/acknowledged. |
+| Advisory-lock vs process-local restore-flag inconsistency | **Refuted for the upload path** (server-scoped contract lock IS held across the whole restore window). Narrow residual for non-upload mutations. CLAUDE.md documents the policy. Downgraded to LOW. |
+| ETag divergence static vs serve-upload | **Confirmed but already-documented** as "Operational gotcha (CRT-D1)." Not new. |
+| Backfill column-set drift | **Refuted** — identical 10-column sets. Found a lock-semantics divergence instead (blocking vs non-blocking) that the doc glosses. |
+| CLAUDE.md doc drift | **Strongly confirmed** — this is where the real findings are: settings-hash key-count (5→9), cache() count (9→10), stale `max-age=86400` comment. |
 
 ---
 
-## LOW
+## Critical Findings (block execution)
 
-### CRT-08 — Service-worker `SW_VERSION` stamp committed stale (9 commits behind HEAD)
-**Confidence: High.** Evidence: `apps/web/public/sw.js` has `SW_VERSION = 'ec50158b-p7'`; HEAD is `8ccc8806`; `git log ec50158b..HEAD` = 9 commits (all CLIP). The `prebuild` hook (`scripts/build-sw.ts`) re-stamps from the git short-SHA at build time, and per the per-iteration deploy policy every push is followed by a build+deploy, so the *served* SW self-corrects. But the **committed** artifact is stale, so anyone inspecting the repo (or any environment that serves `public/sw.js` without running prebuild) gets a cache namespace that doesn't match the code. Minor, but it's a recurring footgun — the stamp is meaningful state checked into git that's allowed to drift from HEAD.
-**Remediation:** Either stop committing the generated `sw.js` (gitignore it, generate at build) or add a CI check that fails if `sw.js`'s stamp != current short-SHA. Today it relies on the human remembering to run prebuild before committing.
-
-### CRT-09 — In-memory rate-limit buckets evict oldest entries past 5000 keys (distributed-attack pressure relief)
-**Confidence: Medium.** Evidence: `LOGIN_RATE_LIMIT_MAX_KEYS = 5000` with oldest-entry eviction in `bounded-map.ts`. An attacker spoofing >5000 distinct IPs/accounts evicts the oldest in-memory buckets, so the *fast-path* loses pressure on early targets. Mitigated because the **DB-backed bucket is the source of truth** (`auth-rate-limit.ts:16-18`) and is consulted every attempt — so this only degrades the in-memory optimization, not the actual limit, unless the DB is *also* unavailable. CLAUDE.md doesn't document the 5000-key cap.
-**Remediation:** Document the cap and the DB-authority relationship in CLAUDE.md's rate-limit section so future readers don't mistake the in-memory map for the limit.
-
-### CRT-10 — Share-key enumeration is throttled only per-IP (60/min); distributed enumeration is botnet-bounded
-**Confidence: Medium.** Evidence: 10-char base56 keys (56^10 ≈ 3.6e17 space — strong) with per-IP `SHARE_MAX_REQUESTS = 60`/min the only anti-enumeration guard (`rate-limit.ts`); collision handling is MySQL UNIQUE + 5 retries. Sequential enumeration is infeasible; the residual is a large distributed attack, which the topology (single-writer, per-IP limit) only partially constrains. Shares have no per-share access cap or analytics-based anomaly detection. This is acceptable for a personal gallery — flagged for completeness, not alarm.
-**Remediation:** None required at current threat model. If shares ever protect sensitive content, add per-share access counters + optional expiry-by-access-count.
-
-### CRT-11 — `style-src 'unsafe-inline'` in production CSP
-**Confidence: High (accepted risk).** Evidence: `content-security-policy.ts:108` ships `style-src 'self' 'unsafe-inline'`. Standard for Next.js/Tailwind inline styles and far lower-risk than script-src inline (which IS nonce-gated correctly). Flagged only so it's a conscious, documented trade-off rather than an oversight.
-**Remediation:** None blocking; revisit if/when Next.js makes nonce-based style isolation ergonomic.
+**None.** No finding causes the product to serve incorrect bytes, leak PII, or corrupt data in the shipped single-instance topology.
 
 ---
 
-## DOC / CODE DRIFT
+## Major Findings (cause significant rework / mislead future agents)
 
-This codebase's CLAUDE.md is unusually accurate — most claims I spot-checked held. The drifts below are the residue.
+### MAJOR-1 — CLAUDE.md states the settings hash covers "5 COLOR_IMPACTING_KEYS"; the actual array has 9. The doc's own enumeration is incomplete.
+- **Evidence:**
+  - CLAUDE.md "ETag / cache invalidation" section: *"The settings hash (P4-E2) covers all **5** `COLOR_IMPACTING_KEYS` — `wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels` — so flipping any color-impacting admin setting invalidates cached variants…"*
+  - `apps/web/src/lib/settings-hash.ts:37-49` — the actual array has **9** entries: the 5 color keys PLUS `image_quality_webp`, `image_quality_avif`, `image_quality_jpeg` (R7-H2) PLUS `image_sizes` (R8-R6).
+  - The source file's OWN docstring was already corrected: `settings-hash.ts:4-12` says *"the 9 settings … (AGG-R7-08 corrected this docstring from a stale 3-key summary)."* CLAUDE.md was never updated to match.
+- **Confidence:** HIGH
+- **Why this matters:** The doc's claim "flipping any color-impacting admin setting invalidates cached variants" is *under-stated* — the truth is broader (quality and size changes also invalidate). A future agent reading "5 keys" might "fix" the array by deleting the quality/size keys, silently re-introducing R7-H2/R8-R6 (stale derivatives after a quality or size change). The doc actively contradicts the source-of-truth docstring sitting 30 lines away.
+- **Fix:** Edit the CLAUDE.md ETag section to say "all **9** `COLOR_IMPACTING_KEYS` (5 color + 3 quality + 1 size)" and list them, mirroring `settings-hash.ts:37-49`.
 
-### CRT-D1 — `serve-upload` ETag staleness on the static path is technically documented but easy to misread as universal
-**Confidence: High.** CLAUDE.md (line 263) says "flipping any color-, quality-, or size-impacting admin setting invalidates cached variants **on that path** automatically." That is true **only on the serve-upload path** (locale-prefixed `/{locale}/uploads/…` + files missing from `public/`). For the *production* serving path — Next's static server delivering existing files from `public/uploads/` with a `W/"{size}-{mtime}"` ETag — flipping `avif_effort` (or any `COLOR_IMPACTING_KEYS` member) does **not** change the on-disk bytes, so the mtime+size ETag is unchanged and **stale bytes keep serving until a backfill re-encode rewrites the file**. The doc states this in the very next sentence ("On the static path, invalidation rides the mtime+size ETag: a backfill re-encode rewrites the file"), so it's not *wrong* — but the two-sentence structure invites the reader to conclude "settings flip ⇒ cache invalidated everywhere," which is false for the path that serves the overwhelming majority of real traffic.
-**Remediation:** Add one explicit sentence: "Flipping a color/quality/size setting does NOT invalidate already-served static derivatives until you run a backfill; the settings-hash ETag only affects the serve-upload path." This is an operational gotcha (admin changes a setting, expects new bytes, sees old ones) worth stating bluntly.
+### MAJOR-2 — CLAUDE.md states React `cache()` wraps "9 data-access functions"; the actual count is 10. The enumeration omits `getLatestImageForOgCached`.
+- **Evidence:**
+  - CLAUDE.md "Performance Optimizations": *"React `cache()` wraps **9** data-access functions for SSR deduplication — every `data.ts` export ending in `Cached` (`getImageCached`, `getTopicBySlugCached`, `getTopicsCached`, `getTagsCached`, `getTopicsWithAliasesCached`, `getImageByShareKeyCached`, `getSharedGroupCached`, `getSmartCollectionBySlugCached`) plus `getSeoSettings`"* — that parenthetical lists 8 `Cached` names + `getSeoSettings` = 9.
+  - `apps/web/src/lib/data.ts` — actual `= cache(` wrapped exports (10): `getSmartCollectionBySlugCached` (1332), `getImageCached` (1608), `getLatestImageForOgCached` (1610), `getTopicBySlugCached` (1611), `getTopicsCached` (1612), `getTagsCached` (1613), `getTopicsWithAliasesCached` (1614), `getImageByShareKeyCached` (1616), `getSharedGroupCached` (1621), `getSeoSettings` (1662).
+  - `getLatestImageForOgCached` (data.ts:1610) is missing from the perf-section enumeration even though the name appears elsewhere in CLAUDE.md (the `getLatestImageForOgCached` key-files table reference).
+- **Confidence:** HIGH
+- **Why this matters:** Lower-impact than MAJOR-1 (an undercount of a perf optimization is benign), but it's a second instance of the doc's enumerations being out of sync with `data.ts`. Combined with MAJOR-1, it signals the CLAUDE.md "counts + lists" sections drift whenever a Cached fn or color key is added without a doc touch.
+- **Fix:** Change "9" → "10" and add `getLatestImageForOgCached` to the parenthetical. Consider replacing the brittle hardcoded count with "all `data.ts` exports wrapped in `cache()`" and dropping the number.
 
-### CRT-D2 — `image_quality_webp/avif/jpeg` are in `COLOR_IMPACTING_KEYS` but absent from the admin-tunables table
-**Confidence: High.** `gallery-config-shared.ts:27-29,97-99,157-159` defines and validates `image_quality_webp` (90), `image_quality_avif` (85), `image_quality_jpeg` (90) as admin settings that change encoded bytes (and are correctly in `settings-hash.ts` `COLOR_IMPACTING_KEYS`). But CLAUDE.md's "Admin tunables (color/HDR)" table lists only the 5 color keys + chroma/effort/pixels — the three quality keys aren't in that table even though they're admin-tunable and byte-impacting. Minor completeness gap; the settings-hash docstring (line 4) and line 263 do mention them.
-**Remediation:** Add `image_quality_webp/avif/jpeg` rows to the admin-tunables table for completeness, or note they're documented under the deployment/setup section.
-
-### CRT-D3 — Stale `git status` snapshot referenced plan-328/329/330; actual committed artifacts are plan-348/349
-**Confidence: High (process/hygiene, not code).** The session-start git snapshot listed untracked `plan/plan-328…330-run6-cycle1-*.md` and ~16 modified files; the working tree is now clean at `8ccc8806` with `plan-348-run6-cycle1-fixes.md` / `plan-349-run6-cycle1-deferred.md` as the run-6 artifacts. Not a code issue — but the plan directory has **60 deferred-finding files** accumulated across runs. That's a deferred-finding-hygiene smell: a 60-file deferral backlog is hard to reason about as a whole, and individual deferrals (like CRT-01's async-payment gap) can sit "tracked but unshipped" indefinitely while reading as "handled."
-**Remediation:** Periodically triage `plan/*deferred*.md` — close/merge resolved ones, and surface the still-open high-impact deferrals (async payment, any other money/security items) into a single living "open risks" doc so they don't get lost in a 60-file pile.
-
----
-
-## Refuted Findings (verification refuted these — recorded so they aren't re-raised next cycle)
-
-These looked like findings during fan-out investigation but were **refuted by direct source re-check**. Documenting them prevents the next cycle from re-flagging.
-
-1. **"`color_primaries` doc/code drift (admin-only vs public)"** — REFUTED. CLAUDE.md line 134 explicitly lists `color_primaries` as **public**, and code (`data.ts:241`, not in the `publicSelectFields` omit set, not in `_PrivacySensitiveKeys`) agrees. Doc and code are consistent. (The schema-section table calling color columns "admin-only" is a *summary* that the detailed line 134 overrides.)
-2. **"`COLOR_IMPACTING_KEYS` is 5 not 9"** — REFUTED. The list is 9 keys (`settings-hash.ts:37-49`) and CLAUDE.md line 263 already says **9** (AGG-R7-08 corrected the old "5"). No drift.
-3. **"Delete-during-processing orphans the original file (CRITICAL)"** — REFUTED. `deleteImage` reads `image.filename_original` (`images.ts:557-560`) before its transaction and unconditionally calls `deleteOriginalUploadFile()` (`images.ts:614`); the original is written at upload (`saveOriginalAndGetMetadata`), never in the queue. The queue's cleanup correctly handles only derivatives. The only residual orphan is a best-effort `unlink` failure, which is logged in `cleanupFailures` by design.
-4. **"Process restart resets rate limit → 5-attempt bypass (MEDIUM vuln)"** — REFUTED/downgraded. The DB-backed `login` / `login_account` buckets survive restart and are the source of truth, consulted on every attempt (`auth-rate-limit.ts:16-18`, `actions/auth.ts`). The in-memory map is a fast-path fallback for DB-unavailable mode only; a post-restart slack exists only if the DB is *also* down — acceptable degraded behavior. (Captured as the documentation note CRT-09.)
-5. **"CSP nonce is read but never set → ineffective script isolation"** — REFUTED. `proxy.ts:41` generates `crypto.randomUUID().replace(/-/g,'')`, sets it as `x-nonce` (line 43), and builds the CSP with it (lines 44-45). Nonce isolation is wired correctly.
-
----
-
-## Multi-Perspective Notes (concerns not promoted to numbered findings)
-
-- **Executor:** The migration runbook is executable as written — all four functions (`getAllJournalMigrations`, `prepareLegacyDatabaseIfNeeded` with hash-coverage check, `reconcileLegacySchema` mirroring all 15 color/HDR/processing columns, `runMigrations` post-condition throw) exist and match CLAUDE.md. The journal's idx 6→7 non-monotonic inversion is grandfathered, allowlisted in test, and any *new* non-monotonic entry is caught by both the monotonicity test and the silent-skip post-condition. Solid.
-- **Stakeholder:** The CLIP "dark by default" honesty posture is genuinely airtight — `disabled` default (`gallery-config-shared.ts:108`), `production`→`disabled` healing unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (`gallery-config.ts`), no `production` SelectItem in the admin UI, `SimilarPhotos` returns null unless production (`similar-photos.tsx:95`), and the search route 503s when not stub/production. No anonymous exposure, no embedding leak into public selects. The directive's "do not activate CLIP" concern is well-protected by the code itself.
-- **Security:** Stripe webhook signature verification (`constructStripeEvent`), entitlement idempotency (sessionId SELECT + UNIQUE + insertId-disambiguated fresh-insert check), 256-bit single-use download tokens with token↔imageId binding (no IDOR), Argon2id params matching OWASP, timingSafeEqual with pre-length-check, advisory-lock-serialized admin deletes/restores/backfills — all verified correct. The security floor here is high.
-- **New-hire:** The biggest onboarding hazard is the volume of indirectly-enforced invariants (CRT-05) and the static-path cache gotcha (CRT-D1) — both are the kind of thing a newcomer breaks without realizing because the enforcement is two layers away from the code they touch.
+### MAJOR-3 — The two backfill entry points are claimed "use whichever is convenient / they serialize," but their lock-acquisition semantics diverge (blocking 10 s vs non-blocking 0 s), which changes operator behavior under contention.
+- **Evidence:**
+  - Sidecar `apps/web/scripts/backfill-color-pipeline.ts:275-282` — `SELECT GET_LOCK(?, 10)` (10-second **blocking** wait), `process.exit(1)` if not acquired.
+  - In-app `apps/web/src/lib/admin-backfill-runner.ts:303-322` (`acquireBackfillLock`) — `SELECT GET_LOCK(?, 0)` (**non-blocking**), returns `null` → caller surfaces `already_running`.
+  - CLAUDE.md "Backfill" section: *"They serialize against each other, so you can use whichever is convenient."*
+  - Column sets ARE identical (verified): both write the same 10 columns on success (sidecar 369-380, runner 557-570) and the same 2 columns with no `pipeline_version` bump on detection failure (sidecar 386-391, runner 594-599). Concurrency defaults differ (sidecar `BACKFILL_CONCURRENCY` default 2 uncapped; runner `ADMIN_BACKFILL_CONCURRENCY` default 1, capped at `floor((pool−reserved−1)/2)`).
+- **Confidence:** HIGH
+- **Why this matters:** "Whichever is convenient" implies behavioral interchangeability. They are *correctness*-equivalent (same lock name → never concurrent; same column writes) but NOT *behaviorally* equivalent: if a sidecar run is already holding the lock and an admin clicks the in-app button, the button fails-fast with "already running" (good) — but if the admin's run is going and an operator launches the sidecar, the sidecar BLOCKS 10 s then `exit(1)`. An operator scripting the sidecar in CI could see a spurious non-zero exit. This is a real operational footgun the doc papers over.
+- **Fix:** Add one sentence to the Backfill section: "The in-app runner fails fast (non-blocking lock) with an 'already running' status; the sidecar blocks up to 10 s on the lock then exits non-zero. They never run concurrently, but their contention behavior differs." Optionally align the sidecar to non-blocking + a clearer exit code.
 
 ---
 
-## The 3 Most Important Things to Fix
+## Minor Findings (suboptimal but functional)
 
-1. **CRT-01 — Close the async-payment money gap operationally NOW** (restrict Stripe to `payment_method_types: ['card']` until plan-316's `async_payment_succeeded` handler ships). It is the only path where a customer can be charged and receive nothing, and it is currently guarded by a doc sentence, not code.
-2. **CRT-02 — Add a retention/prune job for the `*_views` analytics tables and a global anonymous-write ceiling.** Unbounded durable writes from per-IP-only-limited anonymous endpoints are a slow-burn DB-growth and index-bloat outage waiting on the single writer.
-3. **CRT-05 — Gate the public HDR badge on `isAdmin` explicitly (+ a test), and add the CRT-D1 static-path-cache sentence to CLAUDE.md.** The HDR honesty invariant and the ETag freshness story are both currently enforced/explained indirectly; making them explicit converts two future-refactor traps into asserted, documented contracts.
+### MINOR-1 — Stale `max-age=86400` in a load-bearing source docstring.
+- **Evidence:** `apps/web/src/lib/settings-hash.ts:20` — *"the existing cached responses keep the old bytes for `Cache-Control max-age=86400`."* The actual served value at HEAD is `max-age=3600` (`serve-upload.ts:230,252`; `next.config.ts:71`; `nginx/default.conf:157`), reduced per the R8-R7 note in serve-upload.ts. The docstring's example never got updated.
+- **Confidence:** HIGH
+- **Why this matters:** Minor — it's an explanatory comment, not a control value — but it makes the staleness window look 24× worse than reality (24 h vs 1 h) to anyone reasoning about the cache-invalidation gap from this file.
+- **Fix:** s/86400/3600/ in the docstring.
+
+### MINOR-2 — migrate.js post-condition is NOT airtight against a column/index that lands in `drizzle/*.sql` but is missing from `reconcileLegacySchema`; mitigation is a name-only source tripwire.
+- **Evidence:**
+  - `scripts/migrate.js:659-696` — `prepareLegacyDatabaseIfNeeded` runs `baselineAllJournalMigrations` (inserts ALL missing journal hashes) BEFORE `runMigrations` calls drizzle `migrate()`. So on an existing-DB upgrade, the new migration's hash is recorded first, drizzle short-circuits the apply, and `reconcileLegacySchema` becomes the SOLE applier of that migration's DDL.
+  - `runMigrations` post-condition (`migrate.js:708-718`) checks only that every journal **hash** is recorded — which it now is, regardless of whether the DDL ran. So the post-condition CANNOT catch a column that exists in SQL+schema.ts but is absent from reconcile.
+  - The team already understands this exactly: `src/__tests__/migrate-reconcile-coverage.test.ts:106-123` docstring states it verbatim ("reconcile becomes the SOLE applier … would therefore be silently dropped on every existing deployment — green deploy, passing column tests, missing index"). It mitigates with name-presence tripwires for columns (lines 95-103) and indexes (lines 157-172).
+  - Residual gap: the tripwire is `MIGRATE_SRC_CODE.includes(name)` — NAME presence only. It does NOT verify type/default/nullability, and would NOT catch a migration that ALTERs an existing column's type or adds an FK/constraint that reconcile doesn't mirror (the column name already appears in reconcile, so the check passes). The R4C1 comment in `migrate.js:353-363` admits this is a name mirror, not a structural one.
+- **Confidence:** HIGH (logic verified end-to-end)
+- **Why this matters:** A future migration of the form `ALTER TABLE images MODIFY COLUMN x bigint` or `ADD CONSTRAINT … FK` that the author forgets to mirror in reconcile would deploy green on existing DBs with the change silently NOT applied, and no test or post-condition would fire. The blast radius is bounded (the authoritative end-to-end check is a fresh-DB init + information_schema diff, done manually per R4C1), and column-ADD — the common case — IS caught. So this is a known, accepted, narrow residual, not a regression.
+- **Fix (optional / belt-and-braces):** Document the residual in CLAUDE.md's "Adding a new migration" step 3 explicitly: "the reconcile tripwire is name-only; an ALTER/MODIFY/constraint migration needs a manual fresh-DB diff because the tripwire cannot see structural changes." Or strengthen the post-condition to run a drizzle-schema vs information_schema diff at boot in non-prod.
+
+### MINOR-3 — Long restore + 5 s contract-lock timeout yields a misleading "upload settings are being changed" error on the upload path.
+- **Evidence:** During a restore, `db-actions.ts:302` holds `LOCK_UPLOAD_PROCESSING_CONTRACT` for the WHOLE restore window (could be minutes for a 250 MB import). A concurrent upload calls `acquireUploadProcessingContractLock()` with default `timeoutSeconds = 5` (`upload-processing-contract-lock.ts:9`), times out, and returns `{ error: t('uploadSettingsLocked') }` (images.ts:172-173) / `409 "Upload settings are being changed"` (lr/upload/route.ts:160-164). The LR route DOES check `isRestoreMaintenanceActive()` first (route.ts:143) and returns the correct "Restore in progress" 503 — but only on the SAME instance; the browser `uploadImages` action has NO restore-flag check and relies purely on the contract-lock timeout, so it always shows the wrong message during a restore even single-instance.
+- **Confidence:** HIGH
+- **Why this matters:** Cosmetic/UX, single-instance: an admin uploading during their own restore gets "upload settings are being changed" instead of "restore in progress." Confusing, but the upload is correctly rejected — no data risk.
+- **Fix:** Add an `isRestoreMaintenanceActive()` check at the top of `uploadImages` (images.ts, before the contract-lock acquire) returning a restore-specific message, mirroring the LR route at route.ts:143.
+
+---
+
+## What's Missing (gaps, unhandled edges, unstated assumptions)
+
+- **Mechanism-level scale-out failure modes are policy-documented but not enumerated.** CLAUDE.md line 195 correctly says upload-quota tracking, restore flags, and queue state are process-local and "do not horizontally scale … unless those coordination states are moved to a shared store" — and explicitly calls out the OG/checkout/share/search/semantic rate-limit buckets as per-process. What it does NOT say: the *specific* failure each produces (upload quota effectively doubles per instance; non-upload admin mutations on instance B during a restore on instance A acquire NEITHER lock NOR the flag, so a topic/tag/image/settings edit can be lost or hit an FK error when the restore drops/recreates tables). This is a documentation-completeness gap, not a code gap — the policy ("don't scale") already covers it. (Originally flagged by sub-agent as a CRITICAL undocumented sharp edge; Realist Check downgraded — see Verdict Justification.)
+- **No automatic enforcement that a backfill follows a color-impacting settings flip.** Both the settings-hash ETag (serve-upload path) and the static-path mtime ETag only invalidate cached derivatives if the bytes/mtime actually change — which requires a manual backfill. An admin who flips `force_srgb_derivatives` or bumps `IMAGE_PIPELINE_VERSION` without running a backfill leaves the >90%-traffic static path serving stale bytes for up to `max-age=3600`. This IS documented (CRT-D1 "Operational gotcha"), so it's a known accepted gap, not a finding — but there's no admin-UI nudge ("settings changed; run a re-encode") tying the two together.
+- **Detection-failure path leaves `avif_10bit`/`was_downscaled` reflecting NEW bytes while color columns stay STALE at the old `pipeline_version`.** Both backfill paths intentionally write the 2 derivative columns and skip the version bump on detection failure (verified). This is correct-by-design (a later run retries detection), but it means the public `avif_10bit` chip can momentarily disagree with the stale admin-only color columns until the retry succeeds. Documented in CLAUDE.md ("they never strand stale color metadata at the current version"). Acceptable; noting for completeness.
+
+---
+
+## Ambiguity Risks (doc statements with multiple valid interpretations)
+
+- CLAUDE.md Backfill: *"you can use whichever is convenient."* → **Interp A:** they're fully interchangeable (false — see MAJOR-3 lock semantics + concurrency defaults). **Interp B:** they produce identical DB state and never run concurrently (true). Risk if A is assumed: an operator scripts the sidecar in CI expecting fail-fast and gets a 10 s block + non-zero exit, or assumes the same default concurrency (2 vs 1).
+- CLAUDE.md ETag: *"covers all 5 COLOR_IMPACTING_KEYS."* → **Interp A:** the array IS 5 keys (false). **Interp B:** there are 5 *color-named* keys among more (true but not what the sentence says). Risk if A assumed: deletion of the quality/size keys → MAJOR-1 regression.
+
+---
+
+## Multi-Perspective Notes
+
+- **Executor (could I act on the docs without getting stuck?):** Mostly yes — the docs are exceptionally detailed. The two count drifts (MAJOR-1/2) would actively mislead an executor doing a "sync the doc to code" or "tighten the key list" task. The Backfill "whichever is convenient" line would mislead an executor automating backfill in CI.
+- **Stakeholder (does the system deliver its premise?):** Yes. The photographer-intent color pipeline does what the matrix claims (encoder verified line-by-line). Honesty invariants hold (no public HDR badge without real bytes; CLIP honestly dark; Stripe card-only). The premise is intact.
+- **Skeptic (strongest argument it'll break in prod):** The single highest real-world risk is the **cache-staleness-after-settings-flip** gap — but it's documented (CRT-D1) and bounded to 1 h. Second is a future **ALTER/constraint migration** slipping past the name-only reconcile tripwire on existing DBs (MINOR-2) — bounded by the manual fresh-DB diff discipline. Neither is a latent landmine; both are known, fenced, and accepted. No "this will silently break in prod when X" landmine survived verification.
+
+---
+
+## Verdict Justification
+
+**REVISE** — not ACCEPT, because CLAUDE.md (the pipeline's load-bearing context doc) carries two numerically-false invariant claims (5 vs 9 keys; 9 vs 10 cache fns) and a misleading interchangeability claim, plus a stale `max-age` comment. These directly risk a future agent "correcting" code toward the wrong doc. Not REJECT, because zero code-correctness or honesty-invariant defects survived verification — the product ships correct bytes and the safety guards are real.
+
+**Escalation:** Started THOROUGH; escalated to ADVERSARIAL after the 2nd confirmed-false numeric claim (settings-hash 5→9, then cache 9→10) suggested a *systematic* doc-enumeration drift class. Adversarial pass then specifically hunted the encoder matrix, migrate.js post-condition, and backfill column sets for code-level divergence — and found NONE, which is itself strong signal: the drift is confined to the docs, the code is sound.
+
+**Realist Check recalibrations:**
+- The topology sub-agent rated the restore-maintenance-flag and upload-quota issues as **CRITICAL undocumented sharp edges (data corruption)**. I downgraded both:
+  - *Restore flag* → **LOW / documented.** Mitigated by: the server-scoped `LOCK_UPLOAD_PROCESSING_CONTRACT` is held across the entire restore window (db-actions.ts:302), so a 2nd-instance upload blocks/times-out rather than corrupting — refuting the "instance B writes corrupt data" scenario for the upload path. Non-upload mutations remain a narrow gap, but CLAUDE.md line 195 explicitly says "do not horizontally scale … process-local," which covers it at the policy level.
+  - *Upload quota doubling* → **documented, not a finding.** Mitigated by: CLAUDE.md line 195 names "upload quota tracking … process-local" by name. The only residual is that it doesn't spell out "effective quota doubles" — a completeness nit, captured under What's Missing, not a scored finding.
+- The ETag sub-agent surfaced two "real staleness gaps" (settings-flip and pipeline-bump without backfill). Both **downgraded to non-findings / What's Missing** — mitigated by: explicitly documented as CRT-D1 "Operational gotcha," bounded to `max-age=3600` (1 h), with backfill as the documented remediation. Detection time = within 1 h, fix = run backfill. Real but known and fenced.
+- No finding involving data loss, security breach, or financial impact was downgraded (none were found at those severities).
+
+**What would upgrade to ACCEPT:** Fix MAJOR-1/2/3 + MINOR-1 (a pure CLAUDE.md + one-comment edit pass). MINOR-2/3 are optional hardening, not blockers.
+
+---
+
+## Open Questions (unscored)
+
+- Does any production deployment script or CI job invoke `scripts/backfill-color-pipeline.ts` and assert exit code 0? If so, the 10 s-block-then-exit(1) lock behavior (MAJOR-3) could cause spurious CI failures when an in-app backfill is mid-flight. (Could not verify CI config from the repo; `.env.deploy` is gitignored.)
+- The `uploadImages` browser action has no `isRestoreMaintenanceActive()` check (MINOR-3) while the LR route does. Is the asymmetry intentional (browser admin is assumed to know they started a restore) or an oversight? The LR-route comment (route.ts:140-142) implies the flag was meant to be "shared by both ingest entrypoints" — suggesting the browser path was meant to check it too.
+- `getSeoSettings` is `cache()`-wrapped but is NOT named `*Cached` — the CLAUDE.md prose "every export ending in `Cached` … plus `getSeoSettings`" handles this, but it's the kind of naming exception that invites the count to drift again. Worth a lint/test that counts `cache(` occurrences against the doc number? (Out of scope for this review.)
+
+---
+*Ralplan summary row: N/A — this is a system code/doc critique, not a ralplan plan review.*
