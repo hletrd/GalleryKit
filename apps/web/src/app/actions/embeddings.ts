@@ -14,7 +14,10 @@ import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { embedImageStub } from '@/lib/clip-inference';
-import { embeddingToBuffer, STUB_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
+import { embedImageReal } from '@/lib/clip-model';
+import { embeddingToBuffer, STUB_MODEL_VERSION, PRODUCTION_MODEL_VERSION, SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
+import { resolveOriginalUploadPath } from '@/lib/upload-paths';
+import { getGalleryConfig } from '@/lib/gallery-config';
 import { createResetAtBoundedMap } from '@/lib/bounded-map';
 
 const BACKFILL_CONCURRENCY = 2;
@@ -55,10 +58,33 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
         return { status: 'error', message: t('backfillRateLimited') };
     }
 
+    // AGG-L1 (run-6 cycle-2): make this action MODE-AWARE, matching the two
+    // authoritative embedding writers (image-queue.ts queue hook +
+    // scripts/backfill-clip-embeddings.ts). Previously it unconditionally wrote
+    // STUB_MODEL_VERSION rows even in production mode — so if it were ever wired
+    // to a UI control while the deployment was in production, it would populate
+    // rows the production search route (which reads PRODUCTION_MODEL_VERSION)
+    // silently ignores. Now: disabled → no-op; stub → stub encoder; production →
+    // real encoder + PRODUCTION_MODEL_VERSION (resolving the original upload
+    // path per image, like the sidecar).
+    // NOTE: no UI currently wires this action; the sidecar script remains the
+    // canonical backfill entry point. This keeps the action honest if it is
+    // ever surfaced. The dark-by-default guard means production only runs when
+    // the operator has set the mode + SEMANTIC_SEARCH_ALLOW_PRODUCTION env.
+    let semanticMode: 'disabled' | 'stub' | 'production' = 'disabled';
+    try {
+        semanticMode = (await getGalleryConfig()).semanticSearchMode;
+    } catch {
+        // DB unavailable — treat as disabled (no-op) rather than guessing.
+    }
+    if (semanticMode === 'disabled') {
+        return { status: 'ok', processed: 0, skipped: 0 };
+    }
+
     try {
         // Select processed images without an embedding row (up to SEMANTIC_SCAN_LIMIT to bound the operation)
         const pending = await db
-            .select({ id: images.id })
+            .select({ id: images.id, filenameOriginal: images.filename_original })
             .from(images)
             .where(
                 and(
@@ -74,6 +100,7 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
 
         let processed = 0;
         let skipped = 0;
+        const modelVersion = semanticMode === 'production' ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
 
         // Process in batches with bounded concurrency
         for (let batchStart = 0; batchStart < pending.length; batchStart += BACKFILL_BATCH_SIZE) {
@@ -82,9 +109,16 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
             // Run BACKFILL_CONCURRENCY items concurrently within each batch
             for (let i = 0; i < batch.length; i += BACKFILL_CONCURRENCY) {
                 const chunk = batch.slice(i, i + BACKFILL_CONCURRENCY);
-                await Promise.all(chunk.map(async ({ id }) => {
+                await Promise.all(chunk.map(async ({ id, filenameOriginal }) => {
                     try {
-                        const embedding = embedImageStub(id);
+                        let embedding: Float32Array;
+                        if (semanticMode === 'production') {
+                            if (!filenameOriginal) { skipped++; return; }
+                            const originalPath = await resolveOriginalUploadPath(filenameOriginal);
+                            embedding = await embedImageReal(originalPath);
+                        } else {
+                            embedding = embedImageStub(id);
+                        }
                         // AGG-C10-01: store the RAW buffer (not base64) so the read path
                         // (decodeEmbeddingColumn) round-trips it. The Drizzle `text()`
                         // column is a MEDIUMBLOB approximation, so cast through `unknown`.
@@ -94,12 +128,12 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                             .values({
                                 imageId: id,
                                 embedding: embeddingValue,
-                                modelVersion: STUB_MODEL_VERSION,
+                                modelVersion,
                             })
                             .onDuplicateKeyUpdate({
                                 set: {
                                     embedding: embeddingValue,
-                                    modelVersion: STUB_MODEL_VERSION,
+                                    modelVersion,
                                 },
                             });
                         processed++;
