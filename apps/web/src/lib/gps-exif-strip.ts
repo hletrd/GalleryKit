@@ -145,6 +145,16 @@ export function stripGpsFromTiffRegion(buf: Buffer, tiffStart: number, tiffEnd: 
     // Walk the IFD chain (IFD0 → IFD1 → …, bounded) looking for the GPS
     // pointer tag and GPS-bearing XMP tag values.
     let ifdAbs = tiffStart + r.u32(tiffStart + 4);
+    // AGG-L2 / CR-02 (run-6 cycle-2): a structurally-valid TIFF always points
+    // IFD0 past the 8-byte header (offset >= 8). A literal 0 offset (ifdAbs ===
+    // tiffStart) or one pointing into the header is a structural anomaly. The
+    // old code let `ifdAbs !== tiffStart` short-circuit the loop and return the
+    // LENIENT `false` ("no GPS found" → leave the original byte-identical),
+    // whereas the rest of this module's doctrine is to return `null` on any
+    // anomaly so the caller falls through to the tier-2 metadata-free re-encode.
+    // Return null here to match that fail-safe posture for malformed/hostile
+    // files. (No real GPS bytes are reachable through a 0-offset IFD0 anyway.)
+    if (ifdAbs <= tiffStart + 7) return null;
     const visited = new Set<number>();
     for (let chain = 0; chain < MAX_IFD_CHAIN && ifdAbs !== tiffStart; chain++) {
         if (visited.has(ifdAbs)) return null;
