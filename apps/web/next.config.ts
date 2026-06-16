@@ -42,7 +42,12 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: process.env.GALLERYKIT_TYPECHECKED === '1',
   },
   poweredByHeader: false,
-  serverExternalPackages: ['drizzle-orm', 'sharp'],
+  // AGG-C10-03 (run-6 cycle-1): @huggingface/transformers ships native onnxruntime-node
+  // (+ a WASM backend). Like `sharp`, native-addon packages must be kept external so the
+  // standalone build does not webpack-trace their .node binaries into the server bundle.
+  // (clip-model.ts also imports transformers lazily so the dark CLIP feature never loads
+  // it on the boot/upload path.)
+  serverExternalPackages: ['drizzle-orm', 'sharp', '@huggingface/transformers', 'onnxruntime-node'],
   async headers() {
     const isDev = process.env.NODE_ENV === 'development';
     const devCspValue = buildContentSecurityPolicy({ isDev: true, imageBaseUrl });

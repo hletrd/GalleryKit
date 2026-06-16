@@ -16,10 +16,18 @@
 
 import 'server-only';
 import { join } from 'path';
-import { env, AutoModel, AutoTokenizer, Tensor } from '@huggingface/transformers';
+import type * as Transformers from '@huggingface/transformers';
 import sharp from 'sharp';
 import { truncateAndNormalize, EMBEDDING_DIM } from '@/lib/clip-embeddings';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '@/lib/clip-model-id';
+
+// AGG-C10-03 (run-6 cycle-1): `@huggingface/transformers` pulls native
+// onnxruntime-node (+ a WASM backend). It is imported lazily INSIDE getModelBundle()
+// — not at module top level — so the boot/upload graph (instrumentation -> image-queue
+// -> clip-model) does NOT drag the native runtime into every request path. The native
+// runtime resolves only when the (dark by default) real encoder is actually invoked.
+// `@huggingface/transformers` is also listed in next.config.ts serverExternalPackages
+// so the standalone build does not try to webpack-trace its native binaries.
 
 // Re-export so callers can import identity constants from either file.
 export { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '@/lib/clip-model-id';
@@ -45,8 +53,10 @@ const CLIP_MODELS_ROOT =
 // ---------------------------------------------------------------------------
 
 type ModelBundle = {
-    model: Awaited<ReturnType<typeof AutoModel.from_pretrained>>;
-    tokenizer: Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
+    model: Awaited<ReturnType<typeof Transformers.AutoModel.from_pretrained>>;
+    tokenizer: Awaited<ReturnType<typeof Transformers.AutoTokenizer.from_pretrained>>;
+    // Carried so embedImageReal can build a Tensor without a second dynamic import.
+    Tensor: typeof Transformers.Tensor;
 };
 
 let loadPromise: Promise<ModelBundle> | null = null;
@@ -55,6 +65,9 @@ function getModelBundle(): Promise<ModelBundle> {
     if (loadPromise !== null) return loadPromise;
 
     loadPromise = (async (): Promise<ModelBundle> => {
+        // Lazy native-runtime import (AGG-C10-03). Resolved only on first real encode.
+        const { env, AutoModel, AutoTokenizer, Tensor } = await import('@huggingface/transformers');
+
         // Must be set BEFORE any from_pretrained call.
         env.cacheDir = CLIP_MODELS_ROOT;
         // Offline: only read from the pre-seeded volume; never hit the network.
@@ -70,7 +83,7 @@ function getModelBundle(): Promise<ModelBundle> {
             revision: JINA_CLIP_REVISION,
         });
 
-        return { model, tokenizer };
+        return { model, tokenizer, Tensor };
     })().catch((err) => {
         // Null the cached promise so the next call can retry.
         loadPromise = null;
@@ -122,7 +135,7 @@ export async function embedTextReal(query: string): Promise<Float32Array> {
  * Returns a 512-dim L2-normalized Float32Array (Matryoshka truncation of 1024).
  */
 export async function embedImageReal(imagePath: string): Promise<Float32Array> {
-    const { model } = await getModelBundle();
+    const { model, Tensor } = await getModelBundle();
 
     // Decode, resize to 512×512 (fill, no aspect preservation — matches CLIP convention),
     // and return raw HWC uint8 bytes.
