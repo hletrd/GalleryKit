@@ -52,7 +52,11 @@ describe.each(ROUTE_FILES.map((file) => [path.relative(process.cwd(), file), fil
 
         it('GET export passes \'GET\' explicitly (twin symmetry, no silent default)', () => {
             const body = extractExportBody(readSource(file), 'GET');
-            expect(body).toMatch(/serveUploadFile\s*\(\s*pathSegments\s*,[\s\S]*?,\s*'GET'\s*\)/);
+            // AGG-H5 (run-6 cycle-2): the GET handler now also passes
+            // request.signal as a 4th arg so a client abort releases the fd, so
+            // 'GET' is no longer necessarily the final argument. Accept 'GET'
+            // followed by either the close-paren OR a trailing signal arg.
+            expect(body).toMatch(/serveUploadFile\s*\(\s*pathSegments\s*,[\s\S]*?,\s*'GET'\s*(?:,[\s\S]*?)?\)/);
         });
 
         it('GET export never passes \'HEAD\' (would suppress response bodies)', () => {
