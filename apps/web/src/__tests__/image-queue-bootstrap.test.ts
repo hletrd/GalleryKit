@@ -162,7 +162,21 @@ describe('bootstrapImageProcessingQueue', () => {
         } = await loadQueueModule({ pendingBatches: [firstBatch, secondBatch], resolveIdle: true });
 
         await bootstrapImageProcessingQueue();
-        await vi.waitFor(() => expect(limitMock).toHaveBeenCalledTimes(2));
+        // AGG-C4-01: the continuation that fires the 2nd limit() call is scheduled
+        // off a queueOnIdle promise resolution and re-runs the scan path. Under a
+        // contended full-suite run (sharp/clip/db transitive import graphs competing
+        // for CPU) it can land after vi.waitFor's ~1s default, so the bare wait was
+        // flaky (~50% failure in the full 233-file run, 0% isolated). Give it an
+        // explicit generous budget + small poll interval — same R4C1 pattern the
+        // admin-backfill-runner suites use for this exact flake class — and key on
+        // the deterministic bootstrapped end-state alongside the call count.
+        await vi.waitFor(
+            () => {
+                expect(limitMock).toHaveBeenCalledTimes(2);
+                expect(getProcessingQueueState().bootstrapped).toBe(true);
+            },
+            { timeout: 20_000, interval: 25 },
+        );
 
         expect(queueAddMock).toHaveBeenCalledTimes(502);
         expect(gtMock).toHaveBeenCalledWith('id', 500);
