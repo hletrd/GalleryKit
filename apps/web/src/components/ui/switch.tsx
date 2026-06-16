@@ -11,8 +11,9 @@ import { cn } from "@/lib/utils"
 // 44 px track and every toggle read as "half-on". Fix: keep the 44 px tappable
 // hit area on Root (still required by the touch-target audit) but render the
 // VISIBLE switch as a normally-proportioned pill nested inside, with a thumb
-// that travels the full visible track width via translate-x-[calc(100%-2px)]
-// (width-relative, unlike the old fixed 20 px travel). The visible track is
+// that travels the full visible track width via translate-x-full (= 100% of
+// the thumb's own width, width-relative, unlike the old fixed 20 px travel —
+// see the inline geometry note on the Thumb below). The visible track is
 // styled off Root's data-state via group-data-* (Root carries the `group`
 // class and Radix sets data-state on it).
 function Switch({
