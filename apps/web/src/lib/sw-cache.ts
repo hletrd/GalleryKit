@@ -101,10 +101,21 @@ export async function recordAndEvict(
 ): Promise<number> {
   const entries = await meta.getAll();
 
-  // Upsert the new entry
+  // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion
+  // order tracks RECENCY. A plain Map.set() on an existing key updates the
+  // value but keeps the key's original insertion position, so iteration order
+  // would NOT reflect recency after a re-touch — which is why the old code had
+  // to Array.from(...).sort() (O(n log n)) on every near-cap write. Moving a
+  // re-touched entry to the tail lets eviction be a simple head-walk (oldest
+  // first) with no sort.
+  entries.delete(url);
   entries.set(url, { url, size: newSize, timestamp: Date.now() });
 
-  // Compute total
+  // Total is still summed once here (O(n)) because the metadata is rebuilt
+  // from the persisted JSON blob each call; that re-parse is inherent to the
+  // whole-blob storage model (out of scope to change this cycle). The
+  // avoidable cost the review flagged was the per-write O(n log n) sort, which
+  // the insertion-order recency above eliminates.
   let total = 0;
   for (const e of entries.values()) {
     total += e.size;
@@ -113,12 +124,9 @@ export async function recordAndEvict(
   let evicted = 0;
 
   if (total > maxBytes) {
-    // Sort by timestamp ascending (oldest first)
-    const sorted = Array.from(entries.values()).sort(
-      (a, b) => a.timestamp - b.timestamp,
-    );
-
-    for (const entry of sorted) {
+    // Head-walk in insertion (= recency) order: oldest entries come first, so
+    // we evict from the front until under cap. No sort needed.
+    for (const entry of entries.values()) {
       if (total <= maxBytes) break;
       // Never evict the entry we just added if we can avoid it — but if we
       // absolutely must (e.g. single entry > cap) we do so anyway.

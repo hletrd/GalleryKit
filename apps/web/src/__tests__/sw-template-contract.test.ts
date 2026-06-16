@@ -68,6 +68,28 @@ describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-1
         expect(fn).toMatch(/const deleted = await imageCache\.delete\(entry\.url\);/);
         expect(fn).toMatch(/if \(deleted\) \{/);
     });
+
+    // AGG-H3 (run-6 cycle-2): lock the head-walk-no-sort eviction + the
+    // delete-then-set recency upsert so the optimization can't silently
+    // regress back to the O(n log n) Array.from(...).sort() shape.
+    it('recordAndEvict evicts via insertion-order head-walk, not a sort', () => {
+        const fnIdx = TEMPLATE.indexOf('async function recordAndEvict');
+        const fnEnd = TEMPLATE.indexOf('async function', fnIdx + 1);
+        const fn = TEMPLATE.slice(fnIdx, fnEnd);
+        // No sort in the eviction path.
+        expect(fn).not.toMatch(/\.sort\(/);
+        // Upsert is delete-then-set so Map order tracks recency.
+        expect(fn).toMatch(/entries\.delete\(url\);\s*\n\s*entries\.set\(url,/);
+        // Eviction iterates the Map values directly (head-walk).
+        expect(fn).toMatch(/for \(const entry of entries\.values\(\)\)/);
+    });
+
+    it('touchMeta repositions the entry (delete-then-set) so head-walk recency holds', () => {
+        const fnIdx = TEMPLATE.indexOf('async function touchMeta');
+        expect(fnIdx).toBeGreaterThan(-1);
+        const fn = TEMPLATE.slice(fnIdx, TEMPLATE.indexOf('async function', fnIdx + 1));
+        expect(fn).toMatch(/entries\.delete\(url\);\s*\n\s*entries\.set\(url,/);
+    });
 });
 
 describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {

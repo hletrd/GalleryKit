@@ -96,16 +96,20 @@ async function recordAndEvict(url, newSize) {
   const imageCache = await caches.open(IMAGE_CACHE);
   const entries = await getMeta();
 
+  // AGG-H3 (run-6 cycle-2): upsert as delete-then-set so the Map's insertion
+  // order tracks recency (a plain set() on an existing key keeps the original
+  // position). This lets eviction be a head-walk (oldest first) instead of a
+  // re-ordering pass (O(n log n)) on every near-cap image cache write.
+  // Keep in lockstep with lib/sw-cache.ts.
+  entries.delete(url);
   entries.set(url, { url, size: newSize, timestamp: Date.now() });
 
   let total = 0;
   for (const e of entries.values()) total += e.size;
 
   if (total > MAX_IMAGE_BYTES) {
-    const sorted = Array.from(entries.values()).sort(
-      (a, b) => a.timestamp - b.timestamp,
-    );
-    for (const entry of sorted) {
+    // Head-walk in insertion (= recency) order: oldest first, no sort.
+    for (const entry of entries.values()) {
       if (total <= MAX_IMAGE_BYTES) break;
       const deleted = await imageCache.delete(entry.url);
       // Only adjust the running total if the entry was actually present
@@ -152,6 +156,11 @@ async function evictHtmlCacheIfNeeded() {
 async function touchMeta(url, knownSize) {
   const entries = await getMeta();
   const existing = entries.get(url);
+  // AGG-H3 (run-6 cycle-2): delete-then-set so a touched entry moves to the
+  // Map's tail. The eviction head-walk relies on insertion order == recency,
+  // so a 304-touch must reposition the entry too, otherwise a
+  // recently-revalidated image could be evicted as if it were old.
+  entries.delete(url);
   entries.set(url, {
     url,
     size: existing && existing.size ? existing.size : knownSize,

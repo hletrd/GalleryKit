@@ -202,6 +202,33 @@ describe('sw-cache: recordAndEvict LRU eviction', () => {
       vi.useRealTimers();
     }
   });
+
+  // AGG-H3 (run-6 cycle-2): the head-walk eviction (no sort) relies on
+  // insertion order == recency. A re-recorded ("touched") entry MUST move to
+  // the Map tail so it is treated as most-recent and survives eviction over an
+  // older, untouched entry. Without the delete-then-set upsert this would
+  // regress: the touched entry would keep its original (front) position and be
+  // evicted as if it were old.
+  it('a re-recorded entry survives eviction over an older untouched one (recency reorder)', async () => {
+    const cap = 10;
+    const A = 'http://localhost/uploads/avif/a.avif';
+    const B = 'http://localhost/uploads/avif/b.avif';
+    // Insert A then B (A is oldest by insertion order).
+    await recordAndEvict(A, 4, cache, meta, cap);
+    await recordAndEvict(B, 4, cache, meta, cap);
+    // Re-touch A — it must move to the tail (now most-recent).
+    await recordAndEvict(A, 4, cache, meta, cap);
+    // Now add C (4 bytes) → total 12 > cap 10 → must evict the oldest, which
+    // is now B (A was just touched), NOT A.
+    const C = 'http://localhost/uploads/avif/c.avif';
+    await recordAndEvict(C, 4, cache, meta, cap);
+
+    const snap = meta.snapshot();
+    expect(snap.has(A)).toBe(true);           // touched → survives
+    expect(snap.has(C)).toBe(true);           // newest → survives
+    expect(cache.deleted).toContain(B);       // oldest-by-recency → evicted
+    expect(snap.has(B)).toBe(false);
+  });
 });
 
 describe('sw-cache: removeEntry', () => {
