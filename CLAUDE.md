@@ -119,7 +119,7 @@ git values must be treated as compromised and must not be reused.
 - `sharedGroups` / `sharedGroupImages` - Public sharing
 - `image_views` / `topic_views` / `shared_group_views` - Analytics events (US-P44)
 - `image_embeddings` - CLIP embeddings (US-P51). Real jina-clip-v2 encoder shipped but deployed DARK (`semantic_search_mode` defaults to `disabled`; stub mode uses non-meaningful deterministic vectors). MEDIUMBLOB stores the raw 2048-byte float32 vector (read via `decodeEmbeddingColumn`, AGG-C10-01)
-- `entitlements` - Stripe paid-download entitlements (US-P54). **Warning:** `checkout.session.async_payment_succeeded` is not yet handled — delayed payment methods (bank transfer / ACH) complete checkout but never receive an entitlement row; only card / immediate-payment methods are fully supported until plan-316 CRT-R5C1-04 ships.
+- `entitlements` - Stripe paid-download entitlements (US-P54). **Warning:** `checkout.session.async_payment_succeeded` is not yet handled — delayed payment methods (bank transfer / ACH) would complete checkout but never receive an entitlement row. **Interim guard (AGG-H1, run-6 cycle-2):** the checkout session is now pinned to `payment_method_types: ['card']` in `app/api/checkout/[imageId]/route.ts`, so async-payment methods cannot be initiated and the money-taken-no-goods path is closed operationally. Only card / immediate-payment methods are supported until plan-316 CRT-R5C1-04 ships the `async_payment_succeeded` handler — do NOT add async methods to the checkout-session payload before that handler exists. The card-only pin is locked by `__tests__/checkout-route.test.ts`.
 - `admin_tokens` - Lightroom Classic publish-plugin PATs (US-P53)
 - `smart_collections` - Admin-defined dynamic galleries (US-P42)
 

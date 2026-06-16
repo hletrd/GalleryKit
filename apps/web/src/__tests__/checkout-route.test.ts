@@ -201,6 +201,15 @@ describe('checkout route branch tests (TEST-R5C1-06)', () => {
             /^checkout-42-203\.0\.113\.9-\d+$/
         );
 
+        // AGG-H1 / CRT-R5C1-04: the session MUST be pinned to card-only
+        // (immediate-capture) until the webhook handles
+        // async_payment_succeeded. If a future change drops this pin, async
+        // payment methods (SEPA/ACH/etc.) become initiatable and a buyer could
+        // be charged with no entitlement (money-taken-no-goods). This assertion
+        // fails loud if the card-only guard is removed.
+        const sessionPayload = callArgs[0] as { payment_method_types?: string[] };
+        expect(sessionPayload.payment_method_types).toEqual(['card']);
+
         // No rollback on success
         expect(rollbackMock).not.toHaveBeenCalled();
     });

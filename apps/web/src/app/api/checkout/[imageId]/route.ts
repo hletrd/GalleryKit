@@ -193,6 +193,18 @@ export async function POST(
         const session = await stripe.checkout.sessions.create(
             {
                 mode: 'payment',
+                // AGG-H1 / CRT-R5C1-04 (run-6 cycle-2): pin to card-only
+                // (immediate-capture) until the stripe webhook handles
+                // checkout.session.async_payment_succeeded (tracked in
+                // plan-316 CRT-R5C1-04). Async-payment methods (SEPA / ACH /
+                // bank-transfer / OXXO / Boleto) fire completed+unpaid, then
+                // settle days later via async_payment_succeeded — which we do
+                // NOT yet handle, so a buyer would be charged with no
+                // entitlement / download token (money-taken-no-goods). Forcing
+                // card-only makes completed+unpaid unreachable, closing the gap
+                // operationally. DO NOT add async methods here before the
+                // async_payment_succeeded handler ships.
+                payment_method_types: ['card'],
                 line_items: [
                     {
                         price_data: {
