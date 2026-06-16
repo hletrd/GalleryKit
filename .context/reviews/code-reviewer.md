@@ -1,81 +1,84 @@
-# Code Reviewer — Run 6 / Cycle 4 (HEAD f8147868, 2026-06-16)
+# Code Reviewer — Run 6 / Cycle 5
 
-**Angle:** code quality, logic bugs, SOLID, maintainability, error handling, edge cases.
-**Verdict:** **Honest convergence — 0 new Critical / 0 High / 0 Medium / 0 actionable Low.** One cosmetic comment-vs-code drift (NIT) introduced by this cycle's own Switch fix, noted for completeness. Everything else verified clean at HEAD.
+## Headline
 
-This is cycle 4 of a system that closed ~58 findings across runs 4–6. I read the two authoritative ledgers first (`_aggregate.md` cycle-3, `plan-353-run6-cycle3-deferred.md`), confirmed all 8 cycle-3 fixes landed correctly, then examined the highest-regression-risk recently-touched files from my angle and validated behavior directly from source (not comments/tests). I also fanned out two read-only Explore agents over the CLIP surface and the actions/lib surface; **I personally verified every candidate they surfaced against the actual code and schema, and the entire "critical/high" batch they returned was false positives** (details + debunk below, since silently dropping them would lose the audit trail).
-
----
-
-## Cycle-3 fixes — all 8 verified correctly applied at HEAD
-
-| Finding | Commit | Verified |
-|---|---|---|
-| AGG-C3-01 Switch geometry | a3b8c557 | `min-h-11/min-w-11` hit area preserved on Root; visible track is a nested `h-6 w-11` pill; thumb `size-5` + `translate-x-full` → full-width travel. Geometry correct (see NIT-1 for a stale comment). |
-| AGG-C3-02 Histogram contrast | 60c54346 | Both clip-warning spans now `text-destructive-text` (histogram.tsx:671,674). AA-compliant. |
-| AGG-C3-03 TMPDIR isolation | 06a3c5e7 | `TOPIC_RESOURCES_ROOT` env override added (process-topic-image.ts:16-21), mirrors upload-paths pattern; production unset → unchanged. |
-| AGG-C3-04 Backfill exit code | a033056d | `detectionFailures` tracked separately, surfaced in summary + WARN line, `process.exit(errors>0 || detectionFailures>0 ? 1 : 0)` (backfill-color-pipeline.ts:342,464-485). Correct. |
-| AGG-C3-05 settings-hash docstring | f603cd3f | Docstring now `max-age=3600, must-revalidate` (settings-hash.ts:20-24). |
-| AGG-C3-06 serve-upload ETag comment | f603cd3f | Inline 9-key list removed; points at `COLOR_IMPACTING_KEYS` (serve-upload.ts:197-202). |
-| AGG-C3-07 Stripe cross-ref label | 22d02262 | CLAUDE.md cross-ref updated. |
-| AGG-C3-18 color-detection re-export | 0ef29a10 | Re-export removed; `actions/images.ts:29` + `wide-gamut-primaries.test.ts` repointed to `@/lib/color-primaries` leaf. No remaining importer reaches the predicate via the fs/sharp module. |
-
-No regressions introduced by these fixes (each verified by reading the resulting source).
+**0 new actionable findings.** HEAD-verified at `2f603716` (working tree clean). All five cycle-4 findings (AGG-C4-01..05) are CLOSED at HEAD; no new logic / SOLID / maintainability / error-handling / data-flow defect survives verification. Honest convergence — reporting zero, as instructed, because zero is the true state.
 
 ---
 
-## Recently-touched core files — examined from my angle, all clean
+## Scope & Method
 
-- **serve-upload.ts** (abort handling AGG-H5, SWR hash cache): correct. `signal.aborted` early-bail destroys fd (269-272); abort listener `{once:true}` is idempotent and request-scoped (no leak on normal completion). SWR inflight body never rejects → no unhandled rejection (58-73). Cold-start path waits exactly once.
-- **process-image.ts** `_verifyWebpIccChunk` (2784d244, 1KB partial read): correct — `fs.open` + 1KB read + `finally handle?.close().catch()`. fd released on all paths. `verifyWebpIccInBuffer(head.subarray(0, bytesRead))` correctly bounds the slice to actual bytes read.
-- **process-image.ts** metadata decode at :1019 (AGG-C3-10, deferred): deferral reasoning holds — `baseHeight` is consumed only by the wide-gamut `basePixels > cap` gate (1022), which is itself `if (isWideGamutSource && …)`, so for sRGB sources the decode result is genuinely discarded. Perf-only, correctly deferred.
-- **gps-exif-strip.ts** zero-offset fix (d17e5cc2): `if (ifdAbs <= tiffStart + 7) return null;` is the correct fail-safe (valid TIFF IFD0 offset ≥ 8 → null routes to tier-2 metadata-free re-encode). Consistent with module doctrine.
-- **histogram.tsx** clip-label block (647-678): `total === 0` guards division; per-channel worst-case max in RGB mode is correct. Contrast fix in place.
-- **image-queue.ts** CLIP embedding hook (434-478): genuinely fire-and-forget (`void (async()=>{})()`), disabled-by-default early return (442), all errors caught internally (475). Write contract (raw Buffer → MEDIUMBLOB, `onDuplicateKeyUpdate` on PK `imageId`) is consistent across all 3 write sites.
+Angle: code quality, logic bugs, SOLID, maintainability, error handling, invalid assumptions, data-flow / state-consistency.
 
----
-
-## NIT-1 — Switch.tsx top docblock describes a `translate-x` value the code does not use (cosmetic, this-cycle drift)
-
-- **File:** `apps/web/src/components/ui/switch.tsx:13-14` vs `:49`
-- **Issue:** The top comment block (added by the AGG-C3-01 fix, commit a3b8c557) says the thumb "travels the full visible track width via `translate-x-[calc(100%-2px)]` (width-relative, unlike the old fixed 20 px travel)." The actual implementation at line 49 uses `data-[state=checked]:translate-x-full`, and the *inline* comment at lines 41-44 correctly documents `translate-x-full` (40px inner − 20px thumb = 20px = 100% of thumb width). So the code and the geometry are right; only the top docblock cites a `calc(100%-2px)` form that was evidently considered but not shipped.
-- **Why it matters (barely):** Pure comment-vs-code drift — exactly the stale-doc class this loop polices (cf. AGG-C3-05/06 fixed last cycle). Zero runtime impact. A future maintainer reading the top block could be briefly misled about the travel mechanism before reaching the accurate inline comment.
-- **Fix:** Change the top-block phrase `translate-x-[calc(100%-2px)]` → `translate-x-full`, or drop the parenthetical (the inline comment at 41-44 already explains the mechanism precisely).
-- **Confidence:** High (fact — both lines read directly). **Impact: cosmetic.** Genuinely optional; I would not gate the cycle on it.
+1. Read repo rules (root `CLAUDE.md`, `.context/reviews/_aggregate.md` cycle-4 merged findings) before any judgement, to avoid re-reporting closed/deferred items.
+2. Verified the cycle-4 baseline→HEAD delta (`f8147868..2f603716`): the only source/script changes are the four cycle-4 fix commits (`6ab40644`, `9a262e3f`, `1fd350be`, `24159f36`) plus their tests. Confirmed each fix is genuinely landed (read `switch.tsx`, the backfill `computeBackfillExitCode` + `countDeletedMidReencodeDetectionFailures` walkback).
+3. Built a file inventory by size + recent-change frequency (last 40 commits) and read every high-value / recently-touched / boundary-bug-prone file in full — not a subset:
+   - **Largest / most complex:** `lib/image-queue.ts` (786), `lib/admin-backfill-runner.ts` (871), `app/actions/images.ts` (1157, the god-action), `lib/data.ts` (buffered view-count flush + cursor/pagination + smart-collection query sections), `lib/gps-exif-strip.ts` (605, byte surgery).
+   - **Recently changed:** `lib/serve-upload.ts`, `lib/clip-embeddings.ts`, `lib/view-retention.ts`, `lib/clip-model.ts`, `lib/gallery-config.ts`, `scripts/backfill-color-pipeline.ts` (cycle-4 diff), `app/actions/embeddings.ts`, `app/api/search/similar/[id]/route.ts`.
+   - **Highest-risk routes / surfaces:** `app/api/download/[imageId]/route.ts`, `app/api/stripe/webhook/route.ts`, `app/actions/public.ts`, `lib/auth-rate-limit.ts`, `lib/bounded-map.ts`, `lib/admin-tokens.ts`, `lib/analytics.ts`.
+4. Ran 2 read-only `Explore` fan-out sweeps (async/promise/error-handling bug classes; numeric/boundary/state-consistency bug classes) + 5 independent corroborating `grep` sweeps. Did NOT assume tests/comments correct — validated behavior from code.
 
 ---
 
-## Explore-agent candidates I investigated and REJECTED (audit trail)
+## Confirmed analyses (candidates examined, all resolve to "not a bug" or "already handled at HEAD")
 
-I fanned out two Explore agents. Their conclusions on the well-reviewed shared/data/sharing/atom/download/collections surface ("clean") I corroborate. Their **CLIP "critical/high" batch was wrong**; recording the debunk so it is not re-litigated next cycle:
+- **Cycle-4 closures re-verified, NOT re-reported:**
+  - `switch.tsx:14` header comment now correctly cites `translate-x-full` (the geometry triple `w-11`/`px-0.5`/`size-5`/`translate-x-full` is consistent; `switch-geometry-contract.test.ts` pins it).
+  - `backfill-color-pipeline.ts`: `detectionFailures` walkback for deleted-mid-reencode rows present (`:453`), exit code via pure `computeBackfillExitCode` helper (`:530`), tested.
+  - image-queue bootstrap flake fix + switch geometry test + detection-failure decrement all landed.
 
-- **"Rate-limit inverted logic" (embeddings.ts:33-42) — NOT A BUG.** First call: no entry → set count:1 → returns `1 > 1` = false (ALLOWED). Second call in-window: `count++`→2 → returns `2 > 1` = true (BLOCKED). That is precisely the documented "once per hour per admin" contract. The agent misread it.
-- **"Model-version upsert overwrites old row / PK is (imageId)" (backfill-clip-embeddings.ts:124) — NOT A BUG.** Schema confirms `imageEmbeddings.imageId` is the sole PK (`schema.ts:274`, `int("image_id").primaryKey()`, `onDelete:'cascade'`). One embedding row per image is the intended model; `model_version` records which encoder produced it; the read path filters by the active mode's version. Overwriting on mode switch is correct by design. The agent invented a `(imageId, modelVersion)` composite PK that does not exist.
-- **"Dimension check should be `===` not `<`" (clip-model.ts:119,179) — NOT A BUG.** jina-clip-v2 emits native **1024** dims; `truncateAndNormalize` takes the first 512 (Matryoshka). `data.length > EMBEDDING_DIM` is the EXPECTED case; `===` would break the entire feature. `embeddingToBuffer` already hard-asserts exactly 512 downstream (clip-embeddings.ts:63).
-- **"Float maps outside [-1,1]" (clip-inference.ts:41) — NOT A BUG.** `(u32 / 2³¹) − 1` over input `[0, 2³²−1]` yields `[−1, +0.99999999953]`, never >1. It is a deterministic STUB (explicitly non-semantic) and is re-normalized by `truncateAndNormalize` anyway.
-- **"Silent skip / undifferentiated error counting" (embeddings.ts:116,140) — observability nit at most, not actionable.** The action is dark-by-default and has **no UI caller** (the sidecar script is canonical, per the in-source NOTE at embeddings.ts:70-73). Counting a missing-original as `skipped` is reasonable. No data-loss path.
+- **`lib/image-queue.ts`** — claim/retry/bootstrap state machine is leak-free. Lock acquire/release symmetric (`finally` release with `.catch`), `enqueued`/`retryCounts`/`claimRetryCounts`/`lastErrors`/`permanentlyFailedIds` all pruned on every exit path (`finally` at `:544-556`), FIFO eviction caps bounded, `failed_at` written via `toMySqlDateTime` (no trailing-Z ER 1292). `scheduleBootstrapContinuation` re-arm guard correct. Fire-and-forget caption/embedding hooks correctly `void`-ed + `.catch`-ed. No stuck-flag, no counter drift.
 
-Grounded-but-minor items from the second agent, assessed and NOT raised as findings:
-- **`getOnThisDayImages(month, day)` "no range validation" (data-timeline.ts:95).** Only caller derives month/day from `new Date()` (on-this-day-widget.tsx). MySQL `MONTH()=13` → 0 rows, no crash, parameterized (no injection). Robustness nit on an internally-bounded input; not worth a finding in a system at this maturity.
-- **`getYearInReviewImages` JS `getMonth()` vs SQL `YEAR()/MONTH()` TZ seam (data-timeline.ts:241).** mysql2 has no `dateStrings`/`timezone` override, so DATETIME returns a JS `Date`; `getMonth()` reads it in the Node-process TZ while the SQL filter uses the MySQL session TZ. In the **documented single-container deployment both are UTC and agree**, so this is a theoretical seam that only manifests under TZ misconfiguration. Same class as the deferred timezone concerns; not a live bug at the documented topology. Informational only.
-- **`refundEntitlement` convergence-error masking (sales.ts:241-258).** When Stripe returns `charge_already_refunded` and the local convergence UPDATE then throws, the admin sees the original "refund failed" rather than "refunded on Stripe, local sync failed." The failure IS logged server-side (244-246). Defensible product choice (don't show a confusing success on a partial state); an observability refinement, not a correctness defect. Not raised.
+- **`lib/admin-backfill-runner.ts`** — `running` flag reset in `finally`; `lastError` documented last-writer-wins at concurrency>1 (counts stay per-worker-correct); `resolveBackfillConcurrency` NaN-guards the pool limit (`Number.isFinite ? : 10`) so a test-mock `undefined` can't freeze PQueue; deleted-mid-reencode classified before detection-failed (mutually exclusive); `reprocessOne` claim acquired adjacent to its protected `try`/`finally` (no leak window). The discriminated `ReprocessResult` partitions every early-return into exactly one tally.
+
+- **`app/actions/images.ts`** — per-file try/catch wraps every iteration; upload-tracker pre-increment placed AFTER all validation (no manual rollback needed), `settleUploadTrackerClaim` symmetric on all-fail (`:490`) and success (`:512`) paths; `uploadContractLock.release()` in outer `finally`. `safeInsertId` guards BigInt precision; code-point-safe length checks throughout. `bulkUpdateImages` validates TriState shape before reading `.mode` (no framework-500 on malformed payload). Delete paths use `[]` sizes for full variant scan. (The outer-finally tracker-release nuance is the pre-existing deferred AGG-C3-09, framework-only trigger — not re-reported.)
+
+- **`lib/data.ts`** — buffered shared-group view-count flush is correct: timer nulled on entry (COR-R4C11-01), atomic Map swap, re-buffer retry cap (`VIEW_COUNT_MAX_RETRIES`), FIFO eviction of both `viewCountBuffer` and `viewCountRetryCount`, exponential backoff. Cursor normalization (`normalizeImageListCursor` + `buildCursorCondition`) keyset logic sound. `normalizePaginatedRows` applies exactly ONE `+1` lookahead and `hasMore = rows.length > pageSize`; `getImagesForSmartCollection` passes ONE `+1` (the R4C5 double-+1 bug is genuinely fixed and `loadMoreSmartCollectionImages` correctly passes `safeLimit`, not `+1`). `COUNT(*) OVER()` post-GROUP-BY counts distinct images; empty-result `rows[0]?.total_count ?? 0` correct.
+
+- **`lib/gps-exif-strip.ts`** — every byte offset bounds-checked via `inBounds`; IFD chain depth/entry-count capped + visited-set cycle guard; GPS-IFD zeroing math correct; HEIF Exif TIFF region end `start+4+(length-4)=start+length` with the `headerOffset <= length-8` guard leaving ≥4 bytes; iloc extent parsing version-aware; WebP chunk padding correct; all structural anomalies return `null` → re-encode fallback. The single most boundary-bug-prone file in the repo is exemplary.
+
+- **`app/api/download/[imageId]/route.ts`** — FileHandle leak prevented on every post-open path (claim-fail, already-used, stream-setup-fail close it; success autoCloses); validation front-loaded before the atomic single-use claim; path traversal containment + realpath check; RFC 6266/5987 Content-Disposition encoding. GET interstitial is write/fs-free (auto-HEAD safe).
+
+- **`app/api/stripe/webhook/route.ts`** — exhaustively hardened: `payment_status === 'paid'` gate, oversized-email reject before truncation, deleted-image FK both pre-checked and caught (ER_NO_REFERENCED_ROW_2 → 200 not 500), dup-key-loser disambiguation via `affectedRows===1 && insertId>0`, SELECT-first idempotency. No dead-token hazard.
+
+- **`app/actions/public.ts` / `lib/analytics.ts`** — rate-limit TOCTOU correct (pre-increment in-memory → DB increment → combined check → symmetric rollback), pinned `bucketStart`, cursor coercion fails closed to `invalid`, referrer TLD+1 strips all trailing dots, private-IP/onion → `direct`. Fire-and-forget view inserts `.catch`-ed.
+
+- **`lib/gallery-config.ts`** — `semanticSearchMode` heal logic intact (`production`→`disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`); every setting NaN/invalid-guarded with default fallback; whole resolver `try/catch` falls back to defaults on DB unavailability. (HARD GUARD honored — CLIP-disabled-by-design NOT flagged.)
+
+- **`lib/clip-model.ts` / `clip-embeddings.ts` / `embeddings.ts` / similar route** — HWC→CHW pixel indexing math correct; `decodeEmbeddingColumn` handles raw-Buffer + legacy-base64 + string; cosine/dot/topK pure & correct; lazy model singleton nulls promise on failure for retry; mode-aware backfill; similar route gates on `production` (does not activate the dark feature) and rolls back rate-limit on every early-return.
+
+## Independent grep corroboration (all clean)
+- No `parseInt` without radix in source. No `<= …​.length` loop bounds in source.
+- All `if (fn())`-without-await heuristic hits are genuinely SYNC `boolean` functions (`checkShareRateLimit`, `checkUserCreateRateLimit`, `preIncrementBackfillAttempt`, `String.trim()`).
+- All 50 empty-catch / `.catch(()=>undefined)` sites are best-effort cleanup (lock release, fd close, fire-and-forget) — none swallow a result a caller depends on.
+- `Number(x) || 1` cases are concurrency defaults where 0 is invalid anyway (correct, not a 0-is-valid bug).
+- 25 `Promise.all` sites are independent reads / idempotent file deletes / verifications — none corrupt a shared invariant on partial rejection.
+
+## Explore fan-out results
+- **Numeric/boundary/state-consistency sweep:** "NO GENUINE FINDINGS" (verified `Number.isFinite`/`isNaN` guards, FIFO eviction keys, try/finally flag resets, sentinel comparisons).
+- **Async/promise/error-handling sweep:** no genuine floating-promise / partial-mutation / finally-mask / sync-async-misuse defect surfaced beyond the best-effort-cleanup paths already accounted for above.
 
 ---
 
-## What I verified clean (no findings)
+## Findings
 
-Switch fix geometry · histogram contrast + clip math · backfill exit-code + detection-failure resume contract + delete-mid-reencode partition helpers · serve-upload abort/SWR · 1KB WebP ICC read · GPS zero-offset fail-safe · CLIP write/read round-trip across image-queue + embeddings action + sidecar (raw-Buffer MEDIUMBLOB contract, PK upsert) · CLIP stub determinism + Matryoshka truncation · color-detection re-export removal (no dangling importer) · data-timeline privacy guards · atom-feed/download-tokens/download-interstitial/collections/smart-collections/sharing/analytics-data (corroborated clean).
+### CRITICAL: 0
+### HIGH: 0
+### MEDIUM: 0
+### LOW: 0
 
-**HARD GUARD honored:** I reviewed CLIP code for correctness only; I did NOT propose activating semantic search (stays `disabled` by design). The disabled-mode early returns are correct in all 3 write paths.
+No issue rises to the bar of "real, HEAD-verified, genuinely worth a code change."
+
+### Open Questions (low-confidence) — none
+
+### Positive Observations
+- The cycle-4 fixes are correct AND complete (helper extraction for the exit code is exactly the right testability move; the `detectionFailures` walkback comment precisely explains the derivative-slice provenance).
+- Fix-lineage comments are load-bearing and accurate across the surfaces I validated — they materially speed re-review and encode the failure mode each guard defends.
+- The two backfill paths (sidecar script + in-app runner) maintain a genuinely consistent counter-partition + resume contract; the asymmetry that produced AGG-C4-04 is now symmetric.
+- Boundary-critical byte surgery (`gps-exif-strip.ts`) and the paid-download FileHandle lifecycle are model examples of fail-safe, leak-free defensive coding.
 
 ---
 
-## Summary by severity
+## Recommendation
 
-- **Critical: 0**
-- **High: 0**
-- **Medium: 0**
-- **Low (actionable): 0**
-- **Nit (cosmetic, optional): 1** — NIT-1 Switch.tsx top-comment cites `translate-x-[calc(100%-2px)]` while code uses `translate-x-full` (this-cycle doc drift; geometry is correct).
-
-Honest convergence. The codebase remains in genuinely strong shape from a code-quality/logic/SOLID standpoint, and the cycle-3 fixes introduced no regressions.
+**APPROVE** — no CRITICAL/HIGH/MEDIUM/LOW code-quality findings at any confidence. The system is at genuine convergence from the code-quality / logic / SOLID / data-flow angle. Per the honesty requirement, ZERO new findings is the correct, desirable outcome for this cycle.

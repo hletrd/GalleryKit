@@ -1,158 +1,188 @@
-# Tracer — Run 6 / Cycle 4
+# Tracer — Run 6 / Cycle 5
 
-**HEAD:** f8147868
+**HEAD:** 2f603716 (working tree CLEAN)
 **Date:** 2026-06-16
-**Angle:** evidence-driven causal tracing of suspicious end-to-end flows, competing hypotheses, evidence for/against, uncertainty tracking.
-**Working tree:** CLEAN. **Tests run this pass:** touch-target-audit + backfill-color-pipeline + admin-backfill-runner-detection-failure + sw-template-contract + backfill-color-pipeline-deleted-mid-reencode → **44/44 passing**.
+**Angle:** evidence-driven causal tracing of the trickiest end-to-end data flows — competing hypotheses, evidence for/against, uncertainty tracking, next-probe recommendations.
+**Tests run this pass (from `apps/web`):** backfill-color-pipeline-deleted-mid-reencode + admin-backfill-runner-detection-failure + data-view-count-flush + stripe-webhook-source + checkout-route → **52/52 passing**.
 
 ---
 
 ## Headline
 
-All four target flows trace **substantially CLEAN**. The two prior-cycle fixes I was asked to re-examine (backfill exit-code `a033056d`, Switch geometry `a3b8c557`) are **correct** — the Switch geometry is mathematically sound and the detection-failure resume invariant holds on both backfill paths. Cache/ETag invalidation is consistent across all three layers. The upload→process→serve delete-race is closed: the worker is always the last writer and cleans up its own derivatives.
-
-**One genuine latent defect found** (LOW): a sidecar-backfill exit-code over-count at the *detection-failure ∩ concurrent-delete* intersection — `detectionFailures` is inflated by deleted rows, so the new `a033056d` non-zero exit can fire for a run whose "failures" no longer exist. Bounded, not data-integrity. **Two doc/comment drifts** (LOW/INFO) in the just-landed Switch fix.
+Every assigned suspicious flow traces **CLEAN or DOCUMENTED-and-accepted**. The cycle-4 fix I was asked to re-verify (TRC-C4-01 / AGG-C4-04 — sidecar `detectionFailures` walk-back, commit `1fd350be`) is **sound**: the `updateResults.slice(items.length)` recovers exactly the detection-failure batch slice, and the matrix is unit-pinned. The Stripe async-payment gap is **correctly documented AND operationally closed** by the card-only checkout pin — the doc warning is accurate. View-count undercount is the documented best-effort tradeoff with the crash window narrowed to a single in-flight chunk. Settings→ETag invalidation works on both serve paths and CLAUDE.md already states the correct 9-key count (the "5" in the task framing is a stale snapshot — current doc says 9). **ZERO new actionable findings.**
 
 ---
 
-## FLOW 1 — Upload → process → serve (delete-while-processing race, claim lock, orphan cleanup)
+## FLOW 1 — Backfill `detectionFailures` walk-back (re-verifying the cycle-4 fix `1fd350be` — do NOT re-flag)
 
 ### Observation
-`uploadImages` writes the original, INSERTs the row at `pipeline_version=CURRENT, processed=false`, fire-and-forget enqueues processing. The queue worker claims a per-image advisory lock, re-checks the row, encodes 3 formats, then a conditional `UPDATE … WHERE processed=false`. `deleteImage` can run concurrently and does NOT take the per-image lock.
+TRC-C4-01 was: the sidecar `detectionFailures++` fires per-row when `reprocessRow` returns `derivativeOnly`, but `flushBatch`'s deleted-mid-reencode partition adjusted `processed`/`deletedMidReencode` WITHOUT walking back `detectionFailures`, so a detection-failed-AND-then-deleted row left the counter elevated and `process.exit(... detectionFailures>0 ...)` returned non-zero for a row that no longer exists. Commit `1fd350be` claims a fix.
 
 ### Hypothesis table
 | Rank | Hypothesis | Confidence | Evidence Strength |
 |------|------------|------------|-------------------|
-| 1 | No window leaves disk/DB inconsistent or orphans a served derivative | **High** | Strong (source-traced, all interleavings enumerated) |
-| 2 | A derivative written by the worker AFTER delete's cleanup survives as an orphan | Refuted | Strong |
-| 3 | Two workers double-encode the same id | Refuted | Strong |
+| 1 | Fix is sound — the slice recovers exactly the detection-failure∩deleted overlap; no over/under-count | **High** | Strong (source-traced + 52 tests pass) |
+| 2 | The slice mis-indexes (off-by-one or wrong partition) under some batch ordering | Refuted | Strong |
+| 3 | `processed -=` now double-counts or under-counts the deleted rows | Refuted | Strong |
 
-### Evidence FOR Hypothesis 1 (clean)
-- Per-image lock `gallerykit:image-processing:{id}` acquired before encode (`image-queue.ts:261`, `getImageProcessingLockName`), released in `finally` (`:545`). Non-blocking `GET_LOCK(name,0)` (`:199`) — a second worker that loses the claim reschedules (`:262-283`), so **double-encode is impossible** (refutes H3).
-- Conditional UPDATE `WHERE id=? AND processed=false` (`image-queue.ts:370-372`). On `affectedRows===0` (row deleted mid-process) the worker cleans up ALL variants with the `[]` full-scan form (`:374-391`).
-- `deleteImageVariants(dir,name,[])` does a real directory scan matching `{name}_*{ext}` + base (`process-image.ts:517-534`), so every size variant is removed regardless of the configured `image_sizes` — confirmed at the source.
-- `deleteImage` removes the id from `enqueued`/retry maps (`images.ts:593-599`) then deletes the row transactionally (`:603-607`) then cleans files with `[]` (`:618-625`).
-
-### Interleaving trace (the dangerous ordering)
-The only ordering that could orphan a file is: **delete cleans up → worker writes derivatives afterward.** Trace:
-1. deleteImage commits row delete + cleans files (no/partial derivatives on disk).
-2. Worker `processImageFormats` re-materializes fresh derivatives (`image-queue.ts:337`) — lands AFTER delete's cleanup.
-3. Worker conditional UPDATE → row gone → `affectedRows===0` → worker runs its OWN `[]` cleanup (`:374-391`).
-
-**The worker's cleanup is the terminal step.** There is no code path where the worker writes derivatives *after* its own `affectedRows===0` cleanup. So the worker is always the last writer and always sweeps. No orphan survives (refutes H2). Atomic base-rename via `.tmp` (`process-image.ts:1236-1257`) closes the partial-base-file 404 window; leftover `.tmp` swept at bootstrap (`image-queue.ts:32-73`).
+### Evidence FOR Hypothesis 1 (fix sound) — decisive
+- **Batch ordering is deterministic.** In `flushBatch` (`scripts/backfill-color-pipeline.ts:405-433`), success rows (`items`) are pushed into `updateResults` FIRST (loop `:407-423`), then derivative rows (`derivativeItems`) are pushed SECOND (loop `:424-432`). So `updateResults` indices `[0, items.length)` are success outcomes and `[items.length, end)` are derivative (detection-failure) outcomes.
+- **The slice is exact.** `const derivativeResults = updateResults.slice(items.length)` (`:454`) recovers precisely the derivative-slice outcomes. `countDeletedMidReencodeDetectionFailures(derivativeResults)` (`:159-163`) filters `affectedRows===0` over ONLY that slice, and `detectionFailures -= …` (`:455`) subtracts exactly the detection-failure∩deleted overlap. A detection-failure row still alive (`affectedRows===1`) keeps its count; one deleted (`affectedRows===0`) is walked back. **Correct by construction.**
+- **`processed -=` is correct (refutes H3).** `processed++` fires for ANY `outcome==='processed'` (`:467`) — both success and derivative rows. `deletedMidReencodeFiles` is collected over the FULL `updateResults` (success + derivative, `:436`), and `processed -= deletedMidReencodeFiles.length` (`:444`) decrements by the total deleted count. Since both row types contributed `+1` to `processed`, decrementing by the combined deleted count is exact. No double-count.
+- **Pinned by tests.** `backfill-color-pipeline-deleted-mid-reencode.test.ts`:
+  - `countDeletedMidReencodeDetectionFailures([{1},{0},{0}]) === 2` (`:166-178`) — the overlap counter.
+  - `computeBackfillExitCode` matrix 0/0→0, errors→1, detectionFailures→1, both→1 (`:191-207`).
+  - source-shape pins that `flushBatch` calls `collectDeletedMidReencodeFiles(updateResults)`, maps cleanup, and decrements via `detectionFailures -= countDeletedMidReencodeDetectionFailures(` (`:138-159`).
+  - All pass in this pass's run.
 
 ### Evidence AGAINST / gaps
-- `original/{uuid}` SIGKILL orphan between original-write and INSERT remains (AGG-C3-08, deferred) — disk-bloat only, **NOT re-reported** (reasoning confirmed correct: file never served, never referenced, cleanup sweep covers only webp/avif/jpeg).
-- No runtime two-worker race test (AGG-C3-19 deferred) — invariant is sound by construction; lock-name pins only. Unchanged.
+- The decrement uses a `.slice(items.length)` that depends on the two push-loops keeping their relative order. A future refactor that interleaves success/derivative pushes into `updateResults` would break the slice silently. The source-shape test pins the CALL but not the push ORDER. **Pre-existing INFO-level brittleness, NOT a new defect** — the ordering is a single function's two adjacent loops and the comment at `:450-453` explicitly documents the invariant ("derivativeItems are pushed last").
 
-### Verdict: **CLEAN.** Critical unknown: none. No probe needed.
+### Verdict: cycle-4 fix **SOUND / CLEAN**. Not re-reported. Critical unknown: none.
 
 ---
 
-## FLOW 2 — Backfill detection-failure-after-encode (re-examining `a033056d`)
+## FLOW 2 — Stripe checkout → entitlement (the documented `async_payment_succeeded` gap)
 
 ### Observation
-Both backfill paths (sidecar `scripts/backfill-color-pipeline.ts`, in-app `lib/admin-backfill-runner.ts`) re-encode then re-detect. When encode succeeds but `detectColorSignals` throws, the row must persist fresh `was_downscaled`/`avif_10bit` WITHOUT advancing `pipeline_version`, so it stays a candidate (`pipeline_version < CURRENT`) for a later detection retry.
+CLAUDE.md warns: `checkout.session.async_payment_succeeded` is not handled — delayed payment methods (bank transfer / ACH) complete checkout but never receive an entitlement row; only card / immediate-payment methods supported until plan-316 CRT-R5C1-04 ships. The webhook handles only `checkout.session.completed`.
 
 ### Hypothesis table
 | Rank | Hypothesis | Confidence | Evidence Strength |
 |------|------------|------------|-------------------|
-| 1 | `pipeline_version` correctly stays behind on detection-failure; no path lands stale color metadata at CURRENT | **High** | Strong (both paths source-traced + a pinning test passing) |
-| 2 | A success-branch partial UPDATE could bump version with stale columns | Refuted | Strong |
-| 3 | Sidecar exit-code/summary mis-reports | **Confirmed (minor)** | Moderate (source-traced) |
+| 1 | The doc warning is ACCURATE and the gap is operationally closed by the card-only checkout pin | **High** | Strong (both routes source-traced) |
+| 2 | The gap WIDENED — the app's own checkout can now create an async session that strands a paying customer | Refuted | Strong |
+| 3 | The doc is WRONG — entitlements ARE created for async/unpaid sessions (money-no-goods inverse, double-mint) | Refuted | Strong |
 
-### Evidence FOR Hypothesis 1 (resume invariant holds)
-- **Sidecar:** detection-failure returns `{outcome:'processed', derivativeOnly}` (`backfill-color-pipeline.ts:230-233`) → routed to `derivativeBatch` (`:440`) → batched UPDATE sets ONLY `was_downscaled`+`avif_10bit` (`:394-402`), **no `pipeline_version`**. Success returns `signals` → UPDATE sets `pipeline_version=CURRENT` together with fresh signals atomically (`:378-391`).
-- **In-app runner:** `signals===null` branch UPDATEs ONLY `was_downscaled`+`avif_10bit` (`admin-backfill-runner.ts:594-599`), returns `detection-failed` (`:609`). No version bump. Success branch (`:557-577`) writes version + fresh signals in one UPDATE.
-- **Pinned by test** `admin-backfill-runner-detection-failure.test.ts:198-203`: asserts the detection-failure UPDATE does NOT contain `pipeline_version` but DOES contain `was_downscaled`+`avif_10bit`. PASSING.
-- H2 refuted: version bump and color columns are a single atomic UPDATE; a partial failure rolls the whole UPDATE, never leaving version-ahead-of-columns. There is no interleaving that strands stale color at CURRENT.
+### Evidence FOR Hypothesis 1 (accurate + operationally closed)
+- **Checkout is pinned card-only.** `api/checkout/[imageId]/route.ts:207` sets `payment_method_types: ['card']`. The comment `:196-206` (AGG-H1 / CRT-R5C1-04) explains card-only makes `completed+unpaid` unreachable through the app, closing the gap operationally, and "DO NOT add async methods here before the async_payment_succeeded handler ships." So a buyer **cannot initiate an async-payment session via the app**.
+- **The webhook defends in depth anyway.** `api/stripe/webhook/route.ts:105` gates `if (session.payment_status !== 'paid')` and returns `200 {received:true}` — `unpaid` (the async happy-path-pending state) is rejected with `console.warn` (`:106-110`), unexpected statuses with `console.error` (`:111-116`). So even a manually-created (Stripe-dashboard) async session that fires `completed+unpaid` mints NO entitlement (refutes H3 — no money-no-goods double-mint).
+- **The residual gap is exactly what the doc says.** If an async session were created OUT-OF-BAND (Stripe dashboard / direct SDK), it fires `completed+unpaid` (rejected → no entitlement), then settles later via `async_payment_succeeded` — which this route does NOT handle (only `checkout.session.completed` at `:88`), so it falls through to `:453` `{received:true}` and never creates an entitlement. The customer paid, no entitlement. **This is precisely the documented "complete checkout but never receive an entitlement row."** The doc is correct; the app's own flow can't reach it (card-only); the residual is the out-of-band path, bounded and tracked in plan-316.
+- **No widening (refutes H2).** The card-only pin is present at HEAD; `git log` shows commit `22d02262` added the lineage cross-ref to CLAUDE.md. Nothing in the cycle-5 delta (`6ab40644`, `9a262e3f`, `1fd350be`) touches the Stripe surface.
+- **Idempotency + correctness corroborated** by `stripe-webhook-source.test.ts` + `checkout-route.test.ts` (pass): SELECT-by-sessionId idempotency skip (`:320-331`), `affectedRows===1 && insertId>0` dup-key disambiguation (`:382`), deleted-image FK 200 (`:273-281`, `:390-398`), zero-amount reject (`:299-305`), tier allowlist (`:231-235`).
 
-### `a033056d` exit-code fix — verified correct in the common case
-- `detectionFailures++` in the derivative branch (`:439`); surfaced in progress (`:453`), Done line (`:464`), a loud WARNING (`:470`), and `process.exit(errors>0 || detectionFailures>0 ? 1 : 0)` (`:485`). An all-detection-failure run now exits 1 — the fix achieves its goal.
-
-### Evidence AGAINST / gap — **LATENT DEFECT TRC-C4-01 (LOW)**
-**Sidecar `detectionFailures` over-counts rows that were detection-failures AND concurrently deleted mid-reencode.**
-
-Trace: `detectionFailures++` fires inside the per-row queue task (`:439`), BEFORE the batched `flushBatch` discovers the 0-row UPDATE. `collectDeletedMidReencodeFiles(updateResults)` runs over BOTH success and derivative results (`:392, :401, :406`). When a derivative-only (detection-failure) row's UPDATE matched 0 rows (deleted), the handler does `processed -= count` and `deletedMidReencode += count` (`:413-414`) but **never decrements `detectionFailures`**.
-
-- **Consequence:** `process.exit(... detectionFailures>0 ...)` (`:485`) can exit **non-zero** for a run whose only "stale" rows were *deleted and no longer exist*. A CI/cron wrapper re-triggers a backfill that finds nothing to do (idempotent). **Bounded, not data-integrity** — the deleted rows are genuinely gone; there is nothing stale to retry.
-- **Trigger:** a photographer deletes a photo while a sidecar backfill is mid-re-encode of that exact id AND that id's color detection also threw. Narrow intersection.
-- **In-app runner is CLEAN here:** `reprocessOne` checks `affectedRows===0` inline and returns `deleted-mid-reencode` BEFORE `detection-failed` (`admin-backfill-runner.ts:605-609`), so the two reasons are **mutually exclusive** — a deleted detection-failure row counts only as `deletedMidReencode`, never inflating `detectionFailures`/`hadFailures` (`:791`). The asymmetry exists only because the sidecar batches DB writes decoupled from the per-row encode (its own header acknowledges this, `:36-43`).
-- **Fix (one line, if scheduled):** in `flushBatch`, when a *derivative* item is the deleted one, decrement `detectionFailures` alongside the `processed`/`deletedMidReencode` adjustment — i.e. partition `deletedMidReencodeFiles` by which batch (success vs derivative) the row came from. OR re-derive the exit condition from a post-flush recount.
-
-### Verdict: resume invariant **CLEAN**; exit-code precision **LOW defect TRC-C4-01** (sidecar only). Critical unknown: none — the over-count is deterministic from source. Discriminating probe (if doubted): unit test feeding `flushBatch` a derivative item with `affectedRows:0` and asserting `detectionFailures` is not left elevated.
+### Verdict: **DOCUMENTED + ACCEPTED + operationally closed.** NOT a finding (the doc is accurate and the gap is bounded as documented). Critical unknown: none.
 
 ---
 
-## FLOW 3 — Switch geometry fix (`a3b8c557`)
+## FLOW 3 — View-count buffer → async flush → crash window (undercount path)
 
 ### Observation
-The touch-target retrofit had bumped Switch Root to `min-h-11 min-w-11` (44px) but left the thumb `size-5` + fixed `translate-x-5` (20px), so the thumb never reached the right edge ("half-on"). The fix (`switch.tsx`) nests a visible `h-6 w-11` pill inside the 44px Root and switches the thumb to `translate-x-full`.
+CLAUDE.md states shared-group `view_count` is "best-effort approximate analytics" — increments buffered in process memory, flushed asynchronously, so a crash/kill/DB-outage can undercount. The question: is the undercount bounded as documented, or has a wider loss path opened?
 
 ### Hypothesis table
 | Rank | Hypothesis | Confidence | Evidence Strength |
 |------|------------|------------|-------------------|
-| 1a | Fully fixed — thumb travels edge-to-edge, geometry correct | **High** | Strong (pixel math + Radix source verified) |
-| 1b | Fixed visually but hit-zone broke | Refuted | Strong |
-| 1c | Some Switch usages still wrong | Refuted | Strong |
-
-### Evidence FOR 1a (fully fixed)
-- **Pixel math:** Root `inline-flex min-h-11 min-w-11 items-center justify-center` → 44×44 hit area, centers child (`switch.tsx:26`). Visible track `h-6 w-11` (24×44) with `px-0.5` (2px/side) → **40px inner box** (`:36`). Thumb `size-5` (20px); `translate-x-0` unchecked → flush left; `data-[state=checked]:translate-x-full` = `translateX(100% of own width = 20px)` (`:49`). Inner 40px − thumb 20px = **20px travel needed = 20px delivered → flush right.** Geometry exact.
-- **Radix `data-state` propagation verified:** `@radix-ui/react-switch/dist/index.mjs:48` sets `data-state` on Root; `:89` (`SwitchThumb`) sets `data-state` on the **Thumb element itself** from `context.checked`. So the thumb's `data-[state=checked]:translate-x-full` selector resolves on the thumb — the travel is driven by real state, not the Root. This was the load-bearing sub-question; confirmed.
-- **Hit-zone intact (refutes 1b):** the 44px tappable area is still on Root; the visible pill is `pointer-events-none` (`:36`) and the thumb is `pointer-events-none` (`:48`), so all pointer events land on the 44px Root. Touch-target audit `KNOWN_VIOLATIONS['components/ui/switch.tsx'] = 0` (`touch-target-audit.test.ts:143`) and the **audit PASSES** in this pass's 44-test run.
-- **All usages covered (refutes 1c):** the fix is in the shared `ui/switch.tsx`; all 3 consumers (`search.tsx`, `settings/settings-client.tsx`, `categories/topic-manager.tsx`) import that single component — verified by grep. (`nav-client.tsx`, listed as a consumer in the cycle-3 aggregate AGG-C3-01 blast radius, no longer imports Switch at HEAD; harmless drift in the old finding's text, not this fix.)
-
-### Evidence AGAINST / gaps — **DOC DRIFT TRC-C4-02 (LOW) + INFO**
-- **Stale header comment:** `switch.tsx:14` says the thumb "travels the full visible track width via `translate-x-[calc(100%-2px)]` (width-relative, unlike the old fixed 20px travel)". The code at `:49` uses **`translate-x-full`**, NOT `translate-x-[calc(100%-2px)]`. The inline comment at `:41-44` describes the ACTUAL `translate-x-full` math correctly. So the file contains two mutually-inconsistent descriptions of the travel; the header one describes an approach that was not shipped. The commit message also says `translate-x-full`. **Doc-only — the code is correct.** Fix: align `:14` to `translate-x-full`.
-- **No geometry test:** the Switch references in `cycle4-rpf-source-contracts.test.ts` / `cycle5-…` are `switch` STATEMENTS (`mapErrorCode`), not the UI Switch. There is **no test pinning the thumb travel / track geometry** (INFO). A future Tailwind class edit could silently re-break it. Optional: a source-contract assert that thumb travel == inner-track − thumb-width.
-
-### Verdict: geometry **CLEAN / fully fixed (1a)**. Latent risk is doc drift (TRC-C4-02, LOW) + missing geometry test (INFO). Critical unknown: none.
-
----
-
-## FLOW 4 — Cache / ETag invalidation across 3 layers (static-serve, serve-upload, SW)
-
-### Observation
-Three serving layers carry `public, max-age=3600, must-revalidate`: Next static (`next.config.ts:69-72`), `serve-upload.ts:230/252`, nginx (`default.conf:157`). A settings change or backfill re-encode must invalidate cached derivatives without leaving a stale byte.
-
-### Hypothesis table
-| Rank | Hypothesis | Confidence | Evidence Strength |
-|------|------------|------------|-------------------|
-| 1 | Invalidation is correct on every layer for the SUPPORTED operation (backfill re-encode) | **High** | Strong |
-| 2 | A settings-flip WITHOUT a backfill leaves a stale byte on the static path | Confirmed-but-by-design | Strong |
+| 1 | Loss is bounded to the in-flight chunk on crash; matches the documented best-effort tradeoff | **High** | Strong (source-traced + flush invariants pinned) |
+| 2 | A wider window loses the whole buffer (regression of the pre-C2-F01 clear-before-write) | Refuted | Strong |
+| 3 | An unbounded-growth or busy-loop path exists during DB outage | Refuted | Strong |
 
 ### Evidence FOR Hypothesis 1
-- **serve-upload path** (locale-prefixed `/{locale}/uploads/...` + files missing from `public/`): ETag = `W/"v${PIPELINE}-${mtimeMs}-${size}-${settingsHash}"` (`serve-upload.ts:215`). `settingsHash` covers all `COLOR_IMPACTING_KEYS` (`getServingColorSettingsHash`, `:50-83`). So on this path a settings flip invalidates **immediately** (ETag changes even with unchanged mtime). De-enumeration comment de-drifted (AGG-C3-06 fix present, `:197-208`).
-- **Static path** (production, existing files in `public/uploads/`): Next's default static server delivers these (documented precedence: `headers()` → filesystem → route handlers, `next.config.ts:56-67`). Its ETag is mtime+size only (no settings-hash). **Backfill re-encode rewrites bytes in place** → mtime AND size change → ETag changes → 304→200 revalidation fires on every cached client. Pipeline-version bumps invalidate via the same re-encode mtime change. CORRECT for the supported flow.
-- **SW layer**: `staleWhileRevalidateImage` does a bounded (300ms) HEAD probe with `If-None-Match: cachedEtag` (`sw.js:233-257`); a differing server ETag → dispatch revalidate + serve fresh (`:247-252`); 304 → serve cached + touch LRU (`:241-246`). The SW honors whatever ETag the underlying layer returns, so after a backfill re-encode the static-path mtime ETag differs and the SW re-fetches. On probe timeout/failure it serves stale and self-heals in background — a deliberate one-paint window (`:254-262`).
-- **SW version**: `SW_VERSION='dd26e742-p7'` (`sw.js:26`) lags HEAD `f8147868`, but the `prebuild` hook (`package.json:10`) runs `build-sw.ts` which stamps the **current** short-SHA + `-p${IMAGE_PIPELINE_VERSION}` (`build-sw.ts:32,46`) on every build. A deploy (`npm run build`) re-stamps it. The committed lag is expected and harmless — **NOT a defect**. `sw-template-contract.test.ts` passes (template ↔ reference parity intact).
+- **Swap-before-write narrows the loss window.** `flushGroupViewCounts` (`lib/data.ts:63-189`) does `const batch = viewCountBuffer; viewCountBuffer = new Map();` (`:95-96`) BEFORE any DB write (first `db.update(sharedGroups)` at `:107`). New increments during a flush land in the fresh Map. A crash mid-flush loses only the in-flight `batch` (and only the chunks not yet committed), not subsequently-buffered increments. This is strictly the documented behavior (refutes H2 — the pre-C2-F01 clear-before-write is gone).
+- **Chunked drain bounds concurrency** to `FLUSH_CHUNK_SIZE=20` (`:103-104`), so the connection pool (10) is never flooded.
+- **Failure handling bounded (refutes H3):** per-group re-buffer on `.catch` (`:111-131`) with `VIEW_COUNT_MAX_RETRIES=3` drop (`:117-121`), capacity guard `MAX_VIEW_COUNT_BUFFER_SIZE=1000` symmetric in producer + re-buffer path (`:47`, `:125`), post-flush FIFO eviction while over cap (`:143-150`), `viewCountRetryCount` hard cap `500` with collect-then-delete eviction (`:169-187`), exponential backoff capped at `MAX_FLUSH_INTERVAL_MS=300000` (`:37-41`). Timer re-arm guarded on `viewCountBuffer.size > 0 && !viewCountFlushTimer` (`:159`) — no busy-loop after an empty flush.
+- **COR-R4C11-01 stale-timer fix present:** `viewCountFlushTimer = null` on ENTRY before the `isFlushing` guard (`:75`), with re-arm on the early return (`:83-86`) — the buffer cannot strand when a timer fires during a slow drain.
+- **Restore-maintenance gate:** `bufferGroupViewCount` returns early if `isRestoreMaintenanceActive()` (`:44-46`).
+- All 12 source-level flush invariants pinned by `data-view-count-flush.test.ts` (pass).
 
-### Evidence for Hypothesis 2 (by-design, not a defect)
-- A settings flip with **no backfill** does NOT change the on-disk bytes or mtime, so the static-path mtime-only ETag does NOT invalidate → a client keeps the cached derivative. **But the on-disk bytes ARE the old encoding** (no re-encode happened), so serving them is *correct* — the static cache matches the file. The documented contract (CLAUDE.md, repeated) is that flipping a color setting REQUIRES a backfill to re-encode existing photos; the backfill is what changes the bytes and triggers invalidation on all layers. The serve-upload path's settings-hash ETag is an additional belt-and-braces for the paths it serves. **No stale-byte-vs-intended-byte divergence on the supported flow.**
+### Verdict: **DOCUMENTED + ACCEPTED best-effort tradeoff**, crash window correctly narrowed to the in-flight chunk. NOT a finding. Critical unknown: none.
+
+---
+
+## FLOW 4 — Settings change → backfill → ETag invalidation across both serve paths
+
+### Observation
+A color/quality/size admin setting change must invalidate cached derivatives. Two serve paths: Next static (mtime+size ETag) and `serve-upload.ts` (settings-hash-bearing ETag). The task framing quoted CLAUDE.md as "covers all 5 COLOR_IMPACTING_KEYS" — does the code/doc match, and does a flip actually invalidate on both paths?
+
+### Hypothesis table
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|------------|------------|-------------------|
+| 1 | Invalidation correct on both paths; CLAUDE.md accurately states the current key count | **High** | Strong (code + doc both read at HEAD) |
+| 2 | CLAUDE.md drifts ("5 keys") vs code (9 keys) — undocumented doc defect | Refuted | Strong |
+
+### Evidence FOR Hypothesis 1
+- **Code: 9 keys.** `settings-hash.ts:41-53` `COLOR_IMPACTING_KEYS` = 5 color (`wide_gamut_jpeg_chroma`, `sdr_jpeg_chroma`, `avif_effort`, `force_srgb_derivatives`, `wide_gamut_max_source_pixels`) + 3 quality (`image_quality_{webp,avif,jpeg}`) + 1 size (`image_sizes`). The docstring (`:5-13`) says "9 settings" and notes "AGG-R7-08 corrected this docstring from a stale 3-key summary."
+- **CLAUDE.md: also says 9 (refutes H2).** `CLAUDE.md:264` reads "covers all **9** `COLOR_IMPACTING_KEYS` (`settings-hash.ts:37-49`)" and lists all 9, with the parenthetical "(AGG-R7-08 corrected the count from a stale "5")". The task prompt's quoted "5" is a STALE SNAPSHOT, not the current file. **No drift.**
+- **serve-upload path invalidates immediately on a flip.** `serve-upload.ts:215` builds `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs}-${stats.size}-${settingsHash}"`; `settingsHash` from `getServingColorSettingsHash()` (`:50-69`) → `getColorSettingsHash(config)` (validated-values form). Flipping any of the 9 keys changes the hash → ETag changes even with unchanged mtime → `must-revalidate` 304→200 on every cached client.
+- **Static path invalidates via re-encode.** Production existing files are served by Next's static server (mtime+size ETag, no settings-hash). A backfill re-encode rewrites the file → mtime AND size change → ETag changes. CLAUDE.md `:264` documents this as "Operational gotcha (CRT-D1)": a settings flip does NOT invalidate STATIC derivatives until a re-encode rewrites the bytes — the operator must run a backfill. Accurate.
+- Pipeline-version bumps invalidate everywhere (serve-upload via the `v${VERSION}` ETag prefix; static via re-encode mtime after backfill).
+
+### Verdict: **CLEAN** for the supported flow; CLAUDE.md is accurate (9 keys, static-path gotcha documented). NOT a finding. Critical unknown: none. (Matches Flow-4 cycle-4 verdict.)
+
+---
+
+## FLOW 5 — Upload → original save → queue claim → Sharp fan-out → conditional UPDATE → delete cleanup (re-verify no state desync)
+
+### Observation
+Re-verify the delete-while-processing invariant from cycle-4 hasn't drifted: `uploadImages` writes original → INSERT (`processed:false`) → enqueue; queue claims a per-image lock, re-checks, encodes, conditional UPDATE; `deleteImage` runs concurrently WITHOUT the per-image lock.
+
+### Hypothesis table
+| Rank | Hypothesis | Confidence | Evidence Strength |
+|------|------------|------------|-------------------|
+| 1 | No interleaving orphans a served derivative or desyncs DB/disk; encoder is always the last writer | **High** | Strong (full chain re-read at HEAD) |
+| 2 | A regression since cycle-4 reopened the orphan window | Refuted | Strong |
+
+### Evidence FOR Hypothesis 1
+- **Upload order intact:** `saveOriginalAndGetMetadata` (`actions/images.ts:279`) → `db.insert(images)` `processed:false, pipeline_version:CURRENT` (`:382`) → `enqueueImageProcessing` (`:441`). Original on disk before INSERT; INSERT before enqueue, so the queue never claims a row whose original is missing.
+- **Claim lock prevents double-encode:** non-blocking `GET_LOCK(name, 0)` (`image-queue.ts:199`), acquired before encode (`:261`), released in `finally` (`:545`). A losing worker reschedules (`:262-283`).
+- **Conditional UPDATE + cleanup terminal:** `UPDATE … WHERE id=? AND processed=false` (`:370-372`); on `affectedRows===0` (deleted mid-process) the worker cleans ALL variants with `[]` full-dir-scan (`:374-391`). The worker never writes derivatives after its own `affectedRows===0` cleanup → **encoder is always the last writer.**
+- **`deleteImage` takes no per-image lock** (`actions/images.ts:543-637`): removes id from `enqueued`/retry maps (`:593-599`), transactionally deletes the row (`:603-607`), cleans variants with `[]` (`:622-624`). Confirms the cycle-4 chain.
+- Atomic base-rename via `.tmp` closes the partial-base 404 window; orphaned `.tmp` swept at bootstrap (`image-queue.ts:32-73`, `:689`).
+- 52-test run includes no regression on this surface; the encoder/backfill/delete `[]` cleanup contract is pinned across `image-queue-delete-race-cleanup-wiring` + the backfill deleted-mid-reencode tests.
 
 ### Evidence AGAINST / gaps
-- The static path's mtime+size ETag means a settings-flip's *intent* reaches a static-served client only after the operator runs the (documented-mandatory) backfill. This is an accepted, documented design constraint — not a latent defect. SW per-tile HEAD probe (AGG-C3-12, deferred) unchanged.
+- `original/{uuid}` SIGKILL orphan between original-write (`:279`) and INSERT (`:382`) — disk-bloat only, never served/referenced (sweep covers webp/avif/jpeg only). **Documented AGG-C3-08 deferred — NOT re-reported.**
 
-### Verdict: **CLEAN** for the supported operation. No layer lets a stale byte survive a backfill re-encode. Critical unknown: none. (Hypothesis 2 is the documented single-instance/backfill-required contract, not a bug.)
+### Verdict: **CLEAN.** No regression since cycle-4. Critical unknown: none.
+
+---
+
+## FLOW 6 — Session token verification (timing / replay) + paid-download single-use (opportunistic)
+
+### Observation
+Verify the HMAC session-token path has no timing oracle / replay weakness, and the paid-download single-use claim cannot double-deliver or leak a handle.
+
+### Evidence (session — `lib/session.ts`)
+- Constant-time: length-equality check (`:113-115`) BEFORE `timingSafeEqual` (`:117`) — avoids the throw-on-unequal-length oracle.
+- Shape regexes for `random`/`signature` run AFTER crypto verify (`:121-125`) with an explicit comment that they cannot be a timing oracle (a forged token fails HMAC first).
+- Age bound 24 h, `tokenAge < 0` rejected (`:128-134`); DB-backed with expiry purge + delete-on-expired (`:137-148`).
+- Production refuses DB-stored secret fallback (`:30-36`) — signing key lives only in process env.
+- Per-request `cache()` dedup keyed on token string (`:94`) — correct, not a cross-request leak.
+
+### Evidence (paid download — `api/download/[imageId]/route.ts`)
+- Open-before-claim: `open()` awaited (`:349`) BEFORE the atomic `UPDATE … SET downloadedAt=NOW(), downloadTokenHash=null WHERE id=? AND downloadedAt IS NULL` (`:379-385`). A missing-file failure never burns the token (`:356-360`).
+- Single-use: `affectedRows===0` → 410 (`:398-401`); handle closed on every post-open path (`:387`, `:399`, `:456`).
+- GET = claim-free interstitial (scanner-safe, `:198-258`); POST = the claim. Path-traversal containment (`:309`, `:334`) + symlink reject (`:323`). Constant-time `verifyTokenAgainstHash` (`:170`). Refund clears the hash → replay impossible even on DB leak.
+
+### Verdict: **CLEAN.** Critical unknown: none.
 
 ---
 
 ## Convergence / separation notes
-- TRC-C4-01 (sidecar exit-code over-count) and the prior-cycle AGG-C3-04 are **distinct**: AGG-C3-04 was "exit 0 hides stale metadata" (fixed by `a033056d`); TRC-C4-01 is the inverse residual — "exit 1 for rows that no longer exist." Same code region, opposite direction, introduced by the fix's interaction with the pre-existing deleted-mid-reencode partition.
-- Flows 1 and 2's delete-mid-reencode handling **converge** on the same root mechanism (deleteImage takes no per-image lock; the encoder/backfill is the last writer and self-cleans on `affectedRows===0`). The sidecar's counting asymmetry is the only place this mechanism leaks into an observable (exit code), and only because its DB writes are batch-decoupled from the per-row encode.
+- Flows 1 and 5 **converge** on the same root mechanism verified in cycle-4: `deleteImage` takes no per-image lock; the encoder/backfill is the last writer and self-cleans on `affectedRows===0`. The cycle-4 fix `1fd350be` closed the only place this mechanism leaked into an observable (sidecar exit code) — and the slice logic confirms it closed it correctly without introducing an inverse under-count.
+- Flows 2, 3, 4 are all **documented-and-accepted tradeoffs** (Stripe async-payment, view-count best-effort, static-path settings-flip) where the doc is accurate at HEAD — they are NOT findings by the convergence honesty rule.
+- The task framing's "5 COLOR_IMPACTING_KEYS" was a stale snapshot; the live CLAUDE.md says 9 and matches the code. Surfacing this only to record that the suspected doc-drift does NOT exist at HEAD.
 
 ---
 
 ## Findings summary
 
-| ID | Severity | Confidence | File:line | Status |
-|----|----------|------------|-----------|--------|
-| **TRC-C4-01** | LOW | High | `scripts/backfill-color-pipeline.ts:413-414, 439, 485` | NEW — sidecar `detectionFailures` over-counts deleted-mid-reencode detection-failure rows → spurious non-zero exit. Bounded, not data-integrity. In-app runner clean. |
-| **TRC-C4-02** | LOW | High | `apps/web/src/components/ui/switch.tsx:14` | NEW — stale header comment claims `translate-x-[calc(100%-2px)]`; code (and the correct inline comment at :41-44) uses `translate-x-full`. Doc-only; geometry correct. |
-| TRC-C4-03 | INFO | High | `apps/web/src/components/ui/switch.tsx` | No test pins thumb-travel/track geometry; a future Tailwind edit could silently re-break it. Optional source-contract assert. |
+| ID | Severity | Confidence | Status |
+|----|----------|------------|--------|
+| (none) | — | — | **ZERO new actionable findings.** |
 
-**Re-confirmed CLEAN (evidence chains above):** delete-while-processing race (Flow 1), backfill detection-failure resume invariant (Flow 2, both paths), Switch geometry fix (Flow 3, pixel math + Radix data-state verified), 3-layer cache/ETag invalidation on the supported backfill flow (Flow 4).
+### Verified-correct flows (INFO — evidence chains above)
+| ID | Flow | Verdict |
+|----|------|---------|
+| TRC-C5-01 (INFO) | Backfill `detectionFailures` walk-back (`1fd350be`) | Fix SOUND — slice recovers exact detection-failure∩deleted overlap; matrix unit-pinned; 52 tests pass. Cycle-4 TRC-C4-01 **CLOSED**, not re-reported. |
+| TRC-C5-02 (INFO) | Stripe async-payment gap | Doc ACCURATE + operationally closed by card-only checkout pin (`route.ts:207`). Documented-accepted, not a finding. |
+| TRC-C5-03 (INFO) | View-count undercount | Documented best-effort; crash window narrowed to in-flight chunk via swap-before-write. Not a finding. |
+| TRC-C5-04 (INFO) | Settings→ETag both paths | CLEAN; CLAUDE.md accurate (9 keys, static-path gotcha documented). Suspected "5 vs 9" doc-drift does NOT exist at HEAD. |
+| TRC-C5-05 (INFO) | Upload→process→delete race | CLEAN; encoder always last writer; no regression since cycle-4. |
+| TRC-C5-06 (INFO) | Session verify + paid-download single-use | CLEAN; constant-time, replay-safe, no handle leak. |
 
-**Deferred items re-validated, NOT re-reported:** AGG-C3-08 (original/ SIGKILL orphan — reasoning correct), AGG-C3-09 (upload-tracker quota in outer finally — framework-only), AGG-C3-12 (SW HEAD probe), AGG-C3-19 (no two-worker race test). SW_VERSION committed-lag is expected (prebuild re-stamps).
+**Deferred items re-validated, NOT re-reported:** AGG-C3-08 (original/ SIGKILL orphan — disk-bloat only, reasoning correct at HEAD).
 
-**HARD GUARD honored:** no proposal to activate CLIP semantic search.
+**HARD GUARD honored:** no proposal to activate CLIP semantic search. (Traced the embedding write at `image-queue.ts:434-478` only to confirm the delete-race chain — `disabled`-mode early-return at `:442` is correct; not flagged.)
+
+**Honest-convergence note:** Every suspicious flow either checks out at the source or is a correctly-documented accepted tradeoff. Per the convergence honesty requirement, that is the correct and desirable outcome — no hypothetical races manufactured, no accepted tradeoffs re-litigated.

@@ -1,73 +1,83 @@
-# Debugger Review — Run 6 / Cycle 4
+# Debugger Review — Run 6 / Cycle 5 — ZERO new latent bugs; the 5 cycle-4 fix commits are all HEAD-verified correct.
 
-**HEAD:** f8147868
+**HEAD:** 2f603716 (branch master, working tree CLEAN)
 **Date:** 2026-06-16
-**Angle:** latent bug surface, failure modes, regressions, off-by-one, null/undefined hazards, type coercion, async/await mistakes, unhandled rejections, resource leaks, error-path correctness.
+**Angle:** latent bug surface, failure modes, regressions, error/cleanup-path correctness, numeric/parsing edge cases, resource leaks, race regressions, boundary conditions.
 
 ## Verdict
 
 **No new latent bugs survive scrutiny. 0 Crit / 0 High / 0 Med / 0 Low.** Honest convergence.
 
-The prior-cycle (cycle-3) source changes in `b1e9e0da..f8147868` are all verified correct. The core failure surface (queue, Sharp pipeline, SW, GPS strip, parsers, backfill, analytics) is mature and well-hardened by ~58 prior closed findings. Typecheck is green; the 25 tests covering the cycle-3-touched files pass.
+The entire delta since the prior review (f8147868) is the five cycle-4 fix commits (`24159f36..2f603716`), which implement AGG-C4-01..05. I diffed and traced every source-affecting one end-to-end against HEAD — all clean, no regressions introduced. The core failure surface (queue continuation lifecycle, Sharp catch/finally cleanup, GPS-strip byte walkers, ICC/ISOBMFF parsers, SW LRU, analytics `.catch()` guards, env coercion NaN-safety, bounded rate-limit maps) is unchanged since the prior deeply-reviewed cycles and remains bounds-checked and leak-free.
 
-I did NOT re-report the cycle-3 closed items or the deferred AGG-C3-09 (their reasoning is sound — see below).
-
----
-
-## Cycle-3 change scrutiny (b1e9e0da..f8147868) — highest regression risk
-
-All five source-affecting commits were diffed and traced end-to-end. All clean.
-
-### a3b8c557 — switch.tsx geometry rewrite — CORRECT
-- `apps/web/src/components/ui/switch.tsx:32-52`. The thumb (`size-5`=20px) now lives inside the **visible** track (`<span>` `h-6 w-11 px-0.5`), NOT the 44px Root. Inner track width = 44 − 2×2 = 40px; thumb 20px; remaining travel 20px. `translate-x-full` resolves to 100% of the **thumb's own** width (Tailwind `translate-x-full` = `translateX(100%)`, % of the transformed element) = 20px = exactly the remaining travel. Checked-state thumb lands flush right, unchecked flush left. The "half-on" defect is genuinely fixed.
-- The visible track color tracks Root's data-state via `group-data-[state=checked]:bg-primary` (Root carries `group`; Radix sets `data-state` on Root). Correct.
-- NIT (not a finding): the header comment at `switch.tsx:14` says travel is `translate-x-[calc(100%-2px)]`, but the implemented value is `translate-x-full` (line 49). The implemented value is the correct one; only the prose is stale. Cosmetic.
-
-### a033056d — backfill detectionFailures counter + exit code — CORRECT, no off-by-one / double-count
-- `apps/web/scripts/backfill-color-pipeline.ts:339,439,481`. `detectionFailures++` fires ONLY in the `else if (result.derivativeOnly)` branch (mutually exclusive with the `result.signals` success branch), and only inside `outcome === 'processed'`. The `errors++` branch is the terminal `else` (mutually exclusive with `processed`). A row cannot increment both `detectionFailures` and `errors`. No double-count.
-- Exit code `process.exit(errors > 0 || detectionFailures > 0 ? 1 : 0)` is correct — an all-detection-failure run now exits non-zero, closing AGG-C3-04. The WARN summary line is gated on `detectionFailures > 0`. Resume contract intact (`processed++` still counts these so the batch flush + cursor advance is unaffected; `pipeline_version` is deliberately NOT bumped so they remain retry candidates).
-- Benign edge (NOT a finding): a `derivativeOnly` row deleted mid-reencode decrements `processed` (`:414`) but NOT `detectionFailures`, so a run that ONLY had detection-failures-on-now-deleted-rows could exit 1 with `processed=0`. The row is already gone (retry moot) and exiting non-zero on "color metadata not advanced" is the conservative/correct signal anyway. Cosmetic over-report on a deleted row; no incorrect behavior.
-
-### 06a3c5e7 — process-topic-image.ts TOPIC_RESOURCES_ROOT override — CORRECT
-- `apps/web/src/lib/process-topic-image.ts:11-26`. `process.env.TOPIC_RESOURCES_ROOT?.trim()` + truthy guard: undefined → optional-chain short-circuits; empty/whitespace → `''` falsy → falls through to the cwd-derived monorepo/simple path logic (unchanged). Mirrors the verified `upload-paths.ts:13,28` pattern exactly. No path-join bug, no undefined-env fallback hazard. The test (`process-topic-image.test.ts:41-42`) sets it to `mkdtempSync(os.tmpdir())` via a hoisted block so module-eval reads it. Verified isolated.
-
-### 0ef29a10 — color-detection re-export removal + import repoint — CORRECT, no runtime breakage
-- `apps/web/src/lib/color-detection.ts:43-50` removed `export { WIDE_GAMUT_PRIMARIES, isWideGamutPrimary } from '@/lib/color-primaries'`. `apps/web/src/app/actions/images.ts:29` now imports `isWideGamutPrimary` directly from `@/lib/color-primaries` (the client-safe leaf). Same symbol, same source module, just one fewer hop. `wide-gamut-primaries.test.ts` repointed too. Typecheck green confirms no other importer relied on the removed re-export. No runtime breakage.
-
-### f603cd3f — serve-upload.ts comment change — COMMENT-ONLY, verified no logic change
-- `apps/web/src/lib/serve-upload.ts:195-208`. The diff touches only the comment block (de-enumerates the COLOR_IMPACTING_KEYS list, points at the constant). The ETag-construction logic below is byte-identical. Verified via `git diff` — zero executable lines changed.
+**Note on the brief's commit references:** the prompt cites bb463062 (bidi strip), 170297ed (OG/JSON-LD bidi), 13ae79ca (backfill processed count) as "recent fix commits since f8147868." All three are **ancestors of f8147868** (`git merge-base --is-ancestor` confirms) — they were already covered in cycle-1..cycle-4 reviews. They are not part of this cycle's delta. I re-verified the bidi-strip surface anyway (see below) since it is a Trojan-Source attack surface; it is complete.
 
 ---
 
-## Core failure-surface inventory (error paths / async / leaks) — all clean
+## Cycle-4 change scrutiny (24159f36..2f603716) — highest regression risk this cycle
 
-- **image-queue.ts** (`enqueueImageProcessing`): claim acquired before processing; `finally` (`:544-557`) always releases the lock connection (`.catch`-guarded) and prunes the retry maps; the `retried` / `claimRetryScheduled` guards correctly avoid clearing `enqueued`/`claimRetryCounts` when a retry/claim-retry is in flight (no premature delete that would let a duplicate enqueue slip through). Fire-and-forget caption (`:395-410`) and embedding (`:434-478`) hooks are `void`'d / `.then().catch()`'d — no unhandled rejection. The `failed_at` MySQL-datetime fix (`toMySqlDateTime`, `:529`) is present (prevents the swallowed ER 1292 that emptied the failed-images panel). Bootstrap ECONNREFUSED handling + cursor-based pagination + permanently-failed exclusion all sound. No leaked pool connections on any path.
-- **process-image.ts** (`processImageFormats`): the `try/catch/finally` (`:1263-1317`) unlinks every partial sized variant written THIS invocation across all 3 formats on any throw, and the `finally` cleans the WI-15 downscale intermediate. `writtenSizedPaths` tracks paths post-rename so cleanup never deletes a pre-existing prior-run file. AVIF 10-bit→8-bit per-image fallback (`:1165-1188`) uses `base.clone()` with explicit `bitdepth: 8` (the documented COR-R4C8-06 reset). Sharp instances are fresh-per-format (no cross-format state contamination). `metadata()` read at `:1019` guards `height > 0`. No resource leak, no unhandled Sharp rejection.
-- **sw.js**: LRU `recordAndEvict` (`:95-126`) head-walks insertion-order (= recency via delete-then-set), guards the running total on the `deleted` boolean (browser quota-evicted entries don't corrupt the total). `touchMeta` (`:156-170`) repositions on 304 so a freshly-revalidated tile isn't evicted as stale. HEAD probe bounded by `AbortSignal.timeout(300)` with a `catch`→stale-serve fallthrough (`:235-256`). `networkFirstHtml` caches `networkResponse.clone().body` and returns the original — no double stream-consumption. `x-gk-admin-render` gate excludes admin-rendered HTML. No latent bug.
-- **gps-exif-strip.ts**: every walker is bounds-checked and returns `null` on any structural anomaly (`stripGpsFromTiffRegion:104-110,117-119`, type-size table rejects unknown TIFF types), so a truncated/malformed box triggers the caller's re-encode fallback rather than reading OOB. Mature.
-- **public.ts analytics** (`recordPhotoView`/`recordTopicView`/`recordSharedGroupView`, `:355-405`) + **data.ts view-count flush** (`:107-118`): all fire-and-forget `db.insert/update` carry explicit `.catch()` ("swallow errors so analytics never blocks render"); the flush path has retry-count-bounded re-buffering. No unhandled rejection.
-- **env-var coercion**: `Number(process.env.QUEUE_CONCURRENCY) || 1` (`image-queue.ts:168`), `Math.max(1, Number(process.env.BACKFILL_CONCURRENCY) || 2)` (`backfill:329`) — garbage env → `NaN` → `|| fallback` → safe. No NaN escape.
+All five commits diffed and traced. The two that touch executable logic (`1fd350be`, `6ab40644`) get the deepest scrutiny.
+
+### 1fd350be — backfill `detectionFailures` walkback for deleted-mid-reencode rows — CORRECT, slice index verified
+
+`apps/web/scripts/backfill-color-pipeline.ts:454-455`. The fix adds, in `flushBatch`'s deleted-mid-reencode partition:
+```
+const derivativeResults = updateResults.slice(items.length);
+detectionFailures -= countDeletedMidReencodeDetectionFailures(derivativeResults);
+```
+The slice index is the load-bearing claim, and it is correct. In the transaction (`:407-432`), `items` (success rows) are pushed to `updateResults` FIRST, then `derivativeItems` (detection-failure rows) are pushed SECOND. So `updateResults.slice(items.length)` recovers EXACTLY the derivative-slice UPDATE outcomes — no off-by-one. `countDeletedMidReencodeDetectionFailures` (`:159-164`) counts `affectedRows === 0` in that slice = the detection-failure∩deleted overlap, which is exactly what must be walked back.
+
+Counter consistency verified:
+- `detectionFailures++` fires per-row ONLY in the `else if (result.derivativeOnly)` branch (`:480`), pushing to `derivativeBatch`.
+- `processed -= deletedMidReencodeFiles.length` (`:444`) decrements by the TOTAL deleted count (success-slice + derivative-slice). Consistent: `processed++` (`:467`) fires for BOTH `signals` and `derivativeOnly` rows (both inside `outcome === 'processed'`), so both decrement on delete. No asymmetry.
+- The extracted `computeBackfillExitCode` (`:177`) is a pure 1-line predicate, exit expression unchanged (`errors>0 || detectionFailures>0 ? 1 : 0`).
+
+Test coverage (`backfill-color-pipeline-deleted-mid-reencode.test.ts`) is comprehensive and **non-vacuous**: `countDeletedMidReencodeDetectionFailures` matrix (2 deleted of 3 → 2; all-alive → 0; empty → 0), `computeBackfillExitCode` matrix (0/0→0, errors→1, detectionFailures→1, both→1), plus source-shape pins that `flushBatch` invokes the walkback and `main()` routes through the helper. The in-app twin (`admin-backfill-runner.ts:605-609`) does NOT have this over-count because it determines `deleted-mid-reencode` vs `detection-failed` per-row as mutually-exclusive outcomes — verified at HEAD; the sidecar asymmetry is purely an artifact of batching DB writes decoupled from the per-row encode, which this fix correctly compensates for.
+
+### 6ab40644 — image-queue bootstrap flake fix — CORRECT, keys on a real deterministic state field
+
+`apps/web/src/__tests__/image-queue-bootstrap.test.ts:165-176`. The bare `vi.waitFor(() => expect(limitMock).toHaveBeenCalledTimes(2))` (~1s default) now carries `{ timeout: 20_000, interval: 25 }` and additionally asserts `getProcessingQueueState().bootstrapped === true`. Verified the keyed state is REAL and deterministic, not vacuous: `bootstrapped` is set at `image-queue.ts:679` (`pending.length < BOOTSTRAP_BATCH_SIZE`); in the 2-batch test scenario the second (short) batch sets it true. The continuation lifecycle it guards is leak-free: `scheduleBootstrapContinuation` (`:592-606`) guards on `bootstrapContinuationScheduled` against double-schedule, sets it true, and resets it to false in BOTH the `.then` and `.catch` of `queue.onIdle()` — the flag never sticks. `bootstrapImageProcessingQueue` early-returns on that flag (`:610`), preventing re-entrancy. Test is now deterministic, asserts the correct end-state, no global timeout inflation.
+
+### 9a262e3f — switch geometry contract test — CORRECT, non-vacuous static scan
+
+`apps/web/src/__tests__/switch-geometry-contract.test.ts` (new, +99). Static source-scan pinning the load-bearing triple (visible-track `w-11`+`px-0.5`+`h-6`, thumb `size-5`, travel `translate-x-0`/`translate-x-full`) + a guard banning the half-on `translate-x-5`. Commit message documents it was proven RED on reverting the travel class. Mirrors the touch-target-audit / sw-template-contract idiom. Pins the cycle-3 fix against silent re-break. No runtime code touched.
+
+### 24159f36 — switch.tsx header comment fix — COMMENT-ONLY, verified no logic delta
+
+Corrects the `:13-14` docblock to cite `translate-x-full` (matching the shipped code) instead of `calc(100%-2px)`. AGG-C4-05. Zero executable lines changed. Closes the 6-agent-corroborated comment drift.
+
+### 7541c92d / 2f603716 — docs/reviews + plans — non-code.
 
 ---
 
-## Re-verified, NOT re-reported
+## Re-verified failure-prone surface (unchanged since prior cycles) — all clean
 
-- **Deferred AGG-C3-09** (upload-tracker quota settled inside outer `try`, not `finally`; `images.ts` outer `finally` releases only the contract lock): reasoning still sound. The settlement path is reachable only by a throw escaping the per-file inner try/catch (which catches every realistic per-file fault and `continue`s) — framework-level failure only, effect is admin-self-impact quota over-count until window expiry. Correctly deferred; not re-raising.
-- **Cycle-3 CLOSED items** (switch half-on, backfill exit code, settings-hash docstring, ETag de-enumeration, re-export layering trap, histogram contrast, topic-image tmpdir isolation, Stripe cross-ref): all verified fixed at HEAD. Not re-planning.
+- **bidi / zero-width strip (Trojan-Source surface, re-audited since it's security-relevant):** every STRIPPING site (`og-sanitize.ts:29`, `validation.ts:94` `stripUnicodeFormatting`, `sanitize.ts:22`, `download-filename.ts:40`, `csv-escape.ts:54`) uses a fresh `/g` instance derived from `UNICODE_FORMAT_CHARS.source` (avoiding shared `lastIndex` state corruption), and every REJECTION/`.test()` site (`validation.ts:74,106,120`, `sanitize.ts:60,177`) uses the non-global `UNICODE_FORMAT_CHARS`. The `.source`-derived separation is deliberately documented (`validation.ts:77-82`). `sanitizeForOg` (`og-sanitize.ts:28-30`) is a single shared module — no symmetry gap between the per-photo and home OG routes. No remaining non-global `.replace(UNICODE_FORMAT_CHARS, …)` anywhere. The 170297ed fix is complete and leak-free.
+- **gps-exif-strip.ts** (`stripGpsFromTiffRegion:103-199`): every walker bounds-checks before read/fill. `inBounds(entriesStart, count*12+4)` (`:122,166`) fits entries + next-pointer; `MAX_IFD_ENTRIES=1024` / `MAX_IFD_CHAIN=8` caps; unknown TIFF type → `null` (`:128,182`); value-offset checked before fill (`:132,185`); IFD0-offset `<= tiffStart+7` → `null` (`:157`, the d17e5cc2 fix, correct fail-safe); `visited` set catches IFD cycles (`:160`). Any anomaly returns `null` → caller's metadata-free re-encode fallback. Mature.
+- **image-queue.ts** `enqueueImageProcessing`: claim before processing; `finally` releases the lock connection (`.catch`-guarded) and prunes retry maps; `failed_at` MySQL-datetime coercion present; fire-and-forget caption/embedding hooks `.then().catch()`'d. Env coercion `Number(process.env.QUEUE_CONCURRENCY) || 1` NaN-safe. No leaked connections.
+- **process-image.ts** `processImageFormats`: `try/catch/finally` unlinks every partial sized variant written THIS invocation on any throw; `finally` cleans the WI-15 downscale intermediate; `writtenSizedPaths` tracks post-rename so cleanup never deletes a prior-run file; AVIF 10→8-bit per-image fallback uses `base.clone()` with explicit `bitdepth:8`. No Sharp leak.
+- **admin-backfill-runner.ts** `reprocessRow` (`:560-614`): `deleted-mid-reencode` vs `detection-failed` are mutually-exclusive per-row outcomes (the `affectedRows===0` re-check at `:573` and `:605` returns `deleted-mid-reencode` BEFORE `detection-failed`); the per-worker counters sum to the total (`:752`); `finally` (`:610-613`) always releases the claim with `.catch(()=>undefined)`. No double-count, no leak.
+- **auth-rate-limit.ts**: both maps are `createWindowBoundedMap` with explicit max-key caps (`LOGIN_RATE_LIMIT_MAX_KEYS`, `PASSWORD_CHANGE_RATE_LIMIT_MAX_KEYS=5000`) → bounded, no unbounded growth. Rollback uses decrement-not-delete (C1-07) so concurrent rollbacks don't lose counts.
+- **sw.js / sw-cache.ts**: LRU `recordAndEvict` head-walks insertion-order, guards the running total on the `deleted` boolean; `touchMeta` repositions on 304; HEAD probe `AbortSignal.timeout(300)` with stale-serve catch; `networkFirstHtml` clones the body and returns the original (no double stream consumption). No latent bug.
+- **color-detection.ts / icc-chromaticity.ts / icc-extractor.ts / gain-map-detection.ts**: unchanged since prior cycles; bounded ISOBMFF walker (max depth 5, max scan 1 MB), capped tagCount / string lengths, ΔE thresholds. Already deeply verified; no regression in scope this cycle.
 
-## Non-findings investigated
-
-- Two `apps/web/public/resources/{uuid}.webp` orphans (timestamped ~3h before this run) exist on disk. They are **gitignored** (`.gitignore:51` `/public/resources/*`, only `.gitkeep` tracked) so `git status` is clean — no repo pollution. The only test exercising the real topic-image pipeline (`process-topic-image.test.ts`) is now isolated to `os.tmpdir()` via `TOPIC_RESOURCES_ROOT`; `topics-actions.test.ts` fully mocks `process-topic-image`. The orphans are out-of-band leftovers (a prior dev/test run in this sandbox), not produced by the current committed test suite. Not a regression, not a finding.
+---
 
 ## Gates run this review
-- `npm run typecheck --workspace=apps/web` → PASS (typecheck:app + typecheck:scripts both clean).
-- `vitest run` over `process-topic-image.test.ts`, `backfill-color-pipeline.test.ts`, `wide-gamut-primaries.test.ts`, `admin-backfill-runner-detection-failure.test.ts` → 25/25 PASS.
+- `npm run typecheck --workspace=apps/web` → **PASS** (exit 0; typecheck:app + typecheck:scripts both clean).
+- `vitest run` over `backfill-color-pipeline-deleted-mid-reencode.test.ts`, `switch-geometry-contract.test.ts`, `image-queue-bootstrap.test.ts` → **23/23 PASS** (3.65s).
 
-## References
-- `apps/web/src/components/ui/switch.tsx:32-52` — switch geometry fix (verified correct; comment/code prose nit only)
-- `apps/web/scripts/backfill-color-pipeline.ts:339,439,481` — detectionFailures counter + exit code (verified no double-count, exit code correct)
-- `apps/web/src/lib/process-topic-image.ts:11-26` — TOPIC_RESOURCES_ROOT override (verified guard + fallback correct)
-- `apps/web/src/lib/color-detection.ts:43-50` / `apps/web/src/app/actions/images.ts:29` — re-export removal + import repoint (verified no breakage)
-- `apps/web/src/lib/serve-upload.ts:195-208` — comment-only change (verified no logic delta)
-- `apps/web/src/lib/image-queue.ts:544-557` — claim release in finally + retry guards (verified leak-free)
-- `apps/web/src/lib/process-image.ts:1263-1317` — partial-file cleanup catch/finally (verified correct)
+## References (verified this cycle, NOT findings)
+- `apps/web/scripts/backfill-color-pipeline.ts:454-455` — detectionFailures walkback slice index (verified correct: items pushed before derivativeItems, so slice(items.length) = derivative slice)
+- `apps/web/scripts/backfill-color-pipeline.ts:159-164,177` — extracted pure helpers (countDeletedMidReencodeDetectionFailures, computeBackfillExitCode)
+- `apps/web/src/__tests__/image-queue-bootstrap.test.ts:165-176` — flake fix keys on real `bootstrapped` state (image-queue.ts:679)
+- `apps/web/src/lib/image-queue.ts:592-606,610` — bootstrap continuation flag lifecycle (verified leak-free, no double-schedule)
+- `apps/web/src/lib/admin-backfill-runner.ts:573,605-613` — in-app twin: mutually-exclusive deleted/detection outcomes + claim release in finally
+- `apps/web/src/lib/og-sanitize.ts:28-30` / `apps/web/src/lib/validation.ts:77-94` — bidi strip: global-flag twin, .source-derived, no shared lastIndex
+- `apps/web/src/lib/gps-exif-strip.ts:104,122,132,157,166,185` — GPS-strip byte-offset bounds (verified all checked before read/fill)
+
+## Summary count by severity
+- **Critical: 0**
+- **High: 0**
+- **Medium: 0**
+- **Low: 0**
