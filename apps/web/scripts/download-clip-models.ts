@@ -9,10 +9,18 @@
  *   - Set env.cacheDir to the volume path before any model load so Transformers.js
  *     stores / reads weights from the persistent volume rather than node_modules.
  *   - Load the model + tokenizer once (downloads if absent, no-ops if cached).
- *   - After download, verify the key artifact (onnx/model_quantized.onnx) against
- *     a hard-coded SHA-256 manifest — exits non-zero on checksum mismatch.
+ *   - Verify the downloaded artifacts against a hard-coded SHA-256 manifest and
+ *     DELETE any mismatching file before exiting non-zero (AGG-C10-10) so a
+ *     poisoned/partial weight is never left on disk for the runtime loader to
+ *     trust. The shared verify/clean helper lives in clip-model-manifest.ts.
  *   - Idempotent: if the file already exists and its SHA-256 matches, skip the
  *     download and report "already up to date".
+ *
+ * SECURITY: run this only from a trusted network. Transformers.js downloads AND
+ * instantiates the ONNX session in one from_pretrained call, so the checksum gate
+ * is a post-download integrity check (it deletes a bad file and aborts), not a
+ * pre-parse trust boundary. The pinned immutable JINA_CLIP_REVISION + HTTPS are
+ * the primary protections; the runtime never downloads (allowRemoteModels=false).
  *
  * Usage:
  *   CLIP_MODELS_ROOT=data/models/clip npx tsx scripts/download-clip-models.ts
@@ -21,42 +29,15 @@
  *   CLIP_MODELS_ROOT  Target cache directory (default: data/models/clip)
  */
 
-import { createHash } from 'crypto';
-import { existsSync, createReadStream, mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { env, AutoModel, AutoTokenizer } from '@huggingface/transformers';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '../src/lib/clip-model-id';
+import { CLIP_MODEL_MANIFEST, sha256File, verifyAndCleanArtifacts } from './clip-model-manifest';
 
 // Alias so the rest of the script is unchanged.
 const MODEL_ID = JINA_CLIP_MODEL_ID;
-
-/**
- * SHA-256 manifest for the key artifacts downloaded by Transformers.js.
- * These are the checksums of the files as cached from the HF hub at the
- * revision used during the Task 1 spike (2026-06-15).
- *
- * Only the large binary artifacts that are expensive to re-download are
- * verified here. Config/tokenizer JSON files are small and self-describing.
- */
-const MANIFEST: Record<string, string> = {
-    'onnx/model_quantized.onnx':
-        '65c6423fc82eecffb7f7f813730c6a6f0d28e2dc908e414250733b1416ed30bf',
-    'tokenizer.json':
-        '6601c4120779a1a3863897ba332fe3481d548e363bec2c91eba10ef8640a5e93',
-};
-
-/**
- * Compute the SHA-256 hex digest of a file by streaming it.
- */
-async function sha256File(filePath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const hash = createHash('sha256');
-        const stream = createReadStream(filePath);
-        stream.on('data', (chunk) => hash.update(chunk));
-        stream.on('end', () => resolve(hash.digest('hex')));
-        stream.on('error', reject);
-    });
-}
+const MANIFEST = CLIP_MODEL_MANIFEST;
 
 async function main(): Promise<void> {
     const clipModelsRoot =
@@ -108,29 +89,17 @@ async function main(): Promise<void> {
     // Release the ONNX session — we only needed the download side-effect.
     await model.dispose();
 
-    // --- Verify manifest ---
+    // --- Verify manifest (delete any mismatching artifact before aborting) ---
     console.log('[download-clip-models] Verifying checksums...');
-    let allOk = true;
-    for (const [relativePath, expectedHash] of Object.entries(MANIFEST)) {
-        const filePath = join(modelCacheDir, relativePath);
-        if (!existsSync(filePath)) {
-            console.error(`[download-clip-models] MISSING: ${relativePath}`);
-            allOk = false;
-            continue;
-        }
-        const actual = await sha256File(filePath);
-        if (actual === expectedHash) {
-            console.log(`[download-clip-models] OK  ${relativePath}`);
-        } else {
-            console.error(`[download-clip-models] FAIL ${relativePath}`);
-            console.error(`  expected: ${expectedHash}`);
-            console.error(`  actual:   ${actual}`);
-            allOk = false;
-        }
-    }
+    const result = await verifyAndCleanArtifacts(modelCacheDir, MANIFEST);
+    for (const line of result.log) console.log(`[download-clip-models] ${line}`);
 
-    if (!allOk) {
-        console.error('[download-clip-models] One or more checksum failures. Aborting.');
+    if (!result.ok) {
+        console.error(
+            `[download-clip-models] Checksum verification FAILED for: ${result.failures.join(', ')}.` +
+            (result.deleted.length ? ` Deleted poisoned file(s): ${result.deleted.join(', ')}.` : '') +
+            ' Aborting.'
+        );
         process.exit(1);
     }
 
