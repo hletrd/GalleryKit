@@ -1,79 +1,73 @@
-# Architect Review — Cycle 6
+# Architect Review — Run 6 / Cycle 7
 
-**HEAD** `4eb83aab` · **agent** architect · **date** 2026-06-17
+**HEAD:** `a7758ef0`
+**Date:** 2026-06-17
+**Agent:** architect (read-only; persisted by orchestrator after independent HEAD verification)
+**Verdict:** ACCEPT — **0 architecture findings** (0 Critical / 0 High / 0 Medium / 0 Low)
 
 ## Summary
 
-Zero architectural findings. The codebase is architecturally converged. The cycle-5 fix (AGG-C5-01 / ARCH-C5-01) that landed in HEAD is sound and correctly closes the data-layer coverage hole it targeted, without regressing the tsx-backfill constraint. Every architectural boundary in my brief was verified clean against HEAD with both static analysis and executed tests. An honest 0-architecture-finding result is the correct outcome this cycle.
+Zero architectural defects at HEAD. The cycle-6→HEAD delta is 3 commits whose only source changes are (1) the `204e8594` widening of the client→server-only boundary TEST classifier, (2) one NEW source-scan fixture test (`hdr-badge-contrast.test.ts`), and (3) four single-token a11y className edits (`text-white` → `text-amber-950`). None touches a real architectural boundary. Every invariant in the brief was re-verified clean with static analysis plus executed tests (architectural trio: 23/23 GREEN). The HARD GUARDS are respected: `@/db/index.ts` does NOT carry `import 'server-only'`, and the `mysql2`-in-closure detection remains the non-vacuous substitute. An honest 0-architecture-finding result is the correct outcome — the system is architecturally converged.
 
-## Analysis — what I verified, and the evidence
+## Analysis — what was verified, and the evidence
 
-### 1. Client → server-only boundary (the cycle-5 fix) — VERIFIED SOUND, non-vacuous, GREEN
+### 1. Client → server-only boundary (the `204e8594` classifier widening) — VERIFIED CLEAN, the boundary ITSELF is clean
 
-The fix at `apps/web/src/__tests__/client-server-only-boundary.test.ts` is a rigorous, well-reasoned guard:
+- **The boundary itself (production code):** the only production `'use client'` modules that reach `@/lib/data` are `apps/web/src/components/home-client.tsx:13` and `apps/web/src/components/load-more.tsx:6`, and BOTH use `import type { ImageListCursorInput } from '@/lib/data'` — TypeScript-erased forms that never enter any bundle. A full enumeration of all 63 `'use client'` files found ZERO value-imports of `@/db`, `@/lib/data`, `@/lib/image-queue`, `@/lib/process-image`, or the `@/lib/gallery-config` resolution layer (the only non-`import type` hits are the boundary test's own fixture strings). The client→server-only boundary is genuinely clean at HEAD.
+- **The widening is sound and correctly scoped (test-only).** `extractAliasedImports` (`client-server-only-boundary.test.ts:138–223`) now, after the top-level `sf.statements` loop, runs a `ts.forEachChild` full-AST descent (lines 196–218) that ALSO captures the two value-import forms the cycle-6 DBG-C6-01 finding identified as missed: dynamic `import('@/…')` (`CallExpression` with `ts.SyntaxKind.ImportKeyword`, lines 198–206) and `import x = require('@/…')` (`ImportEqualsDeclaration` with `ExternalModuleReference`, lines 208–215), de-duped at line 222. This closes the false-negative narrowing without altering production behavior, without touching `@/db`, and without adding `server-only` anywhere. The classifier pins at lines 404–431 prove it non-vacuously.
+- **HARD GUARD #2 respected and re-confirmed:** `@/db/index.ts` carries NO `import 'server-only'` (the file docstring at lines 38–47 documents precisely why — the tsx backfill sidecar resolves `server-only`'s throwing `default` condition). The cycle-5 proof that `import 'server-only'` on `@/db` breaks tsx scripts stands; not proposed, and explicitly rejected for any analysis that would.
 
-- **Closure walk uses the TypeScript AST, not regex** (`extractAliasedImports`, lines 138–185). It correctly follows VALUE imports and DROPS type-only imports in both the statement form (`import type {…}`) and the inline form (`import { type X }`) — verified by the executed classifier pins at lines 341–364.
-- **`mysql2` / `mysql2/promise` is treated as a server-only-equivalent signal** (`hasServerOnlyDriverImport`, lines 200–202), with a correctly anchored regex (positive/negative cases pinned at lines 321–333). This is the load-bearing widening: it closes the `'use client' → @/lib/data → @/db → mysql2` vector that the bare `import 'server-only'` sentinel missed, because `@/db/index.ts` and the data layer carry no `server-only` marker.
-- **Non-vacuity is proven**, not assumed: the test at lines 309–319 asserts `@/db/index.ts` is recognized as server-only-equivalent via its `mysql2/promise` import (`apps/web/src/db/index.ts:2`). I independently confirmed `apps/web/src/lib/data.ts:2` imports `db` from `@/db` as a VALUE — so a future client→data leak has a real chain the walk would traverse and flag RED.
-- **The HARD GUARD is respected**: `@/db/index.ts` does NOT carry `import 'server-only'` (verified: only `caption-generator.ts` and `clip-model.ts` carry it). The file docstring documents precisely why — the production backfill sidecar `scripts/backfill-color-pipeline.ts` imports `@/db` under tsx, where `server-only`'s `default` export throws. The cycle-5 approach is the settled correct fix and is not regressed.
+**Executed result:** architectural trio (boundary + privacy-fields + data-tag-names-sql) → 23 passed / 0 failed at HEAD.
 
-**Executed result:** all 5 boundary tests pass. Full architectural trio (boundary + privacy-fields + data-tag-names-sql) → 22 passed. `npm run typecheck` → GREEN.
-
-I checked two potential escape hatches in the walk and found neither is a real gap at HEAD:
-- **Relative imports** (`./`, `../`) that the `@/`-only `isAliased` filter would skip: the client-reachable `@/lib` leaf modules use ZERO relative cross-module imports — every dependency is `@/`-aliased, so the walk is complete for these closures.
-- **`'use client'` → `@/app/actions` imports**: these are the correct React Server Actions network boundary. `apps/web/src/app/actions.ts` is a pure barrel re-export and each underlying module carries its own `'use server'` directive, so the bundler replaces these with network-reference stubs — NOT bundled server code. The walk's scoping to `@/lib`/`@/db` is intentional and correct.
-
-> CROSS-AGENT NOTE: the debugger agent independently found a **test-only false-negative** in this same classifier (DBG-C6-01): the AST walk iterates `sf.statements` only and handles `ImportDeclaration`/`ExportDeclaration` — it does NOT traverse dynamic `import('@/lib/data')` (`CallExpression`) or `import db = require('@/db')` (`ImportEqualsDeclaration`), two value-import forms the old regex captured. The trigger surface is empty at HEAD (grep confirms no `'use client'` module uses those forms against `@/lib`/`@/db`), so it is correctly LOW. It does not change my "boundary clean at HEAD" verdict, but the guard's *future* coverage should be hardened. This is a guard-strengthening test fix, not an architecture change. See debugger.md / aggregate DBG-C6-01.
-
-### 2. Storage abstraction (`@/lib/storage`) — VERIFIED FULLY DEAD, local-only
-
-- **Zero production callers**: grep for `getStorage|getStorageSync|switchStorageBackend|getStorageBackend` across `src/` (excluding the module + tests) returns nothing.
-- **No S3/MinIO/network backend**: `local.ts`'s `getUrl` returns a local path; the only `Presigned*` hits are the `PresignedUrlOptions` interface name. No `s3`/`minio`/`aws`/HTTP client code.
-- **Not exposed via any admin surface**: `switchStorageBackend` has no server action, API route, or admin UI caller.
-
-Matches the CLAUDE.md contract verbatim ("local filesystem storage only … Do not document or expose S3/MinIO switching"). Clean.
-
-### 3. Config coupling chain — VERIFIED ACYCLIC, clean layering
+### 2. Config resolution chain — VERIFIED ACYCLIC, correctly layered
 
 ```
-gallery-config-shared.ts   (validation + constants; imports NOTHING — pure client-safe leaf)
+gallery-config-shared.ts   (validation + constants; imports NOTHING — pure client-safe leaf; the only `gallery-config.ts` token is in a COMMENT at line 145)
         ↑ value+type
-gallery-config.ts          (resolution; imports @/db + gallery-config-shared)   [server]
+gallery-config.ts          (resolution; imports @/db + drizzle + react cache + ./gallery-config-shared)   [server]
         ↑ value (getGalleryConfig)
-image-queue.ts             (imports getGalleryConfig as VALUE, JpegChromaSubsampling as TYPE)
+image-queue.ts             (imports getGalleryConfig VALUE @ :12, JpegChromaSubsampling TYPE @ :10)
 ```
 
-- **No cycle**: `gallery-config-shared.ts` does NOT import `gallery-config.ts`. It imports no `@/db`, no `mysql2`, no `server-only`, no node builtins.
-- **Direction correct**: shared leaf ← resolution ← consumer.
-- **Client safety**: 10 `'use client'` components import `gallery-config-shared` and ALL pull only pure VALUE constants/functions; NONE import the resolution layer `@/lib/gallery-config`. Exactly the split the boundary test protects.
+- **No cycle:** `gallery-config-shared.ts` imports nothing (no `@/db`, no `mysql2`, no `server-only`, no resolution layer). Its sole textual reference to `gallery-config.ts` is a documentation comment.
+- **No inversion:** `gallery-config.ts` does NOT import `image-queue` or `process-image` (grep confirmed). Direction is strictly leaf ← resolution ← consumer.
 
-### 4. Single-writer / process-local state — VERIFIED, matches documented topology
+### 3. Privacy field-selection layering (`adminSelectFields → publicSelectFields`) — VERIFIED SOUND
 
-- **Restore flag** (`restore-maintenance.ts`): `Symbol.for`-keyed `globalThis` boolean + `gallerykit_db_restore` advisory lock for real serialization.
-- **Upload quota tracker** (`upload-tracker-state.ts`): `Symbol.for`-keyed `globalThis` Map, hard-bounded (2000 keys, 1-hour window, prune-and-evict).
-- **Image queue retry maps** (`image-queue.ts`): per-process Maps; per-image processing claim backed by the `gallerykit:image-processing:{jobId}` advisory lock.
+- `publicSelectFields` (`data.ts:325–357`) and `publicMapSelectFields` (`data.ts:366–393`) are each derived from `adminSelectFields` via explicit destructuring-omit, then re-frozen into SEPARATE `as const` objects (`publicSelectFieldCore` / `publicMapSelectFieldCore` rest-spreads). They are NOT shared references — adding a field to `adminSelectFields` does not auto-leak it.
+- The compile-time guards close the loop: `_SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, PrivacySensitiveKeys>` must resolve to `never` (`data.ts:418–419`); the map variant `_MapSensitiveKeysInPublicMap` guards the map select against everything except the explicitly-allowed `latitude`/`longitude` (`data.ts:429–431`); and `_largePayloadGuard` blocks `blur_data_url` from the listing payload (`data.ts:447–450`). The 20-key `PrivacySensitiveKeys` union is exported and reused by sibling mirrors. Layering is correct and self-enforcing.
 
-No NEW shared-state assumption silently violates single-writer. The `globalThis`-Symbol pattern is per-process (correct for single-instance Docker) and HMR-reload-safe.
+### 4. Advisory-lock design — VERIFIED, NO deadlock cycle, NO unsafe two-locks-held hazard
 
-### 5. Layering: actions / data / lib / API routes — VERIFIED, no inversion or god-module
+Inventoried every `GET_LOCK` site (6 production sites across `image-queue`, `admin-backfill-runner` ×2, `admin-users`, `topics`, `db-actions`, plus the upload-contract helper) and analyzed nesting:
 
-- **No lib → processing inversion**: `data.ts` does not import `image-queue`, `process-image`, or any `@/app/` module.
-- **One benign directional quirk (NOT a finding)**: `api-auth.ts:1` imports `isAdmin` from `@/app/actions/auth` — a colocation convention, not a true inversion: server-only-consumed, acyclic, pre-existing. Below the threshold for a code change.
-- **No god-module forming**: `data.ts` and `process-image.ts` are large but cohesive and stable across cycles.
+- **Only ONE path holds two locks simultaneously:** the backfill runner holds `LOCK_COLOR_PIPELINE_BACKFILL` (outer, run-scoped, acquired at `admin-backfill-runner.ts:310`) and `getImageProcessingLockName(id)` (inner, per-image, acquired in `reprocessOne` at `:347`, released in `finally` at `:613`). Every other lock site holds exactly ONE lock (verified GET_LOCK count = 1 each).
+- **Deadlock is impossible — two independent guarantees:**
+  1. **Both backfill acquisitions are non-blocking** (`GET_LOCK(?, 0)` at `:310` and `:347`). A non-blocking inner acquire cannot create the hold-and-wait edge that deadlock requires — on contention it returns `null` and the row is skipped with no version bump (`:491–493`).
+  2. **No reverse lock ordering exists.** `image-queue.ts` — the ONLY other holder of the per-image lock — never acquires `LOCK_COLOR_PIPELINE_BACKFILL` (grep: zero references). The per-image→backfill edge needed to close a cycle does not exist anywhere in the codebase.
+- The two BLOCKING acquisitions (`admin-users` and `topics`, `GET_LOCK(?, 5)`) each hold only a single lock and nest no second lock, so the 5-second wait cannot deadlock — there is no second resource to wait on while holding the first.
+
+### 5. Storage abstraction — VERIFIED FULLY DEAD, local-only
+
+- Zero production callers: grep for `getStorage|getStorageSync|switchStorageBackend|getStorageBackend|StorageBackend` across `src/` (excluding the module + tests) returns nothing.
+- No S3/MinIO/AWS/network backend: the only `Presigned*` hits are the `PresignedUrlOptions` interface name; no S3/minio/aws/HTTP-client code. The directory is just `index.ts` / `local.ts` / `types.ts`. Matches the CLAUDE.md "local filesystem storage only" contract. It is dead code, not a half-wired feature that could leak.
+
+### 6. New-this-cycle coupling check — CLEAN
+
+`hdr-badge-contrast.test.ts` imports only `vitest` + `node:fs` + `node:path` (a pure source-scan fixture, consistent with the repo's established test architecture — no runtime-module backward dependency). The four `.tsx` edits are single-token `text-white`→`text-amber-950` className changes with zero structural or import deltas.
 
 ## Recommendations
 
-None architectural. Do not fabricate refactors. The HARD GUARDS are respected and should remain in place:
-- Keep `@/db/index.ts` free of `import 'server-only'` (tsx-backfill constraint — proven in cycle 5).
-- Keep the `mysql2`-in-closure detection in the boundary test; it is the non-vacuous half of the guard.
-- Leave `@/lib/storage` dead until a real end-to-end wiring plan exists.
-- Hardening the boundary test's dynamic-import / import-equals coverage (DBG-C6-01) is a guard-strengthening test fix, not an architecture change.
+None architectural. Do not fabricate refactors. Keep the HARD GUARDS in place: leave `@/db/index.ts` free of `import 'server-only'`; keep the `mysql2`-in-closure detection as the non-vacuous half of the boundary guard; leave `@/lib/storage` dead until a real end-to-end wiring plan exists.
 
 ## References
 
-- `apps/web/src/__tests__/client-server-only-boundary.test.ts` — the cycle-5 fix; AST value-import walk + `mysql2` server-only-equivalent detection; 5 tests GREEN at HEAD.
-- `apps/web/src/db/index.ts:2` — `import mysql from "mysql2/promise"`; the chokepoint; correctly NOT marked `server-only`.
-- `apps/web/src/lib/data.ts:2` — `import { db, … } from '@/db'`; the value chain that makes the guard non-vacuous.
-- `apps/web/src/lib/gallery-config-shared.ts` / `gallery-config.ts:12,26` / `image-queue.ts:10,12` — acyclic config chain.
-- `apps/web/src/lib/storage/index.ts` — dead abstraction; zero production callers.
-- `apps/web/src/lib/api-auth.ts:1` — the one benign lib→action directional read; NOT a finding.
+- `apps/web/src/__tests__/client-server-only-boundary.test.ts:196–223` — the `204e8594` AST full-descent widening (dynamic `import()` + import-equals); 9 classifier pins; GREEN at HEAD.
+- `apps/web/src/components/home-client.tsx:13`, `apps/web/src/components/load-more.tsx:6` — the only production `'use client'`→`@/lib/data` edges, both `import type` (erased; the boundary is clean).
+- `apps/web/src/db/index.ts` — `mysql2/promise` chokepoint; correctly NOT marked `server-only` (HARD GUARD #2 respected).
+- `apps/web/src/lib/gallery-config-shared.ts` (pure leaf) / `gallery-config.ts:12,24,26` / `image-queue.ts:10,12` — acyclic config chain.
+- `apps/web/src/lib/data.ts:325–357, 366–393, 416–432, 447–450` — privacy field-selection derivation + three compile-time guards.
+- `apps/web/src/lib/advisory-locks.ts` — centralized lock registry (6 names).
+- `apps/web/src/lib/admin-backfill-runner.ts:310, 347, 469–614` — the only two-locks-held path; both non-blocking; no reverse ordering.
+- `apps/web/src/lib/image-queue.ts:195–222` — per-image lock holder; never acquires the backfill lock (no deadlock cycle).
+- `apps/web/src/lib/storage/{index,local,types}.ts` — dead abstraction; zero production callers; no network backend.

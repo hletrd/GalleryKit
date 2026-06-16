@@ -1,13 +1,15 @@
-# Code Reviewer — Deep Review (Run-6 Cycle-6)
+# Code Reviewer — Deep Review (Run-6 Cycle-7)
 
-- **HEAD:** `4eb83aab`
+- **HEAD:** `a7758ef0`
 - **Agent:** code-reviewer (oh-my-claudecode:code-reviewer)
 - **Date:** 2026-06-17
-- **Angle:** code quality, logic bugs, SOLID, maintainability, error handling, invariant violations, data-flow / state-consistency.
+- **Angle:** logic bugs, SOLID, maintainability, error-handling, data-flow / state-consistency, edge cases, cross-file interactions.
 
 ## Verdict
 
-**0 actionable findings.** An honest 0/0, consistent with the documented convergence (11 → 45 → 14 → 5 → 1 across cycles 1-5, with the single cycle-5 LOW already fixed at HEAD). No fabricated marginal findings. The repo's correctness/quality posture on the surfaces I examined is genuinely sound.
+**APPROVE — 0 actionable findings.** (CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0.)
+
+The two cycle-6 findings (AGG-C6-01 HDR-badge contrast; AGG-C6-02 boundary-classifier coverage) are both **closed at HEAD** with fixes I independently verified as correct, complete, and non-vacuously tested. The cycle-5→HEAD production delta is exactly four one-token color-class edits. Every codebase-wide sweep is clean and all gates are green. An honest 0/0 — consistent with the documented convergence (11 → 45 → 14 → 5 → 1 → 2 → **0**).
 
 | Severity | Count |
 |---|---|
@@ -18,59 +20,62 @@
 
 ## What HEAD actually is
 
-`4eb83aab` touches only `src/__tests__/client-server-only-boundary.test.ts` (+191 lines) and `plan/plan-356-run6-cycle5-fixes.md`. **No production source changed** since cycle-4's fixes. The working tree at session start carried only `.context/reviews/*.md` doc edits — i.e. HEAD source == reviewed source. I verified this with `git diff-tree --no-commit-id --name-only -r HEAD`.
+`a7758ef0` is the **cycle-6 review+plan doc commit** — it touches only `.context/reviews/*.md` and `plan/*.md`. **No source changed in this commit.**
+
+The full **production-source** delta since the cycle-5 clean baseline (`2f603716..a7758ef0`, verified via `git diff --name-only`) is four files, each a single `text-white` → `text-amber-950` className change in commit `5af25dc7`:
+
+- `apps/web/src/components/color-details-section.tsx:526`
+- `apps/web/src/components/image-manager.tsx:526`
+- `apps/web/src/components/info-bottom-sheet.tsx:278`
+- `apps/web/src/components/lightbox-color-pip.tsx:151`
+
+Plus one **test-only** change (`204e8594`, `client-server-only-boundary.test.ts`) and a new test fixture (`hdr-badge-contrast.test.ts`). Everything else in the diff is docs/plans.
+
+## Cycle-6 finding closures — independently verified at HEAD
+
+### AGG-C6-01 (HDR badge contrast) — CLOSED, fix correct + complete
+- All four badges now use `text-amber-950` on the `from-amber-300 to-orange-400` gradient. Grep sweep for `from-amber-300` across `components/` + `admin/` returns **exactly these four sites, all with `text-amber-950`** — zero residual `text-white`+amber-gradient pairs anywhere in the tree.
+- **Contrast math independently recomputed** (WCAG 2.x sRGB relative luminance, Tailwind v3.4 palette): white/amber-300 = **1.44:1** (the old FAIL), `text-amber-950`/orange-400 = **6.62:1** (worst gradient stop, PASS ≥ 4.5:1), `text-amber-950`/amber-300 = 10.39:1. The forbidden alternative `text-amber-900`/orange-400 = **4.01:1** (correctly rejected). My numbers match the fix commit and the fixture comment to the second decimal.
+- The regression pin `hdr-badge-contrast.test.ts` is **non-vacuous**: per component it asserts (a) the gradient is present, (b) the badge className does NOT contain `text-white`, (c) it DOES contain `text-amber-950` and NOT `text-amber-900`. A refactor that drops the gradient trips the non-vacuity guard; a regression to white/amber-900 fails (b)/(c). Ran it: **PASS**.
+
+### AGG-C6-02 (boundary classifier dynamic-import/import-equals gap) — CLOSED, fix sound
+- `extractAliasedImports` now descends the full AST via `ts.forEachChild`, capturing dynamic `import('…')` (CallExpression + `ImportKeyword` + string-literal arg) and `import x = require('…')` (`ImportEqualsDeclaration` + external-module-reference), de-duped via `Set`. The reasoning ("both forms ALWAYS pull a value, so any aliased specifier is a value edge") is correct — there is no type-only dynamic import or type-only import-equals-require in TS.
+- The new test case carries **9 assertions** including nested-in-function-body dynamic import, non-aliased ignore (`react`, `node:path`), and static+dynamic de-dupe. Non-vacuous. Ran it: **PASS** (combined 18/18 with the contrast fixture).
+- **Trigger surface re-confirmed empty at HEAD:** the only dynamic `import('@/lib…')` sites are in `src/instrumentation.ts` (server `register()` — not a `'use client'` module, unreachable from any client closure); zero `import = require('@/lib|@/db')` sites. Today's boundary is genuinely clean; this was correctly latent future-coverage hardening.
+- **HARD GUARD #1 respected:** `@/db` carries NO `server-only` marker; the test uses `mysql2`-in-closure as the server-only-equivalent signal. This is the correct alternative and is exactly why `server-only` would break the tsx-run backfill sidecar.
 
 ## Files examined in full (not sampled)
 
-Inventory: 234 non-test source files under `apps/web/src`. I prioritized the highest-churn files (by 14-day commit frequency) — where regressions are most probable — then ran codebase-wide pattern sweeps to cover the long tail.
+Inventory: 234 non-test source files under `apps/web/src`. Prioritized the cycle-5→HEAD delta, then re-read the highest-risk correctness/security surfaces and ran codebase-wide pattern sweeps for the long tail.
 
-Read end-to-end and analyzed for logic/state/error-handling defects:
-
-- `lib/admin-backfill-runner.ts` (872 L) — in-app backfill runner, concurrency cap, per-image claim, delete-mid-reencode cleanup, observability counters.
-- `scripts/backfill-color-pipeline.ts` (537 L) — sidecar backfill, batched UPDATE, exit-code matrix, delete-race partitioning.
-- `lib/image-queue.ts` (787 L) — PQueue worker, claim lock, retry/permanent-fail Maps, bootstrap continuation, restore quiesce, embedding/caption hooks.
-- `lib/serve-upload.ts` (309 L) — static-file serving, ETag/settings-hash, SWR hash cache, fd-leak guards, 304 negotiation.
-- `app/api/search/semantic/route.ts` (334 L) — public semantic endpoint, rate-limit Pattern-2, body/content-type guards, model-version isolation.
-- `app/api/checkout/[imageId]/route.ts` (244 L) — Stripe Checkout creation, price parse, idempotency-key under unknown-IP.
-- `app/api/stripe/webhook/route.ts` (454 L) — signature verify, payment_status gate, email shape/length, FK-deleted-image handling, dup-key-loser disambiguation.
-- `app/api/download/[imageId]/route.ts` (463 L) — single-use token claim ordering, open-before-claim fd contract, RFC 6266 disposition.
-- `app/api/admin/lr/upload/route.ts` (485 L) — PAT upload parity with browser path: GPS strip, HDR gate, tracker settle, color-signal insert.
-- `lib/data.ts` (privacy region L204-420 + view-count buffering L17-200) — admin/public/map select-field derivation, compile-time `_PrivacySensitiveKeys` guard, debounced view-count flush + backoff.
-- `lib/process-image.ts` (color resolvers L661-797) — `resolveColorPipelineDecision` / `resolveAvifIccProfile` precedence.
-- `lib/photo-title.ts` (full) — display-title / alt-text derivation.
-- `lib/clip-embeddings.ts` (L62-182) — buffer↔Float32 round-trip, `decodeEmbeddingColumn` shape handling, topK.
-- `lib/smart-collections.ts` (parse/validate L274-363), `lib/admin-tokens.ts` (parseScopes L117-148), `components/wide-gamut-hint.tsx` (L36-54) — all JSON.parse sites.
-- `lib/validation.ts` (`safeInsertId` / `hasMySQLErrorCode` L155-188).
-- `app/actions/admin-backfill.ts` (full) — same-origin gate + status surface.
-- `src/__tests__/client-server-only-boundary.test.ts` (L1-90) — the HEAD change.
+- All four changed components (the `text-amber-950` edits, in full context around the badge).
+- `lib/photo-title.ts` (full) — display-title / alt-text derivation (see INFO below).
+- `lib/smart-collections.ts` (parse/validate L300-364) — JSON.parse guard + depth limit + scalar-type enforcement + column/operator allowlists. Well-hardened.
+- `__tests__/client-server-only-boundary.test.ts` (the AST classifier + new cases).
+- `__tests__/hdr-badge-contrast.test.ts` (the new fixture, full).
+- Plus the carry-forward read set from prior cycles confirmed unchanged byte-for-byte vs the clean baseline: backfill runner + sidecar, image-queue, serve-upload, semantic route, checkout, Stripe webhook, download, LR-upload, data.ts privacy guards + view-count buffering, process-image color resolvers, all JSON.parse sites, validation.ts.
 
 ## Codebase-wide sweeps (clean)
 
-- **`parseInt`/`parseFloat` missing radix** — none. All radix-10.
-- **`JSON.parse` without try/catch or shape validation** — none. All 4 runtime sites (smart-collections, admin-tokens, wide-gamut-hint, semantic route) guard parse + validate the parsed shape.
-- **Empty catch blocks** — none (the single grep hit is a comment in `image-queue.ts`).
-- **`.catch(() => {})`** — all on legitimate best-effort cleanup (fs.unlink, advisory-lock release, `exitFullscreen`); none swallow a load-bearing error.
-- **Sequential `await db.*` inside `for…of` loops** (N+1) — none in `lib/` or `app/actions/`.
-- **action-origin coverage** — every mutating server action calls `requireSameOriginAdmin()` or carries `@action-origin-exempt`; only `auth.ts`/`public.ts` are (correctly) excluded.
+- **`parseInt`/`parseFloat` missing radix** — none. All radix-10 (regex-filtered sweep returns empty).
+- **Empty catch blocks** — none real. Every `catch {}` / `.catch(() => {})` hit is legitimate best-effort cleanup (fs.unlink of temp/orphan derivatives, advisory-lock `RELEASE_LOCK`, `document.exitFullscreen`, rate-limit rollback, session-delete) or a comment in image-queue.ts. None swallow a load-bearing error.
+- **`JSON.parse` without try/catch + shape validation** — none. The 2 lib sites (`admin-tokens.ts:120`, `smart-collections.ts:310`) both wrap parse in try/catch and structurally validate the result; the route/component sites (semantic route, wide-gamut-hint) likewise guard.
+- **Sequential `await db.*` in `for…of` (N+1)** — none in `lib/` or `app/actions/`.
+- **action-origin coverage** — intact (only `auth.ts`/`public.ts` excluded; lint gate enforces).
 
-## Candidates investigated and ruled out (evidence)
+## Gates (re-run at HEAD)
 
-1. **Sidecar backfill double-count of `processed` vs `detectionFailures` on delete-mid-reencode** (`backfill-color-pipeline.ts:444,455`). RULED OUT. A detection-failure row increments BOTH `processed` (L466) and `detectionFailures` (L480). On delete, `processed -=` (L444) subtracts ALL deleted rows and `detectionFailures -=` (L455, via `countDeletedMidReencodeDetectionFailures` on the derivative slice only) subtracts the detection-failure∩deleted overlap. Both counters are walked back exactly once for each affected row — arithmetically correct. Unit-pinned by `backfill-color-pipeline-deleted-mid-reencode.test.ts` (verified passing).
+- **`typecheck:app`** — exit **0**. `✓ Types generated successfully`, `tsc -p tsconfig.typecheck.json --noEmit` clean, zero `error TS`.
+  - *Transient flake disclosed:* the first combined-gate invocation surfaced `npm error code 2` from the typecheck step. It **did not reproduce** on an isolated re-run (`next typegen` alone exit 0; full `typecheck:app` exit 0). Root cause: a `.next/dev` artifact modified at 16:18 today (a dev server had been touching the build dir), racing `next typegen`. This is an environmental tooling artifact, NOT a code regression at HEAD — recorded for transparency, not a finding. The cycle-6 verifier's "typecheck exit 0" holds.
+- **ESLint (`npm run lint`)** — exit **0**, no warnings/errors.
+- **Cycle-6 fix tests** — `hdr-badge-contrast.test.ts` + `client-server-only-boundary.test.ts` → **18/18 PASS** (569 ms).
 
-2. **`server-only` on `@/db` / data layer** — NOT proposed (HARD GUARD #1). The HEAD boundary test's design is the correct alternative: it follows VALUE imports only (type-only imports are erased), uses the TS AST not a regex, and treats `mysql2` in the closure as the server-only-equivalent signal. This is precisely why `server-only` would break the tsx backfill sidecar.
+## INFO / VERIFIED-CORRECT (not findings)
 
-3. **CLIP/semantic dimension drift** (`clip-embeddings.ts`) — RULED OUT. `EMBEDDING_DIM=512`/`EMBEDDING_BYTES=2048` consistent across write (`image-queue.ts:453`), `embeddingToBuffer`, `bufferToEmbedding`, and `decodeEmbeddingColumn` (which handles raw-buffer + base64-in-buffer + base64-string with explicit length checks). Stub and production isolated by `model_version` filter in the route. Feature is `disabled` by default BY DESIGN (HARD GUARD #2) — not activated.
+1. **`getConcisePhotoAltText` mangles a literal internal `#` in a real title** (`photo-title.ts:119-121`). When a meaningful `title` exists, `getPhotoDisplayTitleFromTagNames` returns it verbatim, then `.replace(/\s+#/g, ', ')` turns a title like `"Race #3"` into alt text `"Race, 3"`. **Confirmed real but correctly below the anti-noise threshold** (same disposition as the cycle-6 code-reviewer): alt-text-only (never visible title / `<title>` / OG meta — those take the un-stripped `getPhotoDisplayTitle` path), cosmetic, the alt text remains present and distinguishable (no a11y-AA failure — it's a Level-A name-quality nit, not a contrast/missing-name defect), and an admin-authored title with an internal `#` is vanishingly rare. No correctness/security/data-loss/AA impact → not commit-worthy under the strict rule. Flagged only for completeness.
 
-4. **`getBackfillStatus` omits `deletedMidReencode`** (`admin-backfill.ts:72-100`) — RULED OUT as a defect. Deliberate: `deletedMidReencode` is neither success nor failure and intentionally does NOT flip the with-failures banner (documented at `admin-backfill-runner.ts:787-790`). Surfacing it would be noise.
-
-5. **`getConcisePhotoAltText` corrupts a literal `#` in a real title** (`photo-title.ts:119-121`: `.replace(/^#+/,'').replace(/\s+#/g, ', ')`). A title like `"Race #3"` becomes `"Race, 3"` in alt text. NOTED, not reported: pre-existing, cosmetic, alt-text-only, vanishingly rare (admin-authored titles with internal `#`), and outside this cycle's regression surface. Not worth a code change given convergence posture; flagging only for completeness.
-
-6. **Color-resolver ICC-first vs NCLX-first asymmetry** (`process-image.ts` vs `color-detection.ts`) — RULED OUT. Documented at L677-694 as an intentional design (delivery decision follows editing-intent ICC working-space; audit `color_primaries` follows container NCLX). Not a contradiction.
-
-## Test confirmation
-
-Ran the HEAD-relevant tests: `client-server-only-boundary.test.ts` + `admin-backfill-concurrency-cap.test.ts` + `backfill-color-pipeline-deleted-mid-reencode.test.ts` → **3 files, 29 tests, all passing** (1.12 s). The cycle-5 boundary-test addition works as claimed.
+2. **HARD GUARDs both respected.** No proposal to activate CLIP/semantic_search (the route remains `model_version`-isolated and disabled-by-default by design); no proposal to add `server-only` to `@/db` (the boundary test's `mysql2`-in-closure signal is the correct substitute).
 
 ## Conclusion
 
-Every hot-path and security/correctness-critical surface I examined carries explicit, well-reasoned invariants, layered defenses, and locking test coverage — the product of 5 prior convergence cycles. I found no real regression, latent bug, SOLID violation, or state-consistency defect at HEAD `4eb83aab`. **0/0 is the correct, honest result.**
+The entire production change since the last clean baseline is four correct one-token a11y color fixes whose contrast math I recomputed from scratch, plus a sound, non-vacuously-tested test-only hardening whose trigger surface I re-confirmed empty. Every hot-path and security/correctness-critical surface carries explicit, layered invariants with locking tests. No real regression, latent bug, SOLID violation, data-flow defect, or AA failure survives verification at HEAD `a7758ef0`. **0/0 — APPROVE — is the correct, honest result.**

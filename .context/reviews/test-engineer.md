@@ -1,117 +1,135 @@
-# Test Engineer Review — Run 6 / Cycle 6
+# Test Engineer Review — Run 6 / Cycle 7
 
-**HEAD:** `4eb83aab`
+**HEAD:** `a7758ef0`
 **Agent:** test-engineer
 **Date:** 2026-06-17
 
-## Verdict: 0 actionable coverage gaps. 0 flaky tests. Suite green.
+## Verdict: 0 actionable coverage gaps. 0 flaky tests. 0 vacuous tests. Suite green.
 
-The cycle-5 finding (AGG-C5-01 — data layer uncovered by the client→server-only
-boundary guard) was implemented correctly AT HEAD and closed cleanly. I found
-no new HEAD-verified coverage gap or flaky test that warrants a code change.
-This continues the convergence trend (11 → 45 → 14 → 5 → 1 → **0**); an honest
-0/0 is the correct, desirable outcome here.
+**Unit suite:** `2194 passed | 2 skipped | 0 failed` (234 files passed / 1 skipped = 235),
+exit 0. Ran the full suite TWICE (51.7s then 26.4s) plus the cycle-6 trio in
+isolation — fully deterministic, no contention flake, identical pass/skip counts
+both runs. The 2 skips = the intentional CLIP env-gate. The two cycle-6 commits
+(`5af25dc7` HDR contrast, `204e8594` boundary classifier) both ship their own
+non-vacuous regression tests IN THE SAME COMMIT, and I mutation-proved the
+contrast test catches a `text-white` regression. No HEAD-verified coverage gap,
+flaky test, or vacuous test warrants a code change.
+
+Convergence trend: 11 → 45 → 14 → 5 → 1 → 0 → **0**. An honest 0/0 is the correct
+and expected outcome for cycle 7.
 
 ---
 
 ## What I verified
 
-### 1. Full suite is green and fast (no contention flake this run)
+### 1. Full suite green + deterministic across 2 runs (no flake)
 ```
-npm test --workspace=apps/web
- Test Files  233 passed | 1 skipped (234)
-      Tests  2181 passed | 2 skipped (2183)
-   Duration  43.14s
+npm test --workspace=apps/web   (run 1)  → 2194 pass / 2 skip / 0 fail   51.73s
+npm test --workspace=apps/web   (run 2)  → 2194 pass / 2 skip / 0 fail   26.44s
 ```
-43s this run vs the ~206s cycle-5 run under contention — no slowness, no
-contended-flake signal, exit code 0.
+Identical counts; the 2× wall-clock variance is import/transform jitter under
+load, not a correctness signal. Exit 0 both times. Count rose from cycle-6's
+2181 → 2194 (+13) exactly accounting for the two cycle-6 commits' new tests
+(hdr-badge-contrast +12 it, boundary +1 it).
 
-### 2. The 1 skipped file / 2 skipped tests are the intentional CLIP env-gating
-`clip-semantic-integration.test.ts` uses `const d = RUN ? describe : describe.skip`
-gated on model-weights presence ("CI (no model weights) skips the whole suite").
-This is the documented HARD GUARD (CLIP disabled by design) — NOT a gap.
+### 2. The 2 skipped tests are the intentional CLIP env-gate (HARD GUARD #2)
+`clip-semantic-integration.test.ts:30-31`:
+```
+const RUN = process.env['CLIP_INTEGRATION'] === '1';
+const d = RUN ? describe : describe.skip;   // "Default CI (no model weights) skips"
+```
+Correctly staying skipped. NOT a gap. I did NOT propose activating CLIP /
+semantic_search.
 
-### 3. All 12 CLAUDE.md-claimed locked-contract tests exist and are non-vacuous
-| Test file | it() | expect() | non-vacuous evidence |
-|---|---|---|---|
-| data-tag-names-sql.test.ts | 9 | 52 | asserts `tagNamesAgg` GROUP_CONCAT shape |
-| sw-template-contract.test.ts | 15 | 33 | pins template vs sw-cache reference |
-| touch-target-audit.test.ts | 26 | 28 | 1244-line scanner, FORBIDDEN regex set |
-| privacy-fields.test.ts | 8 | 13 | `publicSelectFieldKeys).not.toContain(GPS/PII)` + symmetric set equality |
-| process-image-blur-wiring.test.ts | 3 | 3 | producer-side blur MIME wrap |
-| images-action-blur-wiring.test.ts | 3 | 4 | write-time blur assertion |
-| backfill-color-pipeline.test.ts | 6 | 25 | persisted column set |
-| admin-backfill-runner-detection-failure.test.ts | 1 | 7 | no version bump on detection failure |
-| client-server-only-boundary.test.ts | 9 | 31 | AST value-import + mysql2-in-closure |
-| check-api-auth.test.ts | 10 | 25 | withAdminAuth wrap fixtures |
-| check-action-origin.test.ts | 27 | 70 | requireSameOriginAdmin early-return |
-| check-public-route-rate-limit.test.ts | 18 | 39 | pre-increment / exempt-tag fixtures |
+### 3. Both cycle-6 commits have adequate, non-vacuous regression coverage
 
-### 4. AGG-C5-01 (the HEAD commit) closed the cycle-5 gap the right way
-`client-server-only-boundary.test.ts` now:
-- treats a `mysql2` / `mysql2/promise` import anywhere in the transitive closure
-  as a server-only-equivalent signal (the unambiguous server-only Node driver
-  that `@/db` imports), closing the `'use client' → @/lib/data → @/db → mysql2`
-  leak that previously passed green;
-- replaced the regex import-extractor with a TypeScript-AST **value-import**
-  classifier that drops both statement-level (`import type`) and inline
-  (`import { type X }`) type-only forms — fixing a latent over-fire the regex
-  always had;
-- correctly left `@/db/index.ts` WITHOUT `import 'server-only'` (HARD GUARD #1 —
-  `server-only@0.0.1` throws under tsx and would break the backfill sidecar +
-  DB init/seed scripts). The mysql2-in-closure check closes the same gap with
-  zero runtime risk. This is exactly the safe fix; the rejected unsafe variant
-  is documented in plan-356.
+**`5af25dc7` (HDR badge contrast → `hdr-badge-contrast.test.ts`, 12 it / mutation-proven):**
+- 4 sites × 3 assertions: gradient-present non-vacuity guard, negative pin
+  (`not.toMatch(/\btext-white\b/)`), positive pin (`text-amber-950`), AND an
+  explicit forbid of the `text-amber-900` trap (4.01:1 at the orange-400 stop).
+- Grep-confirmed all 4 sites use the single-line double-quoted
+  `className="...from-amber-300 to-orange-400...text-amber-950..."` form the test
+  regex inspects — none escapes coverage. The amber→orange gradient appears in
+  EXACTLY these 4 files repo-wide (no 5th uncovered badge).
+- **Mutation test (performed):** reverting `info-bottom-sheet.tsx` to `text-white`
+  flipped exactly 2 assertions RED (the `text-white` pin + the `text-amber-950`
+  pin); restored cleanly. The coverage is genuinely load-bearing, not decorative.
 
-### 5. Every recent source change (last 12 commits) ships with a regression test
-Only 3 non-test `src` files changed in the window, all low-risk and covered:
-- `app/actions/images.ts` — one-line import-source move (`isWideGamutPrimary`
-  now from `@/lib/color-primaries` instead of the dropped `@/lib/color-detection`
-  re-export). Covered by `client-server-only-boundary.test.ts` +
-  `wide-gamut-primaries.test.ts`.
-- `lib/color-detection.ts` — comment-only (dropped the re-export). Covered by
-  the same two tests.
-- `components/ui/switch.tsx` — thumb-travel fix (`translate-x-full` in a nested
-  h-6/w-11 pill). Covered by the new `switch-geometry-contract.test.ts`
-  (99 lines, added in `9a262e3f`) AND the touch-target audit (Root stays 44px).
+**`204e8594` (boundary classifier → `client-server-only-boundary.test.ts`, +1 it):**
+- The AGG-C6-02 fix adds a `ts.forEachChild` recursive descent capturing the two
+  value-import forms the prior statement-only AST walk dropped: dynamic
+  `import('@/lib/data')` (CallExpression + ImportKeyword) and
+  `import db = require('@/db')` (ImportEqualsDeclaration), de-duped via Set.
+- The new `it(...AGG-C6-02)` is non-vacuous: 9 cases incl. nested-in-function
+  dynamic import, `import x = require()`, non-aliased ignore (`react`,
+  `node:path`), and static+dynamic de-dupe (`toEqual(['@/db'])`).
+- The dynamic specifier flows through the SAME `extractAliasedImports` →
+  `resolveAliasedModule` path the real-tree walk uses, and the `@/db`-recognized-
+  as-server-only-equivalent integration pin exercises that path end-to-end, so
+  the walk WILL follow a dynamic edge transitively (not just detect the leaf).
+- Trigger surface grep-confirmed EMPTY at HEAD (only the test fixture itself uses
+  dynamic `@/lib`/`@/db` import; no real `'use client'` module does), so this was
+  correctly LOW — latent future-coverage hardening, now closed.
+- `@/db/index.ts` correctly left WITHOUT `import 'server-only'` (HARD GUARD #1 —
+  `server-only@0.0.1` throws under tsx, breaking the backfill sidecar + DB
+  init/seed scripts; the `mysql2`-in-closure check closes the gap risk-free). I
+  did NOT propose adding `server-only` to `@/db`.
 
-### 6. No flaky-test patterns
+### 4. `switch.tsx` is effectively comment-only since the cycle-4 baseline; its test is current
+The `f8147868..HEAD` diff for `switch.tsx` looked like a real CSS change
+(`translate-x-[calc(100%-2px)]` → `translate-x-full`) but tracing the history,
+the `translate-x-full` behavior change actually landed in cycle-3 `a3b8c557` and
+was already present at the cycle-4 baseline `f8147868`. The only delta in the
+window is the comment-text fix `24159f36`. `switch-geometry-contract.test.ts`
+(cycle-4 AGG-C4-02) pins the load-bearing triple — visible-track `w-11`+`px-0.5`+
+`h-6`, thumb `size-5`, and `translate-x-full` — and explicitly forbids the old
+half-on `translate-x-5`. Current and matching code; non-vacuous (the docstring
+records that flipping any of the three flips an assertion RED).
+
+### 5. Only non-test source changed since cycle-4 baseline = the 4 HDR files + comment-only switch
+`git diff --name-only f8147868..HEAD` over `src/**/*.{ts,tsx}` minus tests yields
+exactly: the 4 HDR badge files (covered) + `switch.tsx` (comment-only, covered).
+Every recent source change still ships with a paired regression test.
+
+### 6. No flaky / non-deterministic patterns
 - **Zero** raw-timer sleeps (`new Promise(r => setTimeout(...))`) anywhere in
-  `__tests__/`.
-- **Every** `vi.waitFor` carries an explicit `{ timeout: 20_000, interval: 25 }`
-  — the generous 20s timeout is the exact hardening from commit `6ab40644`
-  ("fix flaky bootstrap-continuation wait under full-suite load"). The 25ms
-  poll keeps resolution snappy while tolerating CPU starvation under load. This
-  is the correct pattern; the cycle-5 unbounded-wait concern is resolved.
-- `useRealTimers` files (`image-queue`, `sw-cache`, `audit-retention`,
-  `view-retention`, `serve-upload-settings-debounce`, `bounded-map`) pair real
-  timers with `vi.waitFor` polls or deterministic completion, not fixed sleeps.
+  `__tests__/` (grep count 0).
+- **Every** `vi.waitFor` carries an explicit options object — verified each of the
+  8 multi-line calls (the single-line grep miss was a false alarm; the
+  `{ timeout, interval }` is on the following line). 7 use `{ timeout: 20_000,
+  interval: 25 }` (the `6ab40644` hardening), 1 uses `{ timeout: 5000 }`. No bare
+  unbounded wait.
+- The boundary scan's de-flake (AGG-R8-01: read+parse memoization + 60s explicit
+  timeout) is intact and is a correct fix, not a suppression — the assertion runs
+  to completion and still reds on a real leak.
 
-### 7. High-risk security invariants are densely + non-vacuously covered
-- `strip-gps-from-original.test.ts` (28 it / 93 expect) — runs the REAL strip
-  function against GPS-tagged JPEG/AVIF fixtures; asserts GPS IFD gone via
-  `exifReader`, non-GPS EXIF (`Make`/`Model`) retained, pixels byte-identical
-  (no re-encode). Not vacuous.
-- `validation.test.ts` (52 it / 136 expect) — slug/filename/traversal +
-  `containsUnicodeFormatting`/`stripUnicodeFormatting` (the EXIF-caption bidi
-  strip from `a294c333` is regression-fixtured here as the commit message claims).
-- `advisory-locks.test.ts` (4 it / 10 expect) — pins all 5 lock-name constants
-  + the parameterized `gallerykit:image-processing:{id}` name against drift.
-- `csv-escape.test.ts` (20/32), `session-verify.test.ts` (16/32),
-  `rate-limit.test.ts` (27/48), `auth-rate-limit-ordering.test.ts` (12/30) —
-  all substantive.
+### 7. High-risk security/data-loss invariants densely + non-vacuously covered
+- Every critical lib has ≥1 referencing test file: `serve-upload` (4), `data`
+  (84), `process-image` (37), `validation` (37), `color-detection` (11),
+  `blur-data-url` (5), `settings-hash` (2), `auth-rate-limit` (2),
+  `advisory-locks` (2), `gps-exif-strip`/`session-token`/`password-hashing`/
+  `csv-escape` (1 dedicated dense file each).
+- **Stripe async-payment gap (CLAUDE.md-documented operational gap) is fully
+  test-pinned:** `checkout-route.test.ts:211` pins
+  `payment_method_types).toEqual(['card'])` (card-only mitigation), and the
+  webhook `payment_status !== 'paid'` gate is pinned in
+  `cycle3-rpf-source-contracts.test.ts` + `cycle4-rpf-source-contracts.test.ts`.
+  The two operational walls the tracer cited are both regression-locked.
+- All 12 CLAUDE.md locked-contract tests re-confirmed present from cycle-6.
 
 ---
 
 ## HARD GUARDS respected
-1. Did NOT propose `import 'server-only'` on `@/db` (cycle-5 proved it breaks
-   tsx backfill). The AT-HEAD fix already uses the safe mysql2-closure approach.
-2. Did NOT touch the 2 self-skipping CLIP integration tests (intentional
-   env-gating, not a gap).
-3. Did NOT re-report any cycle-1–5 item. All claims verified against HEAD
-   `4eb83aab`.
+1. Did NOT propose `import 'server-only'` on `@/db` (proven to break tsx backfill;
+   the mysql2-closure approach is the safe substitute, left in place).
+2. Did NOT touch / propose activating the 2 self-skipping CLIP integration tests.
+3. Did NOT re-report any cycle-1–6 item. All claims verified against HEAD
+   `a7758ef0` (2 full suite runs + isolation run + a mutation test).
 
 ## Bottom line
-The test surface is mature, the security-critical invariants are pinned with
-non-vacuous fixtures, the suite is green and fast, and there are no flaky-test
-patterns. **No test changes recommended this cycle.**
+The test surface is mature and self-defending. The two cycle-6 fixes each carry
+their own non-vacuous regression test (contrast coverage mutation-proven). The
+suite is green and deterministic across repeated runs, there are zero
+flaky/sleep/unbounded-wait patterns, and the security-critical + data-loss
+invariants are pinned with substantive fixtures. **No test changes recommended
+this cycle.**

@@ -1,9 +1,9 @@
 # Performance & Concurrency Review — GalleryKit
 
-**HEAD:** `4eb83aab` (branch master) · **Agent:** perf-reviewer · **Date:** 2026-06-17
-**Run/Cycle:** Run 6 / Cycle 6 (review-plan-fix loop)
-**Prior perf baselines:** 2f603716 (cycle-5 perf), f8147868 (cycle-4 perf)
-**Scope:** CPU/memory/I/O hotspots; DB query shapes vs composite indexes; N+1; connection-pool & async-queue concurrency; Sharp pipeline throughput + buffer duplication; UI responsiveness (re-render storms / layout thrash / INP / CLS / LCP); `useSyncExternalStore` snapshot stability (React #185); worker/canvas cost; service-worker LRU eviction correctness; advisory-lock hold time; bounded-Map growth & eviction cost; floating-promise throughput; timer-handle leaks; bulk-mutation server-action loops.
+**HEAD:** `a7758ef0` (branch master) · **Agent:** perf-reviewer · **Date:** 2026-06-17
+**Run/Cycle:** Run 6 / Cycle 7 (review-plan-fix loop)
+**Prior perf baselines:** 4eb83aab (cycle-6 perf), 2f603716 (cycle-5), f8147868 (cycle-4)
+**Scope:** CPU/memory/I/O hotspots; DB query shapes vs composite indexes; N+1; connection-pool & async-queue concurrency; Sharp pipeline throughput + buffer duplication; UI responsiveness (re-render storms / layout thrash / INP / CLS / LCP); `useSyncExternalStore` snapshot stability (React #185); worker/canvas cost; service-worker LRU eviction; advisory-lock hold time; bounded-Map growth & eviction cost; floating-promise throughput; timer-handle leaks; bulk-mutation server-action loops; sync-fs in request paths.
 
 ---
 
@@ -11,9 +11,7 @@
 
 **Honest convergence — ZERO actionable performance/concurrency findings (0 CRIT / 0 HIGH / 0 MED / 0 LOW).**
 
-This is the correct, desirable outcome. The system has converged hard (findings 11 → 45 → 14 → 5 → 1 across cycles 1–5). I did NOT inherit the prior cycle-6 `0`; I re-derived every hot path from current-HEAD source and re-verified the delta mechanically. The conclusion holds: no shipping source line that affects a request hot path changed since the cycle-4 perf baseline, and the unchanged hot paths are correct under independent re-examination.
-
-Confidence labels below reflect how certain the (absence-of-)impact assessment is.
+This is the correct outcome. The loop has converged hard (findings 11 → 45 → 14 → 5 → 1 → 2 → **0** perf). I did NOT inherit the prior cycle-6 perf `0`; I re-derived every hot path from current-HEAD source and re-verified the delta mechanically. The conclusion holds: no shipping source line that affects a request hot path changed since the cycle-6 perf baseline, and every unchanged hot path is correct under independent re-examination.
 
 | Severity | New this cycle | IDs |
 |---|---|---|
@@ -22,80 +20,104 @@ Confidence labels below reflect how certain the (absence-of-)impact assessment i
 | MEDIUM | 0 | — |
 | LOW | 0 | — |
 
+Confidence labels below reflect how certain the (absence-of-)impact assessment is.
+
 ---
 
 ## Mechanical delta verification (HEAD-verified, not trusted)
 
-**Working tree:** only `.context/reviews/*.md` are modified. `git status --short` over `apps/web/src/**`, `apps/web/scripts/**`, `apps/web/public/**` (excluding `__tests__`) is empty — no dirty shipping source.
+**Working tree:** clean over shipping source. `git status --short` shows only `.context/reviews/*.md` + new plan files dirty.
 
-**Cycle-5 → cycle-6 (`2f603716..4eb83aab`):** test files + plan/review docs ONLY. The single non-doc file is `src/__tests__/client-server-only-boundary.test.ts` (AGG-C5-01, a TEST). No shipping source changed since the last perf review.
+**Cycle-6 → HEAD (`4eb83aab..a7758ef0`):** exactly the two briefed commits plus the cycle-6 review/plan doc commit:
+- `5af25dc7` — HDR badge contrast a11y fix (AGG-C6-01). **4 shipping files, 1 token each.**
+- `204e8594` — test-only (client→server boundary classifier hardening, AGG-C6-02). Non-shipping.
+- `a7758ef0` — review/plan docs + plan-file moves. Non-shipping.
 
-**Cumulative cycle-4 → HEAD (`f8147868..4eb83aab`)** over `apps/web/{src,scripts,public}` = 6 files; only 2 ship:
+**The entire cycle-6→HEAD SHIPPING delta is four single-token `className` swaps** (`text-white` → `text-amber-950`):
 
-| File | Change | Perf verdict |
+| File:line | Change | Perf verdict |
 |---|---|---|
-| `scripts/backfill-color-pipeline.ts` | Two pure exported helpers — `countDeletedMidReencodeDetectionFailures(derivativeResults)` (`:159`, O(batch) `.filter().length`) and `computeBackfillExitCode({errors,detectionFailures})` (`:174`, constant-time boolean) — plus `collectDeletedMidReencodeFiles` (`:142`) and a small `detectionFailures` accounting subtraction in `flushBatch`. | **Neutral** (confidence HIGH). All pure, O(batch) over already-materialized ≤100-element (`BATCH_SIZE`) arrays, called once per flush / once at process exit. This is the deliberately `concurrency`-serialized, advisory-locked (`gallerykit_color_pipeline_backfill`), operator-triggered sidecar — NOT a request path. Re-read `:120-208` at HEAD; genuinely bounded. |
-| `src/components/ui/switch.tsx` | Comment-only docblock fix. | **Neutral** (confidence HIGH). Render shape, state, effects, handlers identical. |
-| 4 test files | non-shipping | Neutral. |
+| `components/color-details-section.tsx:526` | `text-white`→`text-amber-950` on `.hdr-badge` span | **Neutral** (HIGH). Static class-string literal swap. No change to render shape, component tree, conditional logic, effects, state, handlers, or DOM. |
+| `components/lightbox-color-pip.tsx:151` | same | **Neutral** (HIGH). Same. |
+| `components/info-bottom-sheet.tsx:278` | same | **Neutral** (HIGH). Same. |
+| `components/image-manager.tsx:526` | same | **Neutral** (HIGH). Same. |
 
-**Hot-path files confirmed byte-identical to f8147868** (`git diff --stat f8147868..HEAD -- <file>` empty for each): `lib/process-image.ts`, `lib/color-detection.ts`, `lib/data.ts`, `lib/image-queue.ts`, `lib/serve-upload.ts`, `lib/sw-cache.ts`, `public/sw.js`, `components/home-client.tsx`, `components/photo-viewer.tsx`, `components/histogram.tsx`, `db/schema.ts`, `lib/use-display-capability.ts`, `lib/auth-rate-limit.ts`, `lib/rate-limit.ts`. **No public API route changed** (`src/app/api/**` diff empty); `lib/serve-upload.ts`, `lib/gallery-config.ts`, `lib/analytics-data.ts` diffs empty.
+A `className` string-literal change carries zero runtime/render cost — Tailwind class membership is resolved at build time; the rendered span count, props, and reconciliation are identical. This is purely a WCAG 1.4.3 contrast fix. No perf surface touched.
+
+**Hot-path files confirmed byte-identical to the cycle-6 baseline** (`git diff --stat 4eb83aab..HEAD -- <file>` empty for each): `lib/process-image.ts`, `lib/color-detection.ts`, `lib/data.ts`, `lib/image-queue.ts`, `lib/serve-upload.ts`, `lib/sw-cache.ts`, `lib/bounded-map.ts`, `lib/rate-limit.ts`, `lib/auth-rate-limit.ts`, `lib/admin-backfill-runner.ts`, `lib/use-display-capability.ts`, `components/home-client.tsx`, `components/photo-viewer.tsx`, `components/histogram.tsx`, `db/schema.ts`, `public/sw.js`, `scripts/backfill-color-pipeline.ts`. **No public/admin API route changed** (`src/app/api/**` diff empty).
 
 ---
 
-## Independent HEAD re-derivation (read fresh at 4eb83aab — not inherited)
+## Independent HEAD re-derivation (read fresh at a7758ef0 — not inherited)
 
-The empty diff only proves "no NEW regression introduced." To catch a latent pre-existing regression, I re-examined each hot path from current source.
+The empty diff only proves "no NEW regression." To catch a latent pre-existing regression, I re-examined each hot path from current source.
 
 ### 1. Data access (`lib/data.ts`) — SQL shapes, N+1, GROUP_CONCAT
-- All masonry-list queries (`getImagesLite` `:728`, `getImagesLitePage` `:818`, `getAdminImagesLite`, full `getImages`, `getImagesForFeed` `:771`) use the **single shared `tagNamesAgg`** constant (`:605`) = `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` over one `LEFT JOIN imageTags … LEFT JOIN tags … GROUP BY images.id`. **No N+1** — tags aggregate in the same round-trip, not per-row. The legacy scalar-subquery shape (the production NULL bug, commit aca754c) is gone and locked by `data-tag-names-sql.test.ts`.
-- `getImage()` `:1048` parallelizes tags + prev + next via `Promise.all`. Correct.
-- View-count flush `:103-105` chunks at `FLUSH_CHUNK_SIZE=20` with `Promise.all` per chunk — bounded concurrent DB promises, not a fan-all-at-once.
-- Every `for…of` loop (`:497`, `:1161`, `:1239`, `:1535`, `:1597`) iterates an in-memory result array, never issuing a DB call per iteration. No hidden N+1.
-- View-count buffer is bounded: `MAX_VIEW_COUNT_BUFFER_SIZE=1000` drop-on-cap (`:47-51`), `MAX_VIEW_COUNT_RETRY_SIZE=500` + `VIEW_COUNT_MAX_RETRIES=3` (`:22-27`), atomic Map swap on flush, exponential backoff `getNextFlushInterval()` (`:37-41`), timer `.unref()`'d (`:55`). COR-R4C11-01 timer-handle-null-on-entry fix present (`:75`). No unbounded growth, no timer leak.
+- All masonry/listing queries (`getImagesLite`, `getImagesLitePage`, `getAdminImagesLite`, full `getImages`, `getImagesForFeed`) reference the **single shared `tagNamesAgg`** constant (`:605` = `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)`) at the six `tag_names: tagNamesAgg` sites (`:734,:783,:833,:899,:923,:1359`) over one `LEFT JOIN imageTags … LEFT JOIN tags … GROUP BY images.id`. **No N+1** — tags aggregate in the same round-trip. The legacy scalar-subquery NULL bug (commit aca754c) is gone, locked by `data-tag-names-sql.test.ts`.
+- The full-tag-object path (`getImagesWithTags`, `:1137`) uses a separate combined `GROUP_CONCAT(DISTINCT CONCAT(slug, CHAR(0), name) … SEPARATOR CHAR(1))` (C16-MED-02) — still ONE round-trip, parsed client-side. No N+1.
+- View-count buffer bounded: `MAX_VIEW_COUNT_BUFFER_SIZE=1000` drop-on-cap (`:47-51`), `MAX_VIEW_COUNT_RETRY_SIZE=500` + `VIEW_COUNT_MAX_RETRIES=3` (`:22-27`), flush chunked at `FLUSH_CHUNK_SIZE=20` with `Promise.all` per chunk (`:103-104` — bounded concurrent DB promises, not fan-all), atomic Map swap on flush, exponential backoff `getNextFlushInterval()` (`:37`), timer `.unref()`'d, hard re-cap drain `while (size > MAX) shift` (`:143`). No unbounded growth, no timer leak.
 
-### 2. Index coverage vs query shapes (`db/schema.ts`)
-- Listing sort `(capture_date DESC, created_at DESC, id DESC)` + `processed` filter → `idx_images_processed_capture_date (processed, capture_date, created_at)` `:114`. Covered.
-- prev/next nav → `idx_images_processed_created_at (processed, created_at)` `:115`. Covered.
-- Topic-filtered listing → `idx_images_topic (topic, processed, capture_date, created_at)` `:116`. Covered.
-- Tag JOIN → `idx_image_tags_tag_id` `:132` + `image_tags_image_id_tag_id_unique` `:131`. Covered.
-- Upload-attribution → `idx_images_uploaded_by` `:118`. Analytics breakdowns → `idx_image_views_bot_viewed_country` / `_referrer` `:232-233`. Covered.
-- **`getImagesForFeed` (`:771`) sorts by `(updated_at DESC, created_at DESC, id DESC)` with no matching `(processed, updated_at)` index → a MySQL filesort.** Assessed and INTENTIONALLY NOT REPORTED as a finding: (a) pre-existing — present in the cycle-4 baseline (`git show f8147868:…/data.ts | grep -c getImagesForFeed` = 2), not a new regression; (b) bounded by `safeLimit` ≤ `LISTING_QUERY_LIMIT_PLUS_ONE`; (c) Atom/RSS feed is a low-frequency, cacheable, non-interactive route; (d) filesort over a few-thousand-row personal gallery is sub-millisecond. Adding a `(processed, updated_at, created_at, id)` index would be a speculative micro-optimization with index-write cost on every upload/edit — not worth a code change at this scale. Confidence HIGH that this is acceptable as-is.
+### 2. Index coverage vs query shapes (`db/schema.ts` — unchanged at HEAD)
+- Listing sort `(capture_date, created_at, id)` + `processed` → `idx_images_processed_capture_date`. Covered.
+- prev/next nav → `idx_images_processed_created_at`. Covered.
+- Topic-filtered → `idx_images_topic (topic, processed, capture_date, created_at)`. Covered.
+- Tag JOIN → `idx_image_tags_tag_id` + unique `image_tags_image_id_tag_id`. Covered.
+- Upload-attribution → `idx_images_uploaded_by`; analytics breakdowns → `idx_image_views_bot_viewed_country/_referrer`. Covered.
+- **`getImagesForFeed` sorts by `(updated_at DESC, created_at DESC, id DESC)` with no `(processed, updated_at)` index → MySQL filesort.** AWARENESS-ONLY, NOT A FINDING: pre-existing (not a delta), bounded by `safeLimit`, low-frequency cacheable Atom feed, sub-ms over a few-thousand-row personal gallery. An index would add write cost on every upload/edit for no observable gain. Confidence HIGH.
 
 ### 3. Sharp pipeline (`lib/process-image.ts`)
-- 3-format fan-out in parallel via `Promise.all` (`:1265`). Per-format **fresh `sharp(inputPath, …)` instances** (`:1123-1127`) — the WI-14 fix that eliminates shared-state cross-format contamination; this trades one extra decode for correctness and is the documented contract.
-- Single decode reused via `.clone()` for the 16px blur (`:872`). `sequentialRead: true` + `limitInputPixels` (decompression-bomb cap) + `autoOrient` set per constructor (`:835`, `:1019`).
-- `pipelineColorspace('rgb16')` only on the wide-gamut branch (`:1124`); DCI-P3 deliberately skips rgb16 to keep its source ICC for the Bradford transform — correct, no wasted 16-bit pipeline on sRGB.
-- Failure path (`:1306`) and downscaled-intermediate cleanup (`:1314`) both parallelized / bounded. No buffer-decode duplication beyond the intentional per-format isolation. Confidence HIGH.
+- 3-format fan-out in parallel via `Promise.all` (`:1265`, results `:1272`). Per-format **fresh `sharp(inputPath, …)` instances** (`:1123,:1126`) — the WI-14 cross-format-contamination fix; one extra decode traded for correctness (documented contract).
+- Single decode reused via `.clone()` for the 16px blur (`:872`) and the base-format derivative loop (`:1176`).
+- `limitInputPixels` (bomb cap) + `sequentialRead:true` (peak-memory cap) + `failOn:'error'` + `autoOrient` set per constructor (`:835,:1019,:1123,:1126,:1608`).
+- `pipelineColorspace('rgb16')` ONLY on the wide-gamut branch (`:1124`); DCI-P3 skips rgb16 to keep source ICC for the Bradford transform — no wasted 16-bit pipeline on sRGB.
+- `WIDE_GAMUT_MAX_SOURCE_PIXELS` (default 50 M, `:1004`) downscales huge wide-gamut sources before fan-out (`:1022-1035`) — OOM guard. Failure path (`:1306`) cleanup parallelized. Confidence HIGH.
 
 ### 4. Image queue concurrency (`lib/image-queue.ts`)
-- `PQueue({ concurrency: QUEUE_CONCURRENCY || 1 })` (`:168`) — single-writer topology by default, matching the documented single-instance Docker deployment.
-- Per-job MySQL advisory lock via `GET_LOCK(?, 0)` non-blocking (`:199`) paired with `WHERE processed = false` conditional UPDATE — two workers across a restart boundary cannot double-encode; the loser detects already-processed and cleans up. Lock acquired on a dedicated path, released on connection close. No lock held across the full Sharp encode in a way that would serialize unrelated work beyond the intended single-writer model. Confidence HIGH.
+- `PQueue({ concurrency: QUEUE_CONCURRENCY || 1 })` (`:168`) — single-writer default, matching the single-instance Docker topology.
+- Per-job MySQL advisory lock via non-blocking `GET_LOCK(?, 0)` (`:199`), released on `RELEASE_LOCK` (`:218`), paired with `WHERE processed = false` conditional UPDATE (`:287,:372`) + `affectedRows === 0` cleanup (`:374`). Two workers across a restart boundary cannot double-encode; the loser detects already-processed and cleans up its leftover variants. Lock not held across unrelated work beyond the intended single-writer model. Confidence HIGH.
 
 ### 5. Service-worker LRU (`lib/sw-cache.ts`)
-- `MAX_IMAGE_CACHE_BYTES = 50 MB` (`:19`). Eviction (`:100-148`) is an **O(k) head-walk**, NOT `Array.from().sort()` O(n log n) — the design comment at `:108-111` documents that a re-touched entry is moved to the Map tail (`delete` + re-`set`) so the oldest sits at the head and eviction walks from the front until under cap. Drift-tolerant accounting (`:134-140`, R4C6 TEST-R4C6-11) handles cache.delete() returning false. This is the correct stale-while-revalidate LRU. Confidence HIGH.
+- `MAX_IMAGE_CACHE_BYTES = 50 MB` (`:19`). Upsert is **delete-then-set** (`:111-112`, AGG-H3) so Map insertion order tracks recency. Eviction (`:120-148`) is an **O(k) head-walk** from the front until under cap — explicitly NOT `Array.from().sort()` O(n log n) (design comment `:104-110`). Drift-tolerant accounting handles `cache.delete()` returning false (`:139-143`). Correct stale-while-revalidate LRU. Confidence HIGH.
 
-### 6. Rate-limit maps (`lib/rate-limit.ts`, `lib/auth-rate-limit.ts`, `lib/bounded-map.ts`)
-- Every in-memory limiter is a `BoundedMap` with an explicit hard cap: login 5000, search/OG/checkout/share/semantic 2000 (`rate-limit.ts:63-337`), password-change 5000 (`auth-rate-limit.ts:11`).
-- `set()` is O(1) (`bounded-map.ts:65`). `prune(now)` (`:98-129`) is O(n) but called PERIODICALLY (before a check), not per-insert; the hard-cap eviction walk is bounded by `excess` with an early `break` (`:120`) and relies on Map insertion-order = oldest-first. Cost bounded by `maxKeys` ≤ 5000 — trivial for a periodic sweep. No unbounded growth, no per-request O(n). Confidence HIGH.
+### 6. Rate-limit / bounded maps (`lib/bounded-map.ts`, `rate-limit.ts`, `auth-rate-limit.ts`)
+- Every limiter is a `BoundedMap` with a hard cap (login 5000, search/OG/checkout/share/semantic 2000, password-change 5000).
+- `set()` is O(1) (`bounded-map.ts:65`). `prune(now)` (`:98-128`) is O(n) but called PERIODICALLY before checks, not per-insert; collect-then-delete two-pass (C7-MED-01); hard-cap eviction walk bounded by `excess` with early `break` (`:120`), relying on Map insertion-order = oldest-first. Cost bounded by `maxKeys` ≤ 5000 — trivial periodic sweep. No per-request O(n), no unbounded growth. Confidence HIGH.
 
-### 7. Front-end responsiveness (`components/home-client.tsx`)
-- `useMemo` guards on reorder inputs: `scrollKey` `:125`, `estimatedCardWidth` `:196`, `topicsMap` `:211`, `displayTags` `:216`, `initialLoadMoreCursor` `:226`. `useCallback` on `handleLoadMore` `:121` and `saveScrollPosition` `:127`. Resize work is `requestAnimationFrame`-debounced (`:49`); scroll restore double-rAF'd (`:154-155`). No re-render storm, no layout thrash on resize. `use-display-capability.ts` byte-identical to baseline (the React #185 snapshot-memoization fix is intact). Confidence HIGH.
+### 7. Front-end responsiveness (`components/home-client.tsx`, `histogram.tsx`, `use-display-capability.ts`)
+- `home-client`: reorder inputs `useMemo`'d (`scrollKey :125`, `estimatedCardWidth :196`, `topicsMap :211`, `displayTags :216`, `initialLoadMoreCursor :226`); `useCallback` on `handleLoadMore :121` / `saveScrollPosition :127`; resize work `requestAnimationFrame`-debounced with `cancelAnimationFrame` cleanup (`:48-58`); scroll listener `{ passive: true }` removed on unmount (`:183-184`); scroll restore double-rAF'd (`:154-155`). No re-render storm, no layout thrash.
+- `histogram`: O(n) histogram compute offloaded to a Web Worker via `postMessage` with a **transferable** `imageData` buffer (`:165`); main thread only extracts pixels into a **256-px-capped** canvas (`maxDim=256`, `:180`). No main-thread blocking.
+- `use-display-capability`: `getSnapshot` returns the memoized `_cachedSnapshot` stable reference when `colorGamut`/`isHdr` are unchanged (`:74-81`) — the React #185 `useSyncExternalStore` infinite-loop fix is intact.
+
+### 8. serve-upload request path (`lib/serve-upload.ts`)
+- Async I/O only: `createReadStream` + `fs/promises` `lstat`/`realpath` (`:3-4`). ETag built from `(IMAGE_PIPELINE_VERSION, mtimeMs, size, settingsHash)` (`:215`) — the documented design that avoids 30-50 DB round-trips per masonry paint (`:27`); `getServingColorSettingsHash()` is an in-memory cached helper. 304 short-circuit on If-None-Match (`:219-229`). fd cannot accumulate (single stream per request, `:124`). No sync fs, no per-request heavy work.
+
+### 9. Bulk-mutation server-action loops (admin-only, swept fresh)
+A repo-wide `await`-inside-`for` scan over `src/app/actions` + `src/lib` + `src/app/api` flagged the expected admin-mutation sites. Each verified bounded, correct, and OFF the request hot path:
+- `tags.ts:397/431` — iterate admin `addTagNames`/`removeTagNames` (handful of tags) in one txn; per-tag `ensureTagRecord`/`INSERT IGNORE` is intrinsic to slug-collision semantics.
+- `seo.ts:139` / `settings.ts:138` — iterate `Object.entries(sanitizedSettings)`, a fixed small key set; upsert-or-delete in one txn.
+- `images.ts:268` (`uploadImages`) — iterate `files`, hard-capped at `UPLOAD_MAX_FILES_PER_WINDOW=100`; per-file original-save is intrinsic I/O, heavy Sharp work is enqueued not inline.
+- `images.ts:1017/1032/1048` (bulk-update) — alt-text apply is a per-row UPDATE (each caption differs, so a single statement is impossible without CASE; admin-batch bounded). The tag add/remove paths correctly **batch** via `inArray(imageTags.imageId, ids)` and a single `INSERT IGNORE … ids.map(...)` — exactly right.
+- `embeddings.ts:110` — US-P51 CLIP stub, deferred surface, not active.
+
+### 10. Sync-fs sweep (request/render paths)
+Repo-wide grep for `readFileSync`/`writeFileSync`/`existsSync`/`statSync`/`readdirSync`/`lstatSync`/`execSync` over `src/app` + `src/lib` (excluding tests): **zero hits.** No synchronous fs blocking any request/render path.
 
 ---
 
 ## What I verified did NOT regress (summary)
-- No N+1 in any listing or detail query; tags aggregate via one GROUP_CONCAT JOIN.
+- No N+1 in any listing/detail/feed query; tags aggregate via one GROUP_CONCAT JOIN (two shapes, both single round-trip).
 - No query lacks a covering composite index except the bounded, low-frequency Atom feed (intentional, pre-existing, acceptable).
 - No O(n²) on any hot path; SW LRU and bounded-map eviction are O(k)/O(1)-amortized by design.
 - No unbounded in-memory growth (view-count buffer, retry map, all rate-limit maps capped).
 - No buffer-decode duplication beyond the intentional WI-14 per-format isolation.
-- No timer-handle leak (COR-R4C11-01 fix present; timers `.unref()`'d).
-- No blocking work on a request path; Sharp encode is queued (PQueue) and advisory-locked.
+- No timer-handle leak (timers `.unref()`'d; null-on-entry handling intact).
+- No blocking work on a request path; Sharp encode is queued (PQueue) and advisory-locked; serve-upload is fully async.
 - No floating-promise throughput hazard in the bulk paths re-examined.
+- The delta (4 HDR-badge `className` swaps) carries zero render/perf cost.
 
 ## Hard guards respected
-1. Did NOT propose `import 'server-only'` on `@/db` (cycle-5 proved it breaks tsx backfill).
+1. Did NOT propose `import 'server-only'` on `@/db` (proven to break tsx backfill).
 2. Did NOT propose activating CLIP/semantic search.
-3. Did NOT re-report any cycle 1–5 closed item.
+3. Did NOT re-report any cycle 1–6 closed item; the `getImagesForFeed` filesort remains awareness-only.
 
 No code change is warranted this cycle from a performance/concurrency standpoint.
