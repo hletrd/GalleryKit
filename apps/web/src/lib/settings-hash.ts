@@ -17,7 +17,11 @@
  * changed. Without this, an admin who flips
  * `force_srgb_derivatives=true` to clean up a colorimetric bug ships
  * the new pipeline only to fresh browsers; the existing cached
- * responses keep the old bytes for `Cache-Control max-age=86400`.
+ * responses keep the old bytes for `Cache-Control max-age=3600,
+ * must-revalidate` (AGG-C3-05: was a stale `max-age=86400` here; R8-R7
+ * reduced the served value to 3600 across serve-upload.ts, next.config.ts,
+ * and nginx/default.conf — the 86400 surfaces are s-maxage / SWR on the OG
+ * routes only).
  *
  * SSR / cold-start safety: the function always resolves to 8 hex
  * characters. The NO-ARG form debounces its DB read behind a 5-second

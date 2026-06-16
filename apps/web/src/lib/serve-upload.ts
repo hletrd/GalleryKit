@@ -195,11 +195,11 @@ export async function serveUploadFile(
         // ship color-pipeline fixes without orphan year-long stale caches.
         //
         // P4-E2 / R4-L3 / FA-L1: fold an 8-char hash of ALL color-impacting
-        // admin settings into the ETag (the authoritative list is the 9-entry
-        // COLOR_IMPACTING_KEYS in settings-hash.ts — wide_gamut_jpeg_chroma,
-        // sdr_jpeg_chroma, avif_effort, force_srgb_derivatives,
-        // wide_gamut_max_source_pixels, image_quality_webp/avif/jpeg,
-        // image_sizes — do NOT re-enumerate them here; it drifts. AGG-D1).
+        // admin settings into the ETag. The authoritative list is
+        // COLOR_IMPACTING_KEYS in settings-hash.ts — intentionally NOT
+        // re-enumerated here because an inline copy drifts (AGG-D1; AGG-C3-06
+        // removed the inline 9-key list that had crept back in — see that
+        // constant for the current membership).
         // A flip of any of those settings forces a 304 → 200 revalidation
         // cycle on every cached
         // client even when the file mtime has not changed (e.g. an admin
