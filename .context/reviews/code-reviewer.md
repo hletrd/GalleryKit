@@ -1,140 +1,125 @@
-# Code-Reviewer Deep Review — CLIP Semantic Search + Repo Sweep
+# Code-Quality Review — GalleryKit (Cycle 2, run-6)
 
 **Reviewer:** code-reviewer agent
+**HEAD:** 8ccc8806
 **Date:** 2026-06-16
-**Scope:** Comprehensive skeptical code-quality review weighted toward the newly-shipped CLIP semantic-search surface; broad regression sweep of the rest of the repo.
-**Bar:** Prior cycles 1–9 converged to 0 findings on the non-CLIP surface. New findings only; CLIP surface scrutinized hard.
-
-**Hard guard respected:** The CLIP feature is intentionally deployed DARK (`semantic_search_mode='disabled'` in prod). I do NOT propose activating it. Findings below are latent defects/hardening that would manifest the moment the mode is flipped — reported per the explicit instruction to surface real CLIP bugs.
+**Focus:** code quality, logic correctness, SOLID, maintainability, readability, error handling, naming, dead code, duplication, magic numbers, leaky abstractions.
+**Method:** Systematic directory sweep of `apps/web/src` (app/components/lib/db/actions/api) + `apps/web/scripts`, deep-read of the highest-risk files, parallel `Explore`-agent fan-out over the breadth, and **independent verification of every candidate finding against live code** before recording it.
 
 ---
 
-## CRITICAL
+## Executive summary
 
-### CR-CLIP-01 — MEDIUMBLOB embedding column returns a Buffer, but the read path treats it as a base64 STRING → production & stub semantic results are ALWAYS empty
-**Severity: CRITICAL (defeats the entire feature) · Confidence: HIGH · Currently dark (not live)**
+This is an unusually mature, heavily-reviewed codebase. The privacy enforcement (compile-time `_PrivacySensitiveKeys` guards deriving `publicSelectFields` from `adminSelectFields`), the paid-download / Stripe surfaces, the binary parsers (ICC / EXIF / ISOBMFF), the rate-limit / advisory-lock concurrency model, and the CLIP dark-feature gating are all defended to a high standard with extensive inline provenance.
 
-**Files / lines:**
-- Write path: `apps/web/src/lib/image-queue.ts:452-465`; `apps/web/scripts/backfill-clip-embeddings.ts:159-172`
-- Read paths: `apps/web/src/app/api/search/semantic/route.ts:263-276` (esp. line 267); `apps/web/src/app/api/search/similar/[id]/route.ts:122-132` (line 127) and `:153-166` (line 157)
-- Column type: `apps/web/drizzle/0012_image_embeddings.sql` (`embedding mediumblob NOT NULL`); schema approximates it as `text("embedding")` in `apps/web/src/db/schema.ts:268`
-- DB connection has NO `typeCast`: `apps/web/src/db/index.ts:25-38`
+Static hygiene is excellent: **zero** `as any`, **zero** `@ts-ignore`/`@ts-expect-error`, **zero** truly-empty `catch {}` blocks in product code, only 3 `console.log` (all in the backfill runner, intentional progress logs), and no `FIXME/HACK/XXX` markers.
 
-**The defect (verified end-to-end, including at the mysql2 source and via a runtime proof):**
+Crucially, the parallel sweep agents surfaced ~6 "High/Medium" candidates; **every one dissolved on direct verification** (wrong line numbers, missed an existing guard, or mischaracterized intended design). Those refutations are documented in the "Verified non-issues" section so the next cycle does not re-litigate them.
 
-The `image_embeddings.embedding` column is a **MEDIUMBLOB** (migration 0012). The application writes a **base64 string** into it and reads it back assuming a base64 string:
+The genuine findings are few and low-impact. Nothing rises to Critical or (confirmed) High.
 
-```ts
-// write (image-queue.ts:452-453, backfill:159-160)
-const buf = embeddingToBuffer(embedding);   // 2048 raw float32 bytes
-const base64 = buf.toString('base64');      // ~2732-char ASCII string
-// ...stored into the MEDIUMBLOB column...
+### Counts by severity
+- **Critical:** 0
+- **High:** 0
+- **Medium:** 0
+- **Low:** 3 (CR-01, CR-02, CR-03)
+- **Nits:** 3 (CR-04, CR-05, CR-06)
 
-// read (semantic/route.ts:267, similar/route.ts:127,157)
-const buf = Buffer.from(row.embedding as string, 'base64');
-if (buf.length !== EMBEDDING_BYTES) return null;   // 2048 expected
+---
+
+## Low
+
+### CR-01 — `backfillClipEmbeddings` server action is dead + mode-inconsistent (hardcodes stub)
+**File:** `apps/web/src/app/actions/embeddings.ts:45-122`
+**Confidence:** High (facts), Low (impact — the CLIP feature is deployed dark by design)
+
+`backfillClipEmbeddings()` is exported as a `'use server'` action but has **no caller anywhere in the codebase** (verified: `grep` finds only its definition and a test). Unlike the two sibling embedding paths — the queue hook in `image-queue.ts:433-477` and `scripts/backfill-clip-embeddings.ts:155-157` — both of which branch on `semanticSearchMode === 'production'` to choose `embedImageReal`/`PRODUCTION_MODEL_VERSION`, this action **unconditionally** calls `embedImageStub(id)` and writes `STUB_MODEL_VERSION` (lines 87, 97).
+
+**Why it's a problem:** It is leaky/inconsistent abstraction and latent dead code. If a future cycle wires this action to an admin "Backfill embeddings" button while the deployment is in `production` mode, it would silently populate `STUB_MODEL_VERSION` rows that the production search route (`activeModelVersion = PRODUCTION_MODEL_VERSION`) ignores — i.e. the button would appear to do work but produce nothing the search path consumes. It is *safe by construction today* (no caller; partitioned model_version means no cross-contamination), but it is a divergence from the two authoritative embedding-writer implementations.
+
+**Failure scenario:** Operator (after enabling production) wires the action to a UI control → clicks "backfill" → action reports `{status:'ok', processed: N}` → production search still returns nothing because every written row is `STUB_MODEL_VERSION`.
+
+**Fix:** Either (a) delete the action until it is needed (the sidecar script already covers backfill), or (b) make it mode-aware exactly like `image-queue.ts`/the script (read `getGalleryConfig().semanticSearchMode`, pick `embedImageReal`+`PRODUCTION_MODEL_VERSION` when production). Add a comment stating no UI wires it yet.
+
+---
+
+### CR-02 — Lossless GPS strip treats a zero IFD0 offset as "no GPS" instead of an anomaly
+**File:** `apps/web/src/lib/gps-exif-strip.ts:147-149` (consumed at `process-image.ts:1584-1589`)
+**Confidence:** Medium (real asymmetry), Low (not a demonstrable privacy leak)
+
+```js
+let ifdAbs = tiffStart + r.u32(tiffStart + 4);
+const visited = new Set<number>();
+for (let chain = 0; chain < MAX_IFD_CHAIN && ifdAbs !== tiffStart; chain++) { ... }
 ```
 
-mysql2's text parser returns any **BINARY-charset (charsetNr 63)** column — which a MEDIUMBLOB is — as a Node **`Buffer`**, NOT a string. Verified at the source:
+If the TIFF block's IFD0 offset field (`tiffStart+4`) is literally `0`, then `ifdAbs === tiffStart` and the loop body never executes. `stripGpsFromTiffRegion` returns `false` ("no GPS found"), and the caller `stripGpsFromOriginal` (line 1585: `if (!scrubbed.stripped) return;`) treats that as "leave the original byte-identical." The module's own doctrine elsewhere is that *any structural anomaly returns `null`* so the caller falls through to the tier-2 metadata-free re-encode.
 
+**Why it's borderline:** In a structurally-valid TIFF, IFD0 offset is always ≥ 8 (it must point past the 8-byte header), and GPS data is only reachable through IFD0/IFD1 via tag `0x8825`. A `0` offset means *no IFD is reachable*, so any GPS bytes present would be unreferenced orphans the strip would not need to remove anyway. Hence this is a correctness asymmetry, not a confirmed leak — but a malformed-and-hostile file gets the lenient `false` path where the conservative `null` (force re-encode → strips all metadata) would be safer and matches the rest of the module.
+
+**Fix:** Treat `ifdAbs === tiffStart` (offset 0, or offset pointing into the header) as an anomaly: `if (ifdAbs === tiffStart) return null;` before the loop. This routes the file to the re-encode fallback, consistent with the `visited`-cycle and bounds-check `return null` paths.
+
+---
+
+### CR-03 — `check-action-origin` / `check-api-auth` lint gates silently skip non-`async` exported handlers
+**Files:** `apps/web/scripts/check-action-origin.ts:351, 367`; `apps/web/scripts/check-api-auth.ts` (function-declaration branch)
+**Confidence:** High (the skip is real), Low (not realistically exploitable)
+
+In `check-action-origin.ts`, the arrow-function and function-expression branches both `if (!isAsync) continue;` (lines 351, 367) — a mutating server action exported **without** the `async` keyword (`export const deleteThing = (id) => { db.delete(...) }`) is silently skipped and never checked for `requireSameOriginAdmin()`. The gate's safety net therefore has a hole: a non-async mutating export.
+
+**Why it's Low not High:** Next.js requires `'use server'` module exports to be async functions — a non-async export throws at build/invocation. And `requireSameOriginAdmin()` is itself `await`-ed, structurally forcing async. So a non-async mutating server action is not a reachable deployment state in practice; the lint hole cannot be hit by valid code.
+
+**Fix (defense-in-depth):** Flag a non-async exported function in an action file as a failure (`must be declared async`) rather than `continue`-ing past it, so the gate's coverage is provably total instead of relying on the framework to reject the shape first.
+
+---
+
+## Nits
+
+### CR-04 — `migrate-aliases.ts` exits without closing the DB connection
+**File:** `apps/web/scripts/migrate-aliases.ts:24,27`
+**Confidence:** High (fact), Nit (no real impact)
+
+Both `process.exit(0)` and `process.exit(1)` are reached without `await connection.end()`. This is harmless: `process.exit` terminates immediately and the OS reclaims the socket; this is a one-shot migration script (one process per run), so the "pool exhaustion across repeated runs" scenario does not apply. Add a `finally { await connection.end().catch(() => {}); }` only for tidiness / to match the other scripts' convention (e.g. `migrate.js`, `seed-e2e.ts`).
+
+### CR-05 — `admin-backfill.ts` returns the raw runner error message to the admin UI
+**File:** `apps/web/src/app/actions/admin-backfill.ts:67-68`
+**Confidence:** Medium (fact), Nit (admin-only surface)
+
+```js
+case 'error':
+    return { ok: false, status: 'error', error: result.reason };
 ```
-node_modules/mysql2/lib/parsers/text_parser.js:72-73
-  if (charset === Charsets.BINARY) {
-    return 'packet.readLengthCodedBuffer()';   // ← Buffer, not string
-  }
-```
+`result.reason` originates from `triggerAdminBackfill`'s catch (`admin-backfill-runner.ts:863`, `err.message`) and can carry raw SQL/driver internals. Every other server action on this surface (e.g. `embeddings.ts:120`, the gallery-config fallback) maps to a **localized generic** message and logs the detail server-side. This is inconsistent and could surface driver text in the admin toast. It is only reachable by an authenticated admin, so the disclosure risk is low. Fix: log `result.reason` server-side and return `t('...')` like the sibling actions.
 
-Drizzle's `text()` column has **no `mapFromDriverValue`** (`node_modules/drizzle-orm/mysql-core/columns/text.cjs` — `class MySqlText` only overrides `getSQLType`), so the Buffer passes through unchanged while the *static TypeScript type* is `string`. That is exactly why the `as string` cast compiles even though the runtime value is a `Buffer` — the type lies and tsc cannot catch it.
+### CR-06 — Duplicated FIFO-eviction + Map-prune idiom across modules
+**Files:** `lib/data.ts:178-187`, `lib/image-queue.ts:97-109`, `lib/bounded-map.ts:116-126` (and the per-run state mirroring in `admin-backfill-runner.ts`)
+**Confidence:** High (fact), Nit (maintainability)
 
-Then `Buffer.from(value, 'base64')` **ignores the encoding argument when `value` is a Buffer** and just copies the bytes. So the ~2732 ASCII base64 bytes are copied verbatim (length 2732), the `buf.length !== EMBEDDING_BYTES` guard fires (2732 ≠ 2048), and:
-- `semantic/route.ts`: every scanned row maps to `null` and is filtered out → **`results` is always `[]`**.
-- `similar/route.ts`: the **target** lookup hits line 128's `buf.length !== EMBEDDING_BYTES` → returns **404 "Embedding data is corrupt"** for every image; even if it didn't, every candidate row is dropped at line 158.
-
-Runtime proof (executed during review):
-```
-base64 string length = 2732
-blob buffer length (what mysql2 returns) = 2732
-Buffer.from(<Buffer>, 'base64').length = 2732   (encoding arg IGNORED for Buffer input)
-EMBEDDING_BYTES = 2048  →  row DROPPED (2732 !== 2048) = true
-contrast: Buffer.from(<string>, 'base64').length = 2048  (what the code assumes)
-```
-
-**Why no test caught it:** `clip-embeddings.test.ts` only exercises the pure `embeddingToBuffer`/`bufferToEmbedding` helpers (never the DB blob). `clip-semantic-integration.test.ts` embeds in-memory and never round-trips through the DB. `semantic-route-production.test.ts` mocks `db` so the `.where().orderBy().limit()` chain returns `Promise.resolve([])` — the decode path is never fed a realistic value. `image_embeddings.embedding` is the only MEDIUMBLOB column in the schema, so no other code path proves this pattern works.
-
-**Failure scenario:** Operator seeds the CLIP model volume, runs the backfill in `--production`, flips `semantic_search_mode` to `production` (storable — see CR-CLIP-02), and turns on the search toggle. Every text query and every "similar photos" panel returns nothing (similar returns 404, the panel silently hides itself per `similar-photos.tsx:64-69`). The feature looks completely broken with no error surfaced to anyone.
-
-**Fix (pick one):**
-- **Preferred — store raw bytes, drop base64 entirely** (matches the schema comment "application layer converts Buffer ↔ Float32Array"): write `embeddingToBuffer(embedding)` directly (Drizzle/mysql2 will send the Buffer to the MEDIUMBLOB), and read with `bufferToEmbedding(row.embedding as unknown as Buffer)`. This removes the ~33% base64 storage bloat too.
-- **Minimal — coerce defensively on read:** `const b64 = Buffer.isBuffer(row.embedding) ? row.embedding.toString('latin1') : (row.embedding as string); const buf = Buffer.from(b64, 'base64');` at all three read sites.
-- Either way, **add a real DB-round-trip test** (insert via the actual `db.insert(imageEmbeddings)` against a test MySQL, read back through the route's select, assert a non-empty result) so this class of bug cannot regress.
+The "collect keys → break at `excess` → delete" eviction loop appears in at least three places with near-identical bodies (the comments even cross-reference each other: "matching `BoundedMap.prune()` and C8-MED-01"). `bounded-map.ts` already encapsulates this; `data.ts` (`viewCountRetryCount`) and `image-queue.ts` (`pruneRetryMaps`) reimplement it inline rather than reusing a shared helper. Not a defect — the implementations are correct — but it is copy-paste that will drift. Consider routing the two inline reimplementations through a shared bounded-map/prune utility.
 
 ---
 
-## MEDIUM
+## Verified non-issues (sweep candidates refuted against live code)
 
-### MD-CLIP-02 — `'production'` is a fully storable/resolvable mode, contradicting the in-code claims that it is "rejected" / "healed to disabled"
-**Severity: MEDIUM (consistency / dark-deployment integrity) · Confidence: HIGH**
+These were raised by the parallel sweep agents and **checked directly**; recording them so cycle 3 does not re-flag:
 
-**Files / lines:**
-- Validator accepts it: `apps/web/src/lib/gallery-config-shared.ts:170` — `semantic_search_mode: (v) => v === 'disabled' || v === 'stub' || v === 'production'`
-- Resolver passes it through unchanged: `apps/web/src/lib/gallery-config.ts:128-136` (no heal-to-disabled)
-- Server action persists it: `apps/web/src/app/actions/settings.ts:61-66` validates via `isValidSettingValue`, which now returns `true` for `production`
-- UI comments that are factually WRONG: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:664-666` ("no 'production' item — the validator rejects that value and the resolver heals it to 'disabled'") and `:651` ("which is how the resolver heals it")
-- Route docstring also stale: `semantic/route.ts:189-192` ("only 'stub' mode is the current encoder … a legacy 'production' string that healed to 'disabled'")
-
-**Problem:** The codebase has two mutually-contradictory stories. The *validator + resolver + settings action* treat `production` as a first-class, storable, resolved value (Task 5/6 deliberately opened it — see the comments at `gallery-config-shared.ts:167-169` and `gallery-config.ts:130-133`). But the *settings UI and the route/UI comments* still assert the older posture that `production` is rejected and healed to `disabled`. Both cannot be true; the validator-accepts story is the actual runtime behavior.
-
-This is not a security hole — the surface is admin-only + same-origin guarded, and the "dark" posture currently holds because (a) the Select offers no `production` item and (b) production embeddings don't exist until a backfill runs. But it is a real integrity gap: an admin (or any same-origin admin request, e.g. a replayed/crafted `updateGallerySettings` payload that includes `semantic_search_mode: 'production'`) can persist `production`, and the resolver will honor it — at which point the dark deployment is silently live (and immediately broken by CR-CLIP-01). The stale comments will actively mislead the next maintainer into thinking that can't happen.
-
-**Failure scenario:** A future contributor reads `settings-client.tsx:664-666`, believes `production` is unreachable, and removes the amber "stale production row" warning (`:673-677`) or the route's defense-in-depth gate as "dead code" — turning the contradiction into an actual exposure.
-
-**Fix:** Make the layers agree. Either (a) if production is genuinely intended to stay dark, have the resolver heal `production → disabled` (and say so), or (b) if production is a real mode (it is — the route serves it), correct the false comments at `settings-client.tsx:651,664-666`, `semantic/route.ts:189-192`, and add a `production` SelectItem gated behind an explicit operator acknowledgment. Today's middle state (storable + resolved + "we promise it can't be stored") is the worst of both.
+1. **`gps-exif-strip.ts:521-526` "buffer over-read before bounds check"** — FALSE. The guard `if (start < 0 || length < 0 || start + length > buf.length) return null;` (line 521) runs *before* `buf.readUInt32BE(start)` (line 526), and `length < 8` is rejected at 525. The agent inverted the ordering.
+2. **`icc-chromaticity.ts:234` "integer overflow in `132 + tagCount*12`"** — FALSE. `tagCount` is clamped to `MAX_TAG_COUNT = 100` at line 230 *before* the multiplication; max product is 1200. No overflow possible.
+3. **`process-image.ts:1007-1030` "WI-15 downscale loses aspect ratio (`baseHeight` not updated)"** — FALSE. `baseHeight` feeds only the `basePixels` MP gate (line 1009). The fan-out resizes by width against the **intermediate file's actual pixels** (written with `autoOrient:true` + aspect-preserving `.resize({width})`), so Sharp derives the correct height. No aspect bug.
+4. **`actions/topics.ts` "`topicRouteSegmentExists` TOCTOU outside the lock"** — FALSE. The existence check is called **inside** `withTopicRouteMutationLock(...)` (line 137), and the INSERT additionally catches `ER_DUP_ENTRY` (line 169). Correctly serialized.
+5. **`actions/sharing.ts:120` "in-memory vs DB rate-limit drift on DB failure"** — NOT A BUG. The in-memory and DB limiters are intentionally independent (speed vs durability); on DB failure the documented fail-safe is to "rely on in-memory Map" (stricter / fail-closed). Working as designed.
+6. **`image_embeddings` / `entitlements` orphan rows on image delete** — NOT A BUG. Both carry `onDelete: 'cascade'` FKs (`schema.ts:274, 292`), so the manual delete transaction not touching those tables is correct.
+7. **`use-display-capability.ts` `useSyncExternalStore` infinite-loop (React #185)** — NOT PRESENT. `detect()` value-memoizes `_cachedSnapshot` and returns a stable reference until gamut/HDR actually flip. Correct.
+8. **`api/search/semantic` `clampSemanticTopK` coercion of booleans/arrays** — HANDLED. `if (raw !== undefined && typeof raw !== 'number') return DEFAULT` rejects non-number inputs before any `Number()` coercion (route.ts:88).
+9. **Fire-and-forget embedding write after image deletion (image-queue.ts:433)** — BENIGN. Runs only after `affectedRows>0` (post-`processed=true`); a delete landing between commit and insert makes the insert fail the cascade FK (`ER_NO_REFERENCED_ROW_2`), caught by `catch(embedErr)` → warn log only.
 
 ---
 
-## LOW
+## Coverage
 
-### LO-CLIP-03 — Production threshold docstring says 0.25, actual constant is 0.22
-**Severity: LOW (doc-only) · Confidence: HIGH**
-`apps/web/src/app/api/search/semantic/route.ts:25` ("PRODUCTION_COSINE_THRESHOLD (0.25)") and `:189-192` reference a stale value. The live constant is `PRODUCTION_COSINE_THRESHOLD = 0.22` (`clip-embeddings.ts:103`, calibrated 2026-06-16). `similar/[id]/route.ts` correctly imports the constant, so behavior is fine — only the comment misleads. Fix: change the docstring to 0.22 (or, better, stop hard-coding the number in prose).
+**Files examined:** ~229 source files in `apps/web/src` (app + components + lib + db) plus 26 scripts were in scope and swept. Deep-read in full or in load-bearing regions by the lead reviewer: `lib/data.ts`, `lib/validation.ts`, `lib/gallery-config.ts` + `gallery-config-shared.ts`, `lib/clip-embeddings.ts`, `lib/clip-inference.ts`, `lib/clip-model.ts`, `lib/image-queue.ts`, `lib/admin-backfill-runner.ts`, `lib/gps-exif-strip.ts`, `lib/smart-collections.ts`, `lib/use-display-capability.ts`, `lib/download-tokens.ts`, `lib/icc-chromaticity.ts`, `lib/process-image.ts` (downscale + GPS-strip regions), `actions/embeddings.ts`, `actions/admin-backfill.ts`, `actions/sharing.ts`, `actions/topics.ts`, `actions/images.ts` (delete region), `api/stripe/webhook`, `api/download/[imageId]`, `api/checkout/[imageId]`, `api/search/semantic`, plus `scripts/migrate-aliases.ts`, `scripts/check-action-origin.ts`. The remaining breadth (23 components, 23 scripts, ~57 lib/action modules) was covered by four parallel `Explore` sweeps whose every actionable candidate was then independently verified.
 
-### LO-CLIP-04 — Semantic enrich SELECT omits `lens_model` and `capture_date` that the client maps
-**Severity: LOW (cosmetic; dark feature) · Confidence: HIGH**
-The semantic route's enrichment SELECT (`semantic/route.ts:288-298`) returns `camera_model` but NOT `lens_model` or `capture_date`. The client (`search.tsx:170,186-187`) maps `r.lens_model ?? null` and `r.capture_date ?? null` from the response and renders them in the result subtitle (`SearchResultItem`, `search.tsx:95`). So semantic results always show a thinner subtitle (no lens, no date) than keyword results, which DO populate them via `searchImagesAction`. Not a crash — just an inconsistency between the two search modes. Fix: add `lens_model: images.lens_model` and `capture_date: images.capture_date` to the enrich SELECT and the returned shape (and widen the `enrichedResults` element type, which currently doesn't even declare those fields).
-
-### LO-CLIP-05 — `similar-photos.tsx` thumbnail-size comment drift
-**Severity: LOW (comment vs. code) · Confidence: MEDIUM**
-`similar-photos.tsx:42` says each thumbnail "wraps a 48×48 image", but `SimilarThumb` renders `<Image width={96} height={96}>` (`:159-164`) and `thumbnailSize` resolves to 640 with default `imageSizes` (which has no 128 entry — `DEFAULT_IMAGE_SIZE_VALUES = [640,1536,2048,4096,5120,7680]`), so a 640px derivative is fetched for a grid cell displayed via `object-cover` in an `aspect-square min-h-11` container. Correctness is fine (`sizedImageUrl` clamps to an existing size; `onError` falls back to base). Minor wasted bytes + stale comment. Optional fix: add 128 to default sizes if a true thumbnail is wanted, or correct the comment.
-
----
-
-## INFORMATIONAL (not defects — verified clean / refuted my own initial suspicion)
-
-- **Image resolution 512×512 is CORRECT for jina-clip-v2.** I initially suspected the standard-CLIP 224 size; HF model card confirms v2 upgraded to 512×512 input. `CLIP_IMAGE_SIZE = 512` (`clip-model.ts:31`) is right.
-- **Manual preprocessing (resize `fit:'fill'` + OpenAI CLIP mean/std) is empirically adequate.** I suspected the squashing fill + hand-rolled normalization would misalign text↔image vs. jina's bundled processor. The gated integration test (`clip-semantic-integration.test.ts`, `CLIP_INTEGRATION=1`) shows the red-flower fixture is the clean argmax in BOTH EN and KO with a ≥0.03 lead — so retrieval works. Fill-vs-center-crop is at most a minor quality nuance, not a defect; and the threshold was calibrated against these exact choices, so it is internally consistent.
-- **Matryoshka truncate-then-renormalize is correct** (`truncateAndNormalize`, `clip-embeddings.ts:117-120`): native 1024 → first 512 → L2-renormalize; zero-vector guarded (`normalizeEmbedding` returns input unchanged on norm 0). Good.
-- **Lazy-singleton model load with retry-on-failure** (`clip-model.ts:52-81`) is sound: failed load nulls `loadPromise` so the next call retries; no double-load race that matters (worst case two concurrent first-callers both load — harmless, idempotent).
-- **`onnxruntime-node` is NOT a direct dependency** despite commit `2c26e075` ("ship onnxruntime-node"). It arrives transitively via `@huggingface/transformers ^3.8.1` with `device:'cpu'`. Works, but the commit message overstates what was added; consider pinning it explicitly if the native runtime must be reproducible.
-- **Rate-limit posture (Pattern 2) is correctly implemented** on both routes: pre-increment after cheap validation, rollback on every early return before expensive work (`semantic/route.ts:207-259`, `similar/route.ts:82-150`). Shared 30/min bucket; the `'unknown'` IP fail-closed reasoning (route docstring) is sound.
-- **Same-origin + maintenance + body-size + content-type + chunked-encoding gates** on `semantic/route.ts` are thorough and correct; `clampSemanticTopK` typeof-number guard (`:88-92`) correctly rejects string/boolean/array coercions.
-- **Fire-and-forget embedding hook** (`image-queue.ts:433-470`) correctly never blocks the queue job, gates on `semanticMode`, and tags `model_version`. (The vectors it writes are still unreadable per CR-CLIP-01, but the hook structure is right.)
-
----
-
-## Non-CLIP regression sweep (broad)
-
-Swept the working-tree-modified files and recent non-CLIP commits. Consistent with the cycle 1–9 convergence — **no new defects found.** Specifically:
-
-- `public/sw.js` — regenerated consistently with `sw.template.js` (`__SW_VERSION__` → `ee0f38bd-p7`); template/generated cache names match. Clean.
-- `admin-backfill-concurrency-cap.test.ts` — assertions sound. Clean.
-- `app/[locale]/(public)/page.tsx` — tag-filter parse/filter consistent between metadata and body. Clean.
-- `app/[locale]/admin/(protected)/error.tsx` — mirrors the public error boundary; standard Next.js convention. Clean.
-- `admin-backfill-runner.ts` — the defensive `??=` backfill (`:242-249`) intentionally omits `running`/`lastQueuedCount`/`completedRuns`/`lastError` because those are ORIGINAL state fields always present at object creation (`:224-237`); only later-added counters need backfill. A sub-reviewer flagged this as a missing-backfill bug — that is a **false positive** (no read of those four can hit `undefined`). The only real nit is a stale `affected_rows` vs `affectedRows` comment at `:46` — trivial, below the reporting bar.
-
----
-
-## Verdict
-
-**REQUEST CHANGES** — on the strength of **CR-CLIP-01** (CRITICAL/HIGH: the production embedding read path is incompatible with the MEDIUMBLOB column it reads from; the feature returns empty/404 in every case the moment it is enabled) and **MD-CLIP-02** (MEDIUM: the `production` mode is storable/resolvable, directly contradicting the in-code "rejected/healed" claims that guard the dark deployment).
-
-These do not affect the currently-dark production deployment, but both are genuine latent defects in shipped code, exactly the class the review was asked to surface. The LOW items are doc/cosmetic and can ride along with the fix.
+### Top 3 highest-signal findings
+1. **CR-01** — `backfillClipEmbeddings` is dead + mode-inconsistent (always writes stub even in production), diverging from the two authoritative embedding writers. Wire it mode-aware or delete it.
+2. **CR-02** — Lossless GPS strip returns "no GPS" (lenient) instead of "anomaly → re-encode" (conservative) when a TIFF block has a zero IFD0 offset; tighten to `return null` to match the module's own fail-safe doctrine.
+3. **CR-03** — `check-action-origin`/`check-api-auth` lint gates `continue` past non-`async` exported handlers, leaving a (currently unreachable) coverage hole in the same-origin/auth safety net.

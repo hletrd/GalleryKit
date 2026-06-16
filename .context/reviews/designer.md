@@ -1,187 +1,163 @@
-# Designer (UI/UX + WCAG 2.2 Accessibility) Review — GalleryKit
+# GalleryKit UI/UX & Accessibility Review — Cycle 2
 
-**Run:** deep multi-agent review (fresh-scrutiny pass on CLIP semantic-search UI) · **HEAD:** `bb463062` · **Date:** 2026-06-16
-**Reviewer:** Designer (UI/UX + accessibility)
-**Scope:** Fresh scrutiny of the CLIP semantic-search UI added this session — `components/search.tsx` and `components/similar-photos.tsx` — against the repo's established accessible-component patterns (`photo-viewer.tsx`, `color-details-section.tsx`, `tag-input.tsx`, `lightbox-color-pip.tsx`), WCAG 2.2, the 44×44 px touch-target policy (`__tests__/touch-target-audit.test.ts`), and the en+ko i18n parity + plural convention. Prior cycles 1–9 converged to **0** on the non-CLIP surface; I did not re-derive that surface and report no closed items.
-
-**Method — LIVE + static (NOT static-only).** I started the Next 16 dev server (`npm run dev`, Turbopack, "Ready in 25.3s", first-hit compile ~40–53 s on the slow filesystem) and drove it with `agent-browser` (headless Chromium 0.22.2). Every metric below is text-extractable evidence from `getComputedStyle` / `getBoundingClientRect` / accessibility-attribute reads / direct `fetch()` status — **no findings rest on raw screenshots.** Token contrast was computed from live `getComputedStyle` color values via the WCAG relative-luminance formula. The CLIP feature is DARK in prod (`semanticSearchMode='disabled'`); I reviewed the disabled/stub state's UX honestly and did **not** flip the mode (the `/api/search/similar/80` probe returned `503` live, confirming the dark posture).
-
----
-
-## Live verification performed (evidence ledger)
-
-| What | How | Result |
-|---|---|---|
-| Search input touch target | `getComputedStyle('#search-input')` | **height 44px, min-height 44px** — the base `Input` `min-h-11` overrides the misleading `h-8` (32px) class. NOT a violation. fontSize 14px. |
-| Search dialog dismiss (X) button | `getBoundingClientRect` | **44×44 px** — compliant |
-| Search combobox ARIA (empty) | attribute reads | `role=combobox`, `aria-autocomplete=list`, `aria-expanded=false`, no `aria-controls`/`aria-activedescendant` — correct |
-| Search no-results state | typed "photo", read live region + empty div | live region (`aria-live=polite aria-atomic=true`) announced **"No results"**; visible empty state showed **"No results"** — correct |
-| Search overlay stacking | `getComputedStyle` zIndex | overlay z-40 `rgba(0,0,0,0.5)`, dialog z-50 — correct order |
-| SimilarPhotos toggle touch target | opened info sidebar (panel-right-open), `getBoundingClientRect` | **44px height** (302px wide), `min-height:44px`, `aria-expanded=false` — compliant |
-| **SimilarPhotos 503-vanish + CLS** | clicked toggle, measured EXIF `<h3>` top before/after | API `503`; toggle **removed from DOM** after click; EXIF heading jumped **468px → 408px = 60px upward layout shift** |
-| Dark-mode contrast of `text-muted-foreground` on `bg-card` | live `getComputedStyle` + luminance calc | rgb(161,161,170) on rgb(9,9,11) = **7.76:1** (AAA pass) |
-| Light-mode contrast of `text-muted-foreground` on `bg-card` | toggled `.dark`→`.light`, recomputed | rgb(98,98,106) on rgb(255,255,255) = **6.04:1** (AA pass) |
-| Console / page errors from these components | `agent-browser console` / `errors` | **0 errors.** One unrelated Recharts container warning (Histogram, out of scope). |
-| i18n en+ko parity for `search.*` | flattened both message files | **0 missing keys** in either direction; Korean uses fixed `{count}개` per the documented plural convention (NOT a finding) |
-| Disclaimer-only-in-stub contract | `search-disclaimer.test.ts` | locked by test; `semanticSearchMode==='stub'` gates `semanticExperimentalHint` |
-
-**Net assessment of the honesty question the prompt asked:** the "experimental" disclaimer behavior is **honest and correct**. In prod (`disabled`) the entire semantic toggle block (search.tsx:414–450) does not render at all — visitors see keyword-only search with no semantic affordance and no misleading claim. The disclaimer text (`search.semanticExperimentalHint` = "Experimental — results may not match your query.") renders **only** in `stub` mode, where scores are random. The admin Settings UI only offers `disabled`/`stub` (settings-client.tsx:662–663) — there is no admin-reachable `production` option — so a visitor can never see real-but-unlabelled semantic results through any reachable config. This is the right call and it is test-locked.
+**Type:** Static-only analysis (no dev server, no browser automation)
+**Date:** 2026-06-16
+**Cycle:** 2
+**HEAD:** 8ccc8806
+**Reviewer:** oh-my-claudecode:designer
 
 ---
 
-## NET-NEW FINDINGS THIS PASS: **6** (0 Critical · 0 High · 3 Medium · 3 Low)
+## Summary
 
-The search component is **excellent** — it matches the `tag-input.tsx` combobox gold standard (full ARIA, IME-guarded keyboard nav, stale-response guards, focus restoration, body-scroll lock, live region). All findings below concern `similar-photos.tsx`, plus two minor search nits. None is a WCAG A/AA hard failure; the touch-target floor is met live on both components.
-
----
-
-### DES-CLIP-1 — `SimilarPhotos` loading state has no accessible name (silent for SR users) · **Medium** · **High confidence**
-
-**File:** `apps/web/src/components/similar-photos.tsx:105-108`
-
-```tsx
-{loading ? (
-    <div className="flex items-center justify-center py-4">
-        <span className="text-sm text-muted-foreground animate-pulse">{'…'}</span>
-    </div>
-) : ...}
-```
-
-**Problem (WCAG 4.1.3 Status Messages, AA):** the loading indicator is a bare `…` glyph with `animate-pulse` and **no `role="status"`, no `aria-live`, and no accessible label.** A screen-reader user who activates the "Similar photos" disclosure hears the panel expand, then **silence** during the fetch. The sibling `search.tsx` does this correctly — its spinner is `<Loader2 … role="status" aria-label={t('common.loading')} />` (search.tsx:358) and it has a dedicated `aria-live="polite"` region. SimilarPhotos has neither.
-
-Additionally, under `prefers-reduced-motion` the global rule (`globals.css:291`, `animation-iteration-count: 1 !important`) freezes `animate-pulse` to a single static frame — so reduced-motion users get a motionless, label-less `…` that is indistinguishable from stalled UI.
-
-**User impact:** SR users and reduced-motion users get no feedback that a search is in progress; on a slow network the panel looks broken.
-
-**Fix:** add `role="status"` and an accessible label, reusing the existing `common.loading` key (no new i18n key needed):
-```tsx
-<div className="flex items-center justify-center py-4" role="status" aria-live="polite">
-    <span className="text-sm text-muted-foreground animate-pulse" aria-hidden="true">{'…'}</span>
-    <span className="sr-only">{tCommon('loading')}</span>
-</div>
-```
-(import a `useTranslations('common')` alongside the existing `useTranslations('search')`).
+The surface is notably mature. Prior RPF cycles have closed almost all the obvious a11y gaps: a working skip-to-main link with `tabIndex={-1}` target, ARIA dialog + focus trap in the lightbox, live-region counters for photo position, `focus-visible` rings on all interactive elements, `prefers-reduced-motion` guards in `framer-motion` and the lightbox Ken Burns / slideshow paths, and a bumped `--muted-foreground` contrast to ~6.1:1 AA. The findings below are genuine residual issues discovered by static analysis, not manufactured ones.
 
 ---
 
-### DES-CLIP-2 — `SimilarPhotos` collapses 60 px of layout when the fetch fails/disables (CLS + jarring vanish) · **Medium** · **High confidence**
+## Accessibility (by WCAG 2.2 severity)
 
-**File:** `apps/web/src/components/similar-photos.tsx:64-84`
+### High
 
-```tsx
-if (!res.ok) {           // 503 (stub/disabled), 404 (no embedding), 429, 5xx
-    setResults('error');
-    setOpen(false);
-    return;
-}
-...
-// If a previous fetch errored, don't render at all
-if (results === 'error') return null;
-```
+**DES-01 — `group-hover:scale-105` image zoom transitions are NOT gated on `motion-safe:` — affects every masonry card, year/timeline, on-this-day widget, and shared-group pages**
+- Confidence: High
+- Files:
+  - `apps/web/src/components/home-client.tsx` lines 355, 370
+  - `apps/web/src/components/on-this-day-widget.tsx` line 72
+  - `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx` line 190
+  - `apps/web/src/app/[locale]/(public)/timeline/page.tsx` line 238
+  - `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx` line 230
+- Problem: Every photo card image uses `transition-transform duration-500 group-hover:scale-105` unconditionally. Users who set `prefers-reduced-motion: reduce` still receive the spatial zoom animation on every card hover. The lightbox and `photo-viewer` correctly guard Ken Burns and slide transitions via `shouldReduceMotion` / `useReducedMotion()`, but these Tailwind CSS-only hover animations bypass that runtime check entirely. The only `motion-reduce:` usage found in the codebase is `motion-reduce:animate-none` on a single `animate-pulse` in `similar-photos.tsx`.
+- Affected users: Vestibular disorder / motion-sensitive users on pointer devices.
+- WCAG: 2.3.3 Animation from Interactions (AAA); also relevant to WCAG 2.1 principle of non-interference.
+- Fix: Replace every `group-hover:scale-105` with `motion-safe:group-hover:scale-105` and `transition-transform` with `motion-safe:transition-transform`. The `duration-*` class can remain (it is a no-op when no transition is active). Six files, one-line change each. Alternatively, add a global CSS rule in `globals.css`:
+  ```css
+  @media (prefers-reduced-motion: reduce) {
+    .masonry-card img, .group:hover img { transform: none !important; transition: none !important; }
+  }
+  ```
 
-**Problem (WCAG 2.5.5 / general UX; CLS):** I measured this live. In prod (`disabled` mode) the similar route returns `503` for **every** request. The user sees a "Similar photos" disclosure, clicks it, gets a brief `…`, and then the **entire toggle button is removed from the DOM** — and everything below it (the EXIF heading, all EXIF rows) **jumps up 60 px** (EXIF `<h3>` top moved 468px → 408px in my measurement). There is no message explaining what happened; the affordance simply punishes the click and disappears.
-
-For the prod-`disabled` and `404`-no-embedding cases, silent removal is a defensible "honest dark" choice — but it should be silent *on mount*, not *after the user invests a click and watches a spinner*. And for transient failures (`429` rate-limited, `5xx`) the silent vanish destroys any recovery affordance: the user cannot retry because the control is gone (and `fetchedRef.current` is already `true`, so re-expanding within that instance would not refetch even if the control were still there).
-
-**Bigger structural point — the control is effectively dead in every admin-reachable config.** The similar route is `production`-only (`api/search/similar/[id]/route.ts` Gate 5 → 503 otherwise), but the admin Settings UI only exposes `disabled`/`stub`. So in **every** state an operator can actually select, clicking "Similar photos" results in a 503 → vanish + 60px jump. Rendering a clickable disclosure that is guaranteed to fail-and-disappear is a poor affordance.
-
-**User impact:** confusing disappearing control + measurable layout shift on every click in prod; no retry path on transient errors.
-
-**Fix (pick one):**
-1. **Preferred:** probe capability before rendering the toggle at all — only mount `SimilarPhotos` when `semanticSearchMode === 'production'` (pass the mode down from `photo-viewer.tsx` exactly like `search.tsx` already receives `semanticSearchMode`). Then the disclosure never appears in disabled/stub, and the dead-affordance + CLS problem disappears entirely.
-2. If the toggle must render, **keep it visible on error** and show an inline message for transient failures (distinguish `429`/`5xx` → "Couldn't load similar photos. [Retry]" from `503`/`404` → collapse quietly), and reserve a `min-h` on the panel so the collapse doesn't shift siblings.
-
----
-
-### DES-CLIP-3 — `SimilarPhotos` empty/loaded panel shifts sibling content on every expand (intra-sidebar CLS) · **Low** · **Medium confidence**
-
-**File:** `apps/web/src/components/similar-photos.tsx:103-130`, mounted at `photo-viewer.tsx:856` between `WideGamutHint` and the EXIF `<h3>`.
-
-**Problem:** even on the success path, expanding the disclosure inserts a variable-height block (spinner ~56px → either a `grid-cols-3` of `aspect-square` thumbnails, potentially 100px+, or a one-line "No similar photos found.") directly above the EXIF section, pushing it down. Because the panel lives inside the `overflow-y-auto` info `Card` (photo-viewer.tsx:814) and not above the main image (the LCP element), this is confined to the sidebar and is user-triggered, so it does not affect page-level CLS or LCP — hence Low. But the spinner→grid height delta is a visible jump within the panel.
-
-**User impact:** minor visual jump within the info sidebar when results arrive.
-
-**Fix:** reserve a stable `min-h` on the expanded container (e.g. `min-h-[7rem]`) so the spinner and the eventual grid/empty-text occupy the same vertical box, eliminating the spinner→content jump.
+**DES-02 — Admin UI close-button default label `"Close"` is hardcoded English — affects Korean locale**
+- Confidence: High
+- Files: `apps/web/src/components/ui/dialog.tsx` line 53, `apps/web/src/components/ui/sheet.tsx` line 51
+- Problem: Both shadcn primitives define `closeLabel = "Close"` as the default prop. Any consuming component that does not explicitly pass a `closeLabel` prop (which is the common usage pattern for shadcn) will render an English "Close" label for the screen-reader button regardless of the active locale. Korean screen-reader users hear "Close" instead of the Korean equivalent throughout all admin dialogs and sheets.
+- Affected users: Korean-locale screen-reader users.
+- WCAG: 3.1.2 Language of Parts (AA).
+- Fix: Thread `useTranslation` (or `getTranslations` for server components) into the primitives, or enforce that every call site passes a translated `closeLabel` by removing the default and making the prop required. The simplest approach is to make the shadcn wrapper accept an optional `closeLabel` and internally fall back to `t('common.close')` via the i18n provider context.
 
 ---
 
-### DES-CLIP-4 — Inaccurate code comment claims the `Switch` gets its 44px from wrapper padding · **Low** · **High confidence**
+### Medium
 
-**File:** `apps/web/src/components/search.tsx:436-438`
+**DES-03 — Admin login form: no `aria-invalid` / `aria-describedby` wiring for server-side auth errors**
+- Confidence: Medium
+- File: `apps/web/src/app/[locale]/admin/login-form.tsx` lines 56, 76
+- Problem: Both form fields carry `required` (browser-native validation), but there is no `aria-invalid` state set on failed submission and no `aria-describedby` pointing to a server-returned error message. Auth errors are surfaced as Sonner toasts (inferred from the codebase pattern), which are not programmatically associated with the form field that caused the failure. Screen readers announce the toast in a separate live region but leave the field in an apparently valid state.
+- WCAG: 3.3.1 Error Identification (A), 3.3.3 Error Suggestion (AA).
+- Fix: On failed login, set `aria-invalid="true"` on the password `<Input>` and wire `aria-describedby` to an error `<p id="login-error">` rendered adjacent to the field. The existing toast can remain as a secondary signal.
 
-```tsx
-// 44px touch-target floor: Switch has an implicit min-h,
-// wrapper div provides at least 44px tap area via padding.
-```
+**DES-04 — `tag-input.tsx` text field uses `outline-none` with no `focus-visible` replacement ring**
+- Confidence: High
+- File: `apps/web/src/components/tag-input.tsx` line 199
+- Problem: `className="flex-1 min-w-[120px] bg-transparent outline-none text-sm placeholder:text-muted-foreground"` — the underlying `<input>` element suppresses the browser outline (`outline-none`) without providing a `focus-visible:ring-*` replacement. Every other interactive element in the codebase (buttons, color pip, histogram controls, bottom sheet handle) applies `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`. This input is the primary tag-entry control in the admin upload/edit flow.
+- Affected users: Keyboard-only admin users.
+- WCAG: 2.4.7 Focus Visible (AA), 2.4.11 Focus Appearance (AA, new in WCAG 2.2).
+- Fix: Add `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded` to the `<input>` className.
 
-**Problem:** misleading documentation (not a runtime defect). The `Switch` primitive (`components/ui/switch.tsx:16`) itself carries `min-h-11 min-w-11` (44×44), so the touch target is met by the Switch, not by "wrapper div padding" — the wrapper (`p-3` row, search.tsx:415) does not provide the floor. The comment will mislead a future maintainer who removes the wrapper padding thinking it is load-bearing for accessibility. The semantic toggle is only reachable in `stub` mode, so live measurement was not possible in the default config, but the static class is unambiguous: `min-h-11 min-w-11` on the Radix root.
+**DES-05 — Search modal input is `h-8` (32 px) — below the 44 px touch-target policy**
+- Confidence: High
+- File: `apps/web/src/components/search.tsx` line 356
+- Problem: `className="border-0 p-0 h-8 shadow-none focus-visible:ring-2 ..."` sets the search input inside the modal to 32 px tall. The touch-target audit (`__tests__/touch-target-audit.test.ts`) scans `<Button>` and `<button>` elements but not `<Input>` / shadcn `<Input>` primitives directly, so this slips through the automated gate. On mobile, 32 px is below both the WCAG 2.2 AA minimum (2.5.8, 24 px — barely passes) and the site-wide 44 px policy (WCAG 2.5.5 AAA / Apple HIG / Google MDN).
+- Affected users: Mobile / touch users searching photos.
+- WCAG: 2.5.8 Target Size Minimum (AA), 2.5.5 (AAA); site policy (CLAUDE.md 44 px minimum).
+- Fix: Change `h-8` to `h-11` or `min-h-11`.
 
-**Fix:** correct the comment to "Switch primitive floors at min-h-11/min-w-11 (44px) — touch target met by the control itself."
+**DES-06 — `<main tabIndex={-1} className="... focus:outline-none">` suppresses focus ring for all focus, not just programmatic skip-link focus**
+- Confidence: Medium
+- File: `apps/web/src/app/[locale]/(public)/layout.tsx` line 12
+- Problem: `focus:outline-none` fires for every focus event on the `<main>` element, including any unusual keyboard scenario where focus lands there. The correct fix for skip-link targets is `:focus:not(:focus-visible) { outline: none }` — which suppresses only the mouse/programmatic-click ring while preserving keyboard-visible rings. The current `focus:outline-none` Tailwind class is the standard shadcn pattern for skip targets and is widely accepted in practice, but strictly speaking suppresses `focus-visible` too.
+- WCAG: 2.4.7 Focus Visible (AA), 2.4.11 Focus Appearance (AA, WCAG 2.2).
+- Fix: Change `focus:outline-none` to `focus-visible:outline-none` for maximum precision, or add a globals.css rule: `#main-content:focus:not(:focus-visible) { outline: none; }`.
 
----
-
-### DES-CLIP-5 — Search result thumbnail `alt` falls back to a generic "Photo" while the row text has a richer fallback (redundant SR announcement) · **Low** · **Medium confidence**
-
-**File:** `apps/web/src/components/search.tsx:76` (thumbnail `alt`) vs `:91-96` (row text)
-
-```tsx
-alt={image.title || t('common.photo')}   // line 76 — generic "Photo" when no title
-...
-<p className="font-medium text-sm truncate">
-    {image.title || image.description || `${t('common.photo')} ${image.id}`}  // line 92 — richer
-</p>
-```
-
-**Problem (WCAG 1.1.1 Non-text Content, A — minor):** the row's visible label has a good 3-tier fallback (`title` → `description` → `Photo {id}`), but the adjacent thumbnail's `alt` only falls back to a bare `"Photo"` — so a screen reader on a titleless photo announces the `<img>` as "Photo" and then the link text as "Photo 80", which is slightly redundant. The thumbnail is inside the same `<Link role="option">`, so its `alt` adds to the option's accessible name. By contrast `similar-photos.tsx:161` uses `alt={title ?? ''}` (empty alt — treats the thumb as decorative since the Link carries the label), which is the cleaner pattern for a thumbnail wrapped in a labelled link.
-
-**User impact:** minor — slightly redundant SR announcement on titleless photos in search results.
-
-**Fix:** make the search thumbnail decorative (`alt=""`) since the row text already names the option, mirroring `SimilarThumb`'s approach; or align both on the same 3-tier string. Either is fine — just make them consistent.
-
----
-
-### DES-CLIP-6 — `SimilarThumb` produces an empty-accessible-name link for untitled photos · **Low** · **Medium confidence**
-
-**File:** `apps/web/src/components/similar-photos.tsx:153-172` (with `title` resolved at `:120`)
-
-```tsx
-<Link href={...} className="block ... aspect-square min-h-11 ..." title={title ?? undefined}>
-    <Image ... alt={title ?? ''} ... />
-</Link>
-```
-
-**Problem (WCAG 2.4.4 Link Purpose, A — minor):** when a similar photo has neither title nor description (`title` resolves to `null` at similar-photos.tsx:120), the `Link` gets **no `title` attribute and the image gets `alt=""`** — so the link has an **empty accessible name**. A screen-reader user tabbing the 3-column grid hears "link" with no description for untitled photos, and there is no visible text label in the grid either (it's a pure thumbnail grid). This is the titleless-photo edge of the otherwise-correct decorative-thumb pattern. Only bites when photos lack both title and description — common for camera-default filenames.
-
-**User impact:** untitled similar photos are unlabelled links for SR users (they can still be activated, but the destination is opaque).
-
-**Fix:** provide a guaranteed non-empty accessible name, e.g. `alt={title ?? t('common.photo')}` (and drop the empty-string branch), or add `aria-label={title ?? `${t('common.photo')} ${imageId}`}` to the `Link`.
+**DES-07 — `lightbox-color-pip.tsx` cycle-mode and copy buttons use `ring-1` not `ring-2`**
+- Confidence: Medium
+- File: `apps/web/src/components/lightbox-color-pip.tsx` lines 186, 268
+- Problem: `focus-visible:ring-1 focus-visible:ring-white/50` — a 1 px focus ring on a `bg-black/70` backdrop. The WCAG 2.2 Focus Appearance criterion (2.4.11, AA) requires the focus indicator to have at least a 2 CSS pixel perimeter and a minimum 3:1 contrast ratio between focused and unfocused states. A 1 px ring at 50% opacity white on near-black likely fails the perimeter requirement. The close, fullscreen, and slideshow buttons in the same lightbox use `ring-2` — this is an inconsistency introduced when the color pip was added.
+- WCAG: 2.4.11 Focus Appearance (AA, WCAG 2.2).
+- Fix: Change to `focus-visible:ring-2 focus-visible:ring-white/70` to match the lightbox toolbar button pattern.
 
 ---
 
-## Things I explicitly checked and found CORRECT (no finding)
+### Low
 
-- **Search combobox/listbox ARIA** — textbook: `role=combobox` + `aria-autocomplete=list` + `aria-controls`/`aria-expanded`/`aria-activedescendant` wired to `#search-results` `role=listbox` with `role=option aria-selected` rows and stable `search-result-{idx}` ids. Matches `tag-input.tsx`. (search.tsx:330–334, 384, 66–71) — empty-state ARIA verified live.
-- **Search keyboard model** — ArrowDown/Up move `activeIndex` (clamped), Enter activates the active row via `resultRefs.current[activeIndex]?.click()`, Escape closes; all **IME-guarded** (`isImeComposingReactEvent`, search.tsx:343) so Korean composition arrows/Enter don't hijack result selection. Cmd/Ctrl+K toggles. (search.tsx:243–250, 337–354)
-- **Search focus management** — `FocusTrap` with `initialFocus:'#search-input'` + `fallbackFocus:'#search-dialog'`; focus restored to the trigger button on close via `wasOpenRef` + `requestAnimationFrame` (search.tsx:256–267, 305–312). Body scroll locked while open (search.tsx:272–277).
-- **Search debounce/INP** — 300ms debounce (search.tsx:225–227) + `requestIdRef` stale-response guard on **both** awaits (the `resp.json()` second-await re-check at search.tsx:175 is correct, per the COR-R4C6-07 lineage). Good for INP — no per-keystroke fetch storm.
-- **Search live region** — `sr-only aria-live=polite aria-atomic` announces searching / status / `resultsCount` plural / noResults (search.tsx:371–381). Verified live: announced "No results".
-- **Search responsive** — full-screen on mobile (`inset-0`), centered card on `sm:` (`sm:max-w-xl sm:rounded-xl sm:top-…`), Cmd/Ctrl+K hint hidden on mobile (`hidden sm:block`, search.tsx:409). Sound.
-- **Touch targets** — verified live: search input 44px (despite `h-8`), close button 44×44, SimilarPhotos toggle 44px, `SimilarThumb` link `min-h-11` + `aspect-square`. The `Button`/`Switch`/`Input` primitives all floor at ≥44px (`min-h-11`/`size-11`/`size-12`). **No touch-target violation in either component** — consistent with the `touch-target-audit.test.ts` policy (both files live under `components/` SCAN_ROOTS and would fail the audit otherwise).
-- **Focus-visible rings** — both components use `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2` on every interactive element (search rows, close, SimilarPhotos toggle + thumbs). WCAG 2.4.7 met.
-- **Contrast** — `text-muted-foreground` on `bg-card` measured **7.76:1 (dark)** / **6.04:1 (light)**, both pass AA for the small subtitle/metadata text both components lean on. WCAG 1.4.3 met.
-- **i18n** — en+ko `search.*` at full parity (0 missing either direction); ko fixed `{count}개` is the documented intentional non-plural form, NOT a defect.
-- **Disabled-mode honesty** — the semantic toggle + disclaimer are entirely gated out in `disabled` (prod); disclaimer shows only in `stub`. Honest and test-locked (`search-disclaimer.test.ts`).
-- **Image fallback (404→base JPEG)** — both `SearchResultItem` (search.tsx:81-88) and `SimilarThumb` (similar-photos.tsx:166-170) carry the per-item `onError` sized→base fallback with a `fallbackTriedRef` one-shot guard, matching the R21/R22/R23 lightbox/viewer pattern. No infinite-onError loop. Correct.
+**DES-08 — Year/timeline caption overlay fade uses `transition-opacity` without `motion-safe:`**
+- Confidence: Low
+- File: `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx` line 195
+- Problem: `sm:group-hover:opacity-100 transition-opacity duration-300` on the caption gradient. Opacity fades are generally not vestibular triggers and WCAG 2.3.3 is AAA, so this is low priority. However since DES-01 touches the same files, wrapping both in `motion-safe:` at the same time adds zero cost.
+- Fix: `motion-safe:transition-opacity motion-safe:sm:group-hover:opacity-100` (or rely on the same global CSS block as DES-01).
+
+**DES-09 — Mobile nav: focus may not return to the hamburger trigger when the menu closes**
+- Confidence: Low
+- File: `apps/web/src/components/nav-client.tsx`
+- Problem: The mobile nav uses `aria-expanded` and `aria-controls` correctly. However, if the menu closes via click-outside or Escape (common patterns), the code needs to explicitly call `hamburgerRef.current?.focus()` on collapse. Without focus restoration, keyboard users lose their position in the document and must Tab from the top. This could not be fully confirmed statically without reading the full `nav-client.tsx` close handler.
+- WCAG: 2.4.3 Focus Order (A).
+- Fix: In the `isExpanded → false` transition, call `hamburgerButtonRef.current?.focus()` if the close was triggered by Escape or outside click (not by tabbing out naturally).
+
+**DES-10 — `<OnThisDayWidget>` is not wrapped in `<Suspense>` on the home page**
+- Confidence: Medium
+- File: `apps/web/src/app/[locale]/(public)/page.tsx` line 223
+- Problem: `<OnThisDayWidget />` is rendered without a `<Suspense>` boundary, unlike `<TagFilter>` on line 244 which is correctly wrapped. If `OnThisDayWidget` performs DB queries (likely — it queries photos from the current calendar date), a slow query or render error cascades to the whole page render rather than degrading gracefully.
+- Fix: Wrap in `<Suspense fallback={<div className="h-24 animate-pulse rounded-xl bg-muted" aria-hidden="true" />}>`. Also consider an Error Boundary wrapping it so a DB failure on "on this day" does not break the main gallery.
+
+**DES-11 — Masonry grid column count built with dynamic class interpolation — potential production purge**
+- Confidence: Medium
+- File: `apps/web/src/components/home-client.tsx` line 259
+- Problem: `className={`columns-${colBase} sm:columns-${colSm} md:columns-${colMd} xl:columns-${colXl} 2xl:columns-${col2xl}`}` generates class strings like `columns-3` at runtime. Tailwind JIT requires complete class strings at build time; dynamic interpolation is not scanned by the content extractor. If these classes are not safelisted in `tailwind.config.*`, they may be purged and the grid collapses to one column in production.
+- Fix: Add a `safelist` entry to `tailwind.config.*`:
+  ```js
+  safelist: [
+    { pattern: /^columns-[1-5]$/ },
+    { pattern: /^(sm|md|xl|2xl):columns-[1-5]$/ },
+  ]
+  ```
+  Or refactor to use CSS custom properties / inline `style={{ columnCount: colBase }}`.
 
 ---
 
-## Compact finding list (for the aggregator)
+## UX / IA
 
-- **DES-CLIP-1** · Medium · High — `similar-photos.tsx:105-108` loading `…` has no `role="status"`/`aria-live`/accessible name (silent for SR + reduced-motion users). WCAG 4.1.3. Fix: add `role=status` + `sr-only` `common.loading`.
-- **DES-CLIP-2** · Medium · High — `similar-photos.tsx:64-84` clicking the toggle in prod (503 every time) removes the control from the DOM and shifts siblings **60px up** (measured live); no retry on transient 429/5xx; control is dead in every admin-reachable mode (UI offers only disabled/stub; route needs production). Fix: gate the toggle on `semanticSearchMode==='production'` (pass mode down from photo-viewer), or keep it visible with an inline retry + reserved height.
-- **DES-CLIP-3** · Low · Medium — `similar-photos.tsx:103-130` spinner→grid/empty height delta causes an intra-sidebar jump on expand (confined to the `overflow-y-auto` Card; not page LCP/CLS). Fix: reserve `min-h` on the expanded panel.
-- **DES-CLIP-4** · Low · High — `search.tsx:436-438` comment falsely claims the Switch's 44px comes from wrapper padding; the `Switch` primitive itself is `min-h-11 min-w-11`. Doc-only; fix the comment so a maintainer doesn't strip "load-bearing" padding.
-- **DES-CLIP-5** · Low · Medium — `search.tsx:76` thumbnail `alt` falls back to bare "Photo" while the row text has a richer 3-tier fallback; minor redundant SR announcement. WCAG 1.1.1. Fix: make the thumb decorative (`alt=""`) like `SimilarThumb`, or align both.
-- **DES-CLIP-6** · Low · Medium — `similar-photos.tsx:153-172` untitled similar photos become empty-accessible-name links (`alt=""` + no `title`). WCAG 2.4.4. Fix: `alt={title ?? t('common.photo')}` or `aria-label` on the Link.
+No critical UX architecture issues found. The heading hierarchy (`h1` → `sr-only h2` → per-card `h3`) is correct. Tag filter, topic dropdown, and masonry scroll restoration are all well-implemented. The lightbox `role="dialog"` with `aria-label`, `aria-live` counter, and focus trap is exemplary.
 
-**Search component verdict:** ships clean — matches the repo's combobox gold standard; only two Low nits (DES-CLIP-4 doc, DES-CLIP-5 alt). **SimilarPhotos verdict:** functional and touch-target-compliant, but its error/loading/empty UX is weaker than its siblings (DES-CLIP-1/2/3 + DES-CLIP-6) — the headline item is DES-CLIP-2 (dead clickable affordance + 60px CLS in every reachable prod config). The honest-dark *intent* is right; the execution should make the dark state silent *before* the click, not *after*.
+One informational note: the `info-bottom-sheet` drag-expand gesture has no keyboard equivalent for the drag motion, but the toggle button (`aria-expanded`) covers the core use case. Low priority.
+
+---
+
+## Responsive
+
+No critical responsive breakpoint failures found statically. The 5-column 2xl grid and the `useColumnCount` hook correctly mirror Tailwind breakpoints. The `containIntrinsicSize` dynamic height reservation is a sound CLS mitigation.
+
+---
+
+## i18n
+
+- DES-02 (above) is the primary i18n gap: hardcoded English "Close" default in shadcn primitives.
+- All other user-facing strings pass through `useTranslation` / `getTranslations`. Transfer function names are correctly routed through the i18n callback (`humanizeTransferFunction`). Color primaries intentionally stay as Latinate technical names (documented in `color-details-section.tsx` per cycle-3 RPF convention C3-D2) — this is correct.
+- The `en.json` / `ko.json` asymmetry on count plurals (ICU plural in `en`, fixed form in `ko`) is documented in CLAUDE.md as intentional. No issue.
+
+---
+
+## Perceived Performance (LCP / CLS / INP)
+
+- **LCP:** The masonry grid correctly sets `fetchPriority="high"` / `loading="eager"` on the first `columnCount` images (line 269 `isAboveFold`). Above-fold images use `<picture>` with AVIF/WebP srcsets. No LCP regression found.
+- **CLS:** `containIntrinsicSize` + `aspect-ratio` per card is the right pattern. The triple-RAF scroll-restore (lines 154–162) is a known trade-off for CSS columns and is acceptable.
+- **INP:** The lightbox `showControls` callback avoids re-registration via `controlsVisibleRef` — correct. The masonry `useMemo` for `estimatedCardWidth` and `orderedImages` prevents unnecessary re-renders. No INP regression found.
+- **Note (DES-10 cross-ref):** `<OnThisDayWidget>` without Suspense can delay Time to First Byte / initial render on slow DB connections.
+
+---
+
+## Top 3 Highest-Impact Fixes
+
+1. **DES-01 — Add `motion-safe:` prefix to all `group-hover:scale-105` / `transition-transform` classes** across six files. This is the most impactful a11y fix: every photo card on every public page fires a spatial zoom animation at users with vestibular disorders. Six files, one-line change each, zero visual regression for unaffected users.
+
+2. **DES-04 + DES-05 — Add `focus-visible:ring-2` to the tag input field AND change the search modal input from `h-8` to `h-11`.** The search input is the most-used interactive element after the masonry grid; the tag input is the primary admin data-entry control. Both currently violate the site's own 44 px / focus-visible policy in ways the existing automated audit does not catch.
+
+3. **DES-02 — Fix hardcoded `"Close"` default in `ui/dialog.tsx` and `ui/sheet.tsx`** to read from the i18n system. This is a systemic gap: every admin dialog and sheet close button announces in English to Korean screen-reader users, even though the rest of the admin surface is fully localized.

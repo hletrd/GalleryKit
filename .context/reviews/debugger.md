@@ -1,8 +1,240 @@
-# Debugger Review — Latent-Bug & Failure-Mode Hunt
-
+# Debugger Review — Cycle 2
 **Date:** 2026-06-16
-**Scope:** CLIP semantic-search surface (fresh-scrutiny target, added this session) + broad latent-bug sweep (async/floating-promise, error-swallowing, null/undefined, off-by-one, resource leaks, crash-vs-degrade).
-**Method:** Read every priority CLIP file end-to-end; validated math (zero-vector, float mapping, chunk loop) by execution; verified schema/migration, config resolution, thread-safety of the ONNX session, and the queue race-protection invariants. Confirmed `@huggingface/transformers` is declared (`^3.8.1`) but NOT installed in `node_modules` and `semantic_search_mode` defaults to `disabled` — CLIP is dark, as intended. I did NOT activate it.
+**HEAD:** 8ccc8806 (working tree modifications noted where relevant)
+**Scope:** Full-repo latent-bug and failure-mode sweep (broad, not CLIP-specific).
+
+---
+
+## Files Examined
+
+`lib/image-queue.ts`, `lib/process-image.ts`, `lib/color-detection.ts`,
+`lib/gps-exif-strip.ts`, `lib/admin-backfill-runner.ts`, `lib/serve-upload.ts`,
+`lib/auth-rate-limit.ts`, `lib/rate-limit.ts`, `lib/data.ts`,
+`lib/use-display-capability.ts`, `lib/gallery-config.ts`, `lib/gallery-config-shared.ts`,
+`lib/icc-extractor.ts` (prior session), `lib/icc-chromaticity.ts` (prior session),
+`lib/gain-map-detection.ts` (prior session), `lib/upload-paths.ts`,
+`lib/upload-tracker.ts`, `lib/admin-tokens.ts`, `lib/smart-collections.ts`,
+`app/actions/images.ts`, `app/actions/auth.ts`, `app/actions/admin-users.ts`,
+`app/actions/topics.ts`, `app/api/og/photo/[id]/route.tsx`,
+`app/api/stripe/webhook/route.ts`, `app/api/checkout/[imageId]/route.ts`,
+`app/api/download/[imageId]/route.ts`, `app/api/search/semantic/route.ts`,
+`app/api/search/similar/[id]/route.ts`,
+`components/photo-viewer.tsx`, `components/histogram.tsx`,
+`components/wide-gamut-hint.tsx`, `components/search.tsx`,
+`public/sw.js`, peer reviews (tracer, perf-reviewer, critic, code-reviewer).
+
+Total: ~40 files read or grep-swept across ~465 source files.
+
+---
+
+## CRITICAL Findings
+
+None confirmed at CRITICAL severity in this cycle sweep.
+
+---
+
+## HIGH Findings
+
+### DBG-H1 — Upload tracker quota permanently overclaimed when an exception escapes the per-file try/catch
+**Confidence:** High
+**File:** `apps/web/src/app/actions/images.ts:251-507`
+**Status:** Confirmed latent bug
+
+**Root cause:** At line 251–252 the tracker is pre-incremented by the full batch (`tracker.bytes += totalSize; tracker.count += files.length`). `settleUploadTrackerClaim` only appears at line 485 (all-failures path) and line 507 (success path). These two settlement calls are inside the `try` block of the outer `acquireUploadProcessingContractLock` section. If any code between pre-increment and settlement throws an uncaught exception that propagates past the outer try (e.g. an unexpected throw from `headers()`, DB reconnect, or a Next.js framework error during the loop), the tracker is never settled.
+
+The affected `uploadTrackerKey` (user:IP pair) remains overcounted by the full batch size and byte total until the tracker window expires. An admin hitting this error loses their upload quota for the rest of the window. Low exploit risk but poor UX for photographers on a degraded server.
+
+**Fix (minimal):** Move `settleUploadTrackerClaim` into a `finally` block that runs unconditionally, or pre-increment per-file instead of per-batch.
+
+---
+
+### DBG-H2 — Wide-gamut downscale warning uses hardcoded 50 M pixel cap instead of the admin-configured value
+**Confidence:** High
+**File:** `apps/web/src/app/actions/images.ts:298`
+**Status:** Confirmed semantic mismatch
+
+**Root cause:**
+```typescript
+if (isWideGamutSource && data.width * data.height > 50_000_000) {
+    wideGamutDownscaleWarningCount++;
+}
+```
+`uploadConfig` is already fetched at line 177 and exposes `uploadConfig.wideGamutMaxSourcePixels`, but the warning check uses the hardcoded literal `50_000_000`. The actual encoder uses the configured value from `gallery-config.ts`. An admin who raises the cap to 100 M or lowers it to 20 M will see upload warnings that disagree with encoder behavior.
+
+**Fix (minimal):** Replace the literal on line 298 with `uploadConfig.wideGamutMaxSourcePixels`.
+
+---
+
+### DBG-H3 — `serve-upload.ts` file stream has no request-abort signal; fd held open until GC on client cancel
+**Confidence:** High
+**File:** `apps/web/src/lib/serve-upload.ts:251-256`
+**Status:** Confirmed resource-management gap
+
+**Root cause:**
+```typescript
+fileStream = createReadStream(resolvedPath);
+const webStream = Readable.toWeb(fileStream) as ReadableStream;
+return new NextResponse(webStream, { headers: responseHeaders });
+```
+`createReadStream` opens an OS fd. The `destroy()` call in the `catch` block (lines 260–261) only handles errors during setup, not mid-transfer client aborts. When a browser aborts a download (navigation, back button, connection drop), the Node.js stream is not destroyed until GC. Under concurrent masonry grid loads with rapid navigation (common UX: open gallery, scroll fast, navigate away), fds accumulate. Node's default fd limit is 1024 on many Linux deployments; large AVIF files (up to 50 MB+) make aborts more common.
+
+**Fix (minimal):** Attach an abort signal from the request to call `fileStream.destroy()` on abort, or use `response.signal` if available in the Next.js version.
+
+---
+
+## MEDIUM Findings
+
+### DBG-M1 — `bootstrapImageProcessingQueue` resets `gcInterval` on every successful bootstrap run, delaying GC tasks during continuation batches
+**Confidence:** Medium
+**File:** `apps/web/src/lib/image-queue.ts:698-705`
+**Status:** Likely (observable under large pending queues at startup)
+
+**Root cause:**
+```typescript
+if (state.gcInterval) clearInterval(state.gcInterval);
+state.gcInterval = setInterval(..., 60 * 60 * 1000);
+```
+Each call to `bootstrapImageProcessingQueue` that succeeds — including every continuation batch — clears the prior interval and starts a fresh 1-hour countdown. On a server processing 10 000 pending images (20 continuation batches at BOOTSTRAP_BATCH_SIZE=500), the GC timer is continuously reset and never fires for the entire bootstrap period. `bootstrapCleanupRun` ensures one-shot cleanup at startup, but the `purgeExpiredSessions` / `purgeOldBuckets` / `purgeOldAuditLog` periodic tasks are delayed beyond their intended 1-hour cadence.
+
+**Fix (minimal):** Only arm `state.gcInterval` once — check `if (!state.gcInterval)` before setting it.
+
+---
+
+### DBG-M2 — `wide-gamut-hint.tsx`: `JSON.parse(raw)` from `localStorage` without try/catch will crash the component on malformed stored data
+**Confidence:** High
+**File:** `apps/web/src/components/wide-gamut-hint.tsx:40`
+**Status:** Confirmed crash path
+
+**Root cause:**
+```typescript
+const parsed = JSON.parse(raw) as PersistedDismiss;
+```
+`raw` comes from `localStorage.getItem(...)`. Users can write arbitrary strings to their own `localStorage`, and a storage write failure can produce truncated JSON. `JSON.parse` on a non-JSON string throws a `SyntaxError`. This propagates uncaught through the component and crashes the React subtree containing `WideGamutHint`. The photo viewer mounts this component; if no error boundary is placed above it, the crash collapses the entire photo page for the affected user until they clear `localStorage`.
+
+**Fix (minimal):**
+```typescript
+let parsed: PersistedDismiss | null = null;
+try { parsed = JSON.parse(raw) as PersistedDismiss; } catch { /* treat as fresh */ }
+```
+
+---
+
+### DBG-M3 — `flushGroupViewCounts` backoff counter resets on any partial success, preventing backoff for consistently failing groups
+**Confidence:** Medium
+**File:** `apps/web/src/lib/data.ts:152-157`
+**Status:** Logic inconsistency (analytics impact only)
+
+**Root cause:**
+```typescript
+if (succeeded > 0) {
+    consecutiveFlushFailures = 0;
+} else if (batch.size > 0) {
+    consecutiveFlushFailures++;
+}
+```
+A partial flush (some groups succeed, some fail and are re-buffered) resets `consecutiveFlushFailures` to 0. During a sustained partial DB degradation where some shared group rows consistently fail to update, the exponential backoff never engages as long as at least one group succeeds per flush. The failing groups are retried at the base 5-second interval until VIEW_COUNT_MAX_RETRIES. Analytics impact only, but the backoff is ineffective for the failure mode it was designed to handle.
+
+---
+
+### DBG-M4 — `process-image.ts` `_verifyWebpIccChunk`: reads entire WebP file into memory then uses only 1 KB
+**Confidence:** High
+**File:** `apps/web/src/lib/process-image.ts` (WebP ICC verification function)
+**Status:** Confirmed memory waste
+
+**Root cause:** The WebP ICC verification helper uses `fs.readFile(outputPath)` to load the entire file, then uses `buffer.subarray(0, 1024)`. Wide-gamut WebP derivatives can be tens of MB. Under peak concurrency (QUEUE_CONCURRENCY=4, three formats in parallel per image), this transiently allocates `concurrency × 3 × file_size` bytes of unnecessary buffer. For 50 MB WebPs at concurrency 4: ~600 MB of extra allocation per encode cycle.
+
+**Fix (minimal):** Use `fileHandle.read(smallBuf, 0, 1024, 0)` to read only the first 1 KB.
+
+---
+
+### DBG-M5 — `admin-tokens.ts` line 120: `JSON.parse` result used without shape validation
+**Confidence:** Medium
+**File:** `apps/web/src/lib/admin-tokens.ts:120`
+**Status:** Risk (admin-controlled data, not a security hole)
+
+**Root cause:** `JSON.parse(raw)` is inside a try/catch for SyntaxError, but the parsed object is used immediately without field type guards. If the `admin_settings` DB row is corrupted (e.g. manual DB edit, partial write) to contain a structurally valid JSON object with unexpected field types (e.g. `{"tokens": "not-an-array"}`), downstream code that expects `parsed.tokens` to be an array will throw a TypeError at runtime. Requires DB write access, so this is a robustness concern rather than a security issue.
+
+---
+
+### DBG-M6 — `parseCicpFromHeif`: redundant `dataSize >= 11` inner check masks the intent and the outer check is the only effective guard
+**Confidence:** Medium
+**File:** `apps/web/src/lib/color-detection.ts:251-253`
+**Status:** Code clarity issue, no functional impact
+
+```typescript
+if (dataSize >= 11) {
+    const colourType = buffer.toString('ascii', dataStart, dataStart + 4);
+    if (colourType === 'nclx' && dataSize >= 11) {   // <-- always true here
+```
+The second `dataSize >= 11` check is dead code — the outer guard already enforces it. The `colourType` read requires only `dataSize >= 4`. The redundant check misleads reviewers into thinking the inner condition adds protection. No functional bug, but maintenance hazard if either threshold is changed independently.
+
+---
+
+## LOW Findings
+
+### DBG-L1 — `permanentlyFailedIds` set in image-queue grows without bound; large deployments get unbounded `NOT IN (...)` queries
+**Confidence:** Low
+**File:** `apps/web/src/lib/image-queue.ts:625-626`
+**Status:** Risk (long-running servers)
+
+`permanentlyFailedIds` is a `Set<number>` that is only added to, never evicted. After months of operation with recurring upload failures, the `NOT IN (id1, ..., idN)` clause in each bootstrap query can grow into thousands of entries, degrading MySQL query planning. `pruneRetryMaps` in the GC interval handles the retry count maps but not this set.
+
+---
+
+### DBG-L2 — `color-detection.ts` ICC chromaticity fallback never fires when ICC name implies a known gamut but chromaticity data disagrees
+**Confidence:** Low
+**File:** `apps/web/src/lib/color-detection.ts:357`
+**Status:** Edge-case honesty gap
+
+The chromaticity fallback is gated on `colorPrimaries === 'unknown'`. If an ICC name says "sRGB" but the embedded `rXYZ/gXYZ/bXYZ` tags describe Display P3 (misconfigured export), the name-based result is kept and chromaticity is never consulted. Deliberate design (name takes precedence for known profiles), but worth flagging as a potential misdetection for malformed profiles.
+
+---
+
+### DBG-L3 — `serve-upload.ts` `If-None-Match` parsing splits on bare commas, not RFC 7232 quoted-string-aware commas
+**Confidence:** Low
+**File:** `apps/web/src/lib/serve-upload.ts` (ETag comparison section)
+**Status:** Theoretical (ETag format never contains commas in practice)
+
+The generated ETag is `W/"v7-{mtime}-{size}-{hash}"` — no commas. A comma in an ETag would cause a false-negative 304 miss. Not exploitable, not practically triggerable with the current ETag format.
+
+---
+
+### DBG-L4 — `parseCicpFromHeif`: `Number(buffer.readBigUInt64BE(...))` silently loses precision for boxes > 2^53 bytes
+**Confidence:** Low
+**File:** `apps/web/src/lib/color-detection.ts:241`
+**Status:** Theoretical (files > 8 PB not reachable via 200 MB upload cap)
+
+---
+
+### DBG-L5 — `data.ts` view count re-buffer capacity check bypassed when `groupId` already exists in the new buffer
+**Confidence:** Low
+**File:** `apps/web/src/lib/data.ts:125-130`
+**Status:** Bounded by post-flush enforcer at line 143
+
+Re-buffering checks `!viewCountBuffer.has(groupId)` before the capacity gate, meaning a key already present bypasses the drop check and accumulates unbounded counts. The post-flush `while (viewCountBuffer.size > MAX)` loop at line 143 corrects entry count but not per-entry count magnitudes. Analytics only; no crash.
+
+---
+
+### DBG-L6 — `images.ts` upload action: `data.width * data.height` in the wide-gamut pixel warning is not guarded against integer overflow for extreme resolutions
+**Confidence:** Low
+**File:** `apps/web/src/app/actions/images.ts:298`
+**Status:** Theoretical (200 MB upload cap prevents extreme dimensions in practice)
+
+---
+
+## Summary
+
+| Severity | Count | IDs |
+|----------|-------|-----|
+| CRITICAL | 0 | — |
+| HIGH | 3 | DBG-H1, DBG-H2, DBG-H3 |
+| MEDIUM | 6 | DBG-M1, DBG-M2, DBG-M3, DBG-M4, DBG-M5, DBG-M6 |
+| LOW | 6 | DBG-L1, DBG-L2, DBG-L3, DBG-L4, DBG-L5, DBG-L6 |
+
+**Top 3 most likely to bite in production:**
+1. **DBG-M2** — `wide-gamut-hint.tsx` unguarded `JSON.parse(localStorage)` crashes the photo viewer for any user with corrupted dismiss state. User-visible, no server degradation needed to trigger it.
+2. **DBG-H3** — `serve-upload.ts` fd accumulation on client abort. Triggered by normal browser navigation patterns during masonry grid loading; will eventually hit OS fd limits on a busy instance.
+3. **DBG-H2** — Hardcoded 50 M pixel cap in upload warning disagrees with admin-configured `wide_gamut_max_source_pixels`. Silently misleads photographers whenever the setting is changed.
 
 **Headline:** The CLIP surface is well-engineered. **Zero confirmed crash/correctness bugs.** The much-feared failure modes (rejected-init-promise cached forever, zero-vector NaN, concurrent-session corruption, embedding-hook breaking the queue race protections) are all handled correctly. Findings below are doc-drift (trivial) and genuine but dark-gated operational latent risks.
 

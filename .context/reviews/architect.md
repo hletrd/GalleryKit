@@ -1,117 +1,140 @@
-# Architect Review — CLIP semantic-search surface + topology fit
-Date: 2026-06-16 · Scope: architectural / design-risk · READ-ONLY · Agent: architect (Opus)
+# Deep Architecture & Design-Risk Review — GalleryKit (Cycle 2)
 
-CLIP feature is intentionally DARK (`semantic_search_mode` default `'disabled'`). All
-"when enabled" risks are labelled DEFERRED. No finding proposes activating it.
+**Reviewer:** architect (read-only) · **HEAD:** 8ccc8806 · **Date:** 2026-06-16
+**Scope calibration:** explicitly single-instance / single-writer / personal-scale self-hosted product. Findings are weighted against that scope — structural risks that matter even at personal scale are separated from horizontal-scale concerns the docs already fence.
 
-## Summary
-The CLIP feature is, on the whole, well-isolated: pure helpers (`clip-embeddings.ts`) are
-DB-free, model identity is pinned in a shared shim, the encoder is a lazy singleton, weights
-are volume-mounted not baked, and the queue hook is fire-and-forget and gated. But three
-CONFIRMED issues bite even while dark or on the next build: (1) `@huggingface/transformers`
-(which pulls `onnxruntime-node` native binaries) is a STATIC import in `clip-model.ts`, which
-is statically imported by `image-queue.ts` — the core upload pipeline — yet it is NOT listed
-in `serverExternalPackages`; (2) the admin UI and i18n assert that `'production'` is rejected /
-healed to `'disabled'`, but the config validator + resolver actually ACCEPT and pass
-`'production'` through — a direct in-repo contradiction that strands a large production code
-surface behind a hand-edited DB row; (3) stale provenance comments across `clip-inference.ts`,
-`caption-generator.ts`, and two route docstrings describe a design (ViT-B/32, "once
-onnxruntime-node is added", threshold `0.25`) that no longer matches the shipped code
-(jina-clip-v2, transformers already pulls onnxruntime, threshold `0.22`).
+---
 
-## Analysis
+## Method & What Was Mapped
 
-### CONFIRMED-1 — Native-runtime dependency not externalized; coupled into core pipeline graph
-- `apps/web/src/lib/clip-model.ts:19` — `import { env, AutoModel, AutoTokenizer, Tensor } from '@huggingface/transformers'` (top-level static).
-- `apps/web/src/lib/image-queue.ts:23` — `import { embedImageReal } from '@/lib/clip-model'` (top-level static). `image-queue.ts` is imported at boot by `src/instrumentation.ts` (`bootstrapImageProcessingQueue`) and by every upload action.
-- `apps/web/next.config.ts:45` — `serverExternalPackages: ['drizzle-orm', 'sharp']` — `@huggingface/transformers` is absent.
-- `package-lock.json` — `@huggingface/transformers@3.8.1` declares `onnxruntime-node@1.21.0` (native `.node` addon), `onnxruntime-web`, and its own `sharp@^0.34.1` as dependencies.
-- Architectural risk: in `output: 'standalone'`, packages that ship native addons must be externalized (kept in `node_modules`, not bundled by the Next/Webpack server trace) the same way `sharp` is. Leaving transformers un-externalized risks the Next build attempting to bundle/trace a package with native `.node` binaries and a WASM backend — at best bloating the standalone trace, at worst a build/runtime failure when the bundled copy can't resolve its platform addon. Because the import chain is `instrumentation → image-queue → clip-model → transformers`, the ONNX runtime is pulled into the always-loaded server graph for EVERY request path, not just the dark search routes.
-- Concrete consequence (DEFERRED to next clean build / image rebuild): larger standalone image; possible `Could not load ... runtime`-class failures analogous to the Sharp linux-arm64 note already in the Dockerfile; the `prod-deps` tree must now carry onnxruntime-node native binaries for the runtime container, which the Dockerfile does not special-case the way it does for `@img/sharp-*`.
-- Recommended direction: add `@huggingface/transformers` (and likely `onnxruntime-node`) to `serverExternalPackages`; and convert the encoder import to a lazy `await import('@huggingface/transformers')` inside `getModelBundle()` so the native runtime is only resolved when the dark feature is actually switched on, fully decoupling it from the boot/upload path. Mirror the per-arch native-binary install the Dockerfile already does for sharp if onnxruntime-node fails to materialize in-container.
-- Confidence: High (dependency graph + config verified). Build-break severity itself: Medium-High (depends on Next's tracer tolerance for the current transformers version).
+1. **Layering / dependency direction** — grepped every `lib → app` import, every `api → actions` import, every `'use client'` → `server-only` transitive edge, and the public/admin data-access split.
+2. **Coordination-state inventory** — enumerated every module-level mutable Map/Set/let, every `globalThis[Symbol.for(...)]` store, and every Promise-singleton, then cross-checked each against CLAUDE.md's "don't horizontally scale" fence.
+3. **Extensibility surfaces** — storage abstraction, color-pipeline decision matrix, settings/config system, i18n surface.
+4. **Enforcement model** — whether security/privacy invariants hold *by construction* (types/lint/tests fail on violation) vs *by convention* (a careful reader must remember).
 
-### CONFIRMED-2 — Config layer accepts `'production'`; UI + i18n claim it is rejected/healed
-- `apps/web/src/lib/gallery-config-shared.ts:170` — validator: `v === 'disabled' || v === 'stub' || v === 'production'` → `'production'` is VALID.
-- `apps/web/src/lib/gallery-config.ts:128-136` — resolver passes a valid raw value through unchanged: `return raw as 'disabled' | 'stub' | 'production'`. It does NOT heal `'production'` to `'disabled'`.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:655` — Select value clamped to `['disabled','stub']`; lines 664-669 comment: "no 'production' item — the validator rejects that value and the resolver heals it to 'disabled'". `messages/en.json:732 semanticSearchProductionWarning` tells the admin the production value is "no longer valid and is being treated as Disabled."
-- The full production path IS live code: `semantic/route.ts:227-241` serves `'production'` via `embedTextReal`; `similar/[id]/route.ts` is production-ONLY (Gate 5 returns 503 unless `'production'`); `image-queue.ts:445-447` writes real embeddings in `'production'`; and `semantic-route-production.test.ts` / `gallery-config-semantic-production.test.ts` assert this behavior.
-- Architectural risk: the UI layer's documented invariant is FALSE at the config layer — classic contract drift between two layers' mental models. The settings-client comment reflects an earlier plan state (CRT-R5C1-01) that Task 5/6 deliberately reversed (see `gallery-config.ts:64-68,130-131`), but the UI comment + i18n string were never updated.
-- Concrete consequence: production semantic search and the entire similar-photos endpoint are reachable only by a human directly setting `admin_settings.semantic_search_mode='production'` in MySQL — there is no supported UI affordance. An operator reading the admin UI is actively told production "isn't valid," while the code will happily run it. This is a maintainability and operational-clarity hazard: the feature's true activation surface is undocumented-by-the-UI and contradicts it.
-- Recommended direction: pick ONE source of truth. Either (a) if production is genuinely not ready, make the resolver heal `'production' → 'disabled'` so the validator/resolver match the UI's claim (and the similar route can never serve); or (b) if the production path is intended to be operator-activatable, correct the stale settings-client comment + `semanticSearchProductionWarning` i18n and document the DB-edit (or add a gated UI affordance). Today the layers disagree.
-- Confidence: High (all three layers read directly).
+**Headline:** This is an unusually mature, heavily test-fortified codebase. Layering is clean, the privacy boundary is genuinely enforced by construction, and almost every process-local state risk is both deliberate and fenced. The real architectural debt is **concentration of complexity in a few 1000+ LOC modules**, a **triple-mirrored privacy field surface**, **config sprawl across 40+ env vars with no central typed module**, and an **orphaned storage abstraction** that is honest about being orphaned. None of these are emergencies at the stated scope.
 
-### CONFIRMED-3 — Stale provenance comments / docstrings contradict shipped design
-- `apps/web/src/lib/clip-inference.ts:4-17,56-76` — describes "CLIP ViT-B/32", "onnxruntime-node adds ~750 MB ... once onnxruntime-node is added as a dependency". Shipped encoder is jina-clip-v2 (1024→512 Matryoshka) and transformers ALREADY pulls onnxruntime-node transitively. `caption-generator.ts:1-19` carries the same stale "once onnxruntime-node is added" framing.
-- `apps/web/src/app/api/search/semantic/route.ts:9,25,189` — docstring says `COSINE_THRESHOLD (0.18)` and `PRODUCTION_COSINE_THRESHOLD (0.25)` and "only 'stub' mode is the current encoder"; actual constants are `0.18` and `0.22` (`clip-embeddings.ts:11,103`), and the route serves BOTH stub and production. CLAUDE.md likewise omits the CLIP feature entirely (caption stub US-P52 and embeddings US-P51 are mentioned only as a schema stub / "CLIP embeddings (stub)").
-- `clip-embeddings.ts:10` — `CLIP_MODEL_VERSION = 'stub-sha256-v1'` coexists with `PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8'`. The dual-version scheme itself is sound (it cleanly partitions stub vs real rows), but the naming `CLIP_MODEL_VERSION` for the STUB identity is misleading — a future reader expects that to be the real model version.
-- Architectural risk: low blast radius but high confusion cost; these are the exact comments a future implementer would trust when wiring real inference, and they point at the wrong model, wrong dependency status, and wrong thresholds.
-- Recommended direction: refresh the four docstrings/comments to match jina-clip-v2 + transformers-bundled-onnx + thresholds; consider renaming `CLIP_MODEL_VERSION` → `STUB_MODEL_VERSION`; add a short CLIP section to CLAUDE.md so the dark feature's topology (volume weights, dual model_version, dark-by-default, native-dep externalization need) is documented like the rest of the system.
-- Confidence: High.
+---
 
-### CONFIRMED-4 — `embedImageReal` re-decodes the original separately from the main Sharp pipeline
-- `apps/web/src/lib/image-queue.ts:446` — embedding hook calls `embedImageReal(originalPath)`; `clip-model.ts:124-139` opens a FRESH `sharp(imagePath)` and decodes the full-resolution original to 512×512.
-- The main pipeline (`processImageFormats`) has already decoded the same original moments earlier. The embedding decode is an independent second full decode of a file up to 200 MB.
-- Architectural risk (DEFERRED, production only): on the documented single-writer topology with `QUEUE_CONCURRENCY=1`, the embedding decode runs fire-and-forget AFTER `processed=true` is committed, so it overlaps the NEXT queued job's Sharp work plus the ONNX session — two libvips decodes + an ONNX inference concurrently, all CPU/RAM-bound, on a box sized for one. The 50 MP wide-gamut OOM guard in `process-image.ts` does NOT cover this path (it resizes to 512 fill, so pixel count is bounded — good — but peak memory during decode of the original is not).
-- Concrete consequence: when production is enabled, per-image steady-state CPU/RAM roughly doubles during the overlap window; on the 16 GB Mac mini this is a real contention risk under batch upload. It does not violate single-writer correctness (the lazy singleton is per-process and the hook is detached), but it is a capacity-planning coupling that isn't documented.
-- Recommended direction: acceptable for a personal gallery, but document the CPU/RAM expectation when `'production'`, and consider deriving the embedding from an already-produced derivative (e.g. the largest WebP/JPEG) rather than re-decoding the original, to reuse pipeline work. Lower priority than 1-3.
-- Confidence: Medium (behavioral reasoning; not load-tested).
+## Severity: HIGH (structural risk worth addressing even at personal scale)
 
-## Judgment-call tradeoffs (NOT defects)
+### ARCH-01 — `lib/data.ts` is a 1,649-line god-module spanning the entire data layer · Confidence: High
 
-- TRADEOFF-A — Search business logic lives in the route handlers (`semantic/route.ts`,
-  `similar/[id]/route.ts`) rather than a `lib/semantic-search.ts`. The two routes duplicate
-  ~80 lines: the scan→cosine→topK→enrich pipeline, the identical enrichment SELECT/JOIN, and
-  the model-version/threshold selection. For two endpoints this is tolerable, but the
-  duplication means a change to the enrichment shape or scan strategy must be made twice
-  (drift risk). Direction: if a third consumer appears, extract `scanAndScore(modelVersion,
-  threshold, queryEmbedding, opts)` + `enrichResults(ids, scores)` into lib; the routes keep
-  only HTTP concerns (origin/rate-limit/validation). Confidence: Medium. Not blocking.
+`apps/web/src/lib/data.ts` (1,649 lines) holds: the public/admin/map select-field derivation + compile-time privacy guards (lines ~204–410), the shared-group **view-count buffer with crash-resilient async flush** (lines 14–~180), `tagNamesAgg`, and ~28 query functions (9 `cache()`-wrapped). It is imported by 28 modules.
 
-- TRADEOFF-B — Brute-force linear scan (`SEMANTIC_SCAN_LIMIT=5000`, cosine in JS per row) with
-  no vector index. This is the RIGHT call for the stated topology: it respects single-instance
-  Docker + MySQL with no external vector DB, and 5000×512 float ops is sub-100ms. It correctly
-  does NOT assume pgvector/Pinecone/etc. The only caveat is the implicit scale ceiling: beyond
-  ~5000 embeddings the scan silently truncates to the 5000 most-recently-updated rows
-  (`orderBy(desc(updatedAt)).limit(5000)`), so older photos become unsearchable without any
-  signal. That's a reasonable bound for a personal gallery; just note it is a hard recall cliff,
-  not a soft degradation. Confidence: High this is the right architecture for the constraints.
+- **Design risk:** Three unrelated responsibilities live in one file: (a) privacy-critical field-set definitions, (b) a stateful background-flush subsystem (mutable Maps, timers, backoff, retry caps), and (c) the read query catalog. The view-count buffer alone is a self-contained eventual-consistency subsystem (`viewCountBuffer`, `viewCountRetryCount`, `consecutiveFlushFailures`, `flushGroupViewCounts`, chunked drains, exponential backoff) that has nothing to do with "data access" yet shares a file with the privacy guards.
+- **Future-pain scenario:** A future change to view-count flushing forces a reviewer to re-read 1,649 lines that include the privacy-sensitive select sets; conversely, a privacy-field edit risks merge collisions with unrelated flush-tuning commits. The file's size already required a de-flaking timeout bump in the boundary test (`client-server-only-boundary.test.ts` AGG-R8-01) because of how much it pulls in.
+- **Remediation:** Extract the view-count buffer subsystem into `lib/shared-group-view-counter.ts` (state + flush + shutdown flush), re-exported for back-compat. Optionally split the select-field definitions into `lib/select-fields.ts`. The privacy guards should travel with the field definitions. **Worth doing now** — low-risk mechanical extraction, high clarity payoff, and it shrinks the privacy blast radius.
 
-- TRADEOFF-C — Embedding stored as base64 TEXT of a 2048-byte buffer, with the Drizzle schema
-  typing it `text("embedding")` while the real column is `MEDIUMBLOB` (`schema.ts:264-268`,
-  documented). Base64 inflates 2048 bytes → ~2731 chars and the route does
-  `Buffer.from(row.embedding, 'base64')` per row per query. Storing raw BLOB and reading the
-  Buffer directly would avoid the base64 round-trip and the schema/reality mismatch. The
-  current form is functional and the mismatch is documented, but it's a small abstraction leak
-  (the lib layer must know "text column actually holds base64 of a blob"). Confidence: Low
-  (cosmetic/perf-minor). Not blocking.
+### ARCH-02 — Privacy field set is mirrored in **three** places; correctness rests on a hand-maintained `SENSITIVE_KEYS` literal · Confidence: High
 
-- TRADEOFF-D — Two independent fire-and-forget background config reads per processed image
-  (caption hook + embedding hook each call `getGalleryConfig()`), and `getGalleryConfig` is
-  React `cache()`-wrapped, which is REQUEST-scoped — these run in detached `void` IIFEs outside
-  any request, so the cache never dedupes them. That's 2 extra `admin_settings` SELECTs per
-  image when either feature is on (0 when both disabled, which is the default). Fine at personal
-  scale; noting the cache() gives no benefit on these background paths. Confidence: High
-  (mechanism verified), impact Low.
+The public/admin field separation is enforced in `lib/data.ts` (`adminSelectFields` → destructured `_omit*` → `publicSelectFields` + `publicMapSelectFields`), mirrored again in `lib/data-timeline.ts` (`timelineSelectFields`, its own `Extract<…, PrivacySensitiveKeys>` guard), and pinned by the `SENSITIVE_KEYS` literal in `__tests__/privacy-fields.test.ts`.
 
-## Topology-fit verdict (the explicit ask)
-The CLIP design RESPECTS the single-instance / single-writer constraints: the encoder is a
-per-process lazy singleton (no shared-state assumption), the scan is in-MySQL with no external
-vector service, weights are a host-seeded bind mount (`docker-compose.yml:24` `./data:/app/data`,
-`Dockerfile:90` `CLIP_MODELS_ROOT`), and the queue hook is detached and gated. It does NOT
-assume horizontal scaling, a vector DB, or the not-yet-integrated `@/lib/storage` backend — it
-reads the original via `resolveOriginalUploadPath` (local FS), consistent with the rest of the
-app. The model-weights-on-disk approach fits the single-instance Docker model cleanly. The real
-topology gaps are the build-time externalization (CONFIRMED-1) and the capacity coupling of the
-second decode (CONFIRMED-4), not a distributed-systems mismatch.
+- **What's genuinely by-construction (good):** The `_privacyGuard` (`data.ts` ~408) is a compile-time `Extract` that fails the build if a *known* sensitive key lands in `publicSelectFields`. The **symmetric guard test** (`privacy-fields.test.ts:83`, "admin-only keys form exactly the SENSITIVE_KEYS contract") asserts `setDifference(adminSelectFieldKeys, publicSelectFieldKeys) === SENSITIVE_KEYS`. Together these mean a new admin-only column added to `adminSelectFields` *without* a privacy decision fails CI loudly. This is a real by-construction win and should be preserved.
+- **Residual design risk:** Three parallel field surfaces (`data.ts` public, `data.ts` map, `data-timeline.ts` timeline) must each independently omit every sensitive key. The map surface is the dangerous one — it *intentionally re-adds* `latitude`/`longitude` and relies entirely on a `map_visible` JOIN, with safety living in a comment ("DO NOT use this field set without the map_visible topic filter"), not in the type. A fourth public read path added by a future contributor inherits none of these guards unless they remember to add the `Extract` guard + extend the subset test.
+- **Failure scenario:** Someone adds `lib/data-search.ts` (or a new API route) that hand-writes a select, copies the "safe" columns from memory, and forgets one admin-only column → silent PII/internal-metadata leak with no failing test, because the symmetric guard only inspects `data.ts`'s `adminSelectFields`/`publicSelectFields`, not arbitrary new selects.
+- **Remediation:** (a) Provide a single exported `PUBLIC_IMAGE_COLUMNS` allowlist that all public reads MUST spread, so new read paths are safe by default; (b) bind the map-visibility coupling into a single `getMapImages`-only helper so `publicMapSelectFields` cannot be referenced elsewhere (it currently can). **Worth doing now** — privacy is the product's most expensive-to-reverse invariant.
 
-## Compact list for aggregator
-- [CONFIRMED-1][High] `@huggingface/transformers` (pulls native onnxruntime-node) is a static import in clip-model.ts → image-queue.ts (boot/upload graph) but absent from `serverExternalPackages`; standalone-build/bundling risk + couples native runtime into always-loaded path. Fix: externalize + lazy-import. (DEFERRED: bites on next clean build / when enabled.)
-- [CONFIRMED-2][High] Config validator+resolver ACCEPT `'production'` (gallery-config-shared.ts:170, gallery-config.ts:128-136) but settings-client.tsx:655-669 + i18n `semanticSearchProductionWarning` claim it's rejected/healed-to-disabled. Live production path (incl. production-only similar route) reachable only via hand-edited DB row, contradicting the UI. Pick one source of truth.
-- [CONFIRMED-3][High] Stale comments/docstrings: clip-inference.ts + caption-generator.ts say "ViT-B/32 / once onnxruntime-node is added" (shipped: jina-clip-v2, transformers already bundles onnxruntime); semantic route docstring says threshold 0.25 (actual 0.22) and "only stub" (serves both). CLAUDE.md omits the feature. Refresh + rename CLIP_MODEL_VERSION→STUB_MODEL_VERSION.
-- [CONFIRMED-4][Medium] Embedding hook re-decodes the full original via a second fresh Sharp instance (clip-model.ts:124) overlapping the next job's pipeline + ONNX on a single-writer box; ~2x peak CPU/RAM during overlap when production. Document or derive from an existing derivative. (DEFERRED: production only.)
-- [TRADEOFF-A][Medium] ~80 lines of scan/enrich logic duplicated across the two search routes; extract to lib if a 3rd consumer appears.
-- [TRADEOFF-B][High-confidence-correct] Brute-force 5000-row linear cosine scan = right choice for the no-vector-DB single-instance topology; note the hard recall cliff past 5000 most-recent embeddings.
-- [TRADEOFF-C][Low] Embedding stored as base64 TEXT over a MEDIUMBLOB (schema/reality mismatch is documented); raw BLOB would drop the per-row base64 decode.
-- [TRADEOFF-D][Low] Caption + embedding background hooks each call request-scoped `getGalleryConfig()` from detached IIFEs, so cache() never dedupes → 2 extra admin_settings SELECTs/image when enabled.
-- [TOPOLOGY][verdict] CLIP design respects single-instance/single-writer + local-FS-only constraints; no vector-DB/horizontal-scale/storage-abstraction assumptions. Real gaps are build externalization + decode capacity coupling, not distributed-systems fit.
+### ARCH-03 — Complexity concentration in the Sharp pipeline + image action (`process-image.ts` 1,638 LOC, `actions/images.ts` 1,152 LOC) · Confidence: High
+
+`lib/process-image.ts` (1,638) owns: directory bootstrap, the AVIF/WebP/JPEG parallel encode matrix, the rgb16 wide-gamut path, the 10-bit AVIF libheif probe, blur generation, GPS/EXIF stripping calls, hardlink/copy dedup, and ~30 direct `fs` call sites. `actions/images.ts` (1,152) owns upload validation, quota tracking, enqueue, and delete/cleanup. These two files concentrate most of the product's irreversible on-disk behavior.
+
+- **Design risk:** The encoder decision matrix (documented in CLAUDE.md as a 7-row table) is expressed imperatively across `process-image.ts` rather than as a data-driven table consumed by a small executor. Adding an 8th source-profile case (or the deferred HDR `_hdr.avif` path WI-09) means editing deep inside a 1,600-line function family. The 30 fs call sites are also exactly what ARCH-05 (storage) would have to reroute.
+- **Future-pain scenario:** WI-09 (HDR encoder shell-out) lands → the contributor must thread a new branch through `processImageFormats`, the probe singleton, the dedup logic, and the variant-cleanup unlink set, with the blast radius spanning both 1,600-line files. Regression risk is high precisely because so much shares one scope.
+- **Remediation:** Promote the source→decision mapping to a declarative table (`COLOR_PIPELINE_MATRIX`) and reduce `processImageFormats` to a thin executor over it; extract the fs-mutation/dedup/cleanup helpers into `lib/derivative-files.ts`. This *also* makes ARCH-05 tractable. **Partially now** — the declarative-matrix extraction is worth it before WI-09; full fs extraction can defer until storage work is actually scheduled.
+
+---
+
+## Severity: MEDIUM (acceptable now, will bite if the product grows or contributors multiply)
+
+### ARCH-04 — Configuration sprawl: 40+ env vars read directly, no central typed config module · Confidence: High
+
+Admin-tunable settings have a clean two-stage pipeline (`gallery-config-shared.ts` validation → `gallery-config.ts` DB resolution). **Env-var operational config has no equivalent** — 40+ `process.env.X` reads scattered across 25+ files (`db/index.ts`, `lib/upload-paths.ts`, `lib/rate-limit.ts`, `lib/request-origin.ts`, `lib/process-image.ts`, `lib/image-queue.ts`, `lib/admin-backfill-runner.ts`, `instrumentation.ts`, scripts, …).
+
+- **Concrete issues found:**
+  - **Duplicate-name redundancy:** `ADMIN_BACKFILL_CONCURRENCY` (`admin-backfill-runner.ts`) and `BACKFILL_CONCURRENCY` (`scripts/backfill-color-pipeline.ts`) tune the *same conceptual* parallelism under two names — an operator who sets one and not the other gets surprising behavior across the in-app vs sidecar entry points (which CLAUDE.md presents as "equivalent").
+  - **Four independent concurrency knobs** (`QUEUE_CONCURRENCY`, `SHARP_CONCURRENCY`, `IMAGE_CLEANUP_CONCURRENCY`, `ADMIN_BACKFILL_CONCURRENCY`) with documented-but-scattered interdependencies and no single place to reason about total CPU pressure.
+  - **`TRUST_PROXY` / `TRUSTED_PROXY_HOPS`** (security-critical for client-IP trust in rate limiting) are read in `rate-limit.ts` and `request-origin.ts` with no central validation — a misconfiguration silently changes the IP-trust posture.
+  - **Asymmetric tunability:** upload *window/count* caps are env-tunable but per-file size caps (`MAX_UPLOAD_FILE_BYTES` 200 MiB, `MAX_RESTORE_FILE_BYTES` 250 MiB) are hardcoded; rate-limit windows/maxes are 100% hardcoded in `rate-limit.ts`.
+- **Design risk:** No typed `env.ts` means no fail-fast validation at boot (a typo in `DB_SSL` or `TRUSTED_PROXY_HOPS` surfaces as runtime behavior, not a startup error), and the true configuration contract is only discoverable by grep.
+- **Remediation:** Introduce a single `lib/env.ts` that reads + validates every env var once at startup (zod or hand-rolled), exports a typed frozen object, and is the only module allowed to touch `process.env`. Collapse `BACKFILL_CONCURRENCY`/`ADMIN_BACKFILL_CONCURRENCY` to one name with a back-compat alias. **Defer-but-soon** — not urgent for a single operator, but cheap insurance against a security-relevant proxy misconfig and a real onboarding aid.
+
+### ARCH-05 — Storage abstraction is a fully orphaned shell (honestly documented) · Confidence: High
+
+`lib/storage/{types.ts (105), local.ts (139), index.ts (146)}` defines a clean `StorageBackend` interface + `LocalStorageBackend` + a singleton with `switchStorageBackend`. **Zero production importers** — the only importer is `__tests__/storage-local.test.ts`. Meanwhile the live pipeline does ~49 direct `fs` calls across `process-image.ts`, `serve-upload.ts`, `download/[imageId]/route.ts`, `upload-paths.ts`, `image-queue.ts`. `switchStorageBackend`'s type union is `'local'` only, so it can only ever switch local→local — genuinely dead code.
+
+- **Why this is only MEDIUM:** CLAUDE.md and the module's own header are *explicit* that it is not wired, and `types.ts:4-15` warns docs must stay aligned. The honesty defuses the classic "abstraction implies capability" trap. No admin UI exposes a backend switch.
+- **Residual design risk:** A dead abstraction tends to **drift** from the real fs code it's meant to model. The interface (`writeStream`/`writeBuffer`/`copy`/`getUrl`) was designed before the pipeline grew its hardlink-dedup + TOCTOU-safe symlink-rejection serving semantics — so if someone *does* try to wire it, the interface is already an imperfect fit (no hardlink/atomic-rename/`realpath`-revalidation primitives), and they'll discover that only mid-migration. There's also a small ongoing cost: every reader who finds it must reconfirm it's inert.
+- **Remediation:** Either (a) **delete it** and reintroduce a fit-for-purpose interface when S3 is actually scheduled (recommended at this scope — YAGNI), or (b) keep it but add a one-line `@orphaned` marker test asserting it has no non-test importers so it can't quietly gain a half-wired caller. **Defer** the migration; **decide now** between delete vs mark, because "keep an unused abstraction indefinitely" is the worst option.
+
+### ARCH-06 — `lib/api-auth.ts` imports `isAdmin` from `app/actions/auth` — a `lib → app` dependency inversion · Confidence: Medium
+
+`lib/api-auth.ts:1` does `import { isAdmin } from '@/app/actions/auth'`, and `api/admin/db/download/route.ts:8` imports `getCurrentUser` from the same. This is the only `lib → app` edge in the codebase (verified by grep), so the layering is otherwise clean.
+
+- **Design risk:** `lib/` is supposed to be the lower, app-agnostic layer; depending *upward* into `app/actions/` couples a shared utility to a Next.js server-action module (which carries `'use server'` and a heavy import set: argon2, `next/headers`, rate-limit Maps, audit). This is the kind of edge that creates surprising bundling/circular-import behavior under refactor, and it means the auth *domain* is physically located in the `app/actions/` layer rather than in `lib/`.
+- **Why Medium not High:** It works today, the auth logic legitimately needs request context (`cookies()`), and `auth.ts` is effectively a domain module that merely lives under `app/actions/`. The inversion is contained to auth.
+- **Remediation:** Move the session/auth *reads* (`getSession`, `getCurrentUser`, `isAdmin`) into `lib/auth.ts` (or `lib/session.ts`, which `auth.ts` already depends on) and have `app/actions/auth.ts` re-export the mutations (`login`/`logout`/`updatePassword`) plus re-export the reads for back-compat. Then `lib/api-auth.ts` imports down into `lib/`, restoring direction. **Defer** unless an auth refactor is already planned — it's a tidiness/robustness fix, not a live bug.
+
+### ARCH-07 — Coordination-state fence in CLAUDE.md is *nearly* complete but its line-194 enumeration is not exhaustive · Confidence: Medium
+
+Inventory of process-local coordination state (would diverge across instances):
+| State | File | Fenced at CLAUDE.md:194? | Notes |
+|---|---|---|---|
+| Image processing queue (`PQueue`, `enqueued` Set, retry/claim Maps, permanently-failed Set) | `image-queue.ts` (globalThis) | ✅ "image queue state" | Recoverable from DB on restart via `processed=false` bootstrap re-scan |
+| Upload quota tracker | `upload-tracker-state.ts` (globalThis) | ✅ "upload quota tracking" | |
+| Restore-maintenance flag | `restore-maintenance.ts` (globalThis) | ✅ "Restore maintenance flags" | |
+| Shared-group **view-count buffer** | `data.ts` (module `let`) | ⚠️ not at :194, but documented elsewhere (Runtime topology: "buffered in process memory") | Best-effort by design |
+| **Admin-backfill runner state** (`running`, counts, `lastError`) | `admin-backfill-runner.ts` (globalThis) | ⚠️ not enumerated anywhere | Serialized across instances by the `gallerykit_color_pipeline_backfill` advisory lock, so correctness holds; only the *status surface* is per-process |
+| Login/account/password + OG/checkout/share/search/semantic rate-limit Maps | `auth-rate-limit.ts`, `rate-limit.ts` | partial (login has DB backup) | Per-process buckets weaken distributed-brute-force defense if scaled; login bucket has DB fallback, others don't |
+
+- **Design risk:** The fence is *substantively* complete (every correctness-critical store is either named, advisory-locked, or DB-backed), but the canonical single-sentence enumeration at line 194 omits the backfill-runner state and view-count buffer. A future maintainer reading only line 194 might conclude those three named items are the *complete* list of scale-blockers and miss that backfill *status* and rate-limit *effectiveness* also degrade. The advisory-lock cross-tenant caveat (C8R-RPL-06) is already well documented.
+- **Remediation:** Extend the line-194 sentence to "...and the admin-backfill runner status, shared-group view-count buffer, and in-memory rate-limit buckets are also process-local (the first two are correctness-fenced by an advisory lock / best-effort-by-design; the rate-limit buckets weaken distributed-attack defense under scale-out)." **Worth doing now** — it's a one-line doc edit that closes a reasoning gap, zero code risk.
+
+---
+
+## Severity: LOW (minor / mostly tidiness)
+
+### ARCH-08 — `app/actions.ts` barrel re-export creates a soft module-boundary ambiguity · Confidence: Medium
+`app/actions.ts` (35 lines) re-exports from the 13 `app/actions/*.ts` modules plus pulls client-safe types from `lib/bulk-edit-types.ts`. It's a deliberate, documented back-compat barrel. The mild risk: a barrel makes it easy to import a *server action* into a *client component* by reflex (the type-only `bulk-edit-types` carve-out exists precisely because of this). It's well-managed today (the `'use server'` directive per-module is the real guard), but the barrel slightly obscures which symbols are server-only. **No action needed**; flagged for awareness.
+
+### ARCH-09 — Lint gates encode architecture invariants as regex scanners (powerful but brittle) · Confidence: Medium
+The four blocking lint gates (`lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, plus the touch-target audit) enforce real structural invariants by *source-text scanning* with normalizers for multi-line JSX, aliased exports, etc. This is a genuine by-construction win (a new admin route without `withAdminAuth` fails CI). The risk is the scanners themselves are complex regex/AST-lite (the touch-target normalizer rewrites `=>` to `=ARROW` to dodge a lookahead) and have a history of blind spots that shipped violations (multi-line Buttons, `Badge asChild`, native `select`) until a later cycle caught them. They're well-tested via fixtures, but each is a small parser that can drift. **No action needed** — this is the right tradeoff for the team's loop-driven workflow; noted so the planner doesn't treat a scanner gap as a surprise.
+
+### ARCH-10 — i18n surface: intentional en/ko value-shape asymmetry is correct but easy to "fix" wrongly · Confidence: Low
+Key parity is enforced between `en.json`/`ko.json`, with deliberately different value shapes (en uses ICU `plural`, ko uses a fixed `{count}장`). This is documented (DOC-R5C3-07) and correct (Korean has no grammatical plural). The only risk is a well-meaning contributor "normalizing" ko to add a `plural` block. Already fenced by docs. **No action needed.**
+
+---
+
+## Scope-Appropriate Tradeoffs (NOT bugs — planner should NOT "fix" these)
+
+These are deliberate, documented decisions correct for a single-instance personal gallery. Do not over-engineer them.
+
+- **Single MySQL + single web instance = SPOF.** Documented (CLAUDE.md "Runtime topology"). All advisory locks (`advisory-locks.ts`: 6 named locks) assume one DB server; the cross-tenant scope caveat is already documented (C8R-RPL-06 / AGG8R-05). Multi-instance HA is explicitly out of scope. **Leave alone.**
+- **`revalidate = 0` on all public pages (fully dynamic rendering).** 10 routes opt out of ISR deliberately for immediate freshness after async processing/metadata edits; CLAUDE.md commits to "reintroduce ISR only with an explicit invalidation/freshness plan." This is a *correctness-over-throughput* choice appropriate at personal traffic. **Leave alone** — re-introducing ISR is a feature decision, not a fix.
+- **Flat multi-root-admin model (no RBAC).** Verified: zero role/capability checks anywhere — every admin gate is `isAdmin()`. CLAUDE.md states any admin can do everything. This is an accepted product decision; adding RBAC would be net-negative complexity at this scope. **Leave alone.**
+- **Process-local rate-limit buckets.** Per-process by design; login bucket has a DB backup for the distributed case. Acceptable at single-instance scope. **Leave alone** unless scaling out (see ARCH-07).
+- **View-count is best-effort approximate analytics.** Buffered in memory, async flush, drops on sustained outage — explicitly "not billing/audit-grade." Correct tradeoff. **Leave alone.**
+- **Cache-Control `must-revalidate` (not `immutable`) on derivatives.** Deliberate (R4C6 ARCH-R4C6-06) because backfill rewrites bytes under unchanged filenames. **Leave alone.**
+- **Per-iteration deploy with no staging.** Documented operational policy. Out of architectural scope.
+- **Hardcoded rate-limit windows / file-size caps.** Acceptable for a single operator; making them env-tunable is a nice-to-have (folds into ARCH-04), not a defect.
+
+---
+
+## What's Genuinely Well-Architected (so the planner doesn't churn it)
+
+- **Privacy boundary is by construction**, not convention: compile-time `Extract` guard + symmetric set-difference test (ARCH-02 covers the residual mirror risk, but the core is solid).
+- **Layering is clean**: no `lib → app` edges except the one contained auth inversion (ARCH-06); no `api` route duplicates action business logic; client→server-only boundary is transitively test-pinned.
+- **Queue recovery is robust**: DB is the source of truth; restart re-scans `processed=false`, with claim-retry caps and a permanently-failed set to prevent infinite loops; graceful SIGTERM/SIGINT drains queue + flushes view counts within 15s.
+- **Smart-collections dynamic query builder is safe by construction**: pure Drizzle parameter binding, AST node-type validation, column allowlist, depth cap, IN-value cap — no string concatenation.
+- **Crash-resilient view-count flush**: atomic Map swap, chunked drains, exponential backoff, retry caps — genuinely careful eventual-consistency engineering (it just lives in the wrong file — ARCH-01).
+- **Advisory locks centralized** in `advisory-locks.ts` with named constants and a documented server-scope caveat.
+
+---
+
+## TOP 3 STRUCTURAL RISKS
+
+1. **ARCH-02 — Triple-mirrored privacy field surface.** The core public/admin split is by-construction-safe, but three parallel select surfaces (public, map, timeline) + the map surface's comment-only `map_visible` coupling mean a *fourth* future read path inherits no guard. Privacy is the most expensive-to-reverse invariant; give new read paths a single safe-by-default `PUBLIC_IMAGE_COLUMNS` allowlist and lock the map field set behind its only legitimate caller.
+
+2. **ARCH-01 / ARCH-03 — Complexity concentration in `data.ts` (1,649), `process-image.ts` (1,638), `actions/images.ts` (1,152).** Unrelated concerns share huge scopes (privacy guards + view-count subsystem in one file; the entire encoder decision matrix expressed imperatively in another). This raises regression risk for the next pipeline change (esp. the deferred HDR WI-09) and inflates the privacy blast radius. Extract the view-count subsystem and promote the color-pipeline matrix to a declarative table.
+
+3. **ARCH-04 — Config sprawl with no central typed env module.** 40+ scattered `process.env` reads, duplicate-name concurrency knobs (`BACKFILL_CONCURRENCY` vs `ADMIN_BACKFILL_CONCURRENCY`), and security-relevant proxy-trust vars (`TRUST_PROXY`/`TRUSTED_PROXY_HOPS`) read without central validation or boot-time fail-fast. A single typed `lib/env.ts` would catch misconfigurations at startup instead of as silent runtime behavior changes.

@@ -1,116 +1,149 @@
-# CRITIC review — CLIP semantic search (US-P51 production) + recent change surface
+# Critic — Deep Multi-Perspective Critique (Cycle 2)
 
-**Scope:** commits `e0ad2e0e..158541b6` (17 commits) — the real-CLIP semantic-search feature. Plus the surrounding change surface (CLAUDE.md, Dockerfile, i18n, settings UI). Mode: started THOROUGH, escalated to ADVERSARIAL after the 3rd MAJOR + a systemic pattern emerged. Behavior validated from code + a live `vitest run` (12 files / 59 tests green), not prose.
+**Repo:** GalleryKit @ `8ccc8806` · **Date:** 2026-06-16 · **Mode:** Started THOROUGH, escalated to ADVERSARIAL after the async-payment money path + multiple MEDIUM systemic findings surfaced.
 
-**HARD GUARD honored:** I do NOT propose activating CLIP. Every finding below is about *gating coherence / honesty / drift*, not about turning it on. "Not live yet" is treated as intended design.
+**Scope:** Whole-system holistic audit — correctness, security, durability, a11y, doc/code drift, test-suite quality, deferred-finding hygiene. CLIP feature reviewed **code-only** (not activated, per directive).
 
----
-
-## VERDICT: REVISE
-
-The ranking core is genuinely well-built and honest where it counts: the model_version filter cleanly partitions stub vs production vectors in every read/write path, the Matryoshka-512 truncate-then-normalize is symmetric across text/image/query, the integration smoke is non-vacuous (argmax + ≥0.03 margin, gated on weights, cannot pass against the stub), and `similar` is correctly production-only. The math would not embarrass anyone.
-
-But the **activation + honesty layer is incoherent**: the backend was widened to accept/serve `production` this cycle, while the admin Settings UI, four i18n strings, the operator runbook, and several code/test docstrings were left asserting the *opposite* — that production "is no longer valid / heals to Disabled / is a future feature." The result is a feature that is reachable by code but not by its own documented activation path, and whose admin dashboard would actively misreport the live state if it were ever enabled. None of this is a ranking bug; all of it is the "looks done but isn't" risk you asked me to hunt. It is fixable with edits to copy/UI/docs (no math changes) — hence REVISE, not REJECT.
-
-**Pre-commitment predictions vs reality:** I predicted (1) model_version mixing, (2) honesty/gating leak, (3) Matryoshka order bug, (4) vacuous tests, (5) misleading dead code. Reality: (1) NOT a defect — the filter is applied consistently (good). (3) NOT a defect — order is correct and uniform. (4) Partially — the source-shape contract tests are weak but the integration smoke is strong, so not vacuous overall. (2) CONFIRMED and larger than expected — it's a whole-layer drift, not a single leak. (5) CONFIRMED in the form of stale comments/strings, not dead code.
+**Method note (why this review is worth reading):** I ran 7 deep sub-investigations and then **personally re-verified every CRITICAL/HIGH claim against source**. That verification pass **refuted 5 would-be findings** that a rubber-stamp review would have shipped (see "Refuted Findings" at the end). The surviving findings below are the ones that withstood adversarial re-checking. This is a mature codebase with unusually disciplined invariant-enforcement; the genuine issues are systemic/operational, not happy-path bugs.
 
 ---
 
-## Critical Findings (block a coherent production rollout)
+## Severity Summary
 
-### C1 — Admin UI makes `production` unreachable AND the dashboard would lie about a live production state
-**Evidence:**
-- `src/app/[locale]/admin/(protected)/settings/settings-client.tsx:655` — the `<Select value>` is hard-coerced: `value={['disabled','stub'].includes(settings.semantic_search_mode) ? settings.semantic_search_mode : 'disabled'}`.
-- `settings-client.tsx:662-667` — only `disabled` + `stub` `<SelectItem>`s exist; the comment at 664-666 states *"no 'production' item — the validator rejects that value and the resolver heals it to 'disabled'. A real ONNX encoder (WI-P51) will re-introduce a selectable mode."*
-- `settings-client.tsx:670-677` — when a `production` row IS present, it renders the amber `settings.semanticSearchProductionWarning`.
-- Contradicted by: validator `src/lib/gallery-config-shared.ts:170` ACCEPTS `'production'`; resolver `src/lib/gallery-config.ts:128-136` PASSES IT THROUGH (does not heal); route `src/app/api/search/semantic/route.ts:227` SERVES it.
+| Severity | Count | IDs |
+|---|---|---|
+| CRITICAL | 0 | — |
+| HIGH | 2 | CRT-01, CRT-02 |
+| MEDIUM | 5 | CRT-03, CRT-04, CRT-05, CRT-06, CRT-07 |
+| LOW | 4 | CRT-08, CRT-09, CRT-10, CRT-11 |
+| DOC/CODE DRIFT | 3 | CRT-D1, CRT-D2, CRT-D3 |
 
-**Why this matters:** The plan's own rollout step (Task 16 Step 5: "Flip the admin setting `semantic_search_mode` → `production` in Admin → Settings") is impossible — there is no production item to select, and even a stored value is coerced back to "Disabled" in the trigger. To activate production an operator must hand-write the DB row. If they do (exactly what the runbook tells them to do), the **public route serves real production results while the admin Settings page shows "Disabled" + an amber banner claiming production "is no longer valid and is being treated as Disabled."** The admin dashboard misreports the live system — the precise honesty-invariant failure mode you flagged (analogous to the HDR "admin-only until bytes fulfill it" rule, inverted: here the bytes DO fulfill it but the UI denies it).
-
-**Failure scenario:** Operator seeds weights, runs `--production` backfill, sets `semantic_search_mode='production'` in `admin_settings`. Visitors get real semantic search. Admin opens Settings to confirm → sees "Disabled" + "this value is no longer valid." Admin "fixes" it by selecting Disabled (the only safe-looking option) → silently kills the now-working feature. Or files a bug that production is broken when it is actually running.
-
-**Fix (pick ONE, consistently):**
-- (a) **Keep it dark on purpose, honestly:** revert the backend widening (validator back to `disabled|stub` only, resolver re-heals `production`→`disabled`, route drops the production branch) so code and UI agree it is not yet activatable. OR
-- (b) **Finish the activation path:** add `<SelectItem value="production">`, include `production` in the line-655 allow-list, delete the amber "no longer valid" warning (or repurpose it to only flag a genuinely-unknown/legacy string), and rewrite the line-664 comment. (b) is what the spec/plan intend; (a) is the conservative choice if you want it to stay truly dark. The current half-state is the worst of both.
-- Confidence: **High.**
+No CRITICAL findings. The system has no happy-path-breaking defect I could find. The HIGH findings are a known-but-live customer-money gap and an unbounded anonymous-write surface; the rest are durability/operational design smells and weak (indirectly-enforced) invariants that will bite a future refactor.
 
 ---
 
-## Major Findings (cause rework / operator failure / reviewer distrust)
+## HIGH
 
-### M1 — Operator runbook in CLAUDE.md names a script that does not exist
-**Evidence:** `CLAUDE.md:479` — `sh -c "npx --yes tsx@4.21.0 scripts/backfill-embeddings.ts --production"`. The real file is `apps/web/scripts/backfill-clip-embeddings.ts` (confirmed: `ls apps/web/scripts/` has `backfill-clip-embeddings.ts`, no `backfill-embeddings.ts`). The seed block one section up correctly says `download-clip-models.ts`, and the script's own header + the spec/plan all use `backfill-clip-embeddings.ts` — only the CLAUDE.md backfill command is wrong.
-**Why this matters:** This is the one command an operator runs to populate production embeddings before flipping the gate. Copy-pasting it yields `Cannot find module .../scripts/backfill-embeddings.ts` and exit 1. On a per-iteration-deploy project with no staging and a manual backfill step, this is the last operational mile silently broken.
-**Fix:** `s/backfill-embeddings.ts/backfill-clip-embeddings.ts/` at CLAUDE.md:479. Confidence: **High.**
+### CRT-01 — Async-payment customers are charged but never get an entitlement (live money bug)
+**Confidence: High.** Evidence: `apps/web/src/app/api/stripe/webhook/route.ts` handles `checkout.session.completed` and *only* proceeds when `session.payment_status === 'paid'`; `payment_status === 'unpaid'` logs a warn and returns 200 with no entitlement. There is **no** handler for `checkout.session.async_payment_succeeded` or `…async_payment_failed`. CLAUDE.md (line ~122 and the `entitlements` schema note) already admits this and ties the fix to plan-316 CRT-R5C1-04.
 
-### M2 — Four admin-facing i18n strings still describe stub as the only encoder / call production invalid
-**Evidence (`messages/en.json`, mirrored in `ko.json`):**
-- `settings.semanticSearchDesc`: *"...(stub; real ONNX inference is a future feature)..."* — false; the encoder shipped.
-- `settings.semanticSearchEnabledHint`: *"...(Stub active — embeddings are deterministic but not semantically meaningful.)"* — stated unconditionally regardless of mode.
-- `settings.semanticSearchProductionWarning`: *"This legacy \"production\" value is no longer valid and is being treated as Disabled..."* — false; `production` is valid and served (see C1).
-- (`semanticSearchModeStub` = "Stub (testing only)" is fine.)
-**Why this matters:** These are the admin's only in-product description of the feature. They now contradict shipped behavior; combined with C1 they actively mislead the operator about whether production exists and works.
-**Fix:** Rewrite the three strings to reflect that a real encoder exists; gate the "stub active" clause so it only shows in stub mode; drop/repurpose the production-warning per the C1 resolution. Confidence: **High.**
+**Skeptic view:** This is documented, and paid-downloads (US-P54) are an optional, off-by-default-feeling feature on a single-photographer gallery, so the blast radius is small *today*. But "documented" is not "mitigated." If Stripe is live and a customer pays via SEPA/ACH/bank-transfer/OXXO/Boleto, Stripe fires `completed` with `unpaid`, the bank clears days later, `async_payment_succeeded` fires, GalleryKit ignores it — the customer is charged and the `entitlements` row, download token, and download access never exist. That is the single worst customer-facing failure class in the system: silent money-taken-no-goods.
 
-### M3 — Stale, self-contradicting code/test/route docstrings (reviewer traps)
-**Evidence:**
-- `src/app/api/search/semantic/route.ts:25` — docstring: *"Uses PRODUCTION_COSINE_THRESHOLD (0.25)..."*; actual constant `clip-embeddings.ts:103` is `0.22` (calibration moved it; the doc kept the pre-calibration placeholder).
-- `route.ts:189-192` — comment: *"Capability gate — only 'stub' mode is the current encoder. Any non-'stub' value ... yields a 503"* — directly contradicted by line 227 which serves `'production'`.
-- `route.ts:6-11, 17-29` header — describes the route as embedding "via stub CLIP text encoder" and "COSINE_THRESHOLD (0.18)"; only partially updated for the production branch.
-- `src/__tests__/gallery-config.test.ts:10-12` — file docstring asserts the legacy `'production'` string *"must HEAL to 'disabled' ... 'production' is no longer storable"*, while the test it documents (lines 91-98) asserts the EXACT OPPOSITE (production passes through). Test is green; the docstring lies about it.
-**Why this matters:** Individually minor, but together they form a consistent rot pattern that will mislead the next reviewer/maintainer into believing production is still gated off. The `gallery-config.test.ts` docstring is the worst — it documents the inverse of the assertion directly beneath it.
-**Fix:** Update each docstring/comment to match shipped behavior (threshold 0.22; production is a served mode; production is storable). Confidence: **High.**
+**Failure scenario:** Buyer purchases a $50 editorial license via SEPA. `completed/unpaid` → no entitlement. 3 days later transfer clears → `async_payment_succeeded` → ignored. Buyer's download link returns 404. Manual Stripe reconciliation + refund required, with no automated alert that it happened.
+
+**Remediation:** (a) Until plan-316 ships, configure Stripe Checkout to **restrict payment methods to card / immediate-capture only** (`payment_method_types: ['card']`) so async methods can't be initiated — this closes the gap operationally in one line and is the honest interim posture. (b) Add the `async_payment_succeeded` handler (mirror the `completed/paid` entitlement+token path; idempotency via the existing `sessionId` UNIQUE already covers replay). (c) Handle/log `async_payment_failed`. (d) Add a regression test — the gap is currently guarded only by a CLAUDE.md sentence.
+
+### CRT-02 — Anonymous analytics writes are unbounded; no pruning/retention job for view-event tables
+**Confidence: High.** Evidence: `apps/web/src/app/actions/public.ts` records `image_views` / `topic_views` / `shared_group_views` with a per-IP in-memory limiter (`VIEW_RECORD_MAX_REQUESTS = 120`/min, bounded map capped at `VIEW_RECORD_RATE_LIMIT_MAX_KEYS = 2000`). The limit is **per-IP only**; there is no global write ceiling and no scheduled prune of these analytics tables anywhere in the repo (the hourly background job purges expired sessions, not analytics rows).
+
+**Ops view:** A botnet of N rotating IPs each gets a fresh 120/min budget. At a few thousand IPs that is millions of analytics rows/minute, all durable INSERTs into the single MySQL writer. There is no TTL, no partition rotation, no retention sweep. Over time this grows `image_views` unbounded, degrading the analytics aggregation queries (which already carry dedicated composite indexes per migration 0021 — those indexes also bloat) and eventually the whole DB. Bot detection is `isbot()` UA-string-only (`apps/web/src/lib/analytics.ts`), trivially spoofed, and only affects whether rows are *counted* in the admin UI — bot rows are still **written**.
+
+**Failure scenario:** Sustained low-and-slow scrape from a residential-proxy pool writes ~hundreds of GB of `image_views` over weeks; disk hygiene playbook (Docker prune) doesn't touch the DB volume; analytics dashboard queries slow from index bloat; eventual disk pressure on the DB.
+
+**Remediation:** Add a retention/prune job (cron or the existing hourly sweep) that deletes `*_views` rows older than a configurable window (e.g. 13 months for year-in-review). Consider a global per-minute write ceiling for anonymous view-record, and/or persisting only sampled events above a threshold. Even a documented manual `DELETE … WHERE viewed_at < …` runbook entry would be an improvement over "grows forever."
 
 ---
 
-## Minor Findings
+## MEDIUM
 
-### m1 — `image_embeddings - CLIP embeddings (US-P51, stub)` label is stale
-`CLAUDE.md:121` still tags the table "(stub)". Trivial, but it is the schema-table reference that a maintainer greps. Confidence: High.
+### CRT-03 — `sharedGroups.view_count` (denormalized) silently diverges from the durable `shared_group_views` event log
+**Confidence: High.** Evidence: two independent recording paths fire on the same condition (`!photoId && images.length > 0`): the **in-memory buffered** counter `bufferGroupViewCount()` inside `getSharedGroup()` (`apps/web/src/lib/data.ts` ~1266) which flushes asynchronously (5 s base interval, exponential backoff to 5 min on DB outage, 1000-entry buffer cap, drop-on-overflow), and the **durable** `recordSharedGroupView()` INSERT (`apps/web/src/app/actions/public.ts` ~392). A process kill loses the entire in-memory buffer; the event-log row survives.
 
-### m2 — Source-shape contract tests are weak (grep-the-source), though not vacuous
-`clip-model-contract.test.ts`, `image-queue-embed-wiring.test.ts`, `backfill-clip-embeddings-reembed.test.ts`, `search-disclaimer.test.ts`, `download-clip-models.test.ts` assert via `src.toContain(...)`/regex against file text. They pin real invariants (e.g. `=== 'production'` branch present, `truncateAndNormalize` used, disclaimer guarded by `=== 'stub'`) and the strong integration smoke backs the math, so the suite is NOT vacuous overall. But these particular tests pass on a comment containing the right substring and would not catch a behavioral regression that keeps the tokens. They are acceptable as cheap drift-guards; just don't mistake them for behavioral coverage. Confidence: High (assessment), low-severity.
+**Architect view:** Maintaining two counters of the same quantity with different durability guarantees is a design smell. CLAUDE.md honestly labels `view_count` "best-effort approximate," but the system already has a durable source of truth (`COUNT(*) FROM shared_group_views WHERE bot=false`). The denormalized column will drift downward after every crash/restart and never self-heal. Anyone who reads `view_count` (admin UI, API) gets a number that is structurally an undercount of the durable log.
 
-### m3 — CLAUDE.md asserts a fragile claim about `onnxruntime-node` binary packaging
-`CLAUDE.md` (the "Why the binary is already present" paragraph) states `onnxruntime-node` bundles `linux/{arm64,x64}` `.node` bindings inside the npm tarball and its postinstall "only downloads CUDA .so files." This is presented as load-bearing justification for omitting any Dockerfile install step. It is plausibly correct for current versions but is exactly the kind of upstream-packaging detail that drifts across releases (`@huggingface/transformers ^3.8.1` is an open caret). If a future bump changes the postinstall to fetch the CPU binding, the prod image breaks at first inference with no Dockerfile guard. Not a defect today; flag for a pinned dep or a build-time presence assertion. Confidence: Medium (did not independently verify the tarball contents; egress-limited).
+**Remediation:** Pick one source of truth. Either (a) derive `view_count` from the event log (a periodic reconcile job that sets `view_count = COUNT(*)`), making the buffer a pure latency optimization that self-heals; or (b) drop the denormalized column and compute on read with a cached aggregate. Document which counter is authoritative for billing-grade vs display-grade use.
 
----
+### CRT-04 — No mechanism enforces the single-writer topology the whole coordination model depends on
+**Confidence: High.** Evidence: process-local state that is correctness-relevant under scale-out includes the view buffer (`data.ts:12-17`, a module-level `let … Map`), the in-memory rate-limit fast-path maps, the upload tracker, the image-queue `PQueue` + enqueued/failed sets, and restore-maintenance flags. CLAUDE.md states "do not horizontally scale … unless those coordination states are moved to a shared store" — but there is **no startup guard, advisory-lock-on-boot, or config assertion** preventing a second web instance from booting.
 
-## What's Missing (gaps)
+**Ops view:** The safety of at least four subsystems rests on a sentence in a markdown file. A future operator adding a second replica behind a load balancer (the natural scaling move) gets: independent view buffers (lost increments), independent rate-limit fast-paths (per-replica 5-attempt budgets → effective brute-force budget multiplied by replica count when the DB path degrades), and two queue workers that *do* serialize via the per-image advisory lock but whose in-memory enqueued-sets disagree. Some of this is DB-lock-protected; the rate-limit and view-buffer parts are not.
 
-- **No assertion that the production binding actually loads in the built image.** Everything about production is gated behind weights + a hand-set DB value; there is no smoke/healthcheck that `embedTextReal` can load the model in the Linux container. The macOS spike notes an exit-134 teardown crash "does not occur on Linux" — but nothing in CI or deploy proves the Linux load path. First proof of life is a live visitor query after a manual flip. Given the activation is already manual, a one-shot `download-clip-models.ts`-then-`embedTextReal('test')` sidecar check would close the loop.
-- **No test pins the C1 contradiction.** There is no test asserting either "the settings UI offers production" or "the resolver/route reject production" — so the backend-vs-UI split is unguarded and was free to drift. Whichever C1 resolution is chosen, add a test that fails if backend and UI disagree on the set of valid modes.
-- **Stub-mode public exposure is honest-by-disclaimer but undocumented in CLAUDE.md.** Stub mode serves essentially-random results to anonymous visitors (behind `search.semanticExperimentalHint`). The in-code comments justify this (plan-319 "stub-serving stays; we make it honest"), and the disclaimer is correctly shown only in stub mode (`search.tsx:444`) and dropped in production — that is coherent. But CLAUDE.md does not document that an admin enabling "stub" exposes a random-result search to the public; an operator could enable it expecting "testing only = admin only." Worth a one-line CLAUDE.md note. (Not a defect — the disclaimer makes it honest — but a documentation gap.)
+**Remediation:** Acquire a MySQL advisory lock (e.g. `gallerykit_singleton_web`) on a dedicated connection at boot; refuse to start (or log a loud WARN and disable the in-memory fast-paths) if it can't be acquired. This converts a docs-only invariant into an enforced one and gives a clear signal the moment someone scales out.
 
-## Ambiguity Risks
-- `settings.semanticSearchModeStub` = "Stub (testing only)" reads as *admin-only testing*, but stub is a **public** surface when enabled. Two admins could reasonably read "testing only" as "not visitor-facing." The disclaimer mitigates visitor confusion but not operator confusion. → consider "Stub (public demo — results not meaningful)".
+### CRT-05 — HDR "honesty invariant" (admin-only until WI-09) is enforced indirectly by field-nullness, not by an explicit gate
+**Confidence: Medium.** Evidence: `apps/web/src/components/color-details-section.tsx:169` derives `const isHdr = image.transfer_function === 'pq' || 'hlg'`, and the public HDR badge renders on `{isHdr && …}` at line 511 — **not** gated on `isAdmin`. It works today only because `transfer_function` / `is_hdr` are stripped from `publicSelectFields`, so for public viewers those fields arrive `null`/`undefined` and `isHdr` is coincidentally false. The same indirect pattern repeats in `lightbox-color-pip.tsx`, `info-bottom-sheet.tsx`.
 
-## Multi-Perspective Notes
-- **Executor (operator):** Following the runbook end-to-end fails twice — wrong backfill script name (M1), then no production option in Settings to flip (C1). The documented rollout cannot be completed as written.
-- **Stakeholder (honesty posture):** The feature's premise is honesty (the whole stub→production effort is framed as "make it honest"). C1 + M2 invert that for the admin: the dashboard would deny a running production feature. This is the highest-leverage thing to fix.
-- **Skeptic:** Strongest argument the design is fine anyway — "production is intentionally un-activatable via UI to keep it dark; the backend widening is just forward-prep." If that is the intent, then the backend widening (commits bb06caad/2b09d172/4bbcaaea) is premature and should be reverted until the UI ships, because shipping a served-but-unreachable mode with lying UI copy is strictly worse than not shipping the branch. Either direction is defensible; the in-between is not.
+**Skeptic view:** This is a load-bearing invariant ("the public never sees an HDR badge whose bytes don't fulfill it," CLAUDE.md Color/HDR section) defended by a *coincidence two layers away*. The `_PrivacySensitiveKeys` compile guard does protect the select-field layer (so a regression would fail typecheck — good), but the moment any legitimate future feature surfaces `transfer_function` publicly (e.g. a public "color science" panel), the HDR badge starts rendering on the public surface and the WI-09 honesty rule breaks **with no test catching it**, because the badge gate itself never asserted admin-ness.
 
-## Verdict Justification
-REVISE (not REJECT): the ranking/embedding core — model_version partitioning, Matryoshka symmetry, self-exclusion, production-only `similar`, fail-closed config, rate-limit rollback discipline, FK-cascade cleanup of embeddings, non-vacuous gated integration smoke — is correct and well-tested (59/59 green locally). No correctness defect was found in the math or the data path. The blocking issues are entirely in the activation/honesty/doc layer (C1) and its drift halo (M1-M3), all fixable without touching the encoder. Not ACCEPT, because C1 means the feature cannot be turned on via its documented path and the admin UI would misreport a live production state — a genuine honesty defect, not a style nit.
+**Remediation:** Gate the public HDR badge on `isAdmin && isHdr` explicitly (it's already admin-only intent), so the honesty invariant is enforced at the point of rendering rather than relying on upstream nullness. Add a test that renders `ColorDetailsSection` with `is_hdr=true` and `isAdmin=false` asserting no `.hdr-badge` in output.
 
-**Realist check (severity recalibration):** C1's realistic worst case is an operator confusion / silent self-disable, not data loss or a security breach — but it survives at Critical because it defeats the feature's entire stated purpose (honesty) and the documented rollout is impossible, and the DARK-by-design intent makes "backend serves a mode the UI denies" a real foot-gun the moment anyone follows the runbook. No mitigating gate contains it (there is no other activation path that behaves correctly). M1 stays Major (hard operator failure, but immediately visible as a module-not-found error and trivially fixed). M2/M3 stay Major/Minor as graded — visible only to a human reading the copy/comments, fast to fix, no runtime impact. No finding was downgraded; none involves data/security/financial impact so none was force-held.
+### CRT-06 — Content-Security-Policy has no `wasm-unsafe-eval`; CLIP production mode will silently break under a strict CSP
+**Confidence: Medium (latent — only bites if CLIP `production` is ever enabled).** Evidence: `apps/web/src/lib/content-security-policy.ts:105-117` emits `script-src 'nonce-…' 'self' [GA]` with **no** `wasm-unsafe-eval`. The CLIP stack ships `@huggingface/transformers` + `onnxruntime-node`. If inference ever runs in a context that uses the WASM backend (or any future client-side embedding/onnxruntime-web path), `WebAssembly.instantiate` on compiled modules is blocked by CSP without `'wasm-unsafe-eval'`.
 
-ADVERSARIAL sweep result: I extended scope to the settings UI, i18n bundles, runbook, schema, and the config test, expecting more hidden ranking bugs. The drift cluster is **contained to the activation/honesty layer** — the vector pipeline itself is clean. That containment is the reassuring part.
+**New-hire view:** Today CLIP is server-side (`onnxruntime-node`, native binding) and gated to `disabled`, so this is dormant. But it's a trap: a future engineer who flips `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` + enables production mode (or moves any embedding to the client) will hit an opaque CSP violation with no breadcrumb in the CSP file pointing at the CLIP dependency.
 
-## Open Questions (unscored)
-- Is C1 intentional (keep dark, backend is forward-prep) or an oversight (forgot to wire the UI)? The resolution direction depends on the answer; I could not determine intent from code alone (comments point both ways — validator comment says "real encoder shipped," UI comment says "future feature").
-- Does the production CLIP path actually load on `linux/arm64` in the deployed image? Unverified (no weights in CI, egress-limited here). Recommend a one-shot sidecar load check before any real flip.
-- `@huggingface/transformers ^3.8.1` caret + the CLAUDE.md binary-packaging claim — worth confirming the tarball ships the CPU `.node` for the deploy arch at the resolved version, and pinning if so.
+**Remediation:** Leave the CSP strict (correct default), but add a comment in `content-security-policy.ts` documenting that production CLIP / any onnxruntime-web usage requires conditionally appending `'wasm-unsafe-eval'`, and wire that conditional behind the same env gate so enabling production search also relaxes CSP exactly as much as needed and no more.
+
+### CRT-07 — Test suite is ~35% source-text fixture/contract tests; high drift-detection coverage, lower behavioral coverage; only 5 e2e specs
+**Confidence: High (factual composition).** Evidence: 231 test files / 1965 `it`/`test` blocks; **82 test files (35%) read source via `readFileSync`/`fs.readFile`** (the `cycleN-rpf-source-contracts`, `*-wiring`, `check-*`, touch-target audit families). Only **5 Playwright e2e specs**.
+
+**Verifier view:** The fixture/contract tests are genuinely valuable as drift sentinels (they're why the migration journal, blur MIME, privacy fields, touch targets, and tag-names SQL can't silently regress) — credit where due. But a third of the suite asserts that *source text matches a pattern*, not that *behavior is correct*. Two risks: (1) **false confidence** — a green suite can coexist with a behavioral bug the greps don't probe (e.g. the async-payment money path in CRT-01 had no test until now); (2) **brittleness** — benign refactors (renaming a variable, reformatting) break grep-fixtures, training engineers to update fixtures reflexively, which erodes their signal. The thin e2e layer (5 specs) means whole-flow regressions (login → upload → process → view → share → purchase) are under-covered relative to the unit/fixture mass.
+
+**Remediation:** Treat new fixture tests as a last resort; prefer a behavioral test that exercises the real function. Backfill e2e coverage for the money path and the upload→process→serve happy path. Periodically audit the `source-contract` families and retire ones whose invariant is now also covered behaviorally.
 
 ---
 
-## Aggregator summary (severity + confidence)
-- **[CRITICAL / High]** C1 — `production` unreachable via admin Settings UI (`settings-client.tsx:655,662-667`) AND dashboard would misreport a live production state (amber warning `:670-677` + i18n `semanticSearchProductionWarning`), contradicting validator/resolver/route which accept+serve it. Pick ONE: finish the UI or revert the backend widening.
-- **[MAJOR / High]** M1 — CLAUDE.md:479 backfill runbook names nonexistent `scripts/backfill-embeddings.ts` (real: `backfill-clip-embeddings.ts`); the production activation command fails as written.
-- **[MAJOR / High]** M2 — `messages/{en,ko}.json` `settings.semanticSearchDesc` / `semanticSearchEnabledHint` / `semanticSearchProductionWarning` describe stub as the only encoder and call production invalid; all false post-ship.
-- **[MAJOR / High]** M3 — stale self-contradicting docstrings: `semantic/route.ts:25` (threshold 0.25 vs real 0.22), `route.ts:189-192` ("only 'stub' ... 503" vs serves production), `gallery-config.test.ts:10-12` (docstring asserts production must HEAL, test below asserts it passes through).
-- **[MINOR / High]** m1 — CLAUDE.md:121 `image_embeddings ... (US-P51, stub)` label stale.
-- **[MINOR / High]** m2 — CLIP source-shape contract tests are grep-on-source (drift-guards, not behavioral); strong gated integration smoke compensates, suite is not vacuous.
-- **[MINOR / Medium]** m3 — CLAUDE.md `onnxruntime-node` binary-packaging claim is load-bearing + version-fragile (`^3.8.1` caret); no build-time presence guard.
-- **[GAP]** No CI/deploy proof the production binding loads on linux/arm64; no test pins the backend-vs-UI valid-mode agreement; CLAUDE.md does not note stub mode is a public (random-result) surface.
-- **[POSITIVE]** Ranking core is sound and well-tested: model_version filter partitions stub/production in every read+write path; Matryoshka-512 truncate-then-normalize symmetric across text/image/query; `similar` production-only (random-vector hazard correctly avoided); fail-closed config; rate-limit rollback discipline; FK ON DELETE CASCADE on embeddings; non-vacuous gated argmax+margin integration smoke. 12 CLIP test files / 59 tests pass locally.
+## LOW
+
+### CRT-08 — Service-worker `SW_VERSION` stamp committed stale (9 commits behind HEAD)
+**Confidence: High.** Evidence: `apps/web/public/sw.js` has `SW_VERSION = 'ec50158b-p7'`; HEAD is `8ccc8806`; `git log ec50158b..HEAD` = 9 commits (all CLIP). The `prebuild` hook (`scripts/build-sw.ts`) re-stamps from the git short-SHA at build time, and per the per-iteration deploy policy every push is followed by a build+deploy, so the *served* SW self-corrects. But the **committed** artifact is stale, so anyone inspecting the repo (or any environment that serves `public/sw.js` without running prebuild) gets a cache namespace that doesn't match the code. Minor, but it's a recurring footgun — the stamp is meaningful state checked into git that's allowed to drift from HEAD.
+**Remediation:** Either stop committing the generated `sw.js` (gitignore it, generate at build) or add a CI check that fails if `sw.js`'s stamp != current short-SHA. Today it relies on the human remembering to run prebuild before committing.
+
+### CRT-09 — In-memory rate-limit buckets evict oldest entries past 5000 keys (distributed-attack pressure relief)
+**Confidence: Medium.** Evidence: `LOGIN_RATE_LIMIT_MAX_KEYS = 5000` with oldest-entry eviction in `bounded-map.ts`. An attacker spoofing >5000 distinct IPs/accounts evicts the oldest in-memory buckets, so the *fast-path* loses pressure on early targets. Mitigated because the **DB-backed bucket is the source of truth** (`auth-rate-limit.ts:16-18`) and is consulted every attempt — so this only degrades the in-memory optimization, not the actual limit, unless the DB is *also* unavailable. CLAUDE.md doesn't document the 5000-key cap.
+**Remediation:** Document the cap and the DB-authority relationship in CLAUDE.md's rate-limit section so future readers don't mistake the in-memory map for the limit.
+
+### CRT-10 — Share-key enumeration is throttled only per-IP (60/min); distributed enumeration is botnet-bounded
+**Confidence: Medium.** Evidence: 10-char base56 keys (56^10 ≈ 3.6e17 space — strong) with per-IP `SHARE_MAX_REQUESTS = 60`/min the only anti-enumeration guard (`rate-limit.ts`); collision handling is MySQL UNIQUE + 5 retries. Sequential enumeration is infeasible; the residual is a large distributed attack, which the topology (single-writer, per-IP limit) only partially constrains. Shares have no per-share access cap or analytics-based anomaly detection. This is acceptable for a personal gallery — flagged for completeness, not alarm.
+**Remediation:** None required at current threat model. If shares ever protect sensitive content, add per-share access counters + optional expiry-by-access-count.
+
+### CRT-11 — `style-src 'unsafe-inline'` in production CSP
+**Confidence: High (accepted risk).** Evidence: `content-security-policy.ts:108` ships `style-src 'self' 'unsafe-inline'`. Standard for Next.js/Tailwind inline styles and far lower-risk than script-src inline (which IS nonce-gated correctly). Flagged only so it's a conscious, documented trade-off rather than an oversight.
+**Remediation:** None blocking; revisit if/when Next.js makes nonce-based style isolation ergonomic.
+
+---
+
+## DOC / CODE DRIFT
+
+This codebase's CLAUDE.md is unusually accurate — most claims I spot-checked held. The drifts below are the residue.
+
+### CRT-D1 — `serve-upload` ETag staleness on the static path is technically documented but easy to misread as universal
+**Confidence: High.** CLAUDE.md (line 263) says "flipping any color-, quality-, or size-impacting admin setting invalidates cached variants **on that path** automatically." That is true **only on the serve-upload path** (locale-prefixed `/{locale}/uploads/…` + files missing from `public/`). For the *production* serving path — Next's static server delivering existing files from `public/uploads/` with a `W/"{size}-{mtime}"` ETag — flipping `avif_effort` (or any `COLOR_IMPACTING_KEYS` member) does **not** change the on-disk bytes, so the mtime+size ETag is unchanged and **stale bytes keep serving until a backfill re-encode rewrites the file**. The doc states this in the very next sentence ("On the static path, invalidation rides the mtime+size ETag: a backfill re-encode rewrites the file"), so it's not *wrong* — but the two-sentence structure invites the reader to conclude "settings flip ⇒ cache invalidated everywhere," which is false for the path that serves the overwhelming majority of real traffic.
+**Remediation:** Add one explicit sentence: "Flipping a color/quality/size setting does NOT invalidate already-served static derivatives until you run a backfill; the settings-hash ETag only affects the serve-upload path." This is an operational gotcha (admin changes a setting, expects new bytes, sees old ones) worth stating bluntly.
+
+### CRT-D2 — `image_quality_webp/avif/jpeg` are in `COLOR_IMPACTING_KEYS` but absent from the admin-tunables table
+**Confidence: High.** `gallery-config-shared.ts:27-29,97-99,157-159` defines and validates `image_quality_webp` (90), `image_quality_avif` (85), `image_quality_jpeg` (90) as admin settings that change encoded bytes (and are correctly in `settings-hash.ts` `COLOR_IMPACTING_KEYS`). But CLAUDE.md's "Admin tunables (color/HDR)" table lists only the 5 color keys + chroma/effort/pixels — the three quality keys aren't in that table even though they're admin-tunable and byte-impacting. Minor completeness gap; the settings-hash docstring (line 4) and line 263 do mention them.
+**Remediation:** Add `image_quality_webp/avif/jpeg` rows to the admin-tunables table for completeness, or note they're documented under the deployment/setup section.
+
+### CRT-D3 — Stale `git status` snapshot referenced plan-328/329/330; actual committed artifacts are plan-348/349
+**Confidence: High (process/hygiene, not code).** The session-start git snapshot listed untracked `plan/plan-328…330-run6-cycle1-*.md` and ~16 modified files; the working tree is now clean at `8ccc8806` with `plan-348-run6-cycle1-fixes.md` / `plan-349-run6-cycle1-deferred.md` as the run-6 artifacts. Not a code issue — but the plan directory has **60 deferred-finding files** accumulated across runs. That's a deferred-finding-hygiene smell: a 60-file deferral backlog is hard to reason about as a whole, and individual deferrals (like CRT-01's async-payment gap) can sit "tracked but unshipped" indefinitely while reading as "handled."
+**Remediation:** Periodically triage `plan/*deferred*.md` — close/merge resolved ones, and surface the still-open high-impact deferrals (async payment, any other money/security items) into a single living "open risks" doc so they don't get lost in a 60-file pile.
+
+---
+
+## Refuted Findings (verification refuted these — recorded so they aren't re-raised next cycle)
+
+These looked like findings during fan-out investigation but were **refuted by direct source re-check**. Documenting them prevents the next cycle from re-flagging.
+
+1. **"`color_primaries` doc/code drift (admin-only vs public)"** — REFUTED. CLAUDE.md line 134 explicitly lists `color_primaries` as **public**, and code (`data.ts:241`, not in the `publicSelectFields` omit set, not in `_PrivacySensitiveKeys`) agrees. Doc and code are consistent. (The schema-section table calling color columns "admin-only" is a *summary* that the detailed line 134 overrides.)
+2. **"`COLOR_IMPACTING_KEYS` is 5 not 9"** — REFUTED. The list is 9 keys (`settings-hash.ts:37-49`) and CLAUDE.md line 263 already says **9** (AGG-R7-08 corrected the old "5"). No drift.
+3. **"Delete-during-processing orphans the original file (CRITICAL)"** — REFUTED. `deleteImage` reads `image.filename_original` (`images.ts:557-560`) before its transaction and unconditionally calls `deleteOriginalUploadFile()` (`images.ts:614`); the original is written at upload (`saveOriginalAndGetMetadata`), never in the queue. The queue's cleanup correctly handles only derivatives. The only residual orphan is a best-effort `unlink` failure, which is logged in `cleanupFailures` by design.
+4. **"Process restart resets rate limit → 5-attempt bypass (MEDIUM vuln)"** — REFUTED/downgraded. The DB-backed `login` / `login_account` buckets survive restart and are the source of truth, consulted on every attempt (`auth-rate-limit.ts:16-18`, `actions/auth.ts`). The in-memory map is a fast-path fallback for DB-unavailable mode only; a post-restart slack exists only if the DB is *also* down — acceptable degraded behavior. (Captured as the documentation note CRT-09.)
+5. **"CSP nonce is read but never set → ineffective script isolation"** — REFUTED. `proxy.ts:41` generates `crypto.randomUUID().replace(/-/g,'')`, sets it as `x-nonce` (line 43), and builds the CSP with it (lines 44-45). Nonce isolation is wired correctly.
+
+---
+
+## Multi-Perspective Notes (concerns not promoted to numbered findings)
+
+- **Executor:** The migration runbook is executable as written — all four functions (`getAllJournalMigrations`, `prepareLegacyDatabaseIfNeeded` with hash-coverage check, `reconcileLegacySchema` mirroring all 15 color/HDR/processing columns, `runMigrations` post-condition throw) exist and match CLAUDE.md. The journal's idx 6→7 non-monotonic inversion is grandfathered, allowlisted in test, and any *new* non-monotonic entry is caught by both the monotonicity test and the silent-skip post-condition. Solid.
+- **Stakeholder:** The CLIP "dark by default" honesty posture is genuinely airtight — `disabled` default (`gallery-config-shared.ts:108`), `production`→`disabled` healing unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (`gallery-config.ts`), no `production` SelectItem in the admin UI, `SimilarPhotos` returns null unless production (`similar-photos.tsx:95`), and the search route 503s when not stub/production. No anonymous exposure, no embedding leak into public selects. The directive's "do not activate CLIP" concern is well-protected by the code itself.
+- **Security:** Stripe webhook signature verification (`constructStripeEvent`), entitlement idempotency (sessionId SELECT + UNIQUE + insertId-disambiguated fresh-insert check), 256-bit single-use download tokens with token↔imageId binding (no IDOR), Argon2id params matching OWASP, timingSafeEqual with pre-length-check, advisory-lock-serialized admin deletes/restores/backfills — all verified correct. The security floor here is high.
+- **New-hire:** The biggest onboarding hazard is the volume of indirectly-enforced invariants (CRT-05) and the static-path cache gotcha (CRT-D1) — both are the kind of thing a newcomer breaks without realizing because the enforcement is two layers away from the code they touch.
+
+---
+
+## The 3 Most Important Things to Fix
+
+1. **CRT-01 — Close the async-payment money gap operationally NOW** (restrict Stripe to `payment_method_types: ['card']` until plan-316's `async_payment_succeeded` handler ships). It is the only path where a customer can be charged and receive nothing, and it is currently guarded by a doc sentence, not code.
+2. **CRT-02 — Add a retention/prune job for the `*_views` analytics tables and a global anonymous-write ceiling.** Unbounded durable writes from per-IP-only-limited anonymous endpoints are a slow-burn DB-growth and index-bloat outage waiting on the single writer.
+3. **CRT-05 — Gate the public HDR badge on `isAdmin` explicitly (+ a test), and add the CRT-D1 static-path-cache sentence to CLAUDE.md.** The HDR honesty invariant and the ETag freshness story are both currently enforced/explained indirectly; making them explicit converts two future-refactor traps into asserted, documented contracts.
