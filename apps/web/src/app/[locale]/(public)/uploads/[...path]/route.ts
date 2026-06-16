@@ -6,7 +6,10 @@ export async function GET(
     { params }: { params: Promise<{ path: string[] }> }
 ) {
     const { path: pathSegments } = await params;
-    return serveUploadFile(pathSegments, request.headers.get('if-none-match'), 'GET');
+    // AGG-H5 (run-6 cycle-2): pass request.signal so a client abort mid-transfer
+    // releases the file descriptor (belt-and-braces on top of Readable.toWeb's
+    // cancel→destroy), preventing fd accumulation under rapid grid navigation.
+    return serveUploadFile(pathSegments, request.headers.get('if-none-match'), 'GET', request.signal);
 }
 
 export async function HEAD(

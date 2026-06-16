@@ -104,6 +104,46 @@ describe('serveUploadFile', () => {
         expect(wildcard.status).toBe(304);
     });
 
+    // AGG-H5 (run-6 cycle-2): client-abort fd-release behavior.
+    it('returns 499 and opens no body when the request is already aborted (AGG-H5)', async () => {
+        const jpegPath = path.join(uploadRoot, 'jpeg', 'aborted.jpg');
+        await fsp.writeFile(jpegPath, 'aborted-data');
+
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+        const controller = new AbortController();
+        controller.abort();
+
+        const response = await serveUploadFile(
+            ['jpeg', 'aborted.jpg'],
+            null,
+            'GET',
+            controller.signal,
+        );
+        // Pre-aborted requests short-circuit: no body stream is handed to the
+        // response, and the opened fd is destroyed immediately.
+        expect(response.status).toBe(499);
+        expect(await response.text()).toBe('');
+    });
+
+    it('cancelling the response body destroys the underlying file stream (AGG-H5)', async () => {
+        const jpegPath = path.join(uploadRoot, 'jpeg', 'cancel.jpg');
+        await fsp.writeFile(jpegPath, 'cancel-data-larger-than-one-chunk'.repeat(100));
+
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+        const response = await serveUploadFile(['jpeg', 'cancel.jpg']);
+        expect(response.status).toBe(200);
+        expect(response.body).toBeTruthy();
+
+        // Simulate a client abort mid-transfer: cancel the response body's
+        // ReadableStream. On Node 18+ Readable.toWeb() wires cancel() to
+        // destroy the underlying createReadStream fd. cancel() resolving
+        // without throwing confirms the body stream tore down cleanly (the fd
+        // is released rather than held until GC).
+        const reader = response.body!.getReader();
+        await reader.read(); // pull at least one chunk so the stream is live
+        await expect(reader.cancel('client aborted')).resolves.toBeUndefined();
+    });
+
     it('rejects extension/directory mismatches', async () => {
         const { serveUploadFile } = await import('@/lib/serve-upload');
 

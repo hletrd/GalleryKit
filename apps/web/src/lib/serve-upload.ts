@@ -114,11 +114,21 @@ const CONTENT_TYPES: Record<string, string> = {
  * when the cached client copy still matches. R11-M1: the Service Worker
  * now sends `If-None-Match` on its HEAD revalidate; honouring it here
  * lets the negotiated-cache short-circuit avoid a full response body.
+ *
+ * The optional `signal` (AGG-H5, run-6 cycle-2) is the inbound request's
+ * AbortSignal. On Node 18+ `Readable.toWeb()` already destroys the underlying
+ * file stream when the response body's web stream is cancelled (verified on
+ * Node 24), so a client abort mid-transfer normally releases the fd. Wiring
+ * the request signal is belt-and-braces: if the runtime aborts the request
+ * WITHOUT cancelling the body stream, the abort listener still destroys the
+ * createReadStream fd, so descriptors cannot accumulate under rapid
+ * masonry-grid navigation that cancels in-flight image downloads.
  */
 export async function serveUploadFile(
     pathSegments: string[],
     ifNoneMatch?: string | null,
     method: 'GET' | 'HEAD' = 'GET',
+    signal?: AbortSignal,
 ): Promise<NextResponse> {
     if (!Array.isArray(pathSegments) || pathSegments.length < 2) {
         return new NextResponse('Not found', { status: 404 });
@@ -249,6 +259,32 @@ export async function serveUploadFile(
         // close the TOCTOU gap where a file could be replaced by a symlink
         // between realpath() validation and createReadStream().
         fileStream = createReadStream(resolvedPath);
+
+        // AGG-H5 (run-6 cycle-2): if the request is already aborted by the time
+        // we get here, don't even open the body — release the fd and bail.
+        if (signal?.aborted) {
+            fileStream.destroy();
+            return new NextResponse(null, { status: 499, headers: responseHeaders });
+        }
+
+        // AGG-H5: belt-and-braces fd release on client abort. Readable.toWeb()
+        // destroys the Node stream when the web stream is cancelled (Node 18+),
+        // which covers the normal abort path; this listener additionally
+        // destroys the fd if the runtime aborts the request without cancelling
+        // the body stream. destroy() is idempotent, so a double-fire is safe.
+        const streamForCleanup = fileStream;
+        if (signal) {
+            signal.addEventListener(
+                'abort',
+                () => {
+                    if (!streamForCleanup.destroyed) {
+                        streamForCleanup.destroy();
+                    }
+                },
+                { once: true },
+            );
+        }
+
         const webStream = Readable.toWeb(fileStream) as ReadableStream;
 
         return new NextResponse(webStream, {
