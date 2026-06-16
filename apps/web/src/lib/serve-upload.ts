@@ -194,10 +194,14 @@ export async function serveUploadFile(
         // costs one round-trip to a 304 response on each load but lets us
         // ship color-pipeline fixes without orphan year-long stale caches.
         //
-        // P4-E2 / R4-L3 / FA-L1: fold an 8-char hash of the color-impacting
-        // admin settings (`wide_gamut_jpeg_chroma`, `avif_effort`,
-        // `force_srgb_derivatives`) into the ETag. A flip of any of those
-        // settings forces a 304 → 200 revalidation cycle on every cached
+        // P4-E2 / R4-L3 / FA-L1: fold an 8-char hash of ALL color-impacting
+        // admin settings into the ETag (the authoritative list is the 9-entry
+        // COLOR_IMPACTING_KEYS in settings-hash.ts — wide_gamut_jpeg_chroma,
+        // sdr_jpeg_chroma, avif_effort, force_srgb_derivatives,
+        // wide_gamut_max_source_pixels, image_quality_webp/avif/jpeg,
+        // image_sizes — do NOT re-enumerate them here; it drifts. AGG-D1).
+        // A flip of any of those settings forces a 304 → 200 revalidation
+        // cycle on every cached
         // client even when the file mtime has not changed (e.g. an admin
         // toggles `force_srgb_derivatives=true` to clean up a colorimetric
         // bug; previously the change shipped only to fresh browsers).
