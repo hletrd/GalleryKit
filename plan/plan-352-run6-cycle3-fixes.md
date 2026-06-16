@@ -1,7 +1,7 @@
 # Plan 352 — Run 6 / Cycle 3 — Fixes
 
 **Source:** `.context/reviews/_aggregate.md` (cycle 3, HEAD b1e9e0da) + per-agent reviews.
-**Status:** IN PROGRESS
+**Status:** COMPLETE — all 8 tasks implemented, committed, pushed. Gates green.
 **Repo policy:** GPG-signed commits (`-S`), conventional + gitmoji, no `--no-verify`, `git pull --rebase` before push, fine-grained commits, run `npm run typecheck --workspace=apps/web` before committing test changes. Per-cycle deploy via `npm run deploy`.
 
 This plan schedules the 8 fix-this-cycle findings. Every other review finding is recorded in `plan-353-run6-cycle3-deferred.md`. No finding silently dropped.
@@ -27,7 +27,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** test passes against the tmpdir; full test run leaves the working tree clean; no env override in production = no behavior change.
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -42,7 +42,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** Visual: checked state thumb at right edge, unchecked at left edge, on all 7 Switch usages. `npm test` touch-target audit still green (hit-zone ≥ 44px).
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -57,7 +57,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** Both spans use `text-destructive-text`; contrast ≥ 4.5:1 in light mode; dark mode unaffected (token already AA there).
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -72,7 +72,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** A run where detection always fails exits non-zero and logs the detectionFailures count; a clean run still exits 0. Update `__tests__/backfill-color-pipeline.test.ts` if it asserts on the summary/exit shape.
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -87,7 +87,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** Docstring matches the three serving layers.
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -102,7 +102,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** No inline key enumeration in the comment; points to the canonical constant.
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -117,7 +117,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** CLAUDE.md and the webhook route comment agree on the tracking ID.
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -132,7 +132,7 @@ This plan schedules the 8 fix-this-cycle findings. Every other review finding is
 
 **Acceptance:** `actions/images.ts` no longer imports the predicate via `color-detection`; `npm run typecheck` + `npm run build`-equivalent type gate pass; no broken importers.
 
-**Status:** PENDING
+**Status:** DONE
 
 ---
 
@@ -149,4 +149,11 @@ Before commit+push and deploy, the full repo must pass:
 Errors are blocking. No suppressions unless repo rules authorize (quote in commit body). Warnings best-effort; defer with note if not cleanly fixable.
 
 ## Progress log
-- (to be updated during PROMPT 3)
+- TASK 1 (ORCH-C3-TMPDIR): `06a3c5e7` — TOPIC_RESOURCES_ROOT env override + test tmpdir isolation; stray `public/resources/tmp-test-1781600723284` removed; empty `public/` tree cleaned; test 12/12 green; working tree clean after full run.
+- TASK 2 (Switch geometry): `a3b8c557` — nested visible h-6/w-11 pill in a 44px hit zone; thumb travels translate-x-full; touch-target audit 15/15 green.
+- TASK 3 (histogram contrast): `60c54346` — `text-red-500` → `text-destructive-text` (AA in light mode).
+- TASK 4 (backfill exit code): `a033056d` — detectionFailures counter + WARNING + non-zero exit; backfill test 6/6 green.
+- TASK 5 + 6 (cache doc fixes): `f603cd3f` — settings-hash max-age 86400→3600 docstring; serve-upload ETag comment de-enumerated.
+- TASK 7 (Stripe cross-ref): `22d02262` — CLAUDE.md entitlements note cross-refs the in-code gate lineage.
+- TASK 8 (color-detection re-export): `0ef29a10` — repointed actions/images.ts + test to color-primaries leaf; removed re-export; 48 tests green.
+- Plan/review provenance committed: `1235477a` (reviews), `cbff65fe` (plans).
