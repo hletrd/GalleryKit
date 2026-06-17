@@ -34,7 +34,7 @@ import { join } from 'path';
 import { env, AutoModel, AutoTokenizer } from '@huggingface/transformers';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '../src/lib/clip-model-id';
 import { resolveClipModelsRoot, clipModelArtifactDir } from '../src/lib/clip-paths';
-import { CLIP_MODEL_MANIFEST, sha256File, verifyAndCleanArtifacts } from './clip-model-manifest';
+import { CLIP_MODEL_MANIFEST, verifyAndCleanArtifacts } from './clip-model-manifest';
 
 // Alias so the rest of the script is unchanged.
 const MODEL_ID = JINA_CLIP_MODEL_ID;
@@ -59,20 +59,28 @@ async function main(): Promise<void> {
     console.log(`[download-clip-models] Artifact dir (revision-pinned): ${modelCacheDir}`);
     console.log(`[download-clip-models] Model:  ${MODEL_ID} (int8 ONNX)`);
 
-    // --- Idempotency check: if key artifact exists and matches, skip download ---
+    // --- Idempotency check: skip download only if the FULL manifest verifies ---
+    // AGG-C8-02 (run-6 cycle-8): the old fast-path verified ONLY
+    // onnx/model_quantized.onnx, so a partial seed with a valid ONNX but a
+    // missing/corrupt tokenizer.json was reported "already up to date" and the
+    // script exited 0 — while the runtime offline tokenizer load
+    // (allowRemoteModels=false) then threw, nulling loadPromise and wedging every
+    // subsequent semantic/similar request at 503. Verify EVERY manifest entry (the
+    // same set the runtime reads back) before short-circuiting; use
+    // deleteOnMismatch=false here so the inspection never mutates a good file — the
+    // post-download verify below owns delete-on-mismatch.
     const onnxPath = join(modelCacheDir, 'onnx', 'model_quantized.onnx');
     if (existsSync(onnxPath)) {
-        console.log('[download-clip-models] ONNX artifact already present — verifying checksum...');
-        const actual = await sha256File(onnxPath);
-        const expected = MANIFEST['onnx/model_quantized.onnx'];
-        if (actual === expected) {
-            console.log('[download-clip-models] Checksum OK — already up to date. Nothing to do.');
+        console.log('[download-clip-models] Existing artifacts present — verifying full manifest...');
+        const preCheck = await verifyAndCleanArtifacts(modelCacheDir, MANIFEST, /*deleteOnMismatch*/ false);
+        for (const line of preCheck.log) console.log(`[download-clip-models] ${line}`);
+        if (preCheck.ok) {
+            console.log('[download-clip-models] All checksums OK — already up to date. Nothing to do.');
             return;
         }
-        console.log(`[download-clip-models] Checksum MISMATCH on existing file:`);
-        console.log(`  expected: ${expected}`);
-        console.log(`  actual:   ${actual}`);
-        console.log('[download-clip-models] Re-downloading...');
+        console.log(
+            `[download-clip-models] Manifest incomplete/mismatched (${preCheck.failures.join(', ')}) — re-downloading...`,
+        );
     }
 
     // --- Ensure cache dir exists ---
