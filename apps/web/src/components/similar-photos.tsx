@@ -107,6 +107,7 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                 onClick={handleToggle}
                 className="flex w-full items-center justify-between min-h-11 px-0 text-sm font-semibold hover:text-foreground/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded"
                 aria-expanded={open}
+                aria-controls="similar-photos-results"
             >
                 <span>{t('similarPhotos')}</span>
                 <ChevronDown
@@ -114,8 +115,10 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
                 />
             </button>
 
+            {/* AGG-C8-11 (run-6 cycle-8): id pairs with the button's aria-controls so AT
+                users can navigate from the disclosure toggle to the revealed region. */}
             {open && (
-                <div className="mt-2">
+                <div id="similar-photos-results" className="mt-2">
                     {loading ? (
                         // AGG-C10-07: announce loading to assistive tech (WCAG 4.1.3) and
                         // give reduced-motion users a labelled state, mirroring search.tsx.

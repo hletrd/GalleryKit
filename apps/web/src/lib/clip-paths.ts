@@ -76,5 +76,23 @@ export function resolveClipModelsRoot(
  */
 export function clipModelArtifactDir(resolvedRoot: string): string {
     // JINA_CLIP_MODEL_ID is "<org>/<name>"; transformers nests cache as <org>/<name>/<revision>.
-    return join(resolvedRoot, ...JINA_CLIP_MODEL_ID.split('/'), JINA_CLIP_REVISION);
+    // AGG-C8-12 (run-6 cycle-8): guard the layout assumptions so a future model upgrade
+    // can't SILENTLY mis-path the cache (which would break the seed→offline-load contract
+    // with no error). The revision-subdir layout only holds for a NON-`main` revision —
+    // transformers v3 uses a FLAT <repoId>/ path when revision === 'main' (hub.js
+    // getModelFile). A bare/3-segment model id would also produce a wrong nesting depth.
+    const idSegments = JINA_CLIP_MODEL_ID.split('/');
+    if (idSegments.length !== 2 || idSegments.some((s) => s.length === 0)) {
+        throw new Error(
+            `clipModelArtifactDir: JINA_CLIP_MODEL_ID must be "<org>/<name>" (2 non-empty segments), got "${JINA_CLIP_MODEL_ID}". ` +
+            `The revision-subdir cache layout assumes a 2-segment repo id.`,
+        );
+    }
+    if (!/^[0-9a-f]{40}$/.test(JINA_CLIP_REVISION)) {
+        throw new Error(
+            `clipModelArtifactDir: JINA_CLIP_REVISION must be a 40-hex commit SHA (not a branch/tag like "main"), got "${JINA_CLIP_REVISION}". ` +
+            `Transformers v3 nests a <revision>/ subdir only for a non-"main" revision; a branch/tag would break the seed→offline-load round-trip.`,
+        );
+    }
+    return join(resolvedRoot, ...idSegments, JINA_CLIP_REVISION);
 }

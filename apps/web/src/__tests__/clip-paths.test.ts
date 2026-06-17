@@ -124,3 +124,35 @@ describe('download script + loader use the shared resolver (no drift)', () => {
         expect(loaderSrc).toContain('resolveClipModelsRoot');
     });
 });
+
+describe('clipModelArtifactDir — model-id / revision layout guard (AGG-C8-12)', () => {
+    it('the LIVE constants satisfy the guard (no throw) — production path is guard-safe', () => {
+        // The shipped constants MUST pass: 2-segment id + 40-hex non-main revision.
+        // If a future model upgrade violates either, clipModelArtifactDir throws loud
+        // instead of silently mis-pathing the cache (which would break seed→offline-load).
+        expect(() => clipModelArtifactDir('/tmp/models')).not.toThrow();
+        const segments = JINA_CLIP_MODEL_ID.split('/');
+        expect(segments).toHaveLength(2);
+        expect(segments.every((s) => s.length > 0)).toBe(true);
+        expect(JINA_CLIP_REVISION).toMatch(/^[0-9a-f]{40}$/);
+    });
+
+    it('rejects a non-main-revision assumption: a branch/tag revision is not 40-hex', () => {
+        // Documents WHY the guard exists: transformers v3 nests a <revision>/ subdir only
+        // for a non-"main" revision (flat path for "main"). The 40-hex regex is what
+        // distinguishes a pinned commit SHA from a branch/tag like "main"/"v1".
+        const hex40 = /^[0-9a-f]{40}$/;
+        expect(hex40.test('main')).toBe(false);
+        expect(hex40.test('v1.0')).toBe(false);
+        expect(hex40.test(JINA_CLIP_REVISION)).toBe(true);
+    });
+
+    it('the artifact dir nests exactly one revision segment below the 2-segment repo id', () => {
+        // A bare or 3-segment id would change the nesting depth the offline loader reads.
+        const root = '/srv/clip';
+        const dir = clipModelArtifactDir(root);
+        const rel = dir.slice(root.length).replace(/^[/\\]/, '');
+        // org/name/<revision> → exactly 3 path segments under the root.
+        expect(rel.split(/[/\\]/)).toHaveLength(3);
+    });
+});
