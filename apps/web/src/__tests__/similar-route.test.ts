@@ -109,6 +109,12 @@ vi.mock('@/db', () => {
             topic: 'topic',
             processed: 'processed',
             camera_model: 'camera_model',
+            // AGG-C10-02 (run-6 cycle-10): the route SELECTs these two fields
+            // (AGG-C8-10 parity) and SimilarResult requires them (AGG-C9-04);
+            // the mock schema must declare them so the 200-path test can assert
+            // they survive in the response and a future SELECT-drop fails loudly.
+            lens_model: 'lens_model',
+            capture_date: 'capture_date',
         },
         topics: { slug: 'slug', label: 'label' },
     };
@@ -259,17 +265,32 @@ describe('GET /api/search/similar/[id]', () => {
                 topic: 'nature',
                 topic_label: 'Nature',
                 camera_model: null,
+                // AGG-C10-02: exercise the lens/date enrichment fields so the
+                // assertions below can confirm they reach the response body.
+                lens_model: 'EF 50mm f/1.8',
+                capture_date: '2026-01-02 03:04:05',
             },
         ];
 
         const res = await GET(req(String(targetId)) as never, params(String(targetId)));
         expect(res.status).toBe(200);
 
-        const body = await res.json() as { results: Array<{ imageId: number }> };
+        const body = await res.json() as {
+            results: Array<{ imageId: number; lens_model: string | null; capture_date: string | null }>;
+        };
         const returnedIds = body.results.map(r => r.imageId);
 
         // Self must NOT appear in the results.
         expect(returnedIds).not.toContain(targetId);
+
+        // AGG-C10-02: the route SELECTs lens_model + capture_date and maps them
+        // into each result (AGG-C8-10 parity with the semantic route). Pin them
+        // so a future SELECT-drop regression — which would re-blank the lens/date
+        // on similar-photo cards — fails this test instead of passing silently.
+        const neighbour = body.results.find(r => r.imageId === neighbourId);
+        expect(neighbour).toBeDefined();
+        expect(neighbour).toHaveProperty('lens_model', 'EF 50mm f/1.8');
+        expect(neighbour).toHaveProperty('capture_date', '2026-01-02 03:04:05');
 
         // The neighbour must appear (score above PRODUCTION_COSINE_THRESHOLD for
         // nearly-identical embeddings like 0.49 vs 0.5).
