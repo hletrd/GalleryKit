@@ -1,94 +1,48 @@
-# Document-Specialist Review — Run-6 Cycle-7
+# Document-Specialist Review — Run-6 Cycle-8 (HEAD 1a325fa6)
 
-- **HEAD:** `a7758ef0` (run-6 cycle-7; working tree CLEAN)
-- **Agent:** document-specialist
-- **Date:** 2026-06-17
-- **Angle:** Doc/code mismatches — re-verify load-bearing factual claims in the ON-DISK `CLAUDE.md` / `AGENTS.md` against code at HEAD. Code is authoritative.
-- **Claims verified:** 37 load-bearing facts checked against code.
-- **Findings:** 0 CRIT / 0 HIGH / 0 MED / 0 LOW actionable. 1 carry-forward INFO (non-actionable, repo-disclaimed line-ref drift).
+**Scope:** doc-vs-code (and doc-vs-production-reality) consistency, prioritizing the now-LIVE CLIP semantic-search activation. The feature was previously documented as "deployed DARK"; it is now LIVE in production (`semantic_search_mode=production` in the prod DB, `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, 445 real `jina-clip-v2-d512-q8` embeddings serving). The concern is STALE documentation that still frames the feature as dark/unfinished.
 
----
+**Findings: 0 CRITICAL / 0 HIGH / 2 MEDIUM / 1 LOW.**
 
-## Verdict: 0 actionable mismatches — CONVERGED
-
-The on-disk `CLAUDE.md` contract is accurate at HEAD `a7758ef0`. Findings trend across this loop: 11 → 45 → 14 → 5 → 1 → 2 → **0**. Nine of the prior cycle's findings were closed and the two cycle-6 fixes (HDR badge contrast `5af25dc7`, boundary-test hardening `204e8594`) landed without introducing any doc drift. No developer-misleading doc-vs-code mismatch exists. I did not fabricate nitpicks; the single INFO is the same 4-line internal line-number offset cycle-6 already classified as the "informational only" class the doc itself disclaims.
-
-### Methodological note (source-of-truth discipline)
-
-The `CLAUDE.md` delivered in the agent system-reminder context was AGAIN a STALE snapshot (it says "all **5** COLOR_IMPACTING_KEYS"). The **on-disk `CLAUDE.md` at HEAD is correct** — line 264 reads "covers all **9** `COLOR_IMPACTING_KEYS` … (AGG-R7-08 corrected the count from a stale '5')". I verified strictly against the on-disk HEAD file + the actual array in `settings-hash.ts`, per the orchestrator brief. Did NOT "fix" the count back to 5.
+> Scope note: the *code default* `semantic_search_mode: 'disabled'` in `gallery-config-shared.ts` is CORRECT for fresh installs and is NOT flagged. The findings below concern docs/strings that assert the feature is "deployed dark" as a current state, which production reality now contradicts.
 
 ---
 
-## Two cycle-6 code commits cross-checked for doc drift (both CLEAN)
+## DOC-C8-01 [MEDIUM, confidence High] — CLAUDE.md still describes CLIP as "deployed DARK"
 
-`git diff 4eb83aab^..a7758ef0 -- apps/web/src` touches exactly 6 files (2 test files + 4 component one-liners):
+**Doc:** `CLAUDE.md:121` — "`image_embeddings` - CLIP embeddings (US-P51). Real jina-clip-v2 encoder shipped but **deployed DARK** (`semantic_search_mode` defaults to `disabled`; …)".
 
-| Commit | Change | Doc-asserted value touched? |
-|---|---|---|
-| `5af25dc7` (a11y) | `text-white` → `text-amber-950` at 4 HDR-badge sites + new `hdr-badge-contrast.test.ts` | **No.** CLAUDE.md documents the `.hdr-badge` class and the HDR honesty rule, but asserts NO badge text color / contrast value. Current code grep confirms all 4 sites now carry `text-amber-950` on `from-amber-300 to-orange-400`. Nothing in the contract drifts. |
-| `204e8594` (test) | dynamic-`import()` + import-equals coverage in `client-server-only-boundary.test.ts` | **No.** Test-only; no doc-asserted value. HARD GUARD #1 respected (does NOT add `server-only` to `@/db`). |
+**Contradicting reality:** the feature is LIVE in production. The encoder is no longer dark — the production DB row is `production`, the env opt-in is set, and the public semantic + similar routes serve real results (verified HTTP 200). A maintainer reading CLAUDE.md would conclude the feature is unshipped/inert and could (a) assume the live route is a no-op, (b) skip the operational care a live ML inference path on the single-instance topology requires, or (c) "re-enable" something already on.
 
----
-
-## Facts re-verified at HEAD `a7758ef0` (all PASS)
-
-| # | CLAUDE.md / AGENTS.md claim | Code (file:line) | Result |
-|---|---|---|---|
-| 1 | `IMAGE_PIPELINE_VERSION = 7` | `gallery-config-shared.ts:21` `= 7`; re-exported `process-image.ts:315` | ✓ |
-| 2 | 6 default image sizes `[640, 1536, 2048, 4096, 5120, 7680]` | `gallery-config-shared.ts:90` `DEFAULT_IMAGE_SIZE_VALUES` | ✓ exact |
-| 3 | `COLOR_IMPACTING_KEYS` = **9 keys** (5 color + 3 quality + `image_sizes`) | `settings-hash.ts:41-53` — array has exactly 9 entries | ✓ doc=9, code=9 |
-| 4 | settings-hash inline comment says "the **9** settings" | `settings-hash.ts:6` references "the authoritative list; AGG-R7-08" | ✓ comment, doc, array all agree on 9 |
-| 5 | `force_srgb_derivatives` default `false` | `gallery-config-shared.ts:116` | ✓ |
-| 6 | `allow_hdr_ingest` default `false` | `:119` | ✓ |
-| 7 | `force_show_color_chips` default `false` | `:122` | ✓ |
-| 8 | `wide_gamut_jpeg_chroma` default `'4:4:4'` | `:125` | ✓ |
-| 9 | `avif_effort` default `6` | `:128` | ✓ |
-| 10 | `sdr_jpeg_chroma` default `'4:2:0'` | `:131` | ✓ |
-| 11 | `wide_gamut_max_source_pixels` default `50_000_000` | `:134` (`'50000000'`) | ✓ |
-| 12 | `image_quality_webp=90`, `avif=85`, `jpeg=90` | `:97-99` | ✓ exact |
-| 13 | `strip_gps_on_upload` default `false` | `:101` | ✓ |
-| 14 | avif_effort validator range 0-9; chroma enum `4:4:4 \| 4:2:2 \| 4:2:0` | `:190,196,199` | ✓ |
-| 15 | **6** advisory-lock names (`gallerykit_db_restore`, `_upload_processing_contract`, `_topic_route_segments`, `_admin_delete`, `_color_pipeline_backfill`, `gallerykit:image-processing:{jobId}`) | `advisory-locks.ts` registry + `GET_LOCK` call sites in image-queue/admin-backfill-runner/upload-processing-contract-lock/admin-users/topics | ✓ all 6 present |
-| 16 | (`gallerykit_forwarded_proto` is NOT a 7th lock) | nginx `map` variable only (`nginx-config.test.ts:9`), not a `GET_LOCK` arg | ✓ not a lock; doc count of 6 correct |
-| 17 | Cache-Control `public, max-age=3600, must-revalidate`, NOT `immutable` — 3 files | `serve-upload.ts:230,252`; `next.config.ts:71`; `nginx/default.conf` | ✓ all 3 agree, none `immutable` |
-| 18 | serve-upload ETag `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` | `serve-upload.ts:215` exact | ✓ |
-| 19 | `HASH_LENGTH = 8` (no `.slice(0,8)` at ETag site) | `settings-hash.ts:55`, `:68` slices to HASH_LENGTH at the hash producer | ✓ |
-| 20 | CRT-D1 static-path invalidation gotcha (setting flip does NOT rewrite static bytes; needs backfill) | matches serve-upload-vs-static split in `serve-upload.ts:193` comment + next.config headers | ✓ accurate |
-| 21 | Argon2id memoryCost=65536, timeCost=3, parallelism=4 | `password-hashing.ts:11-14` | ✓ exact |
-| 22 | Login rate-limit 5 attempts / 15-min (per-IP + per-account) | `rate-limit.ts:62-63` (`15*60*1000`, `5`) | ✓ |
-| 23 | Upload caps: 200 MiB/file, 2 GiB total, 100 files/window | `upload-limits.ts:1-3` (`200*1024*1024`, `2*1024^3`, `100`) | ✓ exact |
-| 24 | Restore cap 250 MiB | `upload-limits.ts:4` (`250*1024*1024`) | ✓ |
-| 25 | SW image-derivative LRU cap 50 MB | `sw-cache.ts:19` `MAX_IMAGE_CACHE_BYTES = 50*1024*1024` | ✓ |
-| 26 | Queue concurrency default 1, `QUEUE_CONCURRENCY` override | `image-queue.ts:168` `Number(process.env.QUEUE_CONCURRENCY) || 1` | ✓ |
-| 27 | React `cache()` wraps **10** data-access fns | `data.ts`: 10 `= cache(` sites | ✓ doc=10, code=10 |
-| 28 | `tagNamesAgg` = `GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)` reused across masonry-list queries | `data.ts:605` def; reused :734/:783/:833/:899/:923/:1359 | ✓ exact |
-| 29 | Next.js 16.2 | `package.json` `next: ^16.2.3` | ✓ |
-| 30 | React 19 | `react: ^19.2.5` | ✓ |
-| 31 | TypeScript 6 | `typescript: ^6` | ✓ |
-| 32 | Node 24+ | `engines.node: ">=24"` | ✓ |
-| 33 | i18n: `en.json`/`ko.json` SAME key set; ko no `plural` (DOC-R5C3-07) | en 840 leaf keys = ko 840; 0 keys differ either direction | ✓ parity, asymmetry intentional, NOT flagged |
-| 34 | 4 lint gates (`lint`, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`) | `package.json:14,22,23,24` | ✓ |
-| 35 | Migration journal non-monotonic `when` (2025 + 2026) | `_journal.json`: 22 entries, monotonic=false, years {2025, 2026} | ✓ exact |
-| 36 | SW version stamp = git short-SHA + `-p{IMAGE_PIPELINE_VERSION}` | `build-sw.ts:46` `${getCommitOrTimestamp()}-p${IMAGE_PIPELINE_VERSION}` | ✓ |
-| 37 | HDR badge text now `text-amber-950` (post-`5af25dc7`); CLAUDE.md asserts no badge color | 4 component sites grep-confirmed `text-amber-950`; no contract claim about it | ✓ no drift |
+**Fix:** update line 121 to state the encoder is **activated in production** (operator-gated via `SEMANTIC_SEARCH_ALLOW_PRODUCTION` + the DB `semantic_search_mode=production` row), while keeping the accurate note that the *code default* remains `disabled` for fresh installs and that stub mode uses non-meaningful deterministic vectors. Cross-reference the live-feature verification curl in the operational playbook.
 
 ---
 
-## INFO-1 (non-actionable, carry-forward): `settings-hash.ts` line-range citation is 4 lines stale
+## DOC-C8-02 [MEDIUM, confidence High] — Admin settings i18n string says CLIP is "deployed dark"
 
-- **Location:** `CLAUDE.md` line 264 — "covers all **9** `COLOR_IMPACTING_KEYS` (`settings-hash.ts:37-49`)".
-- **Actual:** the `const COLOR_IMPACTING_KEYS = [ … ] as const;` array spans **lines 41-53**. The cited `37-49` points at the docstring tail + array start, not the full array.
-- **Why NOT actionable:** the symbol name `COLOR_IMPACTING_KEYS` is unambiguous (a developer lands on it instantly via grep regardless of the 4-line offset). The count (9) and the key breakdown in the prose are CORRECT. The repo's own convention treats embedded line numbers as drift-prone and informational (cf. the migrator note: "file/line drifts across drizzle-orm versions; informational only"). Does not mislead anyone into an incorrect/unsafe change. Identical to cycle-6 INFO-1 — left unchanged, correctly.
-- **Optional cosmetic fix (only if a maintainer is already editing that paragraph):** `settings-hash.ts:37-49` → `:41-53`. Not worth a standalone commit.
-- **Confidence:** High (verified by direct `sed` of the array).
+**Doc/strings:** `apps/web/messages/en.json:727` (`settings.semanticSearchDesc`): "… The real CLIP encoder is **deployed dark**; production search is operator-only. …"; the parallel `ko.json` key carries the same framing.
+
+**Contradicting reality:** identical staleness to DOC-C8-01, but user-facing — an admin configuring the gallery is told production search is "deployed dark / operator-only" when it is in fact live on this deployment. The "operator-only" gating clause is still accurate (the env flag is required); only the "deployed dark" present-tense framing is stale.
+
+**Fix:** reword the en + ko strings so they describe the *gating mechanism* ("production semantic search requires the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` server opt-in") rather than asserting the feature is dark. Keep en/ko key parity; the en=ICU-plural vs ko=fixed-form value asymmetry elsewhere is intentional and not in scope for these plain-string keys.
 
 ---
 
-## Hard guards — respected
-- Did NOT propose `import 'server-only'` on `@/db` (cycle-5 proved it breaks the tsx backfill sidecar; multi-agent corroborated).
-- Did NOT propose activating CLIP / semantic_search.
-- Did NOT "fix" the COLOR_IMPACTING_KEYS count back to 5 (the on-disk file already says 9).
-- Did NOT flag the intentional ko-no-plural i18n asymmetry (DOC-R5C3-07).
+## DOC-C8-03 [LOW, confidence High] — `search.invalid` i18n string states the wrong minimum-length (2 vs 3)
 
-## Bottom line
-The on-disk `CLAUDE.md` / `AGENTS.md` contract faithfully describes the code at HEAD `a7758ef0`. **37 load-bearing facts re-verified, all PASS.** The two cycle-6 code commits (`5af25dc7`, `204e8594`) introduced zero doc drift. One harmless carry-forward line-number citation (INFO-1), no fix required. **0 actionable doc-vs-code mismatches** — the expected converged outcome.
+**Strings:** `apps/web/messages/en.json:411` "Type at least **2** characters to search." and `ko.json:411` "검색하려면 **두** 글자 이상 입력하세요." ("two/2").
+
+**Contradicting code:** the semantic route rejects queries below **3** code points (`api/search/semantic/route.ts`), and the designer review (Finding 1/2) recommends routing the client-side semantic short-query case through this `invalid` status. As written, the string would tell the user "at least 2" while a 2-char semantic query still fails — an off-by-one user-facing contradiction. (The keyword path's own minimum is 2, so the string is correct *for keyword* but wrong if reused for semantic.)
+
+**Fix:** coordinate with the designer fix (search.tsx client-side guard) — either add a dedicated `search.invalidSemantic` key stating "at least 3 characters" (and route the semantic branch to it), or align the minimums. Update both en + ko. (This finding is the doc/i18n half of designer Finding 2 — tracked jointly so the strings and the client guard land together.)
+
+---
+
+## Verified-consistent (no mismatch)
+
+- **clip-paths.ts / clip-model.ts header comments** match the code in the same files and the download script. The load-bearing empirical claim (transformers v3 keys its FS cache by `<repoId>/<revision>/<file>` for a non-`main` revision) is **TRUE** — confirmed by other reviewers against `node_modules/@huggingface/transformers/src/utils/hub.js` (`revision === 'main' ? requestURL : pathJoin(repoId, revision, filename)`), and the pin is a 40-hex SHA so the non-main branch is taken. `allowRemoteModels=false` and the revision pin are accurately documented.
+- **Model identity** is consistent across docs and code: `jinaai/jina-clip-v2`, the pinned revision, `EMBEDDING_DIM=512`, `EMBEDDING_BYTES=2048`, `PRODUCTION_MODEL_VERSION='jina-clip-v2-d512-q8'`.
+- **i18n key parity** between en.json and ko.json holds for the semantic/similar keys (`semanticToggle`, `semanticExperimentalHint`, `similarPhotos`, `similarEmpty`, and the `settings.semanticSearch*` block).
+- The `backfill-clip-embeddings.ts` sidecar-example comment block (lines 14-19) uses `--env-file …/.env.local`, which is the supported way to pass `CLIP_MODELS_ROOT` (the prod `.env.local` carries the absolute bind-mount value); it does not re-introduce the path-mismatch e0da12ee fixed, provided `.env.local` sets `CLIP_MODELS_ROOT`. (Recommend the playbook explicitly note that `.env.local` must carry `CLIP_MODELS_ROOT` — minor, folded into DOC-C8-01's cross-reference.)
+
+**No re-reports of cycle 1-7 closed doc items.** (The prior cycle-7 document-specialist.md verified 37 load-bearing CLAUDE.md facts as still-accurate at a7758ef0; those remain accurate at 1a325fa6 — the only doc drift is the activation-staleness above, which postdates that pass.)

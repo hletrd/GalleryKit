@@ -1,7 +1,169 @@
-# Designer (UI/UX + WCAG 2.2 Accessibility) Review — GalleryKit
+# Designer UX/A11y Review — Cycle 8 (Semantic Search Activation)
 
-**HEAD:** `a7758ef0` · **Agent:** designer · **Cycle:** run-6 cycle-7 · **Date:** 2026-06-17 · **Branch:** master · **Working tree:** clean
-**Mode:** **Static source review** + executable a11y gates. MySQL client absent + `apps/web/.env.local` is the placeholder example, so data-backed routes (`/`, `/p/[id]`, `/g`, `/s`, admin) cannot render; I did not boot `npm run dev` for data routes. Every contrast claim below is recomputed independently with the WCAG sRGB relative-luminance formula (not inherited from prior cycles or commit messages). The two blocking visual gates I CAN run headless — the touch-target audit and the new HDR-badge contrast fixture — were executed at HEAD (27/27 pass).
+**Scope:** New CLIP semantic-search and similar-photos surfaces (activation-fix commits), plus broad sweep for regressions.
+**HEAD:** 1a325fa6
+**Reviewer:** oh-my-claudecode:designer
+**Summary: 3 findings (1 HIGH, 1 MEDIUM, 1 LOW). No touch-target violations. No regressions in previously closed issues.**
+
+---
+
+## Finding 1 — HIGH
+
+### Semantic search 400 error surfaces as misleading generic "Search failed" message
+
+**File:** `apps/web/src/components/search.tsx` lines 160–168
+**Also relevant:** `apps/web/src/app/api/search/semantic/route.ts` line 184
+
+**Evidence:**
+
+The semantic API enforces a 3-codepoint minimum (route.ts line 184):
+```
+if (countCodePoints(query) < 3) {
+    return NextResponse.json({ error: 'Query must be at least 3 characters' }, { status: 400, ... });
+}
+```
+
+The client fires `performSearch` for any non-empty trimmed query — there is no client-side minimum-length guard before the fetch. For a 1- or 2-character query with semantic search toggled on, the 300ms debounce fires and the API returns `400`.
+
+The semantic error branch in `search.tsx` maps every non-429, non-503, not-ok response to `setSearchStatus('error')` (line 168):
+```
+} else if (!resp.ok) {
+    setResults([]);
+    setSearchStatus('error');
+}
+```
+
+The display path (line 401) then renders `t('search.error')` = **"Search failed. Please try again."**
+
+The keyword path handles this cleanly: `searchImagesAction` returns `{status: 'invalid'}` for queries under 2 codepoints, which renders the helpful `t('search.invalid')` message. The semantic path has no equivalent handling for 400.
+
+**Impact:** Every user who activates semantic search and types 1–2 characters sees a spurious error message implying a server failure. On a fast typist this flashes error → loading → error on each keypress until the 3-character threshold is reached. Users may abandon the feature believing it is broken.
+
+**Fix:** Add a client-side guard in `performSearch` before the semantic fetch, mirroring the keyword path:
+```typescript
+if (semantic && countCodePoints(searchQuery.trim()) < 3) {
+    setLoading(false);
+    setResults([]);
+    setSearchStatus('invalid');
+    return;
+}
+```
+This surfaces the already-translated `t('search.invalid')` without a network round-trip. Note: see Finding 2 for the follow-on i18n fix needed alongside this.
+
+**Confidence:** High — code path verified line by line.
+
+---
+
+## Finding 2 — MEDIUM
+
+### `search.invalid` i18n message says "2 characters" but semantic search requires 3
+
+**File:** `apps/web/messages/en.json` line 411, `apps/web/messages/ko.json` line 411
+
+**Evidence:**
+
+```json
+"invalid": "Type at least 2 characters to search."
+```
+```json
+"invalid": "검색하려면 두 글자 이상 입력하세요."
+```
+
+The keyword search minimum is 2 codepoints (`public.ts` line 247). The semantic search minimum is 3 codepoints (API route line 184). If Finding 1 is fixed by setting `searchStatus('invalid')` for semantic queries under 3 chars, the rendered message will say "at least 2 characters" while the actual gate for semantic is 3. A user with semantic search on who types exactly 2 characters will read "Type at least 2 characters" — which appears satisfied — but the search still will not fire because the client guard checks for `< 3`. This is a contradictory affordance.
+
+**Fix — option A (preferred, simpler):** Raise the keyword search minimum to match semantic (change `countCodePoints(sanitizedQuery) < 2` to `< 3` in `public.ts` line 247), then update both i18n strings to "at least 3 characters" / "세 글자 이상". The keyword and semantic paths then share one minimum and one message.
+
+**Fix — option B:** Add a separate i18n key `search.invalidSemantic` = "Type at least 3 characters for semantic search." / "시맨틱 검색은 세 글자 이상 입력하세요." and render it conditionally when `useSemanticSearch` is true and `searchStatus === 'invalid'`.
+
+**Confidence:** High — both validation minimums verified directly in source.
+
+---
+
+## Finding 3 — LOW
+
+### `SimilarPhotos` toggle button missing `aria-controls` / result region has no `id`
+
+**File:** `apps/web/src/components/similar-photos.tsx` lines 104–115 (button), 117–148 (result region)
+
+**Evidence:**
+
+The toggle button correctly has `aria-expanded={open}` (line 109). However, it has no `aria-controls`, and the conditionally rendered result container `<div className="mt-2">` (line 118) has no `id`. The ARIA disclosure widget pattern (APG) requires `aria-controls` pointing to the controlled region's `id` so assistive technology can navigate from the button directly to the revealed content.
+
+Current:
+```tsx
+<button aria-expanded={open}>  // no aria-controls
+```
+```tsx
+{open && <div className="mt-2">  // no id
+```
+
+The button text "Similar photos" is visible and descriptive so the control is not unlabeled — this is a navigation convenience gap, not a complete failure.
+
+**Impact:** Screen reader users know the section expanded (via `aria-expanded` state change announced by AT), but cannot use AT shortcuts (e.g. JAWS "jump to controlled region") to navigate directly to the revealed thumbnails. Minor but non-zero friction.
+
+**Fix:**
+```tsx
+<button aria-expanded={open} aria-controls="similar-photos-results">
+```
+```tsx
+{open && <div id="similar-photos-results" className="mt-2">
+```
+
+**Confidence:** Medium — the ARIA spec recommends `aria-controls` for disclosure patterns; some AT implementations work without it, but it is the documented best practice.
+
+---
+
+## Non-Findings (confirmed solid)
+
+The following areas were inspected and found to be compliant. Not re-reporting.
+
+**Touch targets — all new search/similar surfaces pass:**
+- Search trigger button: `h-11 w-11` (44×44 px). `search.tsx` line 291.
+- Search dialog close button: `h-11 w-11`. `search.tsx` line 365.
+- Semantic search `Switch`: `min-h-11 min-w-11` from `ui/switch.tsx`. 44 px hit area on Root with visual pill nested inside. Passes.
+- `SimilarPhotos` toggle button: `min-h-11`. `similar-photos.tsx` line 108.
+- `SimilarThumb` link: `aspect-square min-h-11` wrapping 96 px image. Passes.
+- `SearchResultItem` link: wraps 48 px thumbnail + text in `p-2`, total height > 44 px. Passes.
+- Touch-target audit `SCAN_ROOTS` includes `components/` — both new component files are covered by the automated gate.
+
+**Loading states:**
+- Semantic search: `Loader2` spinner inline + `aria-live="polite"` region announces `t('search.searching')`. Clean.
+- Similar photos: `role="status" aria-live="polite"` with `motion-reduce:animate-none` fallback text. Clean.
+
+**Empty-results states:**
+- Search: `t('search.noResults')` for empty result + non-empty query. Clean.
+- Similar photos: `t('search.similarEmpty')` for `results.length === 0`. Clean.
+
+**Error states (except Finding 1):**
+- Search: `rateLimited`, `maintenance`, `error` all handled and translated for keyword path. Semantic 429 → `rateLimited`, 503 → `maintenance` handled correctly.
+- Similar photos: any non-ok response silently removes the panel (`setResults('error'); return null`). Intentional per AGG-C10-07 design comment — no dead control, no CLS. Correct.
+
+**Debouncing and race conditions:**
+- 300 ms debounce on `query` + `useSemanticSearch`. Request-ID race-condition guard present for both awaits in the semantic branch. Clean.
+
+**Focus management:**
+- `FocusTrap` with `initialFocus: '#search-input'`. Focus returns to trigger button on close via `wasOpenRef + requestAnimationFrame`. Clean.
+- Arrow key navigation with IME composition guard (`isImeComposingReactEvent`). Clean.
+- Global Escape/Cmd+K with IME composition guard (`isImeComposingNativeEvent`). Clean.
+
+**ARIA on search combobox:**
+- `role="combobox"`, `aria-autocomplete="list"`, `aria-controls` (conditional on results present), `aria-expanded`, `aria-activedescendant`. All present and correct.
+- `aria-live="polite"` region announces result counts, loading, and error states.
+
+**Result card ARIA:**
+- Each `SearchResultItem` link: `role="option"`, `aria-selected`, `id` for `aria-activedescendant` reference. Clean.
+- Image `alt` uses `image.title || t('common.photo')`. Clean.
+
+**Semantic toggle ARIA:**
+- `aria-label={t('search.semanticToggle')}` on Switch. `htmlFor` association present. `aria-describedby` conditional on stub mode only. Clean.
+
+**IME / Korean input:**
+- Both native and React IME composition guards present. Korean semantic search input safe.
+
+**Previously closed — not re-opened:**
+- HDR badge contrast.
+- WideGamutHint.
+- Nav touch targets.
 
 ## Severity counts: 0 Critical / 0 High / 0 Medium / 0 Low — ZERO findings.
 

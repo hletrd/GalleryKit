@@ -1,4 +1,109 @@
-# Verifier Review — Cycle 7
+# Verifier Review — Cycle 8
+
+<!-- Cycle 7 report preserved below the cycle 8 report -->
+
+## Cycle 8 — HEAD 1a325fa6 (CLIP activation-fix commits)
+
+**Agent:** oh-my-claudecode:verifier
+**Date:** 2026-06-17
+**Scope:** Activation-fix commits (e0da12ee, b1d6331c, 1a325fa6) — CLIP semantic-search feature
+
+---
+
+### Verdict
+**Status:** PASS
+**Confidence:** high
+**Blockers:** 0
+
+---
+
+### Evidence (all fresh, this run, HEAD 1a325fa6)
+
+| Check | Result | Command | Output |
+|-------|--------|---------|--------|
+| Unit tests | PASS | `npm test --workspace=apps/web` | 2207 passed, 4 skipped (2 model-weight-gated files), 0 failed; 237 files |
+| Typecheck | PASS | `npm run typecheck --workspace=apps/web` | exit 0 (tsc clean, next typegen OK, 7 JS scripts checked) |
+| ESLint | PASS | `npm run lint --workspace=apps/web` | exit 0, 0 diagnostics |
+| lint:api-auth | PASS | `npm run lint:api-auth --workspace=apps/web` | exit 0 — 2/2 admin routes OK |
+| lint:action-origin | PASS | `npm run lint:action-origin --workspace=apps/web` | exit 0 — all mutating actions enforce same-origin provenance |
+| lint:public-route-rate-limit | PASS | `npm run lint:public-route-rate-limit --workspace=apps/web` | exit 0 — `/api/search/semantic` confirmed uses rate-limit helper |
+
+**Unit-count delta vs cycle 7 (2194 → 2207, +13):** consistent with the 3 activation-fix commits adding new clip-paths, clip-offline-load, and related test cases.
+
+---
+
+### Acceptance Criteria
+
+| # | Criterion | Status | Evidence |
+|---|-----------|--------|----------|
+| 1 | All 6 gates pass with fresh output | VERIFIED | Every gate exited 0; output captured above |
+| 2 | 1a325fa6: boundary test catches clip-model.ts via native imports (claim is true) | VERIFIED | See detail below |
+| 3 | clip-paths.test.ts pins absolute-vs-relative resolution and revision-subdir-not-flat | VERIFIED | See detail below |
+| 4 | Semantic route has production branch and same-origin 403 guard | VERIFIED | `route.ts:99-101` hasTrustedSameOrigin → 403; `route.ts:233-244` isProd branch calls `embedTextReal` |
+| 5 | CLAUDE.md CLIP claims match code (model id, revision pin, EMBEDDING_DIM=512, model_version isolation) | VERIFIED | See detail below |
+| 6 | No test weakened/skipped to pass gates | VERIFIED | 2 skipped files are legitimately model-weight-gated — not suppressions |
+
+---
+
+### Detail
+
+#### Criterion 2 — 1a325fa6 client→server-only boundary claim
+
+The commit removed `import 'server-only'` from `clip-model.ts` and claimed the boundary test enforces safety instead.
+
+**Claim is TRUE.** `src/__tests__/client-server-only-boundary.test.ts` (lines 387-410, AGG-C10-FIX block) contains a dedicated non-vacuous pinning test that:
+
+1. Reads `clip-model.ts` from disk and asserts `hasServerOnlyImport(source) === false` — confirming the marker is absent (required because tsx operator scripts import this module under the throwing `default` server-only condition).
+2. Asserts `hasNativeModuleImport(source) === true` — confirming `sharp` or `@huggingface/transformers` are present, so the boundary walk flags any future `'use client'` → `@/lib/clip-model` value import RED.
+3. Asserts `reachesServerOnly(source) === true` — combined detection confirms server-only-equivalent status.
+
+`clip-model.ts:29` imports `sharp` as a value import (not type-only), satisfying native-module detection. The `hasServerOnlyImport` function strips block and line comments before matching (lines 232-235), so the explanatory comment in `clip-model.ts` mentioning `import 'server-only'` does not false-positive. The main closure-walk test also covers native imports globally, so any new client component reaching `clip-model.ts` via a value import would fail that test RED.
+
+#### Criterion 3 — clip-paths.test.ts pinned defects
+
+**Both defects correctly pinned.** `src/__tests__/clip-paths.test.ts`:
+
+- **Absolute-vs-relative (path doubling bug):** `resolveClipModelsRoot('/app/apps/web', '/app/data/models/clip')` asserted to return `'/app/data/models/clip'` verbatim. The anti-pattern `'/app/apps/web/app/'` explicitly asserted absent (line 44). Four cases: absolute verbatim, relative-against-cwd, empty-string-as-default, always-returns-absolute.
+
+- **Revision-subdir-not-flat (MISSING artifact bug):** `clipModelArtifactDir(root)` asserted to equal `join(root, org, name, JINA_CLIP_REVISION)` — NOT the flat `join(root, org, name)`. Regression test (lines 102-109) explicitly asserts `dir !== flat`.
+
+- **No-drift pin:** download script must contain `resolveClipModelsRoot` + `clipModelArtifactDir` and must NOT contain the old `join(process.cwd(), clipModelsRoot)` doubling pattern (lines 116-126).
+
+All four describe blocks pass.
+
+#### Criterion 5 — CLAUDE.md CLIP claims vs code
+
+- **Model ID** (`jinaai/jina-clip-v2`): matches `JINA_CLIP_MODEL_ID` in `src/lib/clip-model-id.ts`.
+- **Revision pin** (`e10d47f5691d...`): matches `JINA_CLIP_REVISION` in `src/lib/clip-model-id.ts`.
+- **EMBEDDING_DIM = 512**: matches `export const EMBEDDING_DIM = 512` at `src/lib/clip-embeddings.ts:8`.
+- **EMBEDDING_BYTES = 2048**: `EMBEDDING_BYTES = EMBEDDING_DIM * 4 = 2048` at `clip-embeddings.ts:9`; `schema.ts:259` states "2048 bytes = 512 × 4-byte little-endian float32"; CLAUDE.md says "raw 2048-byte float32 vector" — all consistent.
+- **model_version isolation**: `STUB_MODEL_VERSION = 'stub-sha256-v1'` and `PRODUCTION_MODEL_VERSION = 'jina-clip-v2-d512-q8'` are distinct; `route.ts:253-255` filters `imageEmbeddings.modelVersion` by active mode — stub rows never appear in production results and vice versa.
+
+One documentation note (not a defect): CLAUDE.md describes the stored vector by byte count (2048) rather than dimension count (512). Both are correct and consistent; no code change required.
+
+#### Criterion 6 — Skipped tests are legitimately gated
+
+The 4 skipped individual tests come from 2 files:
+
+- `src/__tests__/clip-offline-load.test.ts` — `describe.skip` when `process.env['CLIP_OFFLINE_LOAD'] !== '1'`. Tests `embedTextReal`/`embedImageReal` with actual model weights. Correct gating; model weights not present in standard test environment.
+- `src/__tests__/clip-semantic-integration.test.ts` — `describe.skip` when `process.env['CLIP_INTEGRATION'] !== '1'`. Tests real semantic ranking. Same rationale.
+
+No test was weakened, loosened, or suppressed to make any gate pass.
+
+---
+
+### Gaps
+None.
+
+---
+
+### Recommendation
+**APPROVE.** All 6 gates pass with fresh post-HEAD output (2207 passed / 4 skipped / 0 failed unit tests, all lint gates exit 0, typecheck clean). All 6 acceptance criteria VERIFIED with file-and-line citations. The client→server-only boundary claim for 1a325fa6 is true and non-vacuous. clip-paths.test.ts correctly pins both activation-fix defects. The 4 skipped tests are legitimately model-weight-gated — not suppressions. Convergence holds at cycle 8.
+
+---
+---
+
+# Verifier Review — Cycle 7 (archived)
 
 **HEAD:** `a7758ef0` (`docs(reviews): 📝 run-6 cycle-6 deep review + plan (11/11 agents, HEAD 4eb83aab)`)
 **Agent:** verifier
