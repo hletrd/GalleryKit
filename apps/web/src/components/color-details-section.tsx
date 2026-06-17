@@ -103,6 +103,7 @@ export function humanizeMatrixCoefficients(
         case 'bt2020-ncl': return 'BT.2020 NCL';
         case 'bt2020-cl': return 'BT.2020 CL';
         case 'identity': return 'Identity';
+        case 'ycgco': return 'YCgCo';
         default: return t('viewer.colorUnknown');
     }
 }

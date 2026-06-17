@@ -24,7 +24,7 @@ export interface ColorSignals {
     /** Transfer function inferred from ICC description + bit depth. */
     transferFunction: 'srgb' | 'gamma22' | 'gamma18' | 'gamma24' | 'gamma26' | 'pq' | 'hlg' | 'linear' | 'unknown';
     /** Matrix coefficients inferred from ICC / container metadata. */
-    matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'bt2020-cl' | 'identity' | 'unknown';
+    matrixCoefficients: 'bt709' | 'bt2020-ncl' | 'bt2020-cl' | 'identity' | 'ycgco' | 'unknown';
     /** Whether the image is HDR (PQ or HLG transfer). */
     isHdr: boolean;
     /**
@@ -204,7 +204,7 @@ const NCLX_TRANSFER_MAP: Record<number, ColorSignals['transferFunction']> = {
 const NCLX_MATRIX_MAP: Record<number, ColorSignals['matrixCoefficients']> = {
     0: 'identity',
     1: 'bt709',
-    8: 'bt2020-ncl', // R5-M1: ITU-T H.273 Table 4 value 8 = BT.2020 NCL (same as 9)
+    8: 'ycgco', // ITU-T H.273 Table 4 value 8 = YCgCo (NOT BT.2020-NCL; that is value 9)
     9: 'bt2020-ncl',
     10: 'bt2020-cl',
 };

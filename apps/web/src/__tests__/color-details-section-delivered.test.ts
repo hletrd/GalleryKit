@@ -95,12 +95,13 @@ describe('ColorDetailsSection — delivered rows wiring (C4-A5)', () => {
 
         it('humanizes matrix coefficients via the exported helper', () => {
             // The helper is exported for potential external testing and
-            // handles bt709 / bt2020-ncl / bt2020-cl / identity / unknown.
+            // handles bt709 / bt2020-ncl / bt2020-cl / identity / ycgco / unknown.
             expect(SOURCE).toContain('export function humanizeMatrixCoefficients(');
             expect(SOURCE).toContain("case 'bt709': return 'BT.709'");
             expect(SOURCE).toContain("case 'bt2020-ncl': return 'BT.2020 NCL'");
             expect(SOURCE).toContain("case 'bt2020-cl': return 'BT.2020 CL'");
             expect(SOURCE).toContain("case 'identity': return 'Identity'");
+            expect(SOURCE).toContain("case 'ycgco': return 'YCgCo'");
         });
     });
 

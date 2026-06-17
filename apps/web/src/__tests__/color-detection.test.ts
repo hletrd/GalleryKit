@@ -291,10 +291,11 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(false);
     });
 
-    // R5-M1: ITU-T H.273 Table 4 value 8 = BT.2020 NCL (same as 9)
-    it('maps nclx matrix=8 to bt2020-ncl', async () => {
+    // ITU-T H.273 Table 4 value 8 = YCgCo (NOT BT.2020-NCL; that is value 9).
+    // Corrected from the prior incorrect "8 = BT.2020-NCL (alias of 9)" mapping.
+    it('maps nclx matrix=8 to ycgco', async () => {
         const signals = await detectFromNclx(1, 1, 8);
-        expect(signals.matrixCoefficients).toBe('bt2020-ncl');
+        expect(signals.matrixCoefficients).toBe('ycgco');
     });
 
     // R10-M9: ITU-T H.273 values 14 (BT.2020 10-bit) and 15 (BT.2020
