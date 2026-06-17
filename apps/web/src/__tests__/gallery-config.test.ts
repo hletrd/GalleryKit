@@ -90,10 +90,11 @@ describe('getGalleryConfig resolver (TEST-R5C2-09)', () => {
     });
 
     it('HEALS a stored "production" semantic_search_mode to "disabled" by default (AGG-C10-02)', async () => {
-        // The CLIP feature is deployed DARK: 'production' is a type-valid stored value
-        // (the real encoder exists), but without the operator env opt-in the resolver
-        // heals it to 'disabled' so the dark feature is never activatable via the admin
-        // UI. This keeps the Settings UI's documented invariant TRUE for normal deploys.
+        // CLIP 'production' is operator-gated: it is a type-valid stored value (the real
+        // encoder is LIVE in the demo deployment), but without the operator env opt-in the
+        // resolver heals it to 'disabled' so production is never activatable via the admin
+        // UI. This keeps the Settings UI's documented invariant TRUE for deploys that have
+        // not opted in.
         const prev = process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
         delete process.env['SEMANTIC_SEARCH_ALLOW_PRODUCTION'];
         try {

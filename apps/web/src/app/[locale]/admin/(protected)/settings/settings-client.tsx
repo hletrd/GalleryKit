@@ -661,12 +661,12 @@ export function SettingsClient({ initialSettings, hasExistingImages }: SettingsC
                             <SelectContent>
                                 <SelectItem value="disabled">{t('settings.semanticSearchModeDisabled')}</SelectItem>
                                 <SelectItem value="stub">{t('settings.semanticSearchModeStub')}</SelectItem>
-                                {/* AGG-C10-02: no 'production' item BY DESIGN. The real ONNX
-                                    encoder exists but the feature is deployed DARK; production
-                                    is activatable only by an operator (SEMANTIC_SEARCH_ALLOW_
-                                    PRODUCTION=true env + DB row + weights + backfill), never via
-                                    this UI. The resolver heals a stored 'production' to
-                                    'disabled' unless that env flag is set. */}
+                                {/* AGG-C10-02 / AGG-C9-05: no 'production' item BY DESIGN. The
+                                    real ONNX encoder is LIVE in the demo deployment, but production
+                                    is OPERATOR-GATED — activatable only by an operator
+                                    (SEMANTIC_SEARCH_ALLOW_PRODUCTION=true env + DB row + weights +
+                                    backfill), never via this UI. The resolver heals a stored
+                                    'production' to 'disabled' unless that env flag is set. */}
                             </SelectContent>
                         </Select>
                     </div>
