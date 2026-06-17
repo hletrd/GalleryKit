@@ -15,3 +15,22 @@ describe('backfill re-embed contract', () => {
     expect(src).not.toContain("'semantic_search_enabled'");
   });
 });
+
+// AGG-C8-05 (run-6 cycle-8): the unwired backfillClipEmbeddings server action must
+// select candidates by the ACTIVE model_version too — matching the canonical sidecar.
+// Without the modelVersion filter in its notExists subquery, an image carrying a
+// stub-version row was excluded even in production mode, so the action could never
+// upgrade stub→production rows (it would report processed:0). Pin the fix.
+describe('backfillClipEmbeddings action — model_version-aware selection', () => {
+  const actionSrc = readFileSync(join(process.cwd(), 'src/app/actions/embeddings.ts'), 'utf8');
+  it('filters the notExists candidate subquery on modelVersion (like the sidecar)', () => {
+    expect(actionSrc).toMatch(/eq\(\s*imageEmbeddings\.modelVersion\s*,\s*modelVersion\s*\)/);
+  });
+  it('hoists modelVersion above the candidate query so the subquery can reference it', () => {
+    const declIdx = actionSrc.indexOf('const modelVersion =');
+    const notExistsIdx = actionSrc.indexOf('notExists(');
+    expect(declIdx).toBeGreaterThan(-1);
+    expect(notExistsIdx).toBeGreaterThan(-1);
+    expect(declIdx).toBeLessThan(notExistsIdx);
+  });
+});
