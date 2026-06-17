@@ -16,6 +16,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 
 - **`npm run deploy` from repo root** is per-iteration policy. Runs after every commit pushed to `master`. Reads gitignored `.env.deploy`. No staging.
 - The deploy host and SSH credentials are config-driven via the gitignored root `.env.deploy` (copy from `.env.deploy.example`); the helper derives the SSH deploy command from it. Do NOT hardcode hostnames or key paths here — keep them in `.env.deploy` (see `CLAUDE.md` "Remote Deploy Helper").
+- **`apps/web/deploy.sh` auto-prunes Docker after every deploy** (`container` + `image -af` + `builder -af` + `volume` prune — `volume` WITHOUT `-a`) so the disk-constrained host stays clean. The prune runs AFTER `up -d`, so the live container + its image survive; in-use data is never touched (persistence is bind mounts `./data` / `./public` + host MySQL). Preserve all three guarantees (prune-after-up, bind-mounted data, no `-a` on the auto `volume prune`) if you change it. See `CLAUDE.md` "Disk hygiene".
 - **Never `npm install` inside the running `gallerykit-web` container** — it clobbers prod-deps and crashes the site. For one-off scripts use a `--rm` sidecar from `web-web:latest` with read-only source mounts (see `CLAUDE.md` "Backfill" section).
 
 ## Schema
@@ -44,4 +45,4 @@ This file is the canonical short-form reference for AI agents and contributors. 
 
 ## Read CLAUDE.md for everything else
 
-`CLAUDE.md` carries the full architecture, security model, color & HDR pipeline, race-condition protections, migration runbook, operational playbook, and lint-gate / touch-target / Korean i18n details.
+`CLAUDE.md` carries the full architecture, security model, color & HDR pipeline, **CLIP semantic-search activation / weight-seeding (US-P51 — live in production)**, race-condition protections, migration runbook, operational playbook, and lint-gate / touch-target / Korean i18n details.

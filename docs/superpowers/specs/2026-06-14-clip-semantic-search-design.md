@@ -1,7 +1,7 @@
 # Design Spec — Real CLIP Semantic Search (US-P51 → production)
 
 - **Date:** 2026-06-14
-- **Status:** Approved design, pending implementation plan (writing-plans)
+- **Status:** ✅ **SHIPPED & ACTIVATED in production** (live since 2026-06-15). The stub encoder was replaced with the real `jina-clip-v2` encoder (int8 ONNX, Matryoshka-512, `model_version` `jina-clip-v2-d512-q8`), now serving live English + Korean natural-language search and image→image "similar photos" over ~445 real embeddings. Built via the plan at `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`; activated with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` (env) + `admin_settings.semantic_search_mode='production'` (DB). Production cosine threshold `0.22`.
 - **Scope owner:** GalleryKit (`apps/web`, Next.js 16 self-hosted photo gallery)
 
 ## 1. Problem & Goal
