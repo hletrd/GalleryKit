@@ -567,6 +567,10 @@ async function reconcileLegacySchema(connection, dbName) {
             CONSTRAINT image_embeddings_image_id_fk FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+    // AGG-C8-03 / migration 0022: composite index for the live semantic + similar
+    // search scans (`WHERE model_version = ? ORDER BY updated_at DESC LIMIT 5000`).
+    await ensureIndex(connection, dbName, 'image_embeddings', 'idx_image_embeddings_model_version_updated',
+        'CREATE INDEX idx_image_embeddings_model_version_updated ON image_embeddings (model_version, updated_at)');
 
     await ensureTable(connection, `
         CREATE TABLE IF NOT EXISTS entitlements (

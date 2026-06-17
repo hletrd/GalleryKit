@@ -281,7 +281,11 @@ export const imageEmbeddings = mysqlTable("image_embeddings", {
         .default(sql`CURRENT_TIMESTAMP`)
         .onUpdateNow()
         .notNull(),
-});
+}, (table) => ({
+    // AGG-C8-03 (migration 0022): serves the live semantic + similar search scans
+    // `WHERE model_version = ? ORDER BY updated_at DESC LIMIT 5000` (was PK-only).
+    idxImageEmbeddingsModelVersionUpdated: index('idx_image_embeddings_model_version_updated').on(table.modelVersion, table.updatedAt),
+}));
 
 // US-P54 (Phase 5.4): Stripe paid-download entitlements.
 // sessionId is UNIQUE so concurrent webhook retries are idempotent.
