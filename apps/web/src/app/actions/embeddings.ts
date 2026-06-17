@@ -81,8 +81,19 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
         return { status: 'ok', processed: 0, skipped: 0 };
     }
 
+    // AGG-C8-05 (run-6 cycle-8): hoist modelVersion ABOVE the candidate query so the
+    // notExists subquery can filter on it. The canonical sidecar
+    // (scripts/backfill-clip-embeddings.ts) selects images lacking a row FOR THE
+    // ACTIVE model_version; without that filter here, an image carrying a stub-version
+    // row was excluded even in production mode, so this action could never upgrade
+    // stub→production rows (it would report processed:0). The action is still unwired
+    // from any UI — the sidecar remains canonical — but this keeps the selection
+    // honest and matching the sidecar if it is ever surfaced.
+    const modelVersion = semanticMode === 'production' ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
+
     try {
-        // Select processed images without an embedding row (up to SEMANTIC_SCAN_LIMIT to bound the operation)
+        // Select processed images without an embedding row FOR THE ACTIVE model_version
+        // (bounded by SEMANTIC_SCAN_LIMIT), mirroring the sidecar's per-version selection.
         const pending = await db
             .select({ id: images.id, filenameOriginal: images.filename_original })
             .from(images)
@@ -92,7 +103,12 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                     notExists(
                         db.select({ imageId: imageEmbeddings.imageId })
                             .from(imageEmbeddings)
-                            .where(eq(imageEmbeddings.imageId, images.id)),
+                            .where(
+                                and(
+                                    eq(imageEmbeddings.imageId, images.id),
+                                    eq(imageEmbeddings.modelVersion, modelVersion),
+                                ),
+                            ),
                     ),
                 ),
             )
@@ -100,7 +116,6 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
 
         let processed = 0;
         let skipped = 0;
-        const modelVersion = semanticMode === 'production' ? PRODUCTION_MODEL_VERSION : STUB_MODEL_VERSION;
 
         // Process in batches with bounded concurrency
         for (let batchStart = 0; batchStart < pending.length; batchStart += BACKFILL_BATCH_SIZE) {
