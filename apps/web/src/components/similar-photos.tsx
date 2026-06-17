@@ -22,6 +22,12 @@ interface SimilarResult {
     topic: string;
     topic_label: string | null;
     camera_model: string | null;
+    // AGG-C9-04 (run-6 cycle-9): the /api/search/similar/[id] route returns
+    // lens_model + capture_date (added by the AGG-C8-09/10 lens/date parity fix).
+    // The component does not render them today, but the interface must match the
+    // wire shape so the client type does not silently drift from the API contract.
+    lens_model: string | null;
+    capture_date: string | null;
 }
 
 interface SimilarPhotosProps {
