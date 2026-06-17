@@ -15,11 +15,11 @@
  */
 
 import 'server-only';
-import { join } from 'path';
 import type * as Transformers from '@huggingface/transformers';
 import sharp from 'sharp';
 import { truncateAndNormalize, EMBEDDING_DIM } from '@/lib/clip-embeddings';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '@/lib/clip-model-id';
+import { resolveClipModelsRoot } from '@/lib/clip-paths';
 
 // AGG-C10-03 (run-6 cycle-1): `@huggingface/transformers` pulls native
 // onnxruntime-node (+ a WASM backend). It is imported lazily INSIDE getModelBundle()
@@ -44,8 +44,12 @@ const CLIP_STDS = [0.26862954, 0.26130258, 0.27577711] as const;
 // Volume path
 // ---------------------------------------------------------------------------
 
-const CLIP_MODELS_ROOT =
-    process.env['CLIP_MODELS_ROOT'] ?? join(process.cwd(), 'data/models/clip');
+// Absolute-aware resolution shared with the download script (scripts/download-clip-models.ts)
+// via lib/clip-paths.ts, so the seed target and the offline-load source can never drift:
+// an absolute CLIP_MODELS_ROOT (the production bind-mount) is honored verbatim, an unset /
+// relative value resolves against cwd (preserving the historical `join(cwd, 'data/models/clip')`
+// default). This becomes env.cacheDir below.
+const CLIP_MODELS_ROOT = resolveClipModelsRoot();
 
 // ---------------------------------------------------------------------------
 // Lazy singleton — cached Promise of { model, tokenizer }.

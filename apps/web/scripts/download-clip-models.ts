@@ -33,6 +33,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { env, AutoModel, AutoTokenizer } from '@huggingface/transformers';
 import { JINA_CLIP_MODEL_ID, JINA_CLIP_REVISION } from '../src/lib/clip-model-id';
+import { resolveClipModelsRoot, clipModelArtifactDir } from '../src/lib/clip-paths';
 import { CLIP_MODEL_MANIFEST, sha256File, verifyAndCleanArtifacts } from './clip-model-manifest';
 
 // Alias so the rest of the script is unchanged.
@@ -40,13 +41,22 @@ const MODEL_ID = JINA_CLIP_MODEL_ID;
 const MANIFEST = CLIP_MODEL_MANIFEST;
 
 async function main(): Promise<void> {
-    const clipModelsRoot =
-        process.env['CLIP_MODELS_ROOT'] ?? 'data/models/clip';
+    // Resolve CLIP_MODELS_ROOT ABSOLUTE-AWARE and CONSISTENTLY with the runtime
+    // loader (lib/clip-model.ts), via the shared lib/clip-paths.ts resolver. An
+    // absolute value (the production bind-mount, e.g. /app/data/models/clip) is used
+    // verbatim; a relative/unset value resolves against cwd (apps/web). The old
+    // `join(process.cwd(), absolutePath)` produced the doubled `/app/apps/web/app/...`
+    // path that dumped weights into the container's ephemeral fs.
+    const resolvedRoot = resolveClipModelsRoot();
 
-    // Resolve relative to cwd (the apps/web directory when called from the plan).
-    const modelCacheDir = join(process.cwd(), clipModelsRoot, 'jinaai', 'jina-clip-v2');
+    // @huggingface/transformers v3 stores the pinned-revision artifacts UNDER a
+    // <revision>/ subdir (verified against hub.js getModelFile + a live 3.8.1 download).
+    // Verify the manifest there — that is exactly what the offline loader reads back —
+    // so a real download is never falsely reported MISSING (the production abort).
+    const modelCacheDir = clipModelArtifactDir(resolvedRoot);
 
-    console.log(`[download-clip-models] Target: ${join(process.cwd(), clipModelsRoot)}`);
+    console.log(`[download-clip-models] CLIP_MODELS_ROOT (resolved): ${resolvedRoot}`);
+    console.log(`[download-clip-models] Artifact dir (revision-pinned): ${modelCacheDir}`);
     console.log(`[download-clip-models] Model:  ${MODEL_ID} (int8 ONNX)`);
 
     // --- Idempotency check: if key artifact exists and matches, skip download ---
@@ -66,11 +76,13 @@ async function main(): Promise<void> {
     }
 
     // --- Ensure cache dir exists ---
-    mkdirSync(join(process.cwd(), clipModelsRoot), { recursive: true });
+    mkdirSync(resolvedRoot, { recursive: true });
 
     // --- Point Transformers.js cache at the volume directory ---
-    // env.cacheDir must be set BEFORE any from_pretrained call.
-    env.cacheDir = join(process.cwd(), clipModelsRoot);
+    // env.cacheDir must be set BEFORE any from_pretrained call. This is the SAME
+    // value the runtime loader assigns to env.cacheDir, so download + offline load
+    // share one cache root.
+    env.cacheDir = resolvedRoot;
     console.log(`[download-clip-models] env.cacheDir = ${env.cacheDir}`);
 
     // --- Download model + tokenizer (Transformers.js streams from HF hub) ---
@@ -104,7 +116,7 @@ async function main(): Promise<void> {
     }
 
     console.log('[download-clip-models] All checksums verified. Model ready.');
-    console.log(`[download-clip-models] Set CLIP_MODELS_ROOT=${clipModelsRoot} in the app environment to use this cache.`);
+    console.log(`[download-clip-models] Set CLIP_MODELS_ROOT=${resolvedRoot} in the app environment to use this cache.`);
 }
 
 main().catch((err) => {
